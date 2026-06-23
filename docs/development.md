@@ -79,6 +79,8 @@ data/targets.json
 
 ## 验证代理是否生效
 
+本节是快速冒烟验证。完整客户端兼容性验证请按 [compatibility-test-plan.md](compatibility-test-plan.md) 执行，并把结果记录到 [compatibility-matrix.md](compatibility-matrix.md)。
+
 验证一定要让客户端走堡垒机端口，而不是直接连目标服务器。
 
 默认资产：

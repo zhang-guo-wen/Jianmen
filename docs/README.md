@@ -7,6 +7,9 @@
 1. [current-progress.md](current-progress.md) — 当前项目进展和真实实现状态。
 2. [phase2-roadmap.md](phase2-roadmap.md) — 后续开发计划、优先级和里程碑。
 3. [development.md](development.md) — 本地开发、运行、调试和手工验证命令。
+4. [compatibility-matrix.md](compatibility-matrix.md) — SSH/SFTP 客户端兼容性验证结果台账。
+5. [compatibility-test-plan.md](compatibility-test-plan.md) — OpenSSH、PuTTY、Xshell、SecureCRT、Xftp、WinSCP、FileZilla、IDE Remote 的手工测试步骤。
+6. [compatibility-evidence-openssh-2026-06-23.md](compatibility-evidence-openssh-2026-06-23.md) — OpenSSH 命令行客户端自动化冒烟测试证据。
 
 ## 设计和参考文档
 
@@ -27,4 +30,5 @@
 - 当前实现状态只更新 [current-progress.md](current-progress.md)。
 - 后续开发计划只更新 [phase2-roadmap.md](phase2-roadmap.md)。
 - 本地运行命令只更新 [development.md](development.md)。
+- 客户端兼容性结论只更新 [compatibility-matrix.md](compatibility-matrix.md)；测试步骤只更新 [compatibility-test-plan.md](compatibility-test-plan.md)。
 - 架构原则和长期设计放 [design.md](design.md)，不要在里面维护每日进展。

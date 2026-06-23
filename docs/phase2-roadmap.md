@@ -26,7 +26,7 @@
 
 ### 1. 客户端兼容性矩阵
 
-目标：确认 SSH/SFTP 主链路在主流客户端中可用，并把结果固化成手工/自动测试记录。
+目标：确认 SSH/SFTP 主链路在主流客户端中可用，并把结果固化成手工/自动测试记录。测试结果统一维护在 [compatibility-matrix.md](compatibility-matrix.md)，执行步骤统一维护在 [compatibility-test-plan.md](compatibility-test-plan.md)。
 
 待验证客户端：
 

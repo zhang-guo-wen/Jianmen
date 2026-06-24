@@ -15,6 +15,8 @@ import (
 	"jianmen/internal/server/dbproxy"
 	"jianmen/internal/server/sshserver"
 	"jianmen/internal/storage"
+
+	"gorm.io/gorm"
 )
 
 func main() {
@@ -31,6 +33,7 @@ func main() {
 		os.Exit(1)
 	}
 
+	var metadataDB *gorm.DB
 	if cfg.Database.Enabled {
 		db, err := storage.Open(storage.Config{
 			Driver:          storage.Driver(cfg.Database.Driver),
@@ -55,6 +58,11 @@ func main() {
 				os.Exit(1)
 			}
 		}
+		if err := storage.BootstrapMetadata(db, cfg); err != nil {
+			logger.Error("failed to bootstrap metadata database", "driver", cfg.Database.Driver, "error", err)
+			os.Exit(1)
+		}
+		metadataDB = db
 		logger.Info("metadata database ready", "driver", cfg.Database.Driver, "auto_migrate", cfg.Database.AutoMigrate)
 	}
 
@@ -77,19 +85,19 @@ func main() {
 		errCh <- sshSrv.ListenAndServe(ctx)
 	}()
 
+	dbManager := dbproxy.NewManager(cfg.DatabaseProxies, cfg.ReplayDir, logger, metadataDB)
+
 	if cfg.Admin.Enabled {
-		adminSrv := admin.New(cfg, store, logger)
+		adminSrv := admin.New(cfg, store, logger, metadataDB)
+		adminSrv.SetDatabaseProxyApplier(dbManager)
 		go func() {
 			errCh <- adminSrv.ListenAndServe(ctx)
 		}()
 	}
 
-	dbManager := dbproxy.NewManager(cfg.DatabaseProxies, cfg.ReplayDir, logger)
-	if dbManager.Enabled() {
-		go func() {
-			errCh <- dbManager.ListenAndServe(ctx)
-		}()
-	}
+	go func() {
+		errCh <- dbManager.ListenAndServe(ctx)
+	}()
 
 	select {
 	case <-ctx.Done():

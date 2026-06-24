@@ -14,8 +14,8 @@ func TestMySQLAccountAuthAcceptsAllowedUser(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ObserveClientBytes returned error: %v", err)
 	}
-	if !ready || !auth.Ready() || auth.user != "app" {
-		t.Fatalf("unexpected auth state ready=%v user=%q", ready, auth.user)
+	if !ready || !auth.Ready() || auth.Observation().User != "app" {
+		t.Fatalf("unexpected auth state ready=%v user=%q", ready, auth.Observation().User)
 	}
 }
 
@@ -38,8 +38,22 @@ func TestPostgresAccountAuthAcceptsAllowedUser(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ObserveClientBytes returned error: %v", err)
 	}
-	if !ready || !auth.Ready() || auth.user != "app" {
-		t.Fatalf("unexpected auth state ready=%v user=%q", ready, auth.user)
+	if !ready || !auth.Ready() || auth.Observation().User != "app" {
+		t.Fatalf("unexpected auth state ready=%v user=%q", ready, auth.Observation().User)
+	}
+}
+
+func TestPostgresAccountAuthAllowsTLSWhenNotEnforced(t *testing.T) {
+	auth, err := newAccountAuth("postgres", nil)
+	if err != nil {
+		t.Fatalf("newAccountAuth returned error: %v", err)
+	}
+	ready, err := auth.ObserveClientBytes(postgresSSLRequestPacket())
+	if err != nil {
+		t.Fatalf("ObserveClientBytes returned error: %v", err)
+	}
+	if !ready || !auth.Ready() || auth.Observation().Observation != "hidden_by_tls" {
+		t.Fatalf("unexpected auth state ready=%v observation=%#v", ready, auth.Observation())
 	}
 }
 
@@ -92,5 +106,12 @@ func postgresStartupPacket(username, database string) []byte {
 	packet := make([]byte, 4, 4+len(payload))
 	binary.BigEndian.PutUint32(packet[:4], uint32(4+len(payload)))
 	packet = append(packet, payload...)
+	return packet
+}
+
+func postgresSSLRequestPacket() []byte {
+	packet := make([]byte, 8)
+	binary.BigEndian.PutUint32(packet[:4], 8)
+	binary.BigEndian.PutUint32(packet[4:8], 80877103)
 	return packet
 }

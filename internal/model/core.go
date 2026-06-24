@@ -7,9 +7,12 @@ import (
 )
 
 const (
-	PermissionEffectAllow = "allow"
-	PermissionEffectDeny  = "deny"
-	ResourceTypeGroup     = "resource_group"
+	PermissionEffectAllow       = "allow"
+	PermissionEffectDeny        = "deny"
+	ResourceTypeGroup           = "resource_group"
+	ResourceTypeHost            = "host"
+	ResourceTypeHostAccount     = "host_account"
+	ResourceTypeDatabaseAccount = "database_account"
 )
 
 type UserPublicKey struct {

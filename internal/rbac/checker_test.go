@@ -3,25 +3,26 @@ package rbac
 import (
 	"testing"
 
+	"gorm.io/gorm"
+
 	"jianmen/internal/model"
 	"jianmen/internal/storage"
-	"gorm.io/gorm"
 )
 
 func TestHasPermissionRequiresActionAndResourceGrant(t *testing.T) {
 	db := newTestDB(t)
 	seedRBAC(t, db, "u1", []model.Permission{
 		{ID: "p-connect", Action: "session:connect", Effect: model.PermissionEffectAllow},
-		{ID: "p-host-1", ResourceType: "host", ResourceID: "host-1", Effect: model.PermissionEffectAllow},
-		{ID: "p-read-host-1", Action: "sftp:read", ResourceType: "host", ResourceID: "host-1", Effect: model.PermissionEffectAllow},
+		{ID: "p-target-root", ResourceType: "host_account", ResourceID: "target-root", Effect: model.PermissionEffectAllow},
+		{ID: "p-read-target-root", Action: "sftp:read", ResourceType: "host_account", ResourceID: "target-root", Effect: model.PermissionEffectAllow},
 	})
 
 	checker := NewChecker(db)
 	assertPermission(t, checker, "u1", "session:connect", "", "", true)
-	assertPermission(t, checker, "u1", "session:connect", "host", "host-1", true)
-	assertPermission(t, checker, "u1", "session:connect", "host", "host-2", false)
-	assertPermission(t, checker, "u1", "sftp:write", "host", "host-1", false)
-	assertPermission(t, checker, "u1", "sftp:read", "host", "host-1", true)
+	assertPermission(t, checker, "u1", "session:connect", "host_account", "target-root", true)
+	assertPermission(t, checker, "u1", "session:connect", "host_account", "target-ubuntu", false)
+	assertPermission(t, checker, "u1", "sftp:write", "host_account", "target-root", false)
+	assertPermission(t, checker, "u1", "sftp:read", "host_account", "target-root", true)
 	assertPermission(t, checker, "missing", "session:connect", "", "", false)
 }
 
@@ -31,32 +32,68 @@ func TestHasPermissionSupportsResourceGroupGrant(t *testing.T) {
 		{ID: "p-connect", Action: "session:connect", Effect: model.PermissionEffectAllow},
 		{ID: "p-group", ResourceType: model.ResourceTypeGroup, ResourceID: "g1", Effect: model.PermissionEffectAllow},
 	})
-	if err := db.Create(&model.ResourceGroup{ID: "g1", Name: "prod", ResourceType: "host"}).Error; err != nil {
+	if err := db.Create(&model.ResourceGroup{ID: "g1", Name: "prod", ResourceType: "host_account"}).Error; err != nil {
 		t.Fatalf("create group: %v", err)
 	}
 	if err := db.Create(&model.ResourceGroupMember{
 		ID:           "gm1",
 		GroupID:      "g1",
-		ResourceType: "host",
-		ResourceID:   "host-2",
+		ResourceType: "host_account",
+		ResourceID:   "target-ubuntu",
 	}).Error; err != nil {
 		t.Fatalf("create group member: %v", err)
 	}
 
 	checker := NewChecker(db)
-	assertPermission(t, checker, "u1", "session:connect", "host", "host-2", true)
-	assertPermission(t, checker, "u1", "session:connect", "host", "host-3", false)
+	assertPermission(t, checker, "u1", "session:connect", "host_account", "target-ubuntu", true)
+	assertPermission(t, checker, "u1", "session:connect", "host_account", "target-missing", false)
+}
+
+func TestHasPermissionSupportsWildcardResourceGroupMember(t *testing.T) {
+	db := newTestDB(t)
+	seedRBAC(t, db, "u1", []model.Permission{
+		{ID: "p-connect", Action: "session:connect", Effect: model.PermissionEffectAllow},
+		{ID: "p-group", ResourceType: model.ResourceTypeGroup, ResourceID: "g1", Effect: model.PermissionEffectAllow},
+	})
+	if err := db.Create(&model.ResourceGroup{ID: "g1", Name: "all-accounts", ResourceType: "*"}).Error; err != nil {
+		t.Fatalf("create group: %v", err)
+	}
+	if err := db.Create(&model.ResourceGroupMember{
+		ID:           "gm1",
+		GroupID:      "g1",
+		ResourceType: "*",
+		ResourceID:   "*",
+	}).Error; err != nil {
+		t.Fatalf("create group member: %v", err)
+	}
+
+	checker := NewChecker(db)
+	assertPermission(t, checker, "u1", "session:connect", model.ResourceTypeHostAccount, "target-root", true)
+	assertPermission(t, checker, "u1", "session:connect", model.ResourceTypeDatabaseAccount, "dbacct-mysql-app", true)
 }
 
 func TestHasPermissionDenyOverridesAllow(t *testing.T) {
 	db := newTestDB(t)
 	seedRBAC(t, db, "u1", []model.Permission{
 		{ID: "p-connect", Action: "session:connect", Effect: model.PermissionEffectAllow},
-		{ID: "p-host-1", ResourceType: "host", ResourceID: "host-1", Effect: model.PermissionEffectAllow},
-		{ID: "p-deny-host-1", Action: "session:connect", ResourceType: "host", ResourceID: "host-1", Effect: model.PermissionEffectDeny},
+		{ID: "p-target-root", ResourceType: "host_account", ResourceID: "target-root", Effect: model.PermissionEffectAllow},
+		{ID: "p-deny-target-root", Action: "session:connect", ResourceType: "host_account", ResourceID: "target-root", Effect: model.PermissionEffectDeny},
 	})
 
-	assertPermission(t, NewChecker(db), "u1", "session:connect", "host", "host-1", false)
+	assertPermission(t, NewChecker(db), "u1", "session:connect", "host_account", "target-root", false)
+}
+
+func TestHasPermissionSupportsWildcardResourceScope(t *testing.T) {
+	db := newTestDB(t)
+	seedRBAC(t, db, "u1", []model.Permission{
+		{ID: "p-all-actions", Action: "*", Effect: model.PermissionEffectAllow},
+		{ID: "p-all-resources", Action: "*", ResourceType: "*", ResourceID: "*", Effect: model.PermissionEffectAllow},
+	})
+
+	checker := NewChecker(db)
+	assertPermission(t, checker, "u1", "session:connect", "host_account", "target-root", true)
+	assertPermission(t, checker, "u1", "db:audit:view", "database_proxy", "mysql-local", true)
+	assertPermission(t, checker, "u1", "role:create", "", "", true)
 }
 
 func newTestDB(t *testing.T) *gorm.DB {

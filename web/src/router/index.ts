@@ -4,8 +4,10 @@ import { getToken } from '@/api/client';
 import type { TranslationKey } from '@/i18n';
 import AuditView from '@/views/AuditView.vue';
 import DashboardView from '@/views/DashboardView.vue';
+import DatabaseView from '@/views/DatabaseView.vue';
 import HostsView from '@/views/HostsView.vue';
 import LoginView from '@/views/LoginView.vue';
+import QuickConnectView from '@/views/QuickConnectView.vue';
 import RBACView from '@/views/RBACView.vue';
 import SessionsView from '@/views/SessionsView.vue';
 import WebTerminalView from '@/views/WebTerminalView.vue';
@@ -47,6 +49,24 @@ const routes: RouteRecordRaw[] = [
     meta: {
       titleKey: 'route.hosts.title',
       descriptionKey: 'route.hosts.description'
+    } satisfies AppRouteMeta
+  },
+  {
+    path: '/databases',
+    name: 'databases',
+    component: DatabaseView,
+    meta: {
+      titleKey: 'route.databases.title',
+      descriptionKey: 'route.databases.description'
+    } satisfies AppRouteMeta
+  },
+  {
+    path: '/quick-connect',
+    name: 'quick-connect',
+    component: QuickConnectView,
+    meta: {
+      titleKey: 'route.quickConnect.title',
+      descriptionKey: 'route.quickConnect.description'
     } satisfies AppRouteMeta
   },
   {

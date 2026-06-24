@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -20,6 +21,7 @@ import (
 	"jianmen/internal/access"
 	"jianmen/internal/config"
 	"jianmen/internal/model"
+	"jianmen/internal/recording"
 )
 
 const (
@@ -81,7 +83,12 @@ func (s *Server) handleWebTerminal(w http.ResponseWriter, r *http.Request) {
 	}
 	defer conn.Close()
 
-	if err := serveWebTerminalSSHSession(r.Context(), conn, targetClient, opts, s.logger); err != nil && r.Context().Err() == nil {
+	recorder := s.newWebTerminalRecorder(r, target)
+	if recorder != nil {
+		defer recorder.Close()
+	}
+
+	if err := serveWebTerminalSSHSession(r.Context(), conn, targetClient, opts, recorder, s.logger); err != nil && r.Context().Err() == nil {
 		writeWebTerminalClose(conn, err)
 		s.logger.Warn("web terminal session ended with error", "target", target.ID, "error", err)
 	}
@@ -156,7 +163,60 @@ func dialWebTerminalTarget(target config.Target) (*ssh.Client, error) {
 	return ssh.Dial("tcp", target.Addr(), clientConfig)
 }
 
-func serveWebTerminalSSHSession(ctx context.Context, conn *websocket.Conn, targetClient *ssh.Client, opts webTerminalOptions, logger *slog.Logger) error {
+func (s *Server) newWebTerminalRecorder(r *http.Request, target config.Target) *recording.SessionRecorder {
+	if s == nil || s.cfg == nil || !s.cfg.Recording.Enabled {
+		return nil
+	}
+	user := model.User{
+		Username:          "admin-web-terminal",
+		RequestedTargetID: target.ID,
+	}
+	session := model.NewSession(user, target.ID, firstNonEmpty(target.Name, target.ID, target.Addr()), webTerminalClientIP(r))
+	session.Protocol = "ssh"
+	session.ProtocolSubtype = "web-terminal"
+	session.HostID = target.HostID
+	session.AccountID = target.ID
+	session.AccountUsername = target.Username
+	session.HostIP = target.Host
+	session.ConnIP = target.Host
+	session.ConnPort = target.Port
+
+	recorder, err := recording.NewSessionRecorder(
+		s.cfg.ReplayDir,
+		session,
+		s.cfg.Recording.RecordInput,
+		s.cfg.Recording.RecordCommands,
+		s.logger,
+	)
+	if err != nil {
+		s.logger.Warn("failed to initialize web terminal recorder", "target", target.ID, "error", err)
+		return nil
+	}
+	s.logger.Info("web terminal recording started",
+		"session", session.ID,
+		"target", target.Name,
+		"client", session.ClientIP,
+	)
+	return recorder
+}
+
+func webTerminalClientIP(r *http.Request) string {
+	if r == nil {
+		return ""
+	}
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return r.RemoteAddr
+	}
+	return host
+}
+
+type webTerminalResult struct {
+	source string
+	err    error
+}
+
+func serveWebTerminalSSHSession(ctx context.Context, conn *websocket.Conn, targetClient *ssh.Client, opts webTerminalOptions, recorder *recording.SessionRecorder, logger *slog.Logger) error {
 	defer targetClient.Close()
 	if logger == nil {
 		logger = slog.Default()
@@ -188,27 +248,47 @@ func serveWebTerminalSSHSession(ctx context.Context, conn *websocket.Conn, targe
 	}); err != nil {
 		return err
 	}
+	if recorder != nil {
+		recorder.RecordResize("", opts.Columns, opts.Rows)
+	}
 	if err := session.Shell(); err != nil {
 		return err
 	}
 
 	writer := &webTerminalWriter{conn: conn}
-	errCh := make(chan error, 4)
-	go copyWebTerminalOutput(stdout, writer, errCh)
-	go copyWebTerminalOutput(stderr, writer, errCh)
-	go readWebTerminalInput(conn, stdin, session, errCh)
+	resultCh := make(chan webTerminalResult, 4)
+	outputDone := make(chan struct{})
+	var outputWG sync.WaitGroup
+	outputWG.Add(2)
 	go func() {
-		errCh <- session.Wait()
+		defer outputWG.Done()
+		copyWebTerminalOutput("stdout", stdout, writer, recorder, resultCh)
+	}()
+	go func() {
+		defer outputWG.Done()
+		copyWebTerminalOutput("stderr", stderr, writer, recorder, resultCh)
+	}()
+	go func() {
+		outputWG.Wait()
+		close(outputDone)
+	}()
+	go readWebTerminalInput(conn, stdin, session, recorder, resultCh)
+	go func() {
+		resultCh <- webTerminalResult{source: "session", err: session.Wait()}
 	}()
 
+	outputDoneCh := (<-chan struct{})(outputDone)
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
-	case err := <-errCh:
-		if err == nil || isExpectedWebTerminalError(err) {
-			return nil
+	case result := <-resultCh:
+		if result.err != nil && !isExpectedWebTerminalError(result.err) {
+			return result.err
 		}
-		return err
+		if result.source == "session" {
+			return waitWebTerminalOutputDrain(ctx, outputDoneCh)
+		}
+		return nil
 	}
 }
 
@@ -223,34 +303,40 @@ func (w *webTerminalWriter) writeBinary(payload []byte) error {
 	return w.conn.WriteMessage(websocket.BinaryMessage, payload)
 }
 
-func copyWebTerminalOutput(src io.Reader, writer *webTerminalWriter, errCh chan<- error) {
+type webTerminalOutputWriter interface {
+	writeBinary([]byte) error
+}
+
+func copyWebTerminalOutput(source string, src io.Reader, writer webTerminalOutputWriter, recorder *recording.SessionRecorder, resultCh chan<- webTerminalResult) {
 	buf := make([]byte, 32*1024)
 	for {
 		n, readErr := src.Read(buf)
 		if n > 0 {
 			payload := append([]byte(nil), buf[:n]...)
+			if recorder != nil {
+				recorder.RecordOutput(payload)
+			}
 			if err := writer.writeBinary(payload); err != nil {
-				errCh <- err
+				resultCh <- webTerminalResult{source: source, err: err}
 				return
 			}
 		}
 		if readErr != nil {
 			if errors.Is(readErr, io.EOF) {
-				errCh <- nil
 				return
 			}
-			errCh <- readErr
+			resultCh <- webTerminalResult{source: source, err: readErr}
 			return
 		}
 	}
 }
 
-func readWebTerminalInput(conn *websocket.Conn, stdin io.WriteCloser, session *ssh.Session, errCh chan<- error) {
+func readWebTerminalInput(conn *websocket.Conn, stdin io.WriteCloser, session *ssh.Session, recorder *recording.SessionRecorder, resultCh chan<- webTerminalResult) {
 	defer stdin.Close()
 	for {
 		messageType, payload, err := conn.ReadMessage()
 		if err != nil {
-			errCh <- normalizeWebTerminalReadError(err)
+			resultCh <- webTerminalResult{source: "input", err: normalizeWebTerminalReadError(err)}
 			return
 		}
 
@@ -258,26 +344,46 @@ func readWebTerminalInput(conn *websocket.Conn, stdin io.WriteCloser, session *s
 		case websocket.TextMessage:
 			resize, ok, err := parseWebTerminalResizeMessage(payload)
 			if err != nil {
-				errCh <- err
+				resultCh <- webTerminalResult{source: "input", err: err}
 				return
 			}
 			if ok {
 				if err := session.WindowChange(resize.Rows, resize.Columns); err != nil {
-					errCh <- err
+					resultCh <- webTerminalResult{source: "input", err: err}
 					return
+				}
+				if recorder != nil {
+					recorder.RecordResize("", resize.Columns, resize.Rows)
 				}
 				continue
 			}
+			if recorder != nil {
+				recorder.RecordInput(payload)
+			}
 			if _, err := stdin.Write(payload); err != nil {
-				errCh <- err
+				resultCh <- webTerminalResult{source: "input", err: err}
 				return
 			}
 		case websocket.BinaryMessage:
+			if recorder != nil {
+				recorder.RecordInput(payload)
+			}
 			if _, err := stdin.Write(payload); err != nil {
-				errCh <- err
+				resultCh <- webTerminalResult{source: "input", err: err}
 				return
 			}
 		}
+	}
+}
+
+func waitWebTerminalOutputDrain(ctx context.Context, done <-chan struct{}) error {
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-time.After(2 * time.Second):
+		return nil
 	}
 }
 

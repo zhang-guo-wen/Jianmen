@@ -55,7 +55,12 @@ type User struct {
 
 type Target struct {
 	ID                    string `json:"id"`
+	HostID                string `json:"host_id"`
 	Name                  string `json:"name"`
+	Group                 string `json:"group"`
+	Remark                string `json:"remark"`
+	Disabled              bool   `json:"disabled"`
+	ExpiresAt             string `json:"expires_at"`
 	Host                  string `json:"host"`
 	Port                  int    `json:"port"`
 	Username              string `json:"username"`
@@ -69,12 +74,29 @@ type Target struct {
 }
 
 type DatabaseProxyConfig struct {
-	Enabled      bool     `json:"enabled"`
-	Name         string   `json:"name"`
-	Protocol     string   `json:"protocol"`
-	ListenAddr   string   `json:"listen_addr"`
-	UpstreamAddr string   `json:"upstream_addr"`
-	AllowedUsers []string `json:"allowed_users"`
+	Enabled      bool                      `json:"enabled"`
+	Name         string                    `json:"name"`
+	Protocol     string                    `json:"protocol"`
+	ListenAddr   string                    `json:"listen_addr"`
+	UpstreamAddr string                    `json:"upstream_addr"`
+	Remark       string                    `json:"remark"`
+	AllowedUsers []string                  `json:"allowed_users"`
+	Accounts     []DatabaseAccountConfig   `json:"accounts"`
+	QueryPolicy  DatabaseQueryPolicyConfig `json:"query_policy"`
+}
+
+type DatabaseAccountConfig struct {
+	Username string `json:"username"`
+	Database string `json:"database"`
+	Remark   string `json:"remark"`
+	Disabled bool   `json:"disabled"`
+}
+
+type DatabaseQueryPolicyConfig struct {
+	ReadOnly          bool     `json:"read_only"`
+	DeniedQueryKinds  []string `json:"denied_query_kinds"`
+	DeniedSQLPatterns []string `json:"denied_sql_patterns"`
+	MaxQueryBytes     int      `json:"max_query_bytes"`
 }
 
 func Load(path string) (*Config, error) {
@@ -172,45 +194,6 @@ func (c *Config) Validate() error {
 	}
 	if len(c.Users) == 0 {
 		return errors.New("at least one user is required")
-	}
-	if len(c.Targets) == 0 {
-		return errors.New("at least one target is required")
-	}
-	if c.DefaultTarget == "" {
-		c.DefaultTarget = c.Targets[0].ID
-	}
-	for _, target := range c.Targets {
-		if target.ID == c.DefaultTarget {
-			return c.validateDatabaseProxies()
-		}
-	}
-	return fmt.Errorf("default_target %q does not match any configured target", c.DefaultTarget)
-}
-
-func (c *Config) validateDatabaseProxies() error {
-	for _, proxy := range c.DatabaseProxies {
-		if !proxy.Enabled {
-			continue
-		}
-		if proxy.Name == "" {
-			return errors.New("enabled database proxy is missing name")
-		}
-		switch proxy.Protocol {
-		case "mysql", "postgres", "tcp":
-		default:
-			return fmt.Errorf("database proxy %q has unsupported protocol %q", proxy.Name, proxy.Protocol)
-		}
-		if _, _, err := net.SplitHostPort(proxy.ListenAddr); err != nil {
-			return fmt.Errorf("database proxy %q has invalid listen_addr %q: %w", proxy.Name, proxy.ListenAddr, err)
-		}
-		if _, _, err := net.SplitHostPort(proxy.UpstreamAddr); err != nil {
-			return fmt.Errorf("database proxy %q has invalid upstream_addr %q: %w", proxy.Name, proxy.UpstreamAddr, err)
-		}
-		for _, user := range proxy.AllowedUsers {
-			if user == "" {
-				return fmt.Errorf("database proxy %q has empty allowed_users entry", proxy.Name)
-			}
-		}
 	}
 	return nil
 }

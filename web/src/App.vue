@@ -59,8 +59,10 @@
 <script setup lang="ts">
 import {
   Connection,
+  DataAnalysis,
   DataBoard,
   DocumentChecked,
+  Link,
   Monitor,
   Platform,
   UserFilled
@@ -85,6 +87,8 @@ const selectedLocale = computed<Locale>({
 const navItems: Array<{ path: string; icon: Component; labelKey: TranslationKey }> = [
   { path: '/dashboard', icon: DataBoard, labelKey: 'nav.dashboard' },
   { path: '/hosts', icon: Monitor, labelKey: 'nav.hosts' },
+  { path: '/databases', icon: DataAnalysis, labelKey: 'nav.databases' },
+  { path: '/quick-connect', icon: Link, labelKey: 'nav.quickConnect' },
   { path: '/sessions', icon: Connection, labelKey: 'nav.sessions' },
   { path: '/rbac', icon: UserFilled, labelKey: 'nav.rbac' },
   { path: '/audit', icon: DocumentChecked, labelKey: 'nav.audit' },

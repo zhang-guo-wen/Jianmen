@@ -3,16 +3,46 @@ package dbproxy
 import (
 	"encoding/binary"
 	"testing"
+	"time"
+
+	"jianmen/internal/config"
 )
 
 type captureSink struct {
-	queries []string
-	details []map[string]any
+	queries  []string
+	details  []map[string]any
+	finished []queryFinish
+	policy   *sqlPolicy
 }
 
-func (s *captureSink) RecordQuery(sql string, detail map[string]any) {
+func (s *captureSink) StartQuery(sql string, detail map[string]any) (queryRecord, queryDecision) {
 	s.queries = append(s.queries, sql)
 	s.details = append(s.details, detail)
+	decision := allowQuery()
+	if s.policy != nil {
+		decision = s.policy.Evaluate(sql)
+	}
+	record := queryRecord{
+		seq:       int64(len(s.queries)),
+		protocol:  "test",
+		sql:       sql,
+		queryKind: classifyQueryKind(sql),
+		detail:    detail,
+		startedAt: time.Now(),
+	}
+	if !decision.Allowed {
+		s.finished = append(s.finished, queryFinish{
+			Status:       decision.Status,
+			ErrorCode:    decision.ErrorCode,
+			ErrorMessage: decision.ErrorMessage,
+			Detail:       decision.Detail,
+		})
+	}
+	return record, decision
+}
+
+func (s *captureSink) FinishQuery(_ queryRecord, finish queryFinish) {
+	s.finished = append(s.finished, finish)
 }
 
 func TestMySQLObserverCapturesQueryAcrossChunks(t *testing.T) {
@@ -20,8 +50,12 @@ func TestMySQLObserverCapturesQueryAcrossChunks(t *testing.T) {
 	observer := &mysqlObserver{sink: sink}
 	packet := mysqlPacket(0, append([]byte{0x03}, []byte("select 1")...))
 
-	observer.ObserveClientBytes(packet[:3])
-	observer.ObserveClientBytes(packet[3:])
+	if decision := observer.ObserveClientBytes(packet[:3]); decision != nil {
+		t.Fatalf("unexpected decision for partial packet: %#v", decision)
+	}
+	if decision := observer.ObserveClientBytes(packet[3:]); decision != nil {
+		t.Fatalf("unexpected decision: %#v", decision)
+	}
 
 	if len(sink.queries) != 1 {
 		t.Fatalf("expected 1 query, got %d", len(sink.queries))
@@ -34,6 +68,27 @@ func TestMySQLObserverCapturesQueryAcrossChunks(t *testing.T) {
 	}
 }
 
+func TestMySQLObserverRejectsReadOnlyPolicyViolation(t *testing.T) {
+	sink := &captureSink{policy: newSQLPolicy(config.DatabaseQueryPolicyConfig{ReadOnly: true})}
+	observer := &mysqlObserver{sink: sink}
+	packet := mysqlPacket(0, append([]byte{0x03}, []byte("delete from users")...))
+
+	decision := observer.ObserveClientBytes(packet)
+
+	if decision == nil || decision.Allowed {
+		t.Fatalf("expected deny decision, got %#v", decision)
+	}
+	if decision.Status != queryStatusPolicyDenied {
+		t.Fatalf("unexpected decision status %#v", decision)
+	}
+	if len(sink.finished) != 1 || sink.finished[0].Status != queryStatusPolicyDenied {
+		t.Fatalf("expected policy denied finish event, got %#v", sink.finished)
+	}
+	if response := observer.ErrorResponse(*decision); len(response) == 0 {
+		t.Fatal("expected mysql error response")
+	}
+}
+
 func TestPostgresObserverCapturesSimpleQuery(t *testing.T) {
 	sink := &captureSink{}
 	observer := &postgresObserver{sink: sink}
@@ -43,7 +98,9 @@ func TestPostgresObserverCapturesSimpleQuery(t *testing.T) {
 	binary.BigEndian.PutUint32(startup[4:8], 196608)
 	query := postgresMessage('Q', append([]byte("select now()"), 0))
 
-	observer.ObserveClientBytes(append(startup, query...))
+	if decision := observer.ObserveClientBytes(append(startup, query...)); decision != nil {
+		t.Fatalf("unexpected decision: %#v", decision)
+	}
 
 	if len(sink.queries) != 1 {
 		t.Fatalf("expected 1 query, got %d", len(sink.queries))

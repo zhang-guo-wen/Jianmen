@@ -34,40 +34,5 @@
       "public_keys": [],
       "authorized_keys_path": ""
     }
-  ],
-  "targets": [
-    {
-      "id": "target-local",
-      "name": "local",
-      "host": "127.0.0.1",
-      "port": 22,
-      "username": "root",
-      "password": "change-me",
-      "private_key_path": "",
-      "private_key_pem": "",
-      "passphrase": "",
-      "insecure_ignore_host_key": true,
-      "host_key_fingerprint": "",
-      "known_hosts_path": ""
-    }
-  ],
-  "default_target": "target-local",
-  "database_proxies": [
-    {
-      "enabled": false,
-      "name": "mysql-local",
-      "protocol": "mysql",
-      "listen_addr": "127.0.0.1:33060",
-      "upstream_addr": "127.0.0.1:3306",
-      "allowed_users": []
-    },
-    {
-      "enabled": false,
-      "name": "postgres-local",
-      "protocol": "postgres",
-      "listen_addr": "127.0.0.1:15432",
-      "upstream_addr": "127.0.0.1:5432",
-      "allowed_users": []
-    }
   ]
 }

@@ -93,7 +93,7 @@ func (c *Checker) matches(permission model.Permission, action, resourceType, res
 
 func (c *Checker) resourceMatches(permission model.Permission, resourceType, resourceID string) bool {
 	switch {
-	case permission.ResourceType == resourceType && (permission.ResourceID == resourceID || permission.ResourceID == "*"):
+	case resourceTypeMatches(permission.ResourceType, resourceType) && resourceIDMatches(permission.ResourceID, resourceID):
 		return true
 	case permission.ResourceType == model.ResourceTypeGroup && permission.ResourceID != "":
 		return c.groupContainsResource(permission.ResourceID, resourceType, resourceID)
@@ -106,13 +106,21 @@ func (c *Checker) groupContainsResource(groupID, resourceType, resourceID string
 	var count int64
 	err := c.db.Model(&model.ResourceGroupMember{}).
 		Where("group_id = ?", groupID).
-		Where("resource_type = ?", resourceType).
+		Where("resource_type = ? OR resource_type = ?", resourceType, "*").
 		Where("resource_id = ? OR resource_id = ?", resourceID, "*").
 		Count(&count).Error
 	return err == nil && count > 0
 }
 
 func actionMatches(granted, requested string) bool {
+	return granted == requested || granted == "*"
+}
+
+func resourceTypeMatches(granted, requested string) bool {
+	return granted == requested || granted == "*"
+}
+
+func resourceIDMatches(granted, requested string) bool {
 	return granted == requested || granted == "*"
 }
 

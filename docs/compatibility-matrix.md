@@ -34,8 +34,8 @@
 
 | 客户端 | 类型 | 优先级 | 当前状态 | 最近验证日期 | 记录人 | 备注 |
 | --- | --- | --- | --- | --- | --- | --- |
-| OpenSSH `ssh` | SSH Shell | P0 | `PARTIAL` | 2026-06-23 | Claude | OpenSSH_for_Windows_8.6p1；公钥认证、默认/指定资产、exec、shell、stdout/stderr、exit-status、审计产物通过；密码、keyboard-interactive、真实 resize/Ctrl-C/TUI 未测 |
-| OpenSSH `sftp` | SFTP | P0 | `PARTIAL` | 2026-06-23 | Claude | OpenSSH_for_Windows_8.6p1；基础连接、指定资产、上传下载、目录、重命名删除、中文/空格路径、100MB 大文件、100 小文件批量、审计产物通过；异常断线未测 |
+| OpenSSH `ssh` | SSH Shell | P0 | `PARTIAL` | 2026-06-23 | Claude | OpenSSH_for_Windows_8.6p1；公钥认证、默认/指定资产、exec、shell、stdout/stderr、exit-status、客户端长命令中断后服务可用、审计产物通过；密码、keyboard-interactive、真实 resize/Ctrl-C/TUI 未测 |
+| OpenSSH `sftp` | SFTP | P0 | `PARTIAL` | 2026-06-23 | Claude | OpenSSH_for_Windows_8.6p1；基础连接、指定资产、上传下载、目录、重命名删除、stat/chmod、中文/空格路径、100MB 大文件、100 小文件批量、客户端中断、审计产物通过；chown 待 Linux 目标补测 |
 | PuTTY | SSH Shell | P0 | `NOT_TESTED` | - | - | Windows 常用 SSH 客户端 |
 | Xshell | SSH Shell | P0 | `NOT_TESTED` | - | - | 企业 Windows 常用 SSH 客户端 |
 | SecureCRT | SSH Shell | P1 | `NOT_TESTED` | - | - | 企业 SSH 客户端，授权环境可测 |
@@ -128,7 +128,7 @@
 | SSH-04 | `NOT_TESTED` | - | - | keyboard-interactive 需人工交互补测 |
 | SSH-05 | `PASS` | OpenSSH_for_Windows_8.6p1 / Windows 11 / commit 15a7247 | 2026-06-23 | `whoami` 返回 `targetuser`；指定资产 `hostname` 返回 `compat-target` |
 | SSH-06 | `NOT_TESTED` | - | - | 本轮只验证 `-tt` shell 可进入；真实窗口 resize 未测 |
-| SSH-07 | `NOT_TESTED` | - | - | Ctrl-C / signal 需交互补测 |
+| SSH-07 | `PARTIAL` | OpenSSH_for_Windows_8.6p1 / Windows 11 / commit 15a7247 | 2026-06-23 | 自动化验证：`sleep 10` 期间强制 kill `ssh.exe`，Jianmen 继续接受新连接；真实 Ctrl-C signal 仍需人工交互补测 |
 | SSH-08 | `PASS` | OpenSSH_for_Windows_8.6p1 / Windows 11 / commit 15a7247 | 2026-06-23 | `false` 返回 exit code 1；stdout/stderr 均可透传 |
 | SSH-09 | `NOT_TESTED` | - | - | TUI 程序需人工交互补测 |
 | SSH-10 | `PASS` | OpenSSH_for_Windows_8.6p1 / Windows 11 / commit 15a7247 | 2026-06-23 | 生成 `meta.json`、`terminal.cast`、`terminal-events.jsonl`、`commands.jsonl`；证据目录 `data/compat-test/replay/ssh/a010bc208f3e56af6685fe7f4a9dbdab` |
@@ -142,11 +142,11 @@
 | SFTP-03 | `PASS` | OpenSSH_for_Windows_8.6p1 / Windows 11 / commit 15a7247 | 2026-06-23 | `config.example.json` 上传后下载 SHA256 一致：`FF749932...AD137D` |
 | SFTP-04 | `PASS` | OpenSSH_for_Windows_8.6p1 / Windows 11 / commit 15a7247 | 2026-06-23 | `mkdir`/`rmdir` 成功并写入 `files.jsonl` |
 | SFTP-05 | `PASS` | OpenSSH_for_Windows_8.6p1 / Windows 11 / commit 15a7247 | 2026-06-23 | `rename`/`rm` 成功并写入 `files.jsonl` |
-| SFTP-06 | `NOT_TESTED` | - | - | chmod/chown 未测；基础 stat/lstat 在上传下载和 ls 流程中有成功记录 |
+| SFTP-06 | `PARTIAL` | OpenSSH_for_Windows_8.6p1 / Windows 11 / commit 15a7247 | 2026-06-23 | `ls -l`/stat 与 `chmod 600` 成功，审计记录 `setstat`；chown 在 Windows 临时目标上不适用，待 Linux 目标补测 |
 | SFTP-07 | `PASS` | OpenSSH_for_Windows_8.6p1 / Windows 11 / commit 15a7247 | 2026-06-23 | `中文 文件.txt` 上传、列目录、下载、删除成功；下载 SHA256 一致：`5360FBA...0E4BE0` |
 | SFTP-08 | `PASS` | OpenSSH_for_Windows_8.6p1 / Windows 11 / commit 15a7247 | 2026-06-23 | 100MB 文件上传/下载成功，SHA256 一致：`20492A4D...1109E0E`；summary 记录 read/write 各 104857600 字节 |
 | SFTP-09 | `PASS` | OpenSSH_for_Windows_8.6p1 / Windows 11 / commit 15a7247 | 2026-06-23 | 100 个小文件批量上传/下载成功，文件数量 100/100，hash 全部一致；summary 中 100 个文件都有读写记录 |
-| SFTP-10 | `NOT_TESTED` | - | - | 异常断线未测 |
+| SFTP-10 | `PASS` | OpenSSH_for_Windows_8.6p1 / Windows 11 / commit 15a7247 | 2026-06-23 | 512MB 上传中强制 kill `sftp.exe`，Jianmen 继续接受新 SSH 连接；中断会话 summary 记录 `transfer_error: 1` 和部分 `write_bytes` |
 
 ### PuTTY
 

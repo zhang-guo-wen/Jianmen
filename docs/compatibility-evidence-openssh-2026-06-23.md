@@ -339,19 +339,113 @@ SUMMARY_FILES=100
 ALL_READ_WRITE=True
 ```
 
+### chmod / stat
+
+Batch 文件：
+
+```sftp
+mkdir jianmen-chmod
+put config.example.json jianmen-chmod/chmod-target.txt
+ls -l jianmen-chmod/chmod-target.txt
+chmod 600 jianmen-chmod/chmod-target.txt
+ls -l jianmen-chmod/chmod-target.txt
+rm jianmen-chmod/chmod-target.txt
+rmdir jianmen-chmod
+bye
+```
+
+结果：
+
+```text
+SFTP_CHMOD_EXIT=0
+```
+
+代表性审计目录：
+
+```text
+data/compat-test/replay/ssh/723eb869ffbb3792349dece3f210c691
+```
+
+`files.jsonl` 记录到：
+
+- `stat`
+- `lstat`
+- `setstat`
+- `remove`
+- `rmdir`
+
+说明：Windows 临时目标上 `chmod 600` 返回成功，但权限展示为 Windows OpenSSH/SFTP 的 `-rw-******` 风格；`chown` 不适用于本轮 Windows 目标，需要 Linux 目标补测。
+
+### 客户端异常断线
+
+测试方法：
+
+1. 准备 512MB 文件。
+2. 启动 OpenSSH `sftp` 上传。
+3. 200ms 后强制 kill `sftp.exe`。
+4. 再次通过 Jianmen 执行 `ssh ... whoami`，验证网关仍可接受新连接。
+
+结果：
+
+```text
+KILLED=True
+POST_INTERRUPT_SSH_EXIT=0
+```
+
+代表性中断会话目录：
+
+```text
+data/compat-test/replay/ssh/4aaeafb9227e26932ce3313e1b709562
+```
+
+`files-summary.json` 记录：
+
+```json
+{
+  "path": "/C:/02-codespace/Jianmen/data/compat-test/target-root/jianmen-interrupt-512/large-512mb.bin",
+  "actions": {
+    "close": 1,
+    "open_write": 1,
+    "stat": 1,
+    "transfer_error": 1,
+    "write": 1703
+  },
+  "write_bytes": 55803904,
+  "last_result": "success"
+}
+```
+
+说明：本轮模拟的是客户端进程被强制终止。Jianmen 没有崩溃，后续 SSH 连接正常；审计 summary 记录了 `transfer_error` 和部分写入字节。
+
+### SSH 长命令客户端中断
+
+测试方法：
+
+1. 通过 OpenSSH 执行目标长命令 `sleep 10`。
+2. 500ms 后强制 kill `ssh.exe`。
+3. 再次通过 Jianmen 执行 `ssh ... whoami`。
+
+结果：
+
+```text
+SSH_KILLED=True
+POST_SSH_KILL_EXIT=0
+```
+
+说明：这验证了 SSH 客户端异常断开后 Jianmen 仍可接受新连接。它不是完整 Ctrl-C/signal 验证；真实 Ctrl-C 仍需人工交互补测。
+
 ## 本轮结论
 
 OpenSSH 命令行客户端本轮结论为 `PARTIAL`：
 
-- OpenSSH `ssh`：公钥认证、默认资产、指定资产、exec、shell、stdout/stderr、exit-status、基础审计产物通过。
-- OpenSSH `sftp`：基础连接、指定资产、上传下载、目录操作、重命名删除、中文/空格路径、100MB 大文件、100 小文件批量和文件审计通过。
+- OpenSSH `ssh`：公钥认证、默认资产、指定资产、exec、shell、stdout/stderr、exit-status、客户端长命令中断后服务可用、基础审计产物通过。
+- OpenSSH `sftp`：基础连接、指定资产、上传下载、目录操作、重命名删除、stat/chmod、中文/空格路径、100MB 大文件、100 小文件批量、客户端异常断线和文件审计通过。
 
 仍需补测：
 
 - SSH 密码登录。
 - keyboard-interactive。
 - 真实窗口 resize。
-- Ctrl-C / signal。
+- 真实 Ctrl-C signal。
 - TUI 程序。
-- SFTP chmod/chown。
-- SFTP 异常断线。
+- Linux 目标上的 SFTP chown。

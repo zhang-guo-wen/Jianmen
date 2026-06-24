@@ -298,7 +298,7 @@ const replayDuration = computed(() => replayFrames.value.at(-1)?.time ?? 0);
 const replayRawBytes = computed(() => utf8ByteLength(replayData.value.raw));
 const replayFirstOutputTime = computed(() => replayOutputFrames.value[0]?.time ?? 0);
 const replayTerminalCols = computed(() => replayHeaderNumber('width', 120, 20, 240));
-const replayTerminalRows = computed(() => replayHeaderNumber('height', 32, 8, 80));
+const replayTerminalRows = computed(() => replayHeaderNumber('height', 24, 8, 24));
 const replayTerminalMessage = computed(() => {
   if (!isReplay.value) {
     return '';
@@ -719,24 +719,36 @@ onBeforeUnmount(() => {
 
 .replay-terminal-shell {
   position: relative;
-  overflow: hidden;
-  height: 420px;
+  overflow: clip;
+  height: min(420px, calc(100vh - 300px));
+  min-height: 280px;
   background: #0b1220;
   border: 1px solid #1f2937;
   border-radius: 8px;
+  contain: layout paint;
 }
 
 .replay-terminal {
-  height: 100%;
-  padding: 12px;
+  position: absolute;
+  inset: 12px;
+  overflow: hidden;
+  box-sizing: border-box;
 }
 
 .replay-terminal :deep(.xterm) {
+  overflow: hidden;
+  width: 100%;
   height: 100%;
 }
 
 .replay-terminal :deep(.xterm-viewport) {
   overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+
+.replay-terminal :deep(.xterm-screen) {
+  max-width: 100%;
+  max-height: 100%;
 }
 
 .replay-terminal-empty {

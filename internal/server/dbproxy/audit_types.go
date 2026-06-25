@@ -25,14 +25,6 @@ type DBConnectionMeta struct {
 	MySQLConnectAttrs    map[string]string `json:"mysql_connect_attrs,omitempty"`
 	AuthObservation      string            `json:"auth_observation,omitempty"`
 	AllowedUsersEnforced bool              `json:"allowed_users_enforced"`
-	QueryPolicy          DBQueryPolicyMeta `json:"query_policy,omitempty"`
-}
-
-type DBQueryPolicyMeta struct {
-	ReadOnly          bool     `json:"read_only,omitempty"`
-	DeniedQueryKinds  []string `json:"denied_query_kinds,omitempty"`
-	DeniedSQLPatterns []string `json:"denied_sql_patterns,omitempty"`
-	MaxQueryBytes     int      `json:"max_query_bytes,omitempty"`
 }
 
 type DBQueryEvent struct {

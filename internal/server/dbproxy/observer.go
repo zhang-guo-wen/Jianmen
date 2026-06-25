@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"strings"
+	"unicode"
 )
 
 type queryObserver interface {
@@ -422,4 +423,78 @@ func parsePostgresError(payload []byte) (string, string) {
 		payload = rest
 	}
 	return code, message
+}
+
+// --- Symbols moved from policy.go ---
+
+type queryDecision struct {
+	Allowed      bool
+	Status       string
+	ErrorCode    string
+	ErrorMessage string
+	Detail       map[string]any
+}
+
+func allowQuery() queryDecision {
+	return queryDecision{Allowed: true}
+}
+
+func classifyQueryKind(sql string) string {
+	sql = stripLeadingSQLTrivia(sql)
+	if sql == "" {
+		return "unknown"
+	}
+	for i, r := range sql {
+		if !(unicode.IsLetter(r) || r == '_') {
+			if i == 0 {
+				return "unknown"
+			}
+			return strings.ToLower(sql[:i])
+		}
+	}
+	return strings.ToLower(sql)
+}
+
+func stripLeadingSQLTrivia(sql string) string {
+	for {
+		sql = strings.TrimSpace(sql)
+		switch {
+		case strings.HasPrefix(sql, "--"):
+			if index := strings.IndexByte(sql, '\n'); index >= 0 {
+				sql = sql[index+1:]
+				continue
+			}
+			return ""
+		case strings.HasPrefix(sql, "#"):
+			if index := strings.IndexByte(sql, '\n'); index >= 0 {
+				sql = sql[index+1:]
+				continue
+			}
+			return ""
+		case strings.HasPrefix(sql, "/*"):
+			if index := strings.Index(sql, "*/"); index >= 0 {
+				sql = sql[index+2:]
+				continue
+			}
+			return ""
+		default:
+			return sql
+		}
+	}
+}
+
+func mergeDetails(values ...map[string]any) map[string]any {
+	var out map[string]any
+	for _, value := range values {
+		if len(value) == 0 {
+			continue
+		}
+		if out == nil {
+			out = make(map[string]any)
+		}
+		for k, v := range value {
+			out[k] = v
+		}
+	}
+	return out
 }

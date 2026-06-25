@@ -3,7 +3,6 @@ package dbproxy
 import (
 	"encoding/binary"
 	"errors"
-	"fmt"
 	"strings"
 )
 
@@ -17,89 +16,8 @@ const (
 	mysqlClientPluginAuthLenencClientData = 1 << 21
 )
 
-type accountAuthState struct {
-	enabled     bool
-	enforce     bool
-	allowed     map[string]struct{}
-	parser      databaseLoginParser
-	ready       bool
-	observation loginObservation
-}
-
 type databaseLoginParser interface {
 	Observe(data []byte) (loginObservation, bool, error)
-}
-
-func newAccountAuth(protocol string, allowedUsers []string) (*accountAuthState, error) {
-	var parser databaseLoginParser
-	switch protocol {
-	case "mysql":
-		parser = &mysqlLoginParser{}
-	case "postgres":
-		parser = &postgresLoginParser{}
-	default:
-		if len(allowedUsers) == 0 {
-			return &accountAuthState{}, nil
-		}
-		return nil, fmt.Errorf("database account auth is not supported for protocol %q", protocol)
-	}
-
-	allowed := make(map[string]struct{}, len(allowedUsers))
-	for _, user := range allowedUsers {
-		allowed[strings.ToLower(strings.TrimSpace(user))] = struct{}{}
-	}
-	return &accountAuthState{
-		enabled: true,
-		enforce: len(allowedUsers) > 0,
-		allowed: allowed,
-		parser:  parser,
-	}, nil
-}
-
-func (a *accountAuthState) Enabled() bool {
-	return a != nil && a.enabled
-}
-
-func (a *accountAuthState) Enforced() bool {
-	return a != nil && a.enforce
-}
-
-func (a *accountAuthState) Ready() bool {
-	return a == nil || !a.enabled || a.ready
-}
-
-func (a *accountAuthState) Observation() loginObservation {
-	if a == nil {
-		return loginObservation{}
-	}
-	return a.observation
-}
-
-func (a *accountAuthState) ObserveClientBytes(data []byte) (bool, error) {
-	if a == nil || !a.enabled || a.ready {
-		return true, nil
-	}
-	observation, ready, err := a.parser.Observe(data)
-	if err != nil {
-		return false, err
-	}
-	if !ready {
-		return false, nil
-	}
-	if observation.Observation == "" {
-		observation.Observation = "plaintext"
-	}
-	a.observation = observation
-	if a.enforce {
-		if observation.User == "" {
-			return false, errors.New("database username is not visible for account auth")
-		}
-		if _, ok := a.allowed[strings.ToLower(observation.User)]; !ok {
-			return false, fmt.Errorf("database user %q is not allowed", observation.User)
-		}
-	}
-	a.ready = true
-	return true, nil
 }
 
 type mysqlLoginParser struct {

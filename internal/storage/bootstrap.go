@@ -189,6 +189,24 @@ func bootstrapBuiltinPermissions(db *gorm.DB) error {
 			Effect:       model.PermissionEffectAllow,
 			Description:  "Grants all database account resources.",
 		},
+		{
+			ID:           "builtin-db-instance-manage",
+			Name:         "builtin-db-instance-manage",
+			Action:       "db:instance:manage",
+			ResourceType: model.ResourceTypeDatabaseInstance,
+			ResourceID:   "*",
+			Effect:       model.PermissionEffectAllow,
+			Description:  "Allows manage all database instances.",
+		},
+		{
+			ID:           "builtin-db-account-manage",
+			Name:         "builtin-db-account-manage",
+			Action:       "db:account:manage",
+			ResourceType: model.ResourceTypeDatabaseAccount,
+			ResourceID:   "*",
+			Effect:       model.PermissionEffectAllow,
+			Description:  "Allows manage all database accounts.",
+		},
 	}
 	for _, permission := range permissions {
 		if err := upsertPermission(db, permission); err != nil {
@@ -213,6 +231,10 @@ func bootstrapBuiltinRolePermissions(db *gorm.DB) error {
 		{builtinDBOperatorRoleID, "builtin-db-any-database-account"},
 		{builtinDBAuditorRoleID, "builtin-audit-view"},
 		{builtinDBAuditorRoleID, "builtin-db-audit-view"},
+		{builtinDBOperatorRoleID, "builtin-db-instance-manage"},
+		{builtinDBOperatorRoleID, "builtin-db-account-manage"},
+		{builtinAdminRoleID, "builtin-db-instance-manage"},
+		{builtinAdminRoleID, "builtin-db-account-manage"},
 	}
 	for _, assignment := range assignments {
 		binding := model.RolePermission{

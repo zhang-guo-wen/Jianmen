@@ -2,6 +2,7 @@ package dbproxy
 
 import (
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -10,189 +11,55 @@ import (
 	"net"
 	"os"
 	"path/filepath"
-	"reflect"
 	"strings"
 	"sync"
 	"time"
 
+	"gorm.io/gorm"
+	"jianmen/internal/access"
 	"jianmen/internal/config"
 	"jianmen/internal/model"
 	rbaccheck "jianmen/internal/rbac"
-
-	"gorm.io/gorm"
 )
 
-type Manager struct {
-	applyMu           sync.Mutex
-	mu                sync.Mutex
-	desired           []config.DatabaseProxyConfig
-	running           map[string]*runningProxy
-	rootCtx           context.Context
-	errCh             chan<- error
-	proxies           []config.DatabaseProxyConfig
+type Gateway struct {
+	cfg               config.DatabaseGatewayConfig
+	store             *access.StaticStore
+	db                *gorm.DB
 	replayDir         string
 	logger            *slog.Logger
 	permissionChecker permissionChecker
-}
-
-type runningProxy struct {
-	proxy  config.DatabaseProxyConfig
-	cancel context.CancelFunc
-	done   chan struct{}
 }
 
 type permissionChecker interface {
 	HasPermission(userID, action, resourceType, resourceID string) (bool, error)
 }
 
-type connectionRecorder struct {
-	mu       sync.Mutex
-	id       string
-	protocol string
-	metaPath string
-	meta     DBConnectionMeta
-	file     *os.File
-	seq      int64
-	policy   *sqlPolicy
-}
-
-func NewManager(proxies []config.DatabaseProxyConfig, replayDir string, logger *slog.Logger, dbs ...*gorm.DB) *Manager {
+func NewGateway(cfg config.DatabaseGatewayConfig, store *access.StaticStore, replayDir string, logger *slog.Logger, db *gorm.DB) *Gateway {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	enabled := enabledDatabaseProxies(proxies)
 	var checker permissionChecker
-	if len(dbs) > 0 && dbs[0] != nil {
-		checker = rbaccheck.NewChecker(dbs[0])
+	if db != nil {
+		checker = rbaccheck.NewChecker(db)
 	}
-	return &Manager{
-		desired:           enabled,
-		running:           make(map[string]*runningProxy),
-		proxies:           enabled,
-		replayDir:         replayDir,
-		logger:            logger,
-		permissionChecker: checker,
-	}
+	return &Gateway{cfg: cfg, store: store, db: db, replayDir: replayDir, logger: logger, permissionChecker: checker}
 }
 
-func (m *Manager) Enabled() bool {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return len(m.desired) > 0 || len(m.running) > 0
+func (g *Gateway) Enabled() bool {
+	return g.cfg.Enabled
 }
 
-func (m *Manager) ListenAndServe(ctx context.Context) error {
-	errCh := make(chan error, 1)
-	m.mu.Lock()
-	if m.rootCtx != nil {
-		m.mu.Unlock()
-		return errors.New("database proxy manager is already running")
-	}
-	m.rootCtx = ctx
-	m.errCh = errCh
-	desired := append([]config.DatabaseProxyConfig(nil), m.desired...)
-	m.mu.Unlock()
-
-	if err := m.Apply(desired); err != nil {
-		m.stopAll()
-		return err
-	}
-
-	select {
-	case <-ctx.Done():
-		m.stopAll()
-		return nil
-	case err := <-errCh:
-		m.stopAll()
-		return err
-	}
-}
-
-func (m *Manager) Apply(proxies []config.DatabaseProxyConfig) error {
-	enabled := enabledDatabaseProxies(proxies)
-
-	m.applyMu.Lock()
-	defer m.applyMu.Unlock()
-
-	m.mu.Lock()
-	m.desired = enabled
-	m.proxies = enabled
-	ctx := m.rootCtx
-	if ctx == nil || ctx.Err() != nil {
-		m.mu.Unlock()
+func (g *Gateway) ListenAndServe(ctx context.Context) error {
+	if !g.cfg.Enabled {
 		return nil
 	}
-
-	desiredByName := make(map[string]config.DatabaseProxyConfig, len(enabled))
-	for _, proxy := range enabled {
-		desiredByName[proxy.Name] = proxy
-	}
-
-	toStop := make([]*runningProxy, 0)
-	toStart := make([]config.DatabaseProxyConfig, 0)
-	for name, running := range m.running {
-		next, keep := desiredByName[name]
-		if !keep || !reflect.DeepEqual(running.proxy, next) {
-			toStop = append(toStop, running)
-			delete(m.running, name)
-		}
-	}
-	for name, proxy := range desiredByName {
-		if _, ok := m.running[name]; !ok {
-			toStart = append(toStart, proxy)
-		}
-	}
-	m.mu.Unlock()
-
-	stopRunningProxies(toStop)
-
-	started := make(map[string]*runningProxy, len(toStart))
-	for _, proxy := range toStart {
-		running, err := m.startProxy(ctx, proxy)
-		if err != nil {
-			stopRunningProxies(mapValues(started))
-			return err
-		}
-		started[proxy.Name] = running
-	}
-
-	m.mu.Lock()
-	for name, running := range started {
-		m.running[name] = running
-	}
-	m.mu.Unlock()
-	return nil
-}
-
-func (m *Manager) startProxy(parent context.Context, proxy config.DatabaseProxyConfig) (*runningProxy, error) {
-	listener, err := net.Listen("tcp", proxy.ListenAddr)
+	listener, err := net.Listen("tcp", g.cfg.ListenAddr)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	ctx, cancel := context.WithCancel(parent)
-	running := &runningProxy{
-		proxy:  proxy,
-		cancel: cancel,
-		done:   make(chan struct{}),
-	}
-	go func() {
-		defer close(running.done)
-		if err := m.serveProxy(ctx, proxy, listener); err != nil && ctx.Err() == nil {
-			m.reportProxyError(err)
-		}
-	}()
-	return running, nil
-}
-
-func (m *Manager) serveProxy(ctx context.Context, proxy config.DatabaseProxyConfig, listener net.Listener) error {
 	defer listener.Close()
-
-	m.logger.Info("database proxy listening",
-		"name", proxy.Name,
-		"protocol", proxy.Protocol,
-		"listen", proxy.ListenAddr,
-		"upstream", proxy.UpstreamAddr,
-	)
+	g.logger.Info("database gateway listening", "addr", g.cfg.ListenAddr)
 
 	var wg sync.WaitGroup
 	go func() {
@@ -212,229 +79,375 @@ func (m *Manager) serveProxy(ctx context.Context, proxy config.DatabaseProxyConf
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			m.handleConn(ctx, proxy, conn)
+			g.handleConn(ctx, conn)
 		}()
 	}
 }
 
-func (m *Manager) reportProxyError(err error) {
-	m.mu.Lock()
-	errCh := m.errCh
-	m.mu.Unlock()
-	if errCh == nil {
-		return
-	}
-	select {
-	case errCh <- err:
-	default:
-	}
+type gatewayConn struct {
+	protocol     string
+	accountID    string
+	accountName  string
+	upstream     net.Conn
+	upstreamAddr string
+	userID       string
 }
 
-func (m *Manager) stopAll() {
-	m.applyMu.Lock()
-	defer m.applyMu.Unlock()
-
-	m.mu.Lock()
-	toStop := make([]*runningProxy, 0, len(m.running))
-	for _, running := range m.running {
-		toStop = append(toStop, running)
-	}
-	m.running = make(map[string]*runningProxy)
-	m.rootCtx = nil
-	m.errCh = nil
-	m.mu.Unlock()
-
-	stopRunningProxies(toStop)
-}
-
-func stopRunningProxies(proxies []*runningProxy) {
-	for _, proxy := range proxies {
-		proxy.cancel()
-	}
-	for _, proxy := range proxies {
-		<-proxy.done
-	}
-}
-
-func mapValues[K comparable, V any](values map[K]V) []V {
-	out := make([]V, 0, len(values))
-	for _, value := range values {
-		out = append(out, value)
-	}
-	return out
-}
-
-func enabledDatabaseProxies(proxies []config.DatabaseProxyConfig) []config.DatabaseProxyConfig {
-	enabled := make([]config.DatabaseProxyConfig, 0, len(proxies))
-	for _, proxy := range proxies {
-		if proxy.Enabled {
-			enabled = append(enabled, proxy)
-		}
-	}
-	return enabled
-}
-
-func (m *Manager) handleConn(ctx context.Context, proxy config.DatabaseProxyConfig, client net.Conn) {
+func (g *Gateway) handleConn(ctx context.Context, client net.Conn) {
 	defer client.Close()
 
-	upstream, err := net.DialTimeout("tcp", proxy.UpstreamAddr, 10*time.Second)
-	if err != nil {
-		m.logger.Warn("database upstream connect failed", "name", proxy.Name, "upstream", proxy.UpstreamAddr, "error", err)
+	firstByte := make([]byte, 1)
+	if _, err := io.ReadFull(client, firstByte); err != nil {
+		g.logger.Warn("db gateway failed to read protocol byte", "client", client.RemoteAddr().String(), "error", err)
 		return
 	}
-	defer upstream.Close()
 
-	recorder, err := m.newConnectionRecorder(proxy, client.RemoteAddr().String())
-	if err != nil {
-		m.logger.Warn("database recorder init failed", "name", proxy.Name, "error", err)
-	} else {
+	var conn *gatewayConn
+	switch {
+	case firstByte[0] == 0x00:
+		conn = g.handlePG(ctx, client)
+	case firstByte[0] == 0x4a:
+		conn = g.handleMySQL(ctx, client)
+	default:
+		g.logger.Warn("db gateway unsupported protocol", "first_byte", firstByte[0])
+		return
+	}
+	if conn == nil {
+		return
+	}
+	defer conn.upstream.Close()
+
+	g.logger.Info("db gateway connection started",
+		"protocol", conn.protocol, "account", conn.accountName,
+		"client", client.RemoteAddr().String(), "upstream", conn.upstreamAddr)
+
+	recorder, _ := g.newRecorder(conn)
+	if recorder != nil {
 		defer recorder.Close()
 	}
-	observer := newQueryObserver(proxy.Protocol, recorder)
-	accountAuth, err := newAccountAuth(proxy.Protocol, proxy.AllowedUsers)
-	if err != nil {
-		m.logger.Warn("database account auth init failed", "name", proxy.Name, "error", err)
-		return
-	}
 
-	m.logger.Info("database connection started",
-		"name", proxy.Name,
-		"protocol", proxy.Protocol,
-		"client", client.RemoteAddr().String(),
-		"upstream", proxy.UpstreamAddr,
-	)
-	defer m.logger.Info("database connection ended", "name", proxy.Name, "client", client.RemoteAddr().String())
-
+	observer := newQueryObserver(conn.protocol, recorder)
 	done := make(chan struct{}, 2)
 	go func() {
-		m.copyClientToUpstream(proxy, upstream, client, client, observer, accountAuth, recorder)
+		copyClientToUpstream(client, conn.upstream, observer)
 		done <- struct{}{}
 	}()
 	go func() {
-		m.copyUpstreamToClient(client, upstream, observer)
+		copyUpstreamToClient(client, conn.upstream, observer)
 		done <- struct{}{}
 	}()
-
-	select {
-	case <-ctx.Done():
-	case <-done:
-	}
+	<-done
 }
 
-func (m *Manager) copyClientToUpstream(proxy config.DatabaseProxyConfig, dst io.Writer, src io.Reader, client io.Writer, observer queryObserver, accountAuth *accountAuthState, recorder *connectionRecorder) {
-	buf := make([]byte, 32*1024)
-	var pendingAuthBytes []byte
-	for {
-		n, readErr := src.Read(buf)
-		if n > 0 {
-			data := append([]byte(nil), buf[:n]...)
-			if accountAuth.Enabled() && !accountAuth.Ready() {
-				pendingAuthBytes = append(pendingAuthBytes, data...)
-				ready, err := accountAuth.ObserveClientBytes(data)
-				if err != nil {
-					m.logger.Warn("database account auth rejected", "error", err)
-					return
-				}
-				if !ready {
-					continue
-				}
-				data = pendingAuthBytes
-				pendingAuthBytes = nil
-				observation := accountAuth.Observation()
-				if recorder != nil {
-					recorder.UpdateAuth(observation, accountAuth.Enforced())
-				}
-				if accountAuth.Enforced() {
-					resourceID := rbaccheck.DatabaseAccountResourceID(proxy.Name, proxy.ListenAddr, observation.User)
-					if err := m.authorizeDatabaseConnect(proxy, observation, resourceID); err != nil {
-						m.logger.Warn("database rbac connect rejected",
-							"name", proxy.Name,
-							"user", observation.User,
-							"resource_type", model.ResourceTypeDatabaseAccount,
-							"resource_id", resourceID,
-							"error", err,
-						)
-						return
-					}
-				}
-				m.logger.Info("database account auth accepted", "user", observation.User, "observation", observation.Observation)
-			}
-			if decision := observer.ObserveClientBytes(data); decision != nil && !decision.Allowed {
-				if response := observer.ErrorResponse(*decision); len(response) > 0 {
-					_, _ = client.Write(response)
-				}
-				m.logger.Warn("database query rejected by policy", "error_code", decision.ErrorCode, "error", decision.ErrorMessage)
-				return
-			}
-			if _, err := dst.Write(data); err != nil {
-				return
-			}
-		}
-		if readErr != nil {
-			return
-		}
-	}
-}
+// handlePG implements two-layer PostgreSQL authentication:
+// 1. Extract username from PG StartupMessage
+// 2. Request cleartext password from client (bastion user auth)
+// 3. Authenticate via StaticStore.AuthenticateDirect
+// 4. RBAC check
+// 5. Check account disabled/expiry
+// 6. Connect to upstream and relay auth with UpstreamPassword
+func (g *Gateway) handlePG(ctx context.Context, client net.Conn) *gatewayConn {
+	buf := make([]byte, 8*1024)
+	totalRead := 0
 
-func (m *Manager) authorizeDatabaseConnect(proxy config.DatabaseProxyConfig, observation loginObservation, resourceID string) error {
-	if m == nil || m.permissionChecker == nil {
+	// Read StartupMessage header (4 bytes len + 4 bytes protocol)
+	for totalRead < 8 {
+		n, err := client.Read(buf[totalRead:])
+		if err != nil {
+			return nil
+		}
+		totalRead += n
+	}
+
+	msgLen := int(binary.BigEndian.Uint32(buf[0:4]))
+	protocol := int(binary.BigEndian.Uint32(buf[4:8]))
+
+	// Handle SSLRequest (protocol 80877103)
+	if protocol == 80877103 {
+		// Refuse SSL
+		if _, err := client.Write([]byte{'N'}); err != nil {
+			return nil
+		}
+		totalRead = 0
+		for totalRead < 8 {
+			n, err := client.Read(buf[totalRead:])
+			if err != nil {
+				return nil
+			}
+			totalRead += n
+		}
+		msgLen = int(binary.BigEndian.Uint32(buf[0:4]))
+	}
+
+	// Read the rest of the StartupMessage
+	for totalRead < msgLen && totalRead < len(buf) {
+		n, err := client.Read(buf[totalRead:])
+		if err != nil {
+			return nil
+		}
+		totalRead += n
+	}
+
+	// Parse StartupMessage key-value pairs
+	username := ""
+	pos := 8
+	for pos < msgLen-1 {
+		keyEnd := pos
+		for keyEnd < msgLen && buf[keyEnd] != 0 {
+			keyEnd++
+		}
+		if keyEnd >= msgLen {
+			break
+		}
+		valEnd := keyEnd + 1
+		for valEnd < msgLen && buf[valEnd] != 0 {
+			valEnd++
+		}
+		if valEnd >= msgLen {
+			break
+		}
+		key := string(buf[pos:keyEnd])
+		value := string(buf[keyEnd+1 : valEnd])
+		if key == "user" {
+			username = value
+		}
+		pos = valEnd + 1
+	}
+	if username == "" {
 		return nil
 	}
-	userID := strings.TrimSpace(observation.User)
-	if userID == "" {
-		return errors.New("database username is not visible for rbac connect check")
-	}
-	if resourceID == "" {
-		resourceID = rbaccheck.DatabaseAccountResourceID(proxy.Name, proxy.ListenAddr, userID)
-	}
-	allowed, err := m.permissionChecker.HasPermission(userID, rbaccheck.ActionDBConnect, model.ResourceTypeDatabaseAccount, resourceID)
+
+	uniqueName := strings.TrimSpace(username)
+	acct, err := g.store.DatabaseAccountByUniqueName(uniqueName)
 	if err != nil {
-		return fmt.Errorf("database rbac connect check failed: %w", err)
+		g.logger.Warn("db gateway account not found", "unique_name", uniqueName, "error", err)
+		return nil
+	}
+
+	// Request cleartext password from client
+	// PG AuthenticationCleartextPassword: 'R' type, int32(8) len, int32(3) auth type
+	authReq := []byte{'R', 0, 0, 0, 8, 0, 0, 0, 3}
+	if _, err := client.Write(authReq); err != nil {
+		return nil
+	}
+
+	// Read password response: type 'p', int32(len), password (null-terminated)
+	pwdBuf := make([]byte, 1024)
+	n, err := client.Read(pwdBuf)
+	if err != nil || n < 6 {
+		return nil
+	}
+	pwdLen := int(binary.BigEndian.Uint32(pwdBuf[1:5])) - 4
+	if pwdLen <= 0 {
+		return nil
+	}
+	password := string(pwdBuf[5 : 5+pwdLen])
+
+	// Validate bastion user password via StaticStore
+	user, err := g.store.AuthenticateDirect(ctx, uniqueName, password)
+	if err != nil {
+		g.logger.Warn("db gateway auth failed", "user", uniqueName, "error", err)
+		return nil
+	}
+
+	// RBAC check
+	resourceID := rbaccheck.DatabaseAccountResourceID(uniqueName)
+	if err := g.authorizeConnect(user.ID, uniqueName, resourceID); err != nil {
+		g.logger.Warn("db gateway rbac denied", "user", user.ID, "resource", resourceID, "error", err)
+		return nil
+	}
+
+	// Check account disabled and expiry
+	if acct.Disabled {
+		g.logger.Warn("db gateway account disabled", "account", uniqueName)
+		return nil
+	}
+	if acct.ExpiresAt != nil && time.Now().UTC().After(*acct.ExpiresAt) {
+		g.logger.Warn("db gateway account expired", "account", uniqueName, "expires_at", acct.ExpiresAt)
+		return nil
+	}
+
+	// Connect to upstream
+	upstream, err := net.DialTimeout("tcp", acct.Instance.Address, 10*time.Second)
+	if err != nil {
+		g.logger.Warn("db gateway upstream connect failed", "upstream", acct.Instance.Address, "error", err)
+		return nil
+	}
+
+	// Forward a new StartupMessage to upstream with UpstreamUsername
+	upUsername := acct.UpstreamUsername
+	var sb strings.Builder
+	sb.WriteString("user")
+	sb.WriteByte(0)
+	sb.WriteString(upUsername)
+	sb.WriteByte(0)
+
+	startupPayload := sb.String()
+	startupLen := 4 + 4 + len(startupPayload) + 1 // length field + protocol + params + trailing \0
+	startupMsg := make([]byte, startupLen)
+	binary.BigEndian.PutUint32(startupMsg[0:4], uint32(startupLen))
+	binary.BigEndian.PutUint32(startupMsg[4:8], 196608) // PG 3.0
+	copy(startupMsg[8:], startupPayload)
+	startupMsg[startupLen-1] = 0
+
+	if _, err := upstream.Write(startupMsg); err != nil {
+		upstream.Close()
+		return nil
+	}
+
+	// PG auth relay: handle upstream's authentication challenge
+	respBuf := make([]byte, 4096)
+	for {
+		nr, err := upstream.Read(respBuf)
+		if err != nil || nr < 1 {
+			upstream.Close()
+			return nil
+		}
+
+		// Forward the server message to client
+		if _, err := client.Write(respBuf[:nr]); err != nil {
+			upstream.Close()
+			return nil
+		}
+
+		if nr >= 6 && respBuf[0] == 'R' {
+			authType := binary.BigEndian.Uint32(respBuf[5:9])
+			if authType == 0 {
+				// AuthenticationOk -- break out of auth loop
+				break
+			}
+
+			if authType == 3 {
+				// CleartextPassword: send upstream password back
+				pwdMsg := make([]byte, 0, 5+len(acct.UpstreamPassword)+1)
+				pwdMsg = append(pwdMsg, 'p')
+				pwdLenBytes := make([]byte, 4)
+				binary.BigEndian.PutUint32(pwdLenBytes, uint32(4+len(acct.UpstreamPassword)+1))
+				pwdMsg = append(pwdMsg, pwdLenBytes...)
+				pwdMsg = append(pwdMsg, []byte(acct.UpstreamPassword)...)
+				pwdMsg = append(pwdMsg, 0)
+				if _, err := upstream.Write(pwdMsg); err != nil {
+					upstream.Close()
+					return nil
+				}
+			} else if authType == 5 {
+				// MD5Password: for v1, try sending cleartext anyway
+				pwdMsg := make([]byte, 0, 5+len(acct.UpstreamPassword)+1)
+				pwdMsg = append(pwdMsg, 'p')
+				pwdLenBytes := make([]byte, 4)
+				binary.BigEndian.PutUint32(pwdLenBytes, uint32(4+len(acct.UpstreamPassword)+1))
+				pwdMsg = append(pwdMsg, pwdLenBytes...)
+				pwdMsg = append(pwdMsg, []byte(acct.UpstreamPassword)...)
+				pwdMsg = append(pwdMsg, 0)
+				if _, err := upstream.Write(pwdMsg); err != nil {
+					upstream.Close()
+					return nil
+				}
+				continue
+			}
+		}
+
+		// ErrorResponse from upstream -- auth failed
+		if nr >= 1 && respBuf[0] == 'E' {
+			upstream.Close()
+			return nil
+		}
+
+		// ReadyForQuery -- auth succeeded
+		if nr >= 1 && respBuf[0] == 'Z' {
+			break
+		}
+	}
+
+	return &gatewayConn{
+		protocol: "postgres", accountID: acct.ID, accountName: uniqueName,
+		upstream: upstream, upstreamAddr: acct.Instance.Address, userID: user.ID,
+	}
+}
+
+// handleMySQL is a v1 stub. Returns nil with a warning log.
+func (g *Gateway) handleMySQL(ctx context.Context, client net.Conn) *gatewayConn {
+	// MySQL v1 is deferred. The first byte (0x4a) was already consumed by handleConn.
+	// A full implementation would need to: connect upstream, relay handshake,
+	// extract username from client login, RBAC check, then proxy.
+	g.logger.Warn("MySQL proxy not yet implemented in gateway v1 - use PG protocol")
+	return nil
+}
+
+func (g *Gateway) authorizeConnect(userID, uniqueName, resourceID string) error {
+	if g.permissionChecker == nil {
+		return nil
+	}
+	allowed, err := g.permissionChecker.HasPermission(userID, rbaccheck.ActionDBConnect, model.ResourceTypeDatabaseAccount, resourceID)
+	if err != nil {
+		return fmt.Errorf("rbac check failed: %w", err)
 	}
 	if !allowed {
-		return fmt.Errorf("database user %q is not permitted to connect to %s:%s", userID, model.ResourceTypeDatabaseAccount, resourceID)
+		return fmt.Errorf("user %q not permitted to connect to %s", userID, resourceID)
 	}
 	return nil
 }
 
-func (m *Manager) copyUpstreamToClient(dst io.Writer, src io.Reader, observer queryObserver) {
+func copyClientToUpstream(client net.Conn, upstream net.Conn, observer queryObserver) {
 	buf := make([]byte, 32*1024)
 	for {
-		n, readErr := src.Read(buf)
+		n, err := client.Read(buf)
 		if n > 0 {
 			data := append([]byte(nil), buf[:n]...)
-			observer.ObserveServerBytes(data)
-			if _, err := dst.Write(data); err != nil {
+			if decision := observer.ObserveClientBytes(data); decision != nil && !decision.Allowed {
+				return
+			}
+			if _, werr := upstream.Write(data); werr != nil {
 				return
 			}
 		}
-		if readErr != nil {
+		if err != nil {
 			return
 		}
 	}
 }
 
-func (m *Manager) newConnectionRecorder(proxy config.DatabaseProxyConfig, clientAddr string) (*connectionRecorder, error) {
+func copyUpstreamToClient(client net.Conn, upstream net.Conn, observer queryObserver) {
+	buf := make([]byte, 32*1024)
+	for {
+		n, err := upstream.Read(buf)
+		if n > 0 {
+			data := append([]byte(nil), buf[:n]...)
+			observer.ObserveServerBytes(data)
+			if _, werr := client.Write(data); werr != nil {
+				return
+			}
+		}
+		if err != nil {
+			return
+		}
+	}
+}
+
+type connectionRecorder struct {
+	mu       sync.Mutex
+	id       string
+	protocol string
+	metaPath string
+	meta     DBConnectionMeta
+	file     *os.File
+	seq      int64
+}
+
+func (g *Gateway) newRecorder(conn *gatewayConn) (*connectionRecorder, error) {
 	id := model.NewID()
-	dir := filepath.Join(m.replayDir, "db", id)
+	dir := filepath.Join(g.replayDir, "db", id)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, err
 	}
 	startedAt := time.Now().UTC()
 	meta := DBConnectionMeta{
-		ID:                   id,
-		Name:                 proxy.Name,
-		Protocol:             proxy.Protocol,
-		ClientAddr:           clientAddr,
-		UpstreamAddr:         proxy.UpstreamAddr,
-		StartedAt:            startedAt.Format(time.RFC3339Nano),
-		AllowedUsersEnforced: len(proxy.AllowedUsers) > 0,
-		QueryPolicy: DBQueryPolicyMeta{
-			ReadOnly:          proxy.QueryPolicy.ReadOnly,
-			DeniedQueryKinds:  append([]string(nil), proxy.QueryPolicy.DeniedQueryKinds...),
-			DeniedSQLPatterns: append([]string(nil), proxy.QueryPolicy.DeniedSQLPatterns...),
-			MaxQueryBytes:     proxy.QueryPolicy.MaxQueryBytes,
-		},
+		ID:           id,
+		Name:         conn.accountName,
+		Protocol:     conn.protocol,
+		ClientAddr:   "",
+		UpstreamAddr: conn.upstreamAddr,
+		StartedAt:    startedAt.Format(time.RFC3339Nano),
 	}
 	file, err := os.OpenFile(filepath.Join(dir, "queries.jsonl"), os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
 	if err != nil {
@@ -442,32 +455,16 @@ func (m *Manager) newConnectionRecorder(proxy config.DatabaseProxyConfig, client
 	}
 	recorder := &connectionRecorder{
 		id:       id,
-		protocol: proxy.Protocol,
+		protocol: conn.protocol,
 		metaPath: filepath.Join(dir, "meta.json"),
 		meta:     meta,
 		file:     file,
-		policy:   newSQLPolicy(proxy.QueryPolicy),
 	}
 	if err := recorder.writeMetaLocked(); err != nil {
-		_ = file.Close()
+		file.Close()
 		return nil, err
 	}
 	return recorder, nil
-}
-
-func (r *connectionRecorder) UpdateAuth(observation loginObservation, enforced bool) {
-	if r == nil {
-		return
-	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.meta.AuthUser = observation.User
-	r.meta.Database = observation.Database
-	r.meta.ApplicationName = observation.ApplicationName
-	r.meta.MySQLConnectAttrs = observation.ConnectAttrs
-	r.meta.AuthObservation = observation.Observation
-	r.meta.AllowedUsersEnforced = enforced
-	_ = r.writeMetaLocked()
 }
 
 func (r *connectionRecorder) StartQuery(sql string, detail map[string]any) (queryRecord, queryDecision) {
@@ -487,7 +484,7 @@ func (r *connectionRecorder) StartQuery(sql string, detail map[string]any) (quer
 		detail:    detail,
 		startedAt: startedAt,
 	}
-	decision := r.policy.Evaluate(sql)
+	decision := allowQuery()
 	startDetail := mergeDetails(detail, map[string]any{"query_kind": queryKind})
 	r.writeQueryEventLocked(DBQueryEvent{
 		Type:         queryEventTypeStarted,

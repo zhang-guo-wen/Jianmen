@@ -3,6 +3,8 @@ package admin
 import (
 	"bufio"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -17,12 +19,16 @@ import (
 	"gorm.io/gorm"
 	"jianmen/internal/access"
 	"jianmen/internal/config"
+	"jianmen/internal/model"
+	"jianmen/internal/rbac"
+	"jianmen/internal/store"
 )
 
 type Server struct {
 	cfg            *config.Config
-	store          *access.StaticStore
+	store          store.Store
 	db             *gorm.DB
+	rbacChecker    *rbac.Checker
 	logger         *slog.Logger
 	dbProxyApplier databaseProxyApplier
 }
@@ -71,21 +77,23 @@ type dbProxyAccountListItem struct {
 }
 
 type pagedHostList struct {
-	Data     []access.HostView `json:"data"`
+	Data     []store.HostView `json:"data"`
 	Page     int               `json:"page"`
 	PageSize int               `json:"page_size"`
 	Total    int               `json:"total"`
 }
 
-func New(cfg *config.Config, store *access.StaticStore, logger *slog.Logger, dbs ...*gorm.DB) *Server {
+func New(cfg *config.Config, store store.Store, logger *slog.Logger, dbs ...*gorm.DB) *Server {
 	if logger == nil {
 		logger = slog.Default()
 	}
 	var db *gorm.DB
+	var checker *rbac.Checker
 	if len(dbs) > 0 {
 		db = dbs[0]
+		checker = rbac.NewChecker(db)
 	}
-	return &Server{cfg: cfg, store: store, db: db, logger: logger}
+	return &Server{cfg: cfg, store: store, db: db, rbacChecker: checker, logger: logger}
 }
 
 func (s *Server) SetDatabaseProxyApplier(applier databaseProxyApplier) {
@@ -95,28 +103,30 @@ func (s *Server) SetDatabaseProxyApplier(applier databaseProxyApplier) {
 func (s *Server) ListenAndServe(ctx context.Context) error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", s.handleIndex)
-	mux.HandleFunc("/api/health", s.withAuth(s.handleHealth))
-	mux.HandleFunc("/api/users", s.withAuth(s.handleUsers))
-	mux.HandleFunc("/api/hosts", s.withAuth(s.handleHosts))
-	mux.HandleFunc("/api/hosts/", s.withAuth(s.handleHost))
-	mux.HandleFunc("/api/targets", s.withAuth(s.handleTargets))
-	mux.HandleFunc("/api/targets/", s.withAuth(s.handleTarget))
+	mux.HandleFunc("/api/health", s.withAuthAndUser(s.handleHealth))
+	mux.HandleFunc("/api/users", s.withAuthAndUser(s.handleUsers))
+	mux.HandleFunc("/api/hosts", s.withAuthAndUser(s.handleHosts))
+	mux.HandleFunc("/api/hosts/", s.withAuthAndUser(s.handleHost))
+	mux.HandleFunc("/api/targets", s.withAuthAndUser(s.handleTargets))
+	mux.HandleFunc("/api/targets/", s.withAuthAndUser(s.handleTarget))
 	mux.HandleFunc(webTerminalPath, s.handleWebTerminal)
-	mux.HandleFunc("/api/sessions", s.withAuth(s.handleSessions))
-	mux.HandleFunc("/api/sessions/", s.withAuth(s.handleSessionArtifact))
-	mux.HandleFunc("/api/db/proxies", s.withAuth(s.handleDBProxies))
-	mux.HandleFunc("/api/db/proxies/", s.withAuth(s.handleDBProxy))
-	mux.HandleFunc("/api/db/connections", s.withAuth(s.handleDBConnections))
-	mux.HandleFunc("/api/db/connections/", s.withAuth(s.handleDBConnectionArtifact))
-	mux.HandleFunc("/api/rbac/roles", s.withAuth(s.handleRBACRoles))
-	mux.HandleFunc("/api/rbac/roles/", s.withAuth(s.handleRBACRole))
-	mux.HandleFunc("/api/rbac/permissions", s.withAuth(s.handleRBACPermissions))
-	mux.HandleFunc("/api/rbac/permissions/", s.withAuth(s.handleRBACPermission))
-	mux.HandleFunc("/api/rbac/user-roles", s.withAuth(s.handleRBACUserRoles))
-	mux.HandleFunc("/api/rbac/user-roles/", s.withAuth(s.handleRBACUserRole))
-	mux.HandleFunc("/api/rbac/role-permissions", s.withAuth(s.handleRBACRolePermissions))
-	mux.HandleFunc("/api/rbac/role-permissions/", s.withAuth(s.handleRBACRolePermission))
-	mux.HandleFunc("/api/rbac/effective", s.withAuth(s.handleRBACEffective))
+	mux.HandleFunc("/api/sessions", s.withAuthAndUser(s.handleSessions))
+	mux.HandleFunc("/api/sessions/", s.withAuthAndUser(s.handleSessionArtifact))
+	mux.HandleFunc("/api/db/proxies", s.withAuthAndUser(s.handleDBProxies))
+	mux.HandleFunc("/api/db/proxies/", s.withAuthAndUser(s.handleDBProxy))
+	mux.HandleFunc("/api/db/connections", s.withAuthAndUser(s.handleDBConnections))
+	mux.HandleFunc("/api/db/connections/", s.withAuthAndUser(s.handleDBConnectionArtifact))
+	mux.HandleFunc("/api/rbac/roles", s.withAuthAndUser(s.handleRBACRoles))
+	mux.HandleFunc("/api/rbac/roles/", s.withAuthAndUser(s.handleRBACRole))
+	mux.HandleFunc("/api/rbac/permissions", s.withAuthAndUser(s.handleRBACPermissions))
+	mux.HandleFunc("/api/rbac/permissions/", s.withAuthAndUser(s.handleRBACPermission))
+	mux.HandleFunc("/api/rbac/user-roles", s.withAuthAndUser(s.handleRBACUserRoles))
+	mux.HandleFunc("/api/rbac/user-roles/", s.withAuthAndUser(s.handleRBACUserRole))
+	mux.HandleFunc("/api/rbac/role-permissions", s.withAuthAndUser(s.handleRBACRolePermissions))
+	mux.HandleFunc("/api/rbac/role-permissions/", s.withAuthAndUser(s.handleRBACRolePermission))
+	mux.HandleFunc("/api/rbac/effective", s.withAuthAndUser(s.handleRBACEffective))
+	mux.HandleFunc("/api/me", s.withAuthAndUser(s.handleMe))
+	mux.HandleFunc("/api/me/permissions", s.withAuthAndUser(s.handleMePermissions))
 
 	server := &http.Server{
 		Addr:              s.cfg.Admin.ListenAddr,
@@ -158,6 +168,65 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	})
 }
 
+func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", http.MethodGet)
+		writeErrorText(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	userID := userIDFromRequest(r)
+	if userID == "" {
+		writeErrorText(w, http.StatusNotFound, "user not found")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{
+		"user_id":  userID,
+		"username": usernameFromRequest(r),
+	})
+}
+
+func (s *Server) handleMePermissions(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", http.MethodGet)
+		writeErrorText(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	userID := userIDFromRequest(r)
+	if userID == "" {
+		writeErrorText(w, http.StatusNotFound, "user not found")
+		return
+	}
+	if s.db == nil || s.rbacChecker == nil {
+		writeJSON(w, http.StatusOK, map[string]any{"actions": []string{}})
+		return
+	}
+	var rawPerms []model.Permission
+	if err := s.db.Table("permissions").
+		Select("permissions.action").
+		Joins("JOIN role_permissions ON role_permissions.permission_id = permissions.id").
+		Joins("JOIN user_roles ON user_roles.role_id = role_permissions.role_id").
+		Joins("JOIN roles ON roles.id = user_roles.role_id").
+		Where("user_roles.user_id = ?", userID).
+		Where("user_roles.expires_at IS NULL OR user_roles.expires_at > ?", time.Now().UTC()).
+		Where("roles.status = '' OR roles.status = ?", "active").
+		Where("permissions.effect = '' OR permissions.effect = ?", model.PermissionEffectAllow).
+		Where("permissions.action != ''").
+		Group("permissions.action").
+		Find(&rawPerms).Error; err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	actions := make([]string, 0, len(rawPerms))
+	seen := make(map[string]struct{}, len(rawPerms))
+	for _, p := range rawPerms {
+		if _, ok := seen[p.Action]; !ok && p.Action != "" {
+			seen[p.Action] = struct{}{}
+			actions = append(actions, p.Action)
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"actions": actions})
+}
+
 func (s *Server) handleUsers(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, s.store.Users())
 }
@@ -165,8 +234,16 @@ func (s *Server) handleUsers(w http.ResponseWriter, _ *http.Request) {
 func (s *Server) handleHosts(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
+		if !s.requirePermission(r, rbac.ActionHostView) {
+			s.forbidden(w)
+			return
+		}
 		writeJSON(w, http.StatusOK, paginateHosts(s.store.Hosts(), r))
 	case http.MethodPost:
+		if !s.requirePermission(r, rbac.ActionHostCreate) {
+			s.forbidden(w)
+			return
+		}
 		s.handleCreateHost(w, r)
 	default:
 		w.Header().Set("Allow", "GET, POST")
@@ -177,7 +254,7 @@ func (s *Server) handleHosts(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleCreateHost(w http.ResponseWriter, r *http.Request) {
 	defer r.Body.Close()
 	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
-	var host access.HostRecord
+	var host store.HostRecord
 	if err := json.NewDecoder(r.Body).Decode(&host); err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
@@ -217,6 +294,10 @@ func (s *Server) handleHost(w http.ResponseWriter, r *http.Request) {
 
 	switch r.Method {
 	case http.MethodGet:
+		if !s.requirePermission(r, rbac.ActionHostView) {
+			s.forbidden(w)
+			return
+		}
 		view, err := s.store.Host(id)
 		if err != nil {
 			writeHostStoreError(w, err)
@@ -240,7 +321,7 @@ func (s *Server) handleHost(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleUpdateHost(w http.ResponseWriter, r *http.Request, id string) {
 	defer r.Body.Close()
 	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
-	var host access.HostRecord
+	var host store.HostRecord
 	if err := json.NewDecoder(r.Body).Decode(&host); err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
@@ -256,8 +337,16 @@ func (s *Server) handleUpdateHost(w http.ResponseWriter, r *http.Request, id str
 func (s *Server) handleTargets(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
+		if !s.requirePermission(r, rbac.ActionTargetView) {
+			s.forbidden(w)
+			return
+		}
 		writeJSON(w, http.StatusOK, s.store.Targets())
 	case http.MethodPost:
+		if !s.requirePermission(r, rbac.ActionTargetCreate) {
+			s.forbidden(w)
+			return
+		}
 		s.handleCreateTarget(w, r)
 	default:
 		w.Header().Set("Allow", "GET, POST")
@@ -290,6 +379,10 @@ func (s *Server) handleTarget(w http.ResponseWriter, r *http.Request) {
 
 	switch r.Method {
 	case http.MethodGet:
+		if !s.requirePermission(r, rbac.ActionTargetView) {
+			s.forbidden(w)
+			return
+		}
 		view, err := s.store.Target(id)
 		if err != nil {
 			writeTargetStoreError(w, err)
@@ -329,8 +422,16 @@ func (s *Server) handleUpdateTarget(w http.ResponseWriter, r *http.Request, id s
 func (s *Server) handleDBProxies(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
+		if !s.requirePermission(r, rbac.ActionDBProxyView) {
+			s.forbidden(w)
+			return
+		}
 		writeJSON(w, http.StatusOK, s.store.DatabaseProxies())
 	case http.MethodPost:
+		if !s.requirePermission(r, rbac.ActionDBProxyCreate) {
+			s.forbidden(w)
+			return
+		}
 		s.handleCreateDBProxy(w, r)
 	default:
 		w.Header().Set("Allow", "GET, POST")
@@ -374,6 +475,10 @@ func (s *Server) handleDBProxy(w http.ResponseWriter, r *http.Request) {
 	}
 	switch r.Method {
 	case http.MethodGet:
+		if !s.requirePermission(r, rbac.ActionDBProxyView) {
+			s.forbidden(w)
+			return
+		}
 		view, err := s.store.DatabaseProxy(name)
 		if err != nil {
 			writeDBStoreError(w, err)
@@ -483,7 +588,11 @@ func (s *Server) handleDBProxyAccounts(w http.ResponseWriter, r *http.Request, n
 	}
 }
 
-func (s *Server) handleSessions(w http.ResponseWriter, _ *http.Request) {
+func (s *Server) handleSessions(w http.ResponseWriter, r *http.Request) {
+	if !s.requirePermission(r, rbac.ActionSessionView) {
+		s.forbidden(w)
+		return
+	}
 	sessions, err := s.listSessions()
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
@@ -637,17 +746,78 @@ func (s *Server) listDBConnections() ([]dbConnectionListItem, error) {
 	return out, nil
 }
 
-func (s *Server) withAuth(next http.HandlerFunc) http.HandlerFunc {
+type contextKey string
+
+const (
+	ctxKeyUserID   contextKey = "admin_user_id"
+	ctxKeyUsername contextKey = "admin_username"
+)
+
+func (s *Server) withAuthAndUser(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if s.cfg.Admin.Token != "" {
-			auth := r.Header.Get("Authorization")
-			if auth != "Bearer "+s.cfg.Admin.Token {
-				writeErrorText(w, http.StatusUnauthorized, "missing or invalid bearer token")
+		auth := r.Header.Get("Authorization")
+		token := strings.TrimPrefix(auth, "Bearer ")
+		if token == "" || token == auth {
+			writeErrorText(w, http.StatusUnauthorized, "missing or invalid bearer token")
+			return
+		}
+
+		// Try per-user token lookup first
+		if s.db != nil {
+			hash := sha256.Sum256([]byte(token))
+			hashStr := hex.EncodeToString(hash[:])
+			var user model.User
+			if err := s.db.Where("token_hash = ?", hashStr).First(&user).Error; err == nil {
+				ctx := context.WithValue(r.Context(), ctxKeyUserID, user.ID)
+				ctx = context.WithValue(ctx, ctxKeyUsername, user.Username)
+				next(w, r.WithContext(ctx))
 				return
 			}
 		}
-		next(w, r)
+
+		// Fallback to shared admin token
+		if s.cfg.Admin.Token != "" && token == s.cfg.Admin.Token {
+			next(w, r)
+			return
+		}
+
+		writeErrorText(w, http.StatusUnauthorized, "invalid token")
 	}
+}
+
+func userIDFromRequest(r *http.Request) string {
+	if id, ok := r.Context().Value(ctxKeyUserID).(string); ok {
+		return id
+	}
+	return ""
+}
+
+func usernameFromRequest(r *http.Request) string {
+	if name, ok := r.Context().Value(ctxKeyUsername).(string); ok {
+		return name
+	}
+	return ""
+}
+
+func (s *Server) requirePermission(r *http.Request, action string) bool {
+	userID := userIDFromRequest(r)
+	if userID == "" {
+		// Shared token fallback — no per-user RBAC, allow all
+		return true
+	}
+	if s.rbacChecker == nil {
+		return true
+	}
+	allowed, err := s.rbacChecker.HasPermission(userID, action, "", "")
+	if err != nil {
+		s.logger.Warn("rbac check error", "user_id", userID, "action", action, "error", err)
+		return false
+	}
+	return allowed
+}
+
+func (s *Server) forbidden(w http.ResponseWriter) {
+	writeErrorText(w, http.StatusForbidden, "forbidden")
 }
 
 func splitArtifactPath(path string) (string, string, bool) {
@@ -666,7 +836,7 @@ func targetIDFromPath(path string) (string, bool) {
 	return id, true
 }
 
-func paginateHosts(hosts []access.HostView, r *http.Request) pagedHostList {
+func paginateHosts(hosts []store.HostView, r *http.Request) pagedHostList {
 	query := strings.TrimSpace(strings.ToLower(r.URL.Query().Get("q")))
 	if query != "" {
 		filtered := hosts[:0]
@@ -761,7 +931,7 @@ func dbProxyPathParts(path string) (name, child, account string, ok bool) {
 
 func writeHostStoreError(w http.ResponseWriter, err error) {
 	switch {
-	case errors.Is(err, access.ErrHostNotFound):
+	case errors.Is(err, store.ErrHostNotFound) || errors.Is(err, access.ErrHostNotFound):
 		writeError(w, http.StatusNotFound, err)
 	default:
 		writeError(w, http.StatusBadRequest, err)
@@ -770,7 +940,7 @@ func writeHostStoreError(w http.ResponseWriter, err error) {
 
 func writeDBStoreError(w http.ResponseWriter, err error) {
 	switch {
-	case errors.Is(err, access.ErrDBProxyNotFound), errors.Is(err, access.ErrDBAccountNotFound):
+	case errors.Is(err, store.ErrDBProxyNotFound) || errors.Is(err, store.ErrDBAccountNotFound) || errors.Is(err, access.ErrDBProxyNotFound) || errors.Is(err, access.ErrDBAccountNotFound):
 		writeError(w, http.StatusNotFound, err)
 	default:
 		writeError(w, http.StatusBadRequest, err)
@@ -786,7 +956,7 @@ func (s *Server) applyDatabaseProxies() error {
 
 func writeTargetStoreError(w http.ResponseWriter, err error) {
 	switch {
-	case errors.Is(err, access.ErrTargetNotFound):
+	case errors.Is(err, store.ErrTargetNotFound) || errors.Is(err, access.ErrTargetNotFound):
 		writeError(w, http.StatusNotFound, err)
 	default:
 		writeError(w, http.StatusBadRequest, err)

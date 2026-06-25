@@ -6,7 +6,28 @@ import (
 	"strings"
 )
 
-const ActionDBConnect = "db:connect"
+const (
+	ActionDBConnect         = "db:connect"
+	ActionSessionConnect    = "session:connect"
+	ActionSFTPRead          = "sftp:read"
+	ActionSFTPWrite         = "sftp:write"
+	ActionAuditView         = "audit:view"
+	ActionDBAuditView       = "db:audit:view"
+	ActionHostCreate        = "host:create"
+	ActionHostUpdate        = "host:update"
+	ActionHostDelete        = "host:delete"
+	ActionHostView          = "host:view"
+	ActionTargetCreate      = "target:create"
+	ActionTargetUpdate      = "target:update"
+	ActionTargetDelete      = "target:delete"
+	ActionTargetView        = "target:view"
+	ActionDBProxyCreate     = "dbproxy:create"
+	ActionDBProxyUpdate     = "dbproxy:update"
+	ActionDBProxyDelete     = "dbproxy:delete"
+	ActionDBProxyView       = "dbproxy:view"
+	ActionRBACManage        = "rbac:manage"
+	ActionSessionView       = "session:view"
+)
 
 func DatabaseAccountResourceID(proxyName, listenAddr, username string) string {
 	return stableResourceID("dbacct", firstNonEmpty(strings.TrimSpace(proxyName), strings.TrimSpace(listenAddr)), strings.TrimSpace(username))

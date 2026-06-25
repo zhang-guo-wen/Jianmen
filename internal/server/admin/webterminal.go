@@ -18,8 +18,7 @@ import (
 	"github.com/gorilla/websocket"
 	"golang.org/x/crypto/ssh"
 
-	"jianmen/internal/access"
-	"jianmen/internal/config"
+	"jianmen/internal/store"
 	"jianmen/internal/model"
 	"jianmen/internal/recording"
 )
@@ -106,14 +105,14 @@ func (s *Server) authenticateWebTerminal(r *http.Request) bool {
 	return query.Get("token") == token || query.Get("access_token") == token
 }
 
-func (s *Server) resolveWebTerminalTarget(ctx context.Context, targetID string) (config.Target, error) {
+func (s *Server) resolveWebTerminalTarget(ctx context.Context, targetID string) (store.TargetConfig, error) {
 	user := model.User{
 		Username:          "admin-web-terminal",
 		RequestedTargetID: targetID,
 	}
 	target, err := s.store.DefaultTarget(ctx, user)
 	if err != nil {
-		return config.Target{}, err
+		return store.TargetConfig{}, err
 	}
 	return target, nil
 }
@@ -152,8 +151,8 @@ func positiveIntQuery(query url.Values, key string, fallback int) (int, error) {
 	return value, nil
 }
 
-func dialWebTerminalTarget(target config.Target) (*ssh.Client, error) {
-	clientConfig, err := access.ClientConfigForTarget(target)
+func dialWebTerminalTarget(target store.TargetConfig) (*ssh.Client, error) {
+	clientConfig, err := store.ClientConfigForTarget(target)
 	if err != nil {
 		return nil, err
 	}
@@ -163,7 +162,7 @@ func dialWebTerminalTarget(target config.Target) (*ssh.Client, error) {
 	return ssh.Dial("tcp", target.Addr(), clientConfig)
 }
 
-func (s *Server) newWebTerminalRecorder(r *http.Request, target config.Target) *recording.SessionRecorder {
+func (s *Server) newWebTerminalRecorder(r *http.Request, target store.TargetConfig) *recording.SessionRecorder {
 	if s == nil || s.cfg == nil || !s.cfg.Recording.Enabled {
 		return nil
 	}

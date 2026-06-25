@@ -9,12 +9,12 @@ import (
 	"syscall"
 	"time"
 
-	"jianmen/internal/access"
 	"jianmen/internal/config"
 	"jianmen/internal/server/admin"
 	"jianmen/internal/server/dbproxy"
 	"jianmen/internal/server/sshserver"
 	"jianmen/internal/storage"
+	"jianmen/internal/store"
 
 	"gorm.io/gorm"
 )
@@ -66,10 +66,18 @@ func main() {
 		logger.Info("metadata database ready", "driver", cfg.Database.Driver, "auto_migrate", cfg.Database.AutoMigrate)
 	}
 
-	store, err := access.NewStaticStore(cfg)
-	if err != nil {
-		logger.Error("failed to initialize access store", "error", err)
-		os.Exit(1)
+	var appStore store.Store
+	if metadataDB != nil {
+		appStore = store.NewDBStore(metadataDB, cfg.Admin.Token)
+		logger.Info("using database-backed store")
+	} else {
+		adapter, err := store.NewStaticAdapter(cfg)
+		if err != nil {
+			logger.Error("failed to initialize static store", "error", err)
+			os.Exit(1)
+		}
+		appStore = adapter
+		logger.Info("using file-backed static store (no database configured)")
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -80,7 +88,7 @@ func main() {
 
 	errCh := make(chan error, 3)
 
-	sshSrv := sshserver.New(cfg, store, logger)
+	sshSrv := sshserver.New(cfg, appStore, logger, metadataDB)
 	go func() {
 		errCh <- sshSrv.ListenAndServe(ctx)
 	}()
@@ -88,7 +96,7 @@ func main() {
 	dbManager := dbproxy.NewManager(cfg.DatabaseProxies, cfg.ReplayDir, logger, metadataDB)
 
 	if cfg.Admin.Enabled {
-		adminSrv := admin.New(cfg, store, logger, metadataDB)
+		adminSrv := admin.New(cfg, appStore, logger, metadataDB)
 		adminSrv.SetDatabaseProxyApplier(dbManager)
 		go func() {
 			errCh <- adminSrv.ListenAndServe(ctx)

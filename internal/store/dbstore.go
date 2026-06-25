@@ -1,0 +1,362 @@
+package store
+
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"errors"
+	"fmt"
+	"strings"
+
+	"golang.org/x/crypto/ssh"
+	"gorm.io/gorm"
+
+	"jianmen/internal/config"
+	"jianmen/internal/model"
+)
+
+// DBStore implements Store backed by a GORM database.
+// Database proxies still use config-based management (not yet migrated to DB).
+type DBStore struct {
+	db         *gorm.DB
+	adminToken string
+}
+
+func NewDBStore(db *gorm.DB, adminToken string) *DBStore {
+	return &DBStore{db: db, adminToken: adminToken}
+}
+
+// -- auth --
+
+func (s *DBStore) Authenticate(_ context.Context, username, password string) (model.User, error) {
+	// Try token-based auth first.
+	hash := sha256.Sum256([]byte(password))
+	hashStr := hex.EncodeToString(hash[:])
+
+	var user model.User
+	if err := s.db.Where("token_hash = ?", hashStr).First(&user).Error; err == nil {
+		return user, nil
+	}
+
+	// Try username + password hash.
+	login := parseLoginName(username)
+	if err := s.db.Where("username = ?", login.Username).First(&user).Error; err != nil {
+		return model.User{}, errors.New("invalid username or password")
+	}
+	if user.PasswordHash == "" {
+		return model.User{}, errors.New("invalid username or password")
+	}
+	passwordSum := sha256.Sum256([]byte(password))
+	if hex.EncodeToString(passwordSum[:]) != user.PasswordHash {
+		return model.User{}, errors.New("invalid username or password")
+	}
+	user.RequestedTargetID = login.TargetID
+	return user, nil
+}
+
+func (s *DBStore) AuthenticatePublicKey(_ context.Context, username string, key ssh.PublicKey) (model.User, error) {
+	login := parseLoginName(username)
+	var user model.User
+	if err := s.db.Where("username = ?", login.Username).First(&user).Error; err != nil {
+		return model.User{}, errors.New("invalid username or public key")
+	}
+
+	var pubKeys []model.UserPublicKey
+	if err := s.db.Where("user_id = ? AND revoked_at IS NULL", user.ID).Find(&pubKeys).Error; err != nil {
+		return model.User{}, fmt.Errorf("load public keys: %w", err)
+	}
+	for _, pk := range pubKeys {
+		parsed, _, _, _, err := ssh.ParseAuthorizedKey([]byte(pk.PublicKey))
+		if err != nil {
+			continue
+		}
+		if publicKeysEqual(key, parsed) {
+			user.RequestedTargetID = login.TargetID
+			return user, nil
+		}
+	}
+	return model.User{}, errors.New("invalid username or public key")
+}
+
+func (s *DBStore) Users() []UserView {
+	var users []model.User
+	if err := s.db.Where("status = ?", "active").Order("username ASC").Find(&users).Error; err != nil {
+		return nil
+	}
+	out := make([]UserView, len(users))
+	for i := range users {
+		out[i] = UserView{ID: users[i].ID, Username: users[i].Username}
+	}
+	return out
+}
+
+// -- hosts --
+
+func (s *DBStore) hostView(m model.Host) HostView {
+	status := "enabled"
+	if m.Status == "disabled" {
+		status = "disabled"
+	}
+	var count int64
+	s.db.Model(&model.HostAccount{}).Where("host_id = ?", m.ID).Count(&count)
+	return HostView{
+		ID: m.ID, Name: m.Name, Group: m.Labels,
+		Host: m.Address, Port: m.Port, Status: status,
+		Disabled: m.Status == "disabled", AccountCount: int(count),
+	}
+}
+
+func (s *DBStore) Hosts() []HostView {
+	var hosts []model.Host
+	if err := s.db.Order("created_at DESC").Find(&hosts).Error; err != nil {
+		return nil
+	}
+	out := make([]HostView, len(hosts))
+	for i := range hosts {
+		out[i] = s.hostView(hosts[i])
+	}
+	return out
+}
+
+func (s *DBStore) Host(id string) (HostView, error) {
+	var m model.Host
+	if err := s.db.First(&m, "id = ?", id).Error; err != nil {
+		return HostView{}, fmt.Errorf("%w: %q", ErrHostNotFound, id)
+	}
+	return s.hostView(m), nil
+}
+
+func (s *DBStore) AddHost(host HostRecord) (HostView, error) {
+	normalized := normalizeHostRecord(host)
+	m := model.Host{
+		ID:       normalized.ID,
+		Name:     normalized.Name,
+		Address:  normalized.Host,
+		Port:     normalized.Port,
+		Protocol: "ssh",
+		Labels:   normalized.Group,
+	}
+	if normalized.Disabled {
+		m.Status = "disabled"
+	}
+	if err := s.db.Create(&m).Error; err != nil {
+		return HostView{}, fmt.Errorf("create host: %w", err)
+	}
+	return s.hostView(m), nil
+}
+
+func (s *DBStore) UpdateHost(id string, host HostRecord) (HostView, error) {
+	var m model.Host
+	if err := s.db.First(&m, "id = ?", id).Error; err != nil {
+		return HostView{}, fmt.Errorf("%w: %q", ErrHostNotFound, id)
+	}
+	normalized := normalizeHostRecord(host)
+	m.Name = normalized.Name
+	m.Address = normalized.Host
+	m.Port = normalized.Port
+	m.Labels = normalized.Group
+	m.Status = "active"
+	if normalized.Disabled {
+		m.Status = "disabled"
+	}
+	if err := s.db.Save(&m).Error; err != nil {
+		return HostView{}, fmt.Errorf("update host: %w", err)
+	}
+	return s.hostView(m), nil
+}
+
+func (s *DBStore) DeleteHost(id string) error {
+	result := s.db.Delete(&model.Host{}, "id = ?", id)
+	if result.RowsAffected == 0 {
+		return fmt.Errorf("%w: %q", ErrHostNotFound, id)
+	}
+	s.db.Delete(&model.HostAccount{}, "host_id = ?", id)
+	return result.Error
+}
+
+// -- targets / host accounts --
+
+func (s *DBStore) targetView(a model.HostAccount) TargetView {
+	status := "enabled"
+	if a.Status == "disabled" {
+		status = "disabled"
+	}
+	authMethods := []string{"password"}
+	if a.AuthType == "private_key" || a.AuthType == "key" {
+		authMethods = []string{"private_key"}
+	}
+	name := a.Username
+	if name == "" {
+		name = a.ID
+	}
+	return TargetView{
+		ID: a.ID, HostID: a.HostID,
+		ResourceType: model.ResourceTypeHostAccount, ResourceID: a.ID,
+		Name: name, Username: a.Username, Status: status, Disabled: a.Status == "disabled",
+		AuthMethods: authMethods, Static: false,
+	}
+}
+
+func (s *DBStore) targetConfig(a model.HostAccount) TargetConfig {
+	return TargetConfig{
+		ID: a.ID, Username: a.Username,
+		InsecureIgnoreHostKey: true,
+		HostID:                a.HostID,
+	}
+}
+
+func (s *DBStore) HostAccounts(hostID string) ([]TargetView, error) {
+	var accounts []model.HostAccount
+	if err := s.db.Where("host_id = ?", hostID).Order("username ASC").Find(&accounts).Error; err != nil {
+		return nil, fmt.Errorf("list accounts: %w", err)
+	}
+	out := make([]TargetView, len(accounts))
+	for i := range accounts {
+		out[i] = s.targetView(accounts[i])
+	}
+	return out, nil
+}
+
+func (s *DBStore) Targets() []TargetView {
+	var accounts []model.HostAccount
+	if err := s.db.Order("created_at DESC").Find(&accounts).Error; err != nil {
+		return nil
+	}
+	out := make([]TargetView, len(accounts))
+	for i := range accounts {
+		out[i] = s.targetView(accounts[i])
+	}
+	return out
+}
+
+func (s *DBStore) Target(id string) (TargetView, error) {
+	var a model.HostAccount
+	if err := s.db.First(&a, "id = ?", id).Error; err != nil {
+		return TargetView{}, fmt.Errorf("%w: %q", ErrTargetNotFound, id)
+	}
+	return s.targetView(a), nil
+}
+
+func (s *DBStore) AddTarget(target config.Target) (TargetView, error) {
+	target = normalizeConfigTarget(target)
+	if target.HostID == "" {
+		target.HostID = fmt.Sprintf("%s-%d", target.Host, target.Port)
+	}
+	a := model.HostAccount{
+		ID:       target.ID,
+		HostID:   target.HostID,
+		Username: target.Username,
+		AuthType: "password",
+	}
+	if target.PrivateKeyPEM != "" || target.PrivateKeyPath != "" {
+		a.AuthType = "private_key"
+	}
+	if target.Disabled {
+		a.Status = "disabled"
+	}
+	if err := s.db.Create(&a).Error; err != nil {
+		return TargetView{}, fmt.Errorf("create target: %w", err)
+	}
+	return s.targetView(a), nil
+}
+
+func (s *DBStore) UpdateTarget(id string, target config.Target) (TargetView, error) {
+	var a model.HostAccount
+	if err := s.db.First(&a, "id = ?", id).Error; err != nil {
+		return TargetView{}, fmt.Errorf("%w: %q", ErrTargetNotFound, id)
+	}
+	a.Username = target.Username
+	a.AuthType = "password"
+	if target.PrivateKeyPEM != "" || target.PrivateKeyPath != "" {
+		a.AuthType = "private_key"
+	}
+	a.Status = "active"
+	if target.Disabled {
+		a.Status = "disabled"
+	}
+	if err := s.db.Save(&a).Error; err != nil {
+		return TargetView{}, fmt.Errorf("update target: %w", err)
+	}
+	return s.targetView(a), nil
+}
+
+func (s *DBStore) DeleteTarget(id string) error {
+	result := s.db.Delete(&model.HostAccount{}, "id = ?", id)
+	if result.RowsAffected == 0 {
+		return fmt.Errorf("%w: %q", ErrTargetNotFound, id)
+	}
+	return result.Error
+}
+
+// -- db proxies (config-only for now) --
+
+func (s *DBStore) DatabaseProxies() []DatabaseProxyView                             { return nil }
+func (s *DBStore) DatabaseProxyConfigs() []config.DatabaseProxyConfig               { return nil }
+func (s *DBStore) DatabaseProxy(_ string) (DatabaseProxyView, error)                { return DatabaseProxyView{}, ErrDBProxyNotFound }
+func (s *DBStore) DatabaseAccounts(_ string) ([]DatabaseAccountView, error)         { return nil, ErrDBProxyNotFound }
+func (s *DBStore) AddDatabaseProxy(_ config.DatabaseProxyConfig) (DatabaseProxyView, error)    { return DatabaseProxyView{}, errors.New("db proxies: config-only") }
+func (s *DBStore) UpdateDatabaseProxy(_ string, _ config.DatabaseProxyConfig) (DatabaseProxyView, error) { return DatabaseProxyView{}, ErrDBProxyNotFound }
+func (s *DBStore) DeleteDatabaseProxy(_ string) error                              { return ErrDBProxyNotFound }
+func (s *DBStore) AddDatabaseAccount(_ string, _ config.DatabaseAccountConfig) (DatabaseAccountView, error) { return DatabaseAccountView{}, ErrDBProxyNotFound }
+func (s *DBStore) UpdateDatabaseAccount(_, _ string, _ config.DatabaseAccountConfig) (DatabaseAccountView, error) { return DatabaseAccountView{}, ErrDBProxyNotFound }
+func (s *DBStore) DeleteDatabaseAccount(_, _ string) error                         { return ErrDBProxyNotFound }
+
+// -- connection --
+
+func (s *DBStore) DefaultTarget(_ context.Context, user model.User) (TargetConfig, error) {
+	if user.RequestedTargetID != "" {
+		var a model.HostAccount
+		if err := s.db.First(&a, "id = ?", user.RequestedTargetID).Error; err != nil {
+			return TargetConfig{}, fmt.Errorf("target %q not found", user.RequestedTargetID)
+		}
+		return s.targetConfig(a), nil
+	}
+
+	// Pick first active account.
+	var a model.HostAccount
+	if err := s.db.Where("status = ?", "active").First(&a).Error; err != nil {
+		return TargetConfig{}, errors.New("no target accounts available")
+	}
+	return s.targetConfig(a), nil
+}
+
+// ---- normalize helpers (subset, for DB entries) ----
+
+func normalizeHostRecord(h HostRecord) HostRecord {
+	h.ID = strings.TrimSpace(h.ID)
+	h.Name = strings.TrimSpace(h.Name)
+	h.Group = strings.TrimSpace(h.Group)
+	h.Host = strings.TrimSpace(h.Host)
+	h.Remark = strings.TrimSpace(h.Remark)
+	if h.Port == 0 {
+		h.Port = 22
+	}
+	if h.ID == "" {
+		h.ID = fmt.Sprintf("%s-%d", strings.ToLower(h.Host), h.Port)
+	}
+	if h.Name == "" {
+		h.Name = formatHostAddress(h.Host, h.Port)
+	}
+	return h
+}
+
+func normalizeConfigTarget(t config.Target) config.Target {
+	t.ID = strings.TrimSpace(t.ID)
+	t.Name = strings.TrimSpace(t.Name)
+	t.HostID = strings.TrimSpace(t.HostID)
+	t.Host = strings.TrimSpace(t.Host)
+	t.Username = strings.TrimSpace(t.Username)
+	t.Password = strings.TrimSpace(t.Password)
+	t.PrivateKeyPEM = strings.TrimSpace(t.PrivateKeyPEM)
+	t.PrivateKeyPath = strings.TrimSpace(t.PrivateKeyPath)
+	if t.Port == 0 {
+		t.Port = 22
+	}
+	if t.Name == "" {
+		t.Name = t.Username
+	}
+	if !t.InsecureIgnoreHostKey && t.HostKeyFingerprint == "" && t.KnownHostsPath == "" {
+		t.InsecureIgnoreHostKey = true
+	}
+	return t
+}

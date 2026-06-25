@@ -12,9 +12,9 @@ import (
 	"strings"
 	"testing"
 
-	"jianmen/internal/access"
 	"jianmen/internal/config"
 	"jianmen/internal/model"
+	"jianmen/internal/store"
 )
 
 func TestHandleIndexReturnsAPIOnlyInfo(t *testing.T) {
@@ -68,7 +68,7 @@ func TestHandleTargetCRUD(t *testing.T) {
 	if getRec.Code != http.StatusOK {
 		t.Fatalf("get status = %d, want %d; body=%s", getRec.Code, http.StatusOK, getRec.Body.String())
 	}
-	var got access.TargetView
+	var got store.TargetView
 	if err := json.Unmarshal(getRec.Body.Bytes(), &got); err != nil {
 		t.Fatalf("unmarshal get response: %v", err)
 	}
@@ -91,7 +91,7 @@ func TestHandleTargetCRUD(t *testing.T) {
 	if updateRec.Code != http.StatusOK {
 		t.Fatalf("update status = %d, want %d; body=%s", updateRec.Code, http.StatusOK, updateRec.Body.String())
 	}
-	var updated access.TargetView
+	var updated store.TargetView
 	if err := json.Unmarshal(updateRec.Body.Bytes(), &updated); err != nil {
 		t.Fatalf("unmarshal update response: %v", err)
 	}
@@ -181,7 +181,7 @@ func TestHandleHostsPaginationAndLazyAccounts(t *testing.T) {
 	if accountsRec.Code != http.StatusOK {
 		t.Fatalf("host accounts status = %d, want %d; body=%s", accountsRec.Code, http.StatusOK, accountsRec.Body.String())
 	}
-	var accounts []access.TargetView
+	var accounts []store.TargetView
 	if err := json.Unmarshal(accountsRec.Body.Bytes(), &accounts); err != nil {
 		t.Fatalf("unmarshal host accounts: %v; body=%s", err, accountsRec.Body.String())
 	}
@@ -228,7 +228,7 @@ func TestHandleDBProxiesReturnsRuntimePolicyAndAccounts(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusOK, rec.Body.String())
 	}
-	var proxies []access.DatabaseProxyView
+	var proxies []store.DatabaseProxyView
 	if err := json.Unmarshal(rec.Body.Bytes(), &proxies); err != nil {
 		t.Fatalf("unmarshal response: %v; body=%s", err, rec.Body.String())
 	}
@@ -249,7 +249,7 @@ func TestHandleDBProxiesReturnsRuntimePolicyAndAccounts(t *testing.T) {
 	if accountsRec.Code != http.StatusOK {
 		t.Fatalf("accounts status = %d, want %d; body=%s", accountsRec.Code, http.StatusOK, accountsRec.Body.String())
 	}
-	var accounts []access.DatabaseAccountView
+	var accounts []store.DatabaseAccountView
 	if err := json.Unmarshal(accountsRec.Body.Bytes(), &accounts); err != nil {
 		t.Fatalf("unmarshal accounts response: %v; body=%s", err, accountsRec.Body.String())
 	}
@@ -285,7 +285,7 @@ func TestHandleDBProxyCRUD(t *testing.T) {
 	if accountRec.Code != http.StatusCreated {
 		t.Fatalf("create account status = %d, want %d; body=%s", accountRec.Code, http.StatusCreated, accountRec.Body.String())
 	}
-	var account access.DatabaseAccountView
+	var account store.DatabaseAccountView
 	if err := json.Unmarshal(accountRec.Body.Bytes(), &account); err != nil {
 		t.Fatalf("unmarshal account response: %v", err)
 	}
@@ -306,7 +306,7 @@ func TestHandleDBProxyCRUD(t *testing.T) {
 	if updateRec.Code != http.StatusOK {
 		t.Fatalf("update status = %d, want %d; body=%s", updateRec.Code, http.StatusOK, updateRec.Body.String())
 	}
-	var updated access.DatabaseProxyView
+	var updated store.DatabaseProxyView
 	if err := json.Unmarshal(updateRec.Body.Bytes(), &updated); err != nil {
 		t.Fatalf("unmarshal updated proxy: %v", err)
 	}
@@ -371,13 +371,13 @@ func newTargetTestServer(t *testing.T) *Server {
 			},
 		},
 	}
-	store, err := access.NewStaticStore(cfg)
+	adapter, err := store.NewStaticAdapter(cfg)
 	if err != nil {
 		t.Fatalf("NewStaticStore returned error: %v", err)
 	}
 	return &Server{
 		cfg:    cfg,
-		store:  store,
+		store:  adapter,
 		logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
 	}
 }

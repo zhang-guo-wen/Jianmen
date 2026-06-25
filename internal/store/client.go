@@ -1,0 +1,171 @@
+package store
+
+import (
+	"bufio"
+	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
+	"errors"
+	"fmt"
+	"net"
+	"os"
+	"strings"
+
+	"golang.org/x/crypto/ssh"
+	"golang.org/x/crypto/ssh/knownhosts"
+)
+
+// ClientConfigForTarget builds an ssh.ClientConfig from a TargetConfig.
+func ClientConfigForTarget(target TargetConfig) (*ssh.ClientConfig, error) {
+	authMethods := make([]ssh.AuthMethod, 0, 2)
+	if target.Password != "" {
+		authMethods = append(authMethods, ssh.Password(target.Password))
+		authMethods = append(authMethods, ssh.KeyboardInteractive(func(_ string, _ string, questions []string, _ []bool) ([]string, error) {
+			answers := make([]string, len(questions))
+			for i := range answers {
+				answers[i] = target.Password
+			}
+			return answers, nil
+		}))
+	}
+	if target.PrivateKeyPEM != "" || target.PrivateKeyPath != "" {
+		signer, err := loadSigner(target.PrivateKeyPath, target.PrivateKeyPEM, target.Passphrase)
+		if err != nil {
+			return nil, err
+		}
+		authMethods = append(authMethods, ssh.PublicKeys(signer))
+	}
+	if len(authMethods) == 0 {
+		return nil, errors.New("target has no usable auth method")
+	}
+
+	hostKeyCallback, err := hostKeyCallback(target)
+	if err != nil {
+		return nil, err
+	}
+
+	return &ssh.ClientConfig{
+		User:            target.Username,
+		Auth:            authMethods,
+		HostKeyCallback: hostKeyCallback,
+	}, nil
+}
+
+func hostKeyCallback(target TargetConfig) (ssh.HostKeyCallback, error) {
+	if target.InsecureIgnoreHostKey {
+		return ssh.InsecureIgnoreHostKey(), nil
+	}
+	if target.HostKeyFingerprint != "" {
+		expected := normalizeFingerprint(target.HostKeyFingerprint)
+		return func(_ string, _ net.Addr, key ssh.PublicKey) error {
+			actual := normalizeFingerprint(ssh.FingerprintSHA256(key))
+			if actual != expected {
+				return fmt.Errorf("host key fingerprint mismatch: expected %s, got %s", expected, actual)
+			}
+			return nil
+		}, nil
+	}
+	if target.KnownHostsPath != "" {
+		return knownhosts.New(target.KnownHostsPath)
+	}
+	return ssh.InsecureIgnoreHostKey(), nil
+}
+
+func normalizeFingerprint(fp string) string {
+	fp = strings.TrimSpace(fp)
+	fp = strings.TrimPrefix(fp, "SHA256:")
+	return fp
+}
+
+func loadSigner(keyPath, keyPEM, passphrase string) (ssh.Signer, error) {
+	var raw []byte
+	if keyPEM != "" {
+		raw = []byte(keyPEM)
+	} else if keyPath != "" {
+		var err error
+		raw, err = os.ReadFile(keyPath)
+		if err != nil {
+			return nil, fmt.Errorf("read private key %q: %w", keyPath, err)
+		}
+	} else {
+		return nil, errors.New("no private key provided")
+	}
+
+	if passphrase != "" {
+		signer, err := ssh.ParsePrivateKeyWithPassphrase(raw, []byte(passphrase))
+		if err != nil {
+			return nil, fmt.Errorf("parse private key with passphrase: %w", err)
+		}
+		return signer, nil
+	}
+	signer, err := ssh.ParsePrivateKey(raw)
+	if err != nil {
+		return nil, fmt.Errorf("parse private key: %w", err)
+	}
+	return signer, nil
+}
+
+// -------- helpers shared from access package ----------
+
+func formatHostAddress(host string, port int) string {
+	host = strings.TrimSpace(host)
+	if host == "" {
+		return ""
+	}
+	if strings.Contains(host, ":") && !strings.HasPrefix(host, "[") {
+		host = "[" + host + "]"
+	}
+	if port == 0 {
+		port = 22
+	}
+	return fmt.Sprintf("%s:%d", host, port)
+}
+
+func parseLoginName(username string) LoginName {
+	for _, sep := range []string{"+", "#", "@"} {
+		if left, right, ok := strings.Cut(username, sep); ok && left != "" && right != "" {
+			return LoginName{Username: left, TargetID: right}
+		}
+	}
+	return LoginName{Username: username}
+}
+
+func publicKeysEqual(a, b ssh.PublicKey) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return a.Type() == b.Type() && bytes.Equal(a.Marshal(), b.Marshal())
+}
+
+type signerLoader interface {
+	load(keyPath, keyPEM, passphrase string) (ssh.Signer, error)
+}
+
+// parseAuthorizedKeys parses an ssh authorized_keys file.
+func parseAuthorizedKeys(raw []byte) ([]ssh.PublicKey, error) {
+	var keys []ssh.PublicKey
+	scanner := bufio.NewScanner(bytes.NewReader(raw))
+	lineNumber := 0
+	for scanner.Scan() {
+		lineNumber++
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		key, _, _, _, err := ssh.ParseAuthorizedKey([]byte(line))
+		if err != nil {
+			return nil, fmt.Errorf("line %d: %w", lineNumber, err)
+		}
+		keys = append(keys, key)
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+	return keys, nil
+}
+
+// tokenHash returns the SHA-256 hex digest of a token string.
+func tokenHash(token string) string {
+	h := sha256.Sum256([]byte(token))
+	return hex.EncodeToString(h[:])
+}

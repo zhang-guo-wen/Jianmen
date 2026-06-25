@@ -10,25 +10,32 @@ import (
 	"sync"
 
 	"golang.org/x/crypto/ssh"
+	"gorm.io/gorm"
 
-	"jianmen/internal/access"
 	"jianmen/internal/config"
 	"jianmen/internal/model"
 	"jianmen/internal/proxy/sshproxy"
+	"jianmen/internal/rbac"
 	"jianmen/internal/recording"
+	"jianmen/internal/store"
 )
 
 type Server struct {
-	cfg    *config.Config
-	store  *access.StaticStore
-	logger *slog.Logger
+	cfg         *config.Config
+	store       store.Store
+	rbacChecker *rbac.Checker
+	logger      *slog.Logger
 }
 
-func New(cfg *config.Config, store *access.StaticStore, logger *slog.Logger) *Server {
+func New(cfg *config.Config, s store.Store, logger *slog.Logger, dbs ...*gorm.DB) *Server {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Server{cfg: cfg, store: store, logger: logger}
+	var checker *rbac.Checker
+	if len(dbs) > 0 && dbs[0] != nil {
+		checker = rbac.NewChecker(dbs[0])
+	}
+	return &Server{cfg: cfg, store: s, rbacChecker: checker, logger: logger}
 }
 
 func (s *Server) ListenAndServe(ctx context.Context) error {
@@ -120,7 +127,20 @@ func (s *Server) handleConn(ctx context.Context, rawConn net.Conn, serverConfig 
 		s.logger.Warn("failed to resolve target", "user", user.Username, "error", err)
 		return
 	}
-	clientConfig, err := access.ClientConfigForTarget(target)
+
+	if s.rbacChecker != nil {
+		allowed, err := s.rbacChecker.HasPermission(user.ID, rbac.ActionSessionConnect, model.ResourceTypeHostAccount, target.ID)
+		if err != nil {
+			s.logger.Warn("rbac check failed", "user", user.Username, "target", target.ID, "error", err)
+			return
+		}
+		if !allowed {
+			s.logger.Warn("rbac denied session", "user", user.Username, "target", target.ID)
+			return
+		}
+	}
+
+	clientConfig, err := store.ClientConfigForTarget(target)
 	if err != nil {
 		s.logger.Warn("failed to build target client config", "target", target.Name, "error", err)
 		return

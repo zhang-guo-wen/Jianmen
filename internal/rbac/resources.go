@@ -8,8 +8,8 @@ import (
 
 const ActionDBConnect = "db:connect"
 
-func DatabaseAccountResourceID(proxyName, listenAddr, username string) string {
-	return stableResourceID("dbacct", firstNonEmpty(strings.TrimSpace(proxyName), strings.TrimSpace(listenAddr)), strings.TrimSpace(username))
+func DatabaseAccountResourceID(uniqueName string) string {
+	return stableResourceID("dbacct", uniqueName)
 }
 
 func stableResourceID(prefix string, parts ...string) string {

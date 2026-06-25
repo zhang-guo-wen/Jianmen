@@ -15,6 +15,7 @@ type Config struct {
 	TargetsFile     string                `json:"targets_file"`
 	Admin           AdminConfig           `json:"admin"`
 	Database        DatabaseConfig        `json:"database"`
+	DatabaseGateway DatabaseGatewayConfig `json:"database_gateway"`
 	Recording       RecordingConfig       `json:"recording"`
 	Users           []User                `json:"users"`
 	Targets         []Target              `json:"targets"`
@@ -39,6 +40,11 @@ type DatabaseConfig struct {
 	ConnMaxLifetimeSeconds int    `json:"conn_max_lifetime_seconds"`
 }
 
+type DatabaseGatewayConfig struct {
+	Enabled    bool   `json:"enabled"`
+	ListenAddr string `json:"listen_addr"`
+}
+
 type RecordingConfig struct {
 	Enabled        bool `json:"enabled"`
 	RecordInput    bool `json:"record_input"`
@@ -49,6 +55,7 @@ type User struct {
 	ID                 string   `json:"id"`
 	Username           string   `json:"username"`
 	Password           string   `json:"password"`
+	ApiToken           string   `json:"api_token"`
 	PublicKeys         []string `json:"public_keys"`
 	AuthorizedKeysPath string   `json:"authorized_keys_path"`
 }
@@ -87,6 +94,7 @@ type DatabaseProxyConfig struct {
 
 type DatabaseAccountConfig struct {
 	Username string `json:"username"`
+	Password string `json:"password"`
 	Database string `json:"database"`
 	Remark   string `json:"remark"`
 	Disabled bool   `json:"disabled"`
@@ -160,6 +168,11 @@ func (c *Config) applyDefaults() {
 		c.Database.DSN = "data/bastion.db"
 		c.Database.AutoMigrate = true
 	}
+	if c.DatabaseGateway.Enabled {
+		if c.DatabaseGateway.ListenAddr == "" {
+			c.DatabaseGateway.ListenAddr = "0.0.0.0:33060"
+		}
+	}
 	if c.Database.Enabled && c.Database.Driver == "" {
 		c.Database.Driver = "sqlite"
 	}
@@ -190,6 +203,13 @@ func (c *Config) Validate() error {
 		}
 		if (c.Database.Driver == "mysql" || c.Database.Driver == "postgres" || c.Database.Driver == "postgresql") && c.Database.DSN == "" {
 			return fmt.Errorf("database.dsn is required for driver %q", c.Database.Driver)
+		}
+	}
+	if c.DatabaseGateway.Enabled {
+		if c.DatabaseGateway.ListenAddr != "" {
+			if _, _, err := net.SplitHostPort(c.DatabaseGateway.ListenAddr); err != nil {
+				return fmt.Errorf("invalid database_gateway.listen_addr %q: %w", c.DatabaseGateway.ListenAddr, err)
+			}
 		}
 	}
 	if len(c.Users) == 0 {

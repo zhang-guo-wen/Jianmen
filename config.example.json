@@ -21,9 +21,13 @@
     "max_idle_conns": 1,
     "conn_max_lifetime_seconds": 0
   },
+  "database_gateway": {
+    "enabled": true,
+    "listen_addr": "0.0.0.0:33060"
+  },
   "recording": {
     "enabled": true,
-    "record_input": false,
+    "record_input": true,
     "record_commands": true
   },
   "users": [
@@ -31,6 +35,7 @@
       "id": "u-admin",
       "username": "admin",
       "password": "admin",
+      "api_token": "admin-token",
       "public_keys": [],
       "authorized_keys_path": ""
     }

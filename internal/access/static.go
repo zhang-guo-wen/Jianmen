@@ -18,23 +18,21 @@ import (
 
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/knownhosts"
+	"gorm.io/gorm"
 
 	"jianmen/internal/config"
 	"jianmen/internal/model"
-	rbaccheck "jianmen/internal/rbac"
 )
 
 type StaticStore struct {
 	cfg              *config.Config
+	db               *gorm.DB
 	mu               sync.RWMutex
 	users            map[string]config.User
 	userPublicKeys   map[string][]ssh.PublicKey
 	hosts            map[string]HostRecord
 	runtimeHosts     map[string]struct{}
 	hostsFile        string
-	dbProxies        map[string]config.DatabaseProxyConfig
-	runtimeDBProxies map[string]struct{}
-	dbProxiesFile    string
 	targets          map[string]config.Target
 	runtimeTargets   map[string]struct{}
 }
@@ -45,6 +43,7 @@ var (
 	ErrDBProxyNotFound   = errors.New("database proxy not found")
 	ErrDBAccountNotFound = errors.New("database account not found")
 	ErrTargetUnavailable = errors.New("target unavailable")
+	ErrDBInstanceNotFound = errors.New("database instance not found")
 )
 
 type UserView struct {
@@ -102,43 +101,43 @@ type HostView struct {
 	Static       bool   `json:"static"`
 }
 
-type DatabaseProxyView struct {
-	Name                 string                           `json:"name"`
-	Enabled              bool                             `json:"enabled"`
-	Protocol             string                           `json:"protocol"`
-	ListenAddr           string                           `json:"listen_addr"`
-	UpstreamAddr         string                           `json:"upstream_addr"`
-	Remark               string                           `json:"remark,omitempty"`
-	AccountCount         int                              `json:"account_count"`
-	AllowedUsersEnforced bool                             `json:"allowed_users_enforced"`
-	AllowedUsers         []string                         `json:"allowed_users,omitempty"`
-	QueryPolicy          config.DatabaseQueryPolicyConfig `json:"query_policy"`
-	Static               bool                             `json:"static"`
+type DatabaseInstanceView struct {
+	ID           string    `json:"id"`
+	Name         string    `json:"name"`
+	Protocol     string    `json:"protocol"`
+	Address      string    `json:"address"`
+	GroupName    string    `json:"group_name,omitempty"`
+	Remark       string    `json:"remark,omitempty"`
+	Disabled     bool      `json:"disabled"`
+	AccountCount int64     `json:"account_count"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
 }
 
 type DatabaseAccountView struct {
-	Username     string `json:"username"`
-	Database     string `json:"database,omitempty"`
-	Remark       string `json:"remark,omitempty"`
-	Disabled     bool   `json:"disabled"`
-	ResourceType string `json:"resource_type"`
-	ResourceID   string `json:"resource_id"`
-	Static       bool   `json:"static"`
+	ID               string     `json:"id"`
+	InstanceID       string     `json:"instance_id"`
+	UniqueName       string     `json:"unique_name"`
+	UpstreamUsername string     `json:"upstream_username"`
+	GroupName        string     `json:"group_name,omitempty"`
+	Remark           string     `json:"remark,omitempty"`
+	ExpiresAt        *time.Time `json:"expires_at,omitempty"`
+	Disabled         bool       `json:"disabled"`
+	CreatedAt        time.Time  `json:"created_at"`
+	UpdatedAt        time.Time  `json:"updated_at"`
 }
 
-func NewStaticStore(cfg *config.Config) (*StaticStore, error) {
+func NewStaticStore(cfg *config.Config, db *gorm.DB) (*StaticStore, error) {
 	store := &StaticStore{
-		cfg:              cfg,
-		users:            make(map[string]config.User, len(cfg.Users)),
-		userPublicKeys:   make(map[string][]ssh.PublicKey, len(cfg.Users)),
-		hosts:            make(map[string]HostRecord),
-		runtimeHosts:     make(map[string]struct{}),
-		hostsFile:        hostsFileForTargets(cfg.TargetsFile),
-		dbProxies:        make(map[string]config.DatabaseProxyConfig),
-		runtimeDBProxies: make(map[string]struct{}),
-		dbProxiesFile:    dbProxiesFileForTargets(cfg.TargetsFile),
-		targets:          make(map[string]config.Target),
-		runtimeTargets:   make(map[string]struct{}),
+		cfg:            cfg,
+		db:             db,
+		users:          make(map[string]config.User, len(cfg.Users)),
+		userPublicKeys: make(map[string][]ssh.PublicKey, len(cfg.Users)),
+		hosts:          make(map[string]HostRecord),
+		runtimeHosts:   make(map[string]struct{}),
+		hostsFile:      hostsFileForTargets(cfg.TargetsFile),
+		targets:        make(map[string]config.Target),
+		runtimeTargets: make(map[string]struct{}),
 	}
 	for _, user := range cfg.Users {
 		if user.Username == "" {
@@ -151,19 +150,6 @@ func NewStaticStore(cfg *config.Config) (*StaticStore, error) {
 		store.users[user.Username] = user
 		store.userPublicKeys[user.Username] = publicKeys
 	}
-	runtimeDBProxies, err := loadRuntimeDBProxies(store.dbProxiesFile)
-	if err != nil {
-		return nil, err
-	}
-	for _, proxy := range runtimeDBProxies {
-		proxy = normalizeDatabaseProxy(proxy)
-		if err := validateDatabaseProxy(proxy); err != nil {
-			return nil, err
-		}
-		store.dbProxies[proxy.Name] = proxy
-		store.runtimeDBProxies[proxy.Name] = struct{}{}
-	}
-	store.syncConfigDBProxiesLocked()
 	runtimeHosts, err := loadRuntimeHosts(store.hostsFile)
 	if err != nil {
 		return nil, err
@@ -200,6 +186,16 @@ func (s *StaticStore) Authenticate(_ context.Context, username, password string)
 		return model.User{}, errors.New("invalid username or password")
 	}
 	return s.userForLoginLocked(login, user)
+}
+
+func (s *StaticStore) AuthenticateDirect(_ context.Context, username, password string) (model.User, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	user, ok := s.users[username]
+	if !ok || user.Password == "" || user.Password != password {
+		return model.User{}, errors.New("invalid username or password")
+	}
+	return model.User{ID: configUserID(user), Username: user.Username, RequestedTargetID: ""}, nil
 }
 
 func (s *StaticStore) AuthenticatePublicKey(_ context.Context, username string, key ssh.PublicKey) (model.User, error) {
@@ -293,217 +289,299 @@ func (s *StaticStore) Host(id string) (HostView, error) {
 	return host, nil
 }
 
-func (s *StaticStore) DatabaseProxies() []DatabaseProxyView {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	out := make([]DatabaseProxyView, 0, len(s.dbProxies))
-	for _, proxy := range s.dbProxies {
-		out = append(out, s.databaseProxyViewLocked(proxy))
+// --- Database Instances (GORM-backed) ---
+
+func (s *StaticStore) DatabaseInstances() []DatabaseInstanceView {
+	var instances []model.DatabaseInstance
+	if err := s.db.Order("name ASC").Find(&instances).Error; err != nil {
+		return nil
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
-	return out
+	views := make([]DatabaseInstanceView, 0, len(instances))
+	for _, inst := range instances {
+		var count int64
+		s.db.Model(&model.DatabaseAccount{}).Where("instance_id = ?", inst.ID).Count(&count)
+		views = append(views, DatabaseInstanceView{
+			ID:           inst.ID,
+			Name:         inst.Name,
+			Protocol:     inst.Protocol,
+			Address:      inst.Address,
+			GroupName:    inst.GroupName,
+			Remark:       inst.Remark,
+			Disabled:     inst.Disabled,
+			AccountCount: count,
+			CreatedAt:    inst.CreatedAt,
+			UpdatedAt:    inst.UpdatedAt,
+		})
+	}
+	return views
 }
 
-func (s *StaticStore) DatabaseProxyConfigs() []config.DatabaseProxyConfig {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	proxies := make([]config.DatabaseProxyConfig, 0, len(s.dbProxies))
-	for _, proxy := range s.dbProxies {
-		proxies = append(proxies, proxy)
-	}
-	sort.Slice(proxies, func(i, j int) bool { return proxies[i].Name < proxies[j].Name })
-	return proxies
-}
-
-func (s *StaticStore) DatabaseProxy(name string) (DatabaseProxyView, error) {
-	name = strings.TrimSpace(name)
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	proxy, ok := s.dbProxies[name]
-	if !ok {
-		return DatabaseProxyView{}, fmt.Errorf("%w: %q", ErrDBProxyNotFound, name)
-	}
-	return s.databaseProxyViewLocked(proxy), nil
-}
-
-func (s *StaticStore) AddDatabaseProxy(proxy config.DatabaseProxyConfig) (DatabaseProxyView, error) {
-	proxy = normalizeDatabaseProxy(proxy)
-	if err := validateDatabaseProxy(proxy); err != nil {
-		return DatabaseProxyView{}, err
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if _, exists := s.dbProxies[proxy.Name]; exists {
-		return DatabaseProxyView{}, fmt.Errorf("database proxy %q already exists", proxy.Name)
-	}
-	s.dbProxies[proxy.Name] = proxy
-	s.runtimeDBProxies[proxy.Name] = struct{}{}
-	if err := s.saveRuntimeDBProxiesLocked(); err != nil {
-		delete(s.dbProxies, proxy.Name)
-		delete(s.runtimeDBProxies, proxy.Name)
-		return DatabaseProxyView{}, err
-	}
-	s.syncConfigDBProxiesLocked()
-	return s.databaseProxyViewLocked(proxy), nil
-}
-
-func (s *StaticStore) UpdateDatabaseProxy(name string, proxy config.DatabaseProxyConfig) (DatabaseProxyView, error) {
-	name = strings.TrimSpace(name)
-	proxy.Name = strings.TrimSpace(proxy.Name)
-	if proxy.Name == "" {
-		proxy.Name = name
-	}
-	proxy = normalizeDatabaseProxy(proxy)
-	if proxy.Name != name {
-		return DatabaseProxyView{}, fmt.Errorf("database proxy name mismatch: path %q, body %q", name, proxy.Name)
-	}
-	if err := validateDatabaseProxy(proxy); err != nil {
-		return DatabaseProxyView{}, err
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	existing, exists := s.dbProxies[name]
-	if !exists {
-		return DatabaseProxyView{}, fmt.Errorf("%w: %q", ErrDBProxyNotFound, name)
-	}
-	if len(proxy.AllowedUsers) == 0 && len(proxy.Accounts) == 0 {
-		proxy.AllowedUsers = append([]string(nil), existing.AllowedUsers...)
-		proxy.Accounts = append([]config.DatabaseAccountConfig(nil), existing.Accounts...)
-	}
-	_, wasRuntime := s.runtimeDBProxies[name]
-	s.dbProxies[name] = proxy
-	s.runtimeDBProxies[name] = struct{}{}
-	if err := s.saveRuntimeDBProxiesLocked(); err != nil {
-		s.dbProxies[name] = existing
-		if !wasRuntime {
-			delete(s.runtimeDBProxies, name)
+func (s *StaticStore) DatabaseInstance(id string) (DatabaseInstanceView, error) {
+	id = strings.TrimSpace(id)
+	var inst model.DatabaseInstance
+	if err := s.db.First(&inst, "id = ?", id).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return DatabaseInstanceView{}, fmt.Errorf("%w: %q", ErrDBInstanceNotFound, id)
 		}
-		return DatabaseProxyView{}, err
+		return DatabaseInstanceView{}, err
 	}
-	s.syncConfigDBProxiesLocked()
-	return s.databaseProxyViewLocked(proxy), nil
+	var count int64
+	s.db.Model(&model.DatabaseAccount{}).Where("instance_id = ?", inst.ID).Count(&count)
+	return DatabaseInstanceView{
+		ID:           inst.ID,
+		Name:         inst.Name,
+		Protocol:     inst.Protocol,
+		Address:      inst.Address,
+		GroupName:    inst.GroupName,
+		Remark:       inst.Remark,
+		Disabled:     inst.Disabled,
+		AccountCount: count,
+		CreatedAt:    inst.CreatedAt,
+		UpdatedAt:    inst.UpdatedAt,
+	}, nil
 }
 
-func (s *StaticStore) DeleteDatabaseProxy(name string) error {
-	name = strings.TrimSpace(name)
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	proxy, exists := s.dbProxies[name]
-	if !exists {
-		return fmt.Errorf("%w: %q", ErrDBProxyNotFound, name)
+func (s *StaticStore) AddDatabaseInstance(name, protocol, address, groupName, remark string) (DatabaseInstanceView, error) {
+	protocol = strings.ToLower(strings.TrimSpace(protocol))
+	if protocol == "" || protocol == "pg" || protocol == "postgresql" {
+		protocol = "postgres"
 	}
-	delete(s.dbProxies, name)
-	delete(s.runtimeDBProxies, name)
-	if err := s.saveRuntimeDBProxiesLocked(); err != nil {
-		s.dbProxies[name] = proxy
-		s.runtimeDBProxies[name] = struct{}{}
-		return err
+	if protocol != "mysql" && protocol != "postgres" && protocol != "tcp" {
+		return DatabaseInstanceView{}, fmt.Errorf("unsupported database protocol %q", protocol)
 	}
-	s.syncConfigDBProxiesLocked()
+	if _, _, err := net.SplitHostPort(address); err != nil {
+		return DatabaseInstanceView{}, fmt.Errorf("invalid address %q: %w", address, err)
+	}
+	inst := model.DatabaseInstance{
+		Name:      strings.TrimSpace(name),
+		Protocol:  protocol,
+		Address:   strings.TrimSpace(address),
+		GroupName: strings.TrimSpace(groupName),
+		Remark:    strings.TrimSpace(remark),
+	}
+	if inst.Name == "" {
+		inst.Name = inst.Address
+	}
+	if err := s.db.Create(&inst).Error; err != nil {
+		return DatabaseInstanceView{}, err
+	}
+	return DatabaseInstanceView{
+		ID:        inst.ID,
+		Name:      inst.Name,
+		Protocol:  inst.Protocol,
+		Address:   inst.Address,
+		GroupName: inst.GroupName,
+		Remark:    inst.Remark,
+		Disabled:  inst.Disabled,
+		CreatedAt: inst.CreatedAt,
+		UpdatedAt: inst.UpdatedAt,
+	}, nil
+}
+
+func (s *StaticStore) UpdateDatabaseInstance(id, name, protocol, address, groupName, remark string, disabled bool) (DatabaseInstanceView, error) {
+	id = strings.TrimSpace(id)
+	var inst model.DatabaseInstance
+	if err := s.db.First(&inst, "id = ?", id).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return DatabaseInstanceView{}, fmt.Errorf("%w: %q", ErrDBInstanceNotFound, id)
+		}
+		return DatabaseInstanceView{}, err
+	}
+	protocol = strings.ToLower(strings.TrimSpace(protocol))
+	if protocol == "" || protocol == "pg" || protocol == "postgresql" {
+		protocol = "postgres"
+	}
+	if protocol != "mysql" && protocol != "postgres" && protocol != "tcp" {
+		return DatabaseInstanceView{}, fmt.Errorf("unsupported database protocol %q", protocol)
+	}
+	if _, _, err := net.SplitHostPort(address); err != nil {
+		return DatabaseInstanceView{}, fmt.Errorf("invalid address %q: %w", address, err)
+	}
+	inst.Name = strings.TrimSpace(name)
+	inst.Protocol = protocol
+	inst.Address = strings.TrimSpace(address)
+	inst.GroupName = strings.TrimSpace(groupName)
+	inst.Remark = strings.TrimSpace(remark)
+	inst.Disabled = disabled
+	if inst.Name == "" {
+		inst.Name = inst.Address
+	}
+	if err := s.db.Save(&inst).Error; err != nil {
+		return DatabaseInstanceView{}, err
+	}
+	var count int64
+	s.db.Model(&model.DatabaseAccount{}).Where("instance_id = ?", inst.ID).Count(&count)
+	return DatabaseInstanceView{
+		ID:           inst.ID,
+		Name:         inst.Name,
+		Protocol:     inst.Protocol,
+		Address:      inst.Address,
+		GroupName:    inst.GroupName,
+		Remark:       inst.Remark,
+		Disabled:     inst.Disabled,
+		AccountCount: count,
+		CreatedAt:    inst.CreatedAt,
+		UpdatedAt:    inst.UpdatedAt,
+	}, nil
+}
+
+func (s *StaticStore) DeleteDatabaseInstance(id string) error {
+	id = strings.TrimSpace(id)
+	return s.db.Transaction(func(tx *gorm.DB) error {
+		var inst model.DatabaseInstance
+		if err := tx.First(&inst, "id = ?", id).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return fmt.Errorf("%w: %q", ErrDBInstanceNotFound, id)
+			}
+			return err
+		}
+		if err := tx.Where("instance_id = ?", id).Delete(&model.DatabaseAccount{}).Error; err != nil {
+			return err
+		}
+		return tx.Delete(&inst).Error
+	})
+}
+
+// --- Database Accounts (GORM-backed) ---
+
+func (s *StaticStore) DatabaseAccounts(instanceID string) ([]DatabaseAccountView, error) {
+	instanceID = strings.TrimSpace(instanceID)
+	var accounts []model.DatabaseAccount
+	if err := s.db.Where("instance_id = ?", instanceID).Order("upstream_username ASC").Find(&accounts).Error; err != nil {
+		return nil, err
+	}
+	views := make([]DatabaseAccountView, 0, len(accounts))
+	for _, acct := range accounts {
+		views = append(views, s.databaseAccountView(acct))
+	}
+	return views, nil
+}
+
+func (s *StaticStore) DatabaseAccount(id string) (DatabaseAccountView, error) {
+	id = strings.TrimSpace(id)
+	var acct model.DatabaseAccount
+	if err := s.db.First(&acct, "id = ?", id).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return DatabaseAccountView{}, fmt.Errorf("%w: %q", ErrDBAccountNotFound, id)
+		}
+		return DatabaseAccountView{}, err
+	}
+	return s.databaseAccountView(acct), nil
+}
+
+func (s *StaticStore) AddDatabaseAccount(instanceID, upstreamUsername, upstreamPassword, groupName, remark string, expiresAt *time.Time) (DatabaseAccountView, error) {
+	instanceID = strings.TrimSpace(instanceID)
+	upstreamUsername = strings.TrimSpace(upstreamUsername)
+	if upstreamUsername == "" {
+		return DatabaseAccountView{}, errors.New("upstream username is required")
+	}
+	// Verify instance exists
+	var inst model.DatabaseInstance
+	if err := s.db.First(&inst, "id = ?", instanceID).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return DatabaseAccountView{}, fmt.Errorf("%w: %q", ErrDBInstanceNotFound, instanceID)
+		}
+		return DatabaseAccountView{}, err
+	}
+	uniqueName, err := s.generateUniqueName()
+	if err != nil {
+		return DatabaseAccountView{}, err
+	}
+	acct := model.DatabaseAccount{
+		InstanceID:       instanceID,
+		UniqueName:       uniqueName,
+		UpstreamUsername: upstreamUsername,
+		UpstreamPassword: upstreamPassword,
+		GroupName:        strings.TrimSpace(groupName),
+		Remark:           strings.TrimSpace(remark),
+		ExpiresAt:        expiresAt,
+	}
+	if err := s.db.Create(&acct).Error; err != nil {
+		return DatabaseAccountView{}, err
+	}
+	return s.databaseAccountView(acct), nil
+}
+
+func (s *StaticStore) UpdateDatabaseAccount(id, upstreamUsername, upstreamPassword, groupName, remark string, expiresAt *time.Time, disabled bool) (DatabaseAccountView, error) {
+	id = strings.TrimSpace(id)
+	upstreamUsername = strings.TrimSpace(upstreamUsername)
+	var acct model.DatabaseAccount
+	if err := s.db.First(&acct, "id = ?", id).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return DatabaseAccountView{}, fmt.Errorf("%w: %q", ErrDBAccountNotFound, id)
+		}
+		return DatabaseAccountView{}, err
+	}
+	if upstreamUsername != "" {
+		acct.UpstreamUsername = upstreamUsername
+	}
+	if upstreamPassword != "" {
+		acct.UpstreamPassword = upstreamPassword
+	}
+	acct.GroupName = strings.TrimSpace(groupName)
+	acct.Remark = strings.TrimSpace(remark)
+	acct.ExpiresAt = expiresAt
+	acct.Disabled = disabled
+	if err := s.db.Save(&acct).Error; err != nil {
+		return DatabaseAccountView{}, err
+	}
+	return s.databaseAccountView(acct), nil
+}
+
+func (s *StaticStore) DeleteDatabaseAccount(id string) error {
+	id = strings.TrimSpace(id)
+	result := s.db.Delete(&model.DatabaseAccount{}, "id = ?", id)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return fmt.Errorf("%w: %q", ErrDBAccountNotFound, id)
+	}
 	return nil
 }
 
-func (s *StaticStore) DatabaseAccounts(proxyName string) ([]DatabaseAccountView, error) {
-	proxyName = strings.TrimSpace(proxyName)
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	proxy, ok := s.dbProxies[proxyName]
-	if !ok {
-		return nil, fmt.Errorf("%w: %q", ErrDBProxyNotFound, proxyName)
+// --- Database lookups for proxy/rbac ---
+
+func (s *StaticStore) DatabaseAccountByUniqueName(uniqueName string) (*model.DatabaseAccount, error) {
+	uniqueName = strings.TrimSpace(uniqueName)
+	var acct model.DatabaseAccount
+	if err := s.db.Preload("Instance").First(&acct, "unique_name = ?", uniqueName).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, fmt.Errorf("%w: %q", ErrDBAccountNotFound, uniqueName)
+		}
+		return nil, err
 	}
-	return databaseAccountViews(proxy, false), nil
+	return &acct, nil
 }
 
-func (s *StaticStore) AddDatabaseAccount(proxyName string, account config.DatabaseAccountConfig) (DatabaseAccountView, error) {
-	return s.upsertDatabaseAccount(proxyName, "", account)
-}
-
-func (s *StaticStore) UpdateDatabaseAccount(proxyName, username string, account config.DatabaseAccountConfig) (DatabaseAccountView, error) {
-	return s.upsertDatabaseAccount(proxyName, username, account)
-}
-
-func (s *StaticStore) upsertDatabaseAccount(proxyName, username string, account config.DatabaseAccountConfig) (DatabaseAccountView, error) {
-	proxyName = strings.TrimSpace(proxyName)
-	username = strings.TrimSpace(username)
-	account = normalizeDatabaseAccount(account)
-	if account.Username == "" {
-		account.Username = username
-	}
-	if username != "" && account.Username != username {
-		return DatabaseAccountView{}, fmt.Errorf("database account username mismatch: path %q, body %q", username, account.Username)
-	}
-	if err := validateDatabaseAccount(account); err != nil {
-		return DatabaseAccountView{}, err
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	proxy, exists := s.dbProxies[proxyName]
-	if !exists {
-		return DatabaseAccountView{}, fmt.Errorf("%w: %q", ErrDBProxyNotFound, proxyName)
-	}
-	previous := proxy
-	accounts := databaseAccounts(proxy)
-	index := -1
-	for i := range accounts {
-		if accounts[i].Username == account.Username {
-			index = i
-			break
+func (s *StaticStore) generateUniqueName() (string, error) {
+	for i := 0; i < 10; i++ {
+		name := "db-" + model.NewID()[:12]
+		var count int64
+		s.db.Model(&model.DatabaseAccount{}).Where("unique_name = ?", name).Count(&count)
+		if count == 0 {
+			return name, nil
 		}
 	}
-	if username != "" && index < 0 {
-		return DatabaseAccountView{}, fmt.Errorf("%w: %q", ErrDBAccountNotFound, username)
-	}
-	if index >= 0 {
-		accounts[index] = account
-	} else {
-		accounts = append(accounts, account)
-	}
-	proxy.Accounts = accounts
-	proxy.AllowedUsers = allowedUsersFromAccounts(accounts)
-	s.dbProxies[proxyName] = proxy
-	s.runtimeDBProxies[proxyName] = struct{}{}
-	if err := s.saveRuntimeDBProxiesLocked(); err != nil {
-		s.dbProxies[proxyName] = previous
-		return DatabaseAccountView{}, err
-	}
-	s.syncConfigDBProxiesLocked()
-	return databaseAccountView(proxy, account, false), nil
+	return "", errors.New("failed to generate unique database account name after 10 attempts")
 }
 
-func (s *StaticStore) DeleteDatabaseAccount(proxyName, username string) error {
-	proxyName = strings.TrimSpace(proxyName)
-	username = strings.TrimSpace(username)
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	proxy, exists := s.dbProxies[proxyName]
-	if !exists {
-		return fmt.Errorf("%w: %q", ErrDBProxyNotFound, proxyName)
+func (s *StaticStore) databaseAccountView(acct model.DatabaseAccount) DatabaseAccountView {
+	return DatabaseAccountView{
+		ID:               acct.ID,
+		InstanceID:       acct.InstanceID,
+		UniqueName:       acct.UniqueName,
+		UpstreamUsername: acct.UpstreamUsername,
+		GroupName:        acct.GroupName,
+		Remark:           acct.Remark,
+		ExpiresAt:        acct.ExpiresAt,
+		Disabled:         acct.Disabled,
+		CreatedAt:        acct.CreatedAt,
+		UpdatedAt:        acct.UpdatedAt,
 	}
-	previous := proxy
-	accounts := databaseAccounts(proxy)
-	next := accounts[:0]
-	removed := false
-	for _, account := range accounts {
-		if account.Username == username {
-			removed = true
-			continue
-		}
-		next = append(next, account)
-	}
-	if !removed {
-		return fmt.Errorf("%w: %q", ErrDBAccountNotFound, username)
-	}
-	proxy.Accounts = next
-	proxy.AllowedUsers = allowedUsersFromAccounts(next)
-	s.dbProxies[proxyName] = proxy
-	s.runtimeDBProxies[proxyName] = struct{}{}
-	if err := s.saveRuntimeDBProxiesLocked(); err != nil {
-		s.dbProxies[proxyName] = previous
-		return err
-	}
-	s.syncConfigDBProxiesLocked()
-	return nil
 }
+
+// --- Host CRUD (JSON-file-backed) ---
 
 func (s *StaticStore) AddHost(host HostRecord) (HostView, error) {
 	host = normalizeHost(host)
@@ -644,6 +722,8 @@ func (s *StaticStore) DeleteHost(id string) error {
 	}
 	return nil
 }
+
+// --- Target CRUD (JSON-file-backed) ---
 
 func (s *StaticStore) Targets() []TargetView {
 	s.mu.RLock()
@@ -787,16 +867,14 @@ func (s *StaticStore) DeleteTarget(id string) error {
 	return nil
 }
 
+// --- Internal persistence helpers ---
+
 func (s *StaticStore) saveRuntimeTargetsLocked() error {
 	return saveRuntimeTargets(s.cfg.TargetsFile, s.runtimeTargetsSnapshotLocked())
 }
 
 func (s *StaticStore) saveRuntimeHostsLocked() error {
 	return saveRuntimeHosts(s.hostsFile, s.runtimeHostsSnapshotLocked())
-}
-
-func (s *StaticStore) saveRuntimeDBProxiesLocked() error {
-	return saveRuntimeDBProxies(s.dbProxiesFile, s.runtimeDBProxiesSnapshotLocked())
 }
 
 func (s *StaticStore) runtimeTargetsSnapshotLocked() []config.Target {
@@ -823,43 +901,7 @@ func (s *StaticStore) runtimeHostsSnapshotLocked() []HostRecord {
 	return hosts
 }
 
-func (s *StaticStore) runtimeDBProxiesSnapshotLocked() []config.DatabaseProxyConfig {
-	proxies := make([]config.DatabaseProxyConfig, 0, len(s.runtimeDBProxies))
-	for name := range s.runtimeDBProxies {
-		proxy, ok := s.dbProxies[name]
-		if ok {
-			proxies = append(proxies, proxy)
-		}
-	}
-	sort.Slice(proxies, func(i, j int) bool { return proxies[i].Name < proxies[j].Name })
-	return proxies
-}
-
-func (s *StaticStore) databaseProxyViewLocked(proxy config.DatabaseProxyConfig) DatabaseProxyView {
-	accounts := databaseAccountViews(proxy, false)
-	return DatabaseProxyView{
-		Name:                 proxy.Name,
-		Enabled:              proxy.Enabled,
-		Protocol:             proxy.Protocol,
-		ListenAddr:           proxy.ListenAddr,
-		UpstreamAddr:         proxy.UpstreamAddr,
-		Remark:               proxy.Remark,
-		AccountCount:         len(accounts),
-		AllowedUsersEnforced: len(accounts) > 0,
-		AllowedUsers:         allowedUsersFromAccounts(databaseAccounts(proxy)),
-		QueryPolicy:          proxy.QueryPolicy,
-		Static:               false,
-	}
-}
-
-func (s *StaticStore) syncConfigDBProxiesLocked() {
-	proxies := make([]config.DatabaseProxyConfig, 0, len(s.dbProxies))
-	for _, proxy := range s.dbProxies {
-		proxies = append(proxies, proxy)
-	}
-	sort.Slice(proxies, func(i, j int) bool { return proxies[i].Name < proxies[j].Name })
-	s.cfg.DatabaseProxies = proxies
-}
+// --- Internal view helpers ---
 
 func (s *StaticStore) hostViewsLocked() map[string]HostView {
 	hosts := make(map[string]HostView, len(s.hosts)+len(s.targets))
@@ -917,6 +959,8 @@ func (s *StaticStore) applyHostResourceToTargetLocked(target config.Target) (con
 	return normalizeTarget(target), nil
 }
 
+// --- Standalone helpers ---
+
 func ParseLoginName(username string) LoginName {
 	for _, sep := range []string{"+", "#", "@"} {
 		if left, right, ok := strings.Cut(username, sep); ok && left != "" && right != "" {
@@ -944,24 +988,6 @@ func loadRuntimeHosts(path string) ([]HostRecord, error) {
 	return hosts, nil
 }
 
-func loadRuntimeDBProxies(path string) ([]config.DatabaseProxyConfig, error) {
-	if path == "" {
-		return nil, nil
-	}
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return nil, nil
-		}
-		return nil, err
-	}
-	var proxies []config.DatabaseProxyConfig
-	if err := json.Unmarshal(raw, &proxies); err != nil {
-		return nil, fmt.Errorf("load runtime database proxies %q: %w", path, err)
-	}
-	return proxies, nil
-}
-
 func saveRuntimeHosts(path string, hosts []HostRecord) error {
 	if path == "" {
 		return nil
@@ -976,32 +1002,11 @@ func saveRuntimeHosts(path string, hosts []HostRecord) error {
 	return os.WriteFile(path, raw, 0o600)
 }
 
-func saveRuntimeDBProxies(path string, proxies []config.DatabaseProxyConfig) error {
-	if path == "" {
-		return nil
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
-	raw, err := json.MarshalIndent(proxies, "", "  ")
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(path, raw, 0o600)
-}
-
 func hostsFileForTargets(targetsFile string) string {
 	if strings.TrimSpace(targetsFile) == "" {
 		return ""
 	}
 	return filepath.Join(filepath.Dir(targetsFile), "hosts.json")
-}
-
-func dbProxiesFileForTargets(targetsFile string) string {
-	if strings.TrimSpace(targetsFile) == "" {
-		return ""
-	}
-	return filepath.Join(filepath.Dir(targetsFile), "database_proxies.json")
 }
 
 func loadRuntimeTargets(path string) ([]config.Target, error) {
@@ -1070,131 +1075,6 @@ func validateHost(host HostRecord) error {
 		return fmt.Errorf("host %q has invalid port %d", host.Name, host.Port)
 	}
 	return nil
-}
-
-func normalizeDatabaseProxy(proxy config.DatabaseProxyConfig) config.DatabaseProxyConfig {
-	proxy.Name = strings.TrimSpace(proxy.Name)
-	proxy.Protocol = strings.ToLower(strings.TrimSpace(proxy.Protocol))
-	proxy.ListenAddr = strings.TrimSpace(proxy.ListenAddr)
-	proxy.UpstreamAddr = strings.TrimSpace(proxy.UpstreamAddr)
-	proxy.Remark = strings.TrimSpace(proxy.Remark)
-	if proxy.Protocol == "postgresql" || proxy.Protocol == "pg" {
-		proxy.Protocol = "postgres"
-	}
-	if proxy.Protocol == "" {
-		proxy.Protocol = "mysql"
-	}
-	if proxy.Name == "" {
-		proxy.Name = HostResourceID(proxy.UpstreamAddr, 0, "")
-	}
-	proxy.Accounts = databaseAccounts(proxy)
-	proxy.AllowedUsers = allowedUsersFromAccounts(proxy.Accounts)
-	return proxy
-}
-
-func validateDatabaseProxy(proxy config.DatabaseProxyConfig) error {
-	if proxy.Name == "" || proxy.ListenAddr == "" || proxy.UpstreamAddr == "" {
-		return fmt.Errorf("database proxy %q is missing name, listen_addr, or upstream_addr", proxy.Name)
-	}
-	if strings.ContainsAny(proxy.Name, `/\.`) {
-		return fmt.Errorf("database proxy name %q contains unsupported characters", proxy.Name)
-	}
-	switch proxy.Protocol {
-	case "mysql", "postgres", "tcp":
-	default:
-		return fmt.Errorf("database proxy %q has unsupported protocol %q", proxy.Name, proxy.Protocol)
-	}
-	if _, _, err := net.SplitHostPort(proxy.ListenAddr); err != nil {
-		return fmt.Errorf("database proxy %q has invalid listen_addr %q: %w", proxy.Name, proxy.ListenAddr, err)
-	}
-	if _, _, err := net.SplitHostPort(proxy.UpstreamAddr); err != nil {
-		return fmt.Errorf("database proxy %q has invalid upstream_addr %q: %w", proxy.Name, proxy.UpstreamAddr, err)
-	}
-	for _, account := range databaseAccounts(proxy) {
-		if err := validateDatabaseAccount(account); err != nil {
-			return fmt.Errorf("database proxy %q: %w", proxy.Name, err)
-		}
-	}
-	return nil
-}
-
-func normalizeDatabaseAccount(account config.DatabaseAccountConfig) config.DatabaseAccountConfig {
-	account.Username = strings.TrimSpace(account.Username)
-	account.Database = strings.TrimSpace(account.Database)
-	account.Remark = strings.TrimSpace(account.Remark)
-	return account
-}
-
-func validateDatabaseAccount(account config.DatabaseAccountConfig) error {
-	if account.Username == "" {
-		return errors.New("database account username is required")
-	}
-	if strings.ContainsAny(account.Username, `/\`) {
-		return fmt.Errorf("database account username %q contains unsupported characters", account.Username)
-	}
-	return nil
-}
-
-func databaseAccounts(proxy config.DatabaseProxyConfig) []config.DatabaseAccountConfig {
-	seen := make(map[string]struct{}, len(proxy.AllowedUsers)+len(proxy.Accounts))
-	accounts := make([]config.DatabaseAccountConfig, 0, len(proxy.AllowedUsers)+len(proxy.Accounts))
-	for _, account := range proxy.Accounts {
-		account = normalizeDatabaseAccount(account)
-		if account.Username == "" {
-			continue
-		}
-		if _, ok := seen[account.Username]; ok {
-			continue
-		}
-		seen[account.Username] = struct{}{}
-		accounts = append(accounts, account)
-	}
-	for _, username := range proxy.AllowedUsers {
-		account := normalizeDatabaseAccount(config.DatabaseAccountConfig{Username: username})
-		if account.Username == "" {
-			continue
-		}
-		if _, ok := seen[account.Username]; ok {
-			continue
-		}
-		seen[account.Username] = struct{}{}
-		accounts = append(accounts, account)
-	}
-	sort.Slice(accounts, func(i, j int) bool { return accounts[i].Username < accounts[j].Username })
-	return accounts
-}
-
-func allowedUsersFromAccounts(accounts []config.DatabaseAccountConfig) []string {
-	users := make([]string, 0, len(accounts))
-	for _, account := range accounts {
-		account = normalizeDatabaseAccount(account)
-		if account.Username != "" && !account.Disabled {
-			users = append(users, account.Username)
-		}
-	}
-	sort.Strings(users)
-	return users
-}
-
-func databaseAccountViews(proxy config.DatabaseProxyConfig, static bool) []DatabaseAccountView {
-	accounts := databaseAccounts(proxy)
-	out := make([]DatabaseAccountView, 0, len(accounts))
-	for _, account := range accounts {
-		out = append(out, databaseAccountView(proxy, account, static))
-	}
-	return out
-}
-
-func databaseAccountView(proxy config.DatabaseProxyConfig, account config.DatabaseAccountConfig, static bool) DatabaseAccountView {
-	return DatabaseAccountView{
-		Username:     account.Username,
-		Database:     account.Database,
-		Remark:       account.Remark,
-		Disabled:     account.Disabled,
-		ResourceType: model.ResourceTypeDatabaseAccount,
-		ResourceID:   rbaccheck.DatabaseAccountResourceID(proxy.Name, proxy.ListenAddr, account.Username),
-		Static:       static,
-	}
 }
 
 func normalizeTarget(target config.Target) config.Target {

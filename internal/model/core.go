@@ -13,6 +13,7 @@ const (
 	ResourceTypeHost            = "host"
 	ResourceTypeHostAccount     = "host_account"
 	ResourceTypeDatabaseAccount = "database_account"
+	ResourceTypeDatabaseInstance = "database_instance"
 )
 
 type UserPublicKey struct {
@@ -120,6 +121,33 @@ type HostAccount struct {
 	CreatedAt     time.Time `json:"created_at"`
 	UpdatedAt     time.Time `json:"updated_at"`
 	Host          Host      `gorm:"constraint:OnUpdate:CASCADE,OnDelete:CASCADE;" json:"-"`
+}
+
+type DatabaseInstance struct {
+	ID        string    `gorm:"primaryKey;size:64" json:"id"`
+	Name      string    `gorm:"uniqueIndex;size:255;not null" json:"name"`
+	Protocol  string    `gorm:"size:32;not null;default:mysql" json:"protocol"`
+	Address   string    `gorm:"size:255;not null" json:"address"`
+	GroupName string    `gorm:"size:128" json:"group_name,omitempty"`
+	Remark    string    `gorm:"type:text" json:"remark,omitempty"`
+	Disabled  bool      `json:"disabled"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+type DatabaseAccount struct {
+	ID               string    `gorm:"primaryKey;size:64" json:"id"`
+	InstanceID       string    `gorm:"index;size:64;not null" json:"instance_id"`
+	UniqueName       string    `gorm:"uniqueIndex;size:128;not null" json:"unique_name"`
+	UpstreamUsername string    `gorm:"size:128;not null" json:"upstream_username"`
+	UpstreamPassword string    `gorm:"size:512" json:"-"`
+	GroupName        string    `gorm:"size:128" json:"group_name,omitempty"`
+	Remark           string    `gorm:"type:text" json:"remark,omitempty"`
+	ExpiresAt        *time.Time `gorm:"index" json:"expires_at,omitempty"`
+	Disabled         bool      `json:"disabled"`
+	CreatedAt        time.Time  `json:"created_at"`
+	UpdatedAt        time.Time  `json:"updated_at"`
+	Instance         DatabaseInstance `gorm:"constraint:OnUpdate:CASCADE,OnDelete:CASCADE;" json:"-"`
 }
 
 type SessionCommand struct {
@@ -236,6 +264,8 @@ func AllModels() []any {
 		&ResourceGroupMember{},
 		&Host{},
 		&HostAccount{},
+		&DatabaseInstance{},
+		&DatabaseAccount{},
 		&Session{},
 		&SessionCommand{},
 		&SessionFileEvent{},
@@ -264,6 +294,8 @@ func (m *ResourceGroup) BeforeCreate(_ *gorm.DB) error       { return ensureID(&
 func (m *ResourceGroupMember) BeforeCreate(_ *gorm.DB) error { return ensureID(&m.ID) }
 func (m *Host) BeforeCreate(_ *gorm.DB) error                { return ensureID(&m.ID) }
 func (m *HostAccount) BeforeCreate(_ *gorm.DB) error         { return ensureID(&m.ID) }
+func (m *DatabaseInstance) BeforeCreate(_ *gorm.DB) error   { return ensureID(&m.ID) }
+func (m *DatabaseAccount) BeforeCreate(_ *gorm.DB) error    { return ensureID(&m.ID) }
 func (m *SessionCommand) BeforeCreate(_ *gorm.DB) error      { return ensureID(&m.ID) }
 func (m *SessionFileEvent) BeforeCreate(_ *gorm.DB) error    { return ensureID(&m.ID) }
 func (m *Recording) BeforeCreate(_ *gorm.DB) error           { return ensureID(&m.ID) }

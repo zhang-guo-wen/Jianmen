@@ -19,8 +19,7 @@ type Config struct {
 	Recording       RecordingConfig       `json:"recording"`
 	Users           []User                `json:"users"`
 	Targets         []Target              `json:"targets"`
-	DefaultTarget   string                `json:"default_target"`
-	DatabaseProxies []DatabaseProxyConfig `json:"database_proxies"`
+	DefaultTarget   string   `json:"default_target"`
 }
 
 type AdminConfig struct {
@@ -80,32 +79,6 @@ type Target struct {
 	KnownHostsPath        string `json:"known_hosts_path"`
 }
 
-type DatabaseProxyConfig struct {
-	Enabled      bool                      `json:"enabled"`
-	Name         string                    `json:"name"`
-	Protocol     string                    `json:"protocol"`
-	ListenAddr   string                    `json:"listen_addr"`
-	UpstreamAddr string                    `json:"upstream_addr"`
-	Remark       string                    `json:"remark"`
-	AllowedUsers []string                  `json:"allowed_users"`
-	Accounts     []DatabaseAccountConfig   `json:"accounts"`
-	QueryPolicy  DatabaseQueryPolicyConfig `json:"query_policy"`
-}
-
-type DatabaseAccountConfig struct {
-	Username string `json:"username"`
-	Password string `json:"password"`
-	Database string `json:"database"`
-	Remark   string `json:"remark"`
-	Disabled bool   `json:"disabled"`
-}
-
-type DatabaseQueryPolicyConfig struct {
-	ReadOnly          bool     `json:"read_only"`
-	DeniedQueryKinds  []string `json:"denied_query_kinds"`
-	DeniedSQLPatterns []string `json:"denied_sql_patterns"`
-	MaxQueryBytes     int      `json:"max_query_bytes"`
-}
 
 func Load(path string) (*Config, error) {
 	file, err := os.Open(path)

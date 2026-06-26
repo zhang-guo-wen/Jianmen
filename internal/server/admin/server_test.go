@@ -7,8 +7,6 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -200,65 +198,36 @@ func TestHandleHostsPaginationAndLazyAccounts(t *testing.T) {
 	}
 }
 
+func newTargetTestServer(t *testing.T) *Server {
+	t.Helper()
+	cfg := &config.Config{
+		TargetsFile: t.TempDir() + "/targets.json",
+		Admin: config.AdminConfig{
+			Token: "",
+		},
+		Users: []config.User{
+			{
+				ID:       "u-admin",
+				Username: "admin",
+				Password: "admin",
+			},
+		},
+	}
+	adapter, err := store.NewStaticAdapter(cfg, nil)
+	if err != nil {
+		t.Fatalf("NewStaticStore returned error: %v", err)
+	}
+	return &Server{
+		cfg:    cfg,
+		store:  adapter,
+		logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+	}
+}
 
-func TestHandleDBProxyCRUD(t *testing.T) {
-	t.Skip("database proxy API removed; use database instances and accounts")
-	server := newTargetTestServer(t)
-
-	createReq := httptest.NewRequest(http.MethodPost, "/api/db/proxies", bytes.NewBufferString(`{
-		"name": "runtime-mysql",
-		"enabled": true,
-		"protocol": "mysql",
-		"listen_addr": "127.0.0.1:33060",
-		"upstream_addr": "127.0.0.1:3306",
-		"remark": "runtime instance"
-	}`))
-	createRec := httptest.NewRecorder()
-	server.handleDBProxies(createRec, createReq)
-	if createRec.Code != http.StatusCreated {
-		t.Fatalf("create status = %d, want %d; body=%s", createRec.Code, http.StatusCreated, createRec.Body.String())
-	}
-
-	accountReq := httptest.NewRequest(http.MethodPost, "/api/db/proxies/runtime-mysql/accounts", bytes.NewBufferString(`{
-		"username": "app",
-		"database": "orders",
-		"remark": "app account"
-	}`))
-	accountRec := httptest.NewRecorder()
-	server.handleDBProxy(accountRec, accountReq)
-	if accountRec.Code != http.StatusCreated {
-		t.Fatalf("create account status = %d, want %d; body=%s", accountRec.Code, http.StatusCreated, accountRec.Body.String())
-	}
-	var account store.DatabaseAccountView
-	if err := json.Unmarshal(accountRec.Body.Bytes(), &account); err != nil {
-		t.Fatalf("unmarshal account response: %v", err)
-	}
-	if account.Username != "app" || account.Database != "orders" || account.ResourceType != model.ResourceTypeDatabaseAccount {
-		t.Fatalf("unexpected account view: %#v", account)
-	}
-
-	updateReq := httptest.NewRequest(http.MethodPut, "/api/db/proxies/runtime-mysql", bytes.NewBufferString(`{
-		"name": "runtime-mysql",
-		"enabled": false,
-		"protocol": "mysql",
-		"listen_addr": "127.0.0.1:33061",
-		"upstream_addr": "127.0.0.1:3307",
-		"remark": "updated"
-	}`))
-	updateRec := httptest.NewRecorder()
-	server.handleDBProxy(updateRec, updateReq)
-	if updateRec.Code != http.StatusOK {
-		t.Fatalf("update status = %d, want %d; body=%s", updateRec.Code, http.StatusOK, updateRec.Body.String())
-	}
-	var updated store.DatabaseProxyView
-	if err := json.Unmarshal(updateRec.Body.Bytes(), &updated); err != nil {
-		t.Fatalf("unmarshal updated proxy: %v", err)
-	}
-	if updated.Enabled || updated.ListenAddr != "127.0.0.1:33061" || updated.AccountCount != 1 {
-		t.Fatalf("unexpected updated proxy: %#v", updated)
-	}
-
-	deleteAccountReq := httptest.NewRequest(http.MethodDelete, "/api/db/proxies/runtime-mysql/accounts/app", nil)
+func assertTargetResponseHasNoSecrets(t *testing.T, raw []byte) {
+	t.Helper()
+	var body map[string]any
+	if err := json.Unmarshal(raw, &body); err != nil {
 		t.Fatalf("unmarshal response: %v", err)
 	}
 	for _, key := range []string{"password", "private_key_pem", "passphrase"} {

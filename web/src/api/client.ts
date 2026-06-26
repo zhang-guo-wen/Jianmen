@@ -174,58 +174,54 @@ export interface DBConnectionRecord {
   [key: string]: unknown;
 }
 
-export interface DBQueryPolicyRecord {
-  read_only?: boolean;
-  denied_query_kinds?: string[];
-  denied_sql_patterns?: string[];
-  max_query_bytes?: number;
-  [key: string]: unknown;
-}
-
-export interface DBProxyAccountRecord {
-  username?: string;
-  resource_type?: string;
-  resource_id?: string;
-  database?: string;
-  db_name?: string;
-  database_name?: string;
+export interface DBInstanceRecord {
+  id?: string;
+  name?: string;
+  protocol?: string;
+  address?: string;
+  group_name?: string;
   remark?: string;
   disabled?: boolean;
-  static?: boolean;
-  [key: string]: unknown;
-}
-
-export interface DBProxyRecord {
-  name?: string;
-  enabled?: boolean;
-  protocol?: string;
-  listen_addr?: string;
-  upstream_addr?: string;
-  remark?: string;
-  database?: string;
   account_count?: number;
-  accounts_count?: number;
-  allowed_users_enforced?: boolean;
-  allowed_users?: string[];
-  accounts?: DBProxyAccountRecord[];
-  query_policy?: DBQueryPolicyRecord;
-  static?: boolean;
-  [key: string]: unknown;
+  created_at?: string;
+  updated_at?: string;
 }
 
-export interface DBProxyPayload {
+export interface DBAccountRecord {
+  id?: string;
+  instance_id?: string;
+  unique_name?: string;
+  upstream_username?: string;
+  group_name?: string;
+  remark?: string;
+  expires_at?: string;
+  disabled?: boolean;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface DBInstancePayload {
   name: string;
-  enabled: boolean;
   protocol: string;
-  listen_addr: string;
-  upstream_addr: string;
+  address: string;
+  group_name?: string;
   remark?: string;
 }
 
-export interface DBProxyAccountPayload {
-  username: string;
-  database?: string;
+export interface DBAccountPayload {
+  upstream_username: string;
+  upstream_password: string;
+  group_name?: string;
   remark?: string;
+  expires_at?: string;
+}
+
+export interface DBAccountUpdatePayload {
+  upstream_username: string;
+  upstream_password?: string;
+  group_name?: string;
+  remark?: string;
+  expires_at?: string;
   disabled?: boolean;
 }
 
@@ -464,48 +460,44 @@ export const apiClient = {
     ),
   getSessionReplay: (id: string | number) =>
     request<string>(`/api/sessions/${encodeURIComponent(String(id))}/replay`),
-  getDBProxies: () => request<ApiEnvelope<DBProxyRecord[]> | DBProxyRecord[]>('/api/db/proxies'),
-  createDBProxy: (payload: DBProxyPayload) =>
-    request<ApiEnvelope<DBProxyRecord> | DBProxyRecord>('/api/db/proxies', {
+  getDBInstances: () => request<ApiEnvelope<DBInstanceRecord[]> | DBInstanceRecord[]>('/api/db/instances'),
+  createDBInstance: (payload: DBInstancePayload) =>
+    request<ApiEnvelope<DBInstanceRecord> | DBInstanceRecord>('/api/db/instances', {
       method: 'POST',
       body: JSON.stringify(payload)
     }),
-  updateDBProxy: (name: string | number, payload: DBProxyPayload) =>
-    request<ApiEnvelope<DBProxyRecord> | DBProxyRecord>(`/api/db/proxies/${encodeURIComponent(String(name))}`, {
+  updateDBInstance: (id: string, payload: DBInstancePayload & { disabled?: boolean }) =>
+    request<ApiEnvelope<DBInstanceRecord> | DBInstanceRecord>(`/api/db/instances/${encodeURIComponent(id)}`, {
       method: 'PUT',
       body: JSON.stringify(payload)
     }),
-  deleteDBProxy: (name: string | number) =>
-    request<ApiEnvelope<unknown> | unknown>(`/api/db/proxies/${encodeURIComponent(String(name))}`, {
+  deleteDBInstance: (id: string) =>
+    request<ApiEnvelope<unknown> | unknown>(`/api/db/instances/${encodeURIComponent(id)}`, {
       method: 'DELETE'
     }),
-  getDBProxyAccounts: (name: string | number) =>
-    request<ApiEnvelope<DBProxyAccountRecord[]> | DBProxyAccountRecord[]>(
-      `/api/db/proxies/${encodeURIComponent(String(name))}/accounts`
+  getDBAccounts: (instanceID: string) =>
+    request<ApiEnvelope<DBAccountRecord[]> | DBAccountRecord[]>(
+      `/api/db/instances/${encodeURIComponent(instanceID)}/accounts`
     ),
-  createDBProxyAccount: (name: string | number, payload: DBProxyAccountPayload) =>
-    request<ApiEnvelope<DBProxyAccountRecord> | DBProxyAccountRecord>(
-      `/api/db/proxies/${encodeURIComponent(String(name))}/accounts`,
+  createDBAccount: (instanceID: string, payload: DBAccountPayload) =>
+    request<ApiEnvelope<DBAccountRecord> | DBAccountRecord>(
+      `/api/db/instances/${encodeURIComponent(instanceID)}/accounts`,
       {
         method: 'POST',
         body: JSON.stringify(payload)
       }
     ),
-  updateDBProxyAccount: (name: string | number, username: string | number, payload: DBProxyAccountPayload) =>
-    request<ApiEnvelope<DBProxyAccountRecord> | DBProxyAccountRecord>(
-      `/api/db/proxies/${encodeURIComponent(String(name))}/accounts/${encodeURIComponent(String(username))}`,
-      {
-        method: 'PUT',
-        body: JSON.stringify(payload)
-      }
-    ),
-  deleteDBProxyAccount: (name: string | number, username: string | number) =>
-    request<ApiEnvelope<unknown> | unknown>(
-      `/api/db/proxies/${encodeURIComponent(String(name))}/accounts/${encodeURIComponent(String(username))}`,
-      {
-        method: 'DELETE'
-      }
-    ),
+  getDBAccount: (id: string) =>
+    request<ApiEnvelope<DBAccountRecord> | DBAccountRecord>(`/api/db/accounts/${encodeURIComponent(id)}`),
+  updateDBAccount: (id: string, payload: DBAccountUpdatePayload) =>
+    request<ApiEnvelope<DBAccountRecord> | DBAccountRecord>(`/api/db/accounts/${encodeURIComponent(id)}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload)
+    }),
+  deleteDBAccount: (id: string) =>
+    request<ApiEnvelope<unknown> | unknown>(`/api/db/accounts/${encodeURIComponent(id)}`, {
+      method: 'DELETE'
+    }),
   getDBConnections: () =>
     request<ApiEnvelope<DBConnectionRecord[]> | DBConnectionRecord[]>('/api/db/connections'),
   getDBConnectionMeta: (id: string | number) =>

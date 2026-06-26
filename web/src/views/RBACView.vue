@@ -485,8 +485,8 @@ import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'elem
 import {
   apiClient,
   type ApiEnvelope,
-  type DBProxyAccountRecord,
-  type DBProxyRecord,
+  type DBAccountRecord,
+  type DBInstanceRecord,
   type RBACEffectiveCheckPayload,
   type RBACEffectiveCheckResult,
   type RBACPermissionPayload,
@@ -531,7 +531,8 @@ const roleKeyword = ref('');
 const permissionKeyword = ref('');
 const users = ref<UserRecord[]>([]);
 const targets = ref<TargetRecord[]>([]);
-const dbProxies = ref<DBProxyRecord[]>([]);
+const dbInstances = ref<DBInstanceRecord[]>([]);
+const dbAccounts = ref<DBAccountRecord[]>([]);
 const roles = ref<RBACRoleRecord[]>([]);
 const permissions = ref<RBACPermissionRecord[]>([]);
 const userRoles = ref<RBACUserRoleRecord[]>([]);
@@ -659,8 +660,13 @@ const effectiveDecisionLabel = computed(() => {
 });
 const resourceOptionGroups = computed<ResourceOptionGroup[]>(() => {
   const hostOptions = uniqueResourceOptions(targets.value.map(hostResourceOption).filter(isResourceOption));
+  const instanceMap = new Map(dbInstances.value.map((inst) => [inst.id, inst]));
   const databaseOptions = uniqueResourceOptions(
-    dbProxies.value.flatMap((proxy) => dbProxyAccounts(proxy).map((account) => databaseResourceOption(proxy, account)))
+    dbAccounts.value
+      .map((account) => {
+        const inst = instanceMap.get(account.instance_id ?? '');
+        return inst ? databaseResourceOption(inst, account) : null;
+      })
       .filter(isResourceOption)
   );
 
@@ -850,17 +856,13 @@ function hostResourceOption(target: TargetRecord): ResourceOption | null {
   return makeResourceOption(resourceType, resourceId, name, trim(target.source));
 }
 
-function dbProxyAccounts(proxy: DBProxyRecord): DBProxyAccountRecord[] {
-  return Array.isArray(proxy.accounts) ? proxy.accounts : [];
-}
-
-function databaseResourceOption(proxy: DBProxyRecord, account: DBProxyAccountRecord): ResourceOption | null {
-  const resourceType = trim(account.resource_type) || 'database_account';
-  const resourceId = trim(account.resource_id) || trim(account.username);
-  const accountName = trim(account.username) || resourceId;
-  const proxyName = trim(proxy.name);
-  const name = [accountName, proxyName].filter(Boolean).join(' @ ') || resourceId;
-  const detail = [trim(proxy.protocol), trim(proxy.upstream_addr)].filter(Boolean).join(' / ');
+function databaseResourceOption(instance: DBInstanceRecord, account: DBAccountRecord): ResourceOption | null {
+  const resourceType = 'database_account';
+  const resourceId = trim(account.id) || trim(account.unique_name);
+  const accountName = trim(account.unique_name) || trim(account.upstream_username) || resourceId;
+  const instanceName = trim(instance.name);
+  const name = [accountName, instanceName].filter(Boolean).join(' @ ') || resourceId;
+  const detail = [trim(instance.protocol), trim(instance.address)].filter(Boolean).join(' / ');
 
   return makeResourceOption(resourceType, resourceId, name, detail);
 }
@@ -1064,9 +1066,9 @@ async function loadResources() {
   errors.resources = '';
 
   try {
-    const [targetsResult, dbProxiesResult] = await Promise.allSettled([
+    const [targetsResult, dbInstancesResult] = await Promise.allSettled([
       apiClient.getTargets(),
-      apiClient.getDBProxies()
+      apiClient.getDBInstances()
     ]);
     const messages: string[] = [];
 
@@ -1078,12 +1080,23 @@ async function loadResources() {
       );
     }
 
-    if (dbProxiesResult.status === 'fulfilled') {
-      dbProxies.value = unwrapArray(dbProxiesResult.value);
+    if (dbInstancesResult.status === 'fulfilled') {
+      dbInstances.value = unwrapArray(dbInstancesResult.value);
+      // Load accounts for all instances
+      const accountResults = await Promise.allSettled(
+        dbInstances.value.map((inst) => inst.id ? apiClient.getDBAccounts(inst.id) : Promise.resolve([] as DBAccountRecord[]))
+      );
+      const allAccounts: DBAccountRecord[] = [];
+      for (const result of accountResults) {
+        if (result.status === 'fulfilled') {
+          allAccounts.push(...unwrapArray(result.value));
+        }
+      }
+      dbAccounts.value = allAccounts;
     } else {
       messages.push(
-        dbProxiesResult.reason instanceof Error
-          ? dbProxiesResult.reason.message
+        dbInstancesResult.reason instanceof Error
+          ? dbInstancesResult.reason.message
           : 'Unable to load database account resources'
       );
     }

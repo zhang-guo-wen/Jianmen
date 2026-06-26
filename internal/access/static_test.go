@@ -480,7 +480,7 @@ func newTestStoreWithTargetsFile(t *testing.T, targetsFile string, user config.U
 	store, err := NewStaticStore(&config.Config{
 		TargetsFile: targetsFile,
 		Users:       []config.User{user},
-	}, nil)
+	})
 	if err != nil {
 		t.Fatalf("NewStaticStore returned error: %v", err)
 	}

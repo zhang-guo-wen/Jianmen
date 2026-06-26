@@ -1,955 +1,764 @@
 <template>
   <div class="view-stack">
-    <div class="toolbar">
-      <el-input
-        v-model="keyword"
-        clearable
-        :placeholder="t('database.placeholder.search')"
-        style="max-width: 360px"
-      />
-      <div class="toolbar-actions">
-        <el-button :loading="loading" :icon="Refresh" @click="loadProxies">
-          {{ t('common.refresh') }}
-        </el-button>
-        <el-button :icon="Plus" type="primary" @click="openCreateProxyDialog">新增数据库实例</el-button>
+    <el-tabs v-model="activeTab" @tab-change="handleTabChange">
+      <el-tab-pane :label="t('database.instance.title')" name="instances" />
+      <el-tab-pane :disabled="!selectedInstance" :label="t('database.account.title')" name="accounts" />
+    </el-tabs>
+
+    <!-- Tab: Instances -->
+    <template v-if="activeTab === 'instances'">
+      <div class="toolbar">
+        <el-input
+          v-model="instanceKeyword"
+          clearable
+          :placeholder="t('database.instance.placeholder.search')"
+          style="max-width: 360px"
+          @keyup.enter="loadInstances"
+        />
+        <div class="toolbar-actions">
+          <el-button :loading="instancesLoading" @click="loadInstances">
+            {{ t('common.refresh') }}
+          </el-button>
+          <el-button type="primary" @click="openCreateInstanceDialog">
+            {{ t('database.instance.create') }}
+          </el-button>
+        </div>
       </div>
-    </div>
 
-    <el-card class="placeholder-panel" shadow="never">
-      <el-alert v-if="error" :title="error" type="error" show-icon />
-      <el-table v-else v-loading="loading" :data="filteredProxies" height="520" :row-key="proxyRowKey">
-        <el-table-column label="实例名称" min-width="180" show-overflow-tooltip>
-          <template #default="{ row }">
-            <strong class="primary-cell">{{ proxyName(row) }}</strong>
-          </template>
-        </el-table-column>
-        <el-table-column label="协议" width="110">
-          <template #default="{ row }">
-            <el-tag size="small">{{ row.protocol || t('common.none') }}</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column label="监听地址" min-width="190" show-overflow-tooltip>
-          <template #default="{ row }">
-            <span class="mono-text">{{ row.listen_addr || t('common.none') }}</span>
-          </template>
-        </el-table-column>
-        <el-table-column label="上游地址" min-width="190" show-overflow-tooltip>
-          <template #default="{ row }">
-            <span class="mono-text">{{ row.upstream_addr || t('common.none') }}</span>
-          </template>
-        </el-table-column>
-        <el-table-column label="账号数" width="120">
-          <template #default="{ row }">
-            <el-button link type="primary" @click="openAccountsDialog(row)">
-              {{ accountCount(row) }}
-            </el-button>
-          </template>
-        </el-table-column>
-        <el-table-column label="状态" width="110">
-          <template #default="{ row }">
-            <el-tag :type="row.enabled ? 'success' : 'info'">
-              {{ row.enabled ? t('common.enabled') : t('common.disabled') }}
-            </el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column label="备注" min-width="220" show-overflow-tooltip>
-          <template #default="{ row }">
-            {{ row.remark || '-' }}
-          </template>
-        </el-table-column>
-        <el-table-column label="操作" fixed="right" width="330">
-          <template #default="{ row }">
-            <el-button :icon="User" link type="success" @click="openCreateAccountDialog(row)">新增账号</el-button>
-            <el-button :icon="EditIcon" link type="primary" @click="openEditProxyDialog(row)">编辑</el-button>
-            <el-button
-              link
-              :loading="statusUpdatingKey === proxyStatusKey(row)"
-              :type="row.enabled ? 'warning' : 'success'"
-              @click="toggleProxyStatus(row)"
-            >
-              {{ row.enabled ? '禁用' : '启用' }}
-            </el-button>
-            <el-button
-              :icon="DeleteIcon"
-              :loading="deletingKey === proxyName(row)"
-              link
-              type="danger"
-              @click="confirmDeleteProxy(row)"
-            >
-              删除
-            </el-button>
-          </template>
-        </el-table-column>
-      </el-table>
-      <el-empty v-if="!loading && !filteredProxies.length && !error" :description="t('database.empty.resources')" />
-    </el-card>
-
-    <el-dialog
-      v-model="proxyFormVisible"
-      :close-on-click-modal="!submittingProxy"
-      :title="editingProxyName ? '编辑数据库实例' : '新增数据库实例'"
-      class="form-dialog"
-      destroy-on-close
-      width="min(560px, calc(100vw - 32px))"
-    >
-      <el-form ref="proxyFormRef" :model="proxyForm" :rules="proxyRules" label-position="top">
-        <div class="form-sections">
-          <section class="form-section">
-            <div class="form-section-title">实例信息</div>
-            <div class="form-grid">
-              <el-form-item label="实例名称" prop="name">
-                <el-input
-                  v-model="proxyForm.name"
-                  :disabled="editingProxyName !== null"
-                  placeholder="例如 mysql-prod"
-                />
-              </el-form-item>
-              <el-form-item label="协议" prop="protocol">
-                <el-select v-model="proxyForm.protocol" @change="handleProxyProtocolChange">
-                  <el-option label="MySQL" value="mysql" />
-                  <el-option label="PostgreSQL" value="postgres" />
-                  <el-option label="TCP" value="tcp" />
-                </el-select>
-              </el-form-item>
-            </div>
-          </section>
-
-          <section class="form-section">
-            <div class="form-section-title">连接信息</div>
-            <div class="form-grid">
-              <el-form-item label="监听地址" prop="listen_host">
-                <el-input v-model="proxyForm.listen_host" placeholder="0.0.0.0 或 127.0.0.1" />
-              </el-form-item>
-              <el-form-item label="监听端口" prop="listen_port">
-                <el-input-number v-model="proxyForm.listen_port" :max="65535" :min="1" controls-position="right" />
-              </el-form-item>
-              <el-form-item label="上游地址" prop="upstream_host">
-                <el-input v-model="proxyForm.upstream_host" placeholder="数据库主机 IP 或域名" />
-              </el-form-item>
-              <el-form-item label="上游端口" prop="upstream_port">
-                <el-input-number v-model="proxyForm.upstream_port" :max="65535" :min="1" controls-position="right" />
-              </el-form-item>
-            </div>
-          </section>
-
-          <el-collapse v-model="proxyMorePanels" class="more-collapse">
-            <el-collapse-item title="更多设置" name="more">
-              <div class="form-grid">
-                <el-form-item class="form-full" label="备注" prop="remark">
-                  <el-input v-model="proxyForm.remark" :autosize="{ minRows: 3, maxRows: 5 }" type="textarea" />
-                </el-form-item>
-              </div>
-            </el-collapse-item>
-          </el-collapse>
-        </div>
-      </el-form>
-
-      <template #footer>
-        <el-button :disabled="submittingProxy" @click="proxyFormVisible = false">取消</el-button>
-        <el-button :loading="submittingProxy" type="primary" @click="submitProxy">保存</el-button>
-      </template>
-    </el-dialog>
-
-    <el-dialog
-      v-model="accountsDialogVisible"
-      :title="accountsDialogTitle"
-      class="form-dialog"
-      destroy-on-close
-      width="min(980px, calc(100vw - 32px))"
-    >
-      <div class="dialog-stack">
-        <div class="toolbar">
-          <el-tag>{{ selectedProxyAccounts.length }}</el-tag>
-          <div class="toolbar-actions">
-            <el-button :loading="accountsLoading" :icon="Refresh" @click="loadSelectedProxyAccounts">
-              {{ t('common.refresh') }}
-            </el-button>
-            <el-button :disabled="!selectedProxy" :icon="Plus" type="primary" @click="selectedProxy && openCreateAccountDialog(selectedProxy)">
-              新增账号
-            </el-button>
-          </div>
-        </div>
-        <el-alert v-if="accountError" :title="accountError" type="error" show-icon />
-        <el-table
-          v-else
-          v-loading="accountsLoading"
-          :data="selectedProxyAccounts"
-          height="360"
-          :row-key="accountRowKey"
-        >
-          <el-table-column label="账号名称" min-width="150">
+      <el-card class="placeholder-panel" shadow="never">
+        <el-alert v-if="instanceError" :title="instanceError" type="error" show-icon />
+        <el-table v-else v-loading="instancesLoading" :data="filteredInstances" row-key="id">
+          <el-table-column :label="t('database.instance.name')" min-width="160" show-overflow-tooltip>
             <template #default="{ row }">
-              <strong class="primary-cell">{{ accountUsername(row) || t('common.none') }}</strong>
+              <strong class="primary-cell">{{ row.name || '-' }}</strong>
             </template>
           </el-table-column>
-          <el-table-column label="数据库" min-width="140">
+          <el-table-column :label="t('database.instance.protocol')" width="110">
             <template #default="{ row }">
-              {{ databaseName(selectedProxy || {}, row) }}
+              <el-tag size="small">{{ row.protocol || t('common.none') }}</el-tag>
             </template>
           </el-table-column>
-          <el-table-column label="状态" width="110">
+          <el-table-column :label="t('database.instance.address')" min-width="190" show-overflow-tooltip>
+            <template #default="{ row }">
+              <span class="mono-text">{{ row.address || t('common.none') }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column :label="t('database.instance.group')" min-width="120" show-overflow-tooltip>
+            <template #default="{ row }">
+              {{ row.group_name || '-' }}
+            </template>
+          </el-table-column>
+          <el-table-column :label="t('database.instance.accountCount')" width="100">
+            <template #default="{ row }">
+              <el-button link type="primary" @click="openAccountsTab(row)">
+                {{ row.account_count ?? 0 }}
+              </el-button>
+            </template>
+          </el-table-column>
+          <el-table-column :label="t('common.status')" width="90">
             <template #default="{ row }">
               <el-tag :type="row.disabled ? 'info' : 'success'">
                 {{ row.disabled ? t('common.disabled') : t('common.enabled') }}
               </el-tag>
             </template>
           </el-table-column>
-          <el-table-column label="资源 ID" min-width="250" show-overflow-tooltip>
-            <template #default="{ row }">
-              <span class="mono-text">{{ accountResourceId(row) }}</span>
-            </template>
-          </el-table-column>
-          <el-table-column label="备注" min-width="180" show-overflow-tooltip>
+          <el-table-column :label="t('database.instance.remark')" min-width="160" show-overflow-tooltip>
             <template #default="{ row }">
               {{ row.remark || '-' }}
             </template>
           </el-table-column>
-          <el-table-column label="操作" fixed="right" width="340">
+          <el-table-column :label="t('common.actions')" fixed="right" width="290">
             <template #default="{ row }">
-              <el-button :icon="Connection" link type="success" @click="openConnectionDialog(row)">
-                连接配置
+              <el-button link type="primary" @click="openEditInstanceDialog(row)">
+                {{ t('database.instance.edit') }}
               </el-button>
-              <el-button :icon="EditIcon" link type="primary" @click="openEditAccountDialog(row)">编辑</el-button>
               <el-button
+                :loading="instanceStatusUpdatingId === row.id"
                 link
-                :loading="statusUpdatingKey === accountStatusKey(row)"
                 :type="row.disabled ? 'success' : 'warning'"
-                @click="toggleAccountStatus(row)"
+                @click="toggleInstanceStatus(row)"
               >
-                {{ row.disabled ? '启用' : '禁用' }}
+                {{ row.disabled ? t('common.enabled') : t('common.disabled') }}
               </el-button>
               <el-button
-                :icon="DeleteIcon"
-                :loading="deletingKey === accountDeleteKey(row)"
+                :loading="instanceDeletingId === row.id"
                 link
                 type="danger"
-                @click="confirmDeleteAccount(row)"
+                @click="confirmDeleteInstance(row)"
               >
-                删除
+                {{ t('database.instance.delete') }}
+              </el-button>
+              <el-button link type="success" @click="openAccountsTab(row)">
+                {{ t('database.account.title') }}
               </el-button>
             </template>
           </el-table-column>
         </el-table>
-        <el-empty
-          v-if="!accountsLoading && !selectedProxyAccounts.length && !accountError"
-          :description="t('database.empty.accounts')"
-        />
-      </div>
-    </el-dialog>
+        <el-empty v-if="!instancesLoading && !filteredInstances.length && !instanceError" :description="t('database.instance.empty')" />
+        <div class="pagination-row">
+          <el-pagination
+            v-model:current-page="instancePage"
+            v-model:page-size="instancePageSize"
+            background
+            layout="total, sizes, prev, pager, next"
+            :page-sizes="[20, 50, 100]"
+            :total="instanceTotal"
+            @current-change="loadInstances"
+            @size-change="handleInstancePageSizeChange"
+          />
+        </div>
+      </el-card>
 
-    <el-dialog
-      v-model="accountFormVisible"
-      :close-on-click-modal="!submittingAccount"
-      :title="editingAccountUsername ? '编辑数据库账号' : '新增数据库账号'"
-      class="form-dialog"
-      destroy-on-close
-      width="min(480px, calc(100vw - 32px))"
-    >
-      <el-form ref="accountFormRef" :model="accountForm" :rules="accountRules" label-position="top">
-        <div class="form-sections">
-          <section class="form-section">
-            <div class="form-section-title">账号信息</div>
-            <div class="form-grid">
-              <el-form-item label="登录账号" prop="username">
-                <el-input
-                  v-model="accountForm.username"
-                  :disabled="editingAccountUsername !== null"
-                  placeholder="数据库登录用户名"
-                />
-              </el-form-item>
-              <el-form-item label="默认数据库" prop="database">
-                <el-input v-model="accountForm.database" placeholder="可选，例如 app 或 orders" />
-              </el-form-item>
-            </div>
-          </section>
-
-          <el-collapse v-model="accountMorePanels" class="more-collapse">
-            <el-collapse-item title="更多设置" name="more">
+      <!-- Instance Create/Edit Dialog -->
+      <el-dialog
+        v-model="instanceDialogVisible"
+        :close-on-click-modal="!submittingInstance"
+        :title="editingInstanceId ? t('database.instance.edit') : t('database.instance.create')"
+        class="form-dialog"
+        destroy-on-close
+        width="min(560px, calc(100vw - 32px))"
+      >
+        <el-form ref="instanceFormRef" :model="instanceForm" :rules="instanceRules" label-position="top">
+          <div class="form-sections">
+            <section class="form-section">
+              <div class="form-section-title">连接信息</div>
               <div class="form-grid">
-                <el-form-item class="form-full" label="备注" prop="remark">
-                  <el-input v-model="accountForm.remark" :autosize="{ minRows: 3, maxRows: 5 }" type="textarea" />
+                <el-form-item :label="t('database.instance.name')" prop="name">
+                  <el-input v-model="instanceForm.name" :placeholder="t('database.instance.placeholder.name')" />
+                </el-form-item>
+                <el-form-item :label="t('database.instance.protocol')" prop="protocol">
+                  <el-select v-model="instanceForm.protocol">
+                    <el-option label="MySQL" value="mysql" />
+                    <el-option label="PostgreSQL" value="postgres" />
+                  </el-select>
+                </el-form-item>
+                <el-form-item :label="t('database.instance.address')" prop="address" class="form-full">
+                  <el-input v-model="instanceForm.address" :placeholder="t('database.instance.placeholder.address')" />
                 </el-form-item>
               </div>
-            </el-collapse-item>
-          </el-collapse>
+            </section>
+
+            <el-collapse v-model="instanceMorePanels" class="more-collapse">
+              <el-collapse-item :title="t('database.account.moreSettings')" name="more">
+                <div class="form-grid">
+                  <el-form-item :label="t('database.instance.group')" prop="group_name">
+                    <el-select
+                      v-model="instanceForm.group_name"
+                      allow-create
+                      clearable
+                      filterable
+                      placeholder="选择或输入分组"
+                    >
+                      <el-option
+                        v-for="group in instanceGroupOptions"
+                        :key="group"
+                        :label="group"
+                        :value="group"
+                      />
+                    </el-select>
+                  </el-form-item>
+                  <el-form-item :label="t('database.instance.remark')" prop="remark" class="form-full">
+                    <el-input v-model="instanceForm.remark" :autosize="{ minRows: 3, maxRows: 5 }" type="textarea" />
+                  </el-form-item>
+                </div>
+              </el-collapse-item>
+            </el-collapse>
+          </div>
+        </el-form>
+
+        <template #footer>
+          <el-button :disabled="submittingInstance" @click="instanceDialogVisible = false">
+            {{ t('common.cancel') }}
+          </el-button>
+          <el-button :loading="submittingInstance" type="primary" @click="submitInstance">
+            {{ t('common.create') }}
+          </el-button>
+        </template>
+      </el-dialog>
+    </template>
+
+    <!-- Tab: Accounts -->
+    <template v-if="activeTab === 'accounts' && selectedInstance">
+      <div class="toolbar">
+        <div class="toolbar-breadcrumb">
+          <el-button link type="primary" @click="activeTab = 'instances'">
+            &larr; {{ t('database.instance.title') }}
+          </el-button>
+          <span class="breadcrumb-separator">/</span>
+          <strong>{{ selectedInstance.name || '-' }}</strong>
         </div>
-      </el-form>
+        <div class="toolbar-actions">
+          <el-button :loading="accountsLoading" @click="loadAccounts">
+            {{ t('common.refresh') }}
+          </el-button>
+          <el-button type="primary" @click="openCreateAccountDialog">
+            {{ t('database.account.create') }}
+          </el-button>
+        </div>
+      </div>
 
-      <template #footer>
-        <el-button :disabled="submittingAccount" @click="accountFormVisible = false">取消</el-button>
-        <el-button :loading="submittingAccount" type="primary" @click="submitAccount">保存</el-button>
-      </template>
-    </el-dialog>
+      <el-card class="placeholder-panel" shadow="never">
+        <el-alert v-if="accountError" :title="accountError" type="error" show-icon />
+        <el-table v-else v-loading="accountsLoading" :data="accounts" row-key="id">
+          <el-table-column :label="t('database.account.uniqueName')" min-width="180" show-overflow-tooltip>
+            <template #default="{ row }">
+              <span class="mono-text">{{ row.unique_name || t('common.none') }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column :label="t('database.account.upstreamUsername')" min-width="150" show-overflow-tooltip>
+            <template #default="{ row }">
+              {{ row.upstream_username || t('common.none') }}
+            </template>
+          </el-table-column>
+          <el-table-column :label="t('database.account.group')" min-width="120" show-overflow-tooltip>
+            <template #default="{ row }">
+              {{ row.group_name || '-' }}
+            </template>
+          </el-table-column>
+          <el-table-column :label="t('common.status')" width="90">
+            <template #default="{ row }">
+              <el-tag :type="row.disabled ? 'info' : 'success'">
+                {{ row.disabled ? t('common.disabled') : t('common.enabled') }}
+              </el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column :label="t('database.account.expiresAt')" min-width="160" show-overflow-tooltip>
+            <template #default="{ row }">
+              {{ formatTime(row.expires_at) || t('common.none') }}
+            </template>
+          </el-table-column>
+          <el-table-column :label="t('common.actions')" fixed="right" width="280">
+            <template #default="{ row }">
+              <el-button link type="success" @click="openConnectDialog(row)">
+                {{ t('database.account.connect') }}
+              </el-button>
+              <el-button link type="primary" @click="openEditAccountDialog(row)">
+                {{ t('database.account.edit') }}
+              </el-button>
+              <el-button
+                :loading="accountStatusUpdatingId === row.id"
+                link
+                :type="row.disabled ? 'success' : 'warning'"
+                @click="toggleAccountStatus(row)"
+              >
+                {{ row.disabled ? t('common.enabled') : t('common.disabled') }}
+              </el-button>
+              <el-button
+                :loading="accountDeletingId === row.id"
+                link
+                type="danger"
+                @click="confirmDeleteAccount(row)"
+              >
+                {{ t('database.account.delete') }}
+              </el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+        <el-empty v-if="!accountsLoading && !accounts.length && !accountError" :description="t('database.empty.accounts')" />
+      </el-card>
 
-    <el-dialog
-      v-model="configDialogVisible"
-      :title="configDialogTitle"
-      class="form-dialog"
-      destroy-on-close
-      width="min(760px, calc(100vw - 32px))"
-    >
-      <div v-if="selectedConfig" class="dialog-stack">
-        <el-descriptions :column="2" border size="small">
-          <el-descriptions-item :label="t('database.column.protocol')">
-            {{ selectedConfig.proxy.protocol || t('common.none') }}
-          </el-descriptions-item>
-          <el-descriptions-item :label="t('database.column.listen')">
-            <span class="mono-text">{{ selectedConfig.proxy.listen_addr || t('common.none') }}</span>
-          </el-descriptions-item>
-          <el-descriptions-item :label="t('database.column.upstream')">
-            <span class="mono-text">{{ selectedConfig.proxy.upstream_addr || t('common.none') }}</span>
-          </el-descriptions-item>
-          <el-descriptions-item :label="t('database.column.account')">
-            {{ accountUsername(selectedConfig.account) || t('common.none') }}
-          </el-descriptions-item>
-          <el-descriptions-item :label="t('database.column.resourceType')">
-            <span class="mono-text">{{ accountResourceType(selectedConfig.account) }}</span>
-          </el-descriptions-item>
-          <el-descriptions-item :label="t('database.column.resourceId')">
-            <span class="mono-text">{{ accountResourceId(selectedConfig.account) }}</span>
-          </el-descriptions-item>
-        </el-descriptions>
-
-        <div class="config-list">
-          <div v-for="item in connectionItems" :key="item.key" class="config-row">
-            <div class="config-label">{{ item.label }}</div>
-            <el-input :model-value="item.value" readonly>
-              <template #append>
-                <el-tooltip :content="t('quickConnect.action.copy')">
-                  <el-button
-                    :aria-label="t('quickConnect.action.copy')"
-                    :icon="CopyDocument"
-                    @click="copyText(item.value)"
+      <!-- Account Create/Edit Dialog -->
+      <el-dialog
+        v-model="accountDialogVisible"
+        :close-on-click-modal="!submittingAccount"
+        :title="editingAccountId ? t('database.account.edit') : t('database.account.create')"
+        class="form-dialog"
+        destroy-on-close
+        width="min(560px, calc(100vw - 32px))"
+      >
+        <el-form ref="accountFormRef" :model="accountForm" :rules="accountRules" label-position="top">
+          <div class="form-sections">
+            <section class="form-section">
+              <div class="form-section-title">账号信息</div>
+              <div class="form-grid">
+                <el-form-item :label="t('database.account.upstreamUsername')" prop="upstream_username">
+                  <el-input
+                    v-model="accountForm.upstream_username"
+                    :disabled="editingAccountId !== null"
+                    placeholder="数据库登录用户名"
                   />
+                </el-form-item>
+                <el-form-item
+                  :label="t('database.account.password.label')"
+                  prop="upstream_password"
+                >
+                  <el-input
+                    v-model="accountForm.upstream_password"
+                    :placeholder="editingAccountId ? t('database.account.password.emptyHint') : ''"
+                    show-password
+                    type="password"
+                  />
+                </el-form-item>
+              </div>
+            </section>
+
+            <section class="form-section">
+              <div class="form-section-title">有效期</div>
+              <div class="expire-shortcuts">
+                <el-button
+                  v-for="shortcut in expireShortcuts"
+                  :key="shortcut.value"
+                  :type="expireShortcutActive === shortcut.value ? 'primary' : ''"
+                  size="small"
+                  @click="applyExpireShortcut(shortcut.value)"
+                >
+                  {{ shortcut.label }}
+                </el-button>
+              </div>
+              <el-date-picker
+                v-model="accountForm.expires_at"
+                class="expire-picker"
+                placeholder="选择日期时间"
+                type="datetime"
+                value-format="YYYY-MM-DDTHH:mm:ss.SSS[Z]"
+              />
+            </section>
+
+            <el-collapse v-model="accountMorePanels" class="more-collapse">
+              <el-collapse-item :title="t('database.account.moreSettings')" name="more">
+                <div class="form-grid">
+                  <el-form-item :label="t('database.account.group')" prop="group_name">
+                    <el-select
+                      v-model="accountForm.group_name"
+                      allow-create
+                      clearable
+                      filterable
+                      placeholder="选择或输入分组"
+                    >
+                      <el-option
+                        v-for="group in accountGroupOptions"
+                        :key="group"
+                        :label="group"
+                        :value="group"
+                      />
+                    </el-select>
+                  </el-form-item>
+                  <el-form-item :label="t('database.account.remark')" prop="remark" class="form-full">
+                    <el-input v-model="accountForm.remark" :autosize="{ minRows: 3, maxRows: 5 }" type="textarea" />
+                  </el-form-item>
+                </div>
+              </el-collapse-item>
+            </el-collapse>
+          </div>
+        </el-form>
+
+        <template #footer>
+          <el-button :disabled="submittingAccount" @click="accountDialogVisible = false">
+            {{ t('common.cancel') }}
+          </el-button>
+          <el-button :loading="submittingAccount" type="primary" @click="submitAccount">
+            {{ t('common.create') }}
+          </el-button>
+        </template>
+      </el-dialog>
+
+      <!-- Connect Dialog -->
+      <el-dialog
+        v-model="connectDialogVisible"
+        :title="t('database.account.connection')"
+        class="form-dialog"
+        destroy-on-close
+        width="min(560px, calc(100vw - 32px))"
+      >
+        <div v-if="connectTarget" class="dialog-stack">
+          <div class="config-row">
+            <div class="config-label">Shell</div>
+            <el-input :model-value="connectCommand" readonly>
+              <template #append>
+                <el-tooltip :content="t('database.account.copy')">
+                  <el-button :aria-label="t('database.account.copy')" @click="copyText(connectCommand)" />
+                </el-tooltip>
+              </template>
+            </el-input>
+          </div>
+          <div class="config-row">
+            <div class="config-label">{{ t('database.config.resource') }}</div>
+            <el-input :model-value="connectResourceId" readonly>
+              <template #append>
+                <el-tooltip :content="t('database.account.copy')">
+                  <el-button :aria-label="t('database.account.copy')" @click="copyText(connectResourceId)" />
                 </el-tooltip>
               </template>
             </el-input>
           </div>
         </div>
-      </div>
 
-      <template #footer>
-        <el-button @click="configDialogVisible = false">{{ t('common.cancel') }}</el-button>
-        <el-button :disabled="!selectedConfig" :icon="CopyDocument" type="primary" @click="copySelectedConfig">
-          {{ t('database.action.copyAll') }}
-        </el-button>
-      </template>
-    </el-dialog>
+        <template #footer>
+          <el-button @click="connectDialogVisible = false">{{ t('common.cancel') }}</el-button>
+          <el-button type="primary" @click="copyAllConnect">{{ t('database.account.copy') }}全部</el-button>
+        </template>
+      </el-dialog>
+    </template>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onMounted, reactive, ref } from 'vue';
-import {
-  Connection,
-  CopyDocument,
-  Delete as DeleteIcon,
-  Edit as EditIcon,
-  Plus,
-  Refresh,
-  User
-} from '@element-plus/icons-vue';
+import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue';
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus';
-
 import {
   apiClient,
   type ApiEnvelope,
-  type DBProxyAccountPayload,
-  type DBProxyAccountRecord,
-  type DBProxyPayload,
-  type DBProxyRecord
+  type DBInstanceRecord,
+  type DBInstancePayload,
+  type DBAccountRecord,
+  type DBAccountPayload,
+  type DBAccountUpdatePayload
 } from '@/api/client';
 import { useI18n } from '@/i18n';
 
-type DBProxyConfigSelection = {
-  proxy: DBProxyRecord;
-  account: DBProxyAccountRecord;
-};
-type ConnectionItem = {
-  key: string;
-  label: string;
-  value: string;
-};
-type HostPortParts = {
-  host: string;
-  port: string;
-};
-type EndpointFormParts = {
-  host: string;
-  port: number;
-};
-type DBProxyForm = {
+interface InstanceForm {
   name: string;
-  enabled: boolean;
   protocol: string;
-  listen_host: string;
-  listen_port: number;
-  upstream_host: string;
-  upstream_port: number;
+  address: string;
+  group_name: string;
   remark: string;
-};
-type DBAccountForm = {
-  username: string;
-  database: string;
+}
+
+interface AccountForm {
+  upstream_username: string;
+  upstream_password: string;
+  group_name: string;
   remark: string;
-  disabled: boolean;
-};
+  expires_at: string;
+}
 
 const { t } = useI18n();
-const keyword = ref('');
-const loading = ref(false);
-const accountsLoading = ref(false);
-const submittingProxy = ref(false);
-const submittingAccount = ref(false);
-const error = ref('');
-const accountError = ref('');
-const deletingKey = ref('');
-const statusUpdatingKey = ref('');
-const proxies = ref<DBProxyRecord[]>([]);
-const accounts = ref<DBProxyAccountRecord[]>([]);
-const selectedProxy = ref<DBProxyRecord | null>(null);
-const selectedConfig = ref<DBProxyConfigSelection | null>(null);
-const accountsDialogVisible = ref(false);
-const proxyFormVisible = ref(false);
-const accountFormVisible = ref(false);
-const configDialogVisible = ref(false);
-const editingProxyName = ref<string | null>(null);
-const editingAccountUsername = ref<string | null>(null);
-const proxyMorePanels = ref<string[]>([]);
-const accountMorePanels = ref<string[]>([]);
-const proxyFormRef = ref<FormInstance>();
-const accountFormRef = ref<FormInstance>();
-const proxyForm = reactive<DBProxyForm>(emptyProxyForm());
-const accountForm = reactive<DBAccountForm>(emptyAccountForm());
 
-const proxyRules: FormRules = {
+// Tab state
+const activeTab = ref('instances');
+
+// Instance state
+const instanceKeyword = ref('');
+const instances = ref<DBInstanceRecord[]>([]);
+const instancesLoading = ref(false);
+const instanceError = ref('');
+const instanceDeletingId = ref('');
+const instanceStatusUpdatingId = ref('');
+const instancePage = ref(1);
+const instancePageSize = ref(20);
+const instanceTotal = ref(0);
+const instanceDialogVisible = ref(false);
+const submittingInstance = ref(false);
+const editingInstanceId = ref<string | null>(null);
+const instanceMorePanels = ref<string[]>([]);
+const instanceFormRef = ref<FormInstance>();
+const instanceGroupOptions = ref<string[]>([]);
+
+const instanceForm = reactive<InstanceForm>({
+  name: '',
+  protocol: 'mysql',
+  address: '',
+  group_name: '',
+  remark: ''
+});
+
+const instanceRules: FormRules = {
   name: [{ required: true, message: '请输入实例名称', trigger: 'blur' }],
   protocol: [{ required: true, message: '请选择协议', trigger: 'change' }],
-  listen_host: [{ required: true, message: '请输入监听地址', trigger: 'blur' }],
-  listen_port: [{ required: true, type: 'number', message: '请输入监听端口', trigger: 'change' }],
-  upstream_host: [{ required: true, message: '请输入上游地址', trigger: 'blur' }],
-  upstream_port: [{ required: true, type: 'number', message: '请输入上游端口', trigger: 'change' }]
+  address: [{ required: true, message: '请输入上游地址', trigger: 'blur' }]
 };
+
+// Account state
+const selectedInstance = ref<DBInstanceRecord | null>(null);
+const accounts = ref<DBAccountRecord[]>([]);
+const accountsLoading = ref(false);
+const accountError = ref('');
+const accountDeletingId = ref('');
+const accountStatusUpdatingId = ref('');
+const accountDialogVisible = ref(false);
+const submittingAccount = ref(false);
+const editingAccountId = ref<string | null>(null);
+const accountMorePanels = ref<string[]>([]);
+const accountFormRef = ref<FormInstance>();
+const expireShortcutActive = ref('');
+const accountGroupOptions = ref<string[]>([]);
+
+const accountForm = reactive<AccountForm>({
+  upstream_username: '',
+  upstream_password: '',
+  group_name: '',
+  remark: '',
+  expires_at: ''
+});
+
 const accountRules: FormRules = {
-  username: [{ required: true, message: '请输入登录账号', trigger: 'blur' }]
+  upstream_username: [{ required: true, message: '请输入目标用户名', trigger: 'blur' }],
+  upstream_password: [{ required: true, message: '请输入目标密码', trigger: 'blur' }]
 };
 
-const filteredProxies = computed(() => {
-  const query = keyword.value.trim().toLowerCase();
+// Connect dialog state
+const connectDialogVisible = ref(false);
+const connectTarget = ref<DBAccountRecord | null>(null);
 
-  if (!query) {
-    return proxies.value;
-  }
-
-  return proxies.value.filter((proxy) =>
-    [
-      proxyName(proxy),
-      proxy.protocol,
-      proxy.listen_addr,
-      proxy.upstream_addr,
-      proxy.remark,
-      proxy.enabled ? t('common.enabled') : t('common.disabled')
-    ].some((value) => String(value ?? '').toLowerCase().includes(query))
+// Computed
+const filteredInstances = computed(() => {
+  const query = instanceKeyword.value.trim().toLowerCase();
+  if (!query) return instances.value;
+  return instances.value.filter((inst) =>
+    [inst.name, inst.protocol, inst.address, inst.group_name, inst.remark]
+      .some((v) => String(v ?? '').toLowerCase().includes(query))
   );
 });
-const selectedProxyAccounts = computed(() => accounts.value);
-const accountsDialogTitle = computed(() => {
-  const proxy = selectedProxy.value;
 
-  return proxy ? `${proxyName(proxy)} - 数据库账号` : '数据库账号';
-});
-const configDialogTitle = computed(() => {
-  const selection = selectedConfig.value;
+const expireShortcuts = computed(() => [
+  { label: t('database.account.expireShortcuts.hours8'), value: '8h' },
+  { label: t('database.account.expireShortcuts.days7'), value: '7d' },
+  { label: t('database.account.expireShortcuts.year1'), value: '1y' },
+  { label: t('database.account.expireShortcuts.permanent'), value: 'permanent' }
+]);
 
-  if (!selection) {
-    return t('database.dialog.connectionConfig');
+const connectCommand = computed(() => {
+  if (!connectTarget.value || !selectedInstance.value) return '';
+  const inst = selectedInstance.value;
+  const protocol = inst.protocol || 'mysql';
+  const uniqueName = connectTarget.value.unique_name || '<username>';
+  // Parse host and port from address
+  const address = inst.address || '127.0.0.1:3306';
+  const lastColon = address.lastIndexOf(':');
+  let host = address;
+  let port = '3306';
+  if (lastColon > -1) {
+    const portPart = address.slice(lastColon + 1);
+    if (/^\d+$/.test(portPart)) {
+      host = address.slice(0, lastColon);
+      port = portPart;
+    }
   }
-
-  const account = accountUsername(selection.account) || t('common.none');
-
-  return `${t('database.dialog.connectionConfig')} - ${account}@${proxyName(selection.proxy)}`;
+  // Use proxy port convention: default port + 30000
+  const proxyPort = Number(port) + 30000;
+  if (protocol === 'mysql') {
+    return `mysql --protocol=tcp -h ${host} -P ${proxyPort} -u ${uniqueName} -p`;
+  }
+  return `psql -h ${host} -p ${proxyPort} -U ${uniqueName}`;
 });
-const connectionItems = computed<ConnectionItem[]>(() =>
-  selectedConfig.value ? buildConnectionItems(selectedConfig.value.proxy, selectedConfig.value.account) : []
-);
 
-function emptyProxyForm(): DBProxyForm {
-  return {
-    name: '',
-    enabled: true,
-    protocol: 'mysql',
-    listen_host: '127.0.0.1',
-    listen_port: 33060,
-    upstream_host: '127.0.0.1',
-    upstream_port: 3306,
-    remark: ''
-  };
-}
+const connectResourceId = computed(() => {
+  if (!connectTarget.value || !selectedInstance.value) return '';
+  return `database_account:${connectTarget.value.id ?? ''}`;
+});
 
-function emptyAccountForm(): DBAccountForm {
-  return {
-    username: '',
-    database: '',
-    remark: '',
-    disabled: false
-  };
-}
-
+// Helpers
 function unwrapArray<T>(payload: ApiEnvelope<T[]> | T[]): T[] {
   return Array.isArray(payload) ? payload : payload.data ?? [];
 }
 
-function stringFrom(value: unknown): string {
-  return typeof value === 'string' || typeof value === 'number' ? String(value) : '';
-}
-
-function numberFrom(value: unknown, fallback: number): number {
-  const parsed = Number(value);
-
-  return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
-}
-
-function defaultUpstreamPort(protocol: string): number {
-  if (protocol === 'postgres') {
-    return 5432;
+function formatTime(value: unknown): string {
+  if (typeof value === 'string' && value.trim()) {
+    const d = new Date(value);
+    return Number.isNaN(d.getTime()) ? value : d.toLocaleString();
   }
-
-  return 3306;
+  return '';
 }
 
-function defaultListenPort(protocol: string): number {
-  if (protocol === 'postgres') {
-    return 54320;
+function computeExpiry(value: string): string {
+  if (!value || value === 'permanent') return '';
+  const now = new Date();
+  const match = /^(\d+)([hdmy])$/.exec(value);
+  if (!match) return '';
+  const num = Number(match[1]);
+  const unit = match[2];
+  switch (unit) {
+    case 'h': now.setHours(now.getHours() + num); break;
+    case 'd': now.setDate(now.getDate() + num); break;
+    case 'm': now.setMonth(now.getMonth() + num); break;
+    case 'y': now.setFullYear(now.getFullYear() + num); break;
   }
-
-  if (protocol === 'tcp') {
-    return 15432;
-  }
-
-  return 33060;
+  return now.toISOString().replace('Z', '') + 'Z';
 }
 
-function normalizeProtocol(protocol: unknown): string {
-  const value = stringFrom(protocol).trim().toLowerCase();
-
-  if (value === 'postgresql' || value === 'pg') {
-    return 'postgres';
-  }
-
-  return value || 'tcp';
-}
-
-function defaultPort(protocol: string): string {
-  if (protocol === 'mysql') {
-    return '3306';
-  }
-
-  if (protocol === 'postgres') {
-    return '5432';
-  }
-
-  return '<port>';
-}
-
-function publicListenHost(host: string): string {
-  const normalized = host.trim().replace(/^\[(.*)]$/, '$1');
-
-  if (!normalized || normalized === '0.0.0.0' || normalized === '::' || normalized === '::0') {
-    return '127.0.0.1';
-  }
-
-  return normalized;
-}
-
-function splitEndpointForForm(address: unknown, fallbackPort: number): EndpointFormParts {
-  const value = stringFrom(address).trim();
-
-  if (!value) {
-    return { host: '', port: fallbackPort };
-  }
-
-  const bracketMatch = /^\[([^\]]+)]:(\d+)$/.exec(value);
-  if (bracketMatch) {
-    return { host: bracketMatch[1], port: numberFrom(bracketMatch[2], fallbackPort) };
-  }
-
-  const lastColon = value.lastIndexOf(':');
-  if (lastColon > -1) {
-    const host = value.slice(0, lastColon);
-    const port = value.slice(lastColon + 1);
-
-    if (host && /^\d+$/.test(port)) {
-      return { host, port: numberFrom(port, fallbackPort) };
-    }
-  }
-
-  return { host: value, port: fallbackPort };
-}
-
-function parseHostPort(address: unknown, protocol: string): HostPortParts {
-  const value = stringFrom(address).trim();
-  const fallbackPort = defaultPort(protocol);
-
-  if (!value) {
-    return { host: '127.0.0.1', port: fallbackPort };
-  }
-
-  const bracketMatch = /^\[([^\]]+)]:(\d+)$/.exec(value);
-  if (bracketMatch) {
-    return { host: publicListenHost(bracketMatch[1]), port: bracketMatch[2] };
-  }
-
-  const lastColon = value.lastIndexOf(':');
-  if (lastColon > -1) {
-    const host = value.slice(0, lastColon);
-    const port = value.slice(lastColon + 1);
-
-    if (/^\d+$/.test(port)) {
-      return { host: publicListenHost(host), port };
-    }
-  }
-
-  return { host: publicListenHost(value), port: fallbackPort };
-}
-
-function formatHostPort(host: string, port: string | number): string {
-  const trimmedHost = host.trim();
-  const safeHost = trimmedHost.includes(':') && !trimmedHost.startsWith('[') ? `[${trimmedHost}]` : trimmedHost;
-
-  return `${safeHost}:${port}`;
-}
-
-function encodeUrlPart(value: string): string {
-  return value.startsWith('<') && value.endsWith('>') ? value : encodeURIComponent(value);
-}
-
-function proxyName(proxy: DBProxyRecord): string {
-  return stringFrom(proxy.name).trim() || stringFrom(proxy.upstream_addr).trim() || stringFrom(proxy.listen_addr).trim() || '-';
-}
-
-function proxyRowKey(proxy: DBProxyRecord): string {
-  return proxyName(proxy);
-}
-
-function proxyStatusKey(proxy: DBProxyRecord): string {
-  return `proxy:${proxyName(proxy)}`;
-}
-
-function accountCount(proxy: DBProxyRecord): number {
-  const explicitCount = Number(proxy.account_count ?? proxy.accounts_count);
-
-  return Number.isFinite(explicitCount) && explicitCount >= 0 ? explicitCount : 0;
-}
-
-function accountUsername(account: DBProxyAccountRecord): string {
-  return stringFrom(account.username).trim();
-}
-
-function accountResourceType(account: DBProxyAccountRecord): string {
-  return stringFrom(account.resource_type).trim() || 'database_account';
-}
-
-function accountResourceId(account: DBProxyAccountRecord): string {
-  return stringFrom(account.resource_id).trim() || accountUsername(account) || '-';
-}
-
-function accountResource(account: DBProxyAccountRecord): string {
-  return `${accountResourceType(account)}:${accountResourceId(account)}`;
-}
-
-function accountRowKey(account: DBProxyAccountRecord, index?: number): string {
-  return `${accountResourceType(account)}:${accountResourceId(account)}:${accountUsername(account) || String(index ?? 0)}`;
-}
-
-function accountDeleteKey(account: DBProxyAccountRecord): string {
-  return `${proxyName(selectedProxy.value || {})}:${accountUsername(account)}`;
-}
-
-function accountStatusKey(account: DBProxyAccountRecord): string {
-  return `account:${accountDeleteKey(account)}`;
-}
-
-function databaseName(proxy: DBProxyRecord, account: DBProxyAccountRecord): string {
-  return (
-    stringFrom(account.database) ||
-    stringFrom(account.db_name) ||
-    stringFrom(account.database_name) ||
-    stringFrom(proxy.database) ||
-    '-'
-  );
-}
-
-function connectionDatabaseName(proxy: DBProxyRecord, account: DBProxyAccountRecord): string {
-  const database = databaseName(proxy, account);
-
-  return database === '-' ? '<database>' : database;
-}
-
-function buildConnectionItems(proxy: DBProxyRecord, account: DBProxyAccountRecord): ConnectionItem[] {
-  const protocol = normalizeProtocol(proxy.protocol);
-  const endpoint = parseHostPort(proxy.listen_addr, protocol);
-  const listenEndpoint = formatHostPort(endpoint.host, endpoint.port);
-  const username = accountUsername(account) || '<username>';
-  const database = connectionDatabaseName(proxy, account);
-  const encodedUser = encodeUrlPart(username);
-  const encodedDatabase = encodeUrlPart(database);
-
-  if (protocol === 'mysql') {
-    return [
-      {
-        key: 'mysql-command',
-        label: t('database.config.mysqlCommand'),
-        value: `mysql --protocol=tcp -h ${endpoint.host} -P ${endpoint.port} -u ${username} -p -D ${database}`
-      },
-      {
-        key: 'mysql-url-dsn',
-        label: t('database.config.mysqlUrlDsn'),
-        value: `mysql://${encodedUser}:<password>@${listenEndpoint}/${encodedDatabase}`
-      },
-      {
-        key: 'mysql-driver-dsn',
-        label: t('database.config.mysqlDriverDsn'),
-        value: `${username}:<password>@tcp(${listenEndpoint})/${database}`
-      },
-      {
-        key: 'resource',
-        label: t('database.config.resource'),
-        value: accountResource(account)
-      }
-    ];
-  }
-
-  if (protocol === 'postgres') {
-    return [
-      {
-        key: 'postgres-command',
-        label: t('database.config.postgresCommand'),
-        value: `psql -h ${endpoint.host} -p ${endpoint.port} -U ${username} -d ${database}`
-      },
-      {
-        key: 'postgres-url-dsn',
-        label: t('database.config.postgresUrlDsn'),
-        value: `postgresql://${encodedUser}:<password>@${listenEndpoint}/${encodedDatabase}?sslmode=disable`
-      },
-      {
-        key: 'postgres-key-value-dsn',
-        label: t('database.config.postgresKeyValueDsn'),
-        value: `host=${endpoint.host} port=${endpoint.port} user=${username} password=<password> dbname=${database} sslmode=disable`
-      },
-      {
-        key: 'resource',
-        label: t('database.config.resource'),
-        value: accountResource(account)
-      }
-    ];
-  }
-
-  return [
-    {
-      key: 'tcp-endpoint',
-      label: t('database.config.tcpEndpoint'),
-      value: listenEndpoint
-    },
-    {
-      key: 'database-account',
-      label: t('database.column.account'),
-      value: username
-    },
-    {
-      key: 'resource',
-      label: t('database.config.resource'),
-      value: accountResource(account)
-    }
-  ];
-}
-
-function resetProxyForm(values: DBProxyForm = emptyProxyForm()) {
-  Object.assign(proxyForm, values);
-}
-
-function resetAccountForm(values: DBAccountForm = emptyAccountForm()) {
-  Object.assign(accountForm, values);
-}
-
-function proxyToForm(proxy: DBProxyRecord): DBProxyForm {
-  const protocol = normalizeProtocol(proxy.protocol);
-  const listen = splitEndpointForForm(proxy.listen_addr, defaultListenPort(protocol));
-  const upstream = splitEndpointForForm(proxy.upstream_addr, defaultUpstreamPort(protocol));
-
-  return {
-    name: proxyName(proxy),
-    enabled: proxy.enabled !== false,
-    protocol,
-    listen_host: listen.host,
-    listen_port: listen.port,
-    upstream_host: upstream.host,
-    upstream_port: upstream.port,
-    remark: stringFrom(proxy.remark)
-  };
-}
-
-function accountToForm(account: DBProxyAccountRecord): DBAccountForm {
-  return {
-    username: accountUsername(account),
-    database: databaseName({}, account) === '-' ? '' : databaseName({}, account),
-    remark: stringFrom(account.remark),
-    disabled: account.disabled === true
-  };
-}
-
-function buildProxyPayload(): DBProxyPayload {
-  return {
-    name: proxyForm.name.trim(),
-    enabled: proxyForm.enabled,
-    protocol: normalizeProtocol(proxyForm.protocol),
-    listen_addr: formatHostPort(proxyForm.listen_host, proxyForm.listen_port),
-    upstream_addr: formatHostPort(proxyForm.upstream_host, proxyForm.upstream_port),
-    remark: proxyForm.remark.trim() || undefined
-  };
-}
-
-function proxyRecordPayload(proxy: DBProxyRecord, enabled: boolean): DBProxyPayload {
-  return {
-    name: proxyName(proxy),
-    enabled,
-    protocol: normalizeProtocol(proxy.protocol),
-    listen_addr: stringFrom(proxy.listen_addr).trim(),
-    upstream_addr: stringFrom(proxy.upstream_addr).trim(),
-    remark: stringFrom(proxy.remark).trim() || undefined
-  };
-}
-
-function buildAccountPayload(): DBProxyAccountPayload {
-  return {
-    username: accountForm.username.trim(),
-    database: accountForm.database.trim() || undefined,
-    remark: accountForm.remark.trim() || undefined,
-    disabled: accountForm.disabled
-  };
-}
-
-function accountRecordPayload(account: DBProxyAccountRecord, disabled: boolean): DBProxyAccountPayload {
-  const database = databaseName({}, account);
-  return {
-    username: accountUsername(account),
-    database: database === '-' ? undefined : database,
-    remark: stringFrom(account.remark).trim() || undefined,
-    disabled
-  };
-}
-
-function handleProxyProtocolChange() {
-  proxyForm.listen_port = defaultListenPort(proxyForm.protocol);
-  proxyForm.upstream_port = defaultUpstreamPort(proxyForm.protocol);
-}
-
-async function openCreateProxyDialog() {
-  editingProxyName.value = null;
-  proxyMorePanels.value = [];
-  resetProxyForm();
-  proxyFormVisible.value = true;
-  await nextTick();
-  proxyFormRef.value?.clearValidate();
-}
-
-async function openEditProxyDialog(proxy: DBProxyRecord) {
-  editingProxyName.value = proxyName(proxy);
-  proxyMorePanels.value = [];
-  resetProxyForm(proxyToForm(proxy));
-  proxyFormVisible.value = true;
-  await nextTick();
-  proxyFormRef.value?.clearValidate();
-}
-
-async function submitProxy() {
-  const valid = await proxyFormRef.value?.validate().catch(() => false);
-
-  if (!valid) {
+async function writeClipboard(value: string) {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(value);
     return;
   }
-
-  submittingProxy.value = true;
+  const textarea = document.createElement('textarea');
+  textarea.value = value;
+  textarea.setAttribute('readonly', 'true');
+  textarea.style.position = 'fixed';
+  textarea.style.top = '-9999px';
+  document.body.appendChild(textarea);
+  textarea.select();
   try {
-    const id = editingProxyName.value;
-    if (id) {
-      await apiClient.updateDBProxy(id, buildProxyPayload());
+    if (!document.execCommand('copy')) throw new Error('copy command failed');
+  } finally {
+    document.body.removeChild(textarea);
+  }
+}
+
+async function copyText(value: string) {
+  if (!value.trim()) {
+    ElMessage.warning('没有可复制的内容');
+    return;
+  }
+  try {
+    await writeClipboard(value);
+    ElMessage.success(t('database.account.copied'));
+  } catch {
+    ElMessage.warning('复制失败');
+  }
+}
+
+function copyAllConnect() {
+  if (!connectTarget.value) return;
+  const all = `Shell: ${connectCommand.value}\n${t('database.config.resource')}: ${connectResourceId.value}`;
+  copyText(all);
+}
+
+// Instance methods
+async function loadInstances() {
+  instancesLoading.value = true;
+  instanceError.value = '';
+  try {
+    const data = unwrapArray(await apiClient.getDBInstances());
+    // Collect unique groups
+    const groups = new Set<string>();
+    for (const inst of data) {
+      if (inst.group_name) groups.add(inst.group_name);
+    }
+    instanceGroupOptions.value = Array.from(groups).sort();
+    instances.value = data;
+    instanceTotal.value = data.length;
+  } catch (err) {
+    instances.value = [];
+    instanceError.value = err instanceof Error ? err.message : t('database.error.loadResources');
+  } finally {
+    instancesLoading.value = false;
+  }
+}
+
+async function openCreateInstanceDialog() {
+  editingInstanceId.value = null;
+  instanceMorePanels.value = [];
+  Object.assign(instanceForm, {
+    name: '',
+    protocol: 'mysql',
+    address: '',
+    group_name: '',
+    remark: ''
+  });
+  instanceDialogVisible.value = true;
+  await nextTick();
+  instanceFormRef.value?.clearValidate();
+}
+
+async function openEditInstanceDialog(inst: DBInstanceRecord) {
+  editingInstanceId.value = inst.id ?? null;
+  instanceMorePanels.value = [];
+  Object.assign(instanceForm, {
+    name: inst.name || '',
+    protocol: inst.protocol || 'mysql',
+    address: inst.address || '',
+    group_name: inst.group_name || '',
+    remark: inst.remark || ''
+  });
+  instanceDialogVisible.value = true;
+  await nextTick();
+  instanceFormRef.value?.clearValidate();
+}
+
+async function submitInstance() {
+  const valid = await instanceFormRef.value?.validate().catch(() => false);
+  if (!valid) return;
+  submittingInstance.value = true;
+  try {
+    const payload: DBInstancePayload = {
+      name: instanceForm.name.trim(),
+      protocol: instanceForm.protocol,
+      address: instanceForm.address.trim(),
+      group_name: instanceForm.group_name.trim() || undefined,
+      remark: instanceForm.remark.trim() || undefined
+    };
+    if (editingInstanceId.value) {
+      await apiClient.updateDBInstance(editingInstanceId.value, { ...payload, disabled: undefined });
       ElMessage.success('数据库实例已更新');
     } else {
-      await apiClient.createDBProxy(buildProxyPayload());
+      await apiClient.createDBInstance(payload);
       ElMessage.success('数据库实例已创建');
     }
-    proxyFormVisible.value = false;
-    await loadProxies();
+    instanceDialogVisible.value = false;
+    await loadInstances();
   } catch (err) {
-    ElMessage.error(err instanceof Error ? err.message : t('hosts.error.save'));
+    ElMessage.error(err instanceof Error ? err.message : '保存失败');
   } finally {
-    submittingProxy.value = false;
+    submittingInstance.value = false;
   }
 }
 
-async function toggleProxyStatus(proxy: DBProxyRecord) {
-  const name = proxyName(proxy);
-  const enabled = proxy.enabled !== true;
-  statusUpdatingKey.value = proxyStatusKey(proxy);
+async function toggleInstanceStatus(inst: DBInstanceRecord) {
+  const id = inst.id;
+  if (!id) return;
+  const newDisabled = !inst.disabled;
+  instanceStatusUpdatingId.value = id;
   try {
-    await apiClient.updateDBProxy(name, proxyRecordPayload(proxy, enabled));
-    ElMessage.success(enabled ? '数据库实例已启用' : '数据库实例已禁用');
-    await loadProxies();
-  } catch (err) {
-    ElMessage.error(err instanceof Error ? err.message : t('hosts.error.save'));
-  } finally {
-    statusUpdatingKey.value = '';
-  }
-}
-
-async function confirmDeleteProxy(proxy: DBProxyRecord) {
-  const name = proxyName(proxy);
-  try {
-    await ElMessageBox.confirm(`确认删除数据库实例“${name}”？实例下的数据库账号也会删除。`, '删除数据库实例', {
-      cancelButtonText: '取消',
-      confirmButtonText: '删除',
-      type: 'warning'
+    await apiClient.updateDBInstance(id, {
+      name: inst.name || '',
+      protocol: inst.protocol || 'mysql',
+      address: inst.address || '',
+      group_name: inst.group_name || undefined,
+      remark: inst.remark || undefined,
+      disabled: newDisabled
     });
+    ElMessage.success(newDisabled ? '数据库实例已禁用' : '数据库实例已启用');
+    await loadInstances();
+  } catch (err) {
+    ElMessage.error(err instanceof Error ? err.message : '保存失败');
+  } finally {
+    instanceStatusUpdatingId.value = '';
+  }
+}
+
+async function confirmDeleteInstance(inst: DBInstanceRecord) {
+  const id = inst.id;
+  if (!id) return;
+  try {
+    await ElMessageBox.confirm(
+      t('database.instance.deleteConfirm'),
+      t('database.instance.delete'),
+      { cancelButtonText: t('common.cancel'), confirmButtonText: t('common.delete'), type: 'warning' }
+    );
   } catch {
     return;
   }
-
-  deletingKey.value = name;
+  instanceDeletingId.value = id;
   try {
-    await apiClient.deleteDBProxy(name);
+    await apiClient.deleteDBInstance(id);
     ElMessage.success('数据库实例已删除');
-    if (selectedProxy.value && proxyName(selectedProxy.value) === name) {
-      selectedProxy.value = null;
+    if (selectedInstance.value?.id === id) {
+      selectedInstance.value = null;
       accounts.value = [];
-      accountsDialogVisible.value = false;
+      activeTab.value = 'instances';
     }
-    await loadProxies();
+    await loadInstances();
   } catch (err) {
     ElMessage.error(err instanceof Error ? err.message : t('hosts.error.delete'));
   } finally {
-    deletingKey.value = '';
+    instanceDeletingId.value = '';
   }
 }
 
-async function openAccountsDialog(proxy: DBProxyRecord) {
-  selectedProxy.value = proxy;
+function handleInstancePageSizeChange() {
+  instancePage.value = 1;
+  loadInstances();
+}
+
+// Account methods
+function openAccountsTab(inst: DBInstanceRecord) {
+  selectedInstance.value = inst;
   accounts.value = [];
   accountError.value = '';
-  accountsDialogVisible.value = true;
-  await loadSelectedProxyAccounts();
+  activeTab.value = 'accounts';
+  loadAccounts();
+  // Collect group options
+  loadAccountGroups();
 }
 
-async function loadSelectedProxyAccounts() {
-  const proxy = selectedProxy.value;
-  if (!proxy) {
-    return;
-  }
-
+async function loadAccounts() {
+  const inst = selectedInstance.value;
+  if (!inst?.id) return;
   accountsLoading.value = true;
   accountError.value = '';
-
   try {
-    accounts.value = unwrapArray(await apiClient.getDBProxyAccounts(proxyName(proxy)));
+    accounts.value = unwrapArray(await apiClient.getDBAccounts(inst.id));
   } catch (err) {
     accounts.value = [];
     accountError.value = err instanceof Error ? err.message : t('database.error.loadAccounts');
@@ -958,197 +767,170 @@ async function loadSelectedProxyAccounts() {
   }
 }
 
-async function openCreateAccountDialog(proxy: DBProxyRecord) {
-  selectedProxy.value = proxy;
-  editingAccountUsername.value = null;
-  accountMorePanels.value = [];
-  resetAccountForm();
-  accountFormVisible.value = true;
-  await nextTick();
-  accountFormRef.value?.clearValidate();
+async function loadAccountGroups() {
+  const inst = selectedInstance.value;
+  if (!inst?.id) return;
+  try {
+    const data = unwrapArray(await apiClient.getDBAccounts(inst.id));
+    const groups = new Set<string>();
+    for (const acc of data) {
+      if (acc.group_name) groups.add(acc.group_name);
+    }
+    accountGroupOptions.value = Array.from(groups).sort();
+  } catch {
+    // ignore
+  }
 }
 
-async function openEditAccountDialog(account: DBProxyAccountRecord) {
-  editingAccountUsername.value = accountUsername(account);
+async function openCreateAccountDialog() {
+  editingAccountId.value = null;
   accountMorePanels.value = [];
-  resetAccountForm(accountToForm(account));
-  accountFormVisible.value = true;
+  expireShortcutActive.value = '';
+  Object.assign(accountForm, {
+    upstream_username: '',
+    upstream_password: '',
+    group_name: '',
+    remark: '',
+    expires_at: ''
+  });
+  accountDialogVisible.value = true;
   await nextTick();
   accountFormRef.value?.clearValidate();
+  // Dynamic rule: password required only for create
+  accountRules.upstream_password = [{ required: true, message: '请输入目标密码', trigger: 'blur' }];
+}
+
+async function openEditAccountDialog(acc: DBAccountRecord) {
+  editingAccountId.value = acc.id ?? null;
+  accountMorePanels.value = [];
+  expireShortcutActive.value = '';
+  Object.assign(accountForm, {
+    upstream_username: acc.upstream_username || '',
+    upstream_password: '',
+    group_name: acc.group_name || '',
+    remark: acc.remark || '',
+    expires_at: acc.expires_at || ''
+  });
+  accountDialogVisible.value = true;
+  await nextTick();
+  accountFormRef.value?.clearValidate();
+  // Dynamic rule: password optional for edit
+  accountRules.upstream_password = [];
+}
+
+function applyExpireShortcut(value: string) {
+  expireShortcutActive.value = value;
+  if (value === 'permanent') {
+    accountForm.expires_at = '';
+  } else {
+    accountForm.expires_at = computeExpiry(value);
+  }
 }
 
 async function submitAccount() {
-  const proxy = selectedProxy.value;
-  if (!proxy) {
+  const inst = selectedInstance.value;
+  if (!inst?.id) {
     ElMessage.error('请先选择数据库实例');
     return;
   }
-
   const valid = await accountFormRef.value?.validate().catch(() => false);
-  if (!valid) {
-    return;
-  }
-
+  if (!valid) return;
   submittingAccount.value = true;
   try {
-    const username = editingAccountUsername.value;
-    if (username) {
-      await apiClient.updateDBProxyAccount(proxyName(proxy), username, buildAccountPayload());
+    const basePayload: DBAccountPayload = {
+      upstream_username: accountForm.upstream_username.trim(),
+      upstream_password: accountForm.upstream_password,
+      group_name: accountForm.group_name.trim() || undefined,
+      remark: accountForm.remark.trim() || undefined,
+      expires_at: accountForm.expires_at || undefined
+    };
+    if (editingAccountId.value) {
+      const updatePayload: DBAccountUpdatePayload = {
+        ...basePayload,
+        upstream_password: accountForm.upstream_password || undefined
+      };
+      await apiClient.updateDBAccount(editingAccountId.value, updatePayload);
       ElMessage.success('数据库账号已更新');
     } else {
-      await apiClient.createDBProxyAccount(proxyName(proxy), buildAccountPayload());
+      await apiClient.createDBAccount(inst.id, basePayload);
       ElMessage.success('数据库账号已创建');
     }
-    accountFormVisible.value = false;
-    await Promise.all([loadProxies(), loadSelectedProxyAccounts()]);
+    accountDialogVisible.value = false;
+    await Promise.all([loadInstances(), loadAccounts(), loadAccountGroups()]);
   } catch (err) {
-    ElMessage.error(err instanceof Error ? err.message : t('hosts.error.save'));
+    ElMessage.error(err instanceof Error ? err.message : '保存失败');
   } finally {
     submittingAccount.value = false;
   }
 }
 
-async function toggleAccountStatus(account: DBProxyAccountRecord) {
-  const proxy = selectedProxy.value;
-  const username = accountUsername(account);
-
-  if (!proxy || !username) {
-    return;
-  }
-
-  const disabled = account.disabled !== true;
-  statusUpdatingKey.value = accountStatusKey(account);
+async function toggleAccountStatus(acc: DBAccountRecord) {
+  const id = acc.id;
+  if (!id) return;
+  const newDisabled = !acc.disabled;
+  accountStatusUpdatingId.value = id;
   try {
-    await apiClient.updateDBProxyAccount(proxyName(proxy), username, accountRecordPayload(account, disabled));
-    ElMessage.success(disabled ? '数据库账号已禁用' : '数据库账号已启用');
-    await Promise.all([loadProxies(), loadSelectedProxyAccounts()]);
+    await apiClient.updateDBAccount(id, {
+      upstream_username: acc.upstream_username || '',
+      disabled: newDisabled
+    });
+    ElMessage.success(newDisabled ? '数据库账号已禁用' : '数据库账号已启用');
+    await loadAccounts();
   } catch (err) {
-    ElMessage.error(err instanceof Error ? err.message : t('hosts.error.save'));
+    ElMessage.error(err instanceof Error ? err.message : '保存失败');
   } finally {
-    statusUpdatingKey.value = '';
+    accountStatusUpdatingId.value = '';
   }
 }
 
-async function confirmDeleteAccount(account: DBProxyAccountRecord) {
-  const proxy = selectedProxy.value;
-  const username = accountUsername(account);
-
-  if (!proxy || !username) {
-    return;
-  }
-
+async function confirmDeleteAccount(acc: DBAccountRecord) {
+  const id = acc.id;
+  if (!id) return;
   try {
-    await ElMessageBox.confirm(`确认删除数据库账号“${username}”？`, '删除数据库账号', {
-      cancelButtonText: '取消',
-      confirmButtonText: '删除',
-      type: 'warning'
-    });
+    await ElMessageBox.confirm(
+      t('database.account.deleteConfirm'),
+      t('database.account.delete'),
+      { cancelButtonText: t('common.cancel'), confirmButtonText: t('common.delete'), type: 'warning' }
+    );
   } catch {
     return;
   }
-
-  deletingKey.value = accountDeleteKey(account);
+  accountDeletingId.value = id;
   try {
-    await apiClient.deleteDBProxyAccount(proxyName(proxy), username);
+    await apiClient.deleteDBAccount(id);
     ElMessage.success('数据库账号已删除');
-    await Promise.all([loadProxies(), loadSelectedProxyAccounts()]);
+    await Promise.all([loadInstances(), loadAccounts()]);
   } catch (err) {
     ElMessage.error(err instanceof Error ? err.message : t('hosts.error.delete'));
   } finally {
-    deletingKey.value = '';
+    accountDeletingId.value = '';
   }
 }
 
-function openConnectionDialog(account: DBProxyAccountRecord) {
-  const proxy = selectedProxy.value;
-
-  if (!proxy) {
-    return;
-  }
-
-  selectedConfig.value = { proxy, account };
-  configDialogVisible.value = true;
+// Connect dialog
+function openConnectDialog(acc: DBAccountRecord) {
+  connectTarget.value = acc;
+  connectDialogVisible.value = true;
 }
 
-function configText(proxy: DBProxyRecord, account: DBProxyAccountRecord): string {
-  return [
-    `${t('database.column.protocol')}: ${proxy.protocol || t('common.none')}`,
-    `${t('database.column.listen')}: ${proxy.listen_addr || t('common.none')}`,
-    `${t('database.column.upstream')}: ${proxy.upstream_addr || t('common.none')}`,
-    `${t('database.column.account')}: ${accountUsername(account) || t('common.none')}`,
-    `${t('database.column.resourceType')}: ${accountResourceType(account)}`,
-    `${t('database.column.resourceId')}: ${accountResourceId(account)}`,
-    ...buildConnectionItems(proxy, account).map((item) => `${item.label}: ${item.value}`)
-  ].join('\n');
-}
-
-async function writeClipboard(value: string) {
-  if (navigator.clipboard?.writeText) {
-    await navigator.clipboard.writeText(value);
-    return;
-  }
-
-  const textarea = document.createElement('textarea');
-  textarea.value = value;
-  textarea.setAttribute('readonly', 'true');
-  textarea.style.position = 'fixed';
-  textarea.style.top = '-9999px';
-  document.body.appendChild(textarea);
-  textarea.select();
-
-  try {
-    if (!document.execCommand('copy')) {
-      throw new Error('copy command failed');
-    }
-  } finally {
-    document.body.removeChild(textarea);
+// Tab change
+function handleTabChange(tabName: string | number) {
+  if (tabName === 'instances') {
+    loadInstances();
   }
 }
 
-async function copyText(value: string) {
-  if (!value.trim()) {
-    ElMessage.warning(t('database.message.noCopyContent'));
-    return;
+// Watch for instance selection changes to reload
+watch(selectedInstance, (inst) => {
+  if (inst && activeTab.value === 'accounts') {
+    loadAccounts();
+    loadAccountGroups();
   }
+});
 
-  try {
-    await writeClipboard(value);
-    ElMessage.success(t('quickConnect.message.copied'));
-  } catch {
-    ElMessage.warning(t('quickConnect.error.copy'));
-  }
-}
-
-async function copySelectedConfig() {
-  const selection = selectedConfig.value;
-
-  if (!selection) {
-    return;
-  }
-
-  await copyText(configText(selection.proxy, selection.account));
-}
-
-async function loadProxies() {
-  loading.value = true;
-  error.value = '';
-  const selectedName = selectedProxy.value ? proxyName(selectedProxy.value) : '';
-
-  try {
-    const nextProxies = unwrapArray(await apiClient.getDBProxies());
-    proxies.value = nextProxies;
-    if (selectedName) {
-      selectedProxy.value = nextProxies.find((proxy) => proxyName(proxy) === selectedName) ?? selectedProxy.value;
-    }
-  } catch (err) {
-    proxies.value = [];
-    error.value = err instanceof Error ? err.message : t('database.error.loadResources');
-  } finally {
-    loading.value = false;
-  }
-}
-
-onMounted(loadProxies);
+onMounted(() => {
+  loadInstances();
+});
 </script>
 
 <style scoped>
@@ -1156,6 +938,16 @@ onMounted(loadProxies);
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
+}
+
+.toolbar-breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.breadcrumb-separator {
+  color: #98a2b3;
 }
 
 .primary-cell {
@@ -1168,6 +960,12 @@ onMounted(loadProxies);
   color: #475467;
   font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
   font-size: 12px;
+}
+
+.pagination-row {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 16px;
 }
 
 .dialog-stack {
@@ -1228,19 +1026,20 @@ onMounted(loadProxies);
   grid-column: 1 / -1;
 }
 
-.switch-field :deep(.el-form-item__content) {
-  min-height: 32px;
-  align-items: center;
+.expire-shortcuts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
 }
 
-.config-list {
-  display: grid;
-  gap: 14px;
+.expire-picker {
+  width: 100%;
 }
 
 .config-row {
   display: grid;
-  grid-template-columns: minmax(150px, 210px) minmax(0, 1fr);
+  grid-template-columns: minmax(100px, 140px) minmax(0, 1fr);
   gap: 12px;
   align-items: center;
 }

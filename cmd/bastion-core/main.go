@@ -71,7 +71,7 @@ func main() {
 		appStore = store.NewDBStore(metadataDB, cfg.Admin.Token)
 		logger.Info("using database-backed store")
 	} else {
-		adapter, err := store.NewStaticAdapter(cfg, metadataDB)
+		adapter, err := store.NewStaticAdapter(cfg)
 		if err != nil {
 			logger.Error("failed to initialize static store", "error", err)
 			os.Exit(1)
@@ -93,17 +93,18 @@ func main() {
 		errCh <- sshSrv.ListenAndServe(ctx)
 	}()
 
-	dbGateway := dbproxy.NewGateway(cfg.DatabaseGateway, appStore, cfg.ReplayDir, logger, metadataDB)
+	dbManager := dbproxy.NewManager(cfg.DatabaseProxies, cfg.ReplayDir, logger, metadataDB)
 
 	if cfg.Admin.Enabled {
 		adminSrv := admin.New(cfg, appStore, logger, metadataDB)
+		adminSrv.SetDatabaseProxyApplier(dbManager)
 		go func() {
 			errCh <- adminSrv.ListenAndServe(ctx)
 		}()
 	}
 
 	go func() {
-		errCh <- dbGateway.ListenAndServe(ctx)
+		errCh <- dbManager.ListenAndServe(ctx)
 	}()
 
 	select {

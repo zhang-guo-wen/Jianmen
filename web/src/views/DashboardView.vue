@@ -19,7 +19,7 @@
       </el-card>
       <el-card class="metric-card" shadow="never">
         <span>{{ t('dashboard.metric.dbProxy') }}</span>
-        <div class="metric-value">{{ dbProxyLabel }}</div>
+        <div class="metric-value">{{ dbInstancesLabel }}</div>
       </el-card>
       <el-card class="metric-card" shadow="never">
         <span>{{ t('dashboard.metric.audit') }}</span>
@@ -65,7 +65,7 @@ import {
   apiClient,
   type ApiEnvelope,
   type DBConnectionRecord,
-  type DBProxyRecord,
+  type DBInstanceRecord,
   type HealthResponse,
   type RBACPermissionRecord,
   type RBACRoleRecord,
@@ -87,7 +87,7 @@ const health = ref<HealthResponse | null>(null);
 const targets = ref<TargetRecord[]>([]);
 const sessions = ref<SessionRecord[]>([]);
 const dbConnections = ref<DBConnectionRecord[]>([]);
-const dbProxies = ref<DBProxyRecord[]>([]);
+const dbInstances = ref<DBInstanceRecord[]>([]);
 const roles = ref<RBACRoleRecord[]>([]);
 const permissions = ref<RBACPermissionRecord[]>([]);
 const loading = ref(false);
@@ -96,7 +96,7 @@ const errors = reactive({
   targets: '',
   sessions: '',
   db: '',
-  dbProxies: '',
+  dbInstances: '',
   rbac: ''
 });
 
@@ -105,11 +105,11 @@ const targetsLabel = computed(() => countOrFallback(targets.value.length, errors
 const activeSessions = computed(() => sessions.value.filter(isActiveSession));
 const activeSessionsLabel = computed(() => countOrFallback(activeSessions.value.length, errors.sessions));
 const rbacLabel = computed(() => (errors.rbac ? t('dashboard.status.unavailable') : `${roles.value.length}/${permissions.value.length}`));
-const enabledDBProxies = computed(() => dbProxies.value.filter((proxy) => proxy.enabled));
-const dbProxyLabel = computed(() =>
-  errors.dbProxies
+const enabledDBInstances = computed(() => dbInstances.value.filter((inst) => !inst.disabled));
+const dbInstancesLabel = computed(() =>
+  errors.dbInstances
     ? t('dashboard.status.unavailable')
-    : `${enabledDBProxies.value.length}/${dbProxies.value.length}`
+    : `${enabledDBInstances.value.length}/${dbInstances.value.length}`
 );
 const auditLabel = computed(() => {
   if (errors.sessions && errors.db) {
@@ -138,15 +138,15 @@ const serviceRows = computed<ServiceRow[]>(() => [
   },
   {
     name: t('dashboard.service.dbProxy'),
-    status: errors.dbProxies ? 'unavailable' : enabledDBProxies.value.length ? 'ok' : 'warning',
-    summary: errors.dbProxies
+    status: errors.dbInstances ? 'unavailable' : enabledDBInstances.value.length ? 'ok' : 'warning',
+    summary: errors.dbInstances
       ? t('dashboard.status.unavailable')
       : formatText(t('dashboard.summary.dbProxy'), {
           count: String(dbConnections.value.length),
-          enabled: String(enabledDBProxies.value.length),
-          total: String(dbProxies.value.length)
+          enabled: String(enabledDBInstances.value.length),
+          total: String(dbInstances.value.length)
         }),
-    detail: errors.dbProxies || dbProxyDetail.value
+    detail: errors.dbInstances || dbInstancesDetail.value
   },
   {
     name: t('dashboard.service.audit'),
@@ -167,15 +167,15 @@ const healthStatus = computed<ServiceStatus>(() => {
 
   return status === 'ok' || status === 'healthy' ? 'ok' : 'warning';
 });
-const dbProxyDetail = computed(() => {
-  if (!dbProxies.value.length) {
-    return 'No database proxies configured';
+const dbInstancesDetail = computed(() => {
+  if (!dbInstances.value.length) {
+    return 'No database instances configured';
   }
 
-  return dbProxies.value
-    .map((proxy) => {
-      const state = proxy.enabled ? t('common.enabled') : t('common.disabled');
-      return `${proxy.name || proxy.protocol || '-'} ${state} ${proxy.listen_addr || '-'} -> ${proxy.upstream_addr || '-'}`;
+  return dbInstances.value
+    .map((inst) => {
+      const state = inst.disabled ? t('common.disabled') : t('common.enabled');
+      return `${inst.name || inst.protocol || '-'} ${state} ${inst.address || '-'}`;
     })
     .join('; ');
 });
@@ -272,14 +272,14 @@ async function loadDBConnections() {
   }
 }
 
-async function loadDBProxies() {
-  errors.dbProxies = '';
+async function loadDBInstances() {
+  errors.dbInstances = '';
 
   try {
-    dbProxies.value = unwrapArray(await apiClient.getDBProxies());
+    dbInstances.value = unwrapArray(await apiClient.getDBInstances());
   } catch (err) {
-    dbProxies.value = [];
-    errors.dbProxies = err instanceof Error ? err.message : 'Unable to load database proxy configuration';
+    dbInstances.value = [];
+    errors.dbInstances = err instanceof Error ? err.message : 'Unable to load database instance configuration';
   }
 }
 
@@ -308,7 +308,7 @@ async function loadOverview() {
       loadHealth(),
       loadTargets(),
       loadSessions(),
-      loadDBProxies(),
+      loadDBInstances(),
       loadDBConnections(),
       loadRBACSummary()
     ]);

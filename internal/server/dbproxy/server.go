@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"gorm.io/gorm"
+	"jianmen/internal/access"
 	"jianmen/internal/config"
 	"jianmen/internal/model"
 	rbaccheck "jianmen/internal/rbac"
@@ -23,23 +24,18 @@ import (
 
 type Gateway struct {
 	cfg               config.DatabaseGatewayConfig
-	store             databaseAccountResolver
+	store             *access.StaticStore
 	db                *gorm.DB
 	replayDir         string
 	logger            *slog.Logger
 	permissionChecker permissionChecker
 }
 
-type databaseAccountResolver interface {
-	DatabaseAccountByUniqueName(uniqueName string) (*model.DatabaseAccount, error)
-	AuthenticateDirect(ctx context.Context, username, password string) (model.User, error)
-}
-
 type permissionChecker interface {
 	HasPermission(userID, action, resourceType, resourceID string) (bool, error)
 }
 
-func NewGateway(cfg config.DatabaseGatewayConfig, store databaseAccountResolver, replayDir string, logger *slog.Logger, db *gorm.DB) *Gateway {
+func NewGateway(cfg config.DatabaseGatewayConfig, store *access.StaticStore, replayDir string, logger *slog.Logger, db *gorm.DB) *Gateway {
 	if logger == nil {
 		logger = slog.Default()
 	}

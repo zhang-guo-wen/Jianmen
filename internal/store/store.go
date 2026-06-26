@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"time"
 
 	"golang.org/x/crypto/ssh"
 
@@ -87,36 +88,39 @@ func (t TargetConfig) Addr() string {
 	return formatHostAddress(t.Host, t.Port)
 }
 
-type DatabaseProxyView struct {
-	Name                 string                           `json:"name"`
-	Enabled              bool                             `json:"enabled"`
-	Protocol             string                           `json:"protocol"`
-	ListenAddr           string                           `json:"listen_addr"`
-	UpstreamAddr         string                           `json:"upstream_addr"`
-	Remark               string                           `json:"remark,omitempty"`
-	AccountCount         int                              `json:"account_count"`
-	AllowedUsersEnforced bool                             `json:"allowed_users_enforced"`
-	AllowedUsers         []string                         `json:"allowed_users,omitempty"`
-	QueryPolicy          config.DatabaseQueryPolicyConfig `json:"query_policy"`
-	Static               bool                             `json:"static"`
+type DatabaseInstanceView struct {
+	ID           string `json:"id"`
+	Name         string `json:"name"`
+	Protocol     string `json:"protocol"`
+	Address      string `json:"address"`
+	GroupName    string `json:"group_name,omitempty"`
+	Remark       string `json:"remark,omitempty"`
+	Disabled     bool   `json:"disabled"`
+	AccountCount int    `json:"account_count"`
+	CreatedAt    string `json:"created_at,omitempty"`
+	UpdatedAt    string `json:"updated_at,omitempty"`
 }
 
 type DatabaseAccountView struct {
-	Username     string `json:"username"`
-	Database     string `json:"database,omitempty"`
-	Remark       string `json:"remark,omitempty"`
-	Disabled     bool   `json:"disabled"`
-	ResourceType string `json:"resource_type"`
-	ResourceID   string `json:"resource_id"`
-	Static       bool   `json:"static"`
+	ID               string     `json:"id"`
+	InstanceID       string     `json:"instance_id"`
+	UniqueName       string     `json:"unique_name"`
+	UpstreamUsername string     `json:"upstream_username"`
+	GroupName        string     `json:"group_name,omitempty"`
+	Remark           string     `json:"remark,omitempty"`
+	ExpiresAt        *time.Time `json:"expires_at,omitempty"`
+	Disabled         bool       `json:"disabled"`
+	CreatedAt        string     `json:"created_at,omitempty"`
+	UpdatedAt        string     `json:"updated_at,omitempty"`
 }
 
 var (
-	ErrTargetNotFound    = errSentinel("target not found")
-	ErrHostNotFound      = errSentinel("host not found")
-	ErrDBProxyNotFound   = errSentinel("database proxy not found")
-	ErrDBAccountNotFound = errSentinel("database account not found")
-	ErrTargetUnavailable = errSentinel("target unavailable")
+	ErrTargetNotFound      = errSentinel("target not found")
+	ErrHostNotFound        = errSentinel("host not found")
+	ErrDBProxyNotFound     = errSentinel("database proxy not found")
+	ErrDBAccountNotFound   = errSentinel("database account not found")
+	ErrDBInstanceNotFound  = errSentinel("database instance not found")
+	ErrTargetUnavailable   = errSentinel("target unavailable")
 )
 
 type sentinelError struct{ msg string }
@@ -145,17 +149,20 @@ type Store interface {
 	UpdateTarget(id string, target config.Target) (TargetView, error)
 	DeleteTarget(id string) error
 
-	DatabaseProxies() []DatabaseProxyView
-	DatabaseProxyConfigs() []config.DatabaseProxyConfig
-	DatabaseProxy(name string) (DatabaseProxyView, error)
-	AddDatabaseProxy(proxy config.DatabaseProxyConfig) (DatabaseProxyView, error)
-	UpdateDatabaseProxy(name string, proxy config.DatabaseProxyConfig) (DatabaseProxyView, error)
-	DeleteDatabaseProxy(name string) error
+	DatabaseInstances() []DatabaseInstanceView
+	DatabaseInstance(id string) (DatabaseInstanceView, error)
+	AddDatabaseInstance(name, protocol, address, groupName, remark string) (DatabaseInstanceView, error)
+	UpdateDatabaseInstance(id, name, protocol, address, groupName, remark string, disabled bool) (DatabaseInstanceView, error)
+	DeleteDatabaseInstance(id string) error
 
-	DatabaseAccounts(proxyName string) ([]DatabaseAccountView, error)
-	AddDatabaseAccount(proxyName string, account config.DatabaseAccountConfig) (DatabaseAccountView, error)
-	UpdateDatabaseAccount(proxyName, username string, account config.DatabaseAccountConfig) (DatabaseAccountView, error)
-	DeleteDatabaseAccount(proxyName, username string) error
+	InstanceAccounts(instanceID string) ([]DatabaseAccountView, error)
+	DatabaseAccount(id string) (DatabaseAccountView, error)
+	AddDatabaseAccount(instanceID, upstreamUsername, upstreamPassword, groupName, remark string, expiresAt *time.Time) (DatabaseAccountView, error)
+	UpdateDatabaseAccount(id, upstreamUsername, upstreamPassword, groupName, remark string, expiresAt *time.Time, disabled bool) (DatabaseAccountView, error)
+	DeleteDatabaseAccount(id string) error
+
+	DatabaseAccountByUniqueName(uniqueName string) (*model.DatabaseAccount, error)
+	AuthenticateDirect(ctx context.Context, username, password string) (model.User, error)
 
 	DefaultTarget(ctx context.Context, user model.User) (TargetConfig, error)
 }

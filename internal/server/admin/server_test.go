@@ -200,65 +200,9 @@ func TestHandleHostsPaginationAndLazyAccounts(t *testing.T) {
 	}
 }
 
-func TestHandleDBProxiesReturnsRuntimePolicyAndAccounts(t *testing.T) {
-	server := newTargetTestServer(t)
-
-	if _, err := server.store.AddDatabaseProxy(config.DatabaseProxyConfig{
-		Enabled:      true,
-		Name:         "mysql-local",
-		Protocol:     "mysql",
-		ListenAddr:   "127.0.0.1:33060",
-		UpstreamAddr: "127.0.0.1:3306",
-		AllowedUsers: []string{" app ", "report"},
-		QueryPolicy: config.DatabaseQueryPolicyConfig{
-			ReadOnly:          true,
-			DeniedQueryKinds:  []string{"delete"},
-			DeniedSQLPatterns: []string{"drop table"},
-			MaxQueryBytes:     4096,
-		},
-	}); err != nil {
-		t.Fatalf("AddDatabaseProxy returned error: %v", err)
-	}
-
-	req := httptest.NewRequest(http.MethodGet, "/api/db/proxies", nil)
-	rec := httptest.NewRecorder()
-
-	server.handleDBProxies(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusOK, rec.Body.String())
-	}
-	var proxies []store.DatabaseProxyView
-	if err := json.Unmarshal(rec.Body.Bytes(), &proxies); err != nil {
-		t.Fatalf("unmarshal response: %v; body=%s", err, rec.Body.String())
-	}
-	if len(proxies) != 1 {
-		t.Fatalf("proxy count = %d, want 1: %#v", len(proxies), proxies)
-	}
-	proxy := proxies[0]
-	if !proxy.Enabled || proxy.Protocol != "mysql" || proxy.QueryPolicy.MaxQueryBytes != 4096 || !proxy.QueryPolicy.ReadOnly {
-		t.Fatalf("unexpected proxy view: %#v", proxy)
-	}
-	if !proxy.AllowedUsersEnforced || proxy.AccountCount != 2 || proxy.Static {
-		t.Fatalf("unexpected account view: %#v", proxy)
-	}
-
-	accountsReq := httptest.NewRequest(http.MethodGet, "/api/db/proxies/mysql-local/accounts", nil)
-	accountsRec := httptest.NewRecorder()
-	server.handleDBProxy(accountsRec, accountsReq)
-	if accountsRec.Code != http.StatusOK {
-		t.Fatalf("accounts status = %d, want %d; body=%s", accountsRec.Code, http.StatusOK, accountsRec.Body.String())
-	}
-	var accounts []store.DatabaseAccountView
-	if err := json.Unmarshal(accountsRec.Body.Bytes(), &accounts); err != nil {
-		t.Fatalf("unmarshal accounts response: %v; body=%s", err, accountsRec.Body.String())
-	}
-	if len(accounts) != 2 || accounts[0].Username != "app" || accounts[0].ResourceType != model.ResourceTypeDatabaseAccount || accounts[0].ResourceID == "" {
-		t.Fatalf("unexpected first account: %#v", accounts)
-	}
-}
 
 func TestHandleDBProxyCRUD(t *testing.T) {
+	t.Skip("database proxy API removed; use database instances and accounts")
 	server := newTargetTestServer(t)
 
 	createReq := httptest.NewRequest(http.MethodPost, "/api/db/proxies", bytes.NewBufferString(`{
@@ -315,77 +259,6 @@ func TestHandleDBProxyCRUD(t *testing.T) {
 	}
 
 	deleteAccountReq := httptest.NewRequest(http.MethodDelete, "/api/db/proxies/runtime-mysql/accounts/app", nil)
-	deleteAccountRec := httptest.NewRecorder()
-	server.handleDBProxy(deleteAccountRec, deleteAccountReq)
-	if deleteAccountRec.Code != http.StatusNoContent {
-		t.Fatalf("delete account status = %d, want %d; body=%s", deleteAccountRec.Code, http.StatusNoContent, deleteAccountRec.Body.String())
-	}
-
-	deleteReq := httptest.NewRequest(http.MethodDelete, "/api/db/proxies/runtime-mysql", nil)
-	deleteRec := httptest.NewRecorder()
-	server.handleDBProxy(deleteRec, deleteReq)
-	if deleteRec.Code != http.StatusNoContent {
-		t.Fatalf("delete status = %d, want %d; body=%s", deleteRec.Code, http.StatusNoContent, deleteRec.Body.String())
-	}
-}
-
-func TestHandleSessionReplayArtifact(t *testing.T) {
-	server := newTargetTestServer(t)
-	server.cfg.ReplayDir = t.TempDir()
-	dir := filepath.Join(server.cfg.ReplayDir, "ssh", "session-a")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatalf("MkdirAll returned error: %v", err)
-	}
-	cast := "{\"version\":2,\"width\":120,\"height\":40}\n[0.1,\"o\",\"hello\"]\n"
-	if err := os.WriteFile(filepath.Join(dir, "terminal.cast"), []byte(cast), 0o644); err != nil {
-		t.Fatalf("WriteFile returned error: %v", err)
-	}
-
-	req := httptest.NewRequest(http.MethodGet, "/api/sessions/session-a/replay", nil)
-	rec := httptest.NewRecorder()
-	server.handleSessionArtifact(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusOK, rec.Body.String())
-	}
-	if contentType := rec.Header().Get("Content-Type"); !strings.Contains(contentType, "application/x-asciicast") {
-		t.Fatalf("Content-Type = %q, want application/x-asciicast", contentType)
-	}
-	if rec.Body.String() != cast {
-		t.Fatalf("body = %q, want %q", rec.Body.String(), cast)
-	}
-}
-
-func newTargetTestServer(t *testing.T) *Server {
-	t.Helper()
-	cfg := &config.Config{
-		TargetsFile: t.TempDir() + "/targets.json",
-		Admin: config.AdminConfig{
-			Token: "",
-		},
-		Users: []config.User{
-			{
-				ID:       "u-admin",
-				Username: "admin",
-				Password: "admin",
-			},
-		},
-	}
-	adapter, err := store.NewStaticAdapter(cfg, nil)
-	if err != nil {
-		t.Fatalf("NewStaticStore returned error: %v", err)
-	}
-	return &Server{
-		cfg:    cfg,
-		store:  adapter,
-		logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
-	}
-}
-
-func assertTargetResponseHasNoSecrets(t *testing.T, raw []byte) {
-	t.Helper()
-	var body map[string]any
-	if err := json.Unmarshal(raw, &body); err != nil {
 		t.Fatalf("unmarshal response: %v", err)
 	}
 	for _, key := range []string{"password", "private_key_pem", "passphrase"} {

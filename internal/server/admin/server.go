@@ -25,16 +25,11 @@ import (
 )
 
 type Server struct {
-	cfg            *config.Config
-	store          store.Store
-	db             *gorm.DB
-	rbacChecker    *rbac.Checker
-	logger         *slog.Logger
-	dbProxyApplier databaseProxyApplier
-}
-
-type databaseProxyApplier interface {
-	Apply([]config.DatabaseProxyConfig) error
+	cfg         *config.Config
+	store       store.Store
+	db          *gorm.DB
+	rbacChecker *rbac.Checker
+	logger      *slog.Logger
 }
 
 type sessionListItem struct {
@@ -58,24 +53,6 @@ type dbConnectionListItem struct {
 	Path         string `json:"path"`
 }
 
-type dbProxyListItem struct {
-	Name                 string                           `json:"name"`
-	Enabled              bool                             `json:"enabled"`
-	Protocol             string                           `json:"protocol"`
-	ListenAddr           string                           `json:"listen_addr"`
-	UpstreamAddr         string                           `json:"upstream_addr"`
-	AllowedUsersEnforced bool                             `json:"allowed_users_enforced"`
-	AllowedUsers         []string                         `json:"allowed_users,omitempty"`
-	Accounts             []dbProxyAccountListItem         `json:"accounts,omitempty"`
-	QueryPolicy          config.DatabaseQueryPolicyConfig `json:"query_policy"`
-}
-
-type dbProxyAccountListItem struct {
-	Username     string `json:"username"`
-	ResourceType string `json:"resource_type"`
-	ResourceID   string `json:"resource_id"`
-}
-
 type pagedHostList struct {
 	Data     []store.HostView `json:"data"`
 	Page     int               `json:"page"`
@@ -96,10 +73,6 @@ func New(cfg *config.Config, store store.Store, logger *slog.Logger, dbs ...*gor
 	return &Server{cfg: cfg, store: store, db: db, rbacChecker: checker, logger: logger}
 }
 
-func (s *Server) SetDatabaseProxyApplier(applier databaseProxyApplier) {
-	s.dbProxyApplier = applier
-}
-
 func (s *Server) ListenAndServe(ctx context.Context) error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", s.handleIndex)
@@ -112,8 +85,9 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 	mux.HandleFunc(webTerminalPath, s.handleWebTerminal)
 	mux.HandleFunc("/api/sessions", s.withAuthAndUser(s.handleSessions))
 	mux.HandleFunc("/api/sessions/", s.withAuthAndUser(s.handleSessionArtifact))
-	mux.HandleFunc("/api/db/proxies", s.withAuthAndUser(s.handleDBProxies))
-	mux.HandleFunc("/api/db/proxies/", s.withAuthAndUser(s.handleDBProxy))
+	mux.HandleFunc("/api/db/instances", s.withAuthAndUser(s.handleDBInstances))
+	mux.HandleFunc("/api/db/instances/", s.withAuthAndUser(s.handleDBInstance))
+	mux.HandleFunc("/api/db/accounts/", s.withAuthAndUser(s.handleDBAccount))
 	mux.HandleFunc("/api/db/connections", s.withAuthAndUser(s.handleDBConnections))
 	mux.HandleFunc("/api/db/connections/", s.withAuthAndUser(s.handleDBConnectionArtifact))
 	mux.HandleFunc("/api/rbac/roles", s.withAuthAndUser(s.handleRBACRoles))
@@ -419,97 +393,95 @@ func (s *Server) handleUpdateTarget(w http.ResponseWriter, r *http.Request, id s
 	writeJSON(w, http.StatusOK, view)
 }
 
-func (s *Server) handleDBProxies(w http.ResponseWriter, r *http.Request) {
+// -- db instances --
+
+func (s *Server) handleDBInstances(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
 		if !s.requirePermission(r, rbac.ActionDBProxyView) {
 			s.forbidden(w)
 			return
 		}
-		writeJSON(w, http.StatusOK, s.store.DatabaseProxies())
+		writeJSON(w, http.StatusOK, s.store.DatabaseInstances())
 	case http.MethodPost:
 		if !s.requirePermission(r, rbac.ActionDBProxyCreate) {
 			s.forbidden(w)
 			return
 		}
-		s.handleCreateDBProxy(w, r)
+		s.handleCreateDBInstance(w, r)
 	default:
 		w.Header().Set("Allow", "GET, POST")
 		writeErrorText(w, http.StatusMethodNotAllowed, "method not allowed")
 	}
 }
 
-func (s *Server) handleCreateDBProxy(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleCreateDBInstance(w http.ResponseWriter, r *http.Request) {
 	defer r.Body.Close()
 	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
-	var proxy config.DatabaseProxyConfig
-	if err := json.NewDecoder(r.Body).Decode(&proxy); err != nil {
+	var payload struct {
+		Name      string `json:"name"`
+		Protocol  string `json:"protocol"`
+		Address   string `json:"address"`
+		GroupName string `json:"group_name"`
+		Remark    string `json:"remark"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	view, err := s.store.AddDatabaseProxy(proxy)
+	view, err := s.store.AddDatabaseInstance(payload.Name, payload.Protocol, payload.Address, payload.GroupName, payload.Remark)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err)
-		return
-	}
-	if err := s.applyDatabaseProxies(); err != nil {
-		writeError(w, http.StatusConflict, err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, view)
 }
 
-func (s *Server) handleDBProxy(w http.ResponseWriter, r *http.Request) {
-	name, child, account, ok := dbProxyPathParts(r.URL.Path)
+func (s *Server) handleDBInstance(w http.ResponseWriter, r *http.Request) {
+	id, child, ok := dbInstancePathParts(r.URL.Path)
 	if !ok {
 		writeErrorText(w, http.StatusNotFound, "not found")
 		return
 	}
 	if child == "accounts" {
-		s.handleDBProxyAccounts(w, r, name, account)
+		switch r.Method {
+		case http.MethodGet:
+			accounts, err := s.store.InstanceAccounts(id)
+			if err != nil {
+				writeDBStoreError(w, err)
+				return
+			}
+			writeJSON(w, http.StatusOK, accounts)
+		case http.MethodPost:
+			s.handleCreateDBAccount(w, r, id)
+		default:
+			w.Header().Set("Allow", "GET, POST")
+			writeErrorText(w, http.StatusMethodNotAllowed, "method not allowed")
+		}
 		return
 	}
 	if child != "" {
 		writeErrorText(w, http.StatusNotFound, "not found")
 		return
 	}
+
 	switch r.Method {
 	case http.MethodGet:
 		if !s.requirePermission(r, rbac.ActionDBProxyView) {
 			s.forbidden(w)
 			return
 		}
-		view, err := s.store.DatabaseProxy(name)
+		view, err := s.store.DatabaseInstance(id)
 		if err != nil {
 			writeDBStoreError(w, err)
 			return
 		}
 		writeJSON(w, http.StatusOK, view)
 	case http.MethodPut:
-		defer r.Body.Close()
-		r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
-		var proxy config.DatabaseProxyConfig
-		if err := json.NewDecoder(r.Body).Decode(&proxy); err != nil {
-			writeError(w, http.StatusBadRequest, err)
-			return
-		}
-		view, err := s.store.UpdateDatabaseProxy(name, proxy)
-		if err != nil {
-			writeDBStoreError(w, err)
-			return
-		}
-		if err := s.applyDatabaseProxies(); err != nil {
-			writeError(w, http.StatusConflict, err)
-			return
-		}
-		writeJSON(w, http.StatusOK, view)
+		s.handleUpdateDBInstance(w, r, id)
 	case http.MethodDelete:
-		if err := s.store.DeleteDatabaseProxy(name); err != nil {
+		if err := s.store.DeleteDatabaseInstance(id); err != nil {
 			writeDBStoreError(w, err)
-			return
-		}
-		if err := s.applyDatabaseProxies(); err != nil {
-			writeError(w, http.StatusConflict, err)
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)
@@ -519,73 +491,107 @@ func (s *Server) handleDBProxy(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (s *Server) handleDBProxyAccounts(w http.ResponseWriter, r *http.Request, name, account string) {
-	if account == "" {
-		switch r.Method {
-		case http.MethodGet:
-			accounts, err := s.store.DatabaseAccounts(name)
-			if err != nil {
-				writeDBStoreError(w, err)
-				return
-			}
-			writeJSON(w, http.StatusOK, accounts)
-		case http.MethodPost:
-			defer r.Body.Close()
-			r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
-			var payload config.DatabaseAccountConfig
-			if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-				writeError(w, http.StatusBadRequest, err)
-				return
-			}
-			view, err := s.store.AddDatabaseAccount(name, payload)
-			if err != nil {
-				writeDBStoreError(w, err)
-				return
-			}
-			if err := s.applyDatabaseProxies(); err != nil {
-				writeError(w, http.StatusConflict, err)
-				return
-			}
-			writeJSON(w, http.StatusCreated, view)
-		default:
-			w.Header().Set("Allow", "GET, POST")
-			writeErrorText(w, http.StatusMethodNotAllowed, "method not allowed")
-		}
+func (s *Server) handleUpdateDBInstance(w http.ResponseWriter, r *http.Request, id string) {
+	defer r.Body.Close()
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+	var payload struct {
+		Name      string `json:"name"`
+		Protocol  string `json:"protocol"`
+		Address   string `json:"address"`
+		GroupName string `json:"group_name"`
+		Remark    string `json:"remark"`
+		Disabled  bool   `json:"disabled"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		writeError(w, http.StatusBadRequest, err)
 		return
 	}
+	view, err := s.store.UpdateDatabaseInstance(id, payload.Name, payload.Protocol, payload.Address, payload.GroupName, payload.Remark, payload.Disabled)
+	if err != nil {
+		writeDBStoreError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, view)
+}
+
+func (s *Server) handleCreateDBAccount(w http.ResponseWriter, r *http.Request, instanceID string) {
+	defer r.Body.Close()
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+	var payload struct {
+		UpstreamUsername string     `json:"upstream_username"`
+		UpstreamPassword string     `json:"upstream_password"`
+		GroupName        string     `json:"group_name"`
+		Remark           string     `json:"remark"`
+		ExpiresAt        *time.Time `json:"expires_at"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	view, err := s.store.AddDatabaseAccount(instanceID, payload.UpstreamUsername, payload.UpstreamPassword, payload.GroupName, payload.Remark, payload.ExpiresAt)
+	if err != nil {
+		writeDBStoreError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, view)
+}
+
+// -- db accounts (single-account CRUD) --
+
+func (s *Server) handleDBAccount(w http.ResponseWriter, r *http.Request) {
+	id, ok := dbAccountIDFromPath(r.URL.Path)
+	if !ok {
+		writeErrorText(w, http.StatusNotFound, "not found")
+		return
+	}
+
 	switch r.Method {
-	case http.MethodPut:
-		defer r.Body.Close()
-		r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
-		var payload config.DatabaseAccountConfig
-		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-			writeError(w, http.StatusBadRequest, err)
+	case http.MethodGet:
+		if !s.requirePermission(r, rbac.ActionDBProxyView) {
+			s.forbidden(w)
 			return
 		}
-		view, err := s.store.UpdateDatabaseAccount(name, account, payload)
+		view, err := s.store.DatabaseAccount(id)
 		if err != nil {
 			writeDBStoreError(w, err)
 			return
 		}
-		if err := s.applyDatabaseProxies(); err != nil {
-			writeError(w, http.StatusConflict, err)
-			return
-		}
 		writeJSON(w, http.StatusOK, view)
+	case http.MethodPut:
+		s.handleUpdateDBAccount(w, r, id)
 	case http.MethodDelete:
-		if err := s.store.DeleteDatabaseAccount(name, account); err != nil {
+		if err := s.store.DeleteDatabaseAccount(id); err != nil {
 			writeDBStoreError(w, err)
-			return
-		}
-		if err := s.applyDatabaseProxies(); err != nil {
-			writeError(w, http.StatusConflict, err)
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)
 	default:
-		w.Header().Set("Allow", "PUT, DELETE")
+		w.Header().Set("Allow", "GET, PUT, DELETE")
 		writeErrorText(w, http.StatusMethodNotAllowed, "method not allowed")
 	}
+}
+
+func (s *Server) handleUpdateDBAccount(w http.ResponseWriter, r *http.Request, id string) {
+	defer r.Body.Close()
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+	var payload struct {
+		UpstreamUsername string     `json:"upstream_username"`
+		UpstreamPassword string     `json:"upstream_password"`
+		GroupName        string     `json:"group_name"`
+		Remark           string     `json:"remark"`
+		ExpiresAt        *time.Time `json:"expires_at"`
+		Disabled         bool       `json:"disabled"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	view, err := s.store.UpdateDatabaseAccount(id, payload.UpstreamUsername, payload.UpstreamPassword, payload.GroupName, payload.Remark, payload.ExpiresAt, payload.Disabled)
+	if err != nil {
+		writeDBStoreError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, view)
 }
 
 func (s *Server) handleSessions(w http.ResponseWriter, r *http.Request) {
@@ -908,25 +914,27 @@ func hostPathParts(path string) (string, string, bool) {
 	return "", "", false
 }
 
-func dbProxyPathParts(path string) (name, child, account string, ok bool) {
-	trimmed := strings.Trim(strings.TrimPrefix(path, "/api/db/proxies/"), "/")
+func dbInstancePathParts(path string) (id, child string, ok bool) {
+	trimmed := strings.Trim(strings.TrimPrefix(path, "/api/db/instances/"), "/")
 	if trimmed == "" {
-		return "", "", "", false
+		return "", "", false
 	}
 	parts := strings.Split(trimmed, "/")
-	switch len(parts) {
-	case 1:
-		return parts[0], "", "", true
-	case 2:
-		if parts[1] == "accounts" {
-			return parts[0], parts[1], "", true
-		}
-	case 3:
-		if parts[1] == "accounts" && parts[2] != "" {
-			return parts[0], parts[1], parts[2], true
-		}
+	if len(parts) == 1 {
+		return parts[0], "", true
 	}
-	return "", "", "", false
+	if len(parts) == 2 && parts[1] == "accounts" {
+		return parts[0], parts[1], true
+	}
+	return "", "", false
+}
+
+func dbAccountIDFromPath(path string) (string, bool) {
+	id := strings.TrimPrefix(path, "/api/db/accounts/")
+	if id == "" || strings.Contains(id, "/") {
+		return "", false
+	}
+	return id, true
 }
 
 func writeHostStoreError(w http.ResponseWriter, err error) {
@@ -940,18 +948,12 @@ func writeHostStoreError(w http.ResponseWriter, err error) {
 
 func writeDBStoreError(w http.ResponseWriter, err error) {
 	switch {
-	case errors.Is(err, store.ErrDBProxyNotFound) || errors.Is(err, store.ErrDBAccountNotFound) || errors.Is(err, access.ErrDBProxyNotFound) || errors.Is(err, access.ErrDBAccountNotFound):
+	case errors.Is(err, store.ErrDBProxyNotFound) || errors.Is(err, store.ErrDBAccountNotFound) || errors.Is(err, store.ErrDBInstanceNotFound) ||
+		errors.Is(err, access.ErrDBProxyNotFound) || errors.Is(err, access.ErrDBAccountNotFound) || errors.Is(err, access.ErrDBInstanceNotFound):
 		writeError(w, http.StatusNotFound, err)
 	default:
 		writeError(w, http.StatusBadRequest, err)
 	}
-}
-
-func (s *Server) applyDatabaseProxies() error {
-	if s.dbProxyApplier == nil {
-		return nil
-	}
-	return s.dbProxyApplier.Apply(s.store.DatabaseProxyConfigs())
 }
 
 func writeTargetStoreError(w http.ResponseWriter, err error) {

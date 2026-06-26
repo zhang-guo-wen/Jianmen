@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"golang.org/x/crypto/ssh"
 	"gorm.io/gorm"
@@ -288,18 +289,23 @@ func (s *DBStore) DeleteTarget(id string) error {
 	return result.Error
 }
 
-// -- db proxies (config-only for now) --
+// -- db instances/accounts (DB-backed via StaticAdapter; DBStore does not support these yet) --
 
-func (s *DBStore) DatabaseProxies() []DatabaseProxyView                             { return nil }
-func (s *DBStore) DatabaseProxyConfigs() []config.DatabaseProxyConfig               { return nil }
-func (s *DBStore) DatabaseProxy(_ string) (DatabaseProxyView, error)                { return DatabaseProxyView{}, ErrDBProxyNotFound }
-func (s *DBStore) DatabaseAccounts(_ string) ([]DatabaseAccountView, error)         { return nil, ErrDBProxyNotFound }
-func (s *DBStore) AddDatabaseProxy(_ config.DatabaseProxyConfig) (DatabaseProxyView, error)    { return DatabaseProxyView{}, errors.New("db proxies: config-only") }
-func (s *DBStore) UpdateDatabaseProxy(_ string, _ config.DatabaseProxyConfig) (DatabaseProxyView, error) { return DatabaseProxyView{}, ErrDBProxyNotFound }
-func (s *DBStore) DeleteDatabaseProxy(_ string) error                              { return ErrDBProxyNotFound }
-func (s *DBStore) AddDatabaseAccount(_ string, _ config.DatabaseAccountConfig) (DatabaseAccountView, error) { return DatabaseAccountView{}, ErrDBProxyNotFound }
-func (s *DBStore) UpdateDatabaseAccount(_, _ string, _ config.DatabaseAccountConfig) (DatabaseAccountView, error) { return DatabaseAccountView{}, ErrDBProxyNotFound }
-func (s *DBStore) DeleteDatabaseAccount(_, _ string) error                         { return ErrDBProxyNotFound }
+func (s *DBStore) DatabaseInstances() []DatabaseInstanceView                          { return nil }
+func (s *DBStore) DatabaseInstance(_ string) (DatabaseInstanceView, error)           { return DatabaseInstanceView{}, ErrDBProxyNotFound }
+func (s *DBStore) AddDatabaseInstance(_, _, _, _, _ string) (DatabaseInstanceView, error) { return DatabaseInstanceView{}, errors.New("db instances: config-only") }
+func (s *DBStore) UpdateDatabaseInstance(_, _, _, _, _, _ string, _ bool) (DatabaseInstanceView, error) { return DatabaseInstanceView{}, ErrDBProxyNotFound }
+func (s *DBStore) DeleteDatabaseInstance(_ string) error                             { return ErrDBProxyNotFound }
+
+func (s *DBStore) InstanceAccounts(_ string) ([]DatabaseAccountView, error)          { return nil, ErrDBProxyNotFound }
+func (s *DBStore) DatabaseAccount(_ string) (DatabaseAccountView, error)             { return DatabaseAccountView{}, ErrDBAccountNotFound }
+func (s *DBStore) AddDatabaseAccount(_, _, _, _, _ string, _ *time.Time) (DatabaseAccountView, error) { return DatabaseAccountView{}, errors.New("db accounts: config-only") }
+func (s *DBStore) UpdateDatabaseAccount(_, _, _, _, _ string, _ *time.Time, _ bool) (DatabaseAccountView, error) { return DatabaseAccountView{}, ErrDBAccountNotFound }
+func (s *DBStore) DeleteDatabaseAccount(_ string) error                              { return ErrDBAccountNotFound }
+func (s *DBStore) DatabaseAccountByUniqueName(_ string) (*model.DatabaseAccount, error) { return nil, ErrDBAccountNotFound }
+func (s *DBStore) AuthenticateDirect(_ context.Context, username, password string) (model.User, error) {
+	return model.User{}, errors.New("db store: authenticate not supported, use static adapter")
+}
 
 // -- connection --
 

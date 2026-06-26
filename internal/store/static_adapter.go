@@ -2,8 +2,10 @@ package store
 
 import (
 	"context"
+	"time"
 
 	"golang.org/x/crypto/ssh"
+	"gorm.io/gorm"
 
 	"jianmen/internal/access"
 	"jianmen/internal/config"
@@ -15,8 +17,8 @@ type StaticAdapter struct {
 	inner *access.StaticStore
 }
 
-func NewStaticAdapter(cfg *config.Config) (*StaticAdapter, error) {
-	inner, err := access.NewStaticStore(cfg)
+func NewStaticAdapter(cfg *config.Config, db *gorm.DB) (*StaticAdapter, error) {
+	inner, err := access.NewStaticStore(cfg, db)
 	if err != nil {
 		return nil, err
 	}
@@ -161,102 +163,124 @@ func adaptTargetView(t access.TargetView) TargetView {
 	}
 }
 
-// -- db proxies --
+// -- db instances --
 
-func (a *StaticAdapter) DatabaseProxies() []DatabaseProxyView {
-	raw := a.inner.DatabaseProxies()
-	out := make([]DatabaseProxyView, len(raw))
+func (a *StaticAdapter) DatabaseInstances() []DatabaseInstanceView {
+	raw := a.inner.DatabaseInstances()
+	out := make([]DatabaseInstanceView, len(raw))
 	for i := range raw {
-		out[i] = DatabaseProxyView{
-			Name: raw[i].Name, Enabled: raw[i].Enabled, Protocol: raw[i].Protocol,
-			ListenAddr: raw[i].ListenAddr, UpstreamAddr: raw[i].UpstreamAddr,
-			Remark: raw[i].Remark, AccountCount: raw[i].AccountCount,
-			AllowedUsersEnforced: raw[i].AllowedUsersEnforced,
-			AllowedUsers: raw[i].AllowedUsers, QueryPolicy: raw[i].QueryPolicy, Static: raw[i].Static,
-		}
+		out[i] = adaptDatabaseInstanceView(raw[i])
 	}
 	return out
 }
-func (a *StaticAdapter) DatabaseProxyConfigs() []config.DatabaseProxyConfig {
-	return a.inner.DatabaseProxyConfigs()
-}
-func (a *StaticAdapter) DatabaseProxy(name string) (DatabaseProxyView, error) {
-	p, err := a.inner.DatabaseProxy(name)
+func (a *StaticAdapter) DatabaseInstance(id string) (DatabaseInstanceView, error) {
+	v, err := a.inner.DatabaseInstance(id)
 	if err != nil {
-		return DatabaseProxyView{}, err
+		return DatabaseInstanceView{}, err
 	}
-	return DatabaseProxyView{
-		Name: p.Name, Enabled: p.Enabled, Protocol: p.Protocol,
-		ListenAddr: p.ListenAddr, UpstreamAddr: p.UpstreamAddr,
-		Remark: p.Remark, AccountCount: p.AccountCount,
-		AllowedUsersEnforced: p.AllowedUsersEnforced,
-		AllowedUsers: p.AllowedUsers, QueryPolicy: p.QueryPolicy, Static: p.Static,
-	}, nil
+	return adaptDatabaseInstanceView(v), nil
 }
-func (a *StaticAdapter) AddDatabaseProxy(proxy config.DatabaseProxyConfig) (DatabaseProxyView, error) {
-	p, err := a.inner.AddDatabaseProxy(proxy)
+func (a *StaticAdapter) AddDatabaseInstance(name, protocol, address, groupName, remark string) (DatabaseInstanceView, error) {
+	v, err := a.inner.AddDatabaseInstance(name, protocol, address, groupName, remark)
 	if err != nil {
-		return DatabaseProxyView{}, err
+		return DatabaseInstanceView{}, err
 	}
-	return DatabaseProxyView{
-		Name: p.Name, Enabled: p.Enabled, Protocol: p.Protocol,
-		ListenAddr: p.ListenAddr, UpstreamAddr: p.UpstreamAddr,
-		Remark: p.Remark, AccountCount: p.AccountCount,
-		AllowedUsersEnforced: p.AllowedUsersEnforced,
-		AllowedUsers: p.AllowedUsers, QueryPolicy: p.QueryPolicy, Static: p.Static,
-	}, nil
+	return adaptDatabaseInstanceView(v), nil
 }
-func (a *StaticAdapter) UpdateDatabaseProxy(name string, proxy config.DatabaseProxyConfig) (DatabaseProxyView, error) {
-	p, err := a.inner.UpdateDatabaseProxy(name, proxy)
+func (a *StaticAdapter) UpdateDatabaseInstance(id, name, protocol, address, groupName, remark string, disabled bool) (DatabaseInstanceView, error) {
+	v, err := a.inner.UpdateDatabaseInstance(id, name, protocol, address, groupName, remark, disabled)
 	if err != nil {
-		return DatabaseProxyView{}, err
+		return DatabaseInstanceView{}, err
 	}
-	return DatabaseProxyView{
-		Name: p.Name, Enabled: p.Enabled, Protocol: p.Protocol,
-		ListenAddr: p.ListenAddr, UpstreamAddr: p.UpstreamAddr,
-		Remark: p.Remark, AccountCount: p.AccountCount,
-		AllowedUsersEnforced: p.AllowedUsersEnforced,
-		AllowedUsers: p.AllowedUsers, QueryPolicy: p.QueryPolicy, Static: p.Static,
-	}, nil
+	return adaptDatabaseInstanceView(v), nil
 }
-func (a *StaticAdapter) DeleteDatabaseProxy(name string) error { return a.inner.DeleteDatabaseProxy(name) }
+func (a *StaticAdapter) DeleteDatabaseInstance(id string) error {
+	return a.inner.DeleteDatabaseInstance(id)
+}
 
-func (a *StaticAdapter) DatabaseAccounts(proxyName string) ([]DatabaseAccountView, error) {
-	raw, err := a.inner.DatabaseAccounts(proxyName)
+// -- db accounts --
+
+func (a *StaticAdapter) InstanceAccounts(instanceID string) ([]DatabaseAccountView, error) {
+	raw, err := a.inner.DatabaseAccounts(instanceID)
 	if err != nil {
 		return nil, err
 	}
 	out := make([]DatabaseAccountView, len(raw))
 	for i := range raw {
-		out[i] = DatabaseAccountView{
-			Username: raw[i].Username, Database: raw[i].Database, Remark: raw[i].Remark,
-			Disabled: raw[i].Disabled, ResourceType: raw[i].ResourceType, ResourceID: raw[i].ResourceID, Static: raw[i].Static,
-		}
+		out[i] = adaptDatabaseAccountView(raw[i])
 	}
 	return out, nil
 }
-func (a *StaticAdapter) AddDatabaseAccount(proxyName string, account config.DatabaseAccountConfig) (DatabaseAccountView, error) {
-	v, err := a.inner.AddDatabaseAccount(proxyName, account)
+func (a *StaticAdapter) DatabaseAccount(id string) (DatabaseAccountView, error) {
+	v, err := a.inner.DatabaseAccount(id)
 	if err != nil {
 		return DatabaseAccountView{}, err
 	}
-	return DatabaseAccountView{
-		Username: v.Username, Database: v.Database, Remark: v.Remark,
-		Disabled: v.Disabled, ResourceType: v.ResourceType, ResourceID: v.ResourceID, Static: v.Static,
-	}, nil
+	return adaptDatabaseAccountView(v), nil
 }
-func (a *StaticAdapter) UpdateDatabaseAccount(proxyName, username string, account config.DatabaseAccountConfig) (DatabaseAccountView, error) {
-	v, err := a.inner.UpdateDatabaseAccount(proxyName, username, account)
+func (a *StaticAdapter) AddDatabaseAccount(instanceID, upstreamUsername, upstreamPassword, groupName, remark string, expiresAt *time.Time) (DatabaseAccountView, error) {
+	v, err := a.inner.AddDatabaseAccount(instanceID, upstreamUsername, upstreamPassword, groupName, remark, expiresAt)
 	if err != nil {
 		return DatabaseAccountView{}, err
 	}
-	return DatabaseAccountView{
-		Username: v.Username, Database: v.Database, Remark: v.Remark,
-		Disabled: v.Disabled, ResourceType: v.ResourceType, ResourceID: v.ResourceID, Static: v.Static,
-	}, nil
+	return adaptDatabaseAccountView(v), nil
 }
-func (a *StaticAdapter) DeleteDatabaseAccount(proxyName, username string) error {
-	return a.inner.DeleteDatabaseAccount(proxyName, username)
+func (a *StaticAdapter) UpdateDatabaseAccount(id, upstreamUsername, upstreamPassword, groupName, remark string, expiresAt *time.Time, disabled bool) (DatabaseAccountView, error) {
+	v, err := a.inner.UpdateDatabaseAccount(id, upstreamUsername, upstreamPassword, groupName, remark, expiresAt, disabled)
+	if err != nil {
+		return DatabaseAccountView{}, err
+	}
+	return adaptDatabaseAccountView(v), nil
+}
+func (a *StaticAdapter) DeleteDatabaseAccount(id string) error {
+	return a.inner.DeleteDatabaseAccount(id)
+}
+
+func (a *StaticAdapter) DatabaseAccountByUniqueName(uniqueName string) (*model.DatabaseAccount, error) {
+	return a.inner.DatabaseAccountByUniqueName(uniqueName)
+}
+
+func (a *StaticAdapter) AuthenticateDirect(ctx context.Context, username, password string) (model.User, error) {
+	return a.inner.AuthenticateDirect(ctx, username, password)
+}
+
+// -- db view adapters --
+
+func adaptDatabaseInstanceView(v access.DatabaseInstanceView) DatabaseInstanceView {
+	return DatabaseInstanceView{
+		ID:           v.ID,
+		Name:         v.Name,
+		Protocol:     v.Protocol,
+		Address:      v.Address,
+		GroupName:    v.GroupName,
+		Remark:       v.Remark,
+		Disabled:     v.Disabled,
+		AccountCount: int(v.AccountCount),
+		CreatedAt:    timeToStr(v.CreatedAt),
+		UpdatedAt:    timeToStr(v.UpdatedAt),
+	}
+}
+
+func adaptDatabaseAccountView(v access.DatabaseAccountView) DatabaseAccountView {
+	return DatabaseAccountView{
+		ID:               v.ID,
+		InstanceID:       v.InstanceID,
+		UniqueName:       v.UniqueName,
+		UpstreamUsername: v.UpstreamUsername,
+		GroupName:        v.GroupName,
+		Remark:           v.Remark,
+		ExpiresAt:        v.ExpiresAt,
+		Disabled:         v.Disabled,
+		CreatedAt:        timeToStr(v.CreatedAt),
+		UpdatedAt:        timeToStr(v.UpdatedAt),
+	}
+}
+
+func timeToStr(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	return t.UTC().Format(time.RFC3339)
 }
 
 func (a *StaticAdapter) DefaultTarget(ctx context.Context, user model.User) (TargetConfig, error) {

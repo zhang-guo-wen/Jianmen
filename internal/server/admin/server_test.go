@@ -371,7 +371,7 @@ func newTargetTestServer(t *testing.T) *Server {
 			},
 		},
 	}
-	adapter, err := store.NewStaticAdapter(cfg)
+	adapter, err := store.NewStaticAdapter(cfg, nil)
 	if err != nil {
 		t.Fatalf("NewStaticStore returned error: %v", err)
 	}

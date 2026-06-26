@@ -1,6 +1,8 @@
 package storage
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"strings"
 
@@ -61,11 +63,16 @@ func bootstrapConfigUsers(db *gorm.DB, users []config.User) error {
 			Username: username,
 			Status:   "active",
 		}
+		if token := strings.TrimSpace(cfgUser.ApiToken); token != "" {
+			hash := sha256.Sum256([]byte(token))
+			user.TokenHash = hex.EncodeToString(hash[:])
+		}
 		if err := db.Clauses(clause.OnConflict{
 			Columns: []clause.Column{{Name: "id"}},
 			DoUpdates: clause.Assignments(map[string]any{
-				"username": user.Username,
-				"status":   user.Status,
+				"username":   user.Username,
+				"status":     user.Status,
+				"token_hash": user.TokenHash,
 			}),
 		}).Create(&user).Error; err != nil {
 			return fmt.Errorf("bootstrap metadata user %q: %w", userID, err)
@@ -207,6 +214,104 @@ func bootstrapBuiltinPermissions(db *gorm.DB) error {
 			Effect:       model.PermissionEffectAllow,
 			Description:  "Allows manage all database accounts.",
 		},
+		{
+			ID:          "builtin-host-view",
+			Name:        "builtin-host-view",
+			Action:      "host:view",
+			Effect:      model.PermissionEffectAllow,
+			Description: "Allows viewing host resources.",
+		},
+		{
+			ID:          "builtin-host-create",
+			Name:        "builtin-host-create",
+			Action:      "host:create",
+			Effect:      model.PermissionEffectAllow,
+			Description: "Allows creating host resources.",
+		},
+		{
+			ID:          "builtin-host-update",
+			Name:        "builtin-host-update",
+			Action:      "host:update",
+			Effect:      model.PermissionEffectAllow,
+			Description: "Allows updating host resources.",
+		},
+		{
+			ID:          "builtin-host-delete",
+			Name:        "builtin-host-delete",
+			Action:      "host:delete",
+			Effect:      model.PermissionEffectAllow,
+			Description: "Allows deleting host resources.",
+		},
+		{
+			ID:          "builtin-target-view",
+			Name:        "builtin-target-view",
+			Action:      "target:view",
+			Effect:      model.PermissionEffectAllow,
+			Description: "Allows viewing target resources.",
+		},
+		{
+			ID:          "builtin-target-create",
+			Name:        "builtin-target-create",
+			Action:      "target:create",
+			Effect:      model.PermissionEffectAllow,
+			Description: "Allows creating target resources.",
+		},
+		{
+			ID:          "builtin-target-update",
+			Name:        "builtin-target-update",
+			Action:      "target:update",
+			Effect:      model.PermissionEffectAllow,
+			Description: "Allows updating target resources.",
+		},
+		{
+			ID:          "builtin-target-delete",
+			Name:        "builtin-target-delete",
+			Action:      "target:delete",
+			Effect:      model.PermissionEffectAllow,
+			Description: "Allows deleting target resources.",
+		},
+		{
+			ID:          "builtin-dbproxy-view",
+			Name:        "builtin-dbproxy-view",
+			Action:      "dbproxy:view",
+			Effect:      model.PermissionEffectAllow,
+			Description: "Allows viewing database proxy resources.",
+		},
+		{
+			ID:          "builtin-dbproxy-create",
+			Name:        "builtin-dbproxy-create",
+			Action:      "dbproxy:create",
+			Effect:      model.PermissionEffectAllow,
+			Description: "Allows creating database proxy resources.",
+		},
+		{
+			ID:          "builtin-dbproxy-update",
+			Name:        "builtin-dbproxy-update",
+			Action:      "dbproxy:update",
+			Effect:      model.PermissionEffectAllow,
+			Description: "Allows updating database proxy resources.",
+		},
+		{
+			ID:          "builtin-dbproxy-delete",
+			Name:        "builtin-dbproxy-delete",
+			Action:      "dbproxy:delete",
+			Effect:      model.PermissionEffectAllow,
+			Description: "Allows deleting database proxy resources.",
+		},
+		{
+			ID:          "builtin-rbac-manage",
+			Name:        "builtin-rbac-manage",
+			Action:      "rbac:manage",
+			Effect:      model.PermissionEffectAllow,
+			Description: "Allows managing RBAC roles, permissions, and bindings.",
+		},
+		{
+			ID:          "builtin-session-view",
+			Name:        "builtin-session-view",
+			Action:      "session:view",
+			Effect:      model.PermissionEffectAllow,
+			Description: "Allows viewing session records.",
+		},
 	}
 	for _, permission := range permissions {
 		if err := upsertPermission(db, permission); err != nil {
@@ -235,6 +340,20 @@ func bootstrapBuiltinRolePermissions(db *gorm.DB) error {
 		{builtinDBOperatorRoleID, "builtin-db-account-manage"},
 		{builtinAdminRoleID, "builtin-db-instance-manage"},
 		{builtinAdminRoleID, "builtin-db-account-manage"},
+		{builtinAdminRoleID, "builtin-host-view"},
+		{builtinAdminRoleID, "builtin-host-create"},
+		{builtinAdminRoleID, "builtin-host-update"},
+		{builtinAdminRoleID, "builtin-host-delete"},
+		{builtinAdminRoleID, "builtin-target-view"},
+		{builtinAdminRoleID, "builtin-target-create"},
+		{builtinAdminRoleID, "builtin-target-update"},
+		{builtinAdminRoleID, "builtin-target-delete"},
+		{builtinAdminRoleID, "builtin-dbproxy-view"},
+		{builtinAdminRoleID, "builtin-dbproxy-create"},
+		{builtinAdminRoleID, "builtin-dbproxy-update"},
+		{builtinAdminRoleID, "builtin-dbproxy-delete"},
+		{builtinAdminRoleID, "builtin-rbac-manage"},
+		{builtinAdminRoleID, "builtin-session-view"},
 	}
 	for _, assignment := range assignments {
 		binding := model.RolePermission{

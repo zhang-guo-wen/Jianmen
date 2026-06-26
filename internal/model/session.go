@@ -12,6 +12,7 @@ type User struct {
 	ID           string     `gorm:"primaryKey;size:64" json:"id"`
 	Username     string     `gorm:"uniqueIndex;size:128;not null" json:"username"`
 	PasswordHash string     `gorm:"size:255" json:"-"`
+	TokenHash    string     `gorm:"size:255" json:"-"`
 	DisplayName  string     `gorm:"size:128" json:"display_name,omitempty"`
 	Email        string     `gorm:"size:255" json:"email,omitempty"`
 	Status       string     `gorm:"size:32;not null;default:active" json:"status"`

@@ -76,9 +76,10 @@ type handler struct {
 }
 
 func (h *handler) Fileread(r *sftp.Request) (io.ReaderAt, error) {
-	h.logger.Info("sftp proxy", "op", "open_read", "path", r.Filepath, "method", r.Method)
+	h.logger.Info("sftp proxy: open_read start", "path", r.Filepath, "method", r.Method)
 	started := time.Now().UTC()
 	file, err := h.remote.Open(r.Filepath)
+	h.logger.Info("sftp proxy: open_read done", "path", r.Filepath, "err", err)
 	h.record(started, recording.FileEvent{
 		Action: "open_read",
 		Path:   r.Filepath,
@@ -177,7 +178,7 @@ func (h *handler) filecmd(r *sftp.Request, method string) error {
 }
 
 func (h *handler) Filelist(r *sftp.Request) (sftp.ListerAt, error) {
-	h.logger.Info("sftp proxy", "op", "filelist", "path", r.Filepath, "method", r.Method)
+	h.logger.Info("sftp proxy: filelist start", "path", r.Filepath, "method", r.Method)
 	started := time.Now().UTC()
 	var (
 		files []os.FileInfo
@@ -187,9 +188,11 @@ func (h *handler) Filelist(r *sftp.Request) (sftp.ListerAt, error) {
 	switch r.Method {
 	case "List":
 		files, err = h.remote.ReadDir(r.Filepath)
+		h.logger.Info("sftp proxy: readdir done", "path", r.Filepath, "entries", len(files), "err", err)
 	case "Stat":
 		var info os.FileInfo
 		info, err = h.remote.Stat(r.Filepath)
+		h.logger.Info("sftp proxy: stat done", "path", r.Filepath, "err", err)
 		if err == nil {
 			files = []os.FileInfo{info}
 		}
@@ -235,9 +238,10 @@ func (h *handler) Readlink(path string) (string, error) {
 }
 
 func (h *handler) RealPath(path string) (string, error) {
-	h.logger.Info("sftp proxy", "op", "realpath", "path", path)
+	h.logger.Info("sftp proxy: realpath start", "path", path)
 	started := time.Now().UTC()
 	realPath, err := h.remote.RealPath(path)
+	h.logger.Info("sftp proxy: realpath done", "path", path, "realPath", realPath, "err", err, "elapsed", time.Since(started))
 	h.record(started, recording.FileEvent{
 		Action: "realpath",
 		Path:   path,

@@ -106,7 +106,7 @@
         </div>
       </template>
       <el-alert v-if="detailError" :title="detailError" type="error" show-icon />
-      <div v-else v-loading="detailLoading">
+      <div v-else v-loading="detailLoading" class="drawer-content">
         <el-descriptions v-if="isDBMeta" :column="2" border>
           <el-descriptions-item :label="t('common.id')">{{ dbMeta.id || t('common.none') }}</el-descriptions-item>
           <el-descriptions-item :label="t('common.name')">{{ dbMeta.name || t('common.none') }}</el-descriptions-item>
@@ -819,6 +819,14 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   padding: 12px 16px;
+}
+
+.drawer-content {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .replay-panel {

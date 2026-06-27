@@ -66,39 +66,31 @@
       <el-empty v-if="!loading && !filteredTargets.length && !error" :description="t('quickConnect.empty')" />
     </el-card>
 
-    <el-dialog v-model="configVisible" :title="dialogTitle" class="form-dialog" destroy-on-close width="760px">
+    <el-dialog v-model="configVisible" :title="dialogTitle" class="form-dialog" destroy-on-close width="480px">
       <div v-if="selectedTarget" class="config-dialog">
-        <el-alert :title="t('quickConnect.authHint')" show-icon type="info" />
-        <el-descriptions :column="2" border>
-          <el-descriptions-item :label="t('quickConnect.column.host')">
-            {{ targetHostPort(selectedTarget) || t('common.none') }}
+        <el-alert show-icon type="info" :closable="false"
+          title="输入堡垒机的登录密码，不是目标主机的密码" />
+
+        <el-descriptions :column="1" border size="small" style="margin-top: 12px">
+          <el-descriptions-item label="连接地址">
+            <code>{{ bastionHost || '127.0.0.1' }}:{{ bastionPort || 47102 }}</code>
+            <el-button link type="primary" size="small" style="margin-left: 8px" @click="copyValue(`${bastionHost || '127.0.0.1'}:${bastionPort || 47102}`)">复制</el-button>
           </el-descriptions-item>
-          <el-descriptions-item :label="t('quickConnect.column.account')">
-            {{ accountName(selectedTarget) || t('common.none') }}
+          <el-descriptions-item label="用户名">
+            <code>{{ compactUser }}</code>
+            <el-button link type="primary" size="small" style="margin-left: 8px" @click="copyValue(compactUser)">复制</el-button>
           </el-descriptions-item>
-          <el-descriptions-item :label="t('quickConnect.column.targetId')">
-            <span class="mono-text">{{ targetId(selectedTarget) || t('common.none') }}</span>
-          </el-descriptions-item>
-          <el-descriptions-item :label="t('quickConnect.column.hostResourceId')">
-            <span class="mono-text">{{ hostResourceId(selectedTarget) || t('common.none') }}</span>
+          <el-descriptions-item label="密码">
+            堡垒机登录密码
           </el-descriptions-item>
         </el-descriptions>
 
-        <div class="config-list">
-          <div v-for="item in connectionItems" :key="item.key" class="config-row">
-            <div class="config-label">{{ t(item.labelKey) }}</div>
-            <el-input :model-value="item.value" readonly>
-              <template #append>
-                <el-tooltip :content="t('quickConnect.action.copy')">
-                  <el-button
-                    :aria-label="t('quickConnect.action.copy')"
-                    :icon="CopyDocument"
-                    @click="copyValue(item.value)"
-                  />
-                </el-tooltip>
-              </template>
-            </el-input>
-          </div>
+        <div style="margin-top: 12px">
+          <el-input :model-value="`ssh ${compactUser}@${bastionHost || '127.0.0.1'} -p ${bastionPort || 47102}`" readonly size="small">
+            <template #append>
+              <el-button @click="copyValue(`ssh ${compactUser}@${bastionHost || '127.0.0.1'} -p ${bastionPort || 47102}`)">复制</el-button>
+            </template>
+          </el-input>
         </div>
       </div>
     </el-dialog>
@@ -107,17 +99,12 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
-import { Connection, CopyDocument, Refresh } from '@element-plus/icons-vue';
+import { Connection, Refresh } from '@element-plus/icons-vue';
 import { ElMessage } from 'element-plus';
 
 import { apiClient, type ApiEnvelope, type TargetRecord } from '@/api/client';
-import { useI18n, type TranslationKey } from '@/i18n';
+import { useI18n } from '@/i18n';
 
-interface ConnectionItem {
-  key: string;
-  labelKey: TranslationKey;
-  value: string;
-}
 
 const { t } = useI18n();
 const keyword = ref('');
@@ -167,43 +154,13 @@ const dialogTitle = computed(() => {
   return `${t('quickConnect.dialog.title')} - ${account}@${host}`;
 });
 
-const connectionItems = computed<ConnectionItem[]>(() => {
+const compactUser = computed(() => {
   const target = selectedTarget.value;
-
-  if (!target) {
-    return [];
-  }
-
-  const resourceId = target.resource_id || targetId(target).slice(-4) || '0000';
+  if (!target) return 'H000000001';
   const prefix = target.resource_type === 'database_account' ? 'D' : 'H';
+  const resId = target.resource_id || targetId(target).slice(-4) || '0000';
   const sessionId = userSessionId.value || '00001';
-  const compactUser = `${prefix}${resourceId}${sessionId}`;
-  const host = bastionHost.value.trim() || '127.0.0.1';
-  const port = Number(bastionPort.value) || 47102;
-  const webTerminalPath = `/web-terminal?target_id=${encodeURIComponent(compactUser)}`;
-
-  return [
-    {
-      key: 'ssh',
-      labelKey: 'quickConnect.config.ssh',
-      value: `ssh ${compactUser}@${host} -p ${port}`
-    },
-    {
-      key: 'sftp',
-      labelKey: 'quickConnect.config.sftp',
-      value: `sftp -P ${port} ${compactUser}@${host}`
-    },
-    {
-      key: 'webTerminal',
-      labelKey: 'quickConnect.config.webTerminal',
-      value: webTerminalPath
-    },
-    {
-      key: 'resource',
-      labelKey: 'quickConnect.config.resource',
-      value: `${target.resource_type || 'host_account'}:${prefix}${resourceId}`
-    }
-  ];
+  return `${prefix}${resId}${sessionId}`;
 });
 
 function unwrapTargets(payload: ApiEnvelope<TargetRecord[]> | TargetRecord[]): TargetRecord[] {

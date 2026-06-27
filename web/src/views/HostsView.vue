@@ -350,7 +350,7 @@
     >
       <div v-if="selectedConnectionTarget" class="connection-dialog">
         <el-alert show-icon type="info" :closable="false"
-          title="堡垒机密码是 admin，不是目标主机密码" />
+          title="输入堡垒机的登录密码，不是目标主机的密码" />
 
         <el-descriptions :column="1" border size="small" style="margin-top: 12px">
           <el-descriptions-item label="连接地址">
@@ -362,7 +362,7 @@
             <el-button link type="primary" size="small" style="margin-left: 8px" @click="copyText(connectionCompactUser)">复制</el-button>
           </el-descriptions-item>
           <el-descriptions-item label="密码">
-            堡垒机用户密码（默认 admin）
+            堡垒机登录密码
           </el-descriptions-item>
         </el-descriptions>
 

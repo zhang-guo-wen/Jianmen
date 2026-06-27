@@ -73,7 +73,6 @@ type handler struct {
 	remote   *sftp.Client
 	recorder *recording.SessionRecorder
 	logger   *slog.Logger
-	homeDir  string // set on first realpath ".", used to block escaping
 }
 
 func (h *handler) Fileread(r *sftp.Request) (io.ReaderAt, error) {

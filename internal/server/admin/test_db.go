@@ -1,7 +1,9 @@
 package admin
 
 import (
+	"crypto/md5"
 	"encoding/binary"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"net"
@@ -98,27 +100,44 @@ func testPostgresAuth(conn net.Conn, username, password string) error {
 		if authType == 0 {
 			return nil
 		}
-		if authType == 3 || authType == 5 {
-			pwdMsg := make([]byte, 5+len(password)+1)
-			pwdMsg[0] = 'p'
-			binary.BigEndian.PutUint32(pwdMsg[1:5], uint32(4+len(password)+1))
-			copy(pwdMsg[5:], password)
-			pwdMsg[5+len(password)] = 0
-			if _, err := conn.Write(pwdMsg); err != nil {
-				return fmt.Errorf("auth: %w", err)
+		var authPassword string
+		switch authType {
+		case 3:
+			authPassword = password
+		case 5:
+			if n < 13 {
+				return fmt.Errorf("auth: truncated md5 auth message")
 			}
-			n2, err := conn.Read(buf)
-			if err != nil || n2 < 5 {
-				return fmt.Errorf("auth: %w", err)
-			}
-			if buf[0] == 'R' && binary.BigEndian.Uint32(buf[5:9]) == 0 {
-				return nil
-			}
-			if buf[0] == 'Z' {
-				return nil
-			}
-			return fmt.Errorf("auth denied")
+			salt := buf[9:13]
+			h1 := md5.Sum([]byte(password + username))
+			h1Hex := hex.EncodeToString(h1[:])
+			h2Input := make([]byte, len(h1Hex)+4)
+			copy(h2Input, h1Hex)
+			copy(h2Input[len(h1Hex):], salt)
+			h2 := md5.Sum(h2Input)
+			authPassword = "md5" + hex.EncodeToString(h2[:])
+		default:
+			return fmt.Errorf("auth: unsupported auth type %d", authType)
 		}
+		pwdMsg := make([]byte, 5+len(authPassword)+1)
+		pwdMsg[0] = 'p'
+		binary.BigEndian.PutUint32(pwdMsg[1:5], uint32(4+len(authPassword)+1))
+		copy(pwdMsg[5:], authPassword)
+		pwdMsg[5+len(authPassword)] = 0
+		if _, err := conn.Write(pwdMsg); err != nil {
+			return fmt.Errorf("auth: %w", err)
+		}
+		n2, err := conn.Read(buf)
+		if err != nil || n2 < 5 {
+			return fmt.Errorf("auth: %w", err)
+		}
+		if buf[0] == 'R' && binary.BigEndian.Uint32(buf[5:9]) == 0 {
+			return nil
+		}
+		if buf[0] == 'Z' {
+			return nil
+		}
+		return fmt.Errorf("auth denied")
 	}
 	return fmt.Errorf("auth failed")
 }

@@ -19,10 +19,21 @@
           text-color="#d0d5dd"
           active-text-color="#ffffff"
         >
-          <el-menu-item v-for="item in navItems" :key="item.path" :index="item.path">
-            <el-icon><component :is="item.icon" /></el-icon>
-            <span>{{ t(item.labelKey) }}</span>
-          </el-menu-item>
+          <template v-for="item in navItems" :key="item.labelKey">
+            <el-sub-menu v-if="'children' in item" :index="item.labelKey">
+              <template #title>
+                <el-icon><component :is="item.icon" /></el-icon>
+                <span>{{ t(item.labelKey) }}</span>
+              </template>
+              <el-menu-item v-for="child in item.children" :key="child.path" :index="child.path">
+                {{ t(child.labelKey) }}
+              </el-menu-item>
+            </el-sub-menu>
+            <el-menu-item v-else :index="item.path!">
+              <el-icon><component :is="item.icon" /></el-icon>
+              <span>{{ t(item.labelKey) }}</span>
+            </el-menu-item>
+          </template>
         </el-menu>
 
         <div class="sidebar-bottom">
@@ -70,13 +81,12 @@
 import { ref } from 'vue';
 import {
   Connection,
-  DataAnalysis,
   DataBoard,
   DocumentChecked,
   Expand,
   Fold,
+  Goods,
   Link,
-  Monitor,
   Platform,
   UserFilled
 } from '@element-plus/icons-vue';
@@ -98,10 +108,20 @@ const selectedLocale = computed<Locale>({
   set: (nextLocale) => setLocale(nextLocale)
 });
 
-const navItems: Array<{ path: string; icon: Component; labelKey: TranslationKey }> = [
+type NavItem =
+  | { path: string; icon: Component; labelKey: TranslationKey }
+  | { icon: Component; labelKey: TranslationKey; children: { path: string; labelKey: TranslationKey }[] };
+
+const navItems: NavItem[] = [
   { path: '/dashboard', icon: DataBoard, labelKey: 'nav.dashboard' },
-  { path: '/hosts', icon: Monitor, labelKey: 'nav.hosts' },
-  { path: '/databases', icon: DataAnalysis, labelKey: 'nav.databases' },
+  {
+    icon: Goods,
+    labelKey: 'nav.assets' as TranslationKey,
+    children: [
+      { path: '/hosts', labelKey: 'nav.hosts' },
+      { path: '/databases', labelKey: 'nav.databases' },
+    ]
+  },
   { path: '/quick-connect', icon: Link, labelKey: 'nav.quickConnect' },
   { path: '/sessions', icon: Connection, labelKey: 'nav.sessions' },
   { path: '/rbac', icon: UserFilled, labelKey: 'nav.rbac' },
@@ -165,16 +185,12 @@ function logout() {
   gap: 8px;
 }
 
-.app-header-actions {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
 @media (max-width: 780px) {
-  .app-header-actions {
-    width: 100%;
-    justify-content: flex-end;
+  .app-sidebar {
+    width: 64px !important;
+  }
+  .app-sidebar:not(.collapsed) {
+    width: 190px !important;
   }
 }
 </style>

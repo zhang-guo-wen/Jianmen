@@ -86,6 +86,9 @@ func (s *Session) handleRequest(ctx context.Context, req *ssh.Request) bool {
 	case "subsystem":
 		name := parseSubsystemName(req.Payload)
 		if name == "sftp" {
+				if s.recorder != nil {
+					s.recorder.SetProtocolSubtype("sftp")
+				}
 			if req.WantReply {
 				_ = req.Reply(true, nil)
 			}

@@ -137,6 +137,33 @@ func (r *SessionRecorder) Dir() string {
 	return r.dir
 }
 
+// SetProtocolSubtype updates the protocol subtype (e.g. "sftp") in meta.json.
+func (r *SessionRecorder) SetProtocolSubtype(subtype string) {
+	if r == nil {
+		return
+	}
+	r.session.ProtocolSubtype = subtype
+	r.writeMetaField("protocol_subtype", subtype)
+}
+
+func (r *SessionRecorder) writeMetaField(key, value string) {
+	metaPath := filepath.Join(r.dir, "meta.json")
+	raw, err := os.ReadFile(metaPath)
+	if err != nil {
+		return
+	}
+	var meta map[string]any
+	if err := json.Unmarshal(raw, &meta); err != nil {
+		return
+	}
+	meta[key] = value
+	updated, err := json.MarshalIndent(meta, "", "  ")
+	if err != nil {
+		return
+	}
+	_ = os.WriteFile(metaPath, updated, 0o644)
+}
+
 func (r *SessionRecorder) RecordOutput(data []byte) {
 	if r == nil || len(data) == 0 {
 		return

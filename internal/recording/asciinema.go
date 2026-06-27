@@ -31,6 +31,23 @@ func NewAsciinemaWriter(file *os.File, startedAt time.Time, width, height int) *
 	}
 }
 
+// UpdateSize sets the terminal dimensions used in the cast header.
+// Must be called before the first WriteOutput / WriteInput, otherwise the
+// header has already been written and the call is a no-op.
+func (w *AsciinemaWriter) UpdateSize(width, height int) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.wroteHeader {
+		return
+	}
+	if width > 0 {
+		w.width = width
+	}
+	if height > 0 {
+		w.height = height
+	}
+}
+
 func (w *AsciinemaWriter) WriteOutput(data []byte) error {
 	return w.writeRow("o", data)
 }

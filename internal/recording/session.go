@@ -118,7 +118,7 @@ func NewSessionRecorder(root string, session model.Session, recordInput, recordC
 		recordCommands: recordCommands,
 		logger:         logger,
 		dir:            dir,
-		terminal:       NewAsciinemaWriter(terminalFile, startedAt, 120, 40),
+		terminal:       NewAsciinemaWriter(terminalFile, startedAt, 80, 24),
 		eventsFile:     eventsFile,
 		filesFile:      filesFile,
 		commands:       NewCommandRecorder(commandsFile, startedAt),
@@ -160,6 +160,10 @@ func (r *SessionRecorder) RecordInput(data []byte) {
 func (r *SessionRecorder) RecordResize(channelID string, width, height int) {
 	if r == nil {
 		return
+	}
+	// Update cast header dimensions before it's written on first output.
+	if r.terminal != nil {
+		r.terminal.UpdateSize(width, height)
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()

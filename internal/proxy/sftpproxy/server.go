@@ -73,6 +73,7 @@ type handler struct {
 	remote   *sftp.Client
 	recorder *recording.SessionRecorder
 	logger   *slog.Logger
+	homeDir  string // set on first realpath ".", used to block escaping
 }
 
 func (h *handler) Fileread(r *sftp.Request) (io.ReaderAt, error) {
@@ -229,7 +230,8 @@ func (h *handler) readDirTimeout(path string) ([]os.FileInfo, error) {
 	case r := <-ch:
 		return r.files, r.err
 	case <-time.After(10 * time.Second):
-		h.logger.Warn("sftp readdir timed out", "path", path)
+		h.logger.Warn("sftp readdir timed out — closing connection to unblock", "path", path)
+		_ = h.remote.Close()
 		return nil, fmt.Errorf("readdir %s timed out after 10s", path)
 	}
 }

@@ -252,8 +252,17 @@ func (s *DBStore) targetView(a model.HostAccount) TargetView {
 }
 
 func (s *DBStore) targetConfig(a model.HostAccount) TargetConfig {
+	host, port := a.Host.Address, a.Host.Port
+	if host == "" {
+		host = "127.0.0.1"
+	}
+	if port == 0 {
+		port = 22
+	}
 	return TargetConfig{
 		ID: a.ID, Username: a.Username,
+		Host:                  host,
+		Port:                  port,
 		Password:              a.Password,
 		PrivateKeyPEM:         a.PrivateKeyPEM,
 		Passphrase:            a.Passphrase,
@@ -498,7 +507,7 @@ func (s *DBStore) AuthenticateDirect(_ context.Context, username, password strin
 func (s *DBStore) DefaultTarget(_ context.Context, user model.User) (TargetConfig, error) {
 	if user.RequestedTargetID != "" {
 		var a model.HostAccount
-		if err := s.db.First(&a, "id = ?", user.RequestedTargetID).Error; err != nil {
+		if err := s.db.Preload("Host").First(&a, "id = ?", user.RequestedTargetID).Error; err != nil {
 			return TargetConfig{}, fmt.Errorf("target %q not found", user.RequestedTargetID)
 		}
 		return s.targetConfig(a), nil
@@ -506,7 +515,7 @@ func (s *DBStore) DefaultTarget(_ context.Context, user model.User) (TargetConfi
 
 	// Pick first active account.
 	var a model.HostAccount
-	if err := s.db.Where("status = ?", "active").First(&a).Error; err != nil {
+	if err := s.db.Preload("Host").Where("status = ?", "active").First(&a).Error; err != nil {
 		return TargetConfig{}, errors.New("no target accounts available")
 	}
 	return s.targetConfig(a), nil

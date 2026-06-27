@@ -503,7 +503,42 @@ func (s *Server) handleDBInstance(w http.ResponseWriter, r *http.Request) {
 				writeDBStoreError(w, err)
 				return
 			}
-			writeJSON(w, http.StatusOK, accounts)
+
+			page := positiveIntRequestQuery(r, "page", 1)
+			size := positiveIntRequestQuery(r, "size", 20)
+			if size > 100 {
+				size = 100
+			}
+			search := strings.TrimSpace(r.URL.Query().Get("search"))
+
+			filtered := accounts
+			if search != "" {
+				searchLower := strings.ToLower(search)
+				matched := make([]store.DatabaseAccountView, 0, len(accounts))
+				for _, acc := range accounts {
+					if strings.Contains(strings.ToLower(acc.UniqueName), searchLower) ||
+						strings.Contains(strings.ToLower(acc.UpstreamUsername), searchLower) ||
+						strings.Contains(strings.ToLower(acc.GroupName), searchLower) {
+						matched = append(matched, acc)
+					}
+				}
+				filtered = matched
+			}
+
+			total := len(filtered)
+			start := (page - 1) * size
+			if start > total {
+				start = total
+			}
+			end := start + size
+			if end > total {
+				end = total
+			}
+
+			writeJSON(w, http.StatusOK, map[string]any{
+				"items": filtered[start:end],
+				"total": total,
+			})
 		case http.MethodPost:
 			s.handleCreateDBAccount(w, r, id)
 		default:

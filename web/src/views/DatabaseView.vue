@@ -255,6 +255,18 @@
           </el-table-column>
         </el-table>
         <el-empty v-if="!accountsLoading && !accounts.length && !accountError" :description="t('database.empty.accounts')" />
+        <div v-if="accountTotal > 0" class="pagination-row">
+          <el-pagination
+            v-model:current-page="accountPage"
+            v-model:page-size="accountPageSize"
+            background
+            layout="total, sizes, prev, pager, next"
+            :page-sizes="[20, 50, 100]"
+            :total="accountTotal"
+            @current-change="loadAccounts"
+            @size-change="handleAccountPageSizeChange"
+          />
+        </div>
       </el-card>
 
       <!-- Account Create/Edit Dialog -->
@@ -472,6 +484,9 @@ const accountMorePanels = ref<string[]>([]);
 const accountFormRef = ref<FormInstance>();
 const expireShortcutActive = ref('');
 const accountGroupOptions = ref<string[]>([]);
+const accountPage = ref(1);
+const accountPageSize = ref(20);
+const accountTotal = ref(0);
 
 const accountForm = reactive<AccountForm>({
   upstream_username: '',
@@ -745,6 +760,11 @@ function handleInstancePageSizeChange() {
   loadInstances();
 }
 
+function handleAccountPageSizeChange() {
+  accountPage.value = 1;
+  loadAccounts();
+}
+
 // Account methods
 function openAccountsTab(inst: DBInstanceRecord) {
   selectedInstance.value = inst;
@@ -762,7 +782,21 @@ async function loadAccounts() {
   accountsLoading.value = true;
   accountError.value = '';
   try {
-    accounts.value = unwrapArray(await apiClient.getDBAccounts(inst.id));
+    const data = await apiClient.getDBAccounts(inst.id, {
+      page: accountPage.value,
+      size: accountPageSize.value
+    });
+    if (Array.isArray(data)) {
+      accounts.value = data;
+      accountTotal.value = data.length;
+    } else if (data && typeof data === 'object' && 'items' in data) {
+      accounts.value = (data as any).items ?? [];
+      accountTotal.value = (data as any).total ?? 0;
+    } else {
+      const unwrapped = unwrapArray(data as any);
+      accounts.value = unwrapped as DBAccountRecord[];
+      accountTotal.value = unwrapped.length;
+    }
   } catch (err) {
     accounts.value = [];
     accountError.value = err instanceof Error ? err.message : t('database.error.loadAccounts');
@@ -775,9 +809,10 @@ async function loadAccountGroups() {
   const inst = selectedInstance.value;
   if (!inst?.id) return;
   try {
-    const data = unwrapArray(await apiClient.getDBAccounts(inst.id));
+    const data = await apiClient.getDBAccounts(inst.id, { page: 1, size: 1000 });
+    const records = Array.isArray(data) ? data : (data as any)?.items ?? [];
     const groups = new Set<string>();
-    for (const acc of data) {
+    for (const acc of records) {
       if (acc.group_name) groups.add(acc.group_name);
     }
     accountGroupOptions.value = Array.from(groups).sort();

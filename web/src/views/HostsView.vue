@@ -27,9 +27,10 @@
             {{ hostAddress(row) }}
           </template>
         </el-table-column>
-        <el-table-column label="账号" min-width="100">
+        <el-table-column label="账号" width="110">
           <template #default="{ row }">
             <el-button link type="primary" @click="openAccountsDialog(row)">
+              <el-icon style="margin-right: 2px"><User /></el-icon>
               {{ numberFrom(row.account_count, 0) }} 个
             </el-button>
           </template>
@@ -405,6 +406,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus';
+import { User } from '@element-plus/icons-vue';
 
 import {
   apiClient,

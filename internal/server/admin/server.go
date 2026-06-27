@@ -203,64 +203,8 @@ func (s *Server) handleMePermissions(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"actions": actions})
 }
 
-func (s *Server) handleUsers(w http.ResponseWriter, r *http.Request) {
-	switch r.Method {
-	case http.MethodGet:
-		writeJSON(w, http.StatusOK, s.store.Users())
-	case http.MethodPost:
-		s.handleCreateUser(w, r)
-	default:
-		w.Header().Set("Allow", "GET, POST")
-		writeErrorText(w, http.StatusMethodNotAllowed, "method not allowed")
-	}
-}
-
-func (s *Server) handleCreateUser(w http.ResponseWriter, r *http.Request) {
-	if s.db == nil {
-		writeErrorText(w, http.StatusBadRequest, "database not available")
-		return
-	}
-	defer r.Body.Close()
-	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
-
-	var input struct {
-		Username string `json:"username"`
-		Token    string `json:"token"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
-	}
-	username := strings.TrimSpace(input.Username)
-	if username == "" {
-		writeErrorText(w, http.StatusBadRequest, "username is required")
-		return
-	}
-	user := model.User{
-		Username: username,
-		Status:   "active",
-	}
-	if token := strings.TrimSpace(input.Token); token != "" {
-		hash := sha256.Sum256([]byte(token))
-		user.TokenHash = hex.EncodeToString(hash[:])
-	}
-	if err := s.db.Create(&user).Error; err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
-	}
-	// Auto-create permanent session for the new user
-	permSession := model.UserSession{
-		UserID: user.ID,
-		Type:   "permanent",
-		Status: "active",
-	}
-	if _, err := s.store.CreateUserSession(permSession); err != nil {
-		slog.Error("failed to create permanent session", "user_id", user.ID, "error", err)
-	}
-	writeJSON(w, http.StatusCreated, map[string]string{
-		"id":       user.ID,
-		"username": user.Username,
-	})
+func (s *Server) handleUsers(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, s.store.Users())
 }
 
 func (s *Server) handleHosts(w http.ResponseWriter, r *http.Request) {
@@ -424,6 +368,11 @@ func (s *Server) handleTestConnection(w http.ResponseWriter, r *http.Request) {
 	if addr == "" || target.Username == "" {
 		writeErrorText(w, http.StatusBadRequest, "host, port, and username are required")
 		return
+	}
+
+	// 测试连接默认允许跳过主机密钥验证（除非用户明确配置了指纹或 known_hosts）
+	if !target.InsecureIgnoreHostKey && target.HostKeyFingerprint == "" && target.KnownHostsPath == "" {
+		target.InsecureIgnoreHostKey = true
 	}
 
 	clientConfig, err := access.ClientConfigForTarget(target)

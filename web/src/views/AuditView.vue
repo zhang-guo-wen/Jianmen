@@ -47,16 +47,13 @@
             {{ formatDurationSeconds(row.duration_seconds) }}
           </template>
         </el-table-column>
-        <el-table-column :label="t('common.actions')" fixed="right" width="230">
+        <el-table-column :label="t('common.actions')" fixed="right" width="180">
           <template #default="{ row }">
             <el-button :disabled="!hasReplay(row)" link type="success" @click="loadSessionArtifact(row, 'replay')">
               {{ t('audit.action.replay') }}
             </el-button>
-            <el-button link type="primary" @click="loadSessionArtifact(row, 'commands')">
-              {{ t('audit.action.commands') }}
-            </el-button>
-            <el-button link type="primary" @click="loadSessionArtifact(row, 'files')">
-              {{ t('audit.action.files') }}
+            <el-button link type="primary" @click="loadSessionLog(row)">
+              {{ t('audit.action.log') }}
             </el-button>
           </template>
         </el-table-column>
@@ -545,6 +542,21 @@ async function loadSessionArtifact(session: SessionRecord, kind: Exclude<DetailK
     detailError.value = err instanceof Error ? err.message : t('audit.error.loadArtifact');
   } finally {
     detailLoading.value = false;
+  }
+}
+
+function isSFTP(row: SessionRecord): boolean {
+  if (row.protocol_subtype === 'sftp') return true;
+  // Fallback: old sessions without subtype and without replay are likely SFTP
+  if (!row.protocol_subtype && !(row.has_replay ?? false)) return true;
+  return false;
+}
+
+function loadSessionLog(session: SessionRecord) {
+  if (isSFTP(session)) {
+    void loadSessionArtifact(session, 'files');
+  } else {
+    void loadSessionArtifact(session, 'commands');
   }
 }
 

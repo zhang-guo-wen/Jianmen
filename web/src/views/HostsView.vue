@@ -34,11 +34,14 @@
             </el-button>
           </template>
         </el-table-column>
-        <el-table-column label="状态" width="86">
+        <el-table-column align="center" label="状态" width="80">
           <template #default="{ row }">
-            <el-tag :type="statusTagType(row)">
-              {{ statusLabel(row) }}
-            </el-tag>
+            <el-switch
+              :loading="statusUpdatingId === hostStatusKey(row)"
+              :model-value="!row.disabled"
+              size="small"
+              @change="toggleHostStatus(row)"
+            />
           </template>
         </el-table-column>
         <el-table-column label="主机分组" min-width="110" show-overflow-tooltip>
@@ -51,20 +54,12 @@
             {{ row.remark || '-' }}
           </template>
         </el-table-column>
-        <el-table-column align="right" header-align="right" label="操作" fixed="right" width="220">
+        <el-table-column align="right" header-align="right" label="操作" fixed="right" width="170">
           <template #default="{ row }">
             <div class="table-actions host-row-actions">
               <el-button link type="primary" @click="openEditHostDialog(row)">编辑</el-button>
-              <el-button
-                :loading="statusUpdatingId === hostStatusKey(row)"
-                link
-                :type="row.disabled ? 'success' : 'warning'"
-                @click="toggleHostStatus(row)"
-              >
-                {{ row.disabled ? '启用' : '禁用' }}
-              </el-button>
               <el-button link type="danger" @click="confirmDeleteHost(row)">删除</el-button>
-              <el-button link type="success" @click="openCreateAccountDialog(row)">账号</el-button>
+              <el-button link type="success" @click="openCreateAccountDialog(row)">新建账号</el-button>
             </div>
           </template>
         </el-table-column>
@@ -159,11 +154,26 @@
               <div class="account-name">{{ row.username || '-' }}</div>
             </template>
           </el-table-column>
-          <el-table-column label="状态" width="88">
+          <el-table-column label="验证" width="96">
             <template #default="{ row }">
-              <el-tag :type="statusTagType(row)">
-                {{ statusLabel(row) }}
-              </el-tag>
+              <el-space wrap :size="4">
+                <el-tag v-for="method in targetAuthMethods(row)" :key="method" size="small">
+                  {{ authMethodLabel(method) }}
+                </el-tag>
+                <el-tag v-if="!targetAuthMethods(row).length" size="small" type="info">
+                  {{ t('hosts.auth.none') }}
+                </el-tag>
+              </el-space>
+            </template>
+          </el-table-column>
+          <el-table-column align="center" label="状态" width="80">
+            <template #default="{ row }">
+              <el-switch
+                :loading="statusUpdatingId === accountStatusKey(row)"
+                :model-value="!row.disabled"
+                size="small"
+                @change="toggleAccountStatus(row)"
+              />
             </template>
           </el-table-column>
           <el-table-column label="过期时间" min-width="140" show-overflow-tooltip>
@@ -186,31 +196,11 @@
               {{ row.group || '-' }}
             </template>
           </el-table-column>
-          <el-table-column label="验证" width="96">
-            <template #default="{ row }">
-              <el-space wrap :size="4">
-                <el-tag v-for="method in targetAuthMethods(row)" :key="method" size="small">
-                  {{ authMethodLabel(method) }}
-                </el-tag>
-                <el-tag v-if="!targetAuthMethods(row).length" size="small" type="info">
-                  {{ t('hosts.auth.none') }}
-                </el-tag>
-              </el-space>
-            </template>
-          </el-table-column>
-          <el-table-column align="right" header-align="right" label="操作" fixed="right" width="236">
+          <el-table-column align="right" header-align="right" label="操作" fixed="right" width="180">
             <template #default="{ row }">
               <div class="table-actions">
                 <el-button link type="success" @click="openConnectionDialog(row)">连接</el-button>
                 <el-button link type="primary" @click="openEditAccountDialog(row)">编辑</el-button>
-                <el-button
-                  :loading="statusUpdatingId === accountStatusKey(row)"
-                  link
-                  :type="row.disabled ? 'success' : 'warning'"
-                  @click="toggleAccountStatus(row)"
-                >
-                  {{ row.disabled ? '启用' : '禁用' }}
-                </el-button>
                 <el-button
                   :loading="deletingId === targetId(row)"
                   link
@@ -724,45 +714,6 @@ function accountDisplayName(target: TargetRecord): string {
   return stringFrom(target.name).trim() || stringFrom(target.username).trim() || targetId(target) || '-';
 }
 
-function statusValue(record: HostRecord | TargetRecord): string {
-  if (record.disabled === true) {
-    return 'disabled';
-  }
-  const status = stringFrom(record.status).trim().toLowerCase();
-  if (status) {
-    return status;
-  }
-  return 'enabled';
-}
-
-function statusLabel(record: HostRecord | TargetRecord): string {
-  switch (statusValue(record)) {
-    case 'disabled':
-      return '已禁用';
-    case 'expired':
-      return '已过期';
-    case 'host_disabled':
-      return '主机禁用';
-    case 'pending':
-      return '待启用';
-    default:
-      return '启用';
-  }
-}
-
-function statusTagType(record: HostRecord | TargetRecord): 'success' | 'info' | 'warning' | 'danger' {
-  switch (statusValue(record)) {
-    case 'disabled':
-    case 'host_disabled':
-      return 'info';
-    case 'expired':
-      return 'danger';
-    case 'pending':
-      return 'warning';
-    default:
-      return 'success';
-  }
-}
 
 function expiresAtText(target: TargetRecord): string {
   const expiresAt = stringFrom(target.expires_at).trim();

@@ -225,14 +225,27 @@
           </el-table-column>
         </el-table>
 
-        <el-table v-else-if="isFiles" :data="fileEvents" height="420">
-          <el-table-column prop="seq" :label="t('audit.column.seq')" width="90" />
-          <el-table-column prop="action" :label="t('audit.column.action')" min-width="140" />
+        <el-table v-else-if="isFiles" :data="fileEvents" height="420" row-key="seq">
+          <el-table-column prop="seq" :label="t('audit.column.seq')" width="60" />
+          <el-table-column :label="t('audit.column.action')" width="100">
+            <template #default="{ row }">
+              {{ formatFileAction(row.action) }}
+            </template>
+          </el-table-column>
           <el-table-column prop="path" :label="t('audit.column.path')" min-width="260" show-overflow-tooltip />
-          <el-table-column prop="path2" :label="t('audit.column.path2')" min-width="220" show-overflow-tooltip />
-          <el-table-column prop="result" :label="t('audit.column.result')" width="130" />
-          <el-table-column prop="size" :label="t('audit.column.size')" width="120" />
-          <el-table-column :label="t('audit.column.time')" min-width="180">
+          <el-table-column :label="t('audit.column.result')" width="80">
+            <template #default="{ row }">
+              <el-tag :type="row.result === 'success' ? 'success' : 'danger'" size="small">
+                {{ row.result === 'success' ? t('audit.result.success') : t('audit.result.failure') }}
+              </el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column :label="t('audit.column.size')" width="80">
+            <template #default="{ row }">
+              <template v-if="row.size > 0">{{ formatBytes(row.size) }}</template>
+            </template>
+          </el-table-column>
+          <el-table-column :label="t('audit.column.time')" width="160">
             <template #default="{ row }">
               {{ formatTime(row.started_at) }}
             </template>
@@ -543,6 +556,31 @@ async function loadSessionArtifact(session: SessionRecord, kind: Exclude<DetailK
   } finally {
     detailLoading.value = false;
   }
+}
+
+function formatFileAction(action: string): string {
+  const map: Record<string, string> = {
+    realpath: '解析路径',
+    list: '列目录',
+    open_read: '打开读取',
+    open_write: '打开写入',
+    read: '读取',
+    write: '写入',
+    close: '关闭',
+    remove: '删除',
+    rename: '重命名',
+    mkdir: '创建目录',
+    rmdir: '删除目录',
+    stat: '查看属性',
+    setstat: '设属性',
+    fstat: '文件属性',
+    fsetstat: '设文件属性',
+    opendir: '打开目录',
+    readdir: '读目录',
+    readlink: '读链接',
+    symlink: '创建链接',
+  };
+  return map[action] || action;
 }
 
 function isSFTP(row: SessionRecord): boolean {

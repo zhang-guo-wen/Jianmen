@@ -27,10 +27,10 @@
             {{ hostAddress(row) }}
           </template>
         </el-table-column>
-        <el-table-column label="账号数" width="86">
+        <el-table-column label="账号" min-width="100">
           <template #default="{ row }">
             <el-button link type="primary" @click="openAccountsDialog(row)">
-              {{ numberFrom(row.account_count, 0) }}
+              {{ numberFrom(row.account_count, 0) }} 个
             </el-button>
           </template>
         </el-table-column>

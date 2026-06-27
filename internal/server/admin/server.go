@@ -370,6 +370,11 @@ func (s *Server) handleTestConnection(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// 测试连接默认允许跳过主机密钥验证（除非用户明确配置了指纹或 known_hosts）
+	if !target.InsecureIgnoreHostKey && target.HostKeyFingerprint == "" && target.KnownHostsPath == "" {
+		target.InsecureIgnoreHostKey = true
+	}
+
 	clientConfig, err := access.ClientConfigForTarget(target)
 	if err != nil {
 		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "message": "配置错误: " + err.Error()})
@@ -380,7 +385,7 @@ func (s *Server) handleTestConnection(w http.ResponseWriter, r *http.Request) {
 
 	conn, err := ssh.Dial("tcp", addr, clientConfig)
 	if err != nil {
-		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "message": "连接失败: " + err.Error()})
+		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "message": "连接失败: " + friendlySSHError(err)})
 		return
 	}
 	conn.Close()
@@ -1135,4 +1140,23 @@ func withCORS(allowedOrigins []string, next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+func friendlySSHError(err error) string {
+	msg := err.Error()
+	lower := strings.ToLower(msg)
+	switch {
+	case strings.Contains(lower, "unable to authenticate") || strings.Contains(lower, "no supported methods"):
+		return "认证失败，请检查用户名和密码/私钥是否正确"
+	case strings.Contains(lower, "timeout") || strings.Contains(lower, "i/o timeout"):
+		return "连接超时，请检查主机地址和端口是否可达"
+	case strings.Contains(lower, "connection refused"):
+		return "连接被拒绝，请检查主机地址和端口是否正确，以及 SSH 服务是否已启动"
+	case strings.Contains(lower, "no route to host") || strings.Contains(lower, "no such host"):
+		return "无法访问主机，请检查主机地址和网络连接"
+	case strings.Contains(lower, "host key") && strings.Contains(lower, "mismatch"):
+		return "主机密钥不匹配，可能目标主机已变更或存在中间人攻击"
+	default:
+		return msg
+	}
 }

@@ -2,7 +2,7 @@
   <el-config-provider :locale="elementLocale">
     <router-view v-if="isLoginRoute" />
     <el-container v-else class="app-shell">
-      <el-aside class="app-sidebar" width="236px">
+      <el-aside class="app-sidebar" width="190px">
         <div class="brand">
           <div class="brand-mark">GB</div>
           <div>
@@ -123,6 +123,12 @@ function logout() {
 
 .language-select {
   width: 128px;
+}
+
+.nav-menu :deep(.el-menu-item) {
+  padding-left: 20px !important;
+  height: 44px;
+  line-height: 44px;
 }
 
 @media (max-width: 780px) {

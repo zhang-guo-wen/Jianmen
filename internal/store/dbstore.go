@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"strings"
 	"time"
@@ -378,13 +379,158 @@ func (s *DBStore) DeleteTarget(id string) error {
 	return result.Error
 }
 
-// -- db instances/accounts (DB-backed via StaticAdapter; DBStore does not support these yet) --
+// -- db instances (DB-backed) --
 
-func (s *DBStore) DatabaseInstances() []DatabaseInstanceView                          { return nil }
-func (s *DBStore) DatabaseInstance(_ string) (DatabaseInstanceView, error)           { return DatabaseInstanceView{}, ErrDBProxyNotFound }
-func (s *DBStore) AddDatabaseInstance(_, _, _, _, _ string) (DatabaseInstanceView, error) { return DatabaseInstanceView{}, errors.New("db instances: config-only") }
-func (s *DBStore) UpdateDatabaseInstance(_, _, _, _, _, _ string, _ bool) (DatabaseInstanceView, error) { return DatabaseInstanceView{}, ErrDBProxyNotFound }
-func (s *DBStore) DeleteDatabaseInstance(_ string) error                             { return ErrDBProxyNotFound }
+func (s *DBStore) DatabaseInstances() []DatabaseInstanceView {
+	var instances []model.DatabaseInstance
+	if err := s.db.Order("name ASC").Find(&instances).Error; err != nil {
+		return nil
+	}
+	views := make([]DatabaseInstanceView, 0, len(instances))
+	for _, inst := range instances {
+		var count int64
+		s.db.Model(&model.DatabaseAccount{}).Where("instance_id = ?", inst.ID).Count(&count)
+		views = append(views, DatabaseInstanceView{
+			ID:           inst.ID,
+			Name:         inst.Name,
+			Protocol:     inst.Protocol,
+			Address:      inst.Address,
+			GroupName:    inst.GroupName,
+			Remark:       inst.Remark,
+			Disabled:     inst.Disabled,
+			AccountCount: int(count),
+			CreatedAt:    inst.CreatedAt.Format(time.RFC3339),
+			UpdatedAt:    inst.UpdatedAt.Format(time.RFC3339),
+		})
+	}
+	return views
+}
+
+func (s *DBStore) DatabaseInstance(id string) (DatabaseInstanceView, error) {
+	id = strings.TrimSpace(id)
+	var inst model.DatabaseInstance
+	if err := s.db.First(&inst, "id = ?", id).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return DatabaseInstanceView{}, fmt.Errorf("%w: %q", ErrDBInstanceNotFound, id)
+		}
+		return DatabaseInstanceView{}, err
+	}
+	var count int64
+	s.db.Model(&model.DatabaseAccount{}).Where("instance_id = ?", inst.ID).Count(&count)
+	return DatabaseInstanceView{
+		ID:           inst.ID,
+		Name:         inst.Name,
+		Protocol:     inst.Protocol,
+		Address:      inst.Address,
+		GroupName:    inst.GroupName,
+		Remark:       inst.Remark,
+		Disabled:     inst.Disabled,
+		AccountCount: int(count),
+		CreatedAt:    inst.CreatedAt.Format(time.RFC3339),
+		UpdatedAt:    inst.UpdatedAt.Format(time.RFC3339),
+	}, nil
+}
+
+func (s *DBStore) AddDatabaseInstance(name, protocol, address, groupName, remark string) (DatabaseInstanceView, error) {
+	protocol = strings.ToLower(strings.TrimSpace(protocol))
+	if protocol == "" || protocol == "pg" || protocol == "postgresql" {
+		protocol = "postgres"
+	}
+	if protocol != "mysql" && protocol != "postgres" && protocol != "tcp" {
+		return DatabaseInstanceView{}, fmt.Errorf("unsupported database protocol %q", protocol)
+	}
+	if _, _, err := net.SplitHostPort(address); err != nil {
+		return DatabaseInstanceView{}, fmt.Errorf("invalid address %q: %w", address, err)
+	}
+	inst := model.DatabaseInstance{
+		Name:      strings.TrimSpace(name),
+		Protocol:  protocol,
+		Address:   strings.TrimSpace(address),
+		GroupName: strings.TrimSpace(groupName),
+		Remark:    strings.TrimSpace(remark),
+	}
+	if inst.Name == "" {
+		inst.Name = inst.Address
+	}
+	if err := s.db.Create(&inst).Error; err != nil {
+		return DatabaseInstanceView{}, err
+	}
+	return DatabaseInstanceView{
+		ID:        inst.ID,
+		Name:      inst.Name,
+		Protocol:  inst.Protocol,
+		Address:   inst.Address,
+		GroupName: inst.GroupName,
+		Remark:    inst.Remark,
+		Disabled:  inst.Disabled,
+		CreatedAt: inst.CreatedAt.Format(time.RFC3339),
+		UpdatedAt: inst.UpdatedAt.Format(time.RFC3339),
+	}, nil
+}
+
+func (s *DBStore) UpdateDatabaseInstance(id, name, protocol, address, groupName, remark string, disabled bool) (DatabaseInstanceView, error) {
+	id = strings.TrimSpace(id)
+	var inst model.DatabaseInstance
+	if err := s.db.First(&inst, "id = ?", id).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return DatabaseInstanceView{}, fmt.Errorf("%w: %q", ErrDBInstanceNotFound, id)
+		}
+		return DatabaseInstanceView{}, err
+	}
+	protocol = strings.ToLower(strings.TrimSpace(protocol))
+	if protocol == "" || protocol == "pg" || protocol == "postgresql" {
+		protocol = "postgres"
+	}
+	if protocol != "mysql" && protocol != "postgres" && protocol != "tcp" {
+		return DatabaseInstanceView{}, fmt.Errorf("unsupported database protocol %q", protocol)
+	}
+	if _, _, err := net.SplitHostPort(address); err != nil {
+		return DatabaseInstanceView{}, fmt.Errorf("invalid address %q: %w", address, err)
+	}
+	inst.Name = strings.TrimSpace(name)
+	inst.Protocol = protocol
+	inst.Address = strings.TrimSpace(address)
+	inst.GroupName = strings.TrimSpace(groupName)
+	inst.Remark = strings.TrimSpace(remark)
+	inst.Disabled = disabled
+	if inst.Name == "" {
+		inst.Name = inst.Address
+	}
+	if err := s.db.Save(&inst).Error; err != nil {
+		return DatabaseInstanceView{}, err
+	}
+	var count int64
+	s.db.Model(&model.DatabaseAccount{}).Where("instance_id = ?", inst.ID).Count(&count)
+	return DatabaseInstanceView{
+		ID:           inst.ID,
+		Name:         inst.Name,
+		Protocol:     inst.Protocol,
+		Address:      inst.Address,
+		GroupName:    inst.GroupName,
+		Remark:       inst.Remark,
+		Disabled:     inst.Disabled,
+		AccountCount: int(count),
+		CreatedAt:    inst.CreatedAt.Format(time.RFC3339),
+		UpdatedAt:    inst.UpdatedAt.Format(time.RFC3339),
+	}, nil
+}
+
+func (s *DBStore) DeleteDatabaseInstance(id string) error {
+	id = strings.TrimSpace(id)
+	return s.db.Transaction(func(tx *gorm.DB) error {
+		var inst model.DatabaseInstance
+		if err := tx.First(&inst, "id = ?", id).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return fmt.Errorf("%w: %q", ErrDBInstanceNotFound, id)
+			}
+			return err
+		}
+		if err := tx.Where("instance_id = ?", id).Delete(&model.DatabaseAccount{}).Error; err != nil {
+			return err
+		}
+		return tx.Delete(&inst).Error
+	})
+}
 
 func (s *DBStore) InstanceAccounts(instanceID string) ([]DatabaseAccountView, error) {
 	var accounts []model.DatabaseAccount

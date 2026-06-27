@@ -93,6 +93,7 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 	mux.HandleFunc("/api/sessions/", s.withAuthAndUser(s.handleSessionArtifact))
 	mux.HandleFunc("/api/db/instances", s.withAuthAndUser(s.handleDBInstances))
 	mux.HandleFunc("/api/db/instances/", s.withAuthAndUser(s.handleDBInstance))
+	mux.HandleFunc("/api/db/accounts/test/", s.withAuthAndUser(s.handleTestDBConnection))
 	mux.HandleFunc("/api/db/accounts/", s.withAuthAndUser(s.handleDBAccount))
 	mux.HandleFunc("/api/db/connections", s.withAuthAndUser(s.handleDBConnections))
 	mux.HandleFunc("/api/db/connections/", s.withAuthAndUser(s.handleDBConnectionArtifact))

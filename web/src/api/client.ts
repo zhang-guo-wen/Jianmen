@@ -522,6 +522,11 @@ export const apiClient = {
     request<ApiEnvelope<unknown> | unknown>(`/api/db/accounts/${encodeURIComponent(id)}`, {
       method: 'DELETE'
     }),
+  testDBConnection: (id: string) =>
+    request<ApiEnvelope<{ ok: boolean; error?: string; latency_ms: number }>>(
+      `/api/db/accounts/test/${encodeURIComponent(id)}`,
+      { method: 'POST' }
+    ),
   getDBConnections: () =>
     request<ApiEnvelope<DBConnectionRecord[]> | DBConnectionRecord[]>('/api/db/connections'),
   getDBConnectionMeta: (id: string | number) =>

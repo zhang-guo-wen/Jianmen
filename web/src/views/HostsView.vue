@@ -345,6 +345,7 @@
       </el-form>
       <template #footer>
         <el-button :disabled="submittingAccount" @click="accountFormVisible = false">取消</el-button>
+        <el-button :loading="testingConnection" @click="testConnection">测试连接</el-button>
         <el-button :loading="submittingAccount" type="primary" @click="submitAccount">保存</el-button>
       </template>
     </el-dialog>
@@ -484,6 +485,7 @@ const editingAccountId = ref<string | null>(null);
 const accountDetailLoading = ref(false);
 const submittingHost = ref(false);
 const submittingAccount = ref(false);
+const testingConnection = ref(false);
 const deletingId = ref('');
 const statusUpdatingId = ref('');
 const hostNameTouched = ref(false);
@@ -1347,6 +1349,43 @@ async function submitAccount() {
     ElMessage.error(err instanceof Error ? err.message : t('hosts.error.save'));
   } finally {
     submittingAccount.value = false;
+  }
+}
+
+async function testConnection() {
+  if (!selectedHost.value) {
+    ElMessage.error('请先选择主机');
+    return;
+  }
+
+  const username = accountForm.username.trim();
+  if (!username) {
+    ElMessage.warning('请输入登录账号');
+    return;
+  }
+
+  const authMethod = accountForm.auth_method;
+  if (authMethod === 'password' && !accountForm.password) {
+    ElMessage.warning('请输入登录密码');
+    return;
+  }
+  if (authMethod === 'private_key' && !hasValue(accountForm.private_key_pem)) {
+    ElMessage.warning('请提供私钥内容');
+    return;
+  }
+
+  testingConnection.value = true;
+  try {
+    const result = await apiClient.testTargetConnection(buildAccountPayload());
+    if (result.ok) {
+      ElMessage.success(result.message || '连接成功');
+    } else {
+      ElMessage.error(result.message || '连接失败');
+    }
+  } catch (err) {
+    ElMessage.error(err instanceof Error ? err.message : '连接测试失败');
+  } finally {
+    testingConnection.value = false;
   }
 }
 

@@ -115,6 +115,9 @@ type HostAccount struct {
 	HostID        string    `gorm:"index;size:64;not null" json:"host_id"`
 	Username      string    `gorm:"size:128;not null" json:"username"`
 	AuthType      string    `gorm:"size:32" json:"auth_type,omitempty"`
+	Password      string    `gorm:"size:512" json:"-"`
+	PrivateKeyPEM string    `gorm:"type:text" json:"-"`
+	Passphrase    string    `gorm:"size:512" json:"-"`
 	CredentialRef string    `gorm:"size:255" json:"credential_ref,omitempty"`
 	IsPrivileged  bool      `json:"is_privileged"`
 	Status        string    `gorm:"index;size:32;not null;default:active" json:"status"`

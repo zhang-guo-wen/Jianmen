@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -253,6 +254,9 @@ func (s *DBStore) targetView(a model.HostAccount) TargetView {
 func (s *DBStore) targetConfig(a model.HostAccount) TargetConfig {
 	return TargetConfig{
 		ID: a.ID, Username: a.Username,
+		Password:              a.Password,
+		PrivateKeyPEM:         a.PrivateKeyPEM,
+		Passphrase:            a.Passphrase,
 		InsecureIgnoreHostKey: true,
 		HostID:                a.HostID,
 	}
@@ -301,15 +305,23 @@ func (s *DBStore) AddTarget(target config.Target) (TargetView, error) {
 		return TargetView{}, err
 	}
 	a := model.HostAccount{
-		ID:          target.ID,
-		HostID:      target.HostID,
-		Username:    target.Username,
-		AuthType:    "password",
-		ResourceSeq: seq,
-		ResourceID:  util.ResourceIDFromSeq(util.PrefixHost, seq),
+		ID:           target.ID,
+		HostID:       target.HostID,
+		Username:     target.Username,
+		AuthType:     "password",
+		Password:     target.Password,
+		PrivateKeyPEM: target.PrivateKeyPEM,
+		Passphrase:   target.Passphrase,
+		ResourceSeq:  seq,
+		ResourceID:   util.ResourceIDFromSeq(util.PrefixHost, seq),
 	}
 	if target.PrivateKeyPEM != "" || target.PrivateKeyPath != "" {
 		a.AuthType = "private_key"
+		if target.PrivateKeyPath != "" && target.PrivateKeyPEM == "" {
+			if pem, err := os.ReadFile(target.PrivateKeyPath); err == nil {
+				a.PrivateKeyPEM = string(pem)
+			}
+		}
 	}
 	if target.Disabled {
 		a.Status = "disabled"
@@ -327,8 +339,16 @@ func (s *DBStore) UpdateTarget(id string, target config.Target) (TargetView, err
 	}
 	a.Username = target.Username
 	a.AuthType = "password"
+	a.Password = target.Password
+	a.PrivateKeyPEM = target.PrivateKeyPEM
+	a.Passphrase = target.Passphrase
 	if target.PrivateKeyPEM != "" || target.PrivateKeyPath != "" {
 		a.AuthType = "private_key"
+		if target.PrivateKeyPath != "" && target.PrivateKeyPEM == "" {
+			if pem, err := os.ReadFile(target.PrivateKeyPath); err == nil {
+				a.PrivateKeyPEM = string(pem)
+			}
+		}
 	}
 	a.Status = "active"
 	if target.Disabled {

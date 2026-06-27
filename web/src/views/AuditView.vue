@@ -276,7 +276,6 @@
           />
         </template>
 
-        <pre v-else-if="detailData" class="json-preview">{{ JSON.stringify(detailData, null, 2) }}</pre>
         <el-empty v-else :description="t('audit.empty.detail')" />
       </div>
     </el-drawer>
@@ -925,16 +924,7 @@ onBeforeUnmount(() => {
   max-width: 100%;
 }
 
-.json-preview {
-  overflow: auto;
-  max-height: 460px;
-  margin: 0;
-  padding: 14px;
-  color: #344054;
-  background: #f9fafb;
-  border: 1px solid #eaecf0;
-  border-radius: 8px;
-}
+
 
 /* Make drawer body a flex column so terminal can fill remaining space */
 :deep(.el-drawer__body) {

@@ -153,9 +153,32 @@
               <el-button :disabled="!replayPlaying" @click="stopReplay">
                 {{ t('audit.action.stop') }}
               </el-button>
+              <el-select
+                v-model="playbackSpeed"
+                size="small"
+                :disabled="replayPlaying"
+                style="width: 72px"
+              >
+                <el-option
+                  v-for="s in speedOptions"
+                  :key="s"
+                  :label="`${s}x`"
+                  :value="s"
+                />
+              </el-select>
             </div>
           </div>
-          <el-progress :percentage="replayProgress" :show-text="false" />
+          <div class="replay-seek-bar">
+            <span class="replay-time-label">{{ formatReplayDuration(replayCurrentTime) }}</span>
+            <el-slider
+              v-model="replaySeekPercent"
+              :max="100"
+              :show-tooltip="false"
+              :disabled="!replayFrames.length"
+              @change="seekReplay"
+            />
+            <span class="replay-time-label">{{ formatReplayDuration(replayDuration) }}</span>
+          </div>
           <div class="replay-terminal-shell">
             <div ref="replayTerminalHostRef" class="replay-terminal" />
             <div v-if="replayTerminalMessage" class="replay-terminal-empty">
@@ -267,8 +290,12 @@ const detailTitle = ref('');
 const detailKind = ref<DetailKind>('');
 const detailData = ref<unknown>(null);
 const drawerVisible = ref(false);
+const playbackSpeed = ref(1);
+const speedOptions = [1, 2, 4, 8];
 const replayPlaying = ref(false);
 const replayProgress = ref(0);
+const replaySeekPercent = ref(0);
+const replayCurrentTime = ref(0);
 const replayRenderedOutput = ref(false);
 const replayTerminalHostRef = ref<HTMLElement>();
 let replayTerminal: Terminal | undefined;
@@ -304,7 +331,7 @@ const replayDuration = computed(() => replayFrames.value.at(-1)?.time ?? 0);
 const replayRawBytes = computed(() => utf8ByteLength(replayData.value.raw));
 const replayFirstOutputTime = computed(() => replayOutputFrames.value[0]?.time ?? 0);
 const replayTerminalCols = computed(() => replayHeaderNumber('width', 120, 20, 240));
-const replayTerminalRows = computed(() => replayHeaderNumber('height', 24, 8, 24));
+const replayTerminalRows = computed(() => replayHeaderNumber('height', 24, 8, 80));
 const replayTerminalMessage = computed(() => {
   if (!isReplay.value) {
     return '';
@@ -412,7 +439,10 @@ function setDetail(title: string, kind: DetailKind, data: unknown) {
   detailKind.value = kind;
   detailData.value = data;
   drawerVisible.value = true;
+  playbackSpeed.value = 1;
   replayProgress.value = 0;
+  replaySeekPercent.value = 0;
+  replayCurrentTime.value = 0;
   replayRenderedOutput.value = false;
   resetReplayTerminal();
 }
@@ -420,6 +450,7 @@ function setDetail(title: string, kind: DetailKind, data: unknown) {
 function closeDetail() {
   stopReplay();
   drawerVisible.value = false;
+  playbackSpeed.value = 1;
 }
 
 async function loadSessions() {
@@ -531,6 +562,8 @@ function playReplay() {
   const terminal = ensureReplayTerminal();
   terminal?.reset();
   replayProgress.value = 0;
+  replaySeekPercent.value = 0;
+  replayCurrentTime.value = 0;
   replayRenderedOutput.value = false;
   replayStartOffset = replayFirstOutputTime.value > 0 ? Math.max(0, replayFirstOutputTime.value - 0.2) : 0;
   replayFrameIndex = Math.max(
@@ -555,21 +588,63 @@ function stopReplay() {
   replayPlaying.value = false;
 }
 
+function seekReplay(percent: number) {
+  const frames = replayFrames.value;
+  const duration = Math.max(replayDuration.value, 0.1);
+  const targetTime = (percent / 100) * duration;
+
+  // Find target frame index
+  const targetIndex = frames.findIndex((f) => f.time >= targetTime);
+  const idx = targetIndex >= 0 ? targetIndex : frames.length;
+
+  const wasPlaying = replayPlaying.value;
+  stopReplay();
+
+  // Reset terminal and fast-forward
+  const terminal = ensureReplayTerminal();
+  terminal?.reset();
+  replayRenderedOutput.value = false;
+
+  for (let i = 0; i < idx; i++) {
+    if (frames[i].stream === 'o') {
+      terminal?.write(frames[i].data);
+      replayRenderedOutput.value = true;
+    }
+  }
+
+  // Update state
+  replayFrameIndex = idx;
+  replayProgress.value = percent;
+  replaySeekPercent.value = percent;
+  replayCurrentTime.value = targetTime;
+  replayStartOffset = targetTime;
+
+  if (wasPlaying) {
+    replayPlaying.value = true;
+    replayStartedAt = performance.now();
+    tickReplay();
+  }
+}
+
 function tickReplay() {
   if (!replayPlaying.value) {
     return;
   }
 
   const frames = replayFrames.value;
-  const elapsed = (performance.now() - replayStartedAt) / 1000 + replayStartOffset;
+  const speed = playbackSpeed.value;
+  const elapsed = ((performance.now() - replayStartedAt) / 1000) * speed + replayStartOffset;
   while (replayFrameIndex < frames.length && frames[replayFrameIndex].time <= elapsed) {
     appendReplayOutput(frames[replayFrameIndex]);
     replayFrameIndex++;
   }
 
   const duration = Math.max(replayDuration.value, 0.1);
-  replayProgress.value =
+  const pct =
     replayFrameIndex >= frames.length ? 100 : Math.min(99, Math.round((elapsed / duration) * 100));
+  replayProgress.value = pct;
+  replaySeekPercent.value = pct;
+  replayCurrentTime.value = Math.min(elapsed, duration);
 
   if (replayFrameIndex >= frames.length) {
     replayPlaying.value = false;
@@ -603,7 +678,7 @@ function ensureReplayTerminal(): Terminal | undefined {
     replayTerminal = new Terminal({
       cols,
       rows,
-      convertEol: false,
+      convertEol: true,
       cursorBlink: false,
       disableStdin: true,
       fontFamily: '"SFMono-Regular", Consolas, "Liberation Mono", monospace',
@@ -743,7 +818,6 @@ onBeforeUnmount(() => {
 .replay-terminal {
   position: absolute;
   inset: 12px;
-  overflow: hidden;
   box-sizing: border-box;
 }
 
@@ -761,6 +835,24 @@ onBeforeUnmount(() => {
 .replay-terminal :deep(.xterm-screen) {
   max-width: 100%;
   max-height: 100%;
+}
+
+.replay-seek-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.replay-seek-bar :deep(.el-slider) {
+  flex: 1;
+}
+
+.replay-time-label {
+  flex-shrink: 0;
+  min-width: 48px;
+  color: #667085;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
 }
 
 .replay-terminal-empty {

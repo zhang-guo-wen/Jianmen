@@ -261,6 +261,7 @@ func (s *DBStore) targetConfig(a model.HostAccount) TargetConfig {
 	}
 	return TargetConfig{
 		ID: a.ID, Username: a.Username,
+		Name:                  a.Username + "@" + formatHostAddress(host, port),
 		Host:                  host,
 		Port:                  port,
 		Password:              a.Password,

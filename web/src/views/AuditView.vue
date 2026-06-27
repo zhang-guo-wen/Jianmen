@@ -612,6 +612,8 @@ function seekReplay(percent: number) {
     }
   }
 
+  terminal?.scrollToBottom();
+
   // Update state
   replayFrameIndex = idx;
   replayProgress.value = percent;
@@ -638,6 +640,9 @@ function tickReplay() {
     appendReplayOutput(frames[replayFrameIndex]);
     replayFrameIndex++;
   }
+
+  // Keep viewport at bottom so new output is always visible
+  replayTerminal?.scrollToBottom();
 
   const duration = Math.max(replayDuration.value, 0.1);
   const pct =

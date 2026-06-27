@@ -53,15 +53,10 @@
           </template>
         </el-table-column>
       </el-table>
-      <el-pagination
-        v-if="sessions.length > pageSize"
+      <PaginationBar
         v-model:current-page="sessionPage"
-        v-model:page-size="pageSize"
+        v-model:page-size="sessionPageSize"
         :total="sessions.length"
-        layout="prev, pager, next"
-        :page-sizes="[pageSize]"
-        size="small"
-        style="margin-top:8px;justify-content:flex-end"
       />
       <el-empty v-if="!sessionsLoading && !sessions.length && !sessionError" :description="t('sessions.empty')" />
     </el-card>
@@ -228,14 +223,10 @@
             <el-table-column prop="command" :label="t('audit.column.command')" min-width="280" show-overflow-tooltip />
             <el-table-column prop="preview" :label="t('audit.column.preview')" min-width="280" show-overflow-tooltip />
           </el-table>
-          <el-pagination
-            v-if="commandEvents.length > pageSize"
+          <PaginationBar
             v-model:current-page="logPage"
-            :page-size="pageSize"
+            v-model:page-size="logPageSize"
             :total="commandEvents.length"
-            layout="prev, pager, next"
-            size="small"
-            style="margin-top:6px;justify-content:flex-end"
           />
         </template>
 
@@ -265,14 +256,10 @@
               </template>
             </el-table-column>
           </el-table>
-          <el-pagination
-            v-if="fileEvents.length > pageSize"
+          <PaginationBar
             v-model:current-page="logPage"
-            :page-size="pageSize"
+            v-model:page-size="logPageSize"
             :total="fileEvents.length"
-            layout="prev, pager, next"
-            size="small"
-            style="margin-top:6px;justify-content:flex-end"
           />
         </template>
 
@@ -288,6 +275,7 @@ import '@xterm/xterm/css/xterm.css';
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { ElMessage } from 'element-plus';
 
+import PaginationBar from '@/components/PaginationBar.vue';
 import {
   apiClient,
   type ApiEnvelope,
@@ -319,12 +307,13 @@ const sessions = ref<SessionRecord[]>([]);
 const dbConnections = ref<DBConnectionRecord[]>([]);
 const sessionsLoading = ref(false);
 const dbLoading = ref(false);
-const pageSize = ref(30);
 const sessionPage = ref(1);
 const logPage = ref(1);
+const sessionPageSize = ref(30);
+const logPageSize = ref(30);
 const pagedSessions = computed(() => {
-  const start = (sessionPage.value - 1) * pageSize.value;
-  return sessions.value.slice(start, start + pageSize.value);
+  const start = (sessionPage.value - 1) * sessionPageSize.value;
+  return sessions.value.slice(start, start + sessionPageSize.value);
 });
 const detailLoading = ref(false);
 const sessionError = ref('');
@@ -369,12 +358,12 @@ const fileEvents = computed(() =>
   Array.isArray(detailData.value) ? (detailData.value as SessionFileEventRecord[]) : []
 );
 const pagedCommandEvents = computed(() => {
-  const start = (logPage.value - 1) * pageSize.value;
-  return commandEvents.value.slice(start, start + pageSize.value);
+  const start = (logPage.value - 1) * logPageSize.value;
+  return commandEvents.value.slice(start, start + logPageSize.value);
 });
 const pagedFileEvents = computed(() => {
-  const start = (logPage.value - 1) * pageSize.value;
-  return fileEvents.value.slice(start, start + pageSize.value);
+  const start = (logPage.value - 1) * logPageSize.value;
+  return fileEvents.value.slice(start, start + logPageSize.value);
 });
 const replayData = computed(() => (isReplayData(detailData.value) ? detailData.value : { header: {}, frames: [], raw: '' }));
 const replayFrames = computed(() => replayData.value.frames);

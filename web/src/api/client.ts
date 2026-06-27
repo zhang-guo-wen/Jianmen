@@ -27,6 +27,18 @@ export interface UserRecord {
   [key: string]: unknown;
 }
 
+export interface UserPayload {
+  username?: string;
+  password?: string;
+  display_name?: string;
+  email?: string;
+  status?: string;
+}
+
+export interface MyMenusResponse {
+  menus: string[];
+}
+
 export interface TargetRecord {
   id?: string | number;
   host_id?: string;
@@ -399,6 +411,24 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 export const apiClient = {
   getHealth: () => request<HealthResponse>('/api/health'),
   getUsers: () => request<ApiEnvelope<UserRecord[]> | UserRecord[]>('/api/users'),
+  createUser: (payload: UserPayload) =>
+    request<ApiEnvelope<{ user: UserRecord; token: string }>>('/api/users', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  updateUser: (id: string | number, payload: UserPayload) =>
+    request<ApiEnvelope<UserRecord> | UserRecord>(`/api/users/${encodeURIComponent(String(id))}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    }),
+  deleteUser: (id: string | number) =>
+    request<ApiEnvelope<unknown> | unknown>(`/api/users/${encodeURIComponent(String(id))}`, {
+      method: 'DELETE',
+    }),
+  getMyMenus: () =>
+    request<MyMenusResponse>('/api/me/menus'),
+  getMyPermissions: () =>
+    request<{ actions: string[] }>('/api/me/permissions'),
   getHosts: (params: { page?: number; page_size?: number; q?: string } = {}) => {
     const search = new URLSearchParams();
     if (params.page) {

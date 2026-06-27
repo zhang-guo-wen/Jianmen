@@ -229,8 +229,7 @@ func (h *handler) readDirTimeout(path string) ([]os.FileInfo, error) {
 	case r := <-ch:
 		return r.files, r.err
 	case <-time.After(10 * time.Second):
-		h.logger.Warn("sftp readdir timed out, closing remote client", "path", path)
-		_ = h.remote.Close()
+		h.logger.Warn("sftp readdir timed out", "path", path)
 		return nil, fmt.Errorf("readdir %s timed out after 10s", path)
 	}
 }

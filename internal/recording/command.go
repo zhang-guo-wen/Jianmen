@@ -104,7 +104,7 @@ func (r *CommandRecorder) Close() error {
 }
 
 func (r *CommandRecorder) submitLineLocked() {
-	command := strings.TrimSpace(string(r.line))
+	command := strings.TrimSpace(strings.ReplaceAll(string(r.line), "\t", " "))
 	r.line = r.line[:0]
 	if command == "" {
 		return
@@ -147,11 +147,38 @@ func (r *CommandRecorder) flushCurrentLocked() error {
 func stripControlPreview(s string) string {
 	var b strings.Builder
 	b.Grow(len(s))
-	for _, ch := range s {
-		switch ch {
-		case '\r':
+	runes := []rune(s)
+	for i := 0; i < len(runes); i++ {
+		ch := runes[i]
+		switch {
+		case ch == '\x1b':
+			// Skip ANSI escape sequence. CSI sequences end with a letter (A-Z, a-z).
+			// OSC sequences end with BEL (\a) or ST (\x1b\\).
+			if i+1 < len(runes) && runes[i+1] == '[' {
+				i += 2 // skip ESC [
+				for i < len(runes) {
+					c := runes[i]
+					if (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') {
+						break // terminator found
+					}
+					i++
+				}
+			} else if i+1 < len(runes) && runes[i+1] == ']' {
+				i += 2 // skip ESC ]
+				for i < len(runes) {
+					if runes[i] == '\a' || (runes[i] == '\x1b' && i+1 < len(runes) && runes[i+1] == '\\') {
+						if runes[i] == '\x1b' {
+							i++
+						}
+						break
+					}
+					i++
+				}
+			}
+			// For other ESC sequences, just skip the ESC and continue
+		case ch == '\r':
 			b.WriteRune('\n')
-		case '\t', '\n':
+		case ch == '\t', ch == '\n':
 			b.WriteRune(ch)
 		default:
 			if ch >= 0x20 && ch != 0x7f {
@@ -159,5 +186,5 @@ func stripControlPreview(s string) string {
 			}
 		}
 	}
-	return b.String()
+	return strings.TrimSpace(b.String())
 }

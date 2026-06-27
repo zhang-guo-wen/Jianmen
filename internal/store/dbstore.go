@@ -264,9 +264,9 @@ func (s *DBStore) targetConfig(a model.HostAccount) TargetConfig {
 		Name:                  a.Username + "@" + formatHostAddress(host, port),
 		Host:                  host,
 		Port:                  port,
-		Password:              a.Password,
-		PrivateKeyPEM:         a.PrivateKeyPEM,
-		Passphrase:            a.Passphrase,
+		Password:              a.Password.GetPlaintext(),
+		PrivateKeyPEM:         a.PrivateKeyPEM.GetPlaintext(),
+		Passphrase:            a.Passphrase.GetPlaintext(),
 		InsecureIgnoreHostKey: true,
 		HostID:                a.HostID,
 	}
@@ -319,9 +319,9 @@ func (s *DBStore) AddTarget(target config.Target) (TargetView, error) {
 		HostID:       target.HostID,
 		Username:     target.Username,
 		AuthType:     "password",
-		Password:     target.Password,
-		PrivateKeyPEM: target.PrivateKeyPEM,
-		Passphrase:   target.Passphrase,
+		Password:     model.NewEncryptedField(target.Password),
+		PrivateKeyPEM: model.NewEncryptedField(target.PrivateKeyPEM),
+		Passphrase:   model.NewEncryptedField(target.Passphrase),
 		ResourceSeq:  seq,
 		ResourceID:   util.ResourceIDFromSeq(util.PrefixHost, seq),
 	}
@@ -329,7 +329,7 @@ func (s *DBStore) AddTarget(target config.Target) (TargetView, error) {
 		a.AuthType = "private_key"
 		if target.PrivateKeyPath != "" && target.PrivateKeyPEM == "" {
 			if pem, err := os.ReadFile(target.PrivateKeyPath); err == nil {
-				a.PrivateKeyPEM = string(pem)
+				a.PrivateKeyPEM = model.NewEncryptedField(string(pem))
 			}
 		}
 	}
@@ -349,14 +349,14 @@ func (s *DBStore) UpdateTarget(id string, target config.Target) (TargetView, err
 	}
 	a.Username = target.Username
 	a.AuthType = "password"
-	a.Password = target.Password
-	a.PrivateKeyPEM = target.PrivateKeyPEM
-	a.Passphrase = target.Passphrase
+	a.Password = model.NewEncryptedField(target.Password)
+	a.PrivateKeyPEM = model.NewEncryptedField(target.PrivateKeyPEM)
+	a.Passphrase = model.NewEncryptedField(target.Passphrase)
 	if target.PrivateKeyPEM != "" || target.PrivateKeyPath != "" {
 		a.AuthType = "private_key"
 		if target.PrivateKeyPath != "" && target.PrivateKeyPEM == "" {
 			if pem, err := os.ReadFile(target.PrivateKeyPath); err == nil {
-				a.PrivateKeyPEM = string(pem)
+				a.PrivateKeyPEM = model.NewEncryptedField(string(pem))
 			}
 		}
 	}
@@ -437,7 +437,7 @@ func (s *DBStore) AddDatabaseAccount(instanceID, upstreamUsername, upstreamPassw
 		InstanceID:       instanceID,
 		UniqueName:       uniqueName,
 		UpstreamUsername: upstreamUsername,
-		UpstreamPassword: upstreamPassword,
+		UpstreamPassword: model.NewEncryptedField(upstreamPassword),
 		GroupName:        strings.TrimSpace(groupName),
 		Remark:           strings.TrimSpace(remark),
 		ExpiresAt:        expiresAt,
@@ -464,7 +464,7 @@ func (s *DBStore) UpdateDatabaseAccount(id, upstreamUsername, upstreamPassword, 
 		acct.UpstreamUsername = upstreamUsername
 	}
 	if upstreamPassword != "" {
-		acct.UpstreamPassword = upstreamPassword
+		acct.UpstreamPassword = model.NewEncryptedField(upstreamPassword)
 	}
 	acct.GroupName = strings.TrimSpace(groupName)
 	acct.Remark = strings.TrimSpace(remark)

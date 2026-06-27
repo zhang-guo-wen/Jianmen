@@ -560,7 +560,7 @@ func (s *StaticStore) AddDatabaseAccount(instanceID, upstreamUsername, upstreamP
 		InstanceID:       instanceID,
 		UniqueName:       uniqueName,
 		UpstreamUsername: upstreamUsername,
-		UpstreamPassword: upstreamPassword,
+		UpstreamPassword: model.NewEncryptedField(upstreamPassword),
 		GroupName:        strings.TrimSpace(groupName),
 		Remark:           strings.TrimSpace(remark),
 		ExpiresAt:        expiresAt,
@@ -590,7 +590,7 @@ func (s *StaticStore) UpdateDatabaseAccount(id, upstreamUsername, upstreamPasswo
 		acct.UpstreamUsername = upstreamUsername
 	}
 	if upstreamPassword != "" {
-		acct.UpstreamPassword = upstreamPassword
+		acct.UpstreamPassword = model.NewEncryptedField(upstreamPassword)
 	}
 	acct.GroupName = strings.TrimSpace(groupName)
 	acct.Remark = strings.TrimSpace(remark)

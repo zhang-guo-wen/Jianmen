@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"golang.org/x/crypto/bcrypt"
 	"golang.org/x/crypto/ssh"
 	"gorm.io/gorm"
 
@@ -73,8 +74,7 @@ func (s *DBStore) authenticateCompact(login LoginName, password string) (model.U
 	if err := s.db.Where("id = ?", userSession.UserID).First(&user).Error; err != nil {
 		return model.User{}, err
 	}
-	passwordSum := sha256.Sum256([]byte(password))
-	if hex.EncodeToString(passwordSum[:]) != user.PasswordHash {
+	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(password)); err != nil {
 		return model.User{}, errors.New("authentication failed")
 	}
 	// 4. 查找目标资源

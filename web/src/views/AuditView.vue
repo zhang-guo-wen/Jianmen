@@ -47,11 +47,8 @@
             {{ formatDurationSeconds(row.duration_seconds) }}
           </template>
         </el-table-column>
-        <el-table-column :label="t('common.actions')" fixed="right" width="310">
+        <el-table-column :label="t('common.actions')" fixed="right" width="230">
           <template #default="{ row }">
-            <el-button link type="primary" @click="loadSessionArtifact(row, 'meta')">
-              {{ t('audit.action.meta') }}
-            </el-button>
             <el-button :disabled="!hasReplay(row)" link type="success" @click="loadSessionArtifact(row, 'replay')">
               {{ t('audit.action.replay') }}
             </el-button>
@@ -60,9 +57,6 @@
             </el-button>
             <el-button link type="primary" @click="loadSessionArtifact(row, 'files')">
               {{ t('audit.action.files') }}
-            </el-button>
-            <el-button link type="primary" @click="loadSessionArtifact(row, 'file-summary')">
-              {{ t('audit.action.summary') }}
             </el-button>
           </template>
         </el-table-column>

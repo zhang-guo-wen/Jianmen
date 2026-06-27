@@ -711,7 +711,7 @@ function ensureReplayTerminal(): Terminal | undefined {
     // Omit rows — xterm auto-calculates from container height.
     replayTerminal = new Terminal({
       cols: replayTerminalCols.value,
-      convertEol: true,
+      convertEol: false,
       cursorBlink: false,
       disableStdin: true,
       fontFamily: '"SFMono-Regular", Consolas, "Liberation Mono", monospace',

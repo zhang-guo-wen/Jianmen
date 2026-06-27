@@ -214,23 +214,26 @@
         </el-table>
 
         <template v-else-if="isCommands">
-          <el-table :data="pagedCommandEvents" height="420">
-            <el-table-column :label="t('audit.column.time')" width="160">
-              <template #default="{ row }">
-                {{ formatTime(row.started_at) }}
-              </template>
-            </el-table-column>
-            <el-table-column prop="command" :label="t('audit.column.command')" min-width="280" show-overflow-tooltip />
-            <el-table-column prop="preview" :label="t('audit.column.preview')" min-width="280" show-overflow-tooltip />
-          </el-table>
-          <PaginationBar
-            v-model:current-page="logPage"
-            v-model:page-size="logPageSize"
-            :total="commandEvents.length"
-          />
+          <div class="log-block">
+            <el-table :data="pagedCommandEvents" height="420">
+              <el-table-column :label="t('audit.column.time')" width="160">
+                <template #default="{ row }">
+                  {{ formatTime(row.started_at) }}
+                </template>
+              </el-table-column>
+              <el-table-column prop="command" :label="t('audit.column.command')" min-width="280" show-overflow-tooltip />
+              <el-table-column prop="preview" :label="t('audit.column.preview')" min-width="280" show-overflow-tooltip />
+            </el-table>
+            <PaginationBar
+              v-model:current-page="logPage"
+              v-model:page-size="logPageSize"
+              :total="commandEvents.length"
+            />
+          </div>
         </template>
 
         <template v-else-if="isFiles">
+          <div class="log-block">
           <el-table :data="pagedFileEvents" height="420" row-key="seq">
             <el-table-column :label="t('audit.column.time')" width="150">
               <template #default="{ row }">
@@ -261,6 +264,7 @@
             v-model:page-size="logPageSize"
             :total="fileEvents.length"
           />
+          </div>
         </template>
 
         <el-empty v-else :description="t('audit.empty.detail')" />
@@ -927,6 +931,17 @@ onBeforeUnmount(() => {
   flex-direction: column;
   flex: 1;
   min-height: 0;
+}
+
+.log-block {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.log-block :deep(.el-table) {
+  flex: 1;
 }
 
 .replay-panel {

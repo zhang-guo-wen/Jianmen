@@ -301,7 +301,6 @@ const replayRenderedOutput = ref(false);
 const replayTerminalHostRef = ref<HTMLElement>();
 let replayTerminal: Terminal | undefined;
 let fitAddon: FitAddon | undefined;
-let terminalResizeObserver: ResizeObserver | undefined;
 let replayTimer: number | undefined;
 let replayStartedAt = 0;
 let replayStartOffset = 0;
@@ -728,12 +727,6 @@ function ensureReplayTerminal(): Terminal | undefined {
     replayTerminal.loadAddon(fitAddon);
     replayTerminal.open(host);
     fitAddon.fit();
-
-    // Keep terminal sized to container
-    terminalResizeObserver = new ResizeObserver(() => {
-      fitAddon?.fit();
-    });
-    terminalResizeObserver.observe(host);
   }
 
   return replayTerminal;
@@ -744,8 +737,6 @@ function resetReplayTerminal() {
 }
 
 function destroyReplayTerminal() {
-  terminalResizeObserver?.disconnect();
-  terminalResizeObserver = undefined;
   replayTerminal?.dispose();
   replayTerminal = undefined;
   fitAddon = undefined;

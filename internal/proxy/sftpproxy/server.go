@@ -372,11 +372,15 @@ func (l fileInfoLister) ListAt(dst []os.FileInfo, offset int64) (int, error) {
 	if offset < 0 {
 		return 0, os.ErrInvalid
 	}
+	if len(dst) == 0 {
+		return 0, io.EOF
+	}
 	if offset >= int64(len(l)) {
 		return 0, io.EOF
 	}
 	n := copy(dst, l[offset:])
-	if n < len(dst) {
+	// EOF when we copied fewer than requested or reached the end.
+	if n < len(dst) || offset+int64(n) >= int64(len(l)) {
 		return n, io.EOF
 	}
 	return n, nil

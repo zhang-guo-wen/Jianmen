@@ -67,10 +67,11 @@ import {
   Platform,
   UserFilled
 } from '@element-plus/icons-vue';
-import { computed, watchEffect, type Component } from 'vue';
+import { computed, onMounted, watchEffect, type Component } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 
-import { clearToken } from '@/api/client';
+import { clearToken, getToken } from '@/api/client';
+import { usePermissionStore } from '@/stores/permission';
 import { isTranslationKey, useI18n, type Locale, type TranslationKey } from '@/i18n';
 
 const route = useRoute();
@@ -84,16 +85,28 @@ const selectedLocale = computed<Locale>({
   set: (nextLocale) => setLocale(nextLocale)
 });
 
-const navItems: Array<{ path: string; icon: Component; labelKey: TranslationKey }> = [
-  { path: '/dashboard', icon: DataBoard, labelKey: 'nav.dashboard' },
-  { path: '/hosts', icon: Monitor, labelKey: 'nav.hosts' },
-  { path: '/databases', icon: DataAnalysis, labelKey: 'nav.databases' },
-  { path: '/quick-connect', icon: Link, labelKey: 'nav.quickConnect' },
-  { path: '/sessions', icon: Connection, labelKey: 'nav.sessions' },
-  { path: '/rbac', icon: UserFilled, labelKey: 'nav.rbac' },
-  { path: '/audit', icon: DocumentChecked, labelKey: 'nav.audit' },
-  { path: '/web-terminal', icon: Platform, labelKey: 'nav.webTerminal' }
+const ALL_NAV_ITEMS: Array<{ path: string; icon: Component; labelKey: TranslationKey; menuKey: string }> = [
+  { path: '/dashboard', icon: DataBoard, labelKey: 'nav.dashboard', menuKey: 'dashboard' },
+  { path: '/hosts', icon: Monitor, labelKey: 'nav.hosts', menuKey: 'hosts' },
+  { path: '/databases', icon: DataAnalysis, labelKey: 'nav.databases', menuKey: 'databases' },
+  { path: '/quick-connect', icon: Link, labelKey: 'nav.quickConnect', menuKey: 'quickConnect' },
+  { path: '/sessions', icon: Connection, labelKey: 'nav.sessions', menuKey: 'sessions' },
+  { path: '/users', icon: UserFilled, labelKey: 'nav.users', menuKey: 'rbac' },
+  { path: '/roles', icon: UserFilled, labelKey: 'nav.roles', menuKey: 'rbac' },
+  { path: '/audit', icon: DocumentChecked, labelKey: 'nav.audit', menuKey: 'audit' },
+  { path: '/web-terminal', icon: Platform, labelKey: 'nav.webTerminal', menuKey: 'webTerminal' },
 ];
+
+const permission = usePermissionStore();
+const navItems = computed(() =>
+  ALL_NAV_ITEMS.filter(item => permission.canAccessMenu(item.menuKey))
+);
+
+onMounted(async () => {
+  if (!isLoginRoute.value && getToken()) {
+    await permission.fetch();
+  }
+});
 
 function metaText(value: unknown, fallbackKey: TranslationKey): string {
   return t(isTranslationKey(value) ? value : fallbackKey);

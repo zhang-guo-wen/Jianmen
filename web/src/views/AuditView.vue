@@ -16,26 +16,34 @@
       </template>
       <div class="filter-bar">
         <el-input
-          v-model="filterTarget"
-          placeholder="搜索目标…"
+          v-model="filterUser"
+          placeholder="用户"
           :prefix-icon="Search"
           clearable
           size="small"
-          style="width:220px"
+          style="width:140px"
+        />
+        <el-input
+          v-model="filterTarget"
+          placeholder="目标"
+          :prefix-icon="Search"
+          clearable
+          size="small"
+          style="width:160px"
         />
         <el-date-picker
           v-model="filterDateRange"
           type="datetimerange"
           :shortcuts="dateShortcuts"
           range-separator="至"
-          start-placeholder="开始时间"
-          end-placeholder="结束时间"
+          start-placeholder="开始"
+          end-placeholder="结束"
           size="small"
           clearable
           format="MM/DD HH:mm"
-          style="width:340px"
+          style="width:280px"
         />
-        <el-button v-if="hasFilter" size="small" text type="primary" @click="clearFilters">清除筛选</el-button>
+        <el-button v-if="hasFilter" size="small" text type="primary" @click="clearFilters">清除</el-button>
       </div>
       <el-alert v-if="sessionError" :title="sessionError" type="error" show-icon />
       <el-table v-else v-loading="sessionsLoading" :data="pagedSessions" height="380" row-key="id">
@@ -335,6 +343,7 @@ const sessions = ref<SessionRecord[]>([]);
 const dbConnections = ref<DBConnectionRecord[]>([]);
 const sessionsLoading = ref(false);
 const dbLoading = ref(false);
+const filterUser = ref('');
 const filterTarget = ref('');
 const filterDateRange = ref<[Date, Date] | null>(null);
 const sessionPage = ref(1);
@@ -342,7 +351,7 @@ const logPage = ref(1);
 const sessionPageSize = ref(30);
 const logPageSize = ref(30);
 
-const hasFilter = computed(() => !!filterTarget.value || !!filterDateRange.value);
+const hasFilter = computed(() => !!filterUser.value || !!filterTarget.value || !!filterDateRange.value);
 
 const dateShortcuts = [
   { text: '最近1小时', value: () => [new Date(Date.now() - 3600000), new Date()] },
@@ -358,6 +367,12 @@ function parseTime(v: unknown): number {
 
 const filteredSessions = computed(() => {
   let list = sessions.value;
+  const u = filterUser.value.trim().toLowerCase();
+  if (u) {
+    list = list.filter(s =>
+      (s.user || s.user_username || '').toLowerCase().includes(u)
+    );
+  }
   const t = filterTarget.value.trim().toLowerCase();
   if (t) {
     list = list.filter(s => (s.target || '').toLowerCase().includes(t));
@@ -380,6 +395,7 @@ const pagedSessions = computed(() => {
 });
 
 function clearFilters() {
+  filterUser.value = '';
   filterTarget.value = '';
   filterDateRange.value = null;
   sessionPage.value = 1;

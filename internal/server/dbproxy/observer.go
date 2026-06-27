@@ -153,7 +153,7 @@ func (o *mysqlObserver) handleServerPacket(payload []byte) {
 		if len(payload) >= 3 {
 			finish.ErrorCode = fmt.Sprintf("%d", binary.LittleEndian.Uint16(payload[1:3]))
 		}
-		finish.ErrorMessage = parseMySQLErrorMessage(payload)
+		finish.ErrorMessage = ParseMySQLErrorMessage(payload)
 	case 0x00:
 		if rows, _, ok := readLengthEncodedInt(payload[1:]); ok {
 			value := int64(rows)
@@ -368,7 +368,7 @@ func mysqlPacketWithSeq(seq byte, payload []byte) []byte {
 	return packet
 }
 
-func parseMySQLErrorMessage(payload []byte) string {
+func ParseMySQLErrorMessage(payload []byte) string {
 	if len(payload) <= 3 {
 		return ""
 	}

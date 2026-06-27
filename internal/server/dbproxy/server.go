@@ -100,21 +100,27 @@ type gatewayConn struct {
 func (g *Gateway) handleConn(ctx context.Context, client net.Conn) {
 	defer client.Close()
 
+	client.SetReadDeadline(time.Now().Add(200 * time.Millisecond))
 	firstByte := make([]byte, 1)
-	if _, err := io.ReadFull(client, firstByte); err != nil {
-		g.logger.Warn("db gateway failed to read protocol byte", "client", client.RemoteAddr().String(), "error", err)
-		return
-	}
+	_, err := io.ReadFull(client, firstByte)
+	client.SetReadDeadline(time.Time{})
 
 	var conn *gatewayConn
-	switch {
-	case firstByte[0] == 0x00:
-		conn = g.handlePG(ctx, client)
-	case firstByte[0] == 0x4a:
-		conn = g.handleMySQL(ctx, client)
-	default:
-		g.logger.Warn("db gateway unsupported protocol", "first_byte", firstByte[0])
-		return
+	if err != nil {
+		if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+			conn = g.handleMySQL(ctx, client)
+		} else {
+			g.logger.Warn("db gateway protocol detection read error", "error", err)
+			return
+		}
+	} else {
+		switch {
+		case firstByte[0] == 0x00:
+			conn = g.handlePG(ctx, client)
+		default:
+			g.logger.Warn("db gateway unsupported protocol", "first_byte", firstByte[0])
+			return
+		}
 	}
 	if conn == nil {
 		return
@@ -369,13 +375,144 @@ func (g *Gateway) handlePG(ctx context.Context, client net.Conn) *gatewayConn {
 	}
 }
 
-// handleMySQL is a v1 stub. Returns nil with a warning log.
+// handleMySQL implements MySQL proxy authentication:
+// 1. Read client's initial login packet (already buffered after TCP connect)
+// 2. Extract username using MySQLLoginParser
+// 3. Look up DatabaseAccount by unique name
+// 4. RBAC check
+// 5. Check account disabled/expiry
+// 6. Connect to upstream MySQL
+// 7. Read upstream handshake, parse with ParseMySQLHandshake
+// 8. Forward handshake to client
+// 9. Read client's auth response
+// 10. Build upstream login with upstream credentials (mysql_native_password)
+// 11. Send to upstream, read auth result
+// 12. Check auth OK (0x00) or ERR (0xff), forward result to client
+// 13. Return gatewayConn for data relay
 func (g *Gateway) handleMySQL(ctx context.Context, client net.Conn) *gatewayConn {
-	// MySQL v1 is deferred. The first byte (0x4a) was already consumed by handleConn.
-	// A full implementation would need to: connect upstream, relay handshake,
-	// extract username from client login, RBAC check, then proxy.
-	g.logger.Warn("MySQL proxy not yet implemented in gateway v1 - use PG protocol")
-	return nil
+	// Read initial login packet from client
+	clientLoginPkt, err := readMySQLPacket(client)
+	if err != nil {
+		g.logger.Warn("mysql gateway failed to read initial packet", "error", err)
+		return nil
+	}
+
+	// Parse username
+	parser := &MySQLLoginParser{}
+	fullPacket := make([]byte, 4+len(clientLoginPkt.payload))
+	fullPacket[0] = byte(len(clientLoginPkt.payload))
+	fullPacket[1] = byte(len(clientLoginPkt.payload) >> 8)
+	fullPacket[2] = byte(len(clientLoginPkt.payload) >> 16)
+	fullPacket[3] = clientLoginPkt.seq
+	copy(fullPacket[4:], clientLoginPkt.payload)
+	obs, _, err := parser.Observe(fullPacket)
+	if err != nil {
+		g.logger.Warn("mysql gateway failed to parse login", "error", err)
+		return nil
+	}
+	if obs.User == "" {
+		g.logger.Warn("mysql gateway empty username in login")
+		return nil
+	}
+
+	uniqueName := strings.TrimSpace(obs.User)
+	acct, err := g.store.DatabaseAccountByUniqueName(uniqueName)
+	if err != nil {
+		g.logger.Warn("mysql gateway account not found", "unique_name", uniqueName, "error", err)
+		return nil
+	}
+
+	// RBAC check
+	resourceID := rbaccheck.DatabaseAccountResourceID(uniqueName)
+	if err := g.authorizeConnect(uniqueName, uniqueName, resourceID); err != nil {
+		g.logger.Warn("mysql gateway rbac denied", "resource", resourceID, "error", err)
+		return nil
+	}
+
+	// Check account disabled and expiry
+	if acct.Disabled {
+		g.logger.Warn("mysql gateway account disabled", "account", uniqueName)
+		return nil
+	}
+	if acct.ExpiresAt != nil && time.Now().UTC().After(*acct.ExpiresAt) {
+		g.logger.Warn("mysql gateway account expired", "account", uniqueName, "expires_at", acct.ExpiresAt)
+		return nil
+	}
+
+	// Connect to upstream
+	upstream, err := net.DialTimeout("tcp", acct.Instance.Address, 10*time.Second)
+	if err != nil {
+		g.logger.Warn("mysql gateway upstream connect failed", "upstream", acct.Instance.Address, "error", err)
+		return nil
+	}
+
+	// Read upstream handshake
+	hsPkt, err := readMySQLPacket(upstream)
+	if err != nil {
+		g.logger.Warn("mysql gateway failed to read upstream handshake", "error", err)
+		upstream.Close()
+		return nil
+	}
+	hs, err := ParseMySQLHandshake(hsPkt.payload)
+	if err != nil {
+		g.logger.Warn("mysql gateway failed to parse handshake", "error", err)
+		upstream.Close()
+		return nil
+	}
+
+	// Forward handshake to client
+	if _, err := client.Write(hsPkt.raw); err != nil {
+		upstream.Close()
+		return nil
+	}
+
+	// Read client's auth response
+	_, err = readMySQLPacket(client)
+	if err != nil {
+		g.logger.Warn("mysql gateway failed to read client auth", "error", err)
+		upstream.Close()
+		return nil
+	}
+
+	// Build upstream login with upstream credentials
+	upstreamLogin := BuildMySQLUpstreamLogin(hs, acct.UpstreamUsername, acct.UpstreamPassword, "mysql_native_password")
+	if _, err := upstream.Write(upstreamLogin); err != nil {
+		g.logger.Warn("mysql gateway failed to send upstream login", "error", err)
+		upstream.Close()
+		return nil
+	}
+
+	// Read upstream auth result
+	authPkt, err := readMySQLPacket(upstream)
+	if err != nil {
+		g.logger.Warn("mysql gateway failed to read upstream auth result", "error", err)
+		upstream.Close()
+		return nil
+	}
+
+	// Check auth result: OK (0x00) or ERR (0xff)
+	if len(authPkt.payload) > 0 && authPkt.payload[0] == 0xff {
+		errMsg := ParseMySQLErrorMessage(authPkt.payload)
+		g.logger.Warn("mysql gateway upstream auth failed", "error", errMsg)
+		client.Write(authPkt.raw)
+		upstream.Close()
+		return nil
+	}
+
+	// Forward OK to client
+	if _, err := client.Write(authPkt.raw); err != nil {
+		upstream.Close()
+		return nil
+	}
+
+	return &gatewayConn{
+		protocol:     "mysql",
+		accountID:    acct.ID,
+		accountName:  uniqueName,
+		upstream:     upstream,
+		upstreamAddr: acct.Instance.Address,
+		userID:       uniqueName,
+	}
 }
 
 func (g *Gateway) authorizeConnect(userID, uniqueName, resourceID string) error {
@@ -586,4 +723,68 @@ func (r *connectionRecorder) Close() error {
 	err := r.file.Close()
 	r.file = nil
 	return err
+}
+
+// mysqlPacket represents a parsed MySQL packet
+type mysqlPacket struct {
+	raw     []byte
+	payload []byte
+	seq     byte
+}
+
+// readMySQLPacket reads a single MySQL packet (4-byte header + payload) from conn
+func readMySQLPacket(conn net.Conn) (*mysqlPacket, error) {
+	header := make([]byte, 4)
+	if _, err := io.ReadFull(conn, header); err != nil {
+		return nil, err
+	}
+	payloadLen := int(header[0]) | int(header[1])<<8 | int(header[2])<<16
+	if payloadLen < 0 || payloadLen > 128*1024*1024 {
+		return nil, fmt.Errorf("invalid mysql packet length %d", payloadLen)
+	}
+	payload := make([]byte, payloadLen)
+	if _, err := io.ReadFull(conn, payload); err != nil {
+		return nil, err
+	}
+	raw := make([]byte, 4+payloadLen)
+	copy(raw, header)
+	copy(raw[4:], payload)
+	return &mysqlPacket{raw: raw, payload: payload, seq: header[3]}, nil
+}
+
+// BuildMySQLUpstreamLogin builds a MySQL login packet for the upstream server.
+// Exported for use by test connection in admin package.
+func BuildMySQLUpstreamLogin(hs *MySQLHandshake, username, password, authPlugin string) []byte {
+	var authResp []byte
+	if authPlugin == "mysql_native_password" {
+		authResp = BuildMySQLNativePassword(password, hs.AuthData)
+	}
+
+	capFlags := uint32(mysqlClientProtocol41 | mysqlClientSecureConnection | mysqlClientPluginAuth)
+
+	var payload []byte
+	capBytes := make([]byte, 4)
+	binary.LittleEndian.PutUint32(capBytes, capFlags)
+	payload = append(payload, capBytes...)
+	maxPkt := make([]byte, 4)
+	binary.LittleEndian.PutUint32(maxPkt, 16777215)
+	payload = append(payload, maxPkt...)
+	payload = append(payload, hs.CharacterSet)
+	reserved := make([]byte, 23)
+	payload = append(payload, reserved...)
+	payload = append(payload, []byte(username)...)
+	payload = append(payload, 0)
+	payload = append(payload, byte(len(authResp)))
+	payload = append(payload, authResp...)
+	payload = append(payload, 0) // empty database
+	payload = append(payload, []byte(authPlugin)...)
+	payload = append(payload, 0)
+
+	pkt := make([]byte, 4+len(payload))
+	pkt[0] = byte(len(payload))
+	pkt[1] = byte(len(payload) >> 8)
+	pkt[2] = byte(len(payload) >> 16)
+	pkt[3] = 1
+	copy(pkt[4:], payload)
+	return pkt
 }

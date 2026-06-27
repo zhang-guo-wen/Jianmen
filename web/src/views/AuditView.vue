@@ -214,40 +214,37 @@
         </el-table>
 
         <el-table v-else-if="isCommands" :data="commandEvents" height="420">
-          <el-table-column prop="seq" :label="t('audit.column.seq')" width="90" />
-          <el-table-column prop="command" :label="t('audit.column.command')" min-width="260" show-overflow-tooltip />
-          <el-table-column prop="preview" :label="t('audit.column.preview')" min-width="260" show-overflow-tooltip />
-          <el-table-column prop="confidence" :label="t('audit.column.confidence')" width="140" />
-          <el-table-column :label="t('audit.column.time')" min-width="180">
+          <el-table-column :label="t('audit.column.time')" width="160">
             <template #default="{ row }">
               {{ formatTime(row.started_at) }}
             </template>
           </el-table-column>
+          <el-table-column prop="command" :label="t('audit.column.command')" min-width="280" show-overflow-tooltip />
+          <el-table-column prop="preview" :label="t('audit.column.preview')" min-width="280" show-overflow-tooltip />
         </el-table>
 
         <el-table v-else-if="isFiles" :data="fileEvents" height="420" row-key="seq">
-          <el-table-column prop="seq" :label="t('audit.column.seq')" width="60" />
-          <el-table-column :label="t('audit.column.action')" width="100">
+          <el-table-column :label="t('audit.column.time')" width="155">
+            <template #default="{ row }">
+              {{ formatTime(row.started_at) }}
+            </template>
+          </el-table-column>
+          <el-table-column :label="t('audit.column.action')" width="90">
             <template #default="{ row }">
               {{ formatFileAction(row.action) }}
             </template>
           </el-table-column>
-          <el-table-column prop="path" :label="t('audit.column.path')" min-width="260" show-overflow-tooltip />
-          <el-table-column :label="t('audit.column.result')" width="80">
+          <el-table-column prop="path" :label="t('audit.column.path')" min-width="360" show-overflow-tooltip />
+          <el-table-column :label="t('audit.column.result')" width="75">
             <template #default="{ row }">
               <el-tag :type="row.result === 'success' ? 'success' : 'danger'" size="small">
                 {{ row.result === 'success' ? t('audit.result.success') : t('audit.result.failure') }}
               </el-tag>
             </template>
           </el-table-column>
-          <el-table-column :label="t('audit.column.size')" width="80">
+          <el-table-column :label="t('audit.column.size')" width="75">
             <template #default="{ row }">
               <template v-if="row.size > 0">{{ formatBytes(row.size) }}</template>
-            </template>
-          </el-table-column>
-          <el-table-column :label="t('audit.column.time')" width="160">
-            <template #default="{ row }">
-              {{ formatTime(row.started_at) }}
             </template>
           </el-table-column>
         </el-table>

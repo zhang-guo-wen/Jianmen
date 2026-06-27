@@ -118,6 +118,8 @@ type HostAccount struct {
 	CredentialRef string    `gorm:"size:255" json:"credential_ref,omitempty"`
 	IsPrivileged  bool      `json:"is_privileged"`
 	Status        string    `gorm:"index;size:32;not null;default:active" json:"status"`
+	ResourceSeq   int       `gorm:"index;not null;default:0" json:"resource_seq"`
+	ResourceID    string    `gorm:"uniqueIndex;size:4" json:"resource_id"`
 	CreatedAt     time.Time `json:"created_at"`
 	UpdatedAt     time.Time `json:"updated_at"`
 	Host          Host      `gorm:"constraint:OnUpdate:CASCADE,OnDelete:CASCADE;" json:"-"`
@@ -145,6 +147,8 @@ type DatabaseAccount struct {
 	Remark           string    `gorm:"type:text" json:"remark,omitempty"`
 	ExpiresAt        *time.Time `gorm:"index" json:"expires_at,omitempty"`
 	Disabled         bool      `json:"disabled"`
+	ResourceSeq      int       `gorm:"index;not null;default:0" json:"resource_seq"`
+	ResourceID       string    `gorm:"uniqueIndex;size:4" json:"resource_id"`
 	CreatedAt        time.Time  `json:"created_at"`
 	UpdatedAt        time.Time  `json:"updated_at"`
 	Instance         DatabaseInstance `gorm:"constraint:OnUpdate:CASCADE,OnDelete:CASCADE;" json:"-"`

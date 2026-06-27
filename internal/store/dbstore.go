@@ -14,6 +14,7 @@ import (
 
 	"jianmen/internal/config"
 	"jianmen/internal/model"
+	"jianmen/internal/util"
 )
 
 // DBStore implements Store backed by a GORM database.
@@ -192,7 +193,8 @@ func (s *DBStore) targetView(a model.HostAccount) TargetView {
 	}
 	return TargetView{
 		ID: a.ID, HostID: a.HostID,
-		ResourceType: model.ResourceTypeHostAccount, ResourceID: a.ID,
+		ResourceType: model.ResourceTypeHostAccount, ResourceID: a.ResourceID,
+		ResourceSeq: a.ResourceSeq,
 		Name: name, Username: a.Username, Status: status, Disabled: a.Status == "disabled",
 		AuthMethods: authMethods, Static: false,
 	}
@@ -243,11 +245,18 @@ func (s *DBStore) AddTarget(target config.Target) (TargetView, error) {
 	if target.HostID == "" {
 		target.HostID = fmt.Sprintf("%s-%d", target.Host, target.Port)
 	}
+	// 分配资源ID
+	seq, err := s.nextHostResourceSeq()
+	if err != nil {
+		return TargetView{}, err
+	}
 	a := model.HostAccount{
-		ID:       target.ID,
-		HostID:   target.HostID,
-		Username: target.Username,
-		AuthType: "password",
+		ID:          target.ID,
+		HostID:      target.HostID,
+		Username:    target.Username,
+		AuthType:    "password",
+		ResourceSeq: seq,
+		ResourceID:  util.ResourceIDFromSeq(util.PrefixHost, seq),
 	}
 	if target.PrivateKeyPEM != "" || target.PrivateKeyPath != "" {
 		a.AuthType = "private_key"
@@ -297,12 +306,119 @@ func (s *DBStore) AddDatabaseInstance(_, _, _, _, _ string) (DatabaseInstanceVie
 func (s *DBStore) UpdateDatabaseInstance(_, _, _, _, _, _ string, _ bool) (DatabaseInstanceView, error) { return DatabaseInstanceView{}, ErrDBProxyNotFound }
 func (s *DBStore) DeleteDatabaseInstance(_ string) error                             { return ErrDBProxyNotFound }
 
-func (s *DBStore) InstanceAccounts(_ string) ([]DatabaseAccountView, error)          { return nil, ErrDBProxyNotFound }
-func (s *DBStore) DatabaseAccount(_ string) (DatabaseAccountView, error)             { return DatabaseAccountView{}, ErrDBAccountNotFound }
-func (s *DBStore) AddDatabaseAccount(_, _, _, _, _ string, _ *time.Time) (DatabaseAccountView, error) { return DatabaseAccountView{}, errors.New("db accounts: config-only") }
-func (s *DBStore) UpdateDatabaseAccount(_, _, _, _, _ string, _ *time.Time, _ bool) (DatabaseAccountView, error) { return DatabaseAccountView{}, ErrDBAccountNotFound }
-func (s *DBStore) DeleteDatabaseAccount(_ string) error                              { return ErrDBAccountNotFound }
-func (s *DBStore) DatabaseAccountByUniqueName(_ string) (*model.DatabaseAccount, error) { return nil, ErrDBAccountNotFound }
+func (s *DBStore) InstanceAccounts(instanceID string) ([]DatabaseAccountView, error) {
+	var accounts []model.DatabaseAccount
+	if err := s.db.Where("instance_id = ?", instanceID).Order("upstream_username ASC").Find(&accounts).Error; err != nil {
+		return nil, err
+	}
+	views := make([]DatabaseAccountView, 0, len(accounts))
+	for _, acct := range accounts {
+		views = append(views, s.databaseAccountView(acct))
+	}
+	return views, nil
+}
+
+func (s *DBStore) DatabaseAccount(id string) (DatabaseAccountView, error) {
+	id = strings.TrimSpace(id)
+	var acct model.DatabaseAccount
+	if err := s.db.First(&acct, "id = ?", id).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return DatabaseAccountView{}, fmt.Errorf("%w: %q", ErrDBAccountNotFound, id)
+		}
+		return DatabaseAccountView{}, err
+	}
+	return s.databaseAccountView(acct), nil
+}
+
+func (s *DBStore) AddDatabaseAccount(instanceID, upstreamUsername, upstreamPassword, groupName, remark string, expiresAt *time.Time) (DatabaseAccountView, error) {
+	instanceID = strings.TrimSpace(instanceID)
+	upstreamUsername = strings.TrimSpace(upstreamUsername)
+	if upstreamUsername == "" {
+		return DatabaseAccountView{}, errors.New("upstream username is required")
+	}
+	// Verify instance exists
+	var inst model.DatabaseInstance
+	if err := s.db.First(&inst, "id = ?", instanceID).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return DatabaseAccountView{}, fmt.Errorf("%w: %q", ErrDBInstanceNotFound, instanceID)
+		}
+		return DatabaseAccountView{}, err
+	}
+	uniqueName, err := s.generateUniqueName()
+	if err != nil {
+		return DatabaseAccountView{}, err
+	}
+	// 分配资源ID
+	seq, err := s.nextDBResourceSeq()
+	if err != nil {
+		return DatabaseAccountView{}, err
+	}
+	acct := model.DatabaseAccount{
+		InstanceID:       instanceID,
+		UniqueName:       uniqueName,
+		UpstreamUsername: upstreamUsername,
+		UpstreamPassword: upstreamPassword,
+		GroupName:        strings.TrimSpace(groupName),
+		Remark:           strings.TrimSpace(remark),
+		ExpiresAt:        expiresAt,
+		ResourceSeq:      seq,
+		ResourceID:       util.ResourceIDFromSeq(util.PrefixDatabase, seq),
+	}
+	if err := s.db.Create(&acct).Error; err != nil {
+		return DatabaseAccountView{}, err
+	}
+	return s.databaseAccountView(acct), nil
+}
+
+func (s *DBStore) UpdateDatabaseAccount(id, upstreamUsername, upstreamPassword, groupName, remark string, expiresAt *time.Time, disabled bool) (DatabaseAccountView, error) {
+	id = strings.TrimSpace(id)
+	upstreamUsername = strings.TrimSpace(upstreamUsername)
+	var acct model.DatabaseAccount
+	if err := s.db.First(&acct, "id = ?", id).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return DatabaseAccountView{}, fmt.Errorf("%w: %q", ErrDBAccountNotFound, id)
+		}
+		return DatabaseAccountView{}, err
+	}
+	if upstreamUsername != "" {
+		acct.UpstreamUsername = upstreamUsername
+	}
+	if upstreamPassword != "" {
+		acct.UpstreamPassword = upstreamPassword
+	}
+	acct.GroupName = strings.TrimSpace(groupName)
+	acct.Remark = strings.TrimSpace(remark)
+	acct.ExpiresAt = expiresAt
+	acct.Disabled = disabled
+	if err := s.db.Save(&acct).Error; err != nil {
+		return DatabaseAccountView{}, err
+	}
+	return s.databaseAccountView(acct), nil
+}
+
+func (s *DBStore) DeleteDatabaseAccount(id string) error {
+	id = strings.TrimSpace(id)
+	result := s.db.Delete(&model.DatabaseAccount{}, "id = ?", id)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return fmt.Errorf("%w: %q", ErrDBAccountNotFound, id)
+	}
+	return nil
+}
+
+func (s *DBStore) DatabaseAccountByUniqueName(uniqueName string) (*model.DatabaseAccount, error) {
+	uniqueName = strings.TrimSpace(uniqueName)
+	var acct model.DatabaseAccount
+	if err := s.db.Preload("Instance").First(&acct, "unique_name = ?", uniqueName).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, fmt.Errorf("%w: %q", ErrDBAccountNotFound, uniqueName)
+		}
+		return nil, err
+	}
+	return &acct, nil
+}
 func (s *DBStore) AuthenticateDirect(_ context.Context, username, password string) (model.User, error) {
 	return model.User{}, errors.New("db store: authenticate not supported, use static adapter")
 }
@@ -324,6 +440,35 @@ func (s *DBStore) DefaultTarget(_ context.Context, user model.User) (TargetConfi
 		return TargetConfig{}, errors.New("no target accounts available")
 	}
 	return s.targetConfig(a), nil
+}
+
+// ---- DBStore helpers ----
+
+func (s *DBStore) databaseAccountView(acct model.DatabaseAccount) DatabaseAccountView {
+	return DatabaseAccountView{
+		ID:               acct.ID,
+		InstanceID:       acct.InstanceID,
+		UniqueName:       acct.UniqueName,
+		UpstreamUsername: acct.UpstreamUsername,
+		GroupName:        acct.GroupName,
+		Remark:           acct.Remark,
+		ExpiresAt:        acct.ExpiresAt,
+		Disabled:         acct.Disabled,
+		CreatedAt:        acct.CreatedAt.Format(time.RFC3339),
+		UpdatedAt:        acct.UpdatedAt.Format(time.RFC3339),
+	}
+}
+
+func (s *DBStore) generateUniqueName() (string, error) {
+	for i := 0; i < 10; i++ {
+		name := "db-" + model.NewID()[:12]
+		var count int64
+		s.db.Model(&model.DatabaseAccount{}).Where("unique_name = ?", name).Count(&count)
+		if count == 0 {
+			return name, nil
+		}
+	}
+	return "", errors.New("failed to generate unique database account name after 10 attempts")
 }
 
 // ---- normalize helpers (subset, for DB entries) ----

@@ -48,6 +48,7 @@ type TargetView struct {
 	HostID                string   `json:"host_id,omitempty"`
 	ResourceType          string   `json:"resource_type"`
 	ResourceID            string   `json:"resource_id"`
+	ResourceSeq           int      `json:"resource_seq"`
 	HostResourceID        string   `json:"host_resource_id"`
 	Name                  string   `json:"name"`
 	Group                 string   `json:"group,omitempty"`

@@ -22,6 +22,7 @@ import (
 
 	"jianmen/internal/config"
 	"jianmen/internal/model"
+	"jianmen/internal/util"
 )
 
 type StaticStore struct {
@@ -496,6 +497,11 @@ func (s *StaticStore) AddDatabaseAccount(instanceID, upstreamUsername, upstreamP
 		Remark:           strings.TrimSpace(remark),
 		ExpiresAt:        expiresAt,
 	}
+	// 分配资源ID
+	var maxSeq int
+	s.db.Model(&model.DatabaseAccount{}).Select("COALESCE(MAX(resource_seq), 0)").Scan(&maxSeq)
+	acct.ResourceSeq = maxSeq + 1
+	acct.ResourceID = util.ResourceIDFromSeq(util.PrefixDatabase, acct.ResourceSeq)
 	if err := s.db.Create(&acct).Error; err != nil {
 		return DatabaseAccountView{}, err
 	}

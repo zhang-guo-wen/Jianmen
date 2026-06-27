@@ -1,12 +1,11 @@
 <template>
   <div class="pagination-bar" v-if="total > 0">
-    <span class="pagination-total">共 {{ total }} 条</span>
     <el-pagination
       v-model:current-page="currentPage"
       v-model:page-size="pageSizeModel"
       :page-sizes="pageSizes"
       :total="total"
-      layout="sizes, prev, pager, next"
+      layout="total, sizes, prev, pager, next"
       size="small"
     />
   </div>
@@ -43,14 +42,8 @@ const pageSizeModel = computed({
 <style scoped>
 .pagination-bar {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
   margin-top: 8px;
   flex-shrink: 0;
-}
-
-.pagination-total {
-  color: #667085;
-  font-size: 13px;
 }
 </style>

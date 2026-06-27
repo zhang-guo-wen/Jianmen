@@ -32,7 +32,7 @@
           </template>
         </el-table-column>
         <el-table-column prop="client_ip" :label="t('audit.column.client')" min-width="130" />
-        <el-table-column :label="t('sessions.column.started')" min-width="160" show-overflow-tooltip class-name="col-time">
+        <el-table-column :label="t('sessions.column.started')" width="175" show-overflow-tooltip class-name="col-time">
           <template #default="{ row }">
             {{ formatTime(row.started_at ?? row.startedAt) }}
           </template>
@@ -204,7 +204,7 @@
               {{ formatDuration(row.duration_ms) }}
             </template>
           </el-table-column>
-          <el-table-column :label="t('audit.column.time')" min-width="180" show-overflow-tooltip class-name="col-time">
+          <el-table-column :label="t('audit.column.time')" width="180" show-overflow-tooltip class-name="col-time">
             <template #default="{ row }">
               {{ formatTime(row.started_at) }}
             </template>
@@ -216,7 +216,7 @@
         <template v-else-if="isCommands">
           <div class="log-block">
             <el-table :data="pagedCommandEvents" height="420">
-              <el-table-column :label="t('audit.column.time')" width="160" show-overflow-tooltip class-name="col-time">
+              <el-table-column :label="t('audit.column.time')" width="175" show-overflow-tooltip class-name="col-time">
                 <template #default="{ row }">
                   {{ formatTime(row.started_at) }}
                 </template>
@@ -235,7 +235,7 @@
         <template v-else-if="isFiles">
           <div class="log-block">
           <el-table :data="pagedFileEvents" height="420" row-key="seq">
-            <el-table-column :label="t('audit.column.time')" width="150" show-overflow-tooltip class-name="col-time">
+            <el-table-column :label="t('audit.column.time')" width="175" show-overflow-tooltip class-name="col-time">
               <template #default="{ row }">
                 {{ formatTime(row.started_at) }}
               </template>

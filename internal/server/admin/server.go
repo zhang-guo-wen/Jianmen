@@ -31,6 +31,7 @@ type Server struct {
 	db          *gorm.DB
 	rbacChecker *rbac.Checker
 	logger      *slog.Logger
+	dataDir     string
 }
 
 type sessionListItem struct {
@@ -65,7 +66,7 @@ type pagedHostList struct {
 	Total    int               `json:"total"`
 }
 
-func New(cfg *config.Config, store store.Store, logger *slog.Logger, dbs ...*gorm.DB) *Server {
+func New(cfg *config.Config, store store.Store, logger *slog.Logger, dataDir string, dbs ...*gorm.DB) *Server {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -75,12 +76,15 @@ func New(cfg *config.Config, store store.Store, logger *slog.Logger, dbs ...*gor
 		db = dbs[0]
 		checker = rbac.NewChecker(db)
 	}
-	return &Server{cfg: cfg, store: store, db: db, rbacChecker: checker, logger: logger}
+	return &Server{cfg: cfg, store: store, db: db, rbacChecker: checker, logger: logger, dataDir: dataDir}
 }
 
 func (s *Server) ListenAndServe(ctx context.Context) error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", s.handleIndex)
+	mux.HandleFunc("/api/init/status", s.handleInitStatus)
+	mux.HandleFunc("/api/init/setup", s.handleInitSetup)
+	mux.HandleFunc("/api/init/encryption-key", s.handleInitEncryptionKey)
 	mux.HandleFunc("/api/health", s.withAuthAndUser(s.handleHealth))
 	mux.HandleFunc("/api/users", s.withAuthAndUser(s.handleUsers))
 	mux.HandleFunc("/api/hosts", s.withAuthAndUser(s.handleHosts))

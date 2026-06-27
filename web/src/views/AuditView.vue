@@ -224,17 +224,17 @@
         </el-table>
 
         <el-table v-else-if="isFiles" :data="fileEvents" height="420" row-key="seq">
-          <el-table-column :label="t('audit.column.time')" width="155">
+          <el-table-column :label="t('audit.column.time')" width="150">
             <template #default="{ row }">
               {{ formatTime(row.started_at) }}
             </template>
           </el-table-column>
-          <el-table-column :label="t('audit.column.action')" width="90">
+          <el-table-column :label="t('audit.column.action')" width="80">
             <template #default="{ row }">
               {{ formatFileAction(row.action) }}
             </template>
           </el-table-column>
-          <el-table-column prop="path" :label="t('audit.column.path')" min-width="360" show-overflow-tooltip />
+          <el-table-column prop="path" :label="t('audit.column.path')" min-width="420" show-overflow-tooltip />
           <el-table-column :label="t('audit.column.result')" width="75">
             <template #default="{ row }">
               <el-tag :type="row.result === 'success' ? 'success' : 'danger'" size="small">

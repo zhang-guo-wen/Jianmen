@@ -2,7 +2,7 @@
   <div class="setup-container">
     <el-card class="setup-card">
       <!-- 步骤 1: 创建管理员 -->
-      <template v-if="step === 1">
+      <template v-if="step === 1 && !apiToken">
         <div class="setup-header">
           <h2>{{ t('setup.title') }}</h2>
           <p class="setup-desc">{{ t('setup.description') }}</p>
@@ -47,6 +47,42 @@
             </el-button>
           </el-form-item>
         </el-form>
+      </template>
+
+      <!-- 步骤 1.5: 管理员已创建，重试获取加密密钥 -->
+      <template v-if="step === 1 && apiToken">
+        <div class="setup-success">
+          <el-icon :size="48" color="#67c23a"><CircleCheckFilled /></el-icon>
+          <h3>{{ t('setup.adminCreated') }}</h3>
+        </div>
+
+        <div class="key-section">
+          <h4>{{ t('setup.apiToken') }}</h4>
+          <p class="key-hint">{{ t('setup.apiTokenHint') }}</p>
+          <div class="key-display">
+            <code>{{ apiToken }}</code>
+            <el-button size="small" @click="copyToken">
+              {{ t('setup.copy') }}
+            </el-button>
+          </div>
+        </div>
+
+        <el-alert
+          type="warning"
+          :title="t('setup.keyRetryHint')"
+          :closable="false"
+          show-icon
+          style="margin-bottom: 16px"
+        />
+
+        <el-button
+          type="primary"
+          class="setup-submit-btn"
+          :loading="submitting"
+          @click="retryGetKey"
+        >
+          {{ t('setup.retryGetKey') }}
+        </el-button>
       </template>
 
       <!-- 步骤 2: 显示加密密钥和 API Token -->
@@ -159,12 +195,34 @@ async function handleSetup() {
 
     apiToken.value = result.token ?? '';
 
-    const keyResult = await apiClient.getEncryptionKey();
-    encryptionKey.value = keyResult.key ?? '';
+    try {
+      const keyResult = await apiClient.getEncryptionKey();
+      encryptionKey.value = keyResult.key ?? '';
+    } catch (keyErr: unknown) {
+      const msg = keyErr instanceof Error ? keyErr.message : t('setup.error.getKey');
+      ElMessage.error(msg);
+      // setup() 已成功，允许用户重试获取密钥
+      submitting.value = false;
+      return;
+    }
 
     step.value = 2;
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : t('setup.error.setup');
+    ElMessage.error(message);
+  } finally {
+    submitting.value = false;
+  }
+}
+
+async function retryGetKey() {
+  submitting.value = true;
+  try {
+    const keyResult = await apiClient.getEncryptionKey();
+    encryptionKey.value = keyResult.key ?? '';
+    step.value = 2;
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : t('setup.error.getKey');
     ElMessage.error(message);
   } finally {
     submitting.value = false;

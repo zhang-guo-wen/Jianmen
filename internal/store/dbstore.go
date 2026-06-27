@@ -348,15 +348,22 @@ func (s *DBStore) UpdateTarget(id string, target config.Target) (TargetView, err
 		return TargetView{}, fmt.Errorf("%w: %q", ErrTargetNotFound, id)
 	}
 	a.Username = target.Username
-	a.AuthType = "password"
-	a.Password = model.NewEncryptedField(target.Password)
-	a.PrivateKeyPEM = model.NewEncryptedField(target.PrivateKeyPEM)
-	a.Passphrase = model.NewEncryptedField(target.Passphrase)
-	if target.PrivateKeyPEM != "" || target.PrivateKeyPath != "" {
+	if target.Password != "" {
+		a.AuthType = "password"
+		a.Password = model.NewEncryptedField(target.Password)
+	}
+	if target.PrivateKeyPEM != "" {
 		a.AuthType = "private_key"
-		if target.PrivateKeyPath != "" && target.PrivateKeyPEM == "" {
-			if pem, err := os.ReadFile(target.PrivateKeyPath); err == nil {
-				a.PrivateKeyPEM = model.NewEncryptedField(string(pem))
+		a.PrivateKeyPEM = model.NewEncryptedField(target.PrivateKeyPEM)
+	}
+	if target.Passphrase != "" {
+		a.Passphrase = model.NewEncryptedField(target.Passphrase)
+	}
+	if target.PrivateKeyPath != "" {
+		if pem, err := os.ReadFile(target.PrivateKeyPath); err == nil {
+			if pemStr := string(pem); pemStr != "" {
+				a.AuthType = "private_key"
+				a.PrivateKeyPEM = model.NewEncryptedField(pemStr)
 			}
 		}
 	}

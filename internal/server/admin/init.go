@@ -46,16 +46,8 @@ func (s *Server) handleInitStatus(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, InitStatusResponse{Initialized: count > 0})
 }
 
-// handleInitSetup 创建超级管理员用户
+// handleInitSetup 创建超级管理员用户（事务保护 TOCTOU）
 func (s *Server) handleInitSetup(w http.ResponseWriter, r *http.Request) {
-	// 检查是否已初始化
-	var count int64
-	s.db.Model(&model.User{}).Count(&count)
-	if count > 0 {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "already initialized"})
-		return
-	}
-
 	var req SetupRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
@@ -94,27 +86,47 @@ func (s *Server) handleInitSetup(w http.ResponseWriter, r *http.Request) {
 	tokenHash := sha256.Sum256([]byte(token))
 	tokenHashStr := hex.EncodeToString(tokenHash[:])
 
-	user := model.User{
-		ID:           model.NewID(),
-		Username:     username,
-		PasswordHash: string(passwordHash),
-		TokenHash:    tokenHashStr,
-		Email:        email,
-		Status:       "active",
-	}
+	var created bool
+	err = s.db.Transaction(func(tx *gorm.DB) error {
+		var count int64
+		if err := tx.Model(&model.User{}).Count(&count).Error; err != nil {
+			return err
+		}
+		if count > 0 {
+			return nil // 已初始化，不创建
+		}
 
-	if err := s.db.Create(&user).Error; err != nil {
+		user := model.User{
+			ID:           model.NewID(),
+			Username:     username,
+			PasswordHash: string(passwordHash),
+			TokenHash:    tokenHashStr,
+			Email:        email,
+			Status:       "active",
+		}
+
+		if err := tx.Create(&user).Error; err != nil {
+			return err
+		}
+
+		// 分配 admin 角色（如果内置角色已存在）
+		assignAdminRole(tx, user.ID)
+		created = true
+		return nil
+	})
+	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to create user: " + err.Error()})
 		return
 	}
-
-	// 分配 admin 角色（如果内置角色已存在）
-	assignAdminRole(s.db, user.ID)
+	if !created {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "already initialized"})
+		return
+	}
 
 	writeJSON(w, http.StatusCreated, SetupResponse{Token: token})
 }
 
-// handleInitEncryptionKey 返回加密密钥（一次性读取）
+// handleInitEncryptionKey 返回加密密钥（一次性读取，原子标记防并发）
 func (s *Server) handleInitEncryptionKey(w http.ResponseWriter, r *http.Request) {
 	// 检查是否已初始化
 	var count int64
@@ -131,15 +143,19 @@ func (s *Server) handleInitEncryptionKey(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// 标记文件控制一次性显示
+	// 使用 O_CREATE|O_EXCL 原子创建标记文件，避免 TOCTOU 竞态
 	markerPath := filepath.Join(s.dataDir, ".encryption_key_shown")
-	if _, err := os.Stat(markerPath); err == nil {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "encryption key has already been retrieved"})
+	f, err := os.OpenFile(markerPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
+	if err != nil {
+		if os.IsExist(err) {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "encryption key has already been retrieved"})
+			return
+		}
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to mark key as shown"})
 		return
 	}
-
-	// 写入标记文件
-	if err := os.WriteFile(markerPath, []byte("1"), 0600); err != nil {
+	defer f.Close()
+	if _, err := f.Write([]byte("1")); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to mark key as shown"})
 		return
 	}

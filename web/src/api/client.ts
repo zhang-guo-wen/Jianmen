@@ -412,7 +412,7 @@ export const apiClient = {
   getHealth: () => request<HealthResponse>('/api/health'),
   getUsers: () => request<ApiEnvelope<UserRecord[]> | UserRecord[]>('/api/users'),
   createUser: (payload: UserPayload) =>
-    request<ApiEnvelope<{ user: UserRecord; token: string }>>('/api/users', {
+    request<ApiEnvelope<{ user: UserRecord; token: string }> | { user: UserRecord; token: string }>('/api/users', {
       method: 'POST',
       body: JSON.stringify(payload),
     }),

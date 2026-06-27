@@ -884,10 +884,7 @@ onBeforeUnmount(() => {
   inset: 0;
 }
 
-.replay-terminal :deep(.xterm) {
-  width: 100%;
-  height: 100%;
-}
+/* let xterm control its own dimensions based on cols/rows */
 
 .replay-terminal :deep(.xterm-viewport) {
   overflow-y: auto !important;

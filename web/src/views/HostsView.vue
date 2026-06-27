@@ -349,55 +349,34 @@
       width="min(720px, calc(100vw - 32px))"
     >
       <div v-if="selectedConnectionTarget" class="connection-dialog">
-        <el-descriptions :column="2" border size="small">
-          <el-descriptions-item label="主机">{{ targetAddress(selectedConnectionTarget) }}</el-descriptions-item>
-          <el-descriptions-item label="账号">{{ selectedConnectionTarget.username || '-' }}</el-descriptions-item>
-          <el-descriptions-item label="账号 ID">{{ targetId(selectedConnectionTarget) || '-' }}</el-descriptions-item>
-          <el-descriptions-item label="资源">{{ resourceIdentityText(selectedConnectionTarget) }}</el-descriptions-item>
+        <el-alert show-icon type="info" :closable="false"
+          title="堡垒机密码是 admin，不是目标主机密码" />
+
+        <el-descriptions :column="1" border size="small" style="margin-top: 12px">
+          <el-descriptions-item label="连接地址">
+            <code>{{ bastionHost || '127.0.0.1' }}:{{ bastionPort || 47102 }}</code>
+            <el-button link type="primary" size="small" style="margin-left: 8px" @click="copyText(`${bastionHost || '127.0.0.1'}:${bastionPort || 47102}`)">复制</el-button>
+          </el-descriptions-item>
+          <el-descriptions-item label="用户名">
+            <code>{{ connectionCompactUser }}</code>
+            <el-button link type="primary" size="small" style="margin-left: 8px" @click="copyText(connectionCompactUser)">复制</el-button>
+          </el-descriptions-item>
+          <el-descriptions-item label="密码">
+            堡垒机用户密码（默认 admin）
+          </el-descriptions-item>
         </el-descriptions>
 
-        <div class="gateway-form">
-          <el-alert
-            class="connection-auth-alert"
-            show-icon
-            type="info"
-            title="连接时输入堡垒机用户的密码或使用堡垒机用户密钥；不是目标主机账号密码。目标账号由命令里的 +账号ID 指定。"
-          />
-          <el-form label-position="top">
-            <div class="host-form-grid">
-              <el-form-item label="堡垒机登录账号">
-                <el-input v-model="bastionUser" placeholder="admin" />
-              </el-form-item>
-              <el-form-item label="堡垒机 Host">
-                <el-input v-model="bastionHost" placeholder="127.0.0.1" />
-              </el-form-item>
-              <el-form-item label="堡垒机 SSH/SFTP 端口">
-                <el-input-number v-model="bastionPort" :max="65535" :min="1" controls-position="right" />
-              </el-form-item>
-            </div>
-          </el-form>
-        </div>
-
-        <div class="connection-config-list">
-          <div v-for="item in connectionConfigRows" :key="item.key" class="connection-config-row">
-            <div class="connection-config-label">
-              <strong>{{ item.label }}</strong>
-              <span>{{ item.description }}</span>
-            </div>
-            <el-input :model-value="item.value" readonly>
-              <template #append>
-                <el-button @click="copyText(item.value)">复制</el-button>
-              </template>
-            </el-input>
-          </div>
+        <div style="margin-top: 12px">
+          <el-input :model-value="`ssh ${connectionCompactUser}@${bastionHost || '127.0.0.1'} -p ${bastionPort || 47102}`" readonly size="small">
+            <template #append>
+              <el-button @click="copyText(`ssh ${connectionCompactUser}@${bastionHost || '127.0.0.1'} -p ${bastionPort || 47102}`)">复制 SSH 命令</el-button>
+            </template>
+          </el-input>
         </div>
       </div>
 
       <template #footer>
         <el-button @click="connectionDialogVisible = false">关闭</el-button>
-        <el-button :disabled="!selectedConnectionTarget" type="primary" @click="copyAllConnectionConfig">
-          复制全部配置
-        </el-button>
       </template>
     </el-dialog>
   </div>
@@ -447,12 +426,7 @@ type AccountForm = {
   host_key_fingerprint: string;
   known_hosts_path: string;
 };
-type ConnectionConfigRow = {
-  key: string;
-  label: string;
-  description: string;
-  value: string;
-};
+
 
 const { t } = useI18n();
 const keyword = ref('');
@@ -484,7 +458,7 @@ const hostNameTouched = ref(false);
 const accountNameTouched = ref(false);
 const hostMorePanels = ref<string[]>([]);
 const accountMorePanels = ref<string[]>([]);
-const bastionUser = ref('admin');
+
 const bastionHost = ref('127.0.0.1');
 const bastionPort = ref(47102);
 const userSessionId = ref('00001');
@@ -521,46 +495,12 @@ const accountExpiryText = computed(() => {
   }
   return formatDateTime(accountForm.expires_at);
 });
-const connectionConfigRows = computed<ConnectionConfigRow[]>(() => {
+const connectionCompactUser = computed(() => {
   const target = selectedConnectionTarget.value;
-
-  if (!target) {
-    return [];
-  }
-
+  if (!target) return 'H000000001';
   const resId = target.resource_id || targetId(target) || resourceId(target) || '0000';
   const sessionId = userSessionId.value || '00001';
-  const compactUser = `H${resId}${sessionId}`;
-  const host = bastionHost.value.trim() || '127.0.0.1';
-  const port = numberFrom(bastionPort.value, 47102);
-  const webTerminalRoute = `/web-terminal?target_id=${encodeURIComponent(compactUser)}`;
-
-  return [
-    {
-      key: 'ssh',
-      label: 'SSH 命令',
-      description: '复制后可在本地终端直连网关',
-      value: `ssh ${compactUser}@${host} -p ${port}`
-    },
-    {
-      key: 'sftp',
-      label: 'SFTP 命令',
-      description: '复制后可通过网关发起文件传输',
-      value: `sftp -P ${port} ${compactUser}@${host}`
-    },
-    {
-      key: 'web-terminal',
-      label: 'Web Terminal 路由建议',
-      description: '用于后续接入 Web Terminal 页面',
-      value: webTerminalRoute
-    },
-    {
-      key: 'resource',
-      label: '资源标识',
-      description: '用于权限、审计和排障时定位账号资源',
-      value: `host_account:H${resId}`
-    }
-  ];
+  return `H${resId}${sessionId}`;
 });
 
 const hostRules: FormRules<HostForm> = {
@@ -763,23 +703,8 @@ function targetHost(target: TargetRecord): string {
   return address.endsWith(portSuffix) ? address.slice(0, -portSuffix.length) : address;
 }
 
-function targetAddress(target: TargetRecord): string {
-  const host = targetHost(target);
-  const port = numberFrom(target.port, 22);
-
-  return host ? `${host}:${port}` : '';
-}
-
-function resourceType(target: TargetRecord): string {
-  return stringFrom(target.resource_type).trim() || 'host_account';
-}
-
 function resourceId(target: TargetRecord): string {
   return stringFrom(target.resource_id).trim() || targetId(target);
-}
-
-function resourceIdentityText(target: TargetRecord): string {
-  return [`target_id=${targetId(target) || '-'}`, `resource_type=${resourceType(target)}`, `resource_id=${resourceId(target) || '-'}`].join(' | ');
 }
 
 function isAuthMethod(value: unknown): value is AuthMethod {
@@ -1442,11 +1367,6 @@ async function copyText(value: string) {
   } catch {
     ElMessage.warning('复制失败，请手动选择文本复制');
   }
-}
-
-async function copyAllConnectionConfig() {
-  const text = connectionConfigRows.value.map((item) => `${item.label}: ${item.value}`).join('\n');
-  await copyText(text);
 }
 
 watch(

@@ -489,6 +489,7 @@ const accountRules: FormRules = {
 // Connect dialog state
 const connectDialogVisible = ref(false);
 const connectTarget = ref<DBAccountRecord | null>(null);
+const userSessionId = ref('00001');
 
 // Computed
 const filteredInstances = computed(() => {
@@ -511,7 +512,9 @@ const connectCommand = computed(() => {
   if (!connectTarget.value || !selectedInstance.value) return '';
   const inst = selectedInstance.value;
   const protocol = inst.protocol || 'mysql';
-  const uniqueName = connectTarget.value.unique_name || '<username>';
+  const resourceId = connectTarget.value.resource_id || '0000';
+  const sessionId = userSessionId.value || '00001';
+  const compactUser = `D${resourceId}${sessionId}`;
   // Parse host and port from address
   const address = inst.address || '127.0.0.1:3306';
   const lastColon = address.lastIndexOf(':');
@@ -527,14 +530,15 @@ const connectCommand = computed(() => {
   // Use proxy port convention: default port + 30000
   const proxyPort = Number(port) + 30000;
   if (protocol === 'mysql') {
-    return `mysql --protocol=tcp -h ${host} -P ${proxyPort} -u ${uniqueName} -p`;
+    return `mysql --protocol=tcp -h ${host} -P ${proxyPort} -u ${compactUser} -p`;
   }
-  return `psql -h ${host} -p ${proxyPort} -U ${uniqueName}`;
+  return `psql -h ${host} -p ${proxyPort} -U ${compactUser}`;
 });
 
 const connectResourceId = computed(() => {
   if (!connectTarget.value || !selectedInstance.value) return '';
-  return `database_account:${connectTarget.value.id ?? ''}`;
+  const resourceId = connectTarget.value.resource_id || '0000';
+  return `database_account:D${resourceId}`;
 });
 
 // Helpers

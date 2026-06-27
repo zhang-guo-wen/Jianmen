@@ -32,6 +32,7 @@ export interface TargetRecord {
   host_id?: string;
   resource_type?: string;
   resource_id?: string;
+  resource_seq?: number;
   host_resource_id?: string;
   name?: string;
   group?: string;
@@ -196,6 +197,8 @@ export interface DBAccountRecord {
   remark?: string;
   expires_at?: string;
   disabled?: boolean;
+  resource_id?: string;
+  resource_seq?: number;
   created_at?: string;
   updated_at?: string;
 }

@@ -129,6 +129,7 @@ const configVisible = ref(false);
 const bastionUser = ref('admin');
 const bastionHost = ref('127.0.0.1');
 const bastionPort = ref(47102);
+	const userSessionId = ref('00001');
 
 const filteredTargets = computed(() => {
   const query = keyword.value.trim().toLowerCase();
@@ -173,22 +174,24 @@ const connectionItems = computed<ConnectionItem[]>(() => {
     return [];
   }
 
-  const id = targetId(target);
-  const loginUser = bastionUser.value.trim() || 'admin';
-  const principal = `${loginUser}+${id}@${bastionHost.value.trim() || '127.0.0.1'}`;
+  const resourceId = target.resource_id || targetId(target).slice(-4) || '0000';
+  const prefix = target.resource_type === 'database_account' ? 'D' : 'H';
+  const sessionId = userSessionId.value || '00001';
+  const compactUser = `${prefix}${resourceId}${sessionId}`;
+  const host = bastionHost.value.trim() || '127.0.0.1';
   const port = Number(bastionPort.value) || 47102;
-  const webTerminalPath = `/web-terminal?target_id=${encodeURIComponent(id)}`;
+  const webTerminalPath = `/web-terminal?target_id=${encodeURIComponent(compactUser)}`;
 
   return [
     {
       key: 'ssh',
       labelKey: 'quickConnect.config.ssh',
-      value: `ssh ${principal} -p ${port}`
+      value: `ssh ${compactUser}@${host} -p ${port}`
     },
     {
       key: 'sftp',
       labelKey: 'quickConnect.config.sftp',
-      value: `sftp -P ${port} ${principal}`
+      value: `sftp -P ${port} ${compactUser}@${host}`
     },
     {
       key: 'webTerminal',
@@ -198,7 +201,7 @@ const connectionItems = computed<ConnectionItem[]>(() => {
     {
       key: 'resource',
       labelKey: 'quickConnect.config.resource',
-      value: resourceIdentifier(target)
+      value: `${target.resource_type || 'host_account'}:${prefix}${resourceId}`
     }
   ];
 });
@@ -298,7 +301,7 @@ async function loadTargets() {
   }
 }
 
-onMounted(loadTargets);
+onMounted(() => { loadTargets();  });
 </script>
 
 <style scoped>

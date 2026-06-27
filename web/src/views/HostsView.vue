@@ -487,6 +487,7 @@ const accountMorePanels = ref<string[]>([]);
 const bastionUser = ref('admin');
 const bastionHost = ref('127.0.0.1');
 const bastionPort = ref(47102);
+const userSessionId = ref('00001');
 const hostFormRef = ref<FormInstance>();
 const accountFormRef = ref<FormInstance>();
 const privateKeyFileInputRef = ref<HTMLInputElement>();
@@ -527,25 +528,25 @@ const connectionConfigRows = computed<ConnectionConfigRow[]>(() => {
     return [];
   }
 
-  const accountId = targetId(target) || resourceId(target) || 'target-id';
-  const loginUser = bastionUser.value.trim() || 'admin';
-  const gatewayPrincipal = `${loginUser}+${accountId}`;
+  const resId = target.resource_id || targetId(target) || resourceId(target) || '0000';
+  const sessionId = userSessionId.value || '00001';
+  const compactUser = `H${resId}${sessionId}`;
   const host = bastionHost.value.trim() || '127.0.0.1';
   const port = numberFrom(bastionPort.value, 47102);
-  const webTerminalRoute = `/web-terminal?target_id=${encodeURIComponent(accountId)}&username=${encodeURIComponent(loginUser)}`;
+  const webTerminalRoute = `/web-terminal?target_id=${encodeURIComponent(compactUser)}`;
 
   return [
     {
       key: 'ssh',
       label: 'SSH 命令',
       description: '复制后可在本地终端直连网关',
-      value: `ssh ${gatewayPrincipal}@${host} -p ${port}`
+      value: `ssh ${compactUser}@${host} -p ${port}`
     },
     {
       key: 'sftp',
       label: 'SFTP 命令',
       description: '复制后可通过网关发起文件传输',
-      value: `sftp -P ${port} ${gatewayPrincipal}@${host}`
+      value: `sftp -P ${port} ${compactUser}@${host}`
     },
     {
       key: 'web-terminal',
@@ -557,7 +558,7 @@ const connectionConfigRows = computed<ConnectionConfigRow[]>(() => {
       key: 'resource',
       label: '资源标识',
       description: '用于权限、审计和排障时定位账号资源',
-      value: resourceIdentityText(target)
+      value: `host_account:H${resId}`
     }
   ];
 });

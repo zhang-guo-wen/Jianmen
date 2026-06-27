@@ -218,59 +218,63 @@
           <el-table-column prop="error_message" :label="t('audit.column.error')" min-width="220" show-overflow-tooltip />
         </el-table>
 
-        <el-table v-else-if="isCommands" :data="pagedCommandEvents" height="420">
-          <el-table-column :label="t('audit.column.time')" width="160">
-            <template #default="{ row }">
-              {{ formatTime(row.started_at) }}
-            </template>
-          </el-table-column>
-          <el-table-column prop="command" :label="t('audit.column.command')" min-width="280" show-overflow-tooltip />
-          <el-table-column prop="preview" :label="t('audit.column.preview')" min-width="280" show-overflow-tooltip />
-        </el-table>
-        <el-pagination
-          v-if="isCommands && commandEvents.length > pageSize"
-          v-model:current-page="logPage"
-          :page-size="pageSize"
-          :total="commandEvents.length"
-          layout="prev, pager, next"
-          size="small"
-          style="margin-top:6px;justify-content:flex-end"
-        />
+        <template v-else-if="isCommands">
+          <el-table :data="pagedCommandEvents" height="420">
+            <el-table-column :label="t('audit.column.time')" width="160">
+              <template #default="{ row }">
+                {{ formatTime(row.started_at) }}
+              </template>
+            </el-table-column>
+            <el-table-column prop="command" :label="t('audit.column.command')" min-width="280" show-overflow-tooltip />
+            <el-table-column prop="preview" :label="t('audit.column.preview')" min-width="280" show-overflow-tooltip />
+          </el-table>
+          <el-pagination
+            v-if="commandEvents.length > pageSize"
+            v-model:current-page="logPage"
+            :page-size="pageSize"
+            :total="commandEvents.length"
+            layout="prev, pager, next"
+            size="small"
+            style="margin-top:6px;justify-content:flex-end"
+          />
+        </template>
 
-        <el-table v-else-if="isFiles" :data="pagedFileEvents" height="420" row-key="seq">
-          <el-table-column :label="t('audit.column.time')" width="150">
-            <template #default="{ row }">
-              {{ formatTime(row.started_at) }}
-            </template>
-          </el-table-column>
-          <el-table-column :label="t('audit.column.action')" width="80">
-            <template #default="{ row }">
-              {{ formatFileAction(row.action) }}
-            </template>
-          </el-table-column>
-          <el-table-column prop="path" :label="t('audit.column.path')" min-width="420" show-overflow-tooltip />
-          <el-table-column :label="t('audit.column.result')" width="75">
-            <template #default="{ row }">
-              <el-tag :type="row.result === 'success' ? 'success' : 'danger'" size="small">
-                {{ row.result === 'success' ? t('audit.result.success') : t('audit.result.failure') }}
-              </el-tag>
-            </template>
-          </el-table-column>
-          <el-table-column :label="t('audit.column.size')" width="75">
-            <template #default="{ row }">
-              <template v-if="row.size > 0">{{ formatBytes(row.size) }}</template>
-            </template>
-          </el-table-column>
-        </el-table>
-        <el-pagination
-          v-if="isFiles && fileEvents.length > pageSize"
-          v-model:current-page="logPage"
-          :page-size="pageSize"
-          :total="fileEvents.length"
-          layout="prev, pager, next"
-          size="small"
-          style="margin-top:6px;justify-content:flex-end"
-        />
+        <template v-else-if="isFiles">
+          <el-table :data="pagedFileEvents" height="420" row-key="seq">
+            <el-table-column :label="t('audit.column.time')" width="150">
+              <template #default="{ row }">
+                {{ formatTime(row.started_at) }}
+              </template>
+            </el-table-column>
+            <el-table-column :label="t('audit.column.action')" width="80">
+              <template #default="{ row }">
+                {{ formatFileAction(row.action) }}
+              </template>
+            </el-table-column>
+            <el-table-column prop="path" :label="t('audit.column.path')" min-width="420" show-overflow-tooltip />
+            <el-table-column :label="t('audit.column.result')" width="75">
+              <template #default="{ row }">
+                <el-tag :type="row.result === 'success' ? 'success' : 'danger'" size="small">
+                  {{ row.result === 'success' ? t('audit.result.success') : t('audit.result.failure') }}
+                </el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column :label="t('audit.column.size')" width="75">
+              <template #default="{ row }">
+                <template v-if="row.size > 0">{{ formatBytes(row.size) }}</template>
+              </template>
+            </el-table-column>
+          </el-table>
+          <el-pagination
+            v-if="fileEvents.length > pageSize"
+            v-model:current-page="logPage"
+            :page-size="pageSize"
+            :total="fileEvents.length"
+            layout="prev, pager, next"
+            size="small"
+            style="margin-top:6px;justify-content:flex-end"
+          />
+        </template>
 
         <pre v-else-if="detailData" class="json-preview">{{ JSON.stringify(detailData, null, 2) }}</pre>
         <el-empty v-else :description="t('audit.empty.detail')" />

@@ -16,33 +16,28 @@
       </template>
       <el-alert v-if="sessionError" :title="sessionError" type="error" show-icon />
       <el-table v-else v-loading="sessionsLoading" :data="sessions" height="380" row-key="id">
-        <el-table-column :label="t('sessions.column.id')" min-width="160">
-          <template #default="{ row }">
-            {{ sessionId(row) }}
-          </template>
-        </el-table-column>
-        <el-table-column :label="t('sessions.column.user')" min-width="150">
+        <el-table-column :label="t('sessions.column.user')" min-width="130">
           <template #default="{ row }">
             {{ sessionUser(row) }}
           </template>
         </el-table-column>
-        <el-table-column :label="t('sessions.column.target')" min-width="170">
+        <el-table-column :label="t('sessions.column.target')" min-width="190" show-overflow-tooltip>
           <template #default="{ row }">
             {{ row.target || row.target_id || t('common.none') }}
           </template>
         </el-table-column>
-        <el-table-column :label="t('audit.column.protocol')" width="90">
+        <el-table-column :label="t('audit.column.protocol')" width="110">
           <template #default="{ row }">
-            {{ sessionProtocol(row) }}
+            <el-tag :type="sessionProtocolTag(row)" size="small" effect="plain">{{ sessionProtocol(row) }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="client_ip" :label="t('audit.column.client')" min-width="140" />
-        <el-table-column :label="t('sessions.column.started')" min-width="170">
+        <el-table-column prop="client_ip" :label="t('audit.column.client')" min-width="130" />
+        <el-table-column :label="t('sessions.column.started')" min-width="160">
           <template #default="{ row }">
             {{ formatTime(row.started_at ?? row.startedAt) }}
           </template>
         </el-table-column>
-        <el-table-column :label="t('sessions.column.duration')" width="100">
+        <el-table-column :label="t('sessions.column.duration')" width="90">
           <template #default="{ row }">
             {{ formatDurationSeconds(row.duration_seconds) }}
           </template>
@@ -419,13 +414,20 @@ function formatDurationSeconds(value: unknown): string {
 
 function sessionProtocol(row: SessionRecord): string {
   const subtype = row.protocol_subtype || '';
-  if (subtype === 'web-terminal') return 'Web Terminal';
+  if (subtype === 'web-terminal') return 'Web';
   if (subtype === 'sftp') return 'SFTP';
   if (subtype === 'scp') return 'SCP';
-  // Fallback: SFTP has no terminal replay
   if (!row.has_replay && !subtype) return 'SFTP';
-  const proto = (row.protocol || 'ssh').toUpperCase();
-  return proto;
+  return 'SSH';
+}
+
+function sessionProtocolTag(row: SessionRecord): 'success' | 'warning' | 'info' | 'danger' | '' {
+  const subtype = row.protocol_subtype || '';
+  if (subtype === 'web-terminal') return 'info';
+  if (subtype === 'sftp') return 'warning';
+  if (subtype === 'scp') return 'warning';
+  if (!row.has_replay && !subtype) return 'warning';
+  return 'success';
 }
 
 function formatReplayDuration(value: number): string {

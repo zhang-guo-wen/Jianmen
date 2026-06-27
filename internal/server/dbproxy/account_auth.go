@@ -1,6 +1,8 @@
 package dbproxy
 
 import (
+	"bytes"
+	"crypto/sha1"
 	"encoding/binary"
 	"errors"
 	"strings"
@@ -16,15 +18,177 @@ const (
 	mysqlClientPluginAuthLenencClientData = 1 << 21
 )
 
+// MySQLHandshake represents a parsed MySQL Protocol::HandshakeV10 packet.
+type MySQLHandshake struct {
+	ProtocolVersion byte
+	ServerVersion   string
+	ConnectionID    uint32
+	AuthData        []byte // full 20-byte salt
+	CapabilityFlags uint32
+	CharacterSet    byte
+	StatusFlags     uint16
+	AuthPluginName  string
+}
+
+// ParseMySQLHandshake parses a MySQL Protocol::HandshakeV10 payload.
+func ParseMySQLHandshake(payload []byte) (*MySQLHandshake, error) {
+	if len(payload) < 1 {
+		return nil, errors.New("mysql handshake packet too short")
+	}
+
+	pos := 0
+
+	// Protocol version (1 byte)
+	protocolVersion := payload[pos]
+	pos++
+
+	// Server version (null-terminated string)
+	serverVersionEnd := bytes.IndexByte(payload[pos:], 0)
+	if serverVersionEnd < 0 {
+		return nil, errors.New("mysql handshake: missing null terminator for server version")
+	}
+	serverVersion := string(payload[pos : pos+serverVersionEnd])
+	pos += serverVersionEnd + 1
+
+	// Connection ID (4 bytes little-endian)
+	if len(payload[pos:]) < 4 {
+		return nil, errors.New("mysql handshake: truncated connection id")
+	}
+	connectionID := binary.LittleEndian.Uint32(payload[pos:])
+	pos += 4
+
+	// Auth data part 1 (8 bytes)
+	if len(payload[pos:]) < 8 {
+		return nil, errors.New("mysql handshake: truncated auth data part 1")
+	}
+	authData := make([]byte, 20)
+	copy(authData[:8], payload[pos:pos+8])
+	pos += 8
+
+	// Filler (1 byte, skip)
+	if len(payload[pos:]) < 1 {
+		return nil, errors.New("mysql handshake: truncated filler")
+	}
+	pos++
+
+	// Capability flags lower (2 bytes LE)
+	if len(payload[pos:]) < 2 {
+		return nil, errors.New("mysql handshake: truncated capability flags lower")
+	}
+	capLower := binary.LittleEndian.Uint16(payload[pos:])
+	pos += 2
+
+	// Character set (1 byte)
+	if len(payload[pos:]) < 1 {
+		return nil, errors.New("mysql handshake: truncated character set")
+	}
+	characterSet := payload[pos]
+	pos++
+
+	// Status flags (2 bytes LE)
+	if len(payload[pos:]) < 2 {
+		return nil, errors.New("mysql handshake: truncated status flags")
+	}
+	statusFlags := binary.LittleEndian.Uint16(payload[pos:])
+	pos += 2
+
+	// Capability flags upper (2 bytes LE)
+	if len(payload[pos:]) < 2 {
+		return nil, errors.New("mysql handshake: truncated capability flags upper")
+	}
+	capUpper := binary.LittleEndian.Uint16(payload[pos:])
+	pos += 2
+
+	capabilityFlags := uint32(capLower) | uint32(capUpper)<<16
+
+	// Auth plugin data len (1 byte)
+	if len(payload[pos:]) < 1 {
+		return nil, errors.New("mysql handshake: truncated auth plugin data len")
+	}
+	authPluginDataLen := int(payload[pos])
+	pos++
+
+	// Reserved (10 bytes, skip)
+	if len(payload[pos:]) < 10 {
+		return nil, errors.New("mysql handshake: truncated reserved bytes")
+	}
+	pos += 10
+
+	// Auth data part 2
+	var part2Len int
+	if authPluginDataLen > 0 {
+		part2Len = authPluginDataLen - 8
+	} else {
+		part2Len = 12 // default
+	}
+	if part2Len > len(payload[pos:]) {
+		part2Len = len(payload[pos:])
+	}
+	if part2Len > 0 {
+		copy(authData[8:], payload[pos:pos+part2Len])
+		pos += part2Len
+	}
+
+	// Auth plugin name (null-terminated, if CLIENT_PLUGIN_AUTH cap flag set)
+	authPluginName := "mysql_native_password"
+	if capabilityFlags&mysqlClientPluginAuth != 0 {
+		if pos < len(payload) {
+			pluginNameEnd := bytes.IndexByte(payload[pos:], 0)
+			if pluginNameEnd >= 0 {
+				authPluginName = string(payload[pos : pos+pluginNameEnd])
+			}
+		}
+	}
+
+	return &MySQLHandshake{
+		ProtocolVersion: protocolVersion,
+		ServerVersion:   serverVersion,
+		ConnectionID:    connectionID,
+		AuthData:        authData,
+		CapabilityFlags: capabilityFlags,
+		CharacterSet:    characterSet,
+		StatusFlags:     statusFlags,
+		AuthPluginName:  authPluginName,
+	}, nil
+}
+
+// BuildMySQLNativePassword computes a mysql_native_password authentication response.
+// Algorithm: SHA1(password) XOR SHA1(salt + SHA1(SHA1(password)))
+func BuildMySQLNativePassword(password string, salt []byte) []byte {
+	if len(salt) > 20 {
+		salt = salt[:20]
+	}
+
+	// SHA1(password)
+	h1 := sha1.Sum([]byte(password))
+
+	// SHA1(SHA1(password))
+	h2 := sha1.Sum(h1[:])
+
+	// SHA1(salt + SHA1(SHA1(password)))
+	combined := make([]byte, 0, len(salt)+20)
+	combined = append(combined, salt...)
+	combined = append(combined, h2[:]...)
+	h3 := sha1.Sum(combined)
+
+	// XOR h1 with h3 for final 20-byte result
+	result := make([]byte, 20)
+	for i := 0; i < 20; i++ {
+		result[i] = h1[i] ^ h3[i]
+	}
+
+	return result
+}
+
 type databaseLoginParser interface {
 	Observe(data []byte) (loginObservation, bool, error)
 }
 
-type mysqlLoginParser struct {
+type MySQLLoginParser struct {
 	buf []byte
 }
 
-func (p *mysqlLoginParser) Observe(data []byte) (loginObservation, bool, error) {
+func (p *MySQLLoginParser) Observe(data []byte) (loginObservation, bool, error) {
 	p.buf = append(p.buf, data...)
 	if len(p.buf) < 4 {
 		return loginObservation{}, false, nil

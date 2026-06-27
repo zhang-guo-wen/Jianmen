@@ -37,17 +37,18 @@ func Serve(ctx context.Context, opts Options) error {
 	}
 	defer remote.Close()
 
-	handler := &handler{
+	h := &handler{
 		remote:   remote,
 		recorder: opts.Recorder,
 		logger:   slog.Default().With("component", "sftp-proxy"),
 	}
 	server := sftp.NewRequestServer(opts.Channel, sftp.Handlers{
-		FileGet:  handler,
-		FilePut:  handler,
-		FileCmd:  handler,
-		FileList: handler,
+		FileGet:  h,
+		FilePut:  h,
+		FileCmd:  h,
+		FileList: h,
 	})
+	h.closeServer = func() { _ = server.Close() }
 
 	done := make(chan struct{})
 	go func() {
@@ -70,9 +71,10 @@ func Serve(ctx context.Context, opts Options) error {
 }
 
 type handler struct {
-	remote   *sftp.Client
-	recorder *recording.SessionRecorder
-	logger   *slog.Logger
+	remote      *sftp.Client
+	recorder    *recording.SessionRecorder
+	logger      *slog.Logger
+	closeServer func() // close client side on timeout
 }
 
 func (h *handler) Fileread(r *sftp.Request) (io.ReaderAt, error) {
@@ -229,8 +231,10 @@ func (h *handler) readDirTimeout(path string) ([]os.FileInfo, error) {
 	case r := <-ch:
 		return r.files, r.err
 	case <-time.After(10 * time.Second):
-		h.logger.Warn("sftp readdir timed out — closing connection to unblock", "path", path)
-		_ = h.remote.Close()
+		h.logger.Warn("sftp readdir timed out — closing client side so XFTP reconnects", "path", path)
+		if h.closeServer != nil {
+			h.closeServer()
+		}
 		return nil, fmt.Errorf("readdir %s timed out after 10s", path)
 	}
 }

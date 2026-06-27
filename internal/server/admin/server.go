@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"golang.org/x/crypto/ssh"
 	"gorm.io/gorm"
 	"jianmen/internal/access"
 	"jianmen/internal/config"
@@ -81,12 +82,10 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 	mux.HandleFunc("/api/hosts", s.withAuthAndUser(s.handleHosts))
 	mux.HandleFunc("/api/hosts/", s.withAuthAndUser(s.handleHost))
 	mux.HandleFunc("/api/targets", s.withAuthAndUser(s.handleTargets))
+	mux.HandleFunc("/api/targets/test-connection", s.withAuthAndUser(s.handleTestConnection))
 	mux.HandleFunc("/api/targets/", s.withAuthAndUser(s.handleTarget))
 	mux.HandleFunc(webTerminalPath, s.handleWebTerminal)
-	mux.HandleFunc("GET /api/sessions", s.withAuthAndUser(s.handleSessions))
-	mux.HandleFunc("POST /api/sessions", s.withAuthAndUser(s.handleCreateSession))
-	mux.HandleFunc("POST /api/sessions/{id}/disable", s.withAuthAndUser(s.handleDisableSession))
-	mux.HandleFunc("POST /api/sessions/{id}/enable", s.withAuthAndUser(s.handleEnableSession))
+	mux.HandleFunc("/api/sessions", s.withAuthAndUser(s.handleSessions))
 	mux.HandleFunc("/api/sessions/", s.withAuthAndUser(s.handleSessionArtifact))
 	mux.HandleFunc("/api/db/instances", s.withAuthAndUser(s.handleDBInstances))
 	mux.HandleFunc("/api/db/instances/", s.withAuthAndUser(s.handleDBInstance))
@@ -204,8 +203,64 @@ func (s *Server) handleMePermissions(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"actions": actions})
 }
 
-func (s *Server) handleUsers(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, s.store.Users())
+func (s *Server) handleUsers(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		writeJSON(w, http.StatusOK, s.store.Users())
+	case http.MethodPost:
+		s.handleCreateUser(w, r)
+	default:
+		w.Header().Set("Allow", "GET, POST")
+		writeErrorText(w, http.StatusMethodNotAllowed, "method not allowed")
+	}
+}
+
+func (s *Server) handleCreateUser(w http.ResponseWriter, r *http.Request) {
+	if s.db == nil {
+		writeErrorText(w, http.StatusBadRequest, "database not available")
+		return
+	}
+	defer r.Body.Close()
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+
+	var input struct {
+		Username string `json:"username"`
+		Token    string `json:"token"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	username := strings.TrimSpace(input.Username)
+	if username == "" {
+		writeErrorText(w, http.StatusBadRequest, "username is required")
+		return
+	}
+	user := model.User{
+		Username: username,
+		Status:   "active",
+	}
+	if token := strings.TrimSpace(input.Token); token != "" {
+		hash := sha256.Sum256([]byte(token))
+		user.TokenHash = hex.EncodeToString(hash[:])
+	}
+	if err := s.db.Create(&user).Error; err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	// Auto-create permanent session for the new user
+	permSession := model.UserSession{
+		UserID: user.ID,
+		Type:   "permanent",
+		Status: "active",
+	}
+	if _, err := s.store.CreateUserSession(permSession); err != nil {
+		slog.Error("failed to create permanent session", "user_id", user.ID, "error", err)
+	}
+	writeJSON(w, http.StatusCreated, map[string]string{
+		"id":       user.ID,
+		"username": user.Username,
+	})
 }
 
 func (s *Server) handleHosts(w http.ResponseWriter, r *http.Request) {
@@ -345,6 +400,47 @@ func (s *Server) handleCreateTarget(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, view)
+}
+
+func (s *Server) handleTestConnection(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", http.MethodPost)
+		writeErrorText(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	if !s.requirePermission(r, rbac.ActionTargetCreate) {
+		s.forbidden(w)
+		return
+	}
+	defer r.Body.Close()
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+	var target config.Target
+	if err := json.NewDecoder(r.Body).Decode(&target); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+
+	addr := target.Addr()
+	if addr == "" || target.Username == "" {
+		writeErrorText(w, http.StatusBadRequest, "host, port, and username are required")
+		return
+	}
+
+	clientConfig, err := access.ClientConfigForTarget(target)
+	if err != nil {
+		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "message": "配置错误: " + err.Error()})
+		return
+	}
+
+	clientConfig.Timeout = 10 * time.Second
+
+	conn, err := ssh.Dial("tcp", addr, clientConfig)
+	if err != nil {
+		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "message": "连接失败: " + err.Error()})
+		return
+	}
+	conn.Close()
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "message": "连接成功 (" + addr + ")"})
 }
 
 func (s *Server) handleTarget(w http.ResponseWriter, r *http.Request) {
@@ -598,95 +694,11 @@ func (s *Server) handleUpdateDBAccount(w http.ResponseWriter, r *http.Request, i
 }
 
 func (s *Server) handleSessions(w http.ResponseWriter, r *http.Request) {
-	if !s.requirePermission(r, rbac.ActionRBACManage) {
-		s.forbidden(w)
-		return
-	}
-	userID := r.URL.Query().Get("user_id")
-	sessions, err := s.store.UserSessions(userID)
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-		return
-	}
-	if sessions == nil {
-		sessions = []store.SessionView{}
-	}
-	writeJSON(w, http.StatusOK, sessions)
-}
-
-func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request) {
-	if !s.requirePermission(r, rbac.ActionRBACManage) {
-		s.forbidden(w)
-		return
-	}
-	var input struct {
-		UserID    string `json:"user_id"`
-		Type      string `json:"type"`
-		ExpiresAt string `json:"expires_at"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
-		return
-	}
-	if input.UserID == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "user_id required"})
-		return
-	}
-	if input.Type == "" {
-		input.Type = "temporary"
-	}
-	sess := model.UserSession{
-		UserID: input.UserID,
-		Type:   input.Type,
-	}
-	if input.ExpiresAt != "" {
-		t, err := time.Parse(time.RFC3339, input.ExpiresAt)
-		if err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid expires_at format"})
-			return
-		}
-		sess.ExpiresAt = &t
-	}
-	created, err := s.store.CreateUserSession(sess)
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-		return
-	}
-	writeJSON(w, http.StatusCreated, created)
-}
-
-func (s *Server) handleDisableSession(w http.ResponseWriter, r *http.Request) {
-	if !s.requirePermission(r, rbac.ActionRBACManage) {
-		s.forbidden(w)
-		return
-	}
-	id := r.PathValue("id")
-	if err := s.store.DisableUserSession(id); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "disabled"})
-}
-
-func (s *Server) handleEnableSession(w http.ResponseWriter, r *http.Request) {
-	if !s.requirePermission(r, rbac.ActionRBACManage) {
-		s.forbidden(w)
-		return
-	}
-	id := r.PathValue("id")
-	if err := s.store.EnableUserSession(id); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "active"})
-}
-
-func (s *Server) handleSSHSessions(w http.ResponseWriter, r *http.Request) {
 	if !s.requirePermission(r, rbac.ActionSessionView) {
 		s.forbidden(w)
 		return
 	}
-	sessions, err := s.listSSHSessions()
+	sessions, err := s.listSessions()
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
@@ -751,7 +763,7 @@ func (s *Server) handleDBConnectionArtifact(w http.ResponseWriter, r *http.Reque
 	}
 }
 
-func (s *Server) listSSHSessions() ([]sessionListItem, error) {
+func (s *Server) listSessions() ([]sessionListItem, error) {
 	root := filepath.Join(s.cfg.ReplayDir, "ssh")
 	entries, err := os.ReadDir(root)
 	if err != nil {

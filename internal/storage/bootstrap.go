@@ -77,6 +77,18 @@ func bootstrapConfigUsers(db *gorm.DB, users []config.User) error {
 		}).Create(&user).Error; err != nil {
 			return fmt.Errorf("bootstrap metadata user %q: %w", userID, err)
 		}
+
+		// Auto-create permanent session for bootstrap user
+		var userSessionCount int64
+		db.Model(&model.UserSession{}).Where("user_id = ? AND type = ?", userID, "permanent").Count(&userSessionCount)
+		if userSessionCount == 0 {
+			permSession := model.UserSession{
+				UserID: userID,
+				Type:   "permanent",
+				Status: "active",
+			}
+			db.Create(&permSession)
+		}
 	}
 	return nil
 }

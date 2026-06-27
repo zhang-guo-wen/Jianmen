@@ -34,14 +34,18 @@ type Server struct {
 }
 
 type sessionListItem struct {
-	ID         string `json:"id"`
-	User       string `json:"user"`
-	Target     string `json:"target"`
-	ClientIP   string `json:"client_ip"`
-	StartedAt  string `json:"started_at"`
-	Path       string `json:"path"`
-	HasReplay  bool   `json:"has_replay"`
-	ReplaySize int64  `json:"replay_size"`
+	ID              string  `json:"id"`
+	User            string  `json:"user"`
+	Target          string  `json:"target"`
+	ClientIP        string  `json:"client_ip"`
+	StartedAt       string  `json:"started_at"`
+	EndedAt         string  `json:"ended_at,omitempty"`
+	DurationSeconds float64 `json:"duration_seconds"`
+	Protocol        string  `json:"protocol"`
+	ProtocolSubtype string  `json:"protocol_subtype"`
+	Path            string  `json:"path"`
+	HasReplay       bool    `json:"has_replay"`
+	ReplaySize      int64   `json:"replay_size"`
 }
 
 type dbConnectionListItem struct {
@@ -728,11 +732,14 @@ func (s *Server) listSessions() ([]sessionListItem, error) {
 		}
 		dir := filepath.Join(root, entry.Name())
 		var meta struct {
-			SessionID string `json:"session_id"`
-			User      string `json:"user"`
-			Target    string `json:"target"`
-			ClientIP  string `json:"client_ip"`
-			StartedAt string `json:"started_at"`
+			SessionID       string `json:"session_id"`
+			User            string `json:"user"`
+			Target          string `json:"target"`
+			ClientIP        string `json:"client_ip"`
+			StartedAt       string `json:"started_at"`
+			EndedAt         string `json:"ended_at"`
+			Protocol        string `json:"protocol"`
+			ProtocolSubtype string `json:"protocol_subtype"`
 		}
 		if err := readJSON(filepath.Join(dir, "meta.json"), &meta); err != nil {
 			continue
@@ -741,21 +748,66 @@ func (s *Server) listSessions() ([]sessionListItem, error) {
 		if info, err := os.Stat(filepath.Join(dir, "terminal.cast")); err == nil {
 			replaySize = info.Size()
 		}
+
+		duration := calcSessionDuration(meta.StartedAt, meta.EndedAt, filepath.Join(dir, "terminal.cast"))
+
 		out = append(out, sessionListItem{
-			ID:         firstNonEmpty(meta.SessionID, entry.Name()),
-			User:       meta.User,
-			Target:     meta.Target,
-			ClientIP:   meta.ClientIP,
-			StartedAt:  meta.StartedAt,
-			Path:       dir,
-			HasReplay:  replaySize > 0,
-			ReplaySize: replaySize,
+			ID:              firstNonEmpty(meta.SessionID, entry.Name()),
+			User:            meta.User,
+			Target:          meta.Target,
+			ClientIP:        meta.ClientIP,
+			StartedAt:       meta.StartedAt,
+			EndedAt:         meta.EndedAt,
+			DurationSeconds: duration,
+			Protocol:        meta.Protocol,
+			ProtocolSubtype: meta.ProtocolSubtype,
+			Path:            dir,
+			HasReplay:       replaySize > 0,
+			ReplaySize:      replaySize,
 		})
 	}
 	sort.Slice(out, func(i, j int) bool {
 		return out[i].StartedAt > out[j].StartedAt
 	})
 	return out, nil
+}
+
+// calcSessionDuration computes session duration in seconds.
+// Prefers ended_at from meta.json; falls back to the last frame timestamp
+// in the cast file.
+func calcSessionDuration(startedAt, endedAt, castPath string) float64 {
+	if startedAt != "" && endedAt != "" {
+		start, err1 := time.Parse(time.RFC3339Nano, startedAt)
+		end, err2 := time.Parse(time.RFC3339Nano, endedAt)
+		if err1 == nil && err2 == nil {
+			return end.Sub(start).Seconds()
+		}
+	}
+	// Fallback: read the last frame from the cast file.
+	f, err := os.Open(castPath)
+	if err != nil {
+		return 0
+	}
+	defer f.Close()
+	// Read last non-empty line
+	var lastLine string
+	sc := bufio.NewScanner(f)
+	for sc.Scan() {
+		line := strings.TrimSpace(sc.Text())
+		if line != "" && line[0] == '[' {
+			lastLine = line
+		}
+	}
+	// Parse [time, stream, data]
+	if lastLine != "" {
+		var frame []any
+		if json.Unmarshal([]byte(lastLine), &frame) == nil && len(frame) > 0 {
+			if t, ok := frame[0].(float64); ok {
+				return t
+			}
+		}
+	}
+	return 0
 }
 
 func (s *Server) listDBConnections() ([]dbConnectionListItem, error) {

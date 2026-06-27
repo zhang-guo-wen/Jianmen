@@ -31,10 +31,20 @@
             {{ row.target || row.target_id || t('common.none') }}
           </template>
         </el-table-column>
-        <el-table-column prop="client_ip" :label="t('audit.column.client')" min-width="150" />
-        <el-table-column :label="t('sessions.column.started')" min-width="190">
+        <el-table-column :label="t('audit.column.protocol')" width="90">
+          <template #default="{ row }">
+            {{ sessionProtocol(row) }}
+          </template>
+        </el-table-column>
+        <el-table-column prop="client_ip" :label="t('audit.column.client')" min-width="140" />
+        <el-table-column :label="t('sessions.column.started')" min-width="170">
           <template #default="{ row }">
             {{ formatTime(row.started_at ?? row.startedAt) }}
+          </template>
+        </el-table-column>
+        <el-table-column :label="t('sessions.column.duration')" width="100">
+          <template #default="{ row }">
+            {{ formatDurationSeconds(row.duration_seconds) }}
           </template>
         </el-table-column>
         <el-table-column :label="t('common.actions')" fixed="right" width="310">
@@ -392,6 +402,27 @@ function formatTime(value: unknown): string {
 
 function formatDuration(value: unknown): string {
   return typeof value === 'number' && Number.isFinite(value) ? `${value} ms` : t('common.none');
+}
+
+function formatDurationSeconds(value: unknown): string {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) {
+    return t('common.none');
+  }
+  if (value < 60) {
+    return `${Math.round(value)}s`;
+  }
+  const mins = Math.floor(value / 60);
+  const secs = Math.round(value % 60);
+  return `${mins}m ${secs}s`;
+}
+
+function sessionProtocol(row: SessionRecord): string {
+  const subtype = row.protocol_subtype || '';
+  if (subtype === 'web-terminal') return 'Web Terminal';
+  if (subtype === 'sftp') return 'SFTP';
+  if (subtype === 'scp') return 'SCP';
+  const proto = (row.protocol || 'ssh').toUpperCase();
+  return proto;
 }
 
 function formatReplayDuration(value: number): string {

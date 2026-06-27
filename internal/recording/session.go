@@ -100,12 +100,18 @@ func NewSessionRecorder(root string, session model.Session, recordInput, recordC
 		return nil, err
 	}
 
+	protocol := session.Protocol
+	if protocol == "" {
+		protocol = "ssh"
+	}
 	meta := map[string]any{
-		"session_id": session.ID,
-		"user":       session.User.Username,
-		"target":     session.Target,
-		"client_ip":  session.ClientIP,
-		"started_at": startedAt.Format(time.RFC3339Nano),
+		"session_id":       session.ID,
+		"user":             session.User.Username,
+		"target":           session.Target,
+		"client_ip":        session.ClientIP,
+		"started_at":       startedAt.Format(time.RFC3339Nano),
+		"protocol":         protocol,
+		"protocol_subtype": session.ProtocolSubtype,
 	}
 	if raw, err := json.MarshalIndent(meta, "", "  "); err == nil {
 		_ = os.WriteFile(filepath.Join(dir, "meta.json"), raw, 0o644)
@@ -254,7 +260,29 @@ func (r *SessionRecorder) Close() error {
 			firstErr = err
 		}
 	}
+
+	// Write ended_at to meta.json so the listing can calculate duration.
+	r.writeEndedAt()
+
 	return firstErr
+}
+
+func (r *SessionRecorder) writeEndedAt() {
+	metaPath := filepath.Join(r.dir, "meta.json")
+	raw, err := os.ReadFile(metaPath)
+	if err != nil {
+		return
+	}
+	var meta map[string]any
+	if err := json.Unmarshal(raw, &meta); err != nil {
+		return
+	}
+	meta["ended_at"] = time.Now().UTC().Format(time.RFC3339Nano)
+	updated, err := json.MarshalIndent(meta, "", "  ")
+	if err != nil {
+		return
+	}
+	_ = os.WriteFile(metaPath, updated, 0o644)
 }
 
 func (r *SessionRecorder) updateFileSummaryLocked(event FileEvent) {

@@ -127,6 +127,9 @@ export interface SessionRecord {
   path?: string;
   has_replay?: boolean;
   replay_size?: number;
+  duration_seconds?: number;
+  protocol?: string;
+  protocol_subtype?: string;
   [key: string]: unknown;
 }
 

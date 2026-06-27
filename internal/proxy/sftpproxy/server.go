@@ -294,20 +294,37 @@ type trackedFile struct {
 func (f *trackedFile) ReadAt(p []byte, off int64) (int, error) {
 	started := time.Now().UTC()
 	n, err := f.file.ReadAt(p, off)
-	recordErr := err
-	if n > 0 && errors.Is(err, io.EOF) {
-		recordErr = nil
+	// EOF is normal end-of-file, not an error worth recording.
+	if errors.Is(err, io.EOF) {
+		if n > 0 {
+			f.readBytes.Add(int64(n))
+			recordFileEvent(f.recorder, started, recording.FileEvent{
+				Action: "read",
+				Path:   f.path,
+				Offset: off,
+				Size:   int64(n),
+			}, nil)
+		}
+		return n, err
 	}
-	if n > 0 || recordErr != nil {
+	if err != nil {
+		recordFileEvent(f.recorder, started, recording.FileEvent{
+			Action: "read",
+			Path:   f.path,
+			Offset: off,
+		}, err)
+		return n, err
+	}
+	if n > 0 {
 		f.readBytes.Add(int64(n))
 		recordFileEvent(f.recorder, started, recording.FileEvent{
 			Action: "read",
 			Path:   f.path,
 			Offset: off,
 			Size:   int64(n),
-		}, recordErr)
+		}, nil)
 	}
-	return n, err
+	return n, nil
 }
 
 func (f *trackedFile) WriteAt(p []byte, off int64) (int, error) {

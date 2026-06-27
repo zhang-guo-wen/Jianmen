@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"golang.org/x/crypto/ssh"
@@ -295,4 +296,26 @@ func (a *StaticAdapter) DefaultTarget(ctx context.Context, user model.User) (Tar
 		HostKeyFingerprint: t.HostKeyFingerprint, KnownHostsPath: t.KnownHostsPath,
 		Disabled: t.Disabled, ExpiresAt: t.ExpiresAt, HostID: t.HostID,
 	}, nil
+}
+
+// -- user sessions (not supported in static adapter) --
+
+func (a *StaticAdapter) UserSessions(_ string) ([]SessionView, error) {
+	return []SessionView{}, nil
+}
+
+func (a *StaticAdapter) CreateUserSession(_ model.UserSession) (*model.UserSession, error) {
+	return nil, errors.New("user sessions: db-only feature")
+}
+
+func (a *StaticAdapter) DisableUserSession(_ string) error {
+	return errors.New("user sessions: db-only feature")
+}
+
+func (a *StaticAdapter) EnableUserSession(_ string) error {
+	return errors.New("user sessions: db-only feature")
+}
+
+func (a *StaticAdapter) UserSessionByID(_, _ string) (*model.UserSession, error) {
+	return nil, errors.New("user sessions: db-only feature")
 }

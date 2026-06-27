@@ -271,6 +271,7 @@ func AllModels() []any {
 		&DatabaseInstance{},
 		&DatabaseAccount{},
 		&Session{},
+		&UserSession{},
 		&SessionCommand{},
 		&SessionFileEvent{},
 		&Recording{},
@@ -300,6 +301,7 @@ func (m *Host) BeforeCreate(_ *gorm.DB) error                { return ensureID(&
 func (m *HostAccount) BeforeCreate(_ *gorm.DB) error         { return ensureID(&m.ID) }
 func (m *DatabaseInstance) BeforeCreate(_ *gorm.DB) error   { return ensureID(&m.ID) }
 func (m *DatabaseAccount) BeforeCreate(_ *gorm.DB) error    { return ensureID(&m.ID) }
+func (m *UserSession) BeforeCreate(_ *gorm.DB) error         { return ensureID(&m.ID) }
 func (m *SessionCommand) BeforeCreate(_ *gorm.DB) error      { return ensureID(&m.ID) }
 func (m *SessionFileEvent) BeforeCreate(_ *gorm.DB) error    { return ensureID(&m.ID) }
 func (m *Recording) BeforeCreate(_ *gorm.DB) error           { return ensureID(&m.ID) }

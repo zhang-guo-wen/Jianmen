@@ -26,9 +26,11 @@ type User struct {
 type Session struct {
 	ID              string     `gorm:"primaryKey;size:64" json:"id"`
 	SID             string     `gorm:"index;size:128" json:"sid,omitempty"`
-	UserID          string     `gorm:"index;size:64" json:"user_id,omitempty"`
-	User            User       `gorm:"foreignKey:UserID;constraint:OnUpdate:CASCADE,OnDelete:SET NULL;" json:"-"`
-	HostID          string     `gorm:"index;size:64" json:"host_id,omitempty"`
+	UserID          string      `gorm:"index;size:64" json:"user_id,omitempty"`
+	User            User        `gorm:"foreignKey:UserID;constraint:OnUpdate:CASCADE,OnDelete:SET NULL;" json:"-"`
+	UserSessionID   string      `gorm:"index;size:64" json:"user_session_id,omitempty"`
+	UserSession     UserSession `gorm:"foreignKey:UserSessionID;constraint:OnUpdate:CASCADE,OnDelete:SET NULL;" json:"-"`
+	HostID          string      `gorm:"index;size:64" json:"host_id,omitempty"`
 	AccountID       string     `gorm:"index;size:64" json:"account_id,omitempty"`
 	TargetID        string     `gorm:"index;size:64" json:"target_id,omitempty"`
 	Target          string     `gorm:"size:255" json:"target,omitempty"`

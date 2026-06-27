@@ -115,6 +115,19 @@ type DatabaseAccountView struct {
 	UpdatedAt        string     `json:"updated_at,omitempty"`
 }
 
+type SessionView struct {
+	ID         string     `json:"id"`
+	UserID     string     `json:"user_id"`
+	Username   string     `json:"username"`
+	SessionSeq int        `json:"session_seq"`
+	SessionID  string     `json:"session_id"`
+	Type       string     `json:"type"`
+	Status     string     `json:"status"`
+	ExpiresAt  *time.Time `json:"expires_at,omitempty"`
+	CreatedBy  string     `json:"created_by,omitempty"`
+	CreatedAt  time.Time  `json:"created_at"`
+}
+
 var (
 	ErrTargetNotFound      = errSentinel("target not found")
 	ErrHostNotFound        = errSentinel("host not found")
@@ -166,4 +179,10 @@ type Store interface {
 	AuthenticateDirect(ctx context.Context, username, password string) (model.User, error)
 
 	DefaultTarget(ctx context.Context, user model.User) (TargetConfig, error)
+
+	UserSessions(userID string) ([]SessionView, error)
+	CreateUserSession(session model.UserSession) (*model.UserSession, error)
+	DisableUserSession(id string) error
+	EnableUserSession(id string) error
+	UserSessionByID(sessionID string, userID string) (*model.UserSession, error)
 }

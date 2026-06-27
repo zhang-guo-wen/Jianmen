@@ -83,7 +83,10 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 	mux.HandleFunc("/api/targets", s.withAuthAndUser(s.handleTargets))
 	mux.HandleFunc("/api/targets/", s.withAuthAndUser(s.handleTarget))
 	mux.HandleFunc(webTerminalPath, s.handleWebTerminal)
-	mux.HandleFunc("/api/sessions", s.withAuthAndUser(s.handleSessions))
+	mux.HandleFunc("GET /api/sessions", s.withAuthAndUser(s.handleSessions))
+	mux.HandleFunc("POST /api/sessions", s.withAuthAndUser(s.handleCreateSession))
+	mux.HandleFunc("POST /api/sessions/{id}/disable", s.withAuthAndUser(s.handleDisableSession))
+	mux.HandleFunc("POST /api/sessions/{id}/enable", s.withAuthAndUser(s.handleEnableSession))
 	mux.HandleFunc("/api/sessions/", s.withAuthAndUser(s.handleSessionArtifact))
 	mux.HandleFunc("/api/db/instances", s.withAuthAndUser(s.handleDBInstances))
 	mux.HandleFunc("/api/db/instances/", s.withAuthAndUser(s.handleDBInstance))
@@ -595,11 +598,95 @@ func (s *Server) handleUpdateDBAccount(w http.ResponseWriter, r *http.Request, i
 }
 
 func (s *Server) handleSessions(w http.ResponseWriter, r *http.Request) {
+	if !s.requirePermission(r, rbac.ActionRBACManage) {
+		s.forbidden(w)
+		return
+	}
+	userID := r.URL.Query().Get("user_id")
+	sessions, err := s.store.UserSessions(userID)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	if sessions == nil {
+		sessions = []store.SessionView{}
+	}
+	writeJSON(w, http.StatusOK, sessions)
+}
+
+func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request) {
+	if !s.requirePermission(r, rbac.ActionRBACManage) {
+		s.forbidden(w)
+		return
+	}
+	var input struct {
+		UserID    string `json:"user_id"`
+		Type      string `json:"type"`
+		ExpiresAt string `json:"expires_at"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
+		return
+	}
+	if input.UserID == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "user_id required"})
+		return
+	}
+	if input.Type == "" {
+		input.Type = "temporary"
+	}
+	sess := model.UserSession{
+		UserID: input.UserID,
+		Type:   input.Type,
+	}
+	if input.ExpiresAt != "" {
+		t, err := time.Parse(time.RFC3339, input.ExpiresAt)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid expires_at format"})
+			return
+		}
+		sess.ExpiresAt = &t
+	}
+	created, err := s.store.CreateUserSession(sess)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusCreated, created)
+}
+
+func (s *Server) handleDisableSession(w http.ResponseWriter, r *http.Request) {
+	if !s.requirePermission(r, rbac.ActionRBACManage) {
+		s.forbidden(w)
+		return
+	}
+	id := r.PathValue("id")
+	if err := s.store.DisableUserSession(id); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "disabled"})
+}
+
+func (s *Server) handleEnableSession(w http.ResponseWriter, r *http.Request) {
+	if !s.requirePermission(r, rbac.ActionRBACManage) {
+		s.forbidden(w)
+		return
+	}
+	id := r.PathValue("id")
+	if err := s.store.EnableUserSession(id); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "active"})
+}
+
+func (s *Server) handleSSHSessions(w http.ResponseWriter, r *http.Request) {
 	if !s.requirePermission(r, rbac.ActionSessionView) {
 		s.forbidden(w)
 		return
 	}
-	sessions, err := s.listSessions()
+	sessions, err := s.listSSHSessions()
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
@@ -664,7 +751,7 @@ func (s *Server) handleDBConnectionArtifact(w http.ResponseWriter, r *http.Reque
 	}
 }
 
-func (s *Server) listSessions() ([]sessionListItem, error) {
+func (s *Server) listSSHSessions() ([]sessionListItem, error) {
 	root := filepath.Join(s.cfg.ReplayDir, "ssh")
 	entries, err := os.ReadDir(root)
 	if err != nil {

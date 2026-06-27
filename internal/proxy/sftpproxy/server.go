@@ -187,7 +187,7 @@ func (h *handler) Filelist(r *sftp.Request) (sftp.ListerAt, error) {
 
 	switch r.Method {
 	case "List":
-		files, err = h.remote.ReadDir(r.Filepath)
+		files, err = h.readDirTimeout(r.Filepath)
 		h.logger.Info("sftp proxy: readdir done", "path", r.Filepath, "entries", len(files), "err", err)
 	case "Stat":
 		var info os.FileInfo
@@ -210,6 +210,29 @@ func (h *handler) Filelist(r *sftp.Request) (sftp.ListerAt, error) {
 		return nil, err
 	}
 	return fileInfoLister(files), nil
+}
+
+// readDirTimeout wraps ReadDir with a deadline to prevent hanging on
+// directories with stuck mount points (e.g. NFS).  The underlying SSH
+// connection does not expose per-request deadlines so we use a goroutine.
+func (h *handler) readDirTimeout(path string) ([]os.FileInfo, error) {
+	type result struct {
+		files []os.FileInfo
+		err   error
+	}
+	ch := make(chan result, 1)
+	go func() {
+		files, err := h.remote.ReadDir(path)
+		ch <- result{files, err}
+	}()
+	select {
+	case r := <-ch:
+		return r.files, r.err
+	case <-time.After(10 * time.Second):
+		h.logger.Warn("sftp readdir timed out, closing remote client", "path", path)
+		_ = h.remote.Close()
+		return nil, fmt.Errorf("readdir %s timed out after 10s", path)
+	}
 }
 
 func (h *handler) Lstat(r *sftp.Request) (sftp.ListerAt, error) {

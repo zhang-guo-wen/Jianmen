@@ -247,6 +247,7 @@
 
 <script setup lang="ts">
 import { Terminal } from '@xterm/xterm';
+import { FitAddon } from '@xterm/addon-fit';
 import '@xterm/xterm/css/xterm.css';
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { ElMessage } from 'element-plus';
@@ -299,6 +300,8 @@ const replayCurrentTime = ref(0);
 const replayRenderedOutput = ref(false);
 const replayTerminalHostRef = ref<HTMLElement>();
 let replayTerminal: Terminal | undefined;
+let fitAddon: FitAddon | undefined;
+let terminalResizeObserver: ResizeObserver | undefined;
 let replayTimer: number | undefined;
 let replayStartedAt = 0;
 let replayStartOffset = 0;
@@ -330,8 +333,6 @@ const replayOutputFrames = computed(() => replayFrames.value.filter((frame) => f
 const replayDuration = computed(() => replayFrames.value.at(-1)?.time ?? 0);
 const replayRawBytes = computed(() => utf8ByteLength(replayData.value.raw));
 const replayFirstOutputTime = computed(() => replayOutputFrames.value[0]?.time ?? 0);
-const replayTerminalCols = computed(() => replayHeaderNumber('width', 120, 20, 240));
-const replayTerminalRows = computed(() => replayHeaderNumber('height', 24, 8, 80));
 const replayTerminalMessage = computed(() => {
   if (!isReplay.value) {
     return '';
@@ -706,12 +707,10 @@ function ensureReplayTerminal(): Terminal | undefined {
   if (!host) {
     return undefined;
   }
-  const cols = replayTerminalCols.value;
-  const rows = replayTerminalRows.value;
+
   if (!replayTerminal) {
+    fitAddon = new FitAddon();
     replayTerminal = new Terminal({
-      cols,
-      rows,
       convertEol: true,
       cursorBlink: false,
       disableStdin: true,
@@ -726,28 +725,31 @@ function ensureReplayTerminal(): Terminal | undefined {
         selectionBackground: '#344054'
       }
     });
+    replayTerminal.loadAddon(fitAddon);
     replayTerminal.open(host);
-    return replayTerminal;
+    fitAddon.fit();
+
+    // Keep terminal sized to container
+    terminalResizeObserver = new ResizeObserver(() => {
+      fitAddon?.fit();
+    });
+    terminalResizeObserver.observe(host);
   }
-  replayTerminal.resize(cols, rows);
+
   return replayTerminal;
 }
 
 function resetReplayTerminal() {
   replayTerminal?.reset();
+  fitAddon?.fit();
 }
 
 function destroyReplayTerminal() {
+  terminalResizeObserver?.disconnect();
+  terminalResizeObserver = undefined;
   replayTerminal?.dispose();
   replayTerminal = undefined;
-}
-
-function replayHeaderNumber(key: string, fallback: number, min: number, max: number): number {
-  const value = Number(replayData.value.header[key]);
-  if (!Number.isFinite(value)) {
-    return fallback;
-  }
-  return Math.min(max, Math.max(min, Math.round(value)));
+  fitAddon = undefined;
 }
 
 function utf8ByteLength(value: string): number {

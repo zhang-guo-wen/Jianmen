@@ -849,9 +849,8 @@ onBeforeUnmount(() => {
 
 .replay-terminal {
   position: absolute;
-  inset: 0;
+  inset: 8px;
   box-sizing: border-box;
-  padding: 8px;
 }
 
 .replay-terminal :deep(.xterm) {
@@ -861,6 +860,21 @@ onBeforeUnmount(() => {
 
 .replay-terminal :deep(.xterm-viewport) {
   overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: #475467 transparent;
+}
+
+.replay-terminal :deep(.xterm-viewport::-webkit-scrollbar) {
+  width: 8px;
+}
+
+.replay-terminal :deep(.xterm-viewport::-webkit-scrollbar-track) {
+  background: transparent;
+}
+
+.replay-terminal :deep(.xterm-viewport::-webkit-scrollbar-thumb) {
+  background: #475467;
+  border-radius: 4px;
 }
 
 .replay-terminal :deep(.xterm-screen) {

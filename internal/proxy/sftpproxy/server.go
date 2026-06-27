@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"strings"
 	"sync/atomic"
@@ -39,6 +40,7 @@ func Serve(ctx context.Context, opts Options) error {
 	handler := &handler{
 		remote:   remote,
 		recorder: opts.Recorder,
+		logger:   slog.Default().With("component", "sftp-proxy"),
 	}
 	server := sftp.NewRequestServer(opts.Channel, sftp.Handlers{
 		FileGet:  handler,
@@ -70,9 +72,11 @@ func Serve(ctx context.Context, opts Options) error {
 type handler struct {
 	remote   *sftp.Client
 	recorder *recording.SessionRecorder
+	logger   *slog.Logger
 }
 
 func (h *handler) Fileread(r *sftp.Request) (io.ReaderAt, error) {
+	h.logger.Info("sftp proxy", "op", "open_read", "path", r.Filepath, "method", r.Method)
 	started := time.Now().UTC()
 	file, err := h.remote.Open(r.Filepath)
 	h.record(started, recording.FileEvent{
@@ -173,6 +177,7 @@ func (h *handler) filecmd(r *sftp.Request, method string) error {
 }
 
 func (h *handler) Filelist(r *sftp.Request) (sftp.ListerAt, error) {
+	h.logger.Info("sftp proxy", "op", "filelist", "path", r.Filepath, "method", r.Method)
 	started := time.Now().UTC()
 	var (
 		files []os.FileInfo
@@ -230,6 +235,7 @@ func (h *handler) Readlink(path string) (string, error) {
 }
 
 func (h *handler) RealPath(path string) (string, error) {
+	h.logger.Info("sftp proxy", "op", "realpath", "path", path)
 	started := time.Now().UTC()
 	realPath, err := h.remote.RealPath(path)
 	h.record(started, recording.FileEvent{

@@ -341,6 +341,11 @@ export interface RBACEffectiveCheckResult {
   [key: string]: unknown;
 }
 
+export interface TestConnectionResult {
+  ok: boolean;
+  message: string;
+}
+
 export function getToken(): string {
   return localStorage.getItem(TOKEN_KEY) ?? '';
 }
@@ -440,6 +445,11 @@ export const apiClient = {
   deleteTarget: (id: string | number) =>
     request<ApiEnvelope<unknown> | unknown>(`/api/targets/${encodeURIComponent(String(id))}`, {
       method: 'DELETE'
+    }),
+  testTargetConnection: (payload: TargetPayload) =>
+    request<TestConnectionResult>('/api/targets/test-connection', {
+      method: 'POST',
+      body: JSON.stringify(payload)
     }),
   getSessions: () => request<ApiEnvelope<SessionRecord[]> | SessionRecord[]>('/api/sessions'),
   getSessionMeta: (id: string | number) =>

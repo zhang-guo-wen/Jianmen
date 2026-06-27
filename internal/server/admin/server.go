@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"golang.org/x/crypto/ssh"
 	"gorm.io/gorm"
 	"jianmen/internal/access"
 	"jianmen/internal/config"
@@ -81,6 +82,7 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 	mux.HandleFunc("/api/hosts", s.withAuthAndUser(s.handleHosts))
 	mux.HandleFunc("/api/hosts/", s.withAuthAndUser(s.handleHost))
 	mux.HandleFunc("/api/targets", s.withAuthAndUser(s.handleTargets))
+	mux.HandleFunc("/api/targets/test-connection", s.withAuthAndUser(s.handleTestConnection))
 	mux.HandleFunc("/api/targets/", s.withAuthAndUser(s.handleTarget))
 	mux.HandleFunc(webTerminalPath, s.handleWebTerminal)
 	mux.HandleFunc("/api/sessions", s.withAuthAndUser(s.handleSessions))
@@ -342,6 +344,47 @@ func (s *Server) handleCreateTarget(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, view)
+}
+
+func (s *Server) handleTestConnection(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", http.MethodPost)
+		writeErrorText(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	if !s.requirePermission(r, rbac.ActionTargetCreate) {
+		s.forbidden(w)
+		return
+	}
+	defer r.Body.Close()
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+	var target config.Target
+	if err := json.NewDecoder(r.Body).Decode(&target); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+
+	addr := target.Addr()
+	if addr == "" || target.Username == "" {
+		writeErrorText(w, http.StatusBadRequest, "host, port, and username are required")
+		return
+	}
+
+	clientConfig, err := access.ClientConfigForTarget(target)
+	if err != nil {
+		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "message": "配置错误: " + err.Error()})
+		return
+	}
+
+	clientConfig.Timeout = 10 * time.Second
+
+	conn, err := ssh.Dial("tcp", addr, clientConfig)
+	if err != nil {
+		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "message": "连接失败: " + err.Error()})
+		return
+	}
+	conn.Close()
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "message": "连接成功 (" + addr + ")"})
 }
 
 func (s *Server) handleTarget(w http.ResponseWriter, r *http.Request) {

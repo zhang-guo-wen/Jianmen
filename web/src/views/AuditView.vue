@@ -585,19 +585,36 @@ function stopReplay() {
     window.clearTimeout(replayTimer);
     replayTimer = undefined;
   }
+  cancelAutoScroll();
   replayPlaying.value = false;
 }
 
+let scrollRafId: number | undefined;
+
 function autoScrollTerminal() {
-  // Use rAF to ensure xterm has laid out new content before scrolling
-  requestAnimationFrame(() => {
+  // Cancel any pending scroll — only the latest position matters
+  if (scrollRafId !== undefined) {
+    cancelAnimationFrame(scrollRafId);
+  }
+  scrollRafId = requestAnimationFrame(() => {
     const host = replayTerminalHostRef.value;
     if (!host) return;
     const viewport = host.querySelector('.xterm-viewport') as HTMLElement | null;
-    if (viewport) {
+    if (!viewport) return;
+    viewport.scrollTop = viewport.scrollHeight;
+    // xterm may batch DOM updates — confirm on the next frame
+    scrollRafId = requestAnimationFrame(() => {
+      scrollRafId = undefined;
       viewport.scrollTop = viewport.scrollHeight;
-    }
+    });
   });
+}
+
+function cancelAutoScroll() {
+  if (scrollRafId !== undefined) {
+    cancelAnimationFrame(scrollRafId);
+    scrollRafId = undefined;
+  }
 }
 
 function seekReplay(percent: number) {
@@ -823,35 +840,31 @@ onBeforeUnmount(() => {
 
 .replay-terminal-shell {
   position: relative;
-  overflow: clip;
-  height: min(420px, 60vh);
-  min-height: 280px;
+  height: min(520px, 70vh);
+  min-height: 320px;
   background: #0b1220;
   border: 1px solid #1f2937;
   border-radius: 8px;
-  contain: layout paint;
 }
 
 .replay-terminal {
   position: absolute;
-  inset: 12px;
+  inset: 0;
   box-sizing: border-box;
+  padding: 8px;
 }
 
 .replay-terminal :deep(.xterm) {
-  overflow: hidden;
   width: 100%;
   height: 100%;
 }
 
 .replay-terminal :deep(.xterm-viewport) {
   overflow-y: auto;
-  scrollbar-gutter: stable;
 }
 
 .replay-terminal :deep(.xterm-screen) {
   max-width: 100%;
-  max-height: 100%;
 }
 
 .replay-seek-bar {

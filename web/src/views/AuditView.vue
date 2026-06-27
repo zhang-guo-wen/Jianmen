@@ -331,6 +331,7 @@ const replayDuration = computed(() => replayFrames.value.at(-1)?.time ?? 0);
 const replayRawBytes = computed(() => utf8ByteLength(replayData.value.raw));
 const replayFirstOutputTime = computed(() => replayOutputFrames.value[0]?.time ?? 0);
 const replayTerminalCols = computed(() => replayHeaderNumber('width', 120, 20, 240));
+const replayTerminalRows = computed(() => replayHeaderNumber('height', 24, 8, 60));
 const replayTerminalMessage = computed(() => {
   if (!isReplay.value) {
     return '';
@@ -707,10 +708,11 @@ function ensureReplayTerminal(): Terminal | undefined {
   }
 
   if (!replayTerminal) {
-    // Use original session column count so vim/TUI escape sequences align.
-    // Omit rows — xterm auto-calculates from container height.
+    // Match original session cols/rows so vim/TUI escape sequences align
+    // and content doesn't leave stale lines in rows outside the session height.
     replayTerminal = new Terminal({
       cols: replayTerminalCols.value,
+      rows: replayTerminalRows.value,
       convertEol: false,
       cursorBlink: false,
       disableStdin: true,

@@ -8,6 +8,7 @@ import DatabaseView from '@/views/DatabaseView.vue';
 import HostsView from '@/views/HostsView.vue';
 import LoginView from '@/views/LoginView.vue';
 import QuickConnectView from '@/views/QuickConnectView.vue';
+import SetupView from '@/views/SetupView.vue';
 import RBACView from '@/views/RBACView.vue';
 import SessionsView from '@/views/SessionsView.vue';
 import WebTerminalView from '@/views/WebTerminalView.vue';
@@ -22,6 +23,16 @@ const routes: RouteRecordRaw[] = [
   {
     path: '/',
     redirect: '/dashboard'
+  },
+  {
+    path: '/setup',
+    name: 'setup',
+    component: SetupView,
+    meta: {
+      public: true,
+      titleKey: 'setup.title',
+      descriptionKey: 'setup.description'
+    } satisfies AppRouteMeta
   },
   {
     path: '/login',

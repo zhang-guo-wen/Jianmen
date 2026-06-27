@@ -93,8 +93,13 @@
       <el-empty v-if="!dbLoading && !dbConnections.length && !dbError" :description="t('audit.empty.dbConnections')" />
     </el-card>
 
-    <el-card class="placeholder-panel" shadow="never">
-      <template #header>
+    <el-drawer
+      v-model="drawerVisible"
+      direction="rtl"
+      size="65%"
+      @close="closeDetail"
+    >
+      <template #title>
         <div class="toolbar">
           <span>{{ detailTitle || t('audit.title.detail') }}</span>
           <el-tag v-if="detailKind">{{ detailKind }}</el-tag>
@@ -213,7 +218,7 @@
         <pre v-else-if="detailData" class="json-preview">{{ JSON.stringify(detailData, null, 2) }}</pre>
         <el-empty v-else :description="t('audit.empty.detail')" />
       </div>
-    </el-card>
+    </el-drawer>
   </div>
 </template>
 
@@ -261,6 +266,7 @@ const detailError = ref('');
 const detailTitle = ref('');
 const detailKind = ref<DetailKind>('');
 const detailData = ref<unknown>(null);
+const drawerVisible = ref(false);
 const replayPlaying = ref(false);
 const replayProgress = ref(0);
 const replayRenderedOutput = ref(false);
@@ -405,9 +411,15 @@ function setDetail(title: string, kind: DetailKind, data: unknown) {
   detailTitle.value = title;
   detailKind.value = kind;
   detailData.value = data;
+  drawerVisible.value = true;
   replayProgress.value = 0;
   replayRenderedOutput.value = false;
   resetReplayTerminal();
+}
+
+function closeDetail() {
+  stopReplay();
+  drawerVisible.value = false;
 }
 
 async function loadSessions() {
@@ -720,7 +732,7 @@ onBeforeUnmount(() => {
 .replay-terminal-shell {
   position: relative;
   overflow: clip;
-  height: min(420px, calc(100vh - 300px));
+  height: min(420px, 60vh);
   min-height: 280px;
   background: #0b1220;
   border: 1px solid #1f2937;

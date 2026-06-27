@@ -15,7 +15,7 @@
         </div>
       </template>
       <el-alert v-if="sessionError" :title="sessionError" type="error" show-icon />
-      <el-table v-else v-loading="sessionsLoading" :data="sessions" height="380" row-key="id">
+      <el-table v-else v-loading="sessionsLoading" :data="pagedSessions" height="380" row-key="id">
         <el-table-column :label="t('sessions.column.user')" min-width="130">
           <template #default="{ row }">
             {{ sessionUser(row) }}
@@ -53,6 +53,16 @@
           </template>
         </el-table-column>
       </el-table>
+      <el-pagination
+        v-if="sessions.length > pageSize"
+        v-model:current-page="sessionPage"
+        v-model:page-size="pageSize"
+        :total="sessions.length"
+        layout="prev, pager, next"
+        :page-sizes="[pageSize]"
+        size="small"
+        style="margin-top:8px;justify-content:flex-end"
+      />
       <el-empty v-if="!sessionsLoading && !sessions.length && !sessionError" :description="t('sessions.empty')" />
     </el-card>
 
@@ -208,7 +218,7 @@
           <el-table-column prop="error_message" :label="t('audit.column.error')" min-width="220" show-overflow-tooltip />
         </el-table>
 
-        <el-table v-else-if="isCommands" :data="commandEvents" height="420">
+        <el-table v-else-if="isCommands" :data="pagedCommandEvents" height="420">
           <el-table-column :label="t('audit.column.time')" width="160">
             <template #default="{ row }">
               {{ formatTime(row.started_at) }}
@@ -217,8 +227,17 @@
           <el-table-column prop="command" :label="t('audit.column.command')" min-width="280" show-overflow-tooltip />
           <el-table-column prop="preview" :label="t('audit.column.preview')" min-width="280" show-overflow-tooltip />
         </el-table>
+        <el-pagination
+          v-if="isCommands && commandEvents.length > pageSize"
+          v-model:current-page="logPage"
+          :page-size="pageSize"
+          :total="commandEvents.length"
+          layout="prev, pager, next"
+          size="small"
+          style="margin-top:6px;justify-content:flex-end"
+        />
 
-        <el-table v-else-if="isFiles" :data="fileEvents" height="420" row-key="seq">
+        <el-table v-else-if="isFiles" :data="pagedFileEvents" height="420" row-key="seq">
           <el-table-column :label="t('audit.column.time')" width="150">
             <template #default="{ row }">
               {{ formatTime(row.started_at) }}
@@ -243,6 +262,15 @@
             </template>
           </el-table-column>
         </el-table>
+        <el-pagination
+          v-if="isFiles && fileEvents.length > pageSize"
+          v-model:current-page="logPage"
+          :page-size="pageSize"
+          :total="fileEvents.length"
+          layout="prev, pager, next"
+          size="small"
+          style="margin-top:6px;justify-content:flex-end"
+        />
 
         <pre v-else-if="detailData" class="json-preview">{{ JSON.stringify(detailData, null, 2) }}</pre>
         <el-empty v-else :description="t('audit.empty.detail')" />
@@ -288,6 +316,13 @@ const sessions = ref<SessionRecord[]>([]);
 const dbConnections = ref<DBConnectionRecord[]>([]);
 const sessionsLoading = ref(false);
 const dbLoading = ref(false);
+const pageSize = ref(30);
+const sessionPage = ref(1);
+const logPage = ref(1);
+const pagedSessions = computed(() => {
+  const start = (sessionPage.value - 1) * pageSize.value;
+  return sessions.value.slice(start, start + pageSize.value);
+});
 const detailLoading = ref(false);
 const sessionError = ref('');
 const dbError = ref('');
@@ -330,6 +365,14 @@ const commandEvents = computed(() =>
 const fileEvents = computed(() =>
   Array.isArray(detailData.value) ? (detailData.value as SessionFileEventRecord[]) : []
 );
+const pagedCommandEvents = computed(() => {
+  const start = (logPage.value - 1) * pageSize.value;
+  return commandEvents.value.slice(start, start + pageSize.value);
+});
+const pagedFileEvents = computed(() => {
+  const start = (logPage.value - 1) * pageSize.value;
+  return fileEvents.value.slice(start, start + pageSize.value);
+});
 const replayData = computed(() => (isReplayData(detailData.value) ? detailData.value : { header: {}, frames: [], raw: '' }));
 const replayFrames = computed(() => replayData.value.frames);
 const replayOutputFrames = computed(() => replayFrames.value.filter((frame) => frame.stream === 'o'));
@@ -476,6 +519,7 @@ function setDetail(title: string, kind: DetailKind, data: unknown) {
   detailData.value = data;
   drawerVisible.value = true;
   playbackSpeed.value = 1;
+  logPage.value = 1;
   replayProgress.value = 0;
   replaySeekPercent.value = 0;
   replayCurrentTime.value = 0;

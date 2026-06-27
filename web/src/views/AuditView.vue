@@ -139,25 +139,31 @@
         </el-descriptions>
 
         <div v-else-if="isReplay" class="replay-panel">
-          <div class="replay-toolbar">
+          <div class="replay-controls">
             <div class="replay-meta">
-              <span>{{ t('audit.replay.frames') }} {{ replayFrames.length }}</span>
-              <span>{{ t('audit.replay.outputFrames') }} {{ replayOutputFrames.length }}</span>
-              <span>{{ t('audit.replay.size') }} {{ formatBytes(replayRawBytes) }}</span>
-              <span>{{ t('audit.replay.duration') }} {{ formatReplayDuration(replayDuration) }}</span>
+              <span>{{ formatReplayDuration(replayCurrentTime) }}</span>
+              <el-slider
+                v-model="replaySeekPercent"
+                :max="100"
+                :show-tooltip="false"
+                :disabled="!replayFrames.length"
+                size="small"
+                @change="seekReplay"
+              />
+              <span>{{ formatReplayDuration(replayDuration) }}</span>
             </div>
             <div class="replay-actions">
-              <el-button :disabled="!replayOutputFrames.length" type="primary" @click="playReplay">
+              <el-button :disabled="!replayOutputFrames.length" type="primary" size="small" @click="playReplay">
                 {{ replayPlaying ? t('audit.action.restart') : t('audit.action.play') }}
               </el-button>
-              <el-button :disabled="!replayPlaying" @click="stopReplay">
+              <el-button :disabled="!replayPlaying" size="small" @click="stopReplay">
                 {{ t('audit.action.stop') }}
               </el-button>
               <el-select
                 v-model="playbackSpeed"
                 size="small"
                 :disabled="replayPlaying"
-                style="width: 72px"
+                style="width: 64px"
               >
                 <el-option
                   v-for="s in speedOptions"
@@ -168,16 +174,10 @@
               </el-select>
             </div>
           </div>
-          <div class="replay-seek-bar">
-            <span class="replay-time-label">{{ formatReplayDuration(replayCurrentTime) }}</span>
-            <el-slider
-              v-model="replaySeekPercent"
-              :max="100"
-              :show-tooltip="false"
-              :disabled="!replayFrames.length"
-              @change="seekReplay"
-            />
-            <span class="replay-time-label">{{ formatReplayDuration(replayDuration) }}</span>
+          <div class="replay-meta-secondary">
+            <span>{{ t('audit.replay.frames') }} {{ replayFrames.length }}</span>
+            <span>{{ t('audit.replay.outputFrames') }} {{ replayOutputFrames.length }}</span>
+            <span>{{ t('audit.replay.size') }} {{ formatBytes(replayRawBytes) }}</span>
           </div>
           <div class="replay-terminal-shell">
             <div ref="replayTerminalHostRef" class="replay-terminal" />
@@ -814,36 +814,63 @@ onBeforeUnmount(() => {
   border-radius: 8px;
 }
 
+/* Make drawer body a flex column so terminal can fill remaining space */
+:deep(.el-drawer__body) {
+  display: flex;
+  flex-direction: column;
+  padding: 12px 16px;
+}
+
 .replay-panel {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 6px;
+  flex: 1;
+  min-height: 0;
 }
 
-.replay-toolbar {
+.replay-controls {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
 }
 
-.replay-meta,
-.replay-actions {
+.replay-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+  color: #667085;
+  font-size: 12px;
+}
+
+.replay-meta :deep(.el-slider) {
+  flex: 1;
+  min-width: 80px;
+}
+
+.replay-meta-secondary {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
+  color: #667085;
+  font-size: 11px;
 }
 
-.replay-meta {
-  color: #667085;
-  font-size: 13px;
+.replay-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
 }
 
 .replay-terminal-shell {
   position: relative;
-  height: min(480px, 55vh);
-  min-height: 300px;
+  flex: 1;
+  min-height: 200px;
   overflow: hidden;
   background: #0b1220;
   border-radius: 8px;
@@ -882,24 +909,6 @@ onBeforeUnmount(() => {
   max-width: 100%;
 }
 
-.replay-seek-bar {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.replay-seek-bar :deep(.el-slider) {
-  flex: 1;
-}
-
-.replay-time-label {
-  flex-shrink: 0;
-  min-width: 48px;
-  color: #667085;
-  font-size: 12px;
-  font-variant-numeric: tabular-nums;
-}
-
 .replay-terminal-empty {
   position: absolute;
   inset: 0;
@@ -913,9 +922,9 @@ onBeforeUnmount(() => {
 }
 
 @media (max-width: 720px) {
-  .replay-toolbar {
-    align-items: flex-start;
+  .replay-controls {
     flex-direction: column;
+    align-items: stretch;
   }
 }
 

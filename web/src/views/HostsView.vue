@@ -34,7 +34,7 @@
             </el-button>
           </template>
         </el-table-column>
-        <el-table-column align="center" label="状态" width="80">
+        <el-table-column align="center" label="启用状态" width="80">
           <template #default="{ row }">
             <el-switch
               :loading="statusUpdatingId === hostStatusKey(row)"
@@ -154,7 +154,7 @@
               <div class="account-name">{{ row.username || '-' }}</div>
             </template>
           </el-table-column>
-          <el-table-column label="验证" width="96">
+          <el-table-column label="验证方式" width="96">
             <template #default="{ row }">
               <el-space wrap :size="4">
                 <el-tag v-for="method in targetAuthMethods(row)" :key="method" size="small">
@@ -166,7 +166,7 @@
               </el-space>
             </template>
           </el-table-column>
-          <el-table-column align="center" label="状态" width="80">
+          <el-table-column align="center" label="启用状态" width="80">
             <template #default="{ row }">
               <el-switch
                 :loading="statusUpdatingId === accountStatusKey(row)"

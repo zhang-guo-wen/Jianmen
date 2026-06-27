@@ -375,6 +375,15 @@ func (g *Gateway) handlePG(ctx context.Context, client net.Conn) *gatewayConn {
 	}
 }
 
+// NOTE: Bastion user authentication via AuthenticateDirect is deferred for MySQL v1.
+// The PG path validates bastion credentials via cleartext password challenge before RBAC.
+// MySQL protocol does not support cleartext password, and implementing a full
+// mysql_native_password challenge-response for bastion auth requires storing
+// bastion user passwords or implementing AuthSwitchRequest. This is planned for v2.
+// For now, the RBAC check uses the account's uniqueName as userID, which means
+// any client that knows the compact username can attempt a connection.
+// Access control relies on: (1) obscure compact username, (2) account disabled/expiry checks.
+//
 // handleMySQL implements MySQL proxy authentication:
 // 1. Read client's initial login packet (already buffered after TCP connect)
 // 2. Extract username using MySQLLoginParser
@@ -739,7 +748,7 @@ func readMySQLPacket(conn net.Conn) (*mysqlPacket, error) {
 		return nil, err
 	}
 	payloadLen := int(header[0]) | int(header[1])<<8 | int(header[2])<<16
-	if payloadLen < 0 || payloadLen > 128*1024*1024 {
+	if payloadLen == 0 || payloadLen > 128*1024*1024 {
 		return nil, fmt.Errorf("invalid mysql packet length %d", payloadLen)
 	}
 	payload := make([]byte, payloadLen)

@@ -543,24 +543,14 @@ const accountRules: FormRules = {
 // Connect dialog state
 const connectDialogVisible = ref(false);
 const connectTarget = ref<DBAccountRecord | null>(null);
-const userSessionId = ref('00001');
+const userSessionId = ref('00001'); // TODO: use actual session ID from auth context
 const connectTesting = ref(false);
 const connectTestResult = ref<{ ok: boolean; error?: string; latency_ms?: number } | null>(null);
 
 const connectParams = computed(() => {
   if (!connectTarget.value || !selectedInstance.value) return [];
   const inst = selectedInstance.value;
-  const address = inst.address || '127.0.0.1:3306';
-  const lastColon = address.lastIndexOf(':');
-  let host = address;
-  let port = '3306';
-  if (lastColon > -1) {
-    const portPart = address.slice(lastColon + 1);
-    if (/^\d+$/.test(portPart)) {
-      host = address.slice(0, lastColon);
-      port = portPart;
-    }
-  }
+  const { host, port } = parseAddress(inst.address || '127.0.0.1:3306');
   const proxyPort = Number(port) + 30000;
   const resourceId = connectTarget.value.resource_id || '0000';
   const sessionId = userSessionId.value || '00001';
@@ -618,19 +608,8 @@ const connectCommand = computed(() => {
   const resourceId = connectTarget.value.resource_id || '0000';
   const sessionId = userSessionId.value || '00001';
   const compactUser = `D${resourceId}${sessionId}`;
-  // Parse host and port from address
-  const address = inst.address || '127.0.0.1:3306';
-  const lastColon = address.lastIndexOf(':');
-  let host = address;
-  let port = '3306';
-  if (lastColon > -1) {
-    const portPart = address.slice(lastColon + 1);
-    if (/^\d+$/.test(portPart)) {
-      host = address.slice(0, lastColon);
-      port = portPart;
-    }
-  }
   // Use proxy port convention: default port + 30000
+  const { host, port } = parseAddress(inst.address || '127.0.0.1:3306');
   const proxyPort = Number(port) + 30000;
   if (protocol === 'mysql') {
     return `mysql --protocol=tcp -h ${host} -P ${proxyPort} -u ${compactUser} -p`;
@@ -641,6 +620,17 @@ const connectCommand = computed(() => {
 // Helpers
 function unwrapArray<T>(payload: ApiEnvelope<T[]> | T[]): T[] {
   return Array.isArray(payload) ? payload : payload.data ?? [];
+}
+
+function parseAddress(address: string): { host: string; port: string } {
+  const lastColon = address.lastIndexOf(':');
+  if (lastColon > -1) {
+    const portPart = address.slice(lastColon + 1);
+    if (/^\d+$/.test(portPart)) {
+      return { host: address.slice(0, lastColon), port: portPart };
+    }
+  }
+  return { host: address, port: '3306' };
 }
 
 function formatTime(value: unknown): string {
@@ -892,7 +882,8 @@ async function loadAccountGroups() {
   const inst = selectedInstance.value;
   if (!inst?.id) return;
   try {
-    const data = await apiClient.getDBAccounts(inst.id, { page: 1, size: 1000 });
+    const raw = await apiClient.getDBAccounts(inst.id);
+    const data = Array.isArray(raw) ? raw : (raw as any).data ?? raw;
     const records = Array.isArray(data) ? data : (data as any)?.items ?? [];
     const groups = new Set<string>();
     for (const acc of records) {

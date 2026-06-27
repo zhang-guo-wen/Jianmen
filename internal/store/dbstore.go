@@ -431,15 +431,24 @@ func (s *DBStore) DatabaseInstance(id string) (DatabaseInstanceView, error) {
 	}, nil
 }
 
-func (s *DBStore) AddDatabaseInstance(name, protocol, address, groupName, remark string) (DatabaseInstanceView, error) {
+func normalizeDBProtocol(protocol string) (string, error) {
 	protocol = strings.ToLower(strings.TrimSpace(protocol))
 	if protocol == "" || protocol == "pg" || protocol == "postgresql" {
 		protocol = "postgres"
 	}
 	if protocol != "mysql" && protocol != "postgres" && protocol != "tcp" {
-		return DatabaseInstanceView{}, fmt.Errorf("unsupported database protocol %q", protocol)
+		return "", fmt.Errorf("unsupported database protocol %q", protocol)
 	}
-	if _, _, err := net.SplitHostPort(address); err != nil {
+	return protocol, nil
+}
+
+func (s *DBStore) AddDatabaseInstance(name, protocol, address, groupName, remark string) (DatabaseInstanceView, error) {
+	protocol, err := normalizeDBProtocol(protocol)
+	if err != nil {
+		return DatabaseInstanceView{}, err
+	}
+	_, _, err = net.SplitHostPort(address)
+	if err != nil {
 		return DatabaseInstanceView{}, fmt.Errorf("invalid address %q: %w", address, err)
 	}
 	inst := model.DatabaseInstance{
@@ -477,12 +486,9 @@ func (s *DBStore) UpdateDatabaseInstance(id, name, protocol, address, groupName,
 		}
 		return DatabaseInstanceView{}, err
 	}
-	protocol = strings.ToLower(strings.TrimSpace(protocol))
-	if protocol == "" || protocol == "pg" || protocol == "postgresql" {
-		protocol = "postgres"
-	}
-	if protocol != "mysql" && protocol != "postgres" && protocol != "tcp" {
-		return DatabaseInstanceView{}, fmt.Errorf("unsupported database protocol %q", protocol)
+	protocol, err := normalizeDBProtocol(protocol)
+	if err != nil {
+		return DatabaseInstanceView{}, err
 	}
 	if _, _, err := net.SplitHostPort(address); err != nil {
 		return DatabaseInstanceView{}, fmt.Errorf("invalid address %q: %w", address, err)

@@ -11,6 +11,7 @@ import (
 
 	"jianmen/internal/config"
 	"jianmen/internal/model"
+	"jianmen/internal/util"
 )
 
 const (
@@ -33,6 +34,9 @@ func BootstrapMetadata(db *gorm.DB, cfg *config.Config) error {
 	}
 	if err := bootstrapConfigUsers(db, cfg.Users); err != nil {
 		return err
+	}
+	if err := repairUserSessions(db); err != nil {
+		return fmt.Errorf("repair user sessions: %w", err)
 	}
 	if err := bootstrapBuiltinRoles(db); err != nil {
 		return err
@@ -63,6 +67,10 @@ func bootstrapConfigUsers(db *gorm.DB, users []config.User) error {
 			Username: username,
 			Status:   "active",
 		}
+		if pw := strings.TrimSpace(cfgUser.Password); pw != "" {
+			hash := sha256.Sum256([]byte(pw))
+			user.PasswordHash = hex.EncodeToString(hash[:])
+		}
 		if token := strings.TrimSpace(cfgUser.ApiToken); token != "" {
 			hash := sha256.Sum256([]byte(token))
 			user.TokenHash = hex.EncodeToString(hash[:])
@@ -70,9 +78,10 @@ func bootstrapConfigUsers(db *gorm.DB, users []config.User) error {
 		if err := db.Clauses(clause.OnConflict{
 			Columns: []clause.Column{{Name: "id"}},
 			DoUpdates: clause.Assignments(map[string]any{
-				"username":   user.Username,
-				"status":     user.Status,
-				"token_hash": user.TokenHash,
+				"username":      user.Username,
+				"status":        user.Status,
+				"password_hash": user.PasswordHash,
+				"token_hash":    user.TokenHash,
 			}),
 		}).Create(&user).Error; err != nil {
 			return fmt.Errorf("bootstrap metadata user %q: %w", userID, err)
@@ -82,13 +91,36 @@ func bootstrapConfigUsers(db *gorm.DB, users []config.User) error {
 		var userSessionCount int64
 		db.Model(&model.UserSession{}).Where("user_id = ? AND type = ?", userID, "permanent").Count(&userSessionCount)
 		if userSessionCount == 0 {
+			var maxSeq int
+			db.Model(&model.UserSession{}).Where("user_id = ?", userID).
+				Select("COALESCE(MAX(session_seq), 0)").Scan(&maxSeq)
+			seq := maxSeq + 1
 			permSession := model.UserSession{
-				UserID: userID,
-				Type:   "permanent",
-				Status: "active",
+				UserID:     userID,
+				Type:       "permanent",
+				Status:     "active",
+				SessionSeq: seq,
+				SessionID:  util.EncodeBase62Padded(uint64(seq), 5),
 			}
 			db.Create(&permSession)
 		}
+	}
+	return nil
+}
+
+// repairUserSessions 修复已有但session_seq=0或session_id为空的UserSession
+func repairUserSessions(db *gorm.DB) error {
+	var broken []model.UserSession
+	db.Where("session_seq = 0 OR session_id = ''").Find(&broken)
+	for _, s := range broken {
+		var maxSeq int
+		db.Model(&model.UserSession{}).Where("user_id = ?", s.UserID).
+			Select("COALESCE(MAX(session_seq), 0)").Scan(&maxSeq)
+		seq := maxSeq + 1
+		db.Model(&s).Updates(map[string]interface{}{
+			"session_seq": seq,
+			"session_id":  util.EncodeBase62Padded(uint64(seq), 5),
+		})
 	}
 	return nil
 }

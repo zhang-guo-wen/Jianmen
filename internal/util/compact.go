@@ -8,9 +8,10 @@ const (
 	PrefixDatabase = "D"
 )
 
-// ResourceIDFromSeq 从序号生成资源ID（前缀+4位62进制）
+// ResourceIDFromSeq 从序号生成资源ID（4位62进制，不含前缀）
 func ResourceIDFromSeq(prefix string, seq int) string {
-	return prefix + EncodeBase62Padded(uint64(seq), 4)
+	_ = prefix // 保留参数兼容性，资源ID本身不含前缀
+	return EncodeBase62Padded(uint64(seq), 4)
 }
 
 // FullUsername 组装10位完整连接用户名

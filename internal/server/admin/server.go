@@ -61,6 +61,28 @@ type pagedHostList struct {
 	Total    int               `json:"total"`
 }
 
+var menuOrder = []struct {
+	key    string
+	action string
+}{
+	{"dashboard", "dashboard:view"},
+	{"hosts", "host:view"},
+	{"databases", "db:view"},
+	{"quickConnect", "session:connect"},
+	{"sessions", "session:view"},
+	{"rbac", "rbac:manage"},
+	{"audit", "audit:view"},
+	{"webTerminal", "session:connect"},
+}
+
+var menuActionMap = func() map[string]string {
+	m := make(map[string]string, len(menuOrder))
+	for _, entry := range menuOrder {
+		m[entry.key] = entry.action
+	}
+	return m
+}()
+
 func New(cfg *config.Config, store store.Store, logger *slog.Logger, dbs ...*gorm.DB) *Server {
 	if logger == nil {
 		logger = slog.Default()
@@ -103,6 +125,7 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 	mux.HandleFunc("/api/rbac/effective", s.withAuthAndUser(s.handleRBACEffective))
 	mux.HandleFunc("/api/me", s.withAuthAndUser(s.handleMe))
 	mux.HandleFunc("/api/me/permissions", s.withAuthAndUser(s.handleMePermissions))
+	mux.HandleFunc("/api/me/menus", s.withAuthAndUser(s.handleMeMenus))
 
 	server := &http.Server{
 		Addr:              s.cfg.Admin.ListenAddr,
@@ -201,6 +224,66 @@ func (s *Server) handleMePermissions(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"actions": actions})
+}
+
+func (s *Server) handleMeMenus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", http.MethodGet)
+		writeErrorText(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	userID := userIDFromRequest(r)
+	if userID == "" {
+		writeErrorText(w, http.StatusNotFound, "user not found")
+		return
+	}
+	if s.db == nil || s.rbacChecker == nil {
+		// No metadata DB: return all menus in deterministic order
+		all := make([]string, 0, len(menuOrder))
+		for _, entry := range menuOrder {
+			all = append(all, entry.key)
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"menus": all})
+		return
+	}
+	var rawPerms []model.Permission
+	if err := s.db.Table("permissions").
+		Select("permissions.action").
+		Joins("JOIN role_permissions ON role_permissions.permission_id = permissions.id").
+		Joins("JOIN user_roles ON user_roles.role_id = role_permissions.role_id").
+		Joins("JOIN roles ON roles.id = user_roles.role_id").
+		Where("user_roles.user_id = ?", userID).
+		Where("user_roles.expires_at IS NULL OR user_roles.expires_at > ?", time.Now().UTC()).
+		Where("roles.status = '' OR roles.status = ?", "active").
+		Where("permissions.effect = '' OR permissions.effect = ?", model.PermissionEffectAllow).
+		Where("permissions.action != ''").
+		Group("permissions.action").
+		Find(&rawPerms).Error; err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	actionSet := make(map[string]struct{}, len(rawPerms))
+	for _, p := range rawPerms {
+		if p.Action != "" {
+			actionSet[p.Action] = struct{}{}
+		}
+	}
+	// Build menu list from actions in deterministic order
+	seen := make(map[string]struct{})
+	menus := make([]string, 0, len(menuOrder))
+	for _, entry := range menuOrder {
+		if _, ok := actionSet[entry.action]; ok {
+			if _, exists := seen[entry.key]; !exists {
+				seen[entry.key] = struct{}{}
+				menus = append(menus, entry.key)
+			}
+		}
+	}
+	// Always include dashboard
+	if _, ok := seen["dashboard"]; !ok {
+		menus = append([]string{"dashboard"}, menus...)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"menus": menus})
 }
 
 func (s *Server) handleUsers(w http.ResponseWriter, _ *http.Request) {

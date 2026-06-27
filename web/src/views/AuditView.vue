@@ -840,17 +840,16 @@ onBeforeUnmount(() => {
 
 .replay-terminal-shell {
   position: relative;
-  height: min(520px, 70vh);
-  min-height: 320px;
+  height: min(480px, 55vh);
+  min-height: 300px;
+  overflow: hidden;
   background: #0b1220;
-  border: 1px solid #1f2937;
   border-radius: 8px;
 }
 
 .replay-terminal {
   position: absolute;
-  inset: 8px;
-  box-sizing: border-box;
+  inset: 0;
 }
 
 .replay-terminal :deep(.xterm) {
@@ -859,13 +858,13 @@ onBeforeUnmount(() => {
 }
 
 .replay-terminal :deep(.xterm-viewport) {
-  overflow-y: auto;
+  overflow-y: auto !important;
   scrollbar-width: thin;
   scrollbar-color: #475467 transparent;
 }
 
 .replay-terminal :deep(.xterm-viewport::-webkit-scrollbar) {
-  width: 8px;
+  width: 6px;
 }
 
 .replay-terminal :deep(.xterm-viewport::-webkit-scrollbar-track) {
@@ -874,7 +873,7 @@ onBeforeUnmount(() => {
 
 .replay-terminal :deep(.xterm-viewport::-webkit-scrollbar-thumb) {
   background: #475467;
-  border-radius: 4px;
+  border-radius: 3px;
 }
 
 .replay-terminal :deep(.xterm-screen) {

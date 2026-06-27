@@ -139,6 +139,13 @@ func bootstrapBuiltinPermissions(db *gorm.DB) error {
 			Description:  "Allows all resource scopes.",
 		},
 		{
+			ID:          "builtin-dashboard-view",
+			Name:        "builtin-dashboard-view",
+			Action:      "dashboard:view",
+			Effect:      model.PermissionEffectAllow,
+			Description: "Allows viewing the dashboard.",
+		},
+		{
 			ID:          "builtin-ssh-connect",
 			Name:        "builtin-ssh-connect",
 			Action:      "session:connect",
@@ -354,6 +361,10 @@ func bootstrapBuiltinRolePermissions(db *gorm.DB) error {
 		{builtinAdminRoleID, "builtin-dbproxy-delete"},
 		{builtinAdminRoleID, "builtin-rbac-manage"},
 		{builtinAdminRoleID, "builtin-session-view"},
+		{builtinAdminRoleID, "builtin-dashboard-view"},
+		{builtinSSHOperatorRoleID, "builtin-dashboard-view"},
+		{builtinDBOperatorRoleID, "builtin-dashboard-view"},
+		{builtinDBAuditorRoleID, "builtin-dashboard-view"},
 	}
 	for _, assignment := range assignments {
 		binding := model.RolePermission{

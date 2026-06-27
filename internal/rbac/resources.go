@@ -27,6 +27,7 @@ const (
 	ActionDBProxyView       = "dbproxy:view"
 	ActionRBACManage        = "rbac:manage"
 	ActionSessionView       = "session:view"
+	ActionDashboardView     = "dashboard:view"
 )
 
 func DatabaseAccountResourceID(uniqueName string) string {

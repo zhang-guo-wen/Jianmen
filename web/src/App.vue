@@ -2,16 +2,17 @@
   <el-config-provider :locale="elementLocale">
     <router-view v-if="isLoginRoute" />
     <el-container v-else class="app-shell">
-      <el-aside class="app-sidebar" width="190px">
+      <el-aside :class="['app-sidebar', { collapsed }]" :width="collapsed ? '64px' : '190px'">
         <div class="brand">
           <div class="brand-mark">GB</div>
-          <div>
+          <div v-show="!collapsed">
             <strong>Jianmen</strong>
             <span>{{ t('app.subtitle') }}</span>
           </div>
         </div>
         <el-menu
           :default-active="activePath"
+          :collapse="collapsed"
           background-color="#101828"
           class="nav-menu"
           router
@@ -23,20 +24,20 @@
             <span>{{ t(item.labelKey) }}</span>
           </el-menu-item>
         </el-menu>
-      </el-aside>
 
-      <el-container>
-        <el-header class="app-header">
-          <div>
-            <h1>{{ pageTitle }}</h1>
-            <p>{{ pageDescription }}</p>
-          </div>
-          <div class="app-header-actions">
+        <div class="sidebar-bottom">
+          <el-button
+            class="collapse-btn"
+            :icon="collapsed ? Expand : Fold"
+            text
+            @click="collapsed = !collapsed"
+          />
+          <div v-show="!collapsed" class="sidebar-actions">
             <el-select
               v-model="selectedLocale"
-              class="language-select"
               size="small"
               :aria-label="t('app.language')"
+              style="width: 100%"
             >
               <el-option
                 v-for="option in localeOptions"
@@ -45,7 +46,16 @@
                 :value="option.value"
               />
             </el-select>
-            <el-button type="primary" plain @click="logout">{{ t('common.logout') }}</el-button>
+            <el-button size="small" @click="logout">{{ t('common.logout') }}</el-button>
+          </div>
+        </div>
+      </el-aside>
+
+      <el-container>
+        <el-header class="app-header">
+          <div>
+            <h1>{{ pageTitle }}</h1>
+            <p>{{ pageDescription }}</p>
           </div>
         </el-header>
         <el-main class="app-main">
@@ -57,11 +67,14 @@
 </template>
 
 <script setup lang="ts">
+import { ref } from 'vue';
 import {
   Connection,
   DataAnalysis,
   DataBoard,
   DocumentChecked,
+  Expand,
+  Fold,
   Link,
   Monitor,
   Platform,
@@ -77,6 +90,7 @@ const route = useRoute();
 const router = useRouter();
 const { elementLocale, locale, localeOptions, setLocale, t } = useI18n();
 
+const collapsed = ref(false);
 const isLoginRoute = computed(() => route.name === 'login');
 const activePath = computed(() => route.path);
 const selectedLocale = computed<Locale>({
@@ -115,20 +129,46 @@ function logout() {
 </script>
 
 <style scoped>
+.app-sidebar {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  transition: width 0.2s;
+  overflow: hidden;
+}
+
+.nav-menu {
+  flex: 1;
+  border-right: none;
+}
+
+.nav-menu:not(.el-menu--collapse) {
+  width: 190px;
+}
+
+.sidebar-bottom {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border-top: 1px solid #1d2939;
+}
+
+.collapse-btn {
+  align-self: flex-end;
+  color: #98a2b3;
+}
+
+.sidebar-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
 .app-header-actions {
   display: flex;
   align-items: center;
   gap: 12px;
-}
-
-.language-select {
-  width: 128px;
-}
-
-.nav-menu :deep(.el-menu-item) {
-  padding-left: 20px !important;
-  height: 44px;
-  line-height: 44px;
 }
 
 @media (max-width: 780px) {

@@ -4,6 +4,8 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -53,8 +55,8 @@ type UserView struct {
 }
 
 type LoginName struct {
-	Username string
-	TargetID string
+	ResourceID string // 紧凑格式中的资源ID部分 (4位)
+	SessionID  string // 紧凑格式中的会话ID部分 (5位)
 }
 
 type TargetView struct {
@@ -179,14 +181,11 @@ func NewStaticStore(cfg *config.Config, db *gorm.DB) (*StaticStore, error) {
 }
 
 func (s *StaticStore) Authenticate(_ context.Context, username, password string) (model.User, error) {
-	login := ParseLoginName(username)
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	user, ok := s.users[login.Username]
-	if !ok || user.Password == "" || user.Password != password {
-		return model.User{}, errors.New("invalid username or password")
+	login, err := ParseLoginName(username)
+	if err != nil {
+		return model.User{}, err
 	}
-	return s.userForLoginLocked(login, user)
+	return s.authenticateCompact(login, password)
 }
 
 func (s *StaticStore) AuthenticateDirect(_ context.Context, username, password string) (model.User, error) {
@@ -200,28 +199,97 @@ func (s *StaticStore) AuthenticateDirect(_ context.Context, username, password s
 }
 
 func (s *StaticStore) AuthenticatePublicKey(_ context.Context, username string, key ssh.PublicKey) (model.User, error) {
-	login := ParseLoginName(username)
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	user, ok := s.users[login.Username]
-	if !ok {
-		return model.User{}, errors.New("invalid username or public key")
+	login, err := ParseLoginName(username)
+	if err != nil {
+		return model.User{}, err
 	}
-	for _, allowed := range s.userPublicKeys[login.Username] {
-		if publicKeysEqual(allowed, key) {
-			return s.userForLoginLocked(login, user)
+	return s.authenticateCompactPublicKey(login, key)
+}
+
+func (s *StaticStore) authenticateCompact(login LoginName, password string) (model.User, error) {
+	// 1. 通过 sessionID 找到用户会话
+	var userSession model.UserSession
+	if err := s.db.Where("session_id = ? AND status = ?", login.SessionID, "active").First(&userSession).Error; err != nil {
+		return model.User{}, fmt.Errorf("invalid session: %w", err)
+	}
+	// 2. 检查过期
+	if userSession.ExpiresAt != nil && time.Now().After(*userSession.ExpiresAt) {
+		s.db.Model(&userSession).Update("status", "expired")
+		return model.User{}, errors.New("session expired")
+	}
+	// 3. 验证用户密码
+	var user model.User
+	if err := s.db.Where("id = ?", userSession.UserID).First(&user).Error; err != nil {
+		return model.User{}, err
+	}
+	pwHash := sha256Hex(password)
+	if user.PasswordHash != pwHash {
+		return model.User{}, errors.New("authentication failed")
+	}
+	// 4. 查找目标资源
+	if login.ResourceID != "" {
+		var account model.HostAccount
+		if err := s.db.Where("resource_id = ?", login.ResourceID).First(&account).Error; err == nil {
+			user.RequestedTargetID = account.ID
 		}
 	}
-	return model.User{}, errors.New("invalid username or public key")
+	return user, nil
+}
+
+func (s *StaticStore) authenticateCompactPublicKey(login LoginName, key ssh.PublicKey) (model.User, error) {
+	// 1. 通过 sessionID 找到用户会话
+	var userSession model.UserSession
+	if err := s.db.Where("session_id = ? AND status = ?", login.SessionID, "active").First(&userSession).Error; err != nil {
+		return model.User{}, fmt.Errorf("invalid session: %w", err)
+	}
+	// 2. 检查过期
+	if userSession.ExpiresAt != nil && time.Now().After(*userSession.ExpiresAt) {
+		s.db.Model(&userSession).Update("status", "expired")
+		return model.User{}, errors.New("session expired")
+	}
+	// 3. 查找用户并验证公钥
+	var user model.User
+	if err := s.db.Where("id = ?", userSession.UserID).First(&user).Error; err != nil {
+		return model.User{}, err
+	}
+	var pubKeys []model.UserPublicKey
+	if err := s.db.Where("user_id = ? AND revoked_at IS NULL", user.ID).Find(&pubKeys).Error; err != nil {
+		return model.User{}, fmt.Errorf("load public keys: %w", err)
+	}
+	keyMatched := false
+	for _, pk := range pubKeys {
+		parsed, _, _, _, err := ssh.ParseAuthorizedKey([]byte(pk.PublicKey))
+		if err != nil {
+			continue
+		}
+		if publicKeysEqual(key, parsed) {
+			keyMatched = true
+			break
+		}
+	}
+	if !keyMatched {
+		return model.User{}, errors.New("invalid username or public key")
+	}
+	// 4. 查找目标资源
+	if login.ResourceID != "" {
+		var account model.HostAccount
+		if err := s.db.Where("resource_id = ?", login.ResourceID).First(&account).Error; err == nil {
+			user.RequestedTargetID = account.ID
+		}
+	}
+	return user, nil
 }
 
 func (s *StaticStore) userForLoginLocked(login LoginName, user config.User) (model.User, error) {
-	if login.TargetID != "" {
-		if _, ok := s.targets[login.TargetID]; !ok {
-			return model.User{}, fmt.Errorf("target %q not found", login.TargetID)
+	if login.ResourceID != "" {
+		// ResourceID-based lookup replaces old TargetID lookup
+		var account model.HostAccount
+		if err := s.db.Where("resource_id = ?", login.ResourceID).First(&account).Error; err != nil {
+			return model.User{}, fmt.Errorf("target account for resource %q not found", login.ResourceID)
 		}
+		return model.User{ID: configUserID(user), Username: user.Username, RequestedTargetID: account.ID}, nil
 	}
-	return model.User{ID: configUserID(user), Username: user.Username, RequestedTargetID: login.TargetID}, nil
+	return model.User{ID: configUserID(user), Username: user.Username, RequestedTargetID: ""}, nil
 }
 
 func (s *StaticStore) DefaultTarget(_ context.Context, user model.User) (config.Target, error) {
@@ -967,13 +1035,26 @@ func (s *StaticStore) applyHostResourceToTargetLocked(target config.Target) (con
 
 // --- Standalone helpers ---
 
-func ParseLoginName(username string) LoginName {
-	for _, sep := range []string{"+", "#", "@"} {
-		if left, right, ok := strings.Cut(username, sep); ok && left != "" && right != "" {
-			return LoginName{Username: left, TargetID: right}
-		}
+func ParseLoginName(username string) (LoginName, error) {
+	if len(username) != 10 {
+		return LoginName{}, fmt.Errorf("connection username must be 10 characters, got %d", len(username))
 	}
-	return LoginName{Username: username}
+	prefix, _, _, err := util.ParseCompactUsername(username)
+	if err != nil {
+		return LoginName{}, err
+	}
+	if prefix != util.PrefixHost && prefix != util.PrefixDatabase {
+		return LoginName{}, fmt.Errorf("unknown resource prefix: %s", prefix)
+	}
+	return LoginName{
+		ResourceID: username[1:5],
+		SessionID:  username[5:10],
+	}, nil
+}
+
+func sha256Hex(s string) string {
+	h := sha256.Sum256([]byte(s))
+	return hex.EncodeToString(h[:])
 }
 
 func loadRuntimeHosts(path string) ([]HostRecord, error) {

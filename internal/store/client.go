@@ -13,6 +13,8 @@ import (
 
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/knownhosts"
+
+	"jianmen/internal/util"
 )
 
 // ClientConfigForTarget builds an ssh.ClientConfig from a TargetConfig.
@@ -121,13 +123,21 @@ func formatHostAddress(host string, port int) string {
 	return fmt.Sprintf("%s:%d", host, port)
 }
 
-func parseLoginName(username string) LoginName {
-	for _, sep := range []string{"+", "#", "@"} {
-		if left, right, ok := strings.Cut(username, sep); ok && left != "" && right != "" {
-			return LoginName{Username: left, TargetID: right}
-		}
+func parseLoginName(username string) (LoginName, error) {
+	if len(username) != 10 {
+		return LoginName{}, fmt.Errorf("connection username must be 10 characters, got %d", len(username))
 	}
-	return LoginName{Username: username}
+	prefix, _, _, err := util.ParseCompactUsername(username)
+	if err != nil {
+		return LoginName{}, err
+	}
+	if prefix != util.PrefixHost && prefix != util.PrefixDatabase {
+		return LoginName{}, fmt.Errorf("unknown resource prefix: %s", prefix)
+	}
+	return LoginName{
+		ResourceID: username[1:5],
+		SessionID:  username[5:10],
+	}, nil
 }
 
 func publicKeysEqual(a, b ssh.PublicKey) bool {

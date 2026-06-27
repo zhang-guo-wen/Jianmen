@@ -40,44 +40,94 @@ func (s *DBStore) Authenticate(_ context.Context, username, password string) (mo
 		return user, nil
 	}
 
-	// Try username + password hash.
-	login := parseLoginName(username)
-	if err := s.db.Where("username = ?", login.Username).First(&user).Error; err != nil {
-		return model.User{}, errors.New("invalid username or password")
+	// Parse compact username and authenticate via session.
+	login, err := parseLoginName(username)
+	if err != nil {
+		return model.User{}, err
 	}
-	if user.PasswordHash == "" {
-		return model.User{}, errors.New("invalid username or password")
-	}
-	passwordSum := sha256.Sum256([]byte(password))
-	if hex.EncodeToString(passwordSum[:]) != user.PasswordHash {
-		return model.User{}, errors.New("invalid username or password")
-	}
-	user.RequestedTargetID = login.TargetID
-	return user, nil
+	return s.authenticateCompact(login, password)
 }
 
 func (s *DBStore) AuthenticatePublicKey(_ context.Context, username string, key ssh.PublicKey) (model.User, error) {
-	login := parseLoginName(username)
-	var user model.User
-	if err := s.db.Where("username = ?", login.Username).First(&user).Error; err != nil {
-		return model.User{}, errors.New("invalid username or public key")
+	login, err := parseLoginName(username)
+	if err != nil {
+		return model.User{}, err
 	}
+	return s.authenticateCompactPublicKey(login, key)
+}
 
+func (s *DBStore) authenticateCompact(login LoginName, password string) (model.User, error) {
+	// 1. 通过 sessionID 找到用户会话
+	var userSession model.UserSession
+	if err := s.db.Where("session_id = ? AND status = ?", login.SessionID, "active").First(&userSession).Error; err != nil {
+		return model.User{}, fmt.Errorf("invalid session: %w", err)
+	}
+	// 2. 检查过期
+	if userSession.ExpiresAt != nil && time.Now().After(*userSession.ExpiresAt) {
+		s.db.Model(&userSession).Update("status", "expired")
+		return model.User{}, errors.New("session expired")
+	}
+	// 3. 验证用户密码
+	var user model.User
+	if err := s.db.Where("id = ?", userSession.UserID).First(&user).Error; err != nil {
+		return model.User{}, err
+	}
+	passwordSum := sha256.Sum256([]byte(password))
+	if hex.EncodeToString(passwordSum[:]) != user.PasswordHash {
+		return model.User{}, errors.New("authentication failed")
+	}
+	// 4. 查找目标资源
+	if login.ResourceID != "" {
+		var account model.HostAccount
+		if err := s.db.Where("resource_id = ?", login.ResourceID).First(&account).Error; err == nil {
+			user.RequestedTargetID = account.ID
+		}
+	}
+	return user, nil
+}
+
+func (s *DBStore) authenticateCompactPublicKey(login LoginName, key ssh.PublicKey) (model.User, error) {
+	// 1. 通过 sessionID 找到用户会话
+	var userSession model.UserSession
+	if err := s.db.Where("session_id = ? AND status = ?", login.SessionID, "active").First(&userSession).Error; err != nil {
+		return model.User{}, fmt.Errorf("invalid session: %w", err)
+	}
+	// 2. 检查过期
+	if userSession.ExpiresAt != nil && time.Now().After(*userSession.ExpiresAt) {
+		s.db.Model(&userSession).Update("status", "expired")
+		return model.User{}, errors.New("session expired")
+	}
+	// 3. 查找用户并验证公钥
+	var user model.User
+	if err := s.db.Where("id = ?", userSession.UserID).First(&user).Error; err != nil {
+		return model.User{}, err
+	}
 	var pubKeys []model.UserPublicKey
 	if err := s.db.Where("user_id = ? AND revoked_at IS NULL", user.ID).Find(&pubKeys).Error; err != nil {
 		return model.User{}, fmt.Errorf("load public keys: %w", err)
 	}
+	keyMatched := false
 	for _, pk := range pubKeys {
 		parsed, _, _, _, err := ssh.ParseAuthorizedKey([]byte(pk.PublicKey))
 		if err != nil {
 			continue
 		}
 		if publicKeysEqual(key, parsed) {
-			user.RequestedTargetID = login.TargetID
-			return user, nil
+			keyMatched = true
+			break
 		}
 	}
-	return model.User{}, errors.New("invalid username or public key")
+	if !keyMatched {
+		return model.User{}, errors.New("invalid username or public key")
+	}
+	// 4. 查找目标资源
+	if login.ResourceID != "" {
+		var account model.HostAccount
+		if err := s.db.Where("resource_id = ?", login.ResourceID).First(&account).Error; err == nil {
+			user.RequestedTargetID = account.ID
+		}
+	}
+	return user, nil
 }
 
 func (s *DBStore) Users() []UserView {

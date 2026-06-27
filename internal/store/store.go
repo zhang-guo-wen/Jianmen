@@ -11,8 +11,8 @@ import (
 )
 
 type LoginName struct {
-	Username string
-	TargetID string
+	ResourceID string // 紧凑格式中的资源ID部分 (4位)
+	SessionID  string // 紧凑格式中的会话ID部分 (5位)
 }
 
 type UserView struct {

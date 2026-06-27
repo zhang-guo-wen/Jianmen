@@ -4,6 +4,8 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"os"
@@ -13,49 +15,60 @@ import (
 	"time"
 
 	"golang.org/x/crypto/ssh"
+	"gorm.io/gorm"
 
 	"jianmen/internal/config"
 	"jianmen/internal/model"
+	"jianmen/internal/storage"
 )
 
 func TestAuthenticatePublicKeyWithRequestedTarget(t *testing.T) {
 	publicKey := newTestPublicKey(t)
-	store := newTestStore(t, config.User{
-		ID:         "u-admin",
-		Username:   "admin",
-		PublicKeys: []string{string(ssh.MarshalAuthorizedKey(publicKey))},
-	})
+	db := openTestDB(t)
+	userID := "u-test"
+	password := "testpass"
+	seedTestUser(t, db, userID, "testuser", password)
+	seedTestUserPublicKey(t, db, userID, publicKey)
+	seedTestUserSession(t, db, userID, "00001")
+	accountID := seedTestHostAccount(t, db, "0001")
+	store := newTestStoreWithDB(t, db, config.User{ID: userID, Username: "testuser"})
 
-	user, err := store.AuthenticatePublicKey(context.Background(), "admin+target-a", publicKey)
+	user, err := store.AuthenticatePublicKey(context.Background(), "H000100001", publicKey)
 	if err != nil {
 		t.Fatalf("AuthenticatePublicKey returned error: %v", err)
 	}
-	if user.ID != "u-admin" || user.Username != "admin" || user.RequestedTargetID != "target-a" {
-		t.Fatalf("unexpected user: %#v", user)
+	if user.ID != userID || user.Username != "testuser" || user.RequestedTargetID != accountID {
+		t.Fatalf("unexpected user: ID=%s Username=%s RequestedTargetID=%s", user.ID, user.Username, user.RequestedTargetID)
 	}
 }
 
 func TestAuthenticatePublicKeyRejectsUnknownKey(t *testing.T) {
 	allowedKey := newTestPublicKey(t)
 	presentedKey := newTestPublicKey(t)
-	store := newTestStore(t, config.User{
-		ID:         "u-admin",
-		Username:   "admin",
-		PublicKeys: []string{string(ssh.MarshalAuthorizedKey(allowedKey))},
-	})
+	db := openTestDB(t)
+	userID := "u-test"
+	password := "testpass"
+	seedTestUser(t, db, userID, "testuser", password)
+	seedTestUserPublicKey(t, db, userID, allowedKey)
+	seedTestUserSession(t, db, userID, "00001")
+	seedTestHostAccount(t, db, "0001")
+	store := newTestStoreWithDB(t, db, config.User{ID: userID, Username: "testuser"})
 
-	if _, err := store.AuthenticatePublicKey(context.Background(), "admin", presentedKey); err == nil {
+	if _, err := store.AuthenticatePublicKey(context.Background(), "H000100001", presentedKey); err == nil {
 		t.Fatal("AuthenticatePublicKey accepted an unknown key")
 	}
 }
 
 func TestAuthenticateRejectsEmptyPasswordWhenPasswordUnset(t *testing.T) {
-	store := newTestStore(t, config.User{
-		ID:       "u-admin",
-		Username: "admin",
-	})
+	db := openTestDB(t)
+	userID := "u-test"
+	password := "testpass"
+	seedTestUser(t, db, userID, "testuser", password)
+	seedTestUserSession(t, db, userID, "00001")
+	seedTestHostAccount(t, db, "0001")
+	store := newTestStoreWithDB(t, db, config.User{ID: userID, Username: "testuser"})
 
-	if _, err := store.Authenticate(context.Background(), "admin", ""); err == nil {
+	if _, err := store.Authenticate(context.Background(), "H000100001", ""); err == nil {
 		t.Fatal("Authenticate accepted an empty password for a user without password auth")
 	}
 }
@@ -525,4 +538,105 @@ func readRuntimeHosts(t *testing.T, path string) []HostRecord {
 		t.Fatalf("Unmarshal runtime hosts returned error: %v", err)
 	}
 	return hosts
+}
+
+// ---- DB-backed test helpers ----
+
+func openTestDB(t *testing.T) *gorm.DB {
+	t.Helper()
+	db, err := storage.Open(storage.Config{
+		Driver: storage.DriverSQLite,
+		DSN:    ":memory:",
+	})
+	if err != nil {
+		t.Fatalf("open test db: %v", err)
+	}
+	if err := storage.AutoMigrate(db); err != nil {
+		t.Fatalf("auto migrate test db: %v", err)
+	}
+	return db
+}
+
+func testPasswordHash(password string) string {
+	h := sha256.Sum256([]byte(password))
+	return hex.EncodeToString(h[:])
+}
+
+func seedTestUser(t *testing.T, db *gorm.DB, id, username, password string) {
+	t.Helper()
+	user := model.User{
+		ID:           id,
+		Username:     username,
+		PasswordHash: testPasswordHash(password),
+		Status:       "active",
+	}
+	if err := db.Create(&user).Error; err != nil {
+		t.Fatalf("seed user: %v", err)
+	}
+}
+
+func seedTestUserPublicKey(t *testing.T, db *gorm.DB, userID string, key ssh.PublicKey) {
+	t.Helper()
+	pk := model.UserPublicKey{
+		UserID:    userID,
+		PublicKey: string(ssh.MarshalAuthorizedKey(key)),
+	}
+	if err := db.Create(&pk).Error; err != nil {
+		t.Fatalf("seed public key: %v", err)
+	}
+}
+
+func seedTestUserSession(t *testing.T, db *gorm.DB, userID, sessionID string) {
+	t.Helper()
+	sess := model.UserSession{
+		UserID:    userID,
+		SessionID: sessionID,
+		SessionSeq: 1,
+		Type:      "permanent",
+		Status:    "active",
+	}
+	if err := db.Create(&sess).Error; err != nil {
+		t.Fatalf("seed user session: %v", err)
+	}
+}
+
+func seedTestHostAccount(t *testing.T, db *gorm.DB, resourceID string) string {
+	t.Helper()
+	// Need a Host first
+	host := model.Host{
+		ID:      "h-test",
+		Name:    "test-host",
+		Address: "127.0.0.1",
+		Port:    22,
+		Status:  "active",
+	}
+	if err := db.Create(&host).Error; err != nil {
+		t.Fatalf("seed host: %v", err)
+	}
+	account := model.HostAccount{
+		HostID:      host.ID,
+		Username:    "root",
+		AuthType:    "password",
+		Status:      "active",
+		ResourceSeq: 1,
+		ResourceID:  resourceID,
+	}
+	if err := db.Create(&account).Error; err != nil {
+		t.Fatalf("seed host account: %v", err)
+	}
+	return account.ID
+}
+
+func newTestStoreWithDB(t *testing.T, db *gorm.DB, user config.User) *StaticStore {
+	t.Helper()
+	targetsFile := filepath.Join(t.TempDir(), "targets.json")
+	writeRuntimeTargets(t, targetsFile, nil)
+	store, err := NewStaticStore(&config.Config{
+		TargetsFile: targetsFile,
+		Users:       []config.User{user},
+	}, db)
+	if err != nil {
+		t.Fatalf("NewStaticStore returned error: %v", err)
+	}
+	return store
 }

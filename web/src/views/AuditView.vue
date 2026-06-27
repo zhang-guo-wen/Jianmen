@@ -588,6 +588,18 @@ function stopReplay() {
   replayPlaying.value = false;
 }
 
+function autoScrollTerminal() {
+  // Use rAF to ensure xterm has laid out new content before scrolling
+  requestAnimationFrame(() => {
+    const host = replayTerminalHostRef.value;
+    if (!host) return;
+    const viewport = host.querySelector('.xterm-viewport') as HTMLElement | null;
+    if (viewport) {
+      viewport.scrollTop = viewport.scrollHeight;
+    }
+  });
+}
+
 function seekReplay(percent: number) {
   const frames = replayFrames.value;
   const duration = Math.max(replayDuration.value, 0.1);
@@ -612,7 +624,7 @@ function seekReplay(percent: number) {
     }
   }
 
-  terminal?.scrollToBottom();
+  autoScrollTerminal();
 
   // Update state
   replayFrameIndex = idx;
@@ -642,7 +654,7 @@ function tickReplay() {
   }
 
   // Keep viewport at bottom so new output is always visible
-  replayTerminal?.scrollToBottom();
+  autoScrollTerminal();
 
   const duration = Math.max(replayDuration.value, 0.1);
   const pct =

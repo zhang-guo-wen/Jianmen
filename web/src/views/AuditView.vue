@@ -741,7 +741,6 @@ function ensureReplayTerminal(): Terminal | undefined {
 
 function resetReplayTerminal() {
   replayTerminal?.reset();
-  fitAddon?.fit();
 }
 
 function destroyReplayTerminal() {

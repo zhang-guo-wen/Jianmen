@@ -17,23 +17,25 @@
       <div class="filter-bar">
         <el-input
           v-model="filterTarget"
-          :placeholder="t('sessions.column.target')"
+          placeholder="搜索目标…"
+          :prefix-icon="Search"
           clearable
           size="small"
-          style="width:200px"
+          style="width:220px"
         />
         <el-date-picker
           v-model="filterDateRange"
           type="datetimerange"
           :shortcuts="dateShortcuts"
-          range-separator="-"
-          :start-placeholder="t('sessions.column.started')"
-          end-placeholder=""
+          range-separator="至"
+          start-placeholder="开始时间"
+          end-placeholder="结束时间"
           size="small"
           clearable
           format="MM/DD HH:mm"
+          style="width:340px"
         />
-        <el-button size="small" @click="clearFilters" :disabled="!hasFilter">{{ t('common.refresh') }}</el-button>
+        <el-button v-if="hasFilter" size="small" text type="primary" @click="clearFilters">清除筛选</el-button>
       </div>
       <el-alert v-if="sessionError" :title="sessionError" type="error" show-icon />
       <el-table v-else v-loading="sessionsLoading" :data="pagedSessions" height="380" row-key="id">
@@ -299,6 +301,7 @@ import { Terminal } from '@xterm/xterm';
 import '@xterm/xterm/css/xterm.css';
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { ElMessage } from 'element-plus';
+import { Search } from '@element-plus/icons-vue';
 
 import PaginationBar from '@/components/PaginationBar.vue';
 import {
@@ -987,7 +990,19 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   gap: 10px;
-  margin-bottom: 10px;
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  background: #f9fafb;
+  border-radius: 8px;
+}
+
+@media (max-width: 640px) {
+  .filter-bar {
+    flex-wrap: wrap;
+  }
+  .filter-bar > * {
+    flex: 1;
+  }
 }
 
 

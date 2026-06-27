@@ -421,6 +421,8 @@ function sessionProtocol(row: SessionRecord): string {
   if (subtype === 'web-terminal') return 'Web Terminal';
   if (subtype === 'sftp') return 'SFTP';
   if (subtype === 'scp') return 'SCP';
+  // Fallback: SFTP has no terminal replay
+  if (!row.has_replay && !subtype) return 'SFTP';
   const proto = (row.protocol || 'ssh').toUpperCase();
   return proto;
 }

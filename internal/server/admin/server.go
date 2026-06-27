@@ -3,6 +3,7 @@ package admin
 import (
 	"bufio"
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -83,6 +84,19 @@ var menuActionMap = func() map[string]string {
 	return m
 }()
 
+type createUserRequest struct {
+	Username    string `json:"username"`
+	Password    string `json:"password"`
+	DisplayName string `json:"display_name,omitempty"`
+	Email       string `json:"email,omitempty"`
+}
+
+type updateUserRequest struct {
+	DisplayName *string `json:"display_name,omitempty"`
+	Email       *string `json:"email,omitempty"`
+	Status      *string `json:"status,omitempty"`
+}
+
 func New(cfg *config.Config, store store.Store, logger *slog.Logger, dbs ...*gorm.DB) *Server {
 	if logger == nil {
 		logger = slog.Default()
@@ -101,6 +115,7 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 	mux.HandleFunc("/", s.handleIndex)
 	mux.HandleFunc("/api/health", s.withAuthAndUser(s.handleHealth))
 	mux.HandleFunc("/api/users", s.withAuthAndUser(s.handleUsers))
+	mux.HandleFunc("/api/users/", s.withAuthAndUser(s.handleUser))
 	mux.HandleFunc("/api/hosts", s.withAuthAndUser(s.handleHosts))
 	mux.HandleFunc("/api/hosts/", s.withAuthAndUser(s.handleHost))
 	mux.HandleFunc("/api/targets", s.withAuthAndUser(s.handleTargets))
@@ -286,8 +301,187 @@ func (s *Server) handleMeMenus(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"menus": menus})
 }
 
-func (s *Server) handleUsers(w http.ResponseWriter, _ *http.Request) {
+func (s *Server) handleUsers(w http.ResponseWriter, r *http.Request) {
+	if !s.requirePermission(r, rbac.ActionRBACManage) {
+		s.forbidden(w)
+		return
+	}
+	switch r.Method {
+	case http.MethodGet:
+		s.listUsers(w, r)
+	case http.MethodPost:
+		s.createUser(w, r)
+	default:
+		w.Header().Set("Allow", "GET, POST")
+		writeErrorText(w, http.StatusMethodNotAllowed, "method not allowed")
+	}
+}
+
+func (s *Server) handleUser(w http.ResponseWriter, r *http.Request) {
+	if !s.requirePermission(r, rbac.ActionRBACManage) {
+		s.forbidden(w)
+		return
+	}
+	id, ok := userIDFromPath(r.URL.Path)
+	if !ok {
+		writeErrorText(w, http.StatusNotFound, "not found")
+		return
+	}
+	switch r.Method {
+	case http.MethodGet:
+		s.getUser(w, id)
+	case http.MethodPut:
+		s.updateUser(w, r, id)
+	case http.MethodDelete:
+		s.deleteUser(w, r, id)
+	default:
+		w.Header().Set("Allow", "GET, PUT, DELETE")
+		writeErrorText(w, http.StatusMethodNotAllowed, "method not allowed")
+	}
+}
+
+func (s *Server) listUsers(w http.ResponseWriter, _ *http.Request) {
+	if s.db != nil {
+		var users []model.User
+		if err := s.db.Order("created_at DESC").Find(&users).Error; err != nil {
+			writeError(w, http.StatusInternalServerError, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, users)
+		return
+	}
+	// Fallback to store-based listing
 	writeJSON(w, http.StatusOK, s.store.Users())
+}
+
+func (s *Server) createUser(w http.ResponseWriter, r *http.Request) {
+	if s.db == nil {
+		writeErrorText(w, http.StatusServiceUnavailable, "metadata database unavailable")
+		return
+	}
+	defer r.Body.Close()
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<18)
+	var req createUserRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	username := strings.TrimSpace(req.Username)
+	password := strings.TrimSpace(req.Password)
+	if username == "" {
+		writeErrorText(w, http.StatusBadRequest, "username is required")
+		return
+	}
+	if password == "" {
+		writeErrorText(w, http.StatusBadRequest, "password is required")
+		return
+	}
+	// Hash password
+	pwHash := sha256.Sum256([]byte(password))
+	// Generate random token
+	tokenBytes := make([]byte, 32)
+	if _, err := rand.Read(tokenBytes); err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	rawToken := hex.EncodeToString(tokenBytes)
+	tokenHash := sha256.Sum256([]byte(rawToken))
+
+	user := model.User{
+		ID:           model.NewID(),
+		Username:     username,
+		PasswordHash: hex.EncodeToString(pwHash[:]),
+		TokenHash:    hex.EncodeToString(tokenHash[:]),
+		DisplayName:  strings.TrimSpace(req.DisplayName),
+		Email:        strings.TrimSpace(req.Email),
+		Status:       "active",
+	}
+	if err := s.db.Create(&user).Error; err != nil {
+		writeRBACDBError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]any{
+		"user":  user,
+		"token": rawToken,
+	})
+}
+
+func (s *Server) getUser(w http.ResponseWriter, id string) {
+	if s.db == nil {
+		writeErrorText(w, http.StatusServiceUnavailable, "metadata database unavailable")
+		return
+	}
+	var user model.User
+	if err := s.db.First(&user, "id = ?", id).Error; err != nil {
+		writeRBACDBError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, user)
+}
+
+func (s *Server) updateUser(w http.ResponseWriter, r *http.Request, id string) {
+	if s.db == nil {
+		writeErrorText(w, http.StatusServiceUnavailable, "metadata database unavailable")
+		return
+	}
+	var user model.User
+	if err := s.db.First(&user, "id = ?", id).Error; err != nil {
+		writeRBACDBError(w, err)
+		return
+	}
+	defer r.Body.Close()
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<18)
+	var req updateUserRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	if req.DisplayName != nil {
+		user.DisplayName = strings.TrimSpace(*req.DisplayName)
+	}
+	if req.Email != nil {
+		user.Email = strings.TrimSpace(*req.Email)
+	}
+	if req.Status != nil {
+		status := strings.TrimSpace(*req.Status)
+		if status != "active" && status != "disabled" {
+			writeErrorText(w, http.StatusBadRequest, "status must be active or disabled")
+			return
+		}
+		user.Status = status
+	}
+	if err := s.db.Save(&user).Error; err != nil {
+		writeRBACDBError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, user)
+}
+
+func (s *Server) deleteUser(w http.ResponseWriter, r *http.Request, id string) {
+	if s.db == nil {
+		writeErrorText(w, http.StatusServiceUnavailable, "metadata database unavailable")
+		return
+	}
+	currentUserID := userIDFromRequest(r)
+	if currentUserID != "" && currentUserID == id {
+		writeErrorText(w, http.StatusBadRequest, "cannot delete yourself")
+		return
+	}
+	var user model.User
+	if err := s.db.First(&user, "id = ?", id).Error; err != nil {
+		writeRBACDBError(w, err)
+		return
+	}
+	// Cascade delete user_roles
+	if err := s.db.Where("user_id = ?", id).Delete(&model.UserRole{}).Error; err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	if err := s.db.Delete(&user).Error; err != nil {
+		writeRBACDBError(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) handleHosts(w http.ResponseWriter, r *http.Request) {
@@ -967,6 +1161,18 @@ func splitArtifactPath(path string) (string, string, bool) {
 
 func targetIDFromPath(path string) (string, bool) {
 	id := strings.TrimPrefix(path, "/api/targets/")
+	if id == "" || strings.Contains(id, "/") {
+		return "", false
+	}
+	return id, true
+}
+
+func userIDFromPath(path string) (string, bool) {
+	const prefix = "/api/users/"
+	if !strings.HasPrefix(path, prefix) {
+		return "", false
+	}
+	id := strings.TrimSpace(strings.TrimPrefix(path, prefix))
 	if id == "" || strings.Contains(id, "/") {
 		return "", false
 	}

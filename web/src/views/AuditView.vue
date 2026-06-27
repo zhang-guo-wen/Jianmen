@@ -11,9 +11,30 @@
       <template #header>
         <div class="toolbar">
           <span>{{ t('audit.title.sshSessions') }}</span>
-          <el-tag>{{ sessions.length }}</el-tag>
+          <el-tag>{{ filteredSessions.length }}</el-tag>
         </div>
       </template>
+      <div class="filter-bar">
+        <el-input
+          v-model="filterTarget"
+          :placeholder="t('sessions.column.target')"
+          clearable
+          size="small"
+          style="width:200px"
+        />
+        <el-date-picker
+          v-model="filterDateRange"
+          type="datetimerange"
+          :shortcuts="dateShortcuts"
+          range-separator="-"
+          :start-placeholder="t('sessions.column.started')"
+          end-placeholder=""
+          size="small"
+          clearable
+          format="MM/DD HH:mm"
+        />
+        <el-button size="small" @click="clearFilters" :disabled="!hasFilter">{{ t('common.refresh') }}</el-button>
+      </div>
       <el-alert v-if="sessionError" :title="sessionError" type="error" show-icon />
       <el-table v-else v-loading="sessionsLoading" :data="pagedSessions" height="380" row-key="id">
         <el-table-column :label="t('sessions.column.user')" min-width="130">
@@ -56,9 +77,9 @@
       <PaginationBar
         v-model:current-page="sessionPage"
         v-model:page-size="sessionPageSize"
-        :total="sessions.length"
+        :total="filteredSessions.length"
       />
-      <el-empty v-if="!sessionsLoading && !sessions.length && !sessionError" :description="t('sessions.empty')" />
+      <el-empty v-if="!sessionsLoading && !filteredSessions.length && !sessionError" :description="t('sessions.empty')" />
     </el-card>
 
     <el-card v-if="auditScope === 'db'" class="placeholder-panel" shadow="never">
@@ -311,14 +332,55 @@ const sessions = ref<SessionRecord[]>([]);
 const dbConnections = ref<DBConnectionRecord[]>([]);
 const sessionsLoading = ref(false);
 const dbLoading = ref(false);
+const filterTarget = ref('');
+const filterDateRange = ref<[Date, Date] | null>(null);
 const sessionPage = ref(1);
 const logPage = ref(1);
 const sessionPageSize = ref(30);
 const logPageSize = ref(30);
+
+const hasFilter = computed(() => !!filterTarget.value || !!filterDateRange.value);
+
+const dateShortcuts = [
+  { text: '最近1小时', value: () => [new Date(Date.now() - 3600000), new Date()] },
+  { text: '最近24小时', value: () => [new Date(Date.now() - 86400000), new Date()] },
+  { text: '最近7天', value: () => [new Date(Date.now() - 604800000), new Date()] },
+];
+
+function parseTime(v: unknown): number {
+  if (typeof v === 'number') return v;
+  if (typeof v === 'string') { const d = Date.parse(v); return Number.isNaN(d) ? 0 : d; }
+  return 0;
+}
+
+const filteredSessions = computed(() => {
+  let list = sessions.value;
+  const t = filterTarget.value.trim().toLowerCase();
+  if (t) {
+    list = list.filter(s => (s.target || '').toLowerCase().includes(t));
+  }
+  if (filterDateRange.value && filterDateRange.value.length === 2) {
+    const [start, end] = filterDateRange.value;
+    const ts = start.getTime();
+    const te = end.getTime();
+    list = list.filter(s => {
+      const at = parseTime(s.started_at ?? s.startedAt);
+      return at >= ts && at <= te;
+    });
+  }
+  return list;
+});
+
 const pagedSessions = computed(() => {
   const start = (sessionPage.value - 1) * sessionPageSize.value;
-  return sessions.value.slice(start, start + sessionPageSize.value);
+  return filteredSessions.value.slice(start, start + sessionPageSize.value);
 });
+
+function clearFilters() {
+  filterTarget.value = '';
+  filterDateRange.value = null;
+  sessionPage.value = 1;
+}
 const detailLoading = ref(false);
 const sessionError = ref('');
 const dbError = ref('');
@@ -921,6 +983,12 @@ onBeforeUnmount(() => {
   white-space: nowrap;
 }
 
+.filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
 
 
 /* Make drawer body a flex column so terminal can fill remaining space */

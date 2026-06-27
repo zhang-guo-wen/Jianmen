@@ -1,6 +1,6 @@
 import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router';
 
-import { getToken } from '@/api/client';
+import { apiClient, getToken } from '@/api/client';
 import type { TranslationKey } from '@/i18n';
 import AuditView from '@/views/AuditView.vue';
 import DashboardView from '@/views/DashboardView.vue';
@@ -127,16 +127,38 @@ const router = createRouter({
   routes
 });
 
-router.beforeEach((to) => {
+let initChecked = false;
+let needsInit = false;
+
+router.beforeEach(async (to) => {
+  // setup 页面始终可访问
+  if (to.name === 'setup') return true;
+
+  // 首次检查初始化状态
+  if (!initChecked) {
+    try {
+      const status = await apiClient.getInitStatus();
+      needsInit = !status.initialized;
+    } catch {
+      // 如果检查失败（网络问题），允许继续（用户可能已登录）
+      needsInit = false;
+    }
+    initChecked = true;
+  }
+
+  // 未初始化则跳转 setup
+  if (needsInit) {
+    return { name: 'setup' };
+  }
+
+  // 公开路由或已登录
   if (to.meta.public || getToken()) {
     return true;
   }
 
   return {
     name: 'login',
-    query: {
-      redirect: to.fullPath
-    }
+    query: { redirect: to.fullPath },
   };
 });
 

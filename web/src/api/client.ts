@@ -598,6 +598,7 @@ export const apiClient = {
       `/api/rbac/effective?${params.toString()}`
     );
   },
+  getInitStatus: () => request<{ initialized: boolean }>('/api/init/status'),
   setup: (payload: { username: string; password: string; email: string }) =>
     request<{ token: string }>('/api/init/setup', {
       method: 'POST',

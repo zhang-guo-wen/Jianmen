@@ -2,7 +2,10 @@ package dbproxy
 
 import (
 	"context"
+	"crypto/hmac"
 	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
 	"errors"
@@ -373,6 +376,20 @@ func (g *Gateway) handlePG(ctx context.Context, client net.Conn, firstByte byte)
 					return nil
 				}
 				continue
+			} else if authType == 10 {
+				// SASL/SCRAM-SHA-256：用存储密码完成 SCRAM 交换
+				if err := g.pgSCRAMExchange(upstream, acct.UpstreamUsername, acct.UpstreamPassword.GetPlaintext(), respBuf[:nr]); err != nil {
+					g.logger.Warn("pg scram auth failed", "error", err)
+					upstream.Close()
+					return nil
+				}
+				// SCRAM 成功后发送 AuthenticationOk 给客户端
+				okMsg := []byte{'R', 0, 0, 0, 8, 0, 0, 0, 0}
+				if _, err := client.Write(okMsg); err != nil {
+					upstream.Close()
+					return nil
+				}
+				break
 			}
 		}
 
@@ -683,6 +700,133 @@ func (g *Gateway) handleMySQLAuthSwitch(upstream net.Conn, acct *model.DatabaseA
 	}
 
 	return readMySQLPacket(upstream)
+}
+
+// pgSCRAMExchange 用存储凭据完成 SCRAM-SHA-256 交换
+func (g *Gateway) pgSCRAMExchange(upstream net.Conn, username, password string, saslMsg []byte) error {
+	// SASLInitialResponse: 选 SCRAM-SHA-256
+	clientNonce := make([]byte, 18)
+	if _, err := rand.Read(clientNonce); err != nil {
+		return err
+	}
+	nonceStr := base64.StdEncoding.EncodeToString(clientNonce)
+	cfm := "n,,n=" + username + ",r=" + nonceStr
+	irPayload := []byte("SCRAM-SHA-256\x00" + cfm + "\x00")
+	irMsg := make([]byte, 5+len(irPayload))
+	irMsg[0] = 'p'
+	binary.BigEndian.PutUint32(irMsg[1:5], uint32(4+len(irPayload)))
+	copy(irMsg[5:], irPayload)
+	if _, err := upstream.Write(irMsg); err != nil {
+		return fmt.Errorf("scram initial: %w", err)
+	}
+
+	// 读 SASLContinue (type 11)
+	buf := make([]byte, 8192)
+	n, err := upstream.Read(buf)
+	if err != nil || n < 9 {
+		return fmt.Errorf("scram continue: %w", err)
+	}
+	if buf[0] != 'R' || binary.BigEndian.Uint32(buf[5:9]) != 11 {
+		return fmt.Errorf("expected SASLContinue, got type=%d", binary.BigEndian.Uint32(buf[5:9]))
+	}
+	sfm := string(buf[9:n])
+	attrs := ParseSCRAMAttrs(sfm)
+	salt, _ := base64.StdEncoding.DecodeString(attrs["s"])
+	iter := 4096
+	if attrs["i"] != "" {
+		fmt.Sscanf(attrs["i"], "%d", &iter)
+	}
+	combinedNonce := attrs["r"]
+
+	// 计算 SCRAM
+	saltedPwd := PBKDF2Key([]byte(password), salt, iter, 32)
+	clientKey := HMACSHA256(saltedPwd, []byte("Client Key"))
+	storedKey := SHA256Hash(clientKey)
+	authMsg := "n=" + username + ",r=" + nonceStr + "," + sfm + ",c=biws,r=" + combinedNonce
+	clientSig := HMACSHA256(storedKey, []byte(authMsg))
+	proof := XORBytes(clientKey, clientSig)
+
+	cFin := "c=biws,r=" + combinedNonce + ",p=" + base64.StdEncoding.EncodeToString(proof)
+	cfPayload := []byte(cFin + "\x00")
+	cfMsg := make([]byte, 5+len(cfPayload))
+	cfMsg[0] = 'p'
+	binary.BigEndian.PutUint32(cfMsg[1:5], uint32(4+len(cfPayload)))
+	copy(cfMsg[5:], cfPayload)
+	if _, err := upstream.Write(cfMsg); err != nil {
+		return fmt.Errorf("scram final: %w", err)
+	}
+
+	// 读最终结果
+	n2, err := upstream.Read(buf)
+	if err != nil || n2 < 5 {
+		return fmt.Errorf("scram final read: %w", err)
+	}
+	if buf[0] == 'R' && binary.BigEndian.Uint32(buf[5:9]) == 0 {
+		return nil
+	}
+	if buf[0] == 'Z' {
+		return nil
+	}
+	if buf[0] == 'R' && binary.BigEndian.Uint32(buf[5:9]) == 12 {
+		return nil // SASLFinal
+	}
+	return fmt.Errorf("scram auth denied")
+}
+
+// --- SCRAM-SHA-256 helpers ---
+
+func ParseSCRAMAttrs(s string) map[string]string {
+	m := make(map[string]string)
+	for _, part := range strings.Split(s, ",") {
+		if len(part) > 2 {
+			m[string(part[0])] = part[2:]
+		}
+	}
+	return m
+}
+
+func PBKDF2Key(password, salt []byte, iter, keyLen int) []byte {
+	prf := func(p, s []byte) []byte {
+		mac := hmac.New(sha256.New, p)
+		mac.Write(s)
+		return mac.Sum(nil)
+	}
+	hLen := 32
+	blocks := (keyLen + hLen - 1) / hLen
+	result := make([]byte, 0, blocks*hLen)
+	for block := 1; block <= blocks; block++ {
+		u := append(salt, byte(block>>24), byte(block>>16), byte(block>>8), byte(block))
+		t := prf(password, u)
+		tn := make([]byte, len(t))
+		copy(tn, t)
+		for i := 2; i <= iter; i++ {
+			tn = prf(password, tn)
+			for j := range t {
+				t[j] ^= tn[j]
+			}
+		}
+		result = append(result, t...)
+	}
+	return result[:keyLen]
+}
+
+func HMACSHA256(key, data []byte) []byte {
+	mac := hmac.New(sha256.New, key)
+	mac.Write(data)
+	return mac.Sum(nil)
+}
+
+func SHA256Hash(data []byte) []byte {
+	h := sha256.Sum256(data)
+	return h[:]
+}
+
+func XORBytes(a, b []byte) []byte {
+	r := make([]byte, len(a))
+	for i := range a {
+		r[i] = a[i] ^ b[i]
+	}
+	return r
 }
 
 func (g *Gateway) authorizeConnect(userID, uniqueName, resourceID string) error {

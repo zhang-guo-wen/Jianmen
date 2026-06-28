@@ -2,6 +2,8 @@ package admin
 
 import (
 	"crypto/md5"
+	"crypto/rand"
+	"encoding/base64"
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
@@ -129,6 +131,8 @@ func testPostgresAuth(conn net.Conn, username, password string) error {
 			copy(h2Input[len(h1Hex):], salt)
 			h2 := md5.Sum(h2Input)
 			authPassword = "md5" + hex.EncodeToString(h2[:])
+		case 10:
+			return testPGScramAuth(conn, username, password, buf[:n])
 		default:
 			return fmt.Errorf("auth: unsupported auth type %d", authType)
 		}
@@ -153,6 +157,80 @@ func testPostgresAuth(conn net.Conn, username, password string) error {
 		return fmt.Errorf("auth denied")
 	}
 	return fmt.Errorf("auth failed")
+}
+
+// testPGScramAuth 处理 SASL/SCRAM-SHA-256 认证
+func testPGScramAuth(conn net.Conn, username, password string, initMsg []byte) error {
+	// 跳过 SASL mechanism list，直接选 SCRAM-SHA-256
+	clientNonce := make([]byte, 18)
+	if _, err := rand.Read(clientNonce); err != nil {
+		return fmt.Errorf("scram nonce: %w", err)
+	}
+	nonceStr := base64.StdEncoding.EncodeToString(clientNonce)
+
+	// SASLInitialResponse: "SCRAM-SHA-256" + client-first-message
+	cfm := "n,,n=" + username + ",r=" + nonceStr
+	irPayload := []byte("SCRAM-SHA-256\x00" + cfm + "\x00")
+	irMsg := make([]byte, 5+len(irPayload))
+	irMsg[0] = 'p'
+	binary.BigEndian.PutUint32(irMsg[1:5], uint32(4+len(irPayload)))
+	copy(irMsg[5:], irPayload)
+	if _, err := conn.Write(irMsg); err != nil {
+		return fmt.Errorf("scram initial: %w", err)
+	}
+
+	// 读服务器 SASLContinue
+	buf := make([]byte, 8192)
+	n, err := conn.Read(buf)
+	if err != nil || n < 5 {
+		return fmt.Errorf("scram continue: %w", err)
+	}
+	if buf[0] == 'R' && binary.BigEndian.Uint32(buf[5:9]) == 11 {
+		// 解析 server-first-message: r=...,s=...,i=...
+		sfm := string(buf[9:n])
+		attrs := dbproxy.ParseSCRAMAttrs(sfm)
+		saltB64 := attrs["s"]
+		iterStr := attrs["i"]
+		salt, _ := base64.StdEncoding.DecodeString(saltB64)
+		iter := 4096
+		if iterStr != "" {
+			fmt.Sscanf(iterStr, "%d", &iter)
+		}
+		combinedNonce := attrs["r"]
+
+		// 计算 SCRAM 值
+		saltedPwd := dbproxy.PBKDF2Key([]byte(password), salt, iter, 32)
+		clientKey := dbproxy.HMACSHA256(saltedPwd, []byte("Client Key"))
+		storedKey := dbproxy.SHA256Hash(clientKey)
+		authMsg := "n=" + username + ",r=" + nonceStr + "," + sfm + ",c=biws,r=" + combinedNonce
+		clientSig := dbproxy.HMACSHA256(storedKey, []byte(authMsg))
+		proof := dbproxy.XORBytes(clientKey, clientSig)
+
+		// client-final-message
+		cFin := "c=biws,r=" + combinedNonce + ",p=" + base64.StdEncoding.EncodeToString(proof)
+		cfPayload := []byte(cFin + "\x00")
+		cfMsg := make([]byte, 5+len(cfPayload))
+		cfMsg[0] = 'p'
+		binary.BigEndian.PutUint32(cfMsg[1:5], uint32(4+len(cfPayload)))
+		copy(cfMsg[5:], cfPayload)
+		if _, err := conn.Write(cfMsg); err != nil {
+			return fmt.Errorf("scram final: %w", err)
+		}
+
+		// 读最终结果
+		n2, err := conn.Read(buf)
+		if err != nil || n2 < 5 {
+			return fmt.Errorf("scram final read: %w", err)
+		}
+		if buf[0] == 'R' && binary.BigEndian.Uint32(buf[5:9]) == 0 {
+			return nil
+		}
+		if buf[0] == 'Z' {
+			return nil
+		}
+		return fmt.Errorf("auth denied")
+	}
+	return fmt.Errorf("scram unexpected: type=%d", binary.BigEndian.Uint32(buf[5:9]))
 }
 
 func testMySQLAuth(conn net.Conn, username, password string) error {

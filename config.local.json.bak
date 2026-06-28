@@ -30,5 +30,14 @@
     "record_input": true,
     "record_commands": true
   },
-  "users": []
+  "users": []  // users are created via setup wizard; was: [
+    {
+      "id": "u-admin",
+      "username": "admin",
+      "password": "admin",
+      "api_token": "admin-token",
+      "public_keys": [],
+      "authorized_keys_path": ""
+    }
+  ]
 }

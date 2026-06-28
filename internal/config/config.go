@@ -2,7 +2,6 @@ package config
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -185,8 +184,9 @@ func (c *Config) Validate() error {
 			}
 		}
 	}
+	// Users may be empty — the setup wizard creates the first admin user.
 	if len(c.Users) == 0 {
-		return errors.New("at least one user is required")
+		// No hard error; admin user is created via the setup wizard at /api/init/setup
 	}
 	return nil
 }

@@ -33,6 +33,8 @@ func BootstrapMetadata(db *gorm.DB, cfg *config.Config) error {
 	if cfg == nil {
 		return fmt.Errorf("bootstrap metadata: nil config")
 	}
+	// Config-defined users are only created when they don't exist yet,
+	// providing a dev convenience without blocking the setup wizard.
 	if err := bootstrapConfigUsers(db, cfg.Users); err != nil {
 		return err
 	}

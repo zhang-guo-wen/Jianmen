@@ -1,8 +1,8 @@
 <template>
   <div class="setup-container">
     <el-card class="setup-card">
-      <!-- 步骤 1: 创建管理员 -->
-      <template v-if="step === 1 && !apiToken">
+      <!-- Step 1: Create admin user -->
+      <template v-if="step === 1">
         <div class="setup-header">
           <h2>{{ t('setup.title') }}</h2>
           <p class="setup-desc">{{ t('setup.description') }}</p>
@@ -49,58 +49,12 @@
         </el-form>
       </template>
 
-      <!-- 步骤 1.5: 管理员已创建，重试获取加密密钥 -->
-      <template v-if="step === 1 && apiToken">
-        <div class="setup-success">
-          <el-icon :size="48" color="#67c23a"><CircleCheckFilled /></el-icon>
-          <h3>{{ t('setup.adminCreated') }}</h3>
-        </div>
-
-        <div class="key-section">
-          <h4>{{ t('setup.apiToken') }}</h4>
-          <p class="key-hint">{{ t('setup.apiTokenHint') }}</p>
-          <div class="key-display">
-            <code>{{ apiToken }}</code>
-            <el-button size="small" @click="copyToken">
-              {{ t('setup.copy') }}
-            </el-button>
-          </div>
-        </div>
-
-        <el-alert
-          type="warning"
-          :title="t('setup.keyRetryHint')"
-          :closable="false"
-          show-icon
-          style="margin-bottom: 16px"
-        />
-
-        <el-button
-          type="primary"
-          class="setup-submit-btn"
-          :loading="submitting"
-          @click="retryGetKey"
-        >
-          {{ t('setup.retryGetKey') }}
-        </el-button>
-      </template>
-
-      <!-- 步骤 2: 显示加密密钥和 API Token -->
+      <!-- Step 2: Complete — show encryption key and guide to login -->
       <template v-else-if="step === 2">
         <div class="setup-success">
           <el-icon :size="48" color="#67c23a"><CircleCheckFilled /></el-icon>
-          <h3>{{ t('setup.success') }}</h3>
-        </div>
-
-        <div class="key-section">
-          <h4>{{ t('setup.apiToken') }}</h4>
-          <p class="key-hint">{{ t('setup.apiTokenHint') }}</p>
-          <div class="key-display">
-            <code>{{ apiToken }}</code>
-            <el-button size="small" @click="copyToken">
-              {{ t('setup.copy') }}
-            </el-button>
-          </div>
+          <h3>{{ t('setup.adminCreated') }}</h3>
+          <p style="color: #667085; margin-top: 8px;">{{ t('setup.loginHint') }}</p>
         </div>
 
         <div class="key-section">
@@ -125,6 +79,31 @@
           {{ t('setup.goToLogin') }}
         </el-button>
       </template>
+
+      <!-- Step 1.5: Admin created, retry getting encryption key -->
+      <template v-else-if="step === 1 && encryptionKeyNeeded">
+        <div class="setup-success">
+          <el-icon :size="48" color="#67c23a"><CircleCheckFilled /></el-icon>
+          <h3>{{ t('setup.adminCreated') }}</h3>
+        </div>
+
+        <el-alert
+          type="warning"
+          :title="t('setup.keyRetryHint')"
+          :closable="false"
+          show-icon
+          style="margin-bottom: 16px"
+        />
+
+        <el-button
+          type="primary"
+          class="setup-submit-btn"
+          :loading="submitting"
+          @click="retryGetKey"
+        >
+          {{ t('setup.retryGetKey') }}
+        </el-button>
+      </template>
     </el-card>
   </div>
 </template>
@@ -136,7 +115,7 @@ import { CircleCheckFilled } from '@element-plus/icons-vue';
 import { ElMessage } from 'element-plus';
 import type { FormInstance, FormRules } from 'element-plus';
 
-import { apiClient, setToken } from '@/api/client';
+import { apiClient } from '@/api/client';
 import { useI18n } from '@/i18n';
 
 const { t } = useI18n();
@@ -144,8 +123,8 @@ const router = useRouter();
 
 const step = ref(1);
 const submitting = ref(false);
-const apiToken = ref('');
 const encryptionKey = ref('');
+const encryptionKeyNeeded = ref(false);
 const formRef = ref<FormInstance>();
 
 const form = reactive({
@@ -187,26 +166,19 @@ async function handleSetup() {
 
   submitting.value = true;
   try {
-    const result = await apiClient.setup({
+    await apiClient.setup({
       username: form.username.trim(),
       password: form.password,
       email: form.email.trim(),
     });
 
-    apiToken.value = result.token ?? '';
-
     try {
       const keyResult = await apiClient.getEncryptionKey();
       encryptionKey.value = keyResult.key ?? '';
-    } catch (keyErr: unknown) {
-      const msg = keyErr instanceof Error ? keyErr.message : t('setup.error.getKey');
-      ElMessage.error(msg);
-      // setup() 已成功，允许用户重试获取密钥
-      submitting.value = false;
-      return;
+      step.value = 2;
+    } catch {
+      encryptionKeyNeeded.value = true;
     }
-
-    step.value = 2;
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : t('setup.error.setup');
     ElMessage.error(message);
@@ -220,21 +192,13 @@ async function retryGetKey() {
   try {
     const keyResult = await apiClient.getEncryptionKey();
     encryptionKey.value = keyResult.key ?? '';
+    encryptionKeyNeeded.value = false;
     step.value = 2;
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : t('setup.error.getKey');
     ElMessage.error(message);
   } finally {
     submitting.value = false;
-  }
-}
-
-async function copyToken() {
-  try {
-    await navigator.clipboard.writeText(apiToken.value);
-    ElMessage.success(t('quickConnect.message.copied'));
-  } catch {
-    ElMessage.error(t('quickConnect.error.copy'));
   }
 }
 
@@ -248,8 +212,7 @@ async function copyKey() {
 }
 
 function handleFinish() {
-  setToken(apiToken.value);
-  router.replace('/dashboard');
+  router.replace('/login');
 }
 </script>
 
@@ -259,29 +222,26 @@ function handleFinish() {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--el-bg-color-page);
+  padding: 24px;
+  background: #f5f7fb;
 }
 
 .setup-card {
-  width: 480px;
-  max-width: 90vw;
+  width: min(480px, 100%);
 }
 
 .setup-header {
-  text-align: center;
   margin-bottom: 24px;
 }
 
 .setup-header h2 {
-  margin-bottom: 8px;
+  margin: 0 0 8px;
+  font-size: 24px;
 }
 
 .setup-desc {
-  color: var(--el-text-color-secondary);
-}
-
-.setup-submit-btn {
-  width: 100%;
+  margin: 0;
+  color: #667085;
 }
 
 .setup-success {
@@ -290,25 +250,25 @@ function handleFinish() {
 }
 
 .setup-success h3 {
-  margin-top: 12px;
+  margin: 12px 0 0;
 }
 
 .key-section {
-  margin-bottom: 20px;
+  margin-bottom: 24px;
 }
 
 .key-section h4 {
-  margin-bottom: 4px;
+  margin: 0 0 4px;
 }
 
 .key-hint {
-  font-size: 12px;
-  color: var(--el-text-color-secondary);
-  margin-bottom: 8px;
+  margin: 0 0 8px;
+  font-size: 13px;
+  color: #667085;
 }
 
 .key-hint.warning {
-  color: var(--el-color-warning);
+  color: #e6a23c;
 }
 
 .key-display {
@@ -319,11 +279,16 @@ function handleFinish() {
 
 .key-display code {
   flex: 1;
-  padding: 8px;
-  background: var(--el-fill-color-light);
+  padding: 8px 12px;
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
   border-radius: 4px;
   font-size: 12px;
   word-break: break-all;
   user-select: all;
+}
+
+.setup-submit-btn {
+  width: 100%;
 }
 </style>

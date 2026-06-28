@@ -15,7 +15,7 @@
       </template>
       <el-table-column label="协议" width="70" align="center">
         <template #default>
-          <el-tag size="small" type="primary">SSH</el-tag>
+          <el-tag size="small" type="primary" effect="plain">SSH</el-tag>
         </template>
       </el-table-column>
       <el-table-column label="主机名称" min-width="130" show-overflow-tooltip>

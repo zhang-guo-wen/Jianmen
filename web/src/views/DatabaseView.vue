@@ -15,7 +15,7 @@
       <el-table-column prop="name" label="名称" min-width="130" show-overflow-tooltip />
       <el-table-column label="协议" width="80" align="center">
         <template #default="{ row }">
-          <el-tag size="small" :type="row.protocol === 'mysql' ? 'warning' : 'primary'">{{ row.protocol === 'mysql' ? 'MySQL' : 'PG' }}</el-tag>
+          <el-tag size="small" :type="row.protocol === 'mysql' ? 'success' : 'primary'" effect="plain">{{ row.protocol === 'mysql' ? 'MySQL' : 'PG' }}</el-tag>
         </template>
       </el-table-column>
       <el-table-column prop="address" label="地址" min-width="130" show-overflow-tooltip />

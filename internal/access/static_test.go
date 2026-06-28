@@ -4,8 +4,6 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"os"
@@ -14,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"golang.org/x/crypto/bcrypt"
 	"golang.org/x/crypto/ssh"
 	"gorm.io/gorm"
 
@@ -557,9 +556,13 @@ func openTestDB(t *testing.T) *gorm.DB {
 	return db
 }
 
-func testPasswordHash(password string) string {
-	h := sha256.Sum256([]byte(password))
-	return hex.EncodeToString(h[:])
+func testPasswordHash(t *testing.T, password string) string {
+	t.Helper()
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		t.Fatalf("generate bcrypt hash: %v", err)
+	}
+	return string(hash)
 }
 
 func seedTestUser(t *testing.T, db *gorm.DB, id, username, password string) {
@@ -567,7 +570,7 @@ func seedTestUser(t *testing.T, db *gorm.DB, id, username, password string) {
 	user := model.User{
 		ID:           id,
 		Username:     username,
-		PasswordHash: testPasswordHash(password),
+		PasswordHash: testPasswordHash(t, password),
 		Status:       "active",
 	}
 	if err := db.Create(&user).Error; err != nil {

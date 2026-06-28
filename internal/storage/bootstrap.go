@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
@@ -68,8 +69,11 @@ func bootstrapConfigUsers(db *gorm.DB, users []config.User) error {
 			Status:   "active",
 		}
 		if pw := strings.TrimSpace(cfgUser.Password); pw != "" {
-			hash := sha256.Sum256([]byte(pw))
-			user.PasswordHash = hex.EncodeToString(hash[:])
+			hash, err := bcrypt.GenerateFromPassword([]byte(pw), bcrypt.DefaultCost)
+			if err != nil {
+				return fmt.Errorf("hash password for %s: %w", username, err)
+			}
+			user.PasswordHash = string(hash)
 		}
 		if token := strings.TrimSpace(cfgUser.ApiToken); token != "" {
 			hash := sha256.Sum256([]byte(token))

@@ -420,7 +420,33 @@ const zhCN = {
   'webTerminal.pendingTarget': '待绑定目标',
   'webTerminal.targetPlaceholder': '选择目标',
   'webTerminal.terminalText':
-    'jianmen$ ssh target\n连接流程占位。\n在此接入 xterm.js 或 WebSocket 终端流。'
+    'jianmen$ ssh target\n连接流程占位。\n在此接入 xterm.js 或 WebSocket 终端流。',
+  'setup.title': '初始化设置',
+  'setup.description': '创建超级管理员账号以开始使用 Jianmen',
+  'setup.username': '用户名',
+  'setup.email': '邮箱',
+  'setup.password': '密码',
+  'setup.confirmPassword': '确认密码',
+  'setup.submit': '创建管理员',
+  'setup.success': '设置完成',
+  'setup.apiToken': 'API Token',
+  'setup.apiTokenHint': '请保存此 Token，用于登录堡垒机管理后台',
+  'setup.encryptionKey': '加密密钥',
+  'setup.encryptionKeyHint': '请立即复制并安全保存此密钥',
+  'setup.encryptionKeyWarning': '此密钥仅显示一次，丢失后无法恢复已加密的账号密码',
+  'setup.copy': '复制',
+  'setup.goToLogin': '我已保存，前往登录',
+  'setup.passwordMismatch': '两次输入的密码不一致',
+  'setup.error.setup': '初始化失败',
+  'setup.error.getKey': '获取加密密钥失败',
+  'setup.error.loadKey': '获取加密密钥失败',
+  'setup.adminCreated': '管理员已创建成功',
+  'setup.keyRetryHint': '管理员创建成功，但加密密钥获取失败。您可以稍后重试获取密钥。',
+  'setup.retryGetKey': '重试获取密钥',
+  'setup.validation.required': '必填',
+  'setup.validation.usernameLength': '2-64 个字符',
+  'setup.validation.passwordLength': '至少 8 个字符',
+  'setup.validation.email': '邮箱格式不正确'
 } satisfies Record<string, string>;
 
 export type TranslationKey = keyof typeof zhCN;
@@ -837,7 +863,33 @@ const enUS = {
   'webTerminal.pendingTarget': 'Pending target binding',
   'webTerminal.targetPlaceholder': 'Select target',
   'webTerminal.terminalText':
-    'jianmen$ ssh target\nConnection workflow placeholder.\nAttach xterm.js or a websocket terminal stream here.'
+    'jianmen$ ssh target\nConnection workflow placeholder.\nAttach xterm.js or a websocket terminal stream here.',
+  'setup.title': 'Initial Setup',
+  'setup.description': 'Create a super admin account to start using Jianmen',
+  'setup.username': 'Username',
+  'setup.email': 'Email',
+  'setup.password': 'Password',
+  'setup.confirmPassword': 'Confirm Password',
+  'setup.submit': 'Create Admin',
+  'setup.success': 'Setup Complete',
+  'setup.apiToken': 'API Token',
+  'setup.apiTokenHint': 'Save this token to sign in to the bastion admin console',
+  'setup.encryptionKey': 'Encryption Key',
+  'setup.encryptionKeyHint': 'Copy and store this key securely now',
+  'setup.encryptionKeyWarning': 'This key is shown only once. Encrypted account passwords cannot be recovered if the key is lost.',
+  'setup.copy': 'Copy',
+  'setup.goToLogin': 'I have saved it, go to login',
+  'setup.passwordMismatch': 'Passwords do not match',
+  'setup.error.setup': 'Setup failed',
+  'setup.error.getKey': 'Failed to get encryption key',
+  'setup.error.loadKey': 'Failed to get encryption key',
+  'setup.adminCreated': 'Admin account created successfully',
+  'setup.keyRetryHint': 'Admin account created, but encryption key retrieval failed. You can retry later.',
+  'setup.retryGetKey': 'Retry Get Key',
+  'setup.validation.required': 'Required',
+  'setup.validation.usernameLength': '2-64 characters',
+  'setup.validation.passwordLength': 'At least 8 characters',
+  'setup.validation.email': 'Invalid email format'
 } satisfies Record<TranslationKey, string>;
 
 const dictionaries: Record<Locale, Record<TranslationKey, string>> = {

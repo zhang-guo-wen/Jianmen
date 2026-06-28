@@ -6,10 +6,12 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
 	"jianmen/internal/config"
+	"jianmen/internal/crypto"
 	"jianmen/internal/server/admin"
 	"jianmen/internal/server/dbproxy"
 	"jianmen/internal/server/sshserver"
@@ -31,6 +33,21 @@ func main() {
 	if err != nil {
 		logger.Error("failed to load config", "path", *configPath, "error", err)
 		os.Exit(1)
+	}
+
+	// 初始化加密密钥（在任何数据库操作之前）
+	dataDir := filepath.Dir(cfg.Database.DSN)
+	if dataDir == "." || dataDir == "" {
+		dataDir = "data"
+	}
+	newKeyGenerated, err := crypto.Init(dataDir)
+	if err != nil {
+		logger.Error("failed to initialize crypto", "error", err)
+		os.Exit(1)
+	}
+	if newKeyGenerated {
+		logger.Info("generated new encryption key", "path", filepath.Join(dataDir, "encryption.key"))
+		logger.Info("please save this key file, it is required to decrypt stored credentials")
 	}
 
 	var metadataDB *gorm.DB
@@ -96,7 +113,7 @@ func main() {
 	dbGateway := dbproxy.NewGateway(cfg.DatabaseGateway, appStore, cfg.ReplayDir, logger, metadataDB)
 
 	if cfg.Admin.Enabled {
-		adminSrv := admin.New(cfg, appStore, logger, metadataDB)
+		adminSrv := admin.New(cfg, appStore, logger, dataDir, metadataDB)
 		go func() {
 			errCh <- adminSrv.ListenAndServe(ctx)
 		}()

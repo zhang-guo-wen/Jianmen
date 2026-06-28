@@ -610,5 +610,12 @@ export const apiClient = {
     return request<ApiEnvelope<RBACEffectiveCheckResult> | RBACEffectiveCheckResult>(
       `/api/rbac/effective?${params.toString()}`
     );
-  }
+  },
+  getInitStatus: () => request<{ initialized: boolean }>('/api/init/status'),
+  setup: (payload: { username: string; password: string; email: string }) =>
+    request<{ token: string }>('/api/init/setup', {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    }),
+  getEncryptionKey: () => request<{ key: string }>('/api/init/encryption-key')
 };

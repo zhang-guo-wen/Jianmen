@@ -111,21 +111,21 @@ type Host struct {
 }
 
 type HostAccount struct {
-	ID            string    `gorm:"primaryKey;size:64" json:"id"`
-	HostID        string    `gorm:"index;size:64;not null" json:"host_id"`
-	Username      string    `gorm:"size:128;not null" json:"username"`
-	AuthType      string    `gorm:"size:32" json:"auth_type,omitempty"`
-	Password      string    `gorm:"size:512" json:"-"`
-	PrivateKeyPEM string    `gorm:"type:text" json:"-"`
-	Passphrase    string    `gorm:"size:512" json:"-"`
-	CredentialRef string    `gorm:"size:255" json:"credential_ref,omitempty"`
-	IsPrivileged  bool      `json:"is_privileged"`
-	Status        string    `gorm:"index;size:32;not null;default:active" json:"status"`
-	ResourceSeq   int       `gorm:"index;not null;default:0" json:"resource_seq"`
-	ResourceID    string    `gorm:"uniqueIndex;size:4" json:"resource_id"`
-	CreatedAt     time.Time `json:"created_at"`
-	UpdatedAt     time.Time `json:"updated_at"`
-	Host          Host      `gorm:"constraint:OnUpdate:CASCADE,OnDelete:CASCADE;" json:"-"`
+	ID            string         `gorm:"primaryKey;size:64" json:"id"`
+	HostID        string         `gorm:"index;size:64;not null" json:"host_id"`
+	Username      string         `gorm:"size:128;not null" json:"username"`
+	AuthType      string         `gorm:"size:32" json:"auth_type,omitempty"`
+	Password      EncryptedField `gorm:"type:text" json:"-"`
+	PrivateKeyPEM EncryptedField `gorm:"type:text" json:"-"`
+	Passphrase    EncryptedField `gorm:"type:text" json:"-"`
+	CredentialRef string         `gorm:"size:255" json:"credential_ref,omitempty"`
+	IsPrivileged  bool           `json:"is_privileged"`
+	Status        string         `gorm:"index;size:32;not null;default:active" json:"status"`
+	ResourceSeq   int            `gorm:"index;not null;default:0" json:"resource_seq"`
+	ResourceID    string         `gorm:"uniqueIndex;size:4" json:"resource_id"`
+	CreatedAt     time.Time      `json:"created_at"`
+	UpdatedAt     time.Time      `json:"updated_at"`
+	Host          Host           `gorm:"constraint:OnUpdate:CASCADE,OnDelete:CASCADE;" json:"-"`
 }
 
 type DatabaseInstance struct {
@@ -141,19 +141,19 @@ type DatabaseInstance struct {
 }
 
 type DatabaseAccount struct {
-	ID               string    `gorm:"primaryKey;size:64" json:"id"`
-	InstanceID       string    `gorm:"index;size:64;not null" json:"instance_id"`
-	UniqueName       string    `gorm:"uniqueIndex;size:128;not null" json:"unique_name"`
-	UpstreamUsername string    `gorm:"size:128;not null" json:"upstream_username"`
-	UpstreamPassword string    `gorm:"size:512" json:"-"`
-	GroupName        string    `gorm:"size:128" json:"group_name,omitempty"`
-	Remark           string    `gorm:"type:text" json:"remark,omitempty"`
-	ExpiresAt        *time.Time `gorm:"index" json:"expires_at,omitempty"`
-	Disabled         bool      `json:"disabled"`
-	ResourceSeq      int       `gorm:"index;not null;default:0" json:"resource_seq"`
-	ResourceID       string    `gorm:"uniqueIndex;size:4" json:"resource_id"`
-	CreatedAt        time.Time  `json:"created_at"`
-	UpdatedAt        time.Time  `json:"updated_at"`
+	ID               string         `gorm:"primaryKey;size:64" json:"id"`
+	InstanceID       string         `gorm:"index;size:64;not null" json:"instance_id"`
+	UniqueName       string         `gorm:"uniqueIndex;size:128;not null" json:"unique_name"`
+	UpstreamUsername string         `gorm:"size:128;not null" json:"upstream_username"`
+	UpstreamPassword EncryptedField `gorm:"type:text" json:"-"`
+	GroupName        string         `gorm:"size:128" json:"group_name,omitempty"`
+	Remark           string         `gorm:"type:text" json:"remark,omitempty"`
+	ExpiresAt        *time.Time     `gorm:"index" json:"expires_at,omitempty"`
+	Disabled         bool           `json:"disabled"`
+	ResourceSeq      int            `gorm:"index;not null;default:0" json:"resource_seq"`
+	ResourceID       string         `gorm:"uniqueIndex;size:4" json:"resource_id"`
+	CreatedAt        time.Time      `json:"created_at"`
+	UpdatedAt        time.Time      `json:"updated_at"`
 	Instance         DatabaseInstance `gorm:"constraint:OnUpdate:CASCADE,OnDelete:CASCADE;" json:"-"`
 }
 

@@ -4,8 +4,6 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -18,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"golang.org/x/crypto/bcrypt"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/knownhosts"
 	"gorm.io/gorm"
@@ -222,8 +221,7 @@ func (s *StaticStore) authenticateCompact(login LoginName, password string) (mod
 	if err := s.db.Where("id = ?", userSession.UserID).First(&user).Error; err != nil {
 		return model.User{}, err
 	}
-	pwHash := sha256Hex(password)
-	if user.PasswordHash != pwHash {
+	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(password)); err != nil {
 		return model.User{}, errors.New("authentication failed")
 	}
 	// 4. 查找目标资源
@@ -560,7 +558,7 @@ func (s *StaticStore) AddDatabaseAccount(instanceID, upstreamUsername, upstreamP
 		InstanceID:       instanceID,
 		UniqueName:       uniqueName,
 		UpstreamUsername: upstreamUsername,
-		UpstreamPassword: upstreamPassword,
+		UpstreamPassword: model.NewEncryptedField(upstreamPassword),
 		GroupName:        strings.TrimSpace(groupName),
 		Remark:           strings.TrimSpace(remark),
 		ExpiresAt:        expiresAt,
@@ -590,7 +588,7 @@ func (s *StaticStore) UpdateDatabaseAccount(id, upstreamUsername, upstreamPasswo
 		acct.UpstreamUsername = upstreamUsername
 	}
 	if upstreamPassword != "" {
-		acct.UpstreamPassword = upstreamPassword
+		acct.UpstreamPassword = model.NewEncryptedField(upstreamPassword)
 	}
 	acct.GroupName = strings.TrimSpace(groupName)
 	acct.Remark = strings.TrimSpace(remark)
@@ -1050,11 +1048,6 @@ func ParseLoginName(username string) (LoginName, error) {
 		ResourceID: username[1:5],
 		SessionID:  username[5:10],
 	}, nil
-}
-
-func sha256Hex(s string) string {
-	h := sha256.Sum256([]byte(s))
-	return hex.EncodeToString(h[:])
 }
 
 func loadRuntimeHosts(path string) ([]HostRecord, error) {

@@ -101,7 +101,7 @@ const router = useRouter();
 const { elementLocale, locale, localeOptions, setLocale, t } = useI18n();
 
 const collapsed = ref(false);
-const isLoginRoute = computed(() => route.name === 'login');
+const isLoginRoute = computed(() => route.name === 'login' || route.name === 'setup');
 const activePath = computed(() => route.path);
 const selectedLocale = computed<Locale>({
   get: () => locale.value,

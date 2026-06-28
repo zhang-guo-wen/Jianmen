@@ -329,12 +329,13 @@ func (g *Gateway) handlePG(ctx context.Context, client net.Conn) *gatewayConn {
 
 			if authType == 3 {
 				// CleartextPassword: send upstream password back
-				pwdMsg := make([]byte, 0, 5+len(acct.UpstreamPassword)+1)
+				plainPwd := acct.UpstreamPassword.GetPlaintext()
+				pwdMsg := make([]byte, 0, 5+len(plainPwd)+1)
 				pwdMsg = append(pwdMsg, 'p')
 				pwdLenBytes := make([]byte, 4)
-				binary.BigEndian.PutUint32(pwdLenBytes, uint32(4+len(acct.UpstreamPassword)+1))
+				binary.BigEndian.PutUint32(pwdLenBytes, uint32(4+len(plainPwd)+1))
 				pwdMsg = append(pwdMsg, pwdLenBytes...)
-				pwdMsg = append(pwdMsg, []byte(acct.UpstreamPassword)...)
+				pwdMsg = append(pwdMsg, []byte(plainPwd)...)
 				pwdMsg = append(pwdMsg, 0)
 				if _, err := upstream.Write(pwdMsg); err != nil {
 					upstream.Close()
@@ -342,12 +343,13 @@ func (g *Gateway) handlePG(ctx context.Context, client net.Conn) *gatewayConn {
 				}
 			} else if authType == 5 {
 				// MD5Password: for v1, try sending cleartext anyway
-				pwdMsg := make([]byte, 0, 5+len(acct.UpstreamPassword)+1)
+				plainPwd := acct.UpstreamPassword.GetPlaintext()
+				pwdMsg := make([]byte, 0, 5+len(plainPwd)+1)
 				pwdMsg = append(pwdMsg, 'p')
 				pwdLenBytes := make([]byte, 4)
-				binary.BigEndian.PutUint32(pwdLenBytes, uint32(4+len(acct.UpstreamPassword)+1))
+				binary.BigEndian.PutUint32(pwdLenBytes, uint32(4+len(plainPwd)+1))
 				pwdMsg = append(pwdMsg, pwdLenBytes...)
-				pwdMsg = append(pwdMsg, []byte(acct.UpstreamPassword)...)
+				pwdMsg = append(pwdMsg, []byte(plainPwd)...)
 				pwdMsg = append(pwdMsg, 0)
 				if _, err := upstream.Write(pwdMsg); err != nil {
 					upstream.Close()

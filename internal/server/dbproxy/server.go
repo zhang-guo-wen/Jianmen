@@ -711,7 +711,7 @@ func (g *Gateway) pgSCRAMExchange(upstream net.Conn, username, password string, 
 	}
 	nonceStr := base64.StdEncoding.EncodeToString(clientNonce)
 	cfm := "n,,n=" + username + ",r=" + nonceStr
-	irPayload := []byte("SCRAM-SHA-256\x00" + cfm + "\x00")
+	irPayload := []byte("SCRAM-SHA-256\x00" + cfm)
 	irMsg := make([]byte, 5+len(irPayload))
 	irMsg[0] = 'p'
 	binary.BigEndian.PutUint32(irMsg[1:5], uint32(4+len(irPayload)))

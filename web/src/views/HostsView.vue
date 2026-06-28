@@ -12,7 +12,6 @@
     >
       <template #toolbar-extra>
         <el-button type="primary" @click="openCreateHostDialog">新增主机</el-button>
-        <el-button @click="openQuickCreateAccount">新建账号</el-button>
       </template>
       <el-table-column label="主机名称" min-width="130" show-overflow-tooltip>
         <template #default="{ row }">{{ hostName(row) }}</template>
@@ -50,9 +49,10 @@
       <el-table-column label="备注" min-width="120" show-overflow-tooltip>
         <template #default="{ row }">{{ row.remark || '-' }}</template>
       </el-table-column>
-      <el-table-column label="操作" width="150">
+      <el-table-column label="操作" width="260">
         <template #default="{ row }">
           <el-button link type="primary" size="small" @click="openEditHostDialog(row)">编辑</el-button>
+          <el-button link type="primary" size="small" @click="openCreateAccountForHost(row)">新建账号</el-button>
           <el-button link type="success" size="small" @click="openConnectionForHost(row)">连接</el-button>
           <el-button link type="danger" size="small" @click="confirmDeleteHost(row)">删除</el-button>
         </template>
@@ -98,17 +98,6 @@
         </el-collapse>
       </el-form>
     </FormDialog>
-
-    <!-- 快速新建账号：选择主机 -->
-    <el-dialog v-model="quickAccountVisible" title="选择主机" width="420px" destroy-on-close>
-      <el-select v-model="quickAccountHostId" placeholder="选择主机" filterable style="width:100%">
-        <el-option v-for="h in allHosts" :key="h.id" :label="hostName(h)" :value="h.id" />
-      </el-select>
-      <template #footer>
-        <el-button @click="quickAccountVisible = false">取消</el-button>
-        <el-button type="primary" :disabled="!quickAccountHostId" @click="confirmQuickCreateAccount">确定</el-button>
-      </template>
-    </el-dialog>
 
     <!-- 账号列表弹窗 -->
     <el-dialog
@@ -379,9 +368,6 @@ const hostPageSize = ref(20)
 const keyword = ref('')
 const hostsLoading = ref(false)
 const hostError = ref('')
-const allHosts = ref<HostView[]>([])
-const quickAccountVisible = ref(false)
-const quickAccountHostId = ref('')
 
 // ── Account list state ──
 const selectedHost = ref<HostView | null>(null)
@@ -961,21 +947,9 @@ function setSelectedHost(host: HostView) {
   selectedHost.value = host
 }
 
-async function openQuickCreateAccount() {
-  // 加载所有主机用于下拉选择
-  const res = await apiClient.getHosts({ page_size: 9999 })
-  allHosts.value = res.items
-  quickAccountHostId.value = ''
-  quickAccountVisible.value = true
-}
-
-function confirmQuickCreateAccount() {
-  if (!quickAccountHostId.value) return
-  const host = allHosts.value.find(h => h.id === quickAccountHostId.value)
-  if (host) {
-    quickAccountVisible.value = false
-    openAccountsDialog(host)
-  }
+async function openCreateAccountForHost(host: HostView) {
+  await openAccountsDialog(host)
+  openCreateAccountDialog(host)
 }
 
 async function openCreateHostDialog() {

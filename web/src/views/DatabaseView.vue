@@ -11,7 +11,6 @@
     >
       <template #toolbar-extra>
         <el-button type="primary" @click="openCreateInstance">新增实例</el-button>
-        <el-button @click="openQuickCreateAccount">新建账号</el-button>
       </template>
       <el-table-column prop="name" label="名称" min-width="130" show-overflow-tooltip />
       <el-table-column prop="address" label="地址" min-width="130" show-overflow-tooltip />
@@ -33,9 +32,10 @@
         </template>
       </el-table-column>
       <el-table-column prop="remark" label="备注" min-width="120" show-overflow-tooltip />
-      <el-table-column label="操作" width="150">
+      <el-table-column label="操作" width="220">
         <template #default="{ row }">
           <el-button link type="primary" size="small" @click="editInstance(row)">编辑</el-button>
+          <el-button link type="primary" size="small" @click="openCreateAccountForInstance(row)">新建账号</el-button>
           <el-button link type="danger" size="small" @click="deleteInstance(row)">删除</el-button>
         </template>
       </el-table-column>
@@ -71,17 +71,6 @@
         </el-collapse>
       </el-form>
     </FormDialog>
-
-    <!-- 快速新建账号：选择实例 -->
-    <el-dialog v-model="quickAccountVisible" title="选择实例" width="420px" destroy-on-close>
-      <el-select v-model="quickAccountInstanceId" placeholder="选择数据库实例" filterable style="width:100%">
-        <el-option v-for="inst in allInstances" :key="inst.id" :label="inst.name" :value="inst.id" />
-      </el-select>
-      <template #footer>
-        <el-button @click="quickAccountVisible = false">取消</el-button>
-        <el-button type="primary" :disabled="!quickAccountInstanceId" @click="confirmQuickCreateAccount">确定</el-button>
-      </template>
-    </el-dialog>
 
     <!-- 账号列表弹窗 -->
     <el-dialog
@@ -250,7 +239,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, watch, computed, onMounted } from 'vue'
+import { ref, reactive, watch, computed, onMounted, nextTick } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import DataTableCard from '@/components/DataTableCard.vue'
 import FormDialog from '@/components/FormDialog.vue'
@@ -281,9 +270,6 @@ const instancePage = ref(1)
 const instancePageSize = ref(20)
 const instanceTotal = ref(0)
 const instanceSearchKeyword = ref('')
-const allInstances = ref<api.DatabaseInstanceView[]>([])
-const quickAccountVisible = ref(false)
-const quickAccountInstanceId = ref('')
 const showInstanceDialog = ref(false)
 const submitting = ref(false)
 const editingInstance = ref<api.DatabaseInstanceView | null>(null)
@@ -466,20 +452,10 @@ function onInstanceSearch(keyword: string) {
   loadInstances()
 }
 
-async function openQuickCreateAccount() {
-  const res = await api.apiClient.getDBInstances({ page_size: 9999 })
-  allInstances.value = res.items
-  quickAccountInstanceId.value = ''
-  quickAccountVisible.value = true
-}
-
-function confirmQuickCreateAccount() {
-  if (!quickAccountInstanceId.value) return
-  const inst = allInstances.value.find(i => i.id === quickAccountInstanceId.value)
-  if (inst) {
-    quickAccountVisible.value = false
-    showAccounts(inst)
-  }
+async function openCreateAccountForInstance(inst: api.DatabaseInstanceView) {
+  showAccounts(inst)
+  await nextTick()
+  openCreateAccount()
 }
 
 function openCreateInstance() {

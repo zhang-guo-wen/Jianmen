@@ -797,6 +797,8 @@ func (s *DBStore) databaseAccountView(acct model.DatabaseAccount) DatabaseAccoun
 		Remark:           acct.Remark,
 		ExpiresAt:        acct.ExpiresAt,
 		Disabled:         acct.Disabled,
+		ResourceID:       acct.ResourceID,
+		ResourceSeq:      acct.ResourceSeq,
 		CreatedAt:        acct.CreatedAt.Format(time.RFC3339),
 		UpdatedAt:        acct.UpdatedAt.Format(time.RFC3339),
 	}

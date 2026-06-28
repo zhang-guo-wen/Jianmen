@@ -272,6 +272,8 @@ func adaptDatabaseAccountView(v access.DatabaseAccountView) DatabaseAccountView 
 		Remark:           v.Remark,
 		ExpiresAt:        v.ExpiresAt,
 		Disabled:         v.Disabled,
+		ResourceID:       v.ResourceID,
+		ResourceSeq:      v.ResourceSeq,
 		CreatedAt:        timeToStr(v.CreatedAt),
 		UpdatedAt:        timeToStr(v.UpdatedAt),
 	}

@@ -111,6 +111,8 @@ type DatabaseAccountView struct {
 	Remark           string     `json:"remark,omitempty"`
 	ExpiresAt        *time.Time `json:"expires_at,omitempty"`
 	Disabled         bool       `json:"disabled"`
+	ResourceID       string     `json:"resource_id,omitempty"`
+	ResourceSeq      int        `json:"resource_seq,omitempty"`
 	CreatedAt        string     `json:"created_at,omitempty"`
 	UpdatedAt        string     `json:"updated_at,omitempty"`
 }

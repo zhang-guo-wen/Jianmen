@@ -125,6 +125,8 @@ type DatabaseAccountView struct {
 	Remark           string     `json:"remark,omitempty"`
 	ExpiresAt        *time.Time `json:"expires_at,omitempty"`
 	Disabled         bool       `json:"disabled"`
+	ResourceID       string     `json:"resource_id,omitempty"`
+	ResourceSeq      int        `json:"resource_seq,omitempty"`
 	CreatedAt        time.Time  `json:"created_at"`
 	UpdatedAt        time.Time  `json:"updated_at"`
 }
@@ -654,6 +656,8 @@ func (s *StaticStore) databaseAccountView(acct model.DatabaseAccount) DatabaseAc
 		Remark:           acct.Remark,
 		ExpiresAt:        acct.ExpiresAt,
 		Disabled:         acct.Disabled,
+		ResourceID:       acct.ResourceID,
+		ResourceSeq:      acct.ResourceSeq,
 		CreatedAt:        acct.CreatedAt,
 		UpdatedAt:        acct.UpdatedAt,
 	}

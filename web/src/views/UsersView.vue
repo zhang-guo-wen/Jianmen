@@ -1,5 +1,6 @@
 <template>
-  <div class="page-container">
+  <div class="view-stack">
+    <div class="page-container">
     <DataTableCard
       :data="users"
       :loading="loading"
@@ -155,6 +156,7 @@
         </el-collapse>
       </el-form>
     </FormDialog>
+  </div>
   </div>
 </template>
 

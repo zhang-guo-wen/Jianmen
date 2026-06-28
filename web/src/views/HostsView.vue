@@ -1,5 +1,6 @@
 <template>
-  <div class="page-container">
+  <div class="view-stack">
+    <div class="page-container">
     <DataTableCard
       :data="hosts"
       :loading="hostsLoading"
@@ -297,6 +298,7 @@
         <el-button @click="connectionDialogVisible = false">关闭</el-button>
       </template>
     </el-dialog>
+  </div>
   </div>
 </template>
 

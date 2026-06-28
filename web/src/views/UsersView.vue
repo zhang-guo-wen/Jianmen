@@ -1,31 +1,36 @@
 <template>
-  <div class="view-stack">
-    <div class="toolbar">
-      <el-input
-        v-model="searchQuery"
-        clearable
-        :placeholder="t('users.search')"
-        class="search-input"
-        @input="onSearch"
-      />
-      <el-button type="primary" @click="openCreateDialog">{{ t('users.create') }}</el-button>
-    </div>
+  <div class="page-container">
+    <DataTableCard
+      :data="users"
+      :loading="loading"
+      :total="total"
+      v-model:page="page"
+      v-model:page-size="pageSize"
+      search-placeholder="搜索用户名、显示名、邮箱..."
+      @search="onSearch"
+    >
+      <template #toolbar-extra>
+        <el-button type="primary" @click="openCreateDialog">{{ t('users.create') }}</el-button>
+      </template>
 
-    <el-alert v-if="error" :title="error" type="error" show-icon />
+      <el-alert v-if="error" :title="error" type="error" show-icon style="margin-bottom: 8px" />
 
-    <el-table v-else v-loading="loading" :data="filteredUsers" height="420" row-key="id">
       <el-table-column :label="t('users.username')" min-width="140">
         <template #default="{ row }">
           <strong>{{ row.username }}</strong>
         </template>
       </el-table-column>
-      <el-table-column prop="display_name" :label="t('users.displayName')" min-width="120" />
-      <el-table-column prop="email" :label="t('users.email')" min-width="180" />
-      <el-table-column :label="t('users.status')" width="100">
+      <el-table-column prop="display_name" :label="t('users.displayName')" min-width="120" show-overflow-tooltip />
+      <el-table-column prop="email" :label="t('users.email')" min-width="180" show-overflow-tooltip />
+      <el-table-column label="状态" width="80" align="center">
         <template #default="{ row }">
-          <el-tag :type="row.status === 'disabled' ? 'info' : 'success'" size="small">
-            {{ row.status === 'active' ? '已启用' : '已禁用' }}
-          </el-tag>
+          <StatusSwitch
+            v-if="!row.is_super_admin"
+            :model-value="row.status === 'active'"
+            :loading="togglingUserId === String(row.id ?? '')"
+            @update:model-value="(val: boolean) => toggleStatus(row, val)"
+          />
+          <el-tag v-else type="warning" size="small">内置</el-tag>
         </template>
       </el-table-column>
       <el-table-column :label="t('users.lastLogin')" min-width="150">
@@ -33,48 +38,36 @@
           <span class="text-muted">{{ row.last_login_at || '—' }}</span>
         </template>
       </el-table-column>
-      <el-table-column :label="t('users.roles')" min-width="160">
+      <el-table-column :label="t('users.roles')" min-width="180">
         <template #default="{ row }">
-          <div class="role-tags">
-            <template v-if="userAssignedRoles(row.id).length">
-              <el-tag
-                v-for="ur in userAssignedRoles(row.id)"
-                :key="ur.id"
-                size="small"
-                closable
-                class="role-tag"
-                @close="removeRole(ur)"
-              >
-                {{ ur.role?.name || ur.role_id }}
-              </el-tag>
-            </template>
-            <span v-else class="text-muted">{{ t('users.noRoles') }}</span>
+          <div class="role-tags" v-if="userAssignedRoles(row.id).length">
+            <el-tag
+              v-for="ur in userAssignedRoles(row.id)"
+              :key="ur.id"
+              size="small"
+              closable
+              class="role-tag"
+              @close="removeRole(ur)"
+            >
+              {{ ur.role?.name || ur.role_id }}
+            </el-tag>
           </div>
+          <span v-else class="text-muted">{{ t('users.noRoles') }}</span>
         </template>
       </el-table-column>
-      <el-table-column :label="t('common.actions')" fixed="right" width="300">
+      <el-table-column label="操作" width="280" fixed="right">
         <template #default="{ row }">
-          <el-button link type="primary" @click="openEditDialog(row)">{{ t('common.edit') }}</el-button>
+          <el-button link type="primary" size="small" @click="openEditDialog(row)">{{ t('common.edit') }}</el-button>
           <template v-if="!row.is_super_admin">
-            <el-button
-              link
-              :type="row.status === 'disabled' ? 'success' : 'warning'"
-              :loading="togglingUserId === row.id"
-              @click="toggleStatus(row)"
-            >
-              {{ row.status === 'disabled' ? '启用' : '禁用' }}
-            </el-button>
-            <el-button link type="primary" @click="openRoleDialog(row)">{{ t('users.assignRole') }}</el-button>
-            <el-button link type="danger" :loading="deletingUserId === row.id" @click="deleteUser(row)">
+            <el-button link type="primary" size="small" @click="openRoleDialog(row)">{{ t('users.assignRole') }}</el-button>
+            <el-button link type="danger" size="small" :loading="deletingUserId === String(row.id ?? '')" @click="deleteUser(row)">
               {{ t('common.delete') }}
             </el-button>
           </template>
           <el-tag v-else type="warning" size="small">超级管理员</el-tag>
         </template>
       </el-table-column>
-    </el-table>
-
-    <el-empty v-if="!loading && !filteredUsers.length && !error" :description="t('users.empty')" />
+    </DataTableCard>
 
     <!-- Role Assignment Dialog -->
     <el-dialog
@@ -137,13 +130,11 @@
     </el-dialog>
 
     <!-- Create/Edit Dialog -->
-    <el-dialog
-      v-model="dialogVisible"
-      :close-on-click-modal="!submitting"
+    <FormDialog
+      v-model:visible="dialogVisible"
       :title="editingUser ? t('users.edit') : t('users.create')"
-      class="form-dialog"
-      destroy-on-close
-      width="min(440px, calc(100vw - 32px))"
+      :loading="submitting"
+      @submit="submitForm"
     >
       <el-form ref="formRef" :model="form" :rules="formRules" label-position="top">
         <el-form-item :label="t('users.username')" prop="username">
@@ -163,11 +154,7 @@
           </el-collapse-item>
         </el-collapse>
       </el-form>
-      <template #footer>
-        <el-button :disabled="submitting" @click="dialogVisible = false">{{ t('common.cancel') }}</el-button>
-        <el-button :loading="submitting" type="primary" @click="submitForm">{{ t('common.save') }}</el-button>
-      </template>
-    </el-dialog>
+    </FormDialog>
   </div>
 </template>
 
@@ -175,32 +162,41 @@
 import { computed, onMounted, reactive, ref } from 'vue';
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus';
 
-import { apiClient, type UserRecord, type UserPayload, type RBACRoleRecord, type RBACUserRoleRecord } from '@/api/client';
+import DataTableCard from '@/components/DataTableCard.vue';
+import FormDialog from '@/components/FormDialog.vue';
+import StatusSwitch from '@/components/StatusSwitch.vue';
+import * as api from '@/api/client';
 import { useI18n } from '@/i18n';
 
 const { t } = useI18n();
 
-const users = ref<UserRecord[]>([]);
+// ── List state ──
+const users = ref<api.UserRecord[]>([]);
+const total = ref(0);
+const page = ref(1);
+const pageSize = ref(20);
+const keyword = ref('');
 const loading = ref(false);
 const error = ref('');
-const searchQuery = ref('');
+
+// ── Form state ──
 const submitting = ref(false);
-const togglingUserId = ref<string | number>('');
-const deletingUserId = ref<string | number>('');
+const togglingUserId = ref<string>('');
+const deletingUserId = ref<string>('');
 const dialogVisible = ref(false);
-const editingUser = ref<UserRecord | null>(null);
+const editingUser = ref<api.UserRecord | null>(null);
 const morePanels = ref<string[]>([]);
 const formRef = ref<FormInstance>();
 
 // ── Role assignment ──
-const roles = ref<RBACRoleRecord[]>([]);
-const userRoles = ref<RBACUserRoleRecord[]>([]);
+const roles = ref<api.RBACRoleRecord[]>([]);
+const userRoles = ref<api.RBACUserRoleRecord[]>([]);
 const roleDialogVisible = ref(false);
-const roleDialogUser = ref<UserRecord | null>(null);
+const roleDialogUser = ref<api.UserRecord | null>(null);
 const assigningRole = ref(false);
 const selectedNewRoleId = ref('');
 
-const form = reactive<UserPayload & { password?: string }>({
+const form = reactive<api.UserPayload & { password?: string }>({
   username: '',
   password: '',
   display_name: '',
@@ -212,16 +208,8 @@ const formRules: FormRules = {
   password: [{ required: true, message: '请输入密码', trigger: 'blur' }, { min: 6, message: '密码至少 6 位', trigger: 'blur' }],
 };
 
-const filteredUsers = computed(() => {
-  const q = searchQuery.value.trim().toLowerCase();
-  if (!q) return users.value;
-  return users.value.filter(u =>
-    [u.username, u.display_name, u.email].some(v => String(v ?? '').toLowerCase().includes(q))
-  );
-});
-
 // ── Role assignment helpers ──
-function userAssignedRoles(userId: string | number | undefined): RBACUserRoleRecord[] {
+function userAssignedRoles(userId: string | number | undefined): api.RBACUserRoleRecord[] {
   if (!userId) return [];
   return userRoles.value.filter(ur => String(ur.user_id) === String(userId));
 }
@@ -240,7 +228,7 @@ const availableRoles = computed(() =>
   })
 );
 
-function openRoleDialog(user: UserRecord) {
+function openRoleDialog(user: api.UserRecord) {
   roleDialogUser.value = user;
   selectedNewRoleId.value = '';
   roleDialogVisible.value = true;
@@ -250,7 +238,7 @@ async function assignRole() {
   if (!roleDialogUser.value || !selectedNewRoleId.value) return;
   assigningRole.value = true;
   try {
-    await apiClient.createRBACUserRole({
+    await api.apiClient.createRBACUserRole({
       user_id: String(roleDialogUser.value.id ?? ''),
       role_id: selectedNewRoleId.value,
     });
@@ -264,10 +252,10 @@ async function assignRole() {
   }
 }
 
-async function removeRole(userRole: RBACUserRoleRecord) {
+async function removeRole(userRole: api.RBACUserRoleRecord) {
   const id = String(userRole.id ?? '');
   try {
-    await apiClient.deleteRBACUserRole(id);
+    await api.apiClient.deleteRBACUserRole(id);
     ElMessage.success('角色已移除');
     await loadUserRoles();
   } catch (err) {
@@ -277,15 +265,15 @@ async function removeRole(userRole: RBACUserRoleRecord) {
 
 async function loadUserRoles() {
   try {
-    const res = await apiClient.getRBACUserRoles();
-    userRoles.value = Array.isArray(res) ? res : (res as any).data ?? [];
+    const res = await api.apiClient.getRBACUserRoles();
+    userRoles.value = (res as api.PageResponse<api.RBACUserRoleRecord>).items ?? [];
   } catch { /* non-critical */ }
 }
 
 async function loadRoles() {
   try {
-    const res = await apiClient.getRBACRoles();
-    roles.value = Array.isArray(res) ? res : (res as any).data ?? [];
+    const res = await api.apiClient.getRBACRoles();
+    roles.value = (res as api.PageResponse<api.RBACRoleRecord>).items ?? [];
   } catch { /* non-critical */ }
 }
 
@@ -293,12 +281,13 @@ async function loadUsers() {
   loading.value = true;
   error.value = '';
   try {
-    const [userRes] = await Promise.all([
-      apiClient.getUsers(),
-      loadUserRoles(),
-      loadRoles(),
-    ]);
-    users.value = Array.isArray(userRes) ? userRes : (userRes as any).data ?? [];
+    const userRes = await api.apiClient.getUsers({
+      page: page.value,
+      page_size: pageSize.value,
+      q: keyword.value.trim() || undefined,
+    });
+    users.value = userRes.items ?? [];
+    total.value = userRes.total ?? 0;
   } catch (err) {
     error.value = err instanceof Error ? err.message : t('users.error.load');
   } finally {
@@ -320,7 +309,7 @@ function openCreateDialog() {
   dialogVisible.value = true;
 }
 
-function openEditDialog(user: UserRecord) {
+function openEditDialog(user: api.UserRecord) {
   editingUser.value = user;
   form.username = String(user.username ?? '');
   form.display_name = String(user.display_name ?? '');
@@ -337,17 +326,17 @@ async function submitForm() {
   submitting.value = true;
   try {
     if (editingUser.value) {
-      const payload: UserPayload = {};
+      const payload: api.UserPayload = {};
       if (form.display_name !== (editingUser.value.display_name ?? '')) {
         payload.display_name = form.display_name;
       }
       if (form.email !== (editingUser.value.email ?? '')) {
         payload.email = form.email;
       }
-      await apiClient.updateUser(String(editingUser.value.id ?? ''), payload);
+      await api.apiClient.updateUser(String(editingUser.value.id ?? ''), payload);
       ElMessage.success(t('users.updated'));
     } else {
-      await apiClient.createUser({
+      await api.apiClient.createUser({
         username: form.username,
         password: form.password,
         display_name: form.display_name || undefined,
@@ -364,12 +353,12 @@ async function submitForm() {
   }
 }
 
-async function toggleStatus(user: UserRecord) {
+async function toggleStatus(user: api.UserRecord, _newVal: boolean) {
   const id = String(user.id ?? '');
   const newStatus = user.status === 'disabled' ? 'active' : 'disabled';
   togglingUserId.value = id;
   try {
-    await apiClient.updateUser(id, { status: newStatus });
+    await api.apiClient.updateUser(id, { status: newStatus });
     ElMessage.success(t('users.statusToggled'));
     await loadUsers();
   } catch (err) {
@@ -379,7 +368,7 @@ async function toggleStatus(user: UserRecord) {
   }
 }
 
-async function deleteUser(user: UserRecord) {
+async function deleteUser(user: api.UserRecord) {
   const id = String(user.id ?? '');
   try {
     await ElMessageBox.confirm(
@@ -392,7 +381,7 @@ async function deleteUser(user: UserRecord) {
   }
   deletingUserId.value = id;
   try {
-    await apiClient.deleteUser(id);
+    await api.apiClient.deleteUser(id);
     ElMessage.success(t('users.deleted'));
     await loadUsers();
   } catch (err) {
@@ -402,18 +391,22 @@ async function deleteUser(user: UserRecord) {
   }
 }
 
-function onSearch() {
-  // reactive filtering via computed
+function onSearch(q: string) {
+  keyword.value = q;
+  page.value = 1;
+  loadUsers();
 }
 
-onMounted(loadUsers);
+onMounted(async () => {
+  await Promise.all([
+    loadUsers(),
+    loadUserRoles(),
+    loadRoles(),
+  ]);
+});
 </script>
 
 <style scoped>
-.view-stack { display: grid; gap: 14px; }
-.toolbar { display: flex; gap: 10px; align-items: center; }
-.search-input { max-width: 280px; }
-.col-mono { font-family: "SF Mono", "Cascadia Code", "Consolas", monospace; font-size: 11px; color: #64748b; }
 .text-muted { color: #64748b; font-size: 12px; }
 .role-tags { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; }
 .role-tag { margin: 0; }

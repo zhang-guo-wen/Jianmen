@@ -975,6 +975,14 @@ func (g *Gateway) newRecorder(conn *gatewayConn) (*connectionRecorder, error) {
 		return nil, err
 	}
 	startedAt := time.Now().UTC()
+	// 查找操作者用户名
+	authUser := conn.userID
+	if g.db != nil {
+		var u model.User
+		if err := g.db.First(&u, "id = ?", conn.userID).Error; err == nil {
+			authUser = u.Username
+		}
+	}
 	meta := DBConnectionMeta{
 		ID:           id,
 		Name:         conn.accountName,
@@ -984,7 +992,7 @@ func (g *Gateway) newRecorder(conn *gatewayConn) (*connectionRecorder, error) {
 		StartedAt:    startedAt.Format(time.RFC3339Nano),
 		AccountName:  conn.accountUser,
 		InstanceName: conn.instanceName,
-		AuthUser:     conn.userID,
+		AuthUser:     authUser,
 	}
 	file, err := os.OpenFile(filepath.Join(dir, "queries.jsonl"), os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
 	if err != nil {

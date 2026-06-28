@@ -64,6 +64,7 @@ type dbConnectionListItem struct {
 	DurationMs   int64  `json:"duration_ms,omitempty"`
 	AccountName  string `json:"account_name,omitempty"`
 	InstanceName string `json:"instance_name,omitempty"`
+	AuthUser     string `json:"auth_user,omitempty"`
 	Path         string `json:"path"`
 }
 
@@ -1362,6 +1363,7 @@ func (s *Server) listDBConnections() ([]dbConnectionListItem, error) {
 			DurationMs   int64  `json:"duration_ms"`
 			AccountName  string `json:"account_name"`
 			InstanceName string `json:"instance_name"`
+			AuthUser     string `json:"auth_user"`
 		}
 		if err := readJSON(filepath.Join(dir, "meta.json"), &meta); err != nil {
 			continue
@@ -1377,6 +1379,7 @@ func (s *Server) listDBConnections() ([]dbConnectionListItem, error) {
 			DurationMs:   meta.DurationMs,
 			AccountName:  meta.AccountName,
 			InstanceName: meta.InstanceName,
+			AuthUser:     meta.AuthUser,
 			Path:         dir,
 		})
 	}

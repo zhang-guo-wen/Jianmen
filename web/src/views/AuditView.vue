@@ -112,7 +112,7 @@
           <template #default="{ row }">{{ row.account_name || '-' }}</template>
         </el-table-column>
         <el-table-column :label="t('audit.column.operator')" min-width="120" show-overflow-tooltip>
-          <template #default="{ row }">{{ row.name || '-' }}</template>
+          <template #default="{ row }">{{ row.auth_user || row.name || '-' }}</template>
         </el-table-column>
         <el-table-column prop="protocol" :label="t('audit.column.protocol')" width="90" />
         <el-table-column :label="t('sessions.column.started')" min-width="170" show-overflow-tooltip class-name="col-time">

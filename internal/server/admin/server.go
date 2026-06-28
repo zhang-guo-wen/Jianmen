@@ -77,7 +77,8 @@ var menuOrder = []struct {
 	{"databases", "db:view"},
 	{"quickConnect", "session:connect"},
 	{"sessions", "session:view"},
-	{"rbac", "rbac:manage"},
+	{"users", "rbac:manage"},
+	{"roles", "rbac:manage"},
 	{"audit", "audit:view"},
 	{"webTerminal", "session:connect"},
 }
@@ -122,6 +123,16 @@ func New(cfg *config.Config, store store.Store, logger *slog.Logger, dataDir str
 		}
 		if id != "" {
 			superAdminIDs[id] = true
+		}
+	}
+	// 当配置文件中未定义用户时，将数据库中已有用户视为超级管理员
+	// 这覆盖了 setup 向导创建的管理员（在改代码之前就已经存在的账号）
+	if len(superAdminIDs) == 0 && db != nil {
+		var users []model.User
+		if err := db.Where("status = ?", "active").Find(&users).Error; err == nil {
+			for _, u := range users {
+				superAdminIDs[u.ID] = true
+			}
 		}
 	}
 	return &Server{cfg: cfg, store: store, db: db, rbacChecker: checker, logger: logger, dataDir: dataDir, superAdminIDs: superAdminIDs}

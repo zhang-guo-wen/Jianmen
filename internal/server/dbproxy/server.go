@@ -257,7 +257,8 @@ func (g *Gateway) handlePG(ctx context.Context, client net.Conn, firstByte byte)
 	if pwdLen <= 0 {
 		return nil
 	}
-	password := string(pwdBuf[5 : 5+pwdLen])
+	// PG 密码消息以 \x00 结尾，需截断
+	password := strings.TrimRight(string(pwdBuf[5:5+pwdLen]), "\x00")
 
 	// Validate bastion user password
 	var userID string

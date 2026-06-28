@@ -112,7 +112,9 @@ body {
 }
 
 .view-stack {
-  display: grid;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
   gap: 18px;
 }
 

@@ -255,6 +255,18 @@
           </el-table-column>
         </el-table>
         <el-empty v-if="!accountsLoading && !accounts.length && !accountError" :description="t('database.empty.accounts')" />
+        <div v-if="accountTotal > 0" class="pagination-row">
+          <el-pagination
+            v-model:current-page="accountPage"
+            v-model:page-size="accountPageSize"
+            background
+            layout="total, sizes, prev, pager, next"
+            :page-sizes="[20, 50, 100]"
+            :total="accountTotal"
+            @current-change="loadAccounts"
+            @size-change="handleAccountPageSizeChange"
+          />
+        </div>
       </el-card>
 
       <!-- Account Create/Edit Dialog -->
@@ -359,33 +371,72 @@
         class="form-dialog"
         destroy-on-close
         width="min(560px, calc(100vw - 32px))"
+        @opened="onConnectDialogOpened"
       >
         <div v-if="connectTarget" class="dialog-stack">
-          <div class="config-row">
-            <div class="config-label">Shell</div>
-            <el-input :model-value="connectCommand" readonly>
-              <template #append>
-                <el-tooltip :content="t('database.account.copy')">
-                  <el-button :aria-label="t('database.account.copy')" @click="copyText(connectCommand)" />
-                </el-tooltip>
+          <!-- Status section -->
+          <section class="connect-section">
+            <div class="connect-section-title">● {{ t('database.connect.status') }}</div>
+            <div class="connect-status-card" v-loading="connectTesting">
+              <template v-if="connectTestResult !== null">
+                <el-tag :type="connectTestResult.ok ? 'success' : 'danger'" size="small">
+                  {{ connectTestResult.ok ? '🟢 ' + t('database.connect.reachable') : '🔴 ' + t('database.connect.unreachable') }}
+                </el-tag>
+                <span class="connect-latency" v-if="connectTestResult.latency_ms !== undefined" style="margin-left: 8px;">
+                  {{ t('database.connect.latency') }}: {{ connectTestResult.latency_ms }}ms
+                </span>
+                <div class="connect-error" v-if="connectTestResult.error" style="margin-top: 4px; color: var(--el-color-danger); font-size: 12px;">
+                  {{ connectTestResult.error }}
+                </div>
               </template>
-            </el-input>
-          </div>
-          <div class="config-row">
-            <div class="config-label">{{ t('database.config.resource') }}</div>
-            <el-input :model-value="connectResourceId" readonly>
-              <template #append>
-                <el-tooltip :content="t('database.account.copy')">
-                  <el-button :aria-label="t('database.account.copy')" @click="copyText(connectResourceId)" />
-                </el-tooltip>
-              </template>
-            </el-input>
-          </div>
+            </div>
+            <div class="connect-status-tags" style="margin-top: 8px;">
+              <el-tag :type="connectTarget.disabled ? 'info' : 'success'" size="small">
+                {{ connectTarget.disabled ? t('common.disabled') : t('common.enabled') }}
+              </el-tag>
+              <el-tag v-if="isExpired(connectTarget.expires_at)" type="danger" size="small" style="margin-left: 4px;">
+                {{ t('database.connect.expired') }}
+              </el-tag>
+              <el-tag v-else-if="connectTarget.expires_at" type="warning" size="small" style="margin-left: 4px;">
+                {{ t('database.connect.expires') }}: {{ formatTime(connectTarget.expires_at) }}
+              </el-tag>
+            </div>
+          </section>
+
+          <!-- Params section -->
+          <section class="connect-section">
+            <div class="connect-section-title">● {{ t('database.connect.params') }}</div>
+            <div class="config-row" v-for="param in connectParams" :key="param.label">
+              <div class="config-label">{{ param.label }}</div>
+              <el-input :model-value="param.value" readonly>
+                <template #append>
+                  <el-tooltip :content="t('database.account.copy')">
+                    <el-button :aria-label="t('database.account.copy')" @click="copyText(param.value)" />
+                  </el-tooltip>
+                </template>
+              </el-input>
+            </div>
+          </section>
+
+          <!-- Command section -->
+          <section class="connect-section">
+            <div class="connect-section-title">● {{ t('database.connect.command') }}</div>
+            <div class="config-row">
+              <div class="config-label">Shell</div>
+              <el-input :model-value="connectCommand" readonly>
+                <template #append>
+                  <el-tooltip :content="t('database.account.copy')">
+                    <el-button :aria-label="t('database.account.copy')" @click="copyText(connectCommand)" />
+                  </el-tooltip>
+                </template>
+              </el-input>
+            </div>
+          </section>
         </div>
 
         <template #footer>
-          <el-button @click="connectDialogVisible = false">{{ t('common.cancel') }}</el-button>
-          <el-button type="primary" @click="copyAllConnect">{{ t('database.account.copy') }}全部</el-button>
+          <el-button @click="connectDialogVisible = false">{{ t('common.close') }}</el-button>
+          <el-button type="primary" @click="copyAllConnect">{{ t('database.connect.copyAll') }}</el-button>
         </template>
       </el-dialog>
     </template>
@@ -472,6 +523,9 @@ const accountMorePanels = ref<string[]>([]);
 const accountFormRef = ref<FormInstance>();
 const expireShortcutActive = ref('');
 const accountGroupOptions = ref<string[]>([]);
+const accountPage = ref(1);
+const accountPageSize = ref(20);
+const accountTotal = ref(0);
 
 const accountForm = reactive<AccountForm>({
   upstream_username: '',
@@ -489,7 +543,46 @@ const accountRules: FormRules = {
 // Connect dialog state
 const connectDialogVisible = ref(false);
 const connectTarget = ref<DBAccountRecord | null>(null);
-const userSessionId = ref('00001');
+const userSessionId = ref('00001'); // TODO: use actual session ID from auth context
+const connectTesting = ref(false);
+const connectTestResult = ref<{ ok: boolean; error?: string; latency_ms?: number } | null>(null);
+
+const connectParams = computed(() => {
+  if (!connectTarget.value || !selectedInstance.value) return [];
+  const inst = selectedInstance.value;
+  const { host, port } = parseAddress(inst.address || '127.0.0.1:3306');
+  const proxyPort = Number(port) + 30000;
+  const resourceId = connectTarget.value.resource_id || '0000';
+  const sessionId = userSessionId.value || '00001';
+  const compactUser = 'D' + resourceId + sessionId;
+  return [
+    { label: t('database.connect.host') as string, value: host },
+    { label: t('database.connect.port') as string, value: String(proxyPort) },
+    { label: t('database.connect.username') as string, value: compactUser },
+  ];
+});
+
+function isExpired(expiresAt: unknown): boolean {
+  if (typeof expiresAt !== 'string' || !expiresAt.trim()) return false;
+  const d = new Date(expiresAt);
+  if (Number.isNaN(d.getTime())) return false;
+  return d.getTime() < Date.now();
+}
+
+async function onConnectDialogOpened() {
+  if (!connectTarget.value?.id) return;
+  connectTesting.value = true;
+  connectTestResult.value = null;
+  try {
+    const result = await apiClient.testDBConnection(connectTarget.value.id);
+    const data = ('data' in result ? (result as ApiEnvelope<{ ok: boolean; error?: string; latency_ms?: number }>).data : result) as { ok: boolean; error?: string; latency_ms?: number };
+    connectTestResult.value = data ?? null;
+  } catch (err) {
+    connectTestResult.value = { ok: false, error: err instanceof Error ? err.message : 'test failed' };
+  } finally {
+    connectTesting.value = false;
+  }
+}
 
 // Computed
 const filteredInstances = computed(() => {
@@ -515,19 +608,8 @@ const connectCommand = computed(() => {
   const resourceId = connectTarget.value.resource_id || '0000';
   const sessionId = userSessionId.value || '00001';
   const compactUser = `D${resourceId}${sessionId}`;
-  // Parse host and port from address
-  const address = inst.address || '127.0.0.1:3306';
-  const lastColon = address.lastIndexOf(':');
-  let host = address;
-  let port = '3306';
-  if (lastColon > -1) {
-    const portPart = address.slice(lastColon + 1);
-    if (/^\d+$/.test(portPart)) {
-      host = address.slice(0, lastColon);
-      port = portPart;
-    }
-  }
   // Use proxy port convention: default port + 30000
+  const { host, port } = parseAddress(inst.address || '127.0.0.1:3306');
   const proxyPort = Number(port) + 30000;
   if (protocol === 'mysql') {
     return `mysql --protocol=tcp -h ${host} -P ${proxyPort} -u ${compactUser} -p`;
@@ -535,15 +617,20 @@ const connectCommand = computed(() => {
   return `psql -h ${host} -p ${proxyPort} -U ${compactUser}`;
 });
 
-const connectResourceId = computed(() => {
-  if (!connectTarget.value || !selectedInstance.value) return '';
-  const resourceId = connectTarget.value.resource_id || '0000';
-  return `database_account:D${resourceId}`;
-});
-
 // Helpers
 function unwrapArray<T>(payload: ApiEnvelope<T[]> | T[]): T[] {
   return Array.isArray(payload) ? payload : payload.data ?? [];
+}
+
+function parseAddress(address: string): { host: string; port: string } {
+  const lastColon = address.lastIndexOf(':');
+  if (lastColon > -1) {
+    const portPart = address.slice(lastColon + 1);
+    if (/^\d+$/.test(portPart)) {
+      return { host: address.slice(0, lastColon), port: portPart };
+    }
+  }
+  return { host: address, port: '3306' };
 }
 
 function formatTime(value: unknown): string {
@@ -604,8 +691,9 @@ async function copyText(value: string) {
 
 function copyAllConnect() {
   if (!connectTarget.value) return;
-  const all = `Shell: ${connectCommand.value}\n${t('database.config.resource')}: ${connectResourceId.value}`;
-  copyText(all);
+  const lines = connectParams.value.map(p => `${p.label}: ${p.value}`);
+  lines.push(`Shell: ${connectCommand.value}`);
+  copyText(lines.join('\n'));
 }
 
 // Instance methods
@@ -745,6 +833,11 @@ function handleInstancePageSizeChange() {
   loadInstances();
 }
 
+function handleAccountPageSizeChange() {
+  accountPage.value = 1;
+  loadAccounts();
+}
+
 // Account methods
 function openAccountsTab(inst: DBInstanceRecord) {
   selectedInstance.value = inst;
@@ -762,7 +855,21 @@ async function loadAccounts() {
   accountsLoading.value = true;
   accountError.value = '';
   try {
-    accounts.value = unwrapArray(await apiClient.getDBAccounts(inst.id));
+    const data = await apiClient.getDBAccounts(inst.id, {
+      page: accountPage.value,
+      size: accountPageSize.value
+    });
+    if (Array.isArray(data)) {
+      accounts.value = data;
+      accountTotal.value = data.length;
+    } else if (data && typeof data === 'object' && 'items' in data) {
+      accounts.value = (data as any).items ?? [];
+      accountTotal.value = (data as any).total ?? 0;
+    } else {
+      const unwrapped = unwrapArray(data as any);
+      accounts.value = unwrapped as DBAccountRecord[];
+      accountTotal.value = unwrapped.length;
+    }
   } catch (err) {
     accounts.value = [];
     accountError.value = err instanceof Error ? err.message : t('database.error.loadAccounts');
@@ -775,9 +882,11 @@ async function loadAccountGroups() {
   const inst = selectedInstance.value;
   if (!inst?.id) return;
   try {
-    const data = unwrapArray(await apiClient.getDBAccounts(inst.id));
+    const raw = await apiClient.getDBAccounts(inst.id);
+    const data = Array.isArray(raw) ? raw : (raw as any).data ?? raw;
+    const records = Array.isArray(data) ? data : (data as any)?.items ?? [];
     const groups = new Set<string>();
-    for (const acc of data) {
+    for (const acc of records) {
       if (acc.group_name) groups.add(acc.group_name);
     }
     accountGroupOptions.value = Array.from(groups).sort();
@@ -913,6 +1022,7 @@ async function confirmDeleteAccount(acc: DBAccountRecord) {
 
 // Connect dialog
 function openConnectDialog(acc: DBAccountRecord) {
+  connectTestResult.value = null;
   connectTarget.value = acc;
   connectDialogVisible.value = true;
 }
@@ -1039,6 +1149,21 @@ onMounted(() => {
 
 .expire-picker {
   width: 100%;
+}
+
+.connect-section + .connect-section {
+  margin-top: 20px;
+}
+
+.connect-section-title {
+  color: #374151;
+  font-size: 13px;
+  font-weight: 700;
+  margin-bottom: 10px;
+}
+
+.connect-status-card {
+  min-height: 20px;
 }
 
 .config-row {

@@ -491,10 +491,18 @@ export const apiClient = {
     request<ApiEnvelope<unknown> | unknown>(`/api/db/instances/${encodeURIComponent(id)}`, {
       method: 'DELETE'
     }),
-  getDBAccounts: (instanceID: string) =>
-    request<ApiEnvelope<DBAccountRecord[]> | DBAccountRecord[]>(
-      `/api/db/instances/${encodeURIComponent(instanceID)}/accounts`
-    ),
+  getDBAccounts: (instanceID: string, params?: { page?: number; size?: number; search?: string }) => {
+    let path = `/api/db/instances/${encodeURIComponent(instanceID)}/accounts`;
+    if (params) {
+      const searchParams = new URLSearchParams();
+      if (params.page !== undefined) searchParams.set('page', String(params.page));
+      if (params.size !== undefined) searchParams.set('size', String(params.size));
+      if (params.search !== undefined) searchParams.set('search', params.search);
+      const suffix = searchParams.toString();
+      if (suffix) path += '?' + suffix;
+    }
+    return request<ApiEnvelope<DBAccountRecord[]> | DBAccountRecord[]>(path);
+  },
   createDBAccount: (instanceID: string, payload: DBAccountPayload) =>
     request<ApiEnvelope<DBAccountRecord> | DBAccountRecord>(
       `/api/db/instances/${encodeURIComponent(instanceID)}/accounts`,
@@ -514,6 +522,11 @@ export const apiClient = {
     request<ApiEnvelope<unknown> | unknown>(`/api/db/accounts/${encodeURIComponent(id)}`, {
       method: 'DELETE'
     }),
+  testDBConnection: (id: string) =>
+    request<ApiEnvelope<{ ok: boolean; error?: string; latency_ms: number }>>(
+      `/api/db/accounts/test/${encodeURIComponent(id)}`,
+      { method: 'POST' }
+    ),
   getDBConnections: () =>
     request<ApiEnvelope<DBConnectionRecord[]> | DBConnectionRecord[]>('/api/db/connections'),
   getDBConnectionMeta: (id: string | number) =>

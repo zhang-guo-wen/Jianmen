@@ -350,10 +350,12 @@ const connectParams = computed(() => {
   const resourceId = connectTarget.value.resource_id || '0000'
   const sessionId = userSessionId.value
   const compactUser = sessionId ? 'D' + resourceId + sessionId : ''
+  const accountName = connectTarget.value.username || connectTarget.value.unique_name || '-'
   return [
+    { label: '数据库账号', value: accountName },
+    { label: '代理用户', value: compactUser },
     { label: '主机', value: host },
     { label: '端口', value: String(proxyPort) },
-    { label: '用户名', value: compactUser },
   ]
 })
 

@@ -23,8 +23,8 @@ import (
 	"jianmen/internal/config"
 	"jianmen/internal/model"
 	"jianmen/internal/rbac"
-	"jianmen/internal/util"
 	"jianmen/internal/store"
+	"jianmen/internal/util"
 )
 
 type Server struct {
@@ -41,6 +41,7 @@ type sessionListItem struct {
 	ID              string  `json:"id"`
 	User            string  `json:"user"`
 	Target          string  `json:"target"`
+	AccountUsername string  `json:"account_username,omitempty"`
 	ClientIP        string  `json:"client_ip"`
 	StartedAt       string  `json:"started_at"`
 	EndedAt         string  `json:"ended_at,omitempty"`
@@ -399,7 +400,7 @@ func (s *Server) listUsers(w http.ResponseWriter, r *http.Request) {
 			pageSize = 200
 		}
 		var users []model.User
-		if err := tx.Order("created_at DESC").Offset((page-1)*pageSize).Limit(pageSize).Find(&users).Error; err != nil {
+		if err := tx.Order("created_at DESC").Offset((page - 1) * pageSize).Limit(pageSize).Find(&users).Error; err != nil {
 			writeError(w, http.StatusInternalServerError, err)
 			return
 		}
@@ -675,7 +676,14 @@ func (s *Server) handleTargets(w http.ResponseWriter, r *http.Request) {
 			s.forbidden(w)
 			return
 		}
-		writeJSON(w, http.StatusOK, s.store.Targets())
+		resp := paginateSlice(s.store.Targets(), r, func(v store.TargetView, q string) bool {
+			return strings.Contains(strings.ToLower(v.Name), q) ||
+				strings.Contains(strings.ToLower(v.Username), q) ||
+				strings.Contains(strings.ToLower(v.Host), q) ||
+				strings.Contains(strings.ToLower(v.Group), q) ||
+				strings.Contains(strings.ToLower(v.Remark), q)
+		})
+		writeJSON(w, http.StatusOK, resp)
 	case http.MethodPost:
 		if !s.requirePermission(r, rbac.ActionTargetCreate) {
 			s.forbidden(w)
@@ -733,22 +741,22 @@ func (s *Server) handleTestConnection(w http.ResponseWriter, r *http.Request) {
 	}
 
 	clientConfig, err := store.ClientConfigForTarget(store.TargetConfig{
-			ID:                    target.ID,
-			Name:                  target.Name,
-			Host:                  target.Host,
-			Port:                  target.Port,
-			Username:              target.Username,
-			Password:              target.Password,
-			PrivateKeyPath:        target.PrivateKeyPath,
-			PrivateKeyPEM:         target.PrivateKeyPEM,
-			Passphrase:            target.Passphrase,
-			InsecureIgnoreHostKey: target.InsecureIgnoreHostKey,
-			HostKeyFingerprint:    target.HostKeyFingerprint,
-			KnownHostsPath:        target.KnownHostsPath,
-			Disabled:              target.Disabled,
-			ExpiresAt:             target.ExpiresAt,
-			HostID:                target.HostID,
-		})
+		ID:                    target.ID,
+		Name:                  target.Name,
+		Host:                  target.Host,
+		Port:                  target.Port,
+		Username:              target.Username,
+		Password:              target.Password,
+		PrivateKeyPath:        target.PrivateKeyPath,
+		PrivateKeyPEM:         target.PrivateKeyPEM,
+		Passphrase:            target.Passphrase,
+		InsecureIgnoreHostKey: target.InsecureIgnoreHostKey,
+		HostKeyFingerprint:    target.HostKeyFingerprint,
+		KnownHostsPath:        target.KnownHostsPath,
+		Disabled:              target.Disabled,
+		ExpiresAt:             target.ExpiresAt,
+		HostID:                target.HostID,
+	})
 	if err != nil {
 		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "message": "配置错误: " + err.Error()})
 		return
@@ -878,14 +886,14 @@ func (s *Server) handleDBInstances(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		instances := s.store.DatabaseInstances()
-			resp := paginateSlice(instances, r, func(v store.DatabaseInstanceView, q string) bool {
-				return strings.Contains(strings.ToLower(v.Name), q) ||
-					strings.Contains(strings.ToLower(v.Address), q) ||
-					strings.Contains(strings.ToLower(v.Protocol), q) ||
-					strings.Contains(strings.ToLower(v.Group), q) ||
-					strings.Contains(strings.ToLower(v.Remark), q)
-			})
-			writeJSON(w, http.StatusOK, resp)
+		resp := paginateSlice(instances, r, func(v store.DatabaseInstanceView, q string) bool {
+			return strings.Contains(strings.ToLower(v.Name), q) ||
+				strings.Contains(strings.ToLower(v.Address), q) ||
+				strings.Contains(strings.ToLower(v.Protocol), q) ||
+				strings.Contains(strings.ToLower(v.Group), q) ||
+				strings.Contains(strings.ToLower(v.Remark), q)
+		})
+		writeJSON(w, http.StatusOK, resp)
 	case http.MethodPost:
 		if !s.requirePermission(r, rbac.ActionDBProxyCreate) {
 			s.forbidden(w)
@@ -1009,11 +1017,11 @@ func (s *Server) handleUpdateDBInstance(w http.ResponseWriter, r *http.Request, 
 func (s *Server) handleCreateDBAccount(w http.ResponseWriter, r *http.Request, instanceID string) {
 	defer r.Body.Close()
 	var payload struct {
-		Username string     `json:"username"`
-		Password string     `json:"password"`
+		Username  string     `json:"username"`
+		Password  string     `json:"password"`
 		Group     string     `json:"group"`
-		Remark           string     `json:"remark"`
-		ExpiresAt        *time.Time `json:"expires_at"`
+		Remark    string     `json:"remark"`
+		ExpiresAt *time.Time `json:"expires_at"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 		writeError(w, http.StatusBadRequest, err)
@@ -1287,6 +1295,7 @@ func (s *Server) listSessions() ([]sessionListItem, error) {
 			SessionID       string `json:"session_id"`
 			User            string `json:"user"`
 			Target          string `json:"target"`
+			AccountUsername string `json:"account_username"`
 			ClientIP        string `json:"client_ip"`
 			StartedAt       string `json:"started_at"`
 			EndedAt         string `json:"ended_at"`
@@ -1307,6 +1316,7 @@ func (s *Server) listSessions() ([]sessionListItem, error) {
 			ID:              firstNonEmpty(meta.SessionID, entry.Name()),
 			User:            meta.User,
 			Target:          meta.Target,
+			AccountUsername: meta.AccountUsername,
 			ClientIP:        meta.ClientIP,
 			StartedAt:       meta.StartedAt,
 			EndedAt:         meta.EndedAt,

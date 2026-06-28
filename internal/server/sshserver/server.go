@@ -166,6 +166,7 @@ func (s *Server) handleConn(ctx context.Context, rawConn net.Conn, serverConfig 
 	defer targetClient.Close()
 
 	session := model.NewSession(user, target.ID, target.Name, remoteIP(rawConn.RemoteAddr()))
+	session.AccountUsername = target.Username
 	var recorder *recording.SessionRecorder
 	if s.cfg.Recording.Enabled {
 		recorder, err = recording.NewSessionRecorder(

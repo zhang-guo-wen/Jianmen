@@ -17,16 +17,7 @@
         @search="onSSHSearch"
       >
         <template #toolbar-extra>
-          <div class="endpoint-toolbar">
-            <el-input v-model="bastionUser" :placeholder="t('quickConnect.placeholder.bastionUser')">
-              <template #prepend>{{ t('quickConnect.field.bastionUser') }}</template>
-            </el-input>
-            <el-input v-model="bastionHost" :placeholder="t('quickConnect.placeholder.bastionHost')">
-              <template #prepend>{{ t('quickConnect.field.bastionHost') }}</template>
-            </el-input>
-            <el-input-number v-model="bastionPort" :max="65535" :min="1" controls-position="right" />
-            <el-button :loading="sshLoading" :icon="Refresh" @click="loadTargets">{{ t('common.refresh') }}</el-button>
-          </div>
+          <el-button :loading="sshLoading" :icon="Refresh" @click="loadTargets">{{ t('common.refresh') }}</el-button>
         </template>
         <el-table-column :label="t('quickConnect.column.host')" min-width="190">
           <template #default="{ row }">{{ targetHost(row) || '-' }}:{{ targetPort(row) }}</template>
@@ -139,7 +130,6 @@ const targets = ref<TargetRecord[]>([]);
 const targetTotal = ref(0);
 const targetPage = ref(1);
 const targetPageSize = ref(20);
-const bastionUser = ref('admin');
 const bastionHost = ref('127.0.0.1');
 const bastionPort = ref(47102);
 
@@ -295,6 +285,5 @@ onMounted(() => { loadTargets(); });
 </script>
 
 <style scoped>
-.endpoint-toolbar { display: flex; flex: 1; flex-wrap: wrap; justify-content: flex-end; gap: 10px; }
 .config-dialog { min-height: 100px; }
 </style>

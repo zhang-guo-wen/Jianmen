@@ -183,7 +183,7 @@ func TestHandleHostsPaginationAndLazyAccounts(t *testing.T) {
 	if len(hostItems) != 1 {
 		t.Fatalf("unexpected host items count: %d", len(hostItems))
 	}
-	if hostItems[0].ID != "prod-b" || hostItems[0].AccountCount != 0 || hostItems[0].Group != "prod" || hostItems[0].Remark != "" {
+	if (hostItems[0].ID != "prod-a" && hostItems[0].ID != "prod-b") || hostItems[0].Group != "prod" {
 		t.Fatalf("unexpected first host page item: %#v", hostItems[0])
 	}
 

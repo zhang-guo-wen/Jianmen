@@ -14,6 +14,7 @@ import (
 	"log/slog"
 	"net"
 	"os"
+	"strconv"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -103,6 +104,18 @@ type gatewayConn struct {
 	userID       string
 	accountUser  string // 上游数据库登录名
 	instanceName string // 数据库实例名称
+}
+
+func upstreamAddress(inst model.DatabaseInstance) string {
+	port := inst.Port
+	if port == 0 {
+		if inst.Protocol == "postgres" {
+			port = 5432
+		} else {
+			port = 3306
+		}
+	}
+	return net.JoinHostPort(inst.Address, strconv.Itoa(port))
 }
 
 func (g *Gateway) handleConn(ctx context.Context, client net.Conn) {
@@ -293,9 +306,9 @@ func (g *Gateway) handlePG(ctx context.Context, client net.Conn, firstByte byte)
 	}
 
 	// Connect to upstream
-	upstream, err := net.DialTimeout("tcp", acct.Instance.Address, 10*time.Second)
+	upstream, err := net.DialTimeout("tcp", upstreamAddress(acct.Instance), 10*time.Second)
 	if err != nil {
-		g.logger.Warn("db gateway upstream connect failed", "upstream", acct.Instance.Address, "error", err)
+		g.logger.Warn("db gateway upstream connect failed", "upstream", upstreamAddress(acct.Instance), "error", err)
 		return nil
 	}
 
@@ -402,7 +415,7 @@ func (g *Gateway) handlePG(ctx context.Context, client net.Conn, firstByte byte)
 
 	return &gatewayConn{
 		protocol: "postgres", accountID: acct.ID, accountName: resolved.rawName,
-		upstream: upstream, upstreamAddr: acct.Instance.Address, userID: userID,
+		upstream: upstream, upstreamAddr: upstreamAddress(acct.Instance), userID: userID,
 		accountUser: acct.Username, instanceName: acct.Instance.Name,
 	}
 }
@@ -531,9 +544,9 @@ func (g *Gateway) handleMySQL(ctx context.Context, client net.Conn) *gatewayConn
 	}
 
 	// Connect to upstream
-	upstream, err := net.DialTimeout("tcp", acct.Instance.Address, 10*time.Second)
+	upstream, err := net.DialTimeout("tcp", upstreamAddress(acct.Instance), 10*time.Second)
 	if err != nil {
-		g.logger.Warn("mysql gateway upstream connect failed", "upstream", acct.Instance.Address, "error", err)
+		g.logger.Warn("mysql gateway upstream connect failed", "upstream", upstreamAddress(acct.Instance), "error", err)
 		return nil
 	}
 
@@ -610,7 +623,7 @@ func (g *Gateway) handleMySQL(ctx context.Context, client net.Conn) *gatewayConn
 				accountID:    acct.ID,
 				accountName:  resolved.rawName,
 				upstream:     upstream,
-				upstreamAddr: acct.Instance.Address,
+				upstreamAddr: upstreamAddress(acct.Instance),
 				userID:       rbacUserID,
 				accountUser:  acct.Username,
 				instanceName: acct.Instance.Name,
@@ -637,7 +650,7 @@ func (g *Gateway) handleMySQL(ctx context.Context, client net.Conn) *gatewayConn
 		accountID:    acct.ID,
 		accountName:  resolved.rawName,
 		upstream:     upstream,
-		upstreamAddr: acct.Instance.Address,
+		upstreamAddr: upstreamAddress(acct.Instance),
 		userID:       rbacUserID,
 		accountUser:  acct.Username,
 		instanceName: acct.Instance.Name,

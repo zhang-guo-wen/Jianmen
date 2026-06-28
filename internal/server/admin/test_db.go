@@ -50,7 +50,11 @@ func (s *Server) handleTestDBConnection(w http.ResponseWriter, r *http.Request) 
 	}
 
 	start := time.Now()
-	conn, err := net.DialTimeout("tcp", acct.Instance.Address, 5*time.Second)
+	upstreamAddr := acct.Instance.Address
+	if acct.Instance.Port > 0 {
+		upstreamAddr = fmt.Sprintf("%s:%d", acct.Instance.Address, acct.Instance.Port)
+	}
+	conn, err := net.DialTimeout("tcp", upstreamAddr, 5*time.Second)
 	if err != nil {
 		writeJSON(w, http.StatusOK, map[string]any{
 			"ok": false, "error": fmt.Sprintf("connect: %v", err), "latency_ms": time.Since(start).Milliseconds(),

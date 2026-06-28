@@ -124,6 +124,8 @@ type HostAccount struct {
 	Status        string         `gorm:"index;size:32;not null;default:active" json:"status"`
 	ResourceSeq   int            `gorm:"index;not null;default:0" json:"resource_seq"`
 	ResourceID    string         `gorm:"uniqueIndex;size:4" json:"resource_id"`
+	Labels        string         `gorm:"type:text" json:"labels,omitempty"`
+	Remark        string         `gorm:"type:text" json:"remark,omitempty"`
 	CreatedAt     time.Time      `json:"created_at"`
 	UpdatedAt     time.Time      `json:"updated_at"`
 	Host          Host           `gorm:"constraint:OnUpdate:CASCADE,OnDelete:CASCADE;" json:"-"`

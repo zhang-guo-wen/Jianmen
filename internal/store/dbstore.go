@@ -254,7 +254,8 @@ func (s *DBStore) targetView(a model.HostAccount) TargetView {
 		ID: a.ID, HostID: a.HostID,
 		ResourceType: model.ResourceTypeHostAccount, ResourceID: a.ResourceID,
 		ResourceSeq: a.ResourceSeq,
-		Name: name, Username: a.Username, Status: status, Disabled: a.Status == "disabled",
+		Name: name, Group: a.Labels, Remark: a.Remark,
+		Username: a.Username, Status: status, Disabled: a.Status == "disabled",
 		AuthMethods: authMethods, Static: false,
 	}
 }
@@ -332,6 +333,8 @@ func (s *DBStore) AddTarget(target config.Target) (TargetView, error) {
 		Password:     model.NewEncryptedField(target.Password),
 		PrivateKeyPEM: model.NewEncryptedField(target.PrivateKeyPEM),
 		Passphrase:   model.NewEncryptedField(target.Passphrase),
+		Labels:       target.Group,
+		Remark:       target.Remark,
 		ResourceSeq:  seq,
 		ResourceID:   util.ResourceIDFromSeq(util.PrefixHost, seq),
 	}
@@ -358,6 +361,8 @@ func (s *DBStore) UpdateTarget(id string, target config.Target) (TargetView, err
 		return TargetView{}, fmt.Errorf("%w: %q", ErrTargetNotFound, id)
 	}
 	a.Username = target.Username
+	a.Labels = target.Group
+	a.Remark = target.Remark
 	if target.Password != "" {
 		a.AuthType = "password"
 		a.Password = model.NewEncryptedField(target.Password)

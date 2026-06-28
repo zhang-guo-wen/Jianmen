@@ -349,30 +349,38 @@
       width="min(720px, calc(100vw - 32px))"
     >
       <div v-if="selectedConnectionTarget" class="connection-dialog">
-        <el-alert show-icon type="info" :closable="false"
+        <el-alert v-if="connectionError" show-icon type="error" :closable="false" :title="connectionError" />
+        <el-alert v-else show-icon type="info" :closable="false"
           title="输入堡垒机的登录密码，不是目标主机的密码" />
 
-        <el-descriptions :column="1" border size="small" style="margin-top: 12px">
-          <el-descriptions-item label="连接地址">
-            <code>{{ bastionHost || '127.0.0.1' }}:{{ bastionPort || 47102 }}</code>
-            <el-button link type="primary" size="small" style="margin-left: 8px" @click="copyText(`${bastionHost || '127.0.0.1'}:${bastionPort || 47102}`)">复制</el-button>
-          </el-descriptions-item>
-          <el-descriptions-item label="用户名">
-            <code>{{ connectionCompactUser }}</code>
-            <el-button link type="primary" size="small" style="margin-left: 8px" @click="copyText(connectionCompactUser)">复制</el-button>
-          </el-descriptions-item>
-          <el-descriptions-item label="密码">
-            堡垒机登录密码
-          </el-descriptions-item>
-        </el-descriptions>
-
-        <div style="margin-top: 12px">
-          <el-input :model-value="`ssh ${connectionCompactUser}@${bastionHost || '127.0.0.1'} -p ${bastionPort || 47102}`" readonly size="small">
-            <template #append>
-              <el-button @click="copyText(`ssh ${connectionCompactUser}@${bastionHost || '127.0.0.1'} -p ${bastionPort || 47102}`)">复制 SSH 命令</el-button>
-            </template>
-          </el-input>
+        <div v-if="creatingSession" style="text-align: center; padding: 30px 0;">
+          <el-icon class="is-loading" :size="28"><Loading /></el-icon>
+          <p style="margin-top: 10px; color: #667085;">正在创建连接会话...</p>
         </div>
+
+        <template v-else-if="!connectionError && connectionCompactUser">
+          <el-descriptions :column="1" border size="small" style="margin-top: 12px">
+            <el-descriptions-item label="连接地址">
+              <code>{{ bastionHost || '127.0.0.1' }}:{{ bastionPort || 47102 }}</code>
+              <el-button link type="primary" size="small" style="margin-left: 8px" @click="copyText(`${bastionHost || '127.0.0.1'}:${bastionPort || 47102}`)">复制</el-button>
+            </el-descriptions-item>
+            <el-descriptions-item label="用户名">
+              <code>{{ connectionCompactUser }}</code>
+              <el-button link type="primary" size="small" style="margin-left: 8px" @click="copyText(connectionCompactUser)">复制</el-button>
+            </el-descriptions-item>
+            <el-descriptions-item label="密码">
+              堡垒机登录密码
+            </el-descriptions-item>
+          </el-descriptions>
+
+          <div style="margin-top: 12px">
+            <el-input :model-value="`ssh ${connectionCompactUser}@${bastionHost || '127.0.0.1'} -p ${bastionPort || 47102}`" readonly size="small">
+              <template #append>
+                <el-button @click="copyText(`ssh ${connectionCompactUser}@${bastionHost || '127.0.0.1'} -p ${bastionPort || 47102}`)">复制 SSH 命令</el-button>
+              </template>
+            </el-input>
+          </div>
+        </template>
       </div>
 
       <template #footer>
@@ -385,7 +393,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus';
-import { User } from '@element-plus/icons-vue';
+import { Loading, User } from '@element-plus/icons-vue';
 
 import {
   apiClient,
@@ -461,7 +469,9 @@ const accountMorePanels = ref<string[]>([]);
 
 const bastionHost = ref('127.0.0.1');
 const bastionPort = ref(47102);
-const userSessionId = ref('00001');
+const userSessionId = ref('');
+const creatingSession = ref(false);
+const connectionError = ref('');
 const hostFormRef = ref<FormInstance>();
 const accountFormRef = ref<FormInstance>();
 const privateKeyFileInputRef = ref<HTMLInputElement>();
@@ -497,10 +507,10 @@ const accountExpiryText = computed(() => {
 });
 const connectionCompactUser = computed(() => {
   const target = selectedConnectionTarget.value;
-  if (!target) return 'H000000001';
+  if (!target) return '';
   const resId = target.resource_id || targetId(target) || resourceId(target) || '0000';
-  const sessionId = userSessionId.value || '00001';
-  return `H${resId}${sessionId}`;
+  const sessionId = userSessionId.value;
+  return sessionId ? `H${resId}${sessionId}` : '';
 });
 
 const hostRules: FormRules<HostForm> = {
@@ -1346,9 +1356,27 @@ async function confirmDeleteAccount(target: TargetRecord) {
   }
 }
 
-function openConnectionDialog(target: TargetRecord) {
+async function openConnectionDialog(target: TargetRecord) {
+  console.log('[Hosts] creating session for target:', target.id || target.resource_id);
   selectedConnectionTarget.value = target;
+  userSessionId.value = '';
+  connectionError.value = '';
+  creatingSession.value = true;
   connectionDialogVisible.value = true;
+
+  try {
+    const targetId = target.id || target.resource_id || '';
+    if (!targetId) {
+      connectionError.value = '无法获取目标资源ID';
+      return;
+    }
+    const session = await apiClient.createUserSession(String(targetId));
+    userSessionId.value = session?.session_id || '';
+  } catch (err) {
+    connectionError.value = err instanceof Error ? err.message : '创建连接会话失败';
+  } finally {
+    creatingSession.value = false;
+  }
 }
 
 async function copyText(value: string) {

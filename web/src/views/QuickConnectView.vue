@@ -239,6 +239,7 @@ const creatingSession = ref(false);
 const sessionError = ref('');
 
 async function openConfig(target: TargetRecord) {
+  console.log('[QuickConnect] creating session for target:', target.id || target.resource_id);
   selectedTarget.value = target;
   userSessionId.value = '';
   sessionError.value = '';

@@ -543,7 +543,9 @@ const accountRules: FormRules = {
 // Connect dialog state
 const connectDialogVisible = ref(false);
 const connectTarget = ref<DBAccountRecord | null>(null);
-const userSessionId = ref('00001'); // TODO: use actual session ID from auth context
+const userSessionId = ref('');
+const connectSessionLoading = ref(false);
+const connectSessionError = ref('');
 const connectTesting = ref(false);
 const connectTestResult = ref<{ ok: boolean; error?: string; latency_ms?: number } | null>(null);
 
@@ -553,8 +555,8 @@ const connectParams = computed(() => {
   const { host, port } = parseAddress(inst.address || '127.0.0.1:3306');
   const proxyPort = Number(port) + 30000;
   const resourceId = connectTarget.value.resource_id || '0000';
-  const sessionId = userSessionId.value || '00001';
-  const compactUser = 'D' + resourceId + sessionId;
+  const sessionId = userSessionId.value;
+  const compactUser = sessionId ? 'D' + resourceId + sessionId : '';
   return [
     { label: t('database.connect.host') as string, value: host },
     { label: t('database.connect.port') as string, value: String(proxyPort) },
@@ -1021,10 +1023,28 @@ async function confirmDeleteAccount(acc: DBAccountRecord) {
 }
 
 // Connect dialog
-function openConnectDialog(acc: DBAccountRecord) {
+async function openConnectDialog(acc: DBAccountRecord) {
+  console.log('[Database] creating session for account:', acc.id || acc.resource_id);
   connectTestResult.value = null;
   connectTarget.value = acc;
+  userSessionId.value = '';
+  connectSessionError.value = '';
+  connectSessionLoading.value = true;
   connectDialogVisible.value = true;
+
+  try {
+    const targetId = acc.id || acc.resource_id || '';
+    if (!targetId) {
+      connectSessionError.value = '无法获取账号ID';
+      return;
+    }
+    const session = await apiClient.createUserSession(String(targetId));
+    userSessionId.value = session?.session_id || '';
+  } catch (err) {
+    connectSessionError.value = err instanceof Error ? err.message : '创建连接会话失败';
+  } finally {
+    connectSessionLoading.value = false;
+  }
 }
 
 // Tab change

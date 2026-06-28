@@ -16,10 +16,7 @@
     <el-table v-else v-loading="loading" :data="filteredRoles" height="420" row-key="id">
       <el-table-column :label="t('roles.name')" min-width="160">
         <template #default="{ row }">
-          <div>
-            <strong>{{ row.name }}</strong>
-            <div class="col-mono">{{ row.id }}</div>
-          </div>
+          <strong>{{ row.name }}</strong>
         </template>
       </el-table-column>
       <el-table-column prop="description" :label="t('roles.description')" min-width="200" show-overflow-tooltip />

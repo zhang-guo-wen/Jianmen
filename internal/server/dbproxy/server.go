@@ -406,7 +406,7 @@ func (g *Gateway) handlePG(ctx context.Context, client net.Conn) *gatewayConn {
 // any client that knows the compact username can attempt a connection.
 // Access control relies on: (1) obscure compact username, (2) account disabled/expiry checks.
 //
-// sendFakeMySQLHandshake 向客户端发送一个伪装 MySQL 握手包，
+// sendFakeMySQLHandshake 向客户端发送一个伪装 MySQL 8.0 握手包，
 // 让客户端先发送 login 包（包含用户名），以便网关解析账号。
 func sendFakeMySQLHandshake(conn net.Conn) error {
 	// 生成 20 字节随机 salt
@@ -417,7 +417,8 @@ func sendFakeMySQLHandshake(conn net.Conn) error {
 	salt[19] = 0 // 最后一位用 0x00 终止符
 
 	capFlags := uint32(mysqlClientProtocol41 | mysqlClientSecureConnection | mysqlClientPluginAuth)
-	serverVersion := "5.7.0-jianmen-proxy"
+	serverVersion := "8.0.28"
+	authPluginName := "caching_sha2_password" // MySQL 8.0 默认，兼容 JDBC/DBeaver
 
 	// 构建 HandshakeV10 payload
 	var p []byte
@@ -427,7 +428,7 @@ func sendFakeMySQLHandshake(conn net.Conn) error {
 	connID := make([]byte, 4)
 	binary.LittleEndian.PutUint32(connID, uint32(salt[0])|uint32(salt[1])<<8|uint32(salt[2])<<16|uint32(salt[3])<<24)
 	p = append(p, connID...)
-	p = append(p, salt[:8]...) // auth data part 1
+	p = append(p, salt[:8]...) // auth data part 1 (8 bytes)
 	p = append(p, 0)           // filler
 	capLower := make([]byte, 2)
 	binary.LittleEndian.PutUint16(capLower, uint16(capFlags&0xFFFF))
@@ -438,10 +439,10 @@ func sendFakeMySQLHandshake(conn net.Conn) error {
 	capUpper := make([]byte, 2)
 	binary.LittleEndian.PutUint16(capUpper, uint16(capFlags>>16))
 	p = append(p, capUpper...)
-	p = append(p, 21)                          // auth plugin data length (8 + 13)
+	p = append(p, 21)                          // auth plugin data length (8 + 12 + 1 null)
 	p = append(p, make([]byte, 10)...)         // reserved
-	p = append(p, salt[8:20]...)               // auth data part 2 (12 bytes, last is 0x00)
-	p = append(p, []byte("mysql_native_password")...)
+	p = append(p, salt[8:20]...)               // auth data part 2 (12 bytes)
+	p = append(p, []byte(authPluginName)...)
 	p = append(p, 0) // null terminator
 
 	// 包装为 MySQL packet: 3 字节 length + 1 字节 seq(0)

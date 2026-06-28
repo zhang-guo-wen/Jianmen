@@ -1,4 +1,4 @@
-package model
+﻿package model
 
 import (
 	"time"
@@ -160,53 +160,6 @@ type DatabaseAccount struct {
 	Instance         DatabaseInstance `gorm:"constraint:OnUpdate:CASCADE,OnDelete:CASCADE;" json:"-"`
 }
 
-type SessionCommand struct {
-	ID         string     `gorm:"primaryKey;size:64" json:"id"`
-	SessionID  string     `gorm:"index;size:64;not null" json:"session_id"`
-	ChannelID  string     `gorm:"index;size:64" json:"channel_id,omitempty"`
-	Seq        int64      `gorm:"index" json:"seq"`
-	Command    string     `gorm:"type:text" json:"command"`
-	OutputRef  string     `gorm:"size:512" json:"output_ref,omitempty"`
-	Preview    string     `gorm:"type:text" json:"preview,omitempty"`
-	Confidence string     `gorm:"size:32" json:"confidence,omitempty"`
-	StartedAt  *time.Time `gorm:"index" json:"started_at,omitempty"`
-	EndedAt    *time.Time `gorm:"index" json:"ended_at,omitempty"`
-	OffsetMs   uint32     `json:"offset_ms,omitempty"`
-	CreatedAt  time.Time  `json:"created_at"`
-	Session    Session    `gorm:"constraint:OnUpdate:CASCADE,OnDelete:CASCADE;" json:"-"`
-}
-
-type SessionFileEvent struct {
-	ID        string     `gorm:"primaryKey;size:64" json:"id"`
-	SessionID string     `gorm:"index;size:64;not null" json:"session_id"`
-	ChannelID string     `gorm:"index;size:64" json:"channel_id,omitempty"`
-	Seq       int64      `gorm:"index" json:"seq"`
-	Action    string     `gorm:"index;size:64" json:"action"`
-	Path      string     `gorm:"type:text" json:"path,omitempty"`
-	Path2     string     `gorm:"type:text" json:"path2,omitempty"`
-	Handle    string     `gorm:"size:128" json:"handle,omitempty"`
-	Offset    int64      `json:"offset,omitempty"`
-	Size      int64      `json:"size,omitempty"`
-	Result    string     `gorm:"index;size:32" json:"result,omitempty"`
-	ErrorCode uint32     `json:"error_code,omitempty"`
-	StartedAt *time.Time `gorm:"index" json:"started_at,omitempty"`
-	EndedAt   *time.Time `gorm:"index" json:"ended_at,omitempty"`
-	CreatedAt time.Time  `json:"created_at"`
-	Session   Session    `gorm:"constraint:OnUpdate:CASCADE,OnDelete:CASCADE;" json:"-"`
-}
-
-type Recording struct {
-	ID            string    `gorm:"primaryKey;size:64" json:"id"`
-	SessionID     string    `gorm:"index;size:64;not null" json:"session_id"`
-	Kind          string    `gorm:"index;size:64;not null" json:"kind"`
-	Path          string    `gorm:"type:text;not null" json:"path"`
-	Size          int64     `json:"size"`
-	SHA256        string    `gorm:"size:128" json:"sha256,omitempty"`
-	HashChainHead string    `gorm:"size:128" json:"hash_chain_head,omitempty"`
-	CreatedAt     time.Time `json:"created_at"`
-	Session       Session   `gorm:"constraint:OnUpdate:CASCADE,OnDelete:CASCADE;" json:"-"`
-}
-
 type TemporaryAccount struct {
 	ID          string     `gorm:"primaryKey;size:64" json:"id"`
 	Username    string     `gorm:"uniqueIndex;size:128;not null" json:"username"`
@@ -248,19 +201,6 @@ type TemporaryAccountGrant struct {
 	TemporaryAccount   TemporaryAccount `gorm:"constraint:OnUpdate:CASCADE,OnDelete:CASCADE;" json:"-"`
 }
 
-type AuditLog struct {
-	ID           string    `gorm:"primaryKey;size:64" json:"id"`
-	ActorUserID  string    `gorm:"index;size:64" json:"actor_user_id,omitempty"`
-	Action       string    `gorm:"index;size:128;not null" json:"action"`
-	ResourceType string    `gorm:"index;size:64" json:"resource_type,omitempty"`
-	ResourceID   string    `gorm:"index;size:64" json:"resource_id,omitempty"`
-	Result       string    `gorm:"index;size:32" json:"result,omitempty"`
-	IP           string    `gorm:"size:128" json:"ip,omitempty"`
-	UserAgent    string    `gorm:"size:255" json:"user_agent,omitempty"`
-	Detail       string    `gorm:"type:text" json:"detail,omitempty"`
-	CreatedAt    time.Time `json:"created_at"`
-}
-
 func AllModels() []any {
 	return []any{
 		&User{},
@@ -278,13 +218,9 @@ func AllModels() []any {
 		&DatabaseAccount{},
 		&Session{},
 		&UserSession{},
-		&SessionCommand{},
-		&SessionFileEvent{},
-		&Recording{},
 		&TemporaryAccount{},
 		&TemporaryCredential{},
 		&TemporaryAccountGrant{},
-		&AuditLog{},
 	}
 }
 
@@ -308,12 +244,10 @@ func (m *HostAccount) BeforeCreate(_ *gorm.DB) error         { return ensureID(&
 func (m *DatabaseInstance) BeforeCreate(_ *gorm.DB) error   { return ensureID(&m.ID) }
 func (m *DatabaseAccount) BeforeCreate(_ *gorm.DB) error    { return ensureID(&m.ID) }
 func (m *UserSession) BeforeCreate(_ *gorm.DB) error         { return ensureID(&m.ID) }
-func (m *SessionCommand) BeforeCreate(_ *gorm.DB) error      { return ensureID(&m.ID) }
-func (m *SessionFileEvent) BeforeCreate(_ *gorm.DB) error    { return ensureID(&m.ID) }
-func (m *Recording) BeforeCreate(_ *gorm.DB) error           { return ensureID(&m.ID) }
 func (m *TemporaryAccount) BeforeCreate(_ *gorm.DB) error    { return ensureID(&m.ID) }
 func (m *TemporaryCredential) BeforeCreate(_ *gorm.DB) error { return ensureID(&m.ID) }
 func (m *TemporaryAccountGrant) BeforeCreate(_ *gorm.DB) error {
 	return ensureID(&m.ID)
 }
-func (m *AuditLog) BeforeCreate(_ *gorm.DB) error { return ensureID(&m.ID) }
+
+

@@ -72,15 +72,12 @@ var menuOrder = []struct {
 	key    string
 	action string
 }{
-	{"dashboard", "dashboard:view"},
 	{"hosts", "host:view"},
 	{"databases", "dbproxy:view"},
-	{"quickConnect", "session:connect"},
-	{"sessions", "session:view"},
 	{"users", "rbac:manage"},
 	{"roles", "rbac:manage"},
 	{"audit", "audit:view"},
-	{"webTerminal", "session:connect"},
+	{"quickConnect", "session:connect"},
 }
 
 var menuActionMap = func() map[string]string {

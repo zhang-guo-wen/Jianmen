@@ -239,6 +239,7 @@
               {{ formatTime(row.started_at) }}
             </template>
           </el-table-column>
+          <el-table-column prop="comment" :label="t('audit.column.comment')" min-width="140" show-overflow-tooltip />
           <el-table-column prop="sql" :label="t('audit.column.sql')" min-width="320" show-overflow-tooltip />
           <el-table-column prop="error_message" :label="t('audit.column.error')" min-width="180" show-overflow-tooltip />
         </el-table>
@@ -440,6 +441,7 @@ const queryEvents = computed(() => (Array.isArray(detailData.value) ? (detailDat
 interface MergedQueryEvent {
   seq: number;
   sql: string;
+  comment: string;
   query_kind: string;
   status: string;
   duration_ms: number;
@@ -447,13 +449,23 @@ interface MergedQueryEvent {
   error_code?: string;
   error_message?: string;
 }
+function splitSQLComment(sql: string): { comment: string; sql: string } {
+  // 提取 MySQL /++ ... +/ 风格注释，作为来源信息
+  const m = /^\/\*\s*(.+?)\s*\*\/\s*/.exec(sql);
+  if (m) {
+    return { comment: m[1], sql: sql.slice(m[0].length) };
+  }
+  return { comment: '', sql };
+}
 const mergedQueryEvents = computed<MergedQueryEvent[]>(() => {
   const map = new Map<number, MergedQueryEvent>();
   for (const ev of queryEvents.value) {
     const seq = ev.seq ?? 0;
-    const cur = map.get(seq) ?? { seq, sql: ev.sql ?? '', query_kind: ev.query_kind ?? '', status: 'unknown', duration_ms: 0, started_at: ev.started_at ?? 0 };
+    const cur = map.get(seq) ?? { seq, sql: '', comment: '', query_kind: ev.query_kind ?? '', status: 'unknown', duration_ms: 0, started_at: ev.started_at ?? 0 };
     if (ev.type === 'query_started') {
-      cur.sql = ev.sql || cur.sql;
+      const parsed = splitSQLComment(ev.sql || cur.sql);
+      cur.sql = parsed.sql || cur.sql;
+      cur.comment = parsed.comment || cur.comment;
       cur.query_kind = ev.query_kind || cur.query_kind;
       cur.started_at = ev.started_at ?? cur.started_at;
     } else {

@@ -540,7 +540,7 @@ func (g *Gateway) handleMySQL(ctx context.Context, client net.Conn) *gatewayConn
 		return nil
 	}
 
-	// Read upstream handshake
+	// Read upstream handshake — 不转发给客户端（客户端已经响应了 fake handshake）
 	hsPkt, err := readMySQLPacket(upstream)
 	if err != nil {
 		g.logger.Warn("mysql gateway failed to read upstream handshake", "error", err)
@@ -554,21 +554,7 @@ func (g *Gateway) handleMySQL(ctx context.Context, client net.Conn) *gatewayConn
 		return nil
 	}
 
-	// Forward handshake to client
-	if _, err := client.Write(hsPkt.raw); err != nil {
-		upstream.Close()
-		return nil
-	}
-
-	// Read client's auth response
-	_, err = readMySQLPacket(client)
-	if err != nil {
-		g.logger.Warn("mysql gateway failed to read client auth", "error", err)
-		upstream.Close()
-		return nil
-	}
-
-	// Build upstream login with upstream credentials
+	// 直接用存储凭据构建上游登录，不要求客户端二次认证
 	upstreamLogin := BuildMySQLUpstreamLogin(hs, acct.UpstreamUsername, acct.UpstreamPassword.GetPlaintext(), hs.AuthPluginName, 1)
 	if _, err := upstream.Write(upstreamLogin); err != nil {
 		g.logger.Warn("mysql gateway failed to send upstream login", "error", err)

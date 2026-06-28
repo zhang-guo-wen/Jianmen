@@ -92,27 +92,28 @@ type DatabaseInstanceView struct {
 	Name         string `json:"name"`
 	Protocol     string `json:"protocol"`
 	Address      string `json:"address"`
-	GroupName    string `json:"group_name,omitempty"`
+	Port         int    `json:"port"`
+	Group        string `json:"group,omitempty"`
 	Remark       string `json:"remark,omitempty"`
-	Disabled     bool   `json:"disabled"`
+	Status       string `json:"status"`
 	AccountCount int    `json:"account_count"`
 	CreatedAt    string `json:"created_at,omitempty"`
 	UpdatedAt    string `json:"updated_at,omitempty"`
 }
 
 type DatabaseAccountView struct {
-	ID               string     `json:"id"`
-	InstanceID       string     `json:"instance_id"`
-	UniqueName       string     `json:"unique_name"`
-	UpstreamUsername string     `json:"upstream_username"`
-	GroupName        string     `json:"group_name,omitempty"`
-	Remark           string     `json:"remark,omitempty"`
-	ExpiresAt        *time.Time `json:"expires_at,omitempty"`
-	Disabled         bool       `json:"disabled"`
-	ResourceID       string     `json:"resource_id,omitempty"`
-	ResourceSeq      int        `json:"resource_seq,omitempty"`
-	CreatedAt        string     `json:"created_at,omitempty"`
-	UpdatedAt        string     `json:"updated_at,omitempty"`
+	ID         string     `json:"id"`
+	InstanceID string     `json:"instance_id"`
+	UniqueName string     `json:"unique_name"`
+	Username   string     `json:"username"`
+	Group      string     `json:"group,omitempty"`
+	Remark     string     `json:"remark,omitempty"`
+	ExpiresAt  *time.Time `json:"expires_at,omitempty"`
+	Status     string     `json:"status"`
+	ResourceID string     `json:"resource_id,omitempty"`
+	ResourceSeq int       `json:"resource_seq,omitempty"`
+	CreatedAt  string     `json:"created_at,omitempty"`
+	UpdatedAt  string     `json:"updated_at,omitempty"`
 }
 
 type SessionView struct {
@@ -165,14 +166,14 @@ type Store interface {
 
 	DatabaseInstances() []DatabaseInstanceView
 	DatabaseInstance(id string) (DatabaseInstanceView, error)
-	AddDatabaseInstance(name, protocol, address, groupName, remark string) (DatabaseInstanceView, error)
-	UpdateDatabaseInstance(id, name, protocol, address, groupName, remark string, disabled bool) (DatabaseInstanceView, error)
+	AddDatabaseInstance(name, protocol, address string, port int, group, remark string) (DatabaseInstanceView, error)
+	UpdateDatabaseInstance(id, name, protocol, address string, port int, group, remark, status string) (DatabaseInstanceView, error)
 	DeleteDatabaseInstance(id string) error
 
 	InstanceAccounts(instanceID string) ([]DatabaseAccountView, error)
 	DatabaseAccount(id string) (DatabaseAccountView, error)
-	AddDatabaseAccount(instanceID, upstreamUsername, upstreamPassword, groupName, remark string, expiresAt *time.Time) (DatabaseAccountView, error)
-	UpdateDatabaseAccount(id, upstreamUsername, upstreamPassword, groupName, remark string, expiresAt *time.Time, disabled bool) (DatabaseAccountView, error)
+	AddDatabaseAccount(instanceID, username, password, group, remark string, expiresAt *time.Time) (DatabaseAccountView, error)
+	UpdateDatabaseAccount(id, username, password, group, remark string, expiresAt *time.Time, status string) (DatabaseAccountView, error)
 	DeleteDatabaseAccount(id string) error
 
 	DatabaseAccountByUniqueName(uniqueName string) (*model.DatabaseAccount, error)

@@ -163,7 +163,7 @@ func (g *Gateway) handleConn(ctx context.Context, client net.Conn) {
 // 3. Validate via user session password
 // 4. RBAC check
 // 5. Check account disabled/expiry
-// 6. Connect to upstream and relay auth with UpstreamPassword
+// 6. Connect to upstream and relay auth with Password
 func (g *Gateway) handlePG(ctx context.Context, client net.Conn, firstByte byte) *gatewayConn {
 	buf := make([]byte, 8*1024)
 	// 协议检测已读了第1字节，放回缓冲区头部
@@ -279,7 +279,7 @@ func (g *Gateway) handlePG(ctx context.Context, client net.Conn, firstByte byte)
 	}
 
 	// Check account disabled and expiry
-	if acct.Disabled {
+	if acct.Status == "disabled" {
 		g.logger.Warn("db gateway account disabled", "account", resolved.rawName)
 		return nil
 	}
@@ -287,7 +287,7 @@ func (g *Gateway) handlePG(ctx context.Context, client net.Conn, firstByte byte)
 		g.logger.Warn("db gateway account expired", "account", resolved.rawName, "expires_at", acct.ExpiresAt)
 		return nil
 	}
-	if acct.Instance.Disabled {
+	if acct.Instance.Status == "disabled" {
 		g.logger.Warn("db gateway instance disabled", "account", resolved.rawName, "instance", acct.InstanceID)
 		return nil
 	}
@@ -299,8 +299,8 @@ func (g *Gateway) handlePG(ctx context.Context, client net.Conn, firstByte byte)
 		return nil
 	}
 
-	// Forward a new StartupMessage to upstream with UpstreamUsername
-	upUsername := acct.UpstreamUsername
+	// Forward a new StartupMessage to upstream with Username
+	upUsername := acct.Username
 	var sb strings.Builder
 	sb.WriteString("user")
 	sb.WriteByte(0)
@@ -344,7 +344,7 @@ func (g *Gateway) handlePG(ctx context.Context, client net.Conn, firstByte byte)
 
 			if authType == 3 {
 				// CleartextPassword: send upstream password back
-				plainPwd := acct.UpstreamPassword.GetPlaintext()
+				plainPwd := acct.Password.GetPlaintext()
 				pwdMsg := make([]byte, 0, 5+len(plainPwd)+1)
 				pwdMsg = append(pwdMsg, 'p')
 				pwdLenBytes := make([]byte, 4)
@@ -358,7 +358,7 @@ func (g *Gateway) handlePG(ctx context.Context, client net.Conn, firstByte byte)
 				}
 			} else if authType == 5 {
 				// MD5Password: for v1, try sending cleartext anyway
-				plainPwd := acct.UpstreamPassword.GetPlaintext()
+				plainPwd := acct.Password.GetPlaintext()
 				pwdMsg := make([]byte, 0, 5+len(plainPwd)+1)
 				pwdMsg = append(pwdMsg, 'p')
 				pwdLenBytes := make([]byte, 4)
@@ -373,7 +373,7 @@ func (g *Gateway) handlePG(ctx context.Context, client net.Conn, firstByte byte)
 				continue
 			} else if authType == 10 {
 				// SASL/SCRAM-SHA-256：用存储密码完成 SCRAM 交换
-				if err := g.pgSCRAMExchange(upstream, acct.UpstreamUsername, acct.UpstreamPassword.GetPlaintext(), respBuf[:nr]); err != nil {
+				if err := g.pgSCRAMExchange(upstream, acct.Username, acct.Password.GetPlaintext(), respBuf[:nr]); err != nil {
 					g.logger.Warn("pg scram auth failed", "error", err)
 					upstream.Close()
 					return nil
@@ -403,7 +403,7 @@ func (g *Gateway) handlePG(ctx context.Context, client net.Conn, firstByte byte)
 	return &gatewayConn{
 		protocol: "postgres", accountID: acct.ID, accountName: resolved.rawName,
 		upstream: upstream, upstreamAddr: acct.Instance.Address, userID: userID,
-		accountUser: acct.UpstreamUsername, instanceName: acct.Instance.Name,
+		accountUser: acct.Username, instanceName: acct.Instance.Name,
 	}
 }
 
@@ -521,7 +521,7 @@ func (g *Gateway) handleMySQL(ctx context.Context, client net.Conn) *gatewayConn
 	}
 
 	// Check account disabled and expiry
-	if acct.Disabled {
+	if acct.Status == "disabled" {
 		g.logger.Warn("mysql gateway account disabled", "account", resolved.rawName)
 		return nil
 	}
@@ -552,7 +552,7 @@ func (g *Gateway) handleMySQL(ctx context.Context, client net.Conn) *gatewayConn
 	}
 
 	// 直接用存储凭据构建上游登录，不要求客户端二次认证
-	upstreamLogin := BuildMySQLUpstreamLogin(hs, acct.UpstreamUsername, acct.UpstreamPassword.GetPlaintext(), hs.AuthPluginName, 1)
+	upstreamLogin := BuildMySQLUpstreamLogin(hs, acct.Username, acct.Password.GetPlaintext(), hs.AuthPluginName, 1)
 	if _, err := upstream.Write(upstreamLogin); err != nil {
 		g.logger.Warn("mysql gateway failed to send upstream login", "error", err)
 		upstream.Close()
@@ -612,7 +612,7 @@ func (g *Gateway) handleMySQL(ctx context.Context, client net.Conn) *gatewayConn
 				upstream:     upstream,
 				upstreamAddr: acct.Instance.Address,
 				userID:       rbacUserID,
-				accountUser:  acct.UpstreamUsername,
+				accountUser:  acct.Username,
 				instanceName: acct.Instance.Name,
 			}
 		}
@@ -639,7 +639,7 @@ func (g *Gateway) handleMySQL(ctx context.Context, client net.Conn) *gatewayConn
 		upstream:     upstream,
 		upstreamAddr: acct.Instance.Address,
 		userID:       rbacUserID,
-		accountUser:  acct.UpstreamUsername,
+		accountUser:  acct.Username,
 		instanceName: acct.Instance.Name,
 	}
 }
@@ -669,7 +669,7 @@ func (g *Gateway) handleMySQLAuthSwitch(upstream net.Conn, acct *model.DatabaseA
 	authData := payload[nullPos+1:]
 
 	// 构建 raw auth response
-	authResp := BuildMySQLAuthResponse(newPlugin, acct.UpstreamPassword.GetPlaintext(), authData)
+	authResp := BuildMySQLAuthResponse(newPlugin, acct.Password.GetPlaintext(), authData)
 	if authResp == nil {
 		return nil, fmt.Errorf("unsupported auth switch plugin: %s", newPlugin)
 	}

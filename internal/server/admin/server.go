@@ -696,7 +696,6 @@ func (s *Server) handleTestConnection(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer r.Body.Close()
-	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	var target config.Target
 	if err := json.NewDecoder(r.Body).Decode(&target); err != nil {
 		writeError(w, http.StatusBadRequest, err)
@@ -766,7 +765,6 @@ func (s *Server) handleTarget(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleUpdateTarget(w http.ResponseWriter, r *http.Request, id string) {
 	defer r.Body.Close()
-	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	var target config.Target
 	if err := json.NewDecoder(r.Body).Decode(&target); err != nil {
 		writeError(w, http.StatusBadRequest, err)
@@ -861,17 +859,18 @@ func (s *Server) handleCreateDBInstance(w http.ResponseWriter, r *http.Request) 
 	defer r.Body.Close()
 	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	var payload struct {
-		Name      string `json:"name"`
-		Protocol  string `json:"protocol"`
-		Address   string `json:"address"`
-		GroupName string `json:"group_name"`
-		Remark    string `json:"remark"`
+		Name     string `json:"name"`
+		Protocol string `json:"protocol"`
+		Address  string `json:"address"`
+		Port     int    `json:"port"`
+		Group    string `json:"group"`
+		Remark   string `json:"remark"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	view, err := s.store.AddDatabaseInstance(payload.Name, payload.Protocol, ensureDBPort(payload.Address, payload.Protocol), payload.GroupName, payload.Remark)
+	view, err := s.store.AddDatabaseInstance(payload.Name, payload.Protocol, payload.Address, payload.Port, payload.Group, payload.Remark)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
@@ -907,8 +906,8 @@ func (s *Server) handleDBInstance(w http.ResponseWriter, r *http.Request) {
 				matched := make([]store.DatabaseAccountView, 0, len(accounts))
 				for _, acc := range accounts {
 					if strings.Contains(strings.ToLower(acc.UniqueName), searchLower) ||
-						strings.Contains(strings.ToLower(acc.UpstreamUsername), searchLower) ||
-						strings.Contains(strings.ToLower(acc.GroupName), searchLower) {
+						strings.Contains(strings.ToLower(acc.Username), searchLower) ||
+						strings.Contains(strings.ToLower(acc.Group), searchLower) {
 						matched = append(matched, acc)
 					}
 				}
@@ -972,18 +971,19 @@ func (s *Server) handleUpdateDBInstance(w http.ResponseWriter, r *http.Request, 
 	defer r.Body.Close()
 	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	var payload struct {
-		Name      string `json:"name"`
-		Protocol  string `json:"protocol"`
-		Address   string `json:"address"`
-		GroupName string `json:"group_name"`
-		Remark    string `json:"remark"`
-		Disabled  bool   `json:"disabled"`
+		Name     string `json:"name"`
+		Protocol string `json:"protocol"`
+		Address  string `json:"address"`
+		Port     int    `json:"port"`
+		Group    string `json:"group"`
+		Remark   string `json:"remark"`
+		Status   string `json:"status"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	view, err := s.store.UpdateDatabaseInstance(id, payload.Name, payload.Protocol, ensureDBPort(payload.Address, payload.Protocol), payload.GroupName, payload.Remark, payload.Disabled)
+	view, err := s.store.UpdateDatabaseInstance(id, payload.Name, payload.Protocol, payload.Address, payload.Port, payload.Group, payload.Remark, payload.Status)
 	if err != nil {
 		writeDBStoreError(w, err)
 		return
@@ -993,11 +993,10 @@ func (s *Server) handleUpdateDBInstance(w http.ResponseWriter, r *http.Request, 
 
 func (s *Server) handleCreateDBAccount(w http.ResponseWriter, r *http.Request, instanceID string) {
 	defer r.Body.Close()
-	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	var payload struct {
-		UpstreamUsername string     `json:"upstream_username"`
-		UpstreamPassword string     `json:"upstream_password"`
-		GroupName        string     `json:"group_name"`
+		Username string     `json:"username"`
+		Password string     `json:"password"`
+		Group     string     `json:"group"`
 		Remark           string     `json:"remark"`
 		ExpiresAt        *time.Time `json:"expires_at"`
 	}
@@ -1005,7 +1004,7 @@ func (s *Server) handleCreateDBAccount(w http.ResponseWriter, r *http.Request, i
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	view, err := s.store.AddDatabaseAccount(instanceID, payload.UpstreamUsername, payload.UpstreamPassword, payload.GroupName, payload.Remark, payload.ExpiresAt)
+	view, err := s.store.AddDatabaseAccount(instanceID, payload.Username, payload.Password, payload.Group, payload.Remark, payload.ExpiresAt)
 	if err != nil {
 		writeDBStoreError(w, err)
 		return
@@ -1050,20 +1049,19 @@ func (s *Server) handleDBAccount(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleUpdateDBAccount(w http.ResponseWriter, r *http.Request, id string) {
 	defer r.Body.Close()
-	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	var payload struct {
-		UpstreamUsername string     `json:"upstream_username"`
-		UpstreamPassword string     `json:"upstream_password"`
-		GroupName        string     `json:"group_name"`
-		Remark           string     `json:"remark"`
-		ExpiresAt        *time.Time `json:"expires_at"`
-		Disabled         bool       `json:"disabled"`
+		Username  string     `json:"username"`
+		Password  string     `json:"password"`
+		Group     string     `json:"group"`
+		Remark    string     `json:"remark"`
+		ExpiresAt *time.Time `json:"expires_at"`
+		Status    string     `json:"status"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	view, err := s.store.UpdateDatabaseAccount(id, payload.UpstreamUsername, payload.UpstreamPassword, payload.GroupName, payload.Remark, payload.ExpiresAt, payload.Disabled)
+	view, err := s.store.UpdateDatabaseAccount(id, payload.Username, payload.Password, payload.Group, payload.Remark, payload.ExpiresAt, payload.Status)
 	if err != nil {
 		writeDBStoreError(w, err)
 		return
@@ -1117,9 +1115,9 @@ func (s *Server) handleUserSessions(w http.ResponseWriter, r *http.Request) {
 	} else if errors.Is(err, gorm.ErrRecordNotFound) {
 		// 尝试数据库账号
 		var dbAccount model.DatabaseAccount
-		if err := s.db.Where("id = ? AND disabled = ?", req.TargetID, false).First(&dbAccount).Error; err == nil {
+		if err := s.db.Where("id = ? AND status = ?", req.TargetID, false).First(&dbAccount).Error; err == nil {
 			// 验证数据库实例未被禁用
-			if dbAccount.Instance.Disabled {
+			if dbAccount.Instance.Status == "disabled" {
 				writeErrorText(w, http.StatusForbidden, "database instance is disabled")
 				return
 			}

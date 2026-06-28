@@ -105,9 +105,10 @@ type DatabaseInstanceView struct {
 	Name         string    `json:"name"`
 	Protocol     string    `json:"protocol"`
 	Address      string    `json:"address"`
-	GroupName    string    `json:"group_name,omitempty"`
+	Port         int       `json:"port"`
+	Group        string    `json:"group,omitempty"`
 	Remark       string    `json:"remark,omitempty"`
-	Disabled     bool      `json:"disabled"`
+	Status       string    `json:"status"`
 	AccountCount int64     `json:"account_count"`
 	CreatedAt    time.Time `json:"created_at"`
 	UpdatedAt    time.Time `json:"updated_at"`
@@ -117,11 +118,11 @@ type DatabaseAccountView struct {
 	ID               string     `json:"id"`
 	InstanceID       string     `json:"instance_id"`
 	UniqueName       string     `json:"unique_name"`
-	UpstreamUsername string     `json:"upstream_username"`
-	GroupName        string     `json:"group_name,omitempty"`
+	Username   string     `json:"username"`
+	Group      string     `json:"group,omitempty"`
 	Remark           string     `json:"remark,omitempty"`
 	ExpiresAt        *time.Time `json:"expires_at,omitempty"`
-	Disabled         bool       `json:"disabled"`
+	Status     string     `json:"status"`
 	ResourceID       string     `json:"resource_id,omitempty"`
 	ResourceSeq      int        `json:"resource_seq,omitempty"`
 	CreatedAt        time.Time  `json:"created_at"`
@@ -377,9 +378,10 @@ func (s *StaticStore) DatabaseInstances() []DatabaseInstanceView {
 			Name:         inst.Name,
 			Protocol:     inst.Protocol,
 			Address:      inst.Address,
-			GroupName:    inst.GroupName,
+		Port:         inst.Port,
+			Group:    inst.GroupName,
 			Remark:       inst.Remark,
-			Disabled:     inst.Disabled,
+			Status:       inst.Status,
 			AccountCount: count,
 			CreatedAt:    inst.CreatedAt,
 			UpdatedAt:    inst.UpdatedAt,
@@ -404,16 +406,17 @@ func (s *StaticStore) DatabaseInstance(id string) (DatabaseInstanceView, error) 
 		Name:         inst.Name,
 		Protocol:     inst.Protocol,
 		Address:      inst.Address,
-		GroupName:    inst.GroupName,
+		Port:         inst.Port,
+		Group:    inst.GroupName,
 		Remark:       inst.Remark,
-		Disabled:     inst.Disabled,
+		Status:       inst.Status,
 		AccountCount: count,
 		CreatedAt:    inst.CreatedAt,
 		UpdatedAt:    inst.UpdatedAt,
 	}, nil
 }
 
-func (s *StaticStore) AddDatabaseInstance(name, protocol, address, groupName, remark string) (DatabaseInstanceView, error) {
+func (s *StaticStore) AddDatabaseInstance(name, protocol, address string, port int, group, remark string) (DatabaseInstanceView, error) {
 	protocol = strings.ToLower(strings.TrimSpace(protocol))
 	if protocol == "" || protocol == "pg" || protocol == "postgresql" {
 		protocol = "postgres"
@@ -428,7 +431,8 @@ func (s *StaticStore) AddDatabaseInstance(name, protocol, address, groupName, re
 		Name:      strings.TrimSpace(name),
 		Protocol:  protocol,
 		Address:   strings.TrimSpace(address),
-		GroupName: strings.TrimSpace(groupName),
+			Port:      port,
+		GroupName: strings.TrimSpace(group),
 		Remark:    strings.TrimSpace(remark),
 	}
 	if inst.Name == "" {
@@ -442,15 +446,16 @@ func (s *StaticStore) AddDatabaseInstance(name, protocol, address, groupName, re
 		Name:      inst.Name,
 		Protocol:  inst.Protocol,
 		Address:   inst.Address,
-		GroupName: inst.GroupName,
+		Port:         inst.Port,
+		Group: inst.GroupName,
 		Remark:    inst.Remark,
-		Disabled:  inst.Disabled,
+		Status:       inst.Status,
 		CreatedAt: inst.CreatedAt,
 		UpdatedAt: inst.UpdatedAt,
 	}, nil
 }
 
-func (s *StaticStore) UpdateDatabaseInstance(id, name, protocol, address, groupName, remark string, disabled bool) (DatabaseInstanceView, error) {
+func (s *StaticStore) UpdateDatabaseInstance(id, name, protocol, address string, port int, group, remark, status string) (DatabaseInstanceView, error) {
 	id = strings.TrimSpace(id)
 	var inst model.DatabaseInstance
 	if err := s.db.First(&inst, "id = ?", id).Error; err != nil {
@@ -472,9 +477,10 @@ func (s *StaticStore) UpdateDatabaseInstance(id, name, protocol, address, groupN
 	inst.Name = strings.TrimSpace(name)
 	inst.Protocol = protocol
 	inst.Address = strings.TrimSpace(address)
-	inst.GroupName = strings.TrimSpace(groupName)
+	inst.Port = port
+	inst.GroupName = strings.TrimSpace(group)
 	inst.Remark = strings.TrimSpace(remark)
-	inst.Disabled = disabled
+	inst.Status = status
 	if inst.Name == "" {
 		inst.Name = inst.Address
 	}
@@ -488,9 +494,10 @@ func (s *StaticStore) UpdateDatabaseInstance(id, name, protocol, address, groupN
 		Name:         inst.Name,
 		Protocol:     inst.Protocol,
 		Address:      inst.Address,
-		GroupName:    inst.GroupName,
+		Port:         inst.Port,
+		Group:    inst.GroupName,
 		Remark:       inst.Remark,
-		Disabled:     inst.Disabled,
+		Status:       inst.Status,
 		AccountCount: count,
 		CreatedAt:    inst.CreatedAt,
 		UpdatedAt:    inst.UpdatedAt,
@@ -541,11 +548,11 @@ func (s *StaticStore) DatabaseAccount(id string) (DatabaseAccountView, error) {
 	return s.databaseAccountView(acct), nil
 }
 
-func (s *StaticStore) AddDatabaseAccount(instanceID, upstreamUsername, upstreamPassword, groupName, remark string, expiresAt *time.Time) (DatabaseAccountView, error) {
+func (s *StaticStore) AddDatabaseAccount(instanceID, username, password, group, remark string, expiresAt *time.Time) (DatabaseAccountView, error) {
 	instanceID = strings.TrimSpace(instanceID)
-	upstreamUsername = strings.TrimSpace(upstreamUsername)
-	if upstreamUsername == "" {
-		return DatabaseAccountView{}, errors.New("upstream username is required")
+	username = strings.TrimSpace(username)
+	if username == "" {
+		return DatabaseAccountView{}, errors.New("username is required")
 	}
 	// Verify instance exists
 	var inst model.DatabaseInstance
@@ -562,9 +569,9 @@ func (s *StaticStore) AddDatabaseAccount(instanceID, upstreamUsername, upstreamP
 	acct := model.DatabaseAccount{
 		InstanceID:       instanceID,
 		UniqueName:       uniqueName,
-		UpstreamUsername: upstreamUsername,
-		UpstreamPassword: model.NewEncryptedField(upstreamPassword),
-		GroupName:        strings.TrimSpace(groupName),
+		Username:   username,
+		Password:   model.NewEncryptedField(password),
+		GroupName:        strings.TrimSpace(group),
 		Remark:           strings.TrimSpace(remark),
 		ExpiresAt:        expiresAt,
 	}
@@ -579,9 +586,9 @@ func (s *StaticStore) AddDatabaseAccount(instanceID, upstreamUsername, upstreamP
 	return s.databaseAccountView(acct), nil
 }
 
-func (s *StaticStore) UpdateDatabaseAccount(id, upstreamUsername, upstreamPassword, groupName, remark string, expiresAt *time.Time, disabled bool) (DatabaseAccountView, error) {
+func (s *StaticStore) UpdateDatabaseAccount(id, username, password, group, remark string, expiresAt *time.Time, status string) (DatabaseAccountView, error) {
 	id = strings.TrimSpace(id)
-	upstreamUsername = strings.TrimSpace(upstreamUsername)
+	username = strings.TrimSpace(username)
 	var acct model.DatabaseAccount
 	if err := s.db.First(&acct, "id = ?", id).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -589,16 +596,16 @@ func (s *StaticStore) UpdateDatabaseAccount(id, upstreamUsername, upstreamPasswo
 		}
 		return DatabaseAccountView{}, err
 	}
-	if upstreamUsername != "" {
-		acct.UpstreamUsername = upstreamUsername
+	if username != "" {
+		acct.Username = username
 	}
-	if upstreamPassword != "" {
-		acct.UpstreamPassword = model.NewEncryptedField(upstreamPassword)
+	if password != "" {
+		acct.Password = model.NewEncryptedField(password)
 	}
-	acct.GroupName = strings.TrimSpace(groupName)
+	acct.GroupName = strings.TrimSpace(group)
 	acct.Remark = strings.TrimSpace(remark)
 	acct.ExpiresAt = expiresAt
-	acct.Disabled = disabled
+	acct.Status = status
 	if err := s.db.Save(&acct).Error; err != nil {
 		return DatabaseAccountView{}, err
 	}
@@ -648,11 +655,11 @@ func (s *StaticStore) databaseAccountView(acct model.DatabaseAccount) DatabaseAc
 		ID:               acct.ID,
 		InstanceID:       acct.InstanceID,
 		UniqueName:       acct.UniqueName,
-		UpstreamUsername: acct.UpstreamUsername,
-		GroupName:        acct.GroupName,
+		Username: acct.Username,
+		Group:        acct.GroupName,
 		Remark:           acct.Remark,
 		ExpiresAt:        acct.ExpiresAt,
-		Disabled:         acct.Disabled,
+		Status:         acct.Status,
 		ResourceID:       acct.ResourceID,
 		ResourceSeq:      acct.ResourceSeq,
 		CreatedAt:        acct.CreatedAt,

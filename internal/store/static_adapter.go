@@ -189,15 +189,15 @@ func (a *StaticAdapter) DatabaseInstance(id string) (DatabaseInstanceView, error
 	}
 	return adaptDatabaseInstanceView(v), nil
 }
-func (a *StaticAdapter) AddDatabaseInstance(name, protocol, address, groupName, remark string) (DatabaseInstanceView, error) {
-	v, err := a.inner.AddDatabaseInstance(name, protocol, address, groupName, remark)
+func (a *StaticAdapter) AddDatabaseInstance(name, protocol, address string, port int, group, remark string) (DatabaseInstanceView, error) {
+	v, err := a.inner.AddDatabaseInstance(name, protocol, address, port, group, remark)
 	if err != nil {
 		return DatabaseInstanceView{}, err
 	}
 	return adaptDatabaseInstanceView(v), nil
 }
-func (a *StaticAdapter) UpdateDatabaseInstance(id, name, protocol, address, groupName, remark string, disabled bool) (DatabaseInstanceView, error) {
-	v, err := a.inner.UpdateDatabaseInstance(id, name, protocol, address, groupName, remark, disabled)
+func (a *StaticAdapter) UpdateDatabaseInstance(id, name, protocol, address string, port int, group, remark, status string) (DatabaseInstanceView, error) {
+	v, err := a.inner.UpdateDatabaseInstance(id, name, protocol, address, port, group, remark, status)
 	if err != nil {
 		return DatabaseInstanceView{}, err
 	}
@@ -227,15 +227,15 @@ func (a *StaticAdapter) DatabaseAccount(id string) (DatabaseAccountView, error) 
 	}
 	return adaptDatabaseAccountView(v), nil
 }
-func (a *StaticAdapter) AddDatabaseAccount(instanceID, upstreamUsername, upstreamPassword, groupName, remark string, expiresAt *time.Time) (DatabaseAccountView, error) {
-	v, err := a.inner.AddDatabaseAccount(instanceID, upstreamUsername, upstreamPassword, groupName, remark, expiresAt)
+func (a *StaticAdapter) AddDatabaseAccount(instanceID, username, password, group, remark string, expiresAt *time.Time) (DatabaseAccountView, error) {
+	v, err := a.inner.AddDatabaseAccount(instanceID, username, password, group, remark, expiresAt)
 	if err != nil {
 		return DatabaseAccountView{}, err
 	}
 	return adaptDatabaseAccountView(v), nil
 }
-func (a *StaticAdapter) UpdateDatabaseAccount(id, upstreamUsername, upstreamPassword, groupName, remark string, expiresAt *time.Time, disabled bool) (DatabaseAccountView, error) {
-	v, err := a.inner.UpdateDatabaseAccount(id, upstreamUsername, upstreamPassword, groupName, remark, expiresAt, disabled)
+func (a *StaticAdapter) UpdateDatabaseAccount(id, username, password, group, remark string, expiresAt *time.Time, status string) (DatabaseAccountView, error) {
+	v, err := a.inner.UpdateDatabaseAccount(id, username, password, group, remark, expiresAt, status)
 	if err != nil {
 		return DatabaseAccountView{}, err
 	}
@@ -261,9 +261,10 @@ func adaptDatabaseInstanceView(v access.DatabaseInstanceView) DatabaseInstanceVi
 		Name:         v.Name,
 		Protocol:     v.Protocol,
 		Address:      v.Address,
-		GroupName:    v.GroupName,
+		Port:         v.Port,
+		Group:        v.Group,
 		Remark:       v.Remark,
-		Disabled:     v.Disabled,
+		Status:       v.Status,
 		AccountCount: int(v.AccountCount),
 		CreatedAt:    timeToStr(v.CreatedAt),
 		UpdatedAt:    timeToStr(v.UpdatedAt),
@@ -275,11 +276,11 @@ func adaptDatabaseAccountView(v access.DatabaseAccountView) DatabaseAccountView 
 		ID:               v.ID,
 		InstanceID:       v.InstanceID,
 		UniqueName:       v.UniqueName,
-		UpstreamUsername: v.UpstreamUsername,
-		GroupName:        v.GroupName,
+		Username:   v.Username,
+		Group:        v.Group,
 		Remark:           v.Remark,
 		ExpiresAt:        v.ExpiresAt,
-		Disabled:         v.Disabled,
+		Status:       v.Status,
 		ResourceID:       v.ResourceID,
 		ResourceSeq:      v.ResourceSeq,
 		CreatedAt:        timeToStr(v.CreatedAt),

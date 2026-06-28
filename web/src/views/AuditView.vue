@@ -572,7 +572,7 @@ function formatTime(value: unknown): string {
 function formatDuration(value: unknown): string {
   if (value === undefined || value === null) return t('common.none');
   const n = Number(value);
-  if (!Number.isFinite(n) || n === 0) return t('common.none');
+  if (!Number.isFinite(n)) return t('common.none');
   return `${n} ms`;
 }
 

@@ -913,6 +913,7 @@ func dbAccountResourceID(acct *model.DatabaseAccount) string {
 }
 
 func copyClientToUpstream(client net.Conn, upstream net.Conn, observer queryObserver) {
+	defer func() { recover() }()
 	buf := make([]byte, 32*1024)
 	for {
 		n, err := client.Read(buf)
@@ -932,6 +933,7 @@ func copyClientToUpstream(client net.Conn, upstream net.Conn, observer queryObse
 }
 
 func copyUpstreamToClient(client net.Conn, upstream net.Conn, observer queryObserver) {
+	defer func() { recover() }()
 	buf := make([]byte, 32*1024)
 	for {
 		n, err := upstream.Read(buf)

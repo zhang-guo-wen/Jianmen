@@ -109,7 +109,12 @@ func (o *mysqlObserver) ErrorResponse(decision queryDecision) []byte {
 	return mysqlPacketWithSeq(1, payload)
 }
 
-func (o *mysqlObserver) handleClientPacket(seq byte, payload []byte) *queryDecision {
+func (o *mysqlObserver) handleClientPacket(seq byte, payload []byte) (decision *queryDecision) {
+	defer func() {
+		if r := recover(); r != nil {
+			decision = nil // 防止 panic 导致连接卡死
+		}
+	}()
 	if len(payload) == 0 || o.sink == nil {
 		return nil
 	}
@@ -136,7 +141,10 @@ func (o *mysqlObserver) handleClientPacket(seq byte, payload []byte) *queryDecis
 		}
 		o.pending = append(o.pending, record)
 	case 0x17: // COM_STMT_EXECUTE
-		stmtID := int(binary.LittleEndian.Uint32(payload[1:5]))
+		stmtID := 0
+		if len(payload) >= 5 {
+			stmtID = int(binary.LittleEndian.Uint32(payload[1:5]))
+		}
 		record, decision := o.sink.StartQuery(fmt.Sprintf("EXECUTE stmt_id=%d", stmtID), map[string]any{
 			"protocol": "mysql",
 			"command":  "COM_STMT_EXECUTE",
@@ -152,6 +160,7 @@ func (o *mysqlObserver) handleClientPacket(seq byte, payload []byte) *queryDecis
 }
 
 func (o *mysqlObserver) handleServerPacket(payload []byte) {
+	defer func() { recover() }()
 	if len(payload) == 0 || len(o.pending) == 0 || o.sink == nil {
 		return
 	}

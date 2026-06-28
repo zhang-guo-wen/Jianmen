@@ -2,6 +2,7 @@ import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router'
 
 import { apiClient, getToken } from '@/api/client';
 import type { TranslationKey } from '@/i18n';
+import { usePermissionStore } from '@/stores/permission';
 import AuditView from '@/views/AuditView.vue';
 import DashboardView from '@/views/DashboardView.vue';
 import DatabaseView from '@/views/DatabaseView.vue';
@@ -10,13 +11,28 @@ import LoginView from '@/views/LoginView.vue';
 import QuickConnectView from '@/views/QuickConnectView.vue';
 import SetupView from '@/views/SetupView.vue';
 import RBACView from '@/views/RBACView.vue';
+import RolesView from '@/views/RolesView.vue';
 import SessionsView from '@/views/SessionsView.vue';
+import UsersView from '@/views/UsersView.vue';
 import WebTerminalView from '@/views/WebTerminalView.vue';
 
 type AppRouteMeta = {
   public?: boolean;
   titleKey: TranslationKey;
   descriptionKey: TranslationKey;
+};
+
+const routeMenuMap: Record<string, string> = {
+  '/dashboard': 'dashboard',
+  '/hosts': 'hosts',
+  '/databases': 'databases',
+  '/quick-connect': 'quickConnect',
+  '/sessions': 'sessions',
+  '/rbac': 'rbac',
+  '/audit': 'audit',
+  '/web-terminal': 'webTerminal',
+  '/users': 'rbac',
+  '/roles': 'rbac',
 };
 
 const routes: RouteRecordRaw[] = [
@@ -99,6 +115,24 @@ const routes: RouteRecordRaw[] = [
     } satisfies AppRouteMeta
   },
   {
+    path: '/users',
+    name: 'users',
+    component: UsersView,
+    meta: {
+      titleKey: 'route.users.title',
+      descriptionKey: 'route.users.description',
+    } satisfies AppRouteMeta,
+  },
+  {
+    path: '/roles',
+    name: 'roles',
+    component: RolesView,
+    meta: {
+      titleKey: 'route.roles.title',
+      descriptionKey: 'route.roles.description',
+    } satisfies AppRouteMeta,
+  },
+  {
     path: '/audit',
     name: 'audit',
     component: AuditView,
@@ -153,6 +187,17 @@ router.beforeEach(async (to) => {
 
   // 公开路由或已登录
   if (to.meta.public || getToken()) {
+    // Check permission for non-public routes
+    if (!to.meta.public) {
+      const store = usePermissionStore();
+      if (!store.loaded) {
+        await store.fetch();
+      }
+      const menuKey = routeMenuMap[to.path];
+      if (menuKey && !store.canAccessMenu(menuKey)) {
+        return { name: 'dashboard' };
+      }
+    }
     return true;
   }
 

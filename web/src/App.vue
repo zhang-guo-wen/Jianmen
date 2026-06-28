@@ -90,10 +90,11 @@ import {
   Platform,
   UserFilled
 } from '@element-plus/icons-vue';
-import { computed, watchEffect, type Component } from 'vue';
+import { computed, onMounted, watchEffect, type Component } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 
-import { clearToken } from '@/api/client';
+import { clearToken, getToken } from '@/api/client';
+import { usePermissionStore } from '@/stores/permission';
 import { isTranslationKey, useI18n, type Locale, type TranslationKey } from '@/i18n';
 
 const route = useRoute();
@@ -128,6 +129,17 @@ const navItems: NavItem[] = [
   { path: '/audit', icon: DocumentChecked, labelKey: 'nav.audit' },
   { path: '/web-terminal', icon: Platform, labelKey: 'nav.webTerminal' }
 ];
+
+const permission = usePermissionStore();
+const navItems = computed(() =>
+  ALL_NAV_ITEMS.filter(item => permission.canAccessMenu(item.menuKey))
+);
+
+onMounted(async () => {
+  if (!isLoginRoute.value && getToken()) {
+    await permission.fetch();
+  }
+});
 
 function metaText(value: unknown, fallbackKey: TranslationKey): string {
   return t(isTranslationKey(value) ? value : fallbackKey);

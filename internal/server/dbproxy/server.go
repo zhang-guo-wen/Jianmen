@@ -984,6 +984,7 @@ func (g *Gateway) newRecorder(conn *gatewayConn) (*connectionRecorder, error) {
 		StartedAt:    startedAt.Format(time.RFC3339Nano),
 		AccountName:  conn.accountUser,
 		InstanceName: conn.instanceName,
+		AuthUser:     conn.userID,
 	}
 	file, err := os.OpenFile(filepath.Join(dir, "queries.jsonl"), os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
 	if err != nil {

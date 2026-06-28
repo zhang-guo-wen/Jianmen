@@ -47,28 +47,32 @@
       </div>
       <el-alert v-if="sessionError" :title="sessionError" type="error" show-icon />
       <el-table v-else v-loading="sessionsLoading" :data="pagedSessions" height="380" row-key="id">
-        <el-table-column :label="t('sessions.column.user')" min-width="130">
-          <template #default="{ row }">
-            {{ sessionUser(row) }}
-          </template>
-        </el-table-column>
-        <el-table-column :label="t('sessions.column.target')" min-width="190" show-overflow-tooltip>
+        <el-table-column :label="t('audit.column.instance')" min-width="150" show-overflow-tooltip>
           <template #default="{ row }">
             {{ row.target || row.target_id || t('common.none') }}
           </template>
         </el-table-column>
-        <el-table-column :label="t('audit.column.protocol')" width="110">
+        <el-table-column :label="t('audit.column.account')" min-width="120" show-overflow-tooltip>
+          <template #default="{ row }">
+            {{ row.account_username || '-' }}
+          </template>
+        </el-table-column>
+        <el-table-column :label="t('audit.column.operator')" min-width="120">
+          <template #default="{ row }">
+            {{ sessionUser(row) }}
+          </template>
+        </el-table-column>
+        <el-table-column :label="t('audit.column.protocol')" width="90">
           <template #default="{ row }">
             <el-tag :type="sessionProtocolTag(row)" size="small" effect="plain">{{ sessionProtocol(row) }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="client_ip" :label="t('audit.column.client')" min-width="130" />
-        <el-table-column :label="t('sessions.column.started')" width="175" show-overflow-tooltip class-name="col-time">
+        <el-table-column :label="t('sessions.column.started')" width="170" show-overflow-tooltip class-name="col-time">
           <template #default="{ row }">
             {{ formatTime(row.started_at ?? row.startedAt) }}
           </template>
         </el-table-column>
-        <el-table-column :label="t('sessions.column.duration')" width="90">
+        <el-table-column :label="t('audit.column.duration')" width="90">
           <template #default="{ row }">
             {{ formatDurationSeconds(row.duration_seconds) }}
           </template>
@@ -101,11 +105,14 @@
       </template>
       <el-alert v-if="dbError" :title="dbError" type="warning" show-icon />
       <el-table v-else v-loading="dbLoading" :data="dbConnections" height="380" row-key="id">
-        <el-table-column :label="t('database.instance.name')" min-width="150" show-overflow-tooltip>
+        <el-table-column :label="t('audit.column.instance')" min-width="150" show-overflow-tooltip>
           <template #default="{ row }">{{ row.instance_name || row.upstream_addr || '-' }}</template>
         </el-table-column>
-        <el-table-column :label="t('database.account.title')" min-width="120" show-overflow-tooltip>
-          <template #default="{ row }">{{ row.account_name || row.name || '-' }}</template>
+        <el-table-column :label="t('audit.column.account')" min-width="120" show-overflow-tooltip>
+          <template #default="{ row }">{{ row.account_name || '-' }}</template>
+        </el-table-column>
+        <el-table-column :label="t('audit.column.operator')" min-width="120" show-overflow-tooltip>
+          <template #default="{ row }">{{ row.name || '-' }}</template>
         </el-table-column>
         <el-table-column prop="protocol" :label="t('audit.column.protocol')" width="90" />
         <el-table-column :label="t('sessions.column.started')" min-width="170" show-overflow-tooltip class-name="col-time">

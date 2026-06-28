@@ -27,7 +27,7 @@
         </el-table-column>
         <el-table-column :label="t('common.status')" width="90">
           <template #default="{ row }">
-            <el-tag :type="statusTagType(row)" size="small">{{ row.status || t('common.enabled') }}</el-tag>
+            <el-tag :type="row.status === 'disabled' ? 'info' : 'success'" size="small">{{ row.status === 'disabled' ? t('common.disabled') : t('common.enabled') }}</el-tag>
           </template>
         </el-table-column>
         <el-table-column :label="t('common.actions')" fixed="right" width="100">
@@ -63,7 +63,7 @@
         </el-table-column>
         <el-table-column :label="t('common.status')" width="90">
           <template #default="{ row }">
-            <el-tag :type="row.disabled ? 'info' : 'success'" size="small">{{ row.disabled ? t('common.disabled') : t('common.enabled') }}</el-tag>
+            <el-tag :type="row.status === 'disabled' ? 'info' : 'success'" size="small">{{ row.status === 'disabled' ? t('common.disabled') : t('common.enabled') }}</el-tag>
           </template>
         </el-table-column>
         <el-table-column :label="t('common.actions')" fixed="right" width="100">
@@ -155,8 +155,6 @@ const dialogTitle = computed(() => connectType.value === 'ssh' ? 'SSH 连接' : 
 function targetHost(t: TargetRecord): string { return String(t.host || t.address || ''); }
 function targetPort(t: TargetRecord): number { return Number(t.port) || 22; }
 function accountName(t: TargetRecord): string { return String(t.username || ''); }
-function statusTagType(t: TargetRecord): 'success' | 'info' { return t.status === 'disabled' ? 'info' : 'success'; }
-
 async function loadTargets() {
   sshLoading.value = true;
   sshError.value = '';

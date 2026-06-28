@@ -826,6 +826,8 @@ func normalizeConfigTarget(t config.Target) config.Target {
 	t.ID = strings.TrimSpace(t.ID)
 	t.Name = strings.TrimSpace(t.Name)
 	t.HostID = strings.TrimSpace(t.HostID)
+	t.Group = strings.TrimSpace(t.Group)
+	t.Remark = strings.TrimSpace(t.Remark)
 	t.Host = strings.TrimSpace(t.Host)
 	t.Username = strings.TrimSpace(t.Username)
 	t.Password = strings.TrimSpace(t.Password)

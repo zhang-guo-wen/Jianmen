@@ -159,6 +159,7 @@ func testPostgresAuth(conn net.Conn, username, password string) error {
 	return fmt.Errorf("auth failed")
 }
 
+// TODO(SCRAM): 同 server.go pgSCRAMExchange，见 docs/known-issues.md
 // testPGScramAuth 处理 SASL/SCRAM-SHA-256 认证
 func testPGScramAuth(conn net.Conn, username, password string, initMsg []byte) error {
 	// 跳过 SASL mechanism list，直接选 SCRAM-SHA-256

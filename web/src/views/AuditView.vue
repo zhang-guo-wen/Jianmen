@@ -101,14 +101,21 @@
       </template>
       <el-alert v-if="dbError" :title="dbError" type="warning" show-icon />
       <el-table v-else v-loading="dbLoading" :data="dbConnections" height="380" row-key="id">
-        <el-table-column prop="id" :label="t('common.id')" min-width="160" />
-        <el-table-column prop="name" :label="t('common.name')" min-width="150" />
-        <el-table-column prop="protocol" :label="t('audit.column.protocol')" width="120" />
-        <el-table-column prop="client_addr" :label="t('audit.column.client')" min-width="170" />
-        <el-table-column prop="upstream_addr" :label="t('audit.column.upstream')" min-width="170" />
-        <el-table-column :label="t('sessions.column.started')" min-width="190" show-overflow-tooltip class-name="col-time">
+        <el-table-column :label="t('database.instance.name')" min-width="150" show-overflow-tooltip>
+          <template #default="{ row }">{{ row.instance_name || row.upstream_addr || '-' }}</template>
+        </el-table-column>
+        <el-table-column :label="t('database.account.title')" min-width="120" show-overflow-tooltip>
+          <template #default="{ row }">{{ row.account_name || row.name || '-' }}</template>
+        </el-table-column>
+        <el-table-column prop="protocol" :label="t('audit.column.protocol')" width="90" />
+        <el-table-column :label="t('sessions.column.started')" min-width="170" show-overflow-tooltip class-name="col-time">
           <template #default="{ row }">
             {{ formatTime(row.started_at) }}
+          </template>
+        </el-table-column>
+        <el-table-column :label="t('audit.column.duration')" width="100">
+          <template #default="{ row }">
+            {{ formatDuration(row.duration_ms) }}
           </template>
         </el-table-column>
         <el-table-column :label="t('common.actions')" fixed="right" width="170">

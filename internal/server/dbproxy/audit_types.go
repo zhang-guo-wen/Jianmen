@@ -19,6 +19,10 @@ type DBConnectionMeta struct {
 	ClientAddr           string            `json:"client_addr"`
 	UpstreamAddr         string            `json:"upstream_addr"`
 	StartedAt            string            `json:"started_at"`
+	EndedAt              string            `json:"ended_at,omitempty"`
+	DurationMs           int64             `json:"duration_ms,omitempty"`
+	AccountName          string            `json:"account_name,omitempty"`
+	InstanceName         string            `json:"instance_name,omitempty"`
 	AuthUser             string            `json:"auth_user,omitempty"`
 	Database             string            `json:"database,omitempty"`
 	ApplicationName      string            `json:"application_name,omitempty"`

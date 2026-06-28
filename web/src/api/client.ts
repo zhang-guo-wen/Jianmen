@@ -265,6 +265,10 @@ export interface DBAccountUpdatePayload {
 }
 
 export interface DBConnectionMetaRecord extends DBConnectionRecord {
+  ended_at?: string;
+  duration_ms?: number;
+  account_name?: string;
+  instance_name?: string;
   auth_user?: string;
   database?: string;
   application_name?: string;

@@ -101,6 +101,8 @@ type gatewayConn struct {
 	upstream     net.Conn
 	upstreamAddr string
 	userID       string
+	accountUser  string // 上游数据库登录名
+	instanceName string // 数据库实例名称
 }
 
 func (g *Gateway) handleConn(ctx context.Context, client net.Conn) {
@@ -401,6 +403,7 @@ func (g *Gateway) handlePG(ctx context.Context, client net.Conn, firstByte byte)
 	return &gatewayConn{
 		protocol: "postgres", accountID: acct.ID, accountName: resolved.rawName,
 		upstream: upstream, upstreamAddr: acct.Instance.Address, userID: userID,
+		accountUser: acct.UpstreamUsername, instanceName: acct.Instance.Name,
 	}
 }
 
@@ -609,6 +612,8 @@ func (g *Gateway) handleMySQL(ctx context.Context, client net.Conn) *gatewayConn
 				upstream:     upstream,
 				upstreamAddr: acct.Instance.Address,
 				userID:       rbacUserID,
+				accountUser:  acct.UpstreamUsername,
+				instanceName: acct.Instance.Name,
 			}
 		}
 		// 0x04 = full auth with public key — 暂不支持，回传错误
@@ -634,6 +639,8 @@ func (g *Gateway) handleMySQL(ctx context.Context, client net.Conn) *gatewayConn
 		upstream:     upstream,
 		upstreamAddr: acct.Instance.Address,
 		userID:       rbacUserID,
+		accountUser:  acct.UpstreamUsername,
+		instanceName: acct.Instance.Name,
 	}
 }
 
@@ -951,13 +958,14 @@ func copyUpstreamToClient(client net.Conn, upstream net.Conn, observer queryObse
 }
 
 type connectionRecorder struct {
-	mu       sync.Mutex
-	id       string
-	protocol string
-	metaPath string
-	meta     DBConnectionMeta
-	file     *os.File
-	seq      int64
+	mu        sync.Mutex
+	id        string
+	protocol  string
+	metaPath  string
+	meta      DBConnectionMeta
+	file      *os.File
+	seq       int64
+	startedAt time.Time
 }
 
 func (g *Gateway) newRecorder(conn *gatewayConn) (*connectionRecorder, error) {
@@ -974,17 +982,20 @@ func (g *Gateway) newRecorder(conn *gatewayConn) (*connectionRecorder, error) {
 		ClientAddr:   "",
 		UpstreamAddr: conn.upstreamAddr,
 		StartedAt:    startedAt.Format(time.RFC3339Nano),
+		AccountName:  conn.accountUser,
+		InstanceName: conn.instanceName,
 	}
 	file, err := os.OpenFile(filepath.Join(dir, "queries.jsonl"), os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
 	if err != nil {
 		return nil, err
 	}
 	recorder := &connectionRecorder{
-		id:       id,
-		protocol: conn.protocol,
-		metaPath: filepath.Join(dir, "meta.json"),
-		meta:     meta,
-		file:     file,
+		id:        id,
+		protocol:  conn.protocol,
+		metaPath:  filepath.Join(dir, "meta.json"),
+		meta:      meta,
+		file:      file,
+		startedAt: startedAt,
 	}
 	if err := recorder.writeMetaLocked(); err != nil {
 		file.Close()
@@ -1102,6 +1113,11 @@ func (r *connectionRecorder) Close() error {
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	// 写入连接结束时间和时长
+	endedAt := time.Now().UTC()
+	r.meta.EndedAt = endedAt.Format(time.RFC3339Nano)
+	r.meta.DurationMs = endedAt.Sub(r.startedAt).Milliseconds()
+	r.writeMetaLocked()
 	if r.file == nil {
 		return nil
 	}

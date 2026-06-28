@@ -74,7 +74,7 @@ var menuOrder = []struct {
 }{
 	{"dashboard", "dashboard:view"},
 	{"hosts", "host:view"},
-	{"databases", "db:view"},
+	{"databases", "dbproxy:view"},
 	{"quickConnect", "session:connect"},
 	{"sessions", "session:view"},
 	{"users", "rbac:manage"},

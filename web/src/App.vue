@@ -58,13 +58,10 @@
 
 <script setup lang="ts">
 import {
-  Connection,
   DataAnalysis,
-  DataBoard,
   DocumentChecked,
   Link,
   Monitor,
-  Platform,
   UserFilled
 } from '@element-plus/icons-vue';
 import { computed, onMounted, watchEffect, type Component } from 'vue';
@@ -86,15 +83,13 @@ const selectedLocale = computed<Locale>({
 });
 
 const ALL_NAV_ITEMS: Array<{ path: string; icon: Component; labelKey: TranslationKey; menuKey: string }> = [
-  { path: '/dashboard', icon: DataBoard, labelKey: 'nav.dashboard', menuKey: 'dashboard' },
+
+  { path: '/quick-connect', icon: Link, labelKey: 'nav.quickConnect', menuKey: 'quickConnect' },
   { path: '/hosts', icon: Monitor, labelKey: 'nav.hosts', menuKey: 'hosts' },
   { path: '/databases', icon: DataAnalysis, labelKey: 'nav.databases', menuKey: 'databases' },
-  { path: '/quick-connect', icon: Link, labelKey: 'nav.quickConnect', menuKey: 'quickConnect' },
-  { path: '/sessions', icon: Connection, labelKey: 'nav.sessions', menuKey: 'sessions' },
-  { path: '/users', icon: UserFilled, labelKey: 'nav.users', menuKey: 'rbac' },
-  { path: '/roles', icon: UserFilled, labelKey: 'nav.roles', menuKey: 'rbac' },
+  { path: '/users', icon: UserFilled, labelKey: 'nav.users', menuKey: 'users' },
+  { path: '/roles', icon: UserFilled, labelKey: 'nav.roles', menuKey: 'roles' },
   { path: '/audit', icon: DocumentChecked, labelKey: 'nav.audit', menuKey: 'audit' },
-  { path: '/web-terminal', icon: Platform, labelKey: 'nav.webTerminal', menuKey: 'webTerminal' },
 ];
 
 const permission = usePermissionStore();
@@ -112,9 +107,9 @@ function metaText(value: unknown, fallbackKey: TranslationKey): string {
   return t(isTranslationKey(value) ? value : fallbackKey);
 }
 
-const pageTitle = computed(() => metaText(route.meta.titleKey, 'route.dashboard.title'));
+const pageTitle = computed(() => metaText(route.meta.titleKey, 'route.quickConnect.title'));
 const pageDescription = computed(() =>
-  metaText(route.meta.descriptionKey, 'route.dashboard.description')
+  metaText(route.meta.descriptionKey, 'route.quickConnect.description')
 );
 
 watchEffect(() => {

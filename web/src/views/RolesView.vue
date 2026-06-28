@@ -58,6 +58,9 @@
               {{ t('common.delete') }}
             </el-button>
           </template>
+          <el-tooltip v-else content="内置角色不可删除" placement="top">
+            <span class="builtin-hint">内置角色</span>
+          </el-tooltip>
         </template>
       </el-table-column>
     </el-table>
@@ -161,17 +164,16 @@ const PERM_GROUPS: PermGroup[] = [
       { action: 'host:create', label: '创建主机',   desc: '新增纳管主机' },
       { action: 'host:update', label: '编辑主机',   desc: '修改主机配置' },
       { action: 'host:delete', label: '删除主机',   desc: '移除纳管主机' },
-      { action: 'host:export', label: '导出主机',   desc: '导出主机列表' },
     ],
   },
   {
     resource: '数据库 (database)', icon: '🗄️', permissions: [
-      { action: 'db:connect',    label: '连接数据库',     desc: '通过代理连接' },
-      { action: 'db:view',       label: '查看实例',       desc: '浏览数据库实例' },
-      { action: 'db:create',     label: '创建实例',       desc: '新增数据库代理实例' },
-      { action: 'db:update',     label: '编辑实例',       desc: '修改数据库代理配置' },
-      { action: 'db:delete',     label: '删除实例',       desc: '删除数据库代理实例' },
-      { action: 'db:audit:view', label: '查看数据库审计',  desc: '浏览数据库审计记录' },
+      { action: 'dbproxy:view',   label: '查看实例',       desc: '浏览数据库实例' },
+      { action: 'dbproxy:create', label: '创建实例',       desc: '新增数据库代理实例' },
+      { action: 'dbproxy:update', label: '编辑实例',       desc: '修改数据库代理配置' },
+      { action: 'dbproxy:delete', label: '删除实例',       desc: '删除数据库代理实例' },
+      { action: 'db:connect',     label: '连接数据库',      desc: '通过代理连接' },
+      { action: 'db:audit:view',  label: '查看数据库审计',  desc: '浏览数据库审计记录' },
     ],
   },
   {
@@ -197,8 +199,11 @@ const PERM_GROUPS: PermGroup[] = [
     ],
   },
   {
-    resource: '仪表盘 (dashboard)', icon: '📊', permissions: [
-      { action: 'dashboard:view', label: '查看仪表盘', desc: '访问系统仪表盘' },
+    resource: '目标 (target)', icon: '🎯', permissions: [
+      { action: 'target:view',   label: '查看目标', desc: '浏览目标资产' },
+      { action: 'target:create', label: '创建目标', desc: '新增目标资产' },
+      { action: 'target:update', label: '编辑目标', desc: '修改目标配置' },
+      { action: 'target:delete', label: '删除目标', desc: '移除目标资产' },
     ],
   },
 ];
@@ -246,9 +251,18 @@ const selectedCountText = computed(() =>
   `${selectedPerms.value.length} 项已选`
 );
 
+const rolePermCountMap = computed(() => {
+  const map: Record<string, number> = {};
+  for (const b of existingBindings.value) {
+    const rid = String(b.role_id ?? '');
+    map[rid] = (map[rid] || 0) + 1;
+  }
+  return map;
+});
+
 function rolePermCount(roleId: string | number | undefined): number {
   if (!roleId) return 0;
-  return existingBindings.value.filter(b => String(b.role_id) === String(roleId)).length;
+  return rolePermCountMap.value[String(roleId)] || 0;
 }
 
 async function loadRoles() {
@@ -368,14 +382,21 @@ async function savePermissions() {
 
   savingPerms.value = true;
   try {
-    // Get current bindings
-    const current = existingBindings.value.filter(b => String(b.role_id) === roleId);
+    // 先确保所有选中 action 都有对应的 Permission 记录（不存在则自动创建）
+    await ensurePermissionsExist(selectedPerms.value);
+
+    // 重新加载权限列表
+    const permsRes = await apiClient.getRBACPermissions();
+    allPermissions.value = Array.isArray(permsRes) ? permsRes : (permsRes as any).data ?? [];
 
     // Build action → permission_id map
     const actionToPermId = new Map<string, string>();
     for (const p of allPermissions.value) {
       if (p.action) actionToPermId.set(p.action, String(p.id ?? ''));
     }
+
+    // Get current bindings
+    const current = existingBindings.value.filter(b => String(b.role_id) === roleId);
 
     const currentActions = new Set(
       current.map(b => {
@@ -417,6 +438,17 @@ async function savePermissions() {
   }
 }
 
+async function ensurePermissionsExist(actions: string[]) {
+  // 构建已存在 action 的集合
+  const existing = new Set(allPermissions.value.map(p => p.action).filter(Boolean) as string[]);
+  for (const action of actions) {
+    if (!existing.has(action)) {
+      await apiClient.createRBACPermission({ action, effect: 'allow' });
+      existing.add(action);
+    }
+  }
+}
+
 function onSearch() {}
 onMounted(async () => {
   await loadRoles();
@@ -434,6 +466,7 @@ onMounted(async () => {
 .search-input { max-width: 280px; }
 .col-mono { font-family: "SF Mono", "Cascadia Code", "Consolas", monospace; font-size: 11px; color: #64748b; }
 .perm-count { font-weight: 600; color: var(--el-color-primary); }
+.builtin-hint { font-size: 12px; color: #94a3b8; cursor: default; }
 
 .perm-dialog-header { margin-bottom: 14px; }
 .perm-count-label { font-size: 13px; color: #64748b; font-weight: 500; }

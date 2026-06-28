@@ -17,17 +17,19 @@ import (
 	"jianmen/internal/proxy/sshproxy"
 	"jianmen/internal/rbac"
 	"jianmen/internal/recording"
+	"jianmen/internal/server/admin"
 	"jianmen/internal/store"
 )
 
 type Server struct {
-	cfg         *config.Config
-	store       store.Store
-	rbacChecker *rbac.Checker
-	logger      *slog.Logger
+	cfg           *config.Config
+	store         store.Store
+	rbacChecker   *rbac.Checker
+	logger        *slog.Logger
+	superAdminIDs map[string]bool
 }
 
-func New(cfg *config.Config, s store.Store, logger *slog.Logger, dbs ...*gorm.DB) *Server {
+func New(cfg *config.Config, s store.Store, logger *slog.Logger, dataDir string, dbs ...*gorm.DB) *Server {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -35,7 +37,13 @@ func New(cfg *config.Config, s store.Store, logger *slog.Logger, dbs ...*gorm.DB
 	if len(dbs) > 0 && dbs[0] != nil {
 		checker = rbac.NewChecker(dbs[0])
 	}
-	return &Server{cfg: cfg, store: s, rbacChecker: checker, logger: logger}
+	return &Server{
+		cfg:           cfg,
+		store:         s,
+		rbacChecker:   checker,
+		logger:        logger,
+		superAdminIDs: admin.LoadSuperAdminIDs(cfg, dataDir),
+	}
 }
 
 func (s *Server) ListenAndServe(ctx context.Context) error {
@@ -133,7 +141,7 @@ func (s *Server) handleConn(ctx context.Context, rawConn net.Conn, serverConfig 
 		return
 	}
 
-	if s.rbacChecker != nil {
+	if s.rbacChecker != nil && !s.superAdminIDs[user.ID] {
 		allowed, err := s.rbacChecker.HasPermission(user.ID, rbac.ActionSessionConnect, model.ResourceTypeHostAccount, target.ID)
 		if err != nil {
 			s.logger.Warn("rbac check failed", "user", user.Username, "target", target.ID, "error", err)

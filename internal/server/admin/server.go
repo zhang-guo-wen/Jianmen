@@ -111,21 +111,8 @@ func New(cfg *config.Config, store store.Store, logger *slog.Logger, dataDir str
 		db = dbs[0]
 		checker = rbac.NewChecker(db)
 	}
-	// 收集配置文件中定义的超级管理员用户 ID
-	superAdminIDs := make(map[string]bool)
-	for _, u := range cfg.Users {
-		id := strings.TrimSpace(u.ID)
-		if id == "" {
-			id = strings.TrimSpace(u.Username)
-		}
-		if id != "" {
-			superAdminIDs[id] = true
-		}
-	}
-	// 从持久化文件中恢复 setup 向导创建的超级管理员
-	if dataDir != "" {
-		loadSuperAdminIDsFromFile(dataDir, superAdminIDs)
-	}
+	// 收集所有超级管理员用户 ID
+	superAdminIDs := LoadSuperAdminIDs(cfg, dataDir)
 	return &Server{cfg: cfg, store: store, db: db, rbacChecker: checker, logger: logger, dataDir: dataDir, superAdminIDs: superAdminIDs}
 }
 
@@ -1364,11 +1351,29 @@ func (s *Server) isSuperAdmin(userID string) bool {
 	return s.superAdminIDs[userID]
 }
 
-const superAdminIDsFile = ".super_admin_ids"
+const SuperAdminIDsFile = ".super_admin_ids"
+
+// LoadSuperAdminIDs 收集所有超级管理员 ID：配置文件中的用户 + 持久化文件中的用户。
+func LoadSuperAdminIDs(cfg *config.Config, dataDir string) map[string]bool {
+	ids := make(map[string]bool)
+	for _, u := range cfg.Users {
+		id := strings.TrimSpace(u.ID)
+		if id == "" {
+			id = strings.TrimSpace(u.Username)
+		}
+		if id != "" {
+			ids[id] = true
+		}
+	}
+	if dataDir != "" {
+		loadSuperAdminIDsFromFile(dataDir, ids)
+	}
+	return ids
+}
 
 // loadSuperAdminIDsFromFile 从持久化文件读取 setup 向导创建的管理员 ID。
 func loadSuperAdminIDsFromFile(dataDir string, ids map[string]bool) {
-	path := filepath.Join(dataDir, superAdminIDsFile)
+	path := filepath.Join(dataDir, SuperAdminIDsFile)
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return
@@ -1383,7 +1388,7 @@ func loadSuperAdminIDsFromFile(dataDir string, ids map[string]bool) {
 
 // saveSuperAdminID 将 setup 向导创建的管理员 ID 持久化到文件。
 func saveSuperAdminID(dataDir, userID string) {
-	path := filepath.Join(dataDir, superAdminIDsFile)
+	path := filepath.Join(dataDir, SuperAdminIDsFile)
 	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
 	if err != nil {
 		return

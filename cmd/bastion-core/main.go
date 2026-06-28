@@ -105,12 +105,12 @@ func main() {
 
 	errCh := make(chan error, 3)
 
-	sshSrv := sshserver.New(cfg, appStore, logger, metadataDB)
+	sshSrv := sshserver.New(cfg, appStore, logger, dataDir, metadataDB)
 	go func() {
 		errCh <- sshSrv.ListenAndServe(ctx)
 	}()
 
-	dbGateway := dbproxy.NewGateway(cfg.DatabaseGateway, appStore, cfg.ReplayDir, logger, metadataDB)
+	dbGateway := dbproxy.NewGateway(cfg.DatabaseGateway, appStore, cfg.ReplayDir, logger, metadataDB, admin.LoadSuperAdminIDs(cfg, dataDir))
 
 	if cfg.Admin.Enabled {
 		adminSrv := admin.New(cfg, appStore, logger, dataDir, metadataDB)

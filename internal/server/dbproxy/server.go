@@ -28,6 +28,7 @@ type Gateway struct {
 	replayDir         string
 	logger            *slog.Logger
 	permissionChecker permissionChecker
+	superAdminIDs     map[string]bool
 }
 
 type databaseAccountResolver interface {
@@ -39,7 +40,7 @@ type permissionChecker interface {
 	HasPermission(userID, action, resourceType, resourceID string) (bool, error)
 }
 
-func NewGateway(cfg config.DatabaseGatewayConfig, store databaseAccountResolver, replayDir string, logger *slog.Logger, db *gorm.DB) *Gateway {
+func NewGateway(cfg config.DatabaseGatewayConfig, store databaseAccountResolver, replayDir string, logger *slog.Logger, db *gorm.DB, superAdminIDs map[string]bool) *Gateway {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -47,7 +48,7 @@ func NewGateway(cfg config.DatabaseGatewayConfig, store databaseAccountResolver,
 	if db != nil {
 		checker = rbaccheck.NewChecker(db)
 	}
-	return &Gateway{cfg: cfg, store: store, db: db, replayDir: replayDir, logger: logger, permissionChecker: checker}
+	return &Gateway{cfg: cfg, store: store, db: db, replayDir: replayDir, logger: logger, permissionChecker: checker, superAdminIDs: superAdminIDs}
 }
 
 func (g *Gateway) Enabled() bool {
@@ -531,7 +532,7 @@ func (g *Gateway) handleMySQL(ctx context.Context, client net.Conn) *gatewayConn
 }
 
 func (g *Gateway) authorizeConnect(userID, uniqueName, resourceID string) error {
-	if g.permissionChecker == nil {
+	if g.permissionChecker == nil || g.superAdminIDs[userID] {
 		return nil
 	}
 	allowed, err := g.permissionChecker.HasPermission(userID, rbaccheck.ActionDBConnect, model.ResourceTypeDatabaseAccount, resourceID)

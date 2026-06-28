@@ -13,11 +13,6 @@
       <template #toolbar-extra>
         <el-button type="primary" @click="openCreateHostDialog">新增主机</el-button>
       </template>
-      <el-table-column label="协议" width="70" align="center">
-        <template #default>
-          <el-tag size="small" type="primary" effect="plain">SSH</el-tag>
-        </template>
-      </el-table-column>
       <el-table-column label="主机名称" min-width="130" show-overflow-tooltip>
         <template #default="{ row }">{{ hostName(row) }}</template>
       </el-table-column>
@@ -26,6 +21,11 @@
       </el-table-column>
       <el-table-column label="端口" width="70" align="center">
         <template #default="{ row }">{{ row.port || 22 }}</template>
+      </el-table-column>
+      <el-table-column label="协议" width="70" align="center">
+        <template #default>
+          <el-tag size="small" type="primary" effect="plain">SSH</el-tag>
+        </template>
       </el-table-column>
       <el-table-column label="账号数" width="80" align="center">
         <template #default="{ row }">

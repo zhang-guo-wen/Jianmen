@@ -120,7 +120,7 @@ func (g *Gateway) handleConn(ctx context.Context, client net.Conn) {
 	} else {
 		switch {
 		case firstByte[0] == 0x00:
-			conn = g.handlePG(ctx, client)
+			conn = g.handlePG(ctx, client, firstByte[0])
 		default:
 			g.logger.Warn("db gateway unsupported protocol", "first_byte", firstByte[0])
 			return
@@ -160,9 +160,11 @@ func (g *Gateway) handleConn(ctx context.Context, client net.Conn) {
 // 4. RBAC check
 // 5. Check account disabled/expiry
 // 6. Connect to upstream and relay auth with UpstreamPassword
-func (g *Gateway) handlePG(ctx context.Context, client net.Conn) *gatewayConn {
+func (g *Gateway) handlePG(ctx context.Context, client net.Conn, firstByte byte) *gatewayConn {
 	buf := make([]byte, 8*1024)
-	totalRead := 0
+	// 协议检测已读了第1字节，放回缓冲区头部
+	buf[0] = firstByte
+	totalRead := 1
 
 	// Read StartupMessage header (4 bytes len + 4 bytes protocol)
 	for totalRead < 8 {
@@ -266,21 +268,15 @@ func (g *Gateway) handlePG(ctx context.Context, client net.Conn) *gatewayConn {
 			return nil
 		}
 		userID = resolved.user.ID
-	} else {
-		// 回退到 AuthenticateDirect (非 compact username 路径)
-		user, err := g.store.AuthenticateDirect(ctx, resolved.rawName, password)
-		if err != nil {
-			g.logger.Warn("db gateway auth failed", "user", resolved.rawName, "error", err)
+		// RBAC check (仅 compact 路径)
+		resourceID := dbAccountResourceID(acct)
+		if err := g.authorizeConnect(userID, resolved.rawName, resourceID); err != nil {
+			g.logger.Warn("db gateway rbac denied", "user", userID, "resource", resourceID, "error", err)
 			return nil
 		}
-		userID = user.ID
-	}
-
-	// RBAC check
-	resourceID := dbAccountResourceID(acct)
-	if err := g.authorizeConnect(userID, resolved.rawName, resourceID); err != nil {
-		g.logger.Warn("db gateway rbac denied", "user", userID, "resource", resourceID, "error", err)
-		return nil
+	} else {
+		// 非 compact username 路径：跳过堡垒机用户认证和 RBAC（同 MySQL v1）
+		userID = resolved.rawName
 	}
 
 	// Check account disabled and expiry

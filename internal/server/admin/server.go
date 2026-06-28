@@ -1047,26 +1047,37 @@ func (s *Server) handleUserSessions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sess := model.UserSession{
-		UserID:    userID,
-		Type:      "host",
-		Status:    "active",
-		CreatedBy: usernameFromRequest(r),
-	}
-	created, err := s.store.CreateUserSession(sess)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
+	// 使用用户的永久会话（session ID 固定），不每次新建
+	var permSession model.UserSession
+	if err := s.db.Where("user_id = ? AND type = ? AND status = ?", userID, "permanent", "active").
+		First(&permSession).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			// 尚未有永久会话则创建一个
+			newSess := model.UserSession{
+				UserID: userID,
+				Type:   "permanent",
+				Status: "active",
+			}
+			created, createErr := s.store.CreateUserSession(newSess)
+			if createErr != nil {
+				writeError(w, http.StatusInternalServerError, createErr)
+				return
+			}
+			permSession = *created
+		} else {
+			writeError(w, http.StatusInternalServerError, err)
+			return
+		}
 	}
 
 	writeJSON(w, http.StatusCreated, map[string]any{
-		"id":               created.ID,
-		"session_id":       created.SessionID,
-		"session_seq":      created.SessionSeq,
-		"type":             created.Type,
-		"status":           created.Status,
+		"id":               permSession.ID,
+		"session_id":       permSession.SessionID,
+		"session_seq":      permSession.SessionSeq,
+		"type":             permSession.Type,
+		"status":           permSession.Status,
 		"resource_id":      account.ResourceID,
-		"compact_username": "H" + account.ResourceID + created.SessionID,
+		"compact_username": "H" + account.ResourceID + permSession.SessionID,
 		"resource_type":    "host_account",
 	})
 }

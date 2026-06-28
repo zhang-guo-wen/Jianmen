@@ -423,6 +423,13 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
         : await response.text();
 
   if (!response.ok) {
+    // 401 表示 token 过期或无效，清除 token 并跳转登录
+    if (response.status === 401) {
+      clearToken();
+      if (window.location.pathname !== '/login') {
+        window.location.href = '/login';
+      }
+    }
     const message =
       typeof payload === 'object' && payload !== null && 'error' in payload
         ? String(payload.error)

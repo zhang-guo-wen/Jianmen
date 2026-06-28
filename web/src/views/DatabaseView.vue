@@ -110,7 +110,7 @@
           </template>
         </el-table-column>
         <el-table-column label="过期时间" min-width="140">
-          <template #default="{ row }">{{ row.expires_at ? new Date(row.expires_at).toLocaleString() : '永久' }}</template>
+          <template #default="{ row }">{{ formatTime(row.expires_at) || '永久' }}</template>
         </el-table-column>
         <el-table-column label="备注" min-width="120" show-overflow-tooltip>
           <template #default="{ row }">{{ row.remark || '-' }}</template>
@@ -376,11 +376,16 @@ const connectCommand = computed(() => {
 
 // ── Helpers ──
 function formatTime(value: unknown): string {
-  if (typeof value === 'string' && value.trim()) {
-    const d = new Date(value)
-    return Number.isNaN(d.getTime()) ? value : d.toLocaleString()
+  let d: Date | null = null
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    d = new Date(value)
+  } else if (typeof value === 'string' && value.trim()) {
+    const parsed = Date.parse(value)
+    if (!Number.isNaN(parsed)) d = new Date(parsed)
   }
-  return ''
+  if (!d || Number.isNaN(d.getTime())) return ''
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
 }
 
 function isExpired(expiresAt: unknown): boolean {

@@ -36,7 +36,7 @@
       </el-table-column>
       <el-table-column :label="t('users.lastLogin')" width="140">
         <template #default="{ row }">
-          <span class="text-muted">{{ row.last_login_at ? new Date(row.last_login_at).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '—' }}</span>
+          <span class="text-muted">{{ formatTime(row.last_login_at) }}</span>
         </template>
       </el-table-column>
       <el-table-column :label="t('users.roles')" min-width="180">
@@ -171,6 +171,14 @@ import * as api from '@/api/client';
 import { useI18n } from '@/i18n';
 
 const { t } = useI18n();
+
+function formatTime(iso?: string): string {
+  if (!iso) return '—'
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return '—'
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
+}
 
 // ── List state ──
 const users = ref<api.UserRecord[]>([]);

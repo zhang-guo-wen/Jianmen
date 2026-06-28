@@ -506,17 +506,16 @@ function hasReplay(session: SessionRecord): boolean {
 }
 
 function formatTime(value: unknown): string {
+  let d: Date | null = null
   if (typeof value === 'number' && Number.isFinite(value)) {
-    return new Date(value).toLocaleString();
+    d = new Date(value)
+  } else if (typeof value === 'string' && value.trim()) {
+    const parsed = Date.parse(value)
+    if (!Number.isNaN(parsed)) d = new Date(parsed)
   }
-
-  if (typeof value === 'string' && value.trim()) {
-    const parsed = Date.parse(value);
-
-    return Number.isNaN(parsed) ? value : new Date(parsed).toLocaleString();
-  }
-
-  return t('common.none');
+  if (!d || Number.isNaN(d.getTime())) return t('common.none')
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
 }
 
 function formatDuration(value: unknown): string {

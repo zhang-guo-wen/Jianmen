@@ -187,8 +187,12 @@
             {{ roleNameForId(row.role_id) }}
           </template>
         </el-table-column>
-        <el-table-column prop="expires_at" :label="t('rbac.field.expiresAt')" min-width="180" />
-        <el-table-column prop="created_at" :label="t('common.createdAt')" min-width="180" />
+        <el-table-column :label="t('rbac.field.expiresAt')" min-width="180">
+          <template #default="{ row }">{{ formatTime(row.expires_at) }}</template>
+        </el-table-column>
+        <el-table-column :label="t('common.createdAt')" min-width="180">
+          <template #default="{ row }">{{ formatTime(row.created_at) }}</template>
+        </el-table-column>
         <el-table-column :label="t('common.actions')" fixed="right" width="120">
           <template #default="{ row }">
             <el-button
@@ -271,7 +275,9 @@
             {{ permissionNameForId(row.permission_id) }}
           </template>
         </el-table-column>
-        <el-table-column prop="created_at" :label="t('common.createdAt')" min-width="180" />
+        <el-table-column :label="t('common.createdAt')" min-width="180">
+          <template #default="{ row }">{{ formatTime(row.created_at) }}</template>
+        </el-table-column>
         <el-table-column :label="t('common.actions')" fixed="right" width="120">
           <template #default="{ row }">
             <el-button
@@ -529,6 +535,14 @@ interface ResourceOption extends ResourceIdentity {
 interface ResourceOptionGroup {
   label: string;
   options: ResourceOption[];
+}
+
+function formatTime(iso?: string): string {
+  if (!iso) return '-'
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return '-'
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
 }
 
 const { t } = useI18n();

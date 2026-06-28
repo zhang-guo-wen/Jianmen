@@ -1309,12 +1309,6 @@ func (s *Server) withAuthAndUser(next http.HandlerFunc) http.HandlerFunc {
 			}
 		}
 
-		// Fallback to shared admin token
-		if s.cfg.Admin.Token != "" && token == s.cfg.Admin.Token {
-			next(w, r)
-			return
-		}
-
 		writeErrorText(w, http.StatusUnauthorized, "invalid token")
 	}
 }

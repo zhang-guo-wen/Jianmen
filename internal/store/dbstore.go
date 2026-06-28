@@ -23,12 +23,11 @@ import (
 // DBStore implements Store backed by a GORM database.
 // Database proxies still use config-based management (not yet migrated to DB).
 type DBStore struct {
-	db         *gorm.DB
-	adminToken string
+	db *gorm.DB
 }
 
-func NewDBStore(db *gorm.DB, adminToken string) *DBStore {
-	return &DBStore{db: db, adminToken: adminToken}
+func NewDBStore(db *gorm.DB) *DBStore {
+	return &DBStore{db: db}
 }
 
 // -- auth --

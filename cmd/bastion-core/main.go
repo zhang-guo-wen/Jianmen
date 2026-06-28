@@ -85,7 +85,7 @@ func main() {
 
 	var appStore store.Store
 	if metadataDB != nil {
-		appStore = store.NewDBStore(metadataDB, cfg.Admin.Token)
+		appStore = store.NewDBStore(metadataDB)
 		logger.Info("using database-backed store")
 	} else {
 		adapter, err := store.NewStaticAdapter(cfg, metadataDB)

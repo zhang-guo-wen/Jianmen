@@ -28,7 +28,7 @@ func TestCompactUsernameAuthIntegration(t *testing.T) {
 		t.Fatalf("crypto init: %v", err)
 	}
 
-	cfg := &config.Config{Admin: config.AdminConfig{Token: "dev-admin-token"}}
+	cfg := &config.Config{Admin: config.AdminConfig{}}
 	db, err := storage.Open(storage.Config{Driver: storage.DriverSQLite, DSN: dbPath})
 	if err != nil {
 		t.Fatalf("open db: %v", err)
@@ -95,7 +95,7 @@ func TestCompactUsernameAuthIntegration(t *testing.T) {
 	// Build compact username using the actual resource_id
 	compactUser := "H" + acct.ResourceID + "00001"
 
-	s := NewDBStore(db, cfg.Admin.Token)
+	s := NewDBStore(db)
 	user, err := s.Authenticate(context.Background(), compactUser, "admin")
 	if err != nil {
 		t.Fatalf("AUTH FAILED: %v", err)

@@ -2,6 +2,8 @@ package admin
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -18,9 +20,9 @@ import (
 	"github.com/gorilla/websocket"
 	"golang.org/x/crypto/ssh"
 
-	"jianmen/internal/store"
 	"jianmen/internal/model"
 	"jianmen/internal/recording"
+	"jianmen/internal/store"
 )
 
 const (
@@ -98,15 +100,27 @@ func (s *Server) handleWebTerminal(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) authenticateWebTerminal(r *http.Request) bool {
-	token := s.cfg.Admin.Token
+	// WebTerminal 使用与 Admin API 相同的 per-user token 认证
+	auth := r.Header.Get("Authorization")
+	token := strings.TrimPrefix(auth, "Bearer ")
+	if token == "" || token == auth {
+		// 也支持 query string 传 token
+		query := r.URL.Query()
+		token = query.Get("token")
+		if token == "" {
+			token = query.Get("access_token")
+		}
+	}
 	if token == "" {
-		return true
+		return false
 	}
-	if r.Header.Get("Authorization") == "Bearer "+token {
-		return true
+	if s.db == nil {
+		return true // 无 DB 时允许通过
 	}
-	query := r.URL.Query()
-	return query.Get("token") == token || query.Get("access_token") == token
+	hash := sha256.Sum256([]byte(token))
+	hashStr := hex.EncodeToString(hash[:])
+	var user model.User
+	return s.db.Where("token_hash = ?", hashStr).First(&user).Error == nil
 }
 
 func (s *Server) resolveWebTerminalTarget(ctx context.Context, targetID string) (store.TargetConfig, error) {

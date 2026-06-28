@@ -41,18 +41,15 @@ func TestParseWebTerminalResizeMessageIgnoresTerminalText(t *testing.T) {
 
 func TestHandleWebTerminalRejectsMissingToken(t *testing.T) {
 	server := &Server{
-		cfg: &config.Config{
-			Admin: config.AdminConfig{Token: "secret"},
-		},
+		cfg:    &config.Config{Admin: config.AdminConfig{}},
 		logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
 	}
+	// 无 Authorization header 且无 query token → 拒绝
 	req := httptest.NewRequest(http.MethodGet, webTerminalPath+"?target_id=web01", nil)
 	rec := httptest.NewRecorder()
-
 	server.handleWebTerminal(rec, req)
-
 	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("status = %d, want %d", rec.Code, http.StatusUnauthorized)
+		t.Fatalf("status = %d, want %d (missing token should be rejected)", rec.Code, http.StatusUnauthorized)
 	}
 }
 

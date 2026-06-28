@@ -6,7 +6,6 @@
   "admin": {
     "enabled": true,
     "listen_addr": "127.0.0.1:47100",
-    "token": "dev-admin-token",
     "cors_allowed_origins": [
       "http://127.0.0.1:47101",
       "http://localhost:47101"

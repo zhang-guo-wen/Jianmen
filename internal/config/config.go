@@ -24,7 +24,6 @@ type Config struct {
 type AdminConfig struct {
 	Enabled            bool     `json:"enabled"`
 	ListenAddr         string   `json:"listen_addr"`
-	Token              string   `json:"token"`
 	CORSAllowedOrigins []string `json:"cors_allowed_origins"`
 }
 
@@ -103,7 +102,6 @@ func Load(path string) (*Config, error) {
 func (c *Config) applyDefaults() {
 	adminEmpty := !c.Admin.Enabled &&
 		c.Admin.ListenAddr == "" &&
-		c.Admin.Token == "" &&
 		len(c.Admin.CORSAllowedOrigins) == 0
 	databaseEmpty := c.Database == (DatabaseConfig{})
 	if c.ListenAddr == "" {
@@ -120,7 +118,6 @@ func (c *Config) applyDefaults() {
 	}
 	if adminEmpty {
 		c.Admin.ListenAddr = "127.0.0.1:47100"
-		c.Admin.Token = "dev-admin-token"
 		c.Admin.Enabled = true
 		c.Admin.CORSAllowedOrigins = []string{"http://127.0.0.1:47101", "http://localhost:47101"}
 	}

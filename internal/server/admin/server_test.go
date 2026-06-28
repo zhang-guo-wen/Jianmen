@@ -202,9 +202,7 @@ func newTargetTestServer(t *testing.T) *Server {
 	t.Helper()
 	cfg := &config.Config{
 		TargetsFile: t.TempDir() + "/targets.json",
-		Admin: config.AdminConfig{
-			Token: "",
-		},
+		Admin: config.AdminConfig{},
 		Users: []config.User{
 			{
 				ID:       "u-admin",

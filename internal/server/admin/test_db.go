@@ -44,7 +44,7 @@ func (s *Server) handleTestDBConnection(w http.ResponseWriter, r *http.Request) 
 	}
 	defer conn.Close()
 
-	err = testDBAuth(conn, acct.Instance.Protocol, acct.UpstreamUsername, acct.UpstreamPassword)
+	err = testDBAuth(conn, acct.Instance.Protocol, acct.UpstreamUsername, acct.UpstreamPassword.GetPlaintext())
 	latencyMs := time.Since(start).Milliseconds()
 	if err != nil {
 		writeJSON(w, http.StatusOK, map[string]any{

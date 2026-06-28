@@ -486,7 +486,7 @@ func (g *Gateway) handleMySQL(ctx context.Context, client net.Conn) *gatewayConn
 	}
 
 	// Build upstream login with upstream credentials
-	upstreamLogin := BuildMySQLUpstreamLogin(hs, acct.UpstreamUsername, acct.UpstreamPassword, "mysql_native_password")
+	upstreamLogin := BuildMySQLUpstreamLogin(hs, acct.UpstreamUsername, acct.UpstreamPassword.GetPlaintext(), "mysql_native_password")
 	if _, err := upstream.Write(upstreamLogin); err != nil {
 		g.logger.Warn("mysql gateway failed to send upstream login", "error", err)
 		upstream.Close()

@@ -67,6 +67,41 @@ type pagedHostList struct {
 	Total    int               `json:"total"`
 }
 
+var menuOrder = []struct {
+	key    string
+	action string
+}{
+	{"dashboard", "dashboard:view"},
+	{"hosts", "host:view"},
+	{"databases", "db:view"},
+	{"quickConnect", "session:connect"},
+	{"sessions", "session:view"},
+	{"rbac", "rbac:manage"},
+	{"audit", "audit:view"},
+	{"webTerminal", "session:connect"},
+}
+
+var menuActionMap = func() map[string]string {
+	m := make(map[string]string, len(menuOrder))
+	for _, entry := range menuOrder {
+		m[entry.key] = entry.action
+	}
+	return m
+}()
+
+type createUserRequest struct {
+	Username    string `json:"username"`
+	Password    string `json:"password"`
+	DisplayName string `json:"display_name,omitempty"`
+	Email       string `json:"email,omitempty"`
+}
+
+type updateUserRequest struct {
+	DisplayName *string `json:"display_name,omitempty"`
+	Email       *string `json:"email,omitempty"`
+	Status      *string `json:"status,omitempty"`
+}
+
 func New(cfg *config.Config, store store.Store, logger *slog.Logger, dataDir string, dbs ...*gorm.DB) *Server {
 	if logger == nil {
 		logger = slog.Default()

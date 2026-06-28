@@ -522,13 +522,10 @@ function formatDuration(value: unknown): string {
   if (value === undefined || value === null) return t('common.none');
   const n = Number(value);
   if (!Number.isFinite(n)) return t('common.none');
+  // n is milliseconds
+  if (n < 1000) return `${Math.round(n)}ms`;
   const totalSeconds = n / 1000;
-  if (totalSeconds < 60) {
-    if (totalSeconds < 1) {
-      return `${Math.round(totalSeconds * 10) / 10}s`;
-    }
-    return `${Math.round(totalSeconds)}s`;
-  }
+  if (totalSeconds < 60) return `${Math.round(totalSeconds * 10) / 10}s`;
   const mins = Math.floor(totalSeconds / 60);
   const secs = Math.round(totalSeconds % 60);
   return `${mins}m ${secs}s`;

@@ -164,9 +164,14 @@ const router = createRouter({
 let initChecked = false;
 let needsInit = false;
 
-router.beforeEach(async (to) => {
+router.beforeEach(async (to, from) => {
   // setup 页面始终可访问
   if (to.name === 'setup') return true;
+
+  // 离开 setup 时重新检查初始化状态（用户可能刚完成初始化）
+  if (from.name === 'setup') {
+    initChecked = false;
+  }
 
   // 首次检查初始化状态
   if (!initChecked) {

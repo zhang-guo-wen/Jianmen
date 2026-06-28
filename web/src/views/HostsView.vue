@@ -22,7 +22,10 @@
         <template #default="{ row }">{{ hostName(row) }}</template>
       </el-table-column>
       <el-table-column label="地址" min-width="130" show-overflow-tooltip>
-        <template #default="{ row }">{{ hostAddress(row) }}</template>
+        <template #default="{ row }">{{ row.address || '-' }}</template>
+      </el-table-column>
+      <el-table-column label="端口" width="70" align="center">
+        <template #default="{ row }">{{ row.port || 22 }}</template>
       </el-table-column>
       <el-table-column label="账号数" width="80" align="center">
         <template #default="{ row }">
@@ -497,12 +500,6 @@ function hostId(host: HostView): string {
 
 function hostName(host: HostView): string {
   return stringFrom(host.name).trim() || stringFrom(host.address).trim() || '-'
-}
-
-function hostAddress(host: HostView): string {
-  const address = stringFrom(host.address).trim()
-  const port = numberFrom(host.port, 22)
-  return address ? formatAddressPort(address, port) : '-'
 }
 
 function hostStatusKey(host: HostView): string {

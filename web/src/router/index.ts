@@ -172,7 +172,10 @@ router.beforeEach(async (to, from) => {
       }
       const menuKey = routeMenuMap[to.path];
       if (menuKey && !store.canAccessMenu(menuKey)) {
-        return { name: 'quick-connect' };
+        // 避免无限重定向：已在 fallback 页面则不再跳转
+        if (to.name !== 'quick-connect') {
+          return { name: 'quick-connect' };
+        }
       }
     }
     return true;

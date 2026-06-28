@@ -1138,7 +1138,7 @@ func (s *Server) handleUserSessions(w http.ResponseWriter, r *http.Request) {
 	} else if errors.Is(err, gorm.ErrRecordNotFound) {
 		// 尝试数据库账号
 		var dbAccount model.DatabaseAccount
-		if err := s.db.Where("id = ? AND status = ?", req.TargetID, false).First(&dbAccount).Error; err == nil {
+		if err := s.db.Preload("Instance").Where("id = ? AND status = ?", req.TargetID, "active").First(&dbAccount).Error; err == nil {
 			// 验证数据库实例未被禁用
 			if dbAccount.Instance.Status == "disabled" {
 				writeErrorText(w, http.StatusForbidden, "database instance is disabled")

@@ -56,7 +56,7 @@
           <template #default="{ row }">{{ row._instance_name || '-' }}</template>
         </el-table-column>
         <el-table-column :label="t('audit.column.account')" min-width="130" show-overflow-tooltip>
-          <template #default="{ row }">{{ row.upstream_username || '-' }}</template>
+          <template #default="{ row }">{{ row.username || '-' }}</template>
         </el-table-column>
         <el-table-column :label="t('audit.column.protocol')" width="100">
           <template #default="{ row }">{{ row._protocol || 'mysql' }}</template>
@@ -237,7 +237,7 @@ const dbFiltered = computed(() => {
   const q = dbKeyword.value.trim().toLowerCase();
   if (!q) return dbAccounts.value;
   return dbAccounts.value.filter(a =>
-    [a._instance_name, a.upstream_username, a._protocol].some(v => String(v ?? '').toLowerCase().includes(q))
+    [a._instance_name, a.username, a._protocol].some(v => String(v ?? '').toLowerCase().includes(q))
   );
 });
 
@@ -280,6 +280,13 @@ async function copyValue(value: string) {
 
 // ── Watchers ──
 watch([targetPage, targetPageSize], () => loadTargets());
+
+// 切换到 DB tab 时自动加载数据
+watch(activeTab, (tab) => {
+  if (tab === 'db' && dbAccounts.value.length === 0) {
+    loadDBAccounts();
+  }
+});
 
 onMounted(() => { loadTargets(); });
 </script>

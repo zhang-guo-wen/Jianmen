@@ -2,6 +2,7 @@ package dbproxy
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/binary"
 	"encoding/json"
 	"errors"
@@ -405,9 +406,60 @@ func (g *Gateway) handlePG(ctx context.Context, client net.Conn) *gatewayConn {
 // any client that knows the compact username can attempt a connection.
 // Access control relies on: (1) obscure compact username, (2) account disabled/expiry checks.
 //
+// sendFakeMySQLHandshake 向客户端发送一个伪装 MySQL 握手包，
+// 让客户端先发送 login 包（包含用户名），以便网关解析账号。
+func sendFakeMySQLHandshake(conn net.Conn) error {
+	// 生成 20 字节随机 salt
+	salt := make([]byte, 20)
+	if _, err := rand.Read(salt); err != nil {
+		return err
+	}
+	salt[19] = 0 // 最后一位用 0x00 终止符
+
+	capFlags := uint32(mysqlClientProtocol41 | mysqlClientSecureConnection | mysqlClientPluginAuth)
+	serverVersion := "5.7.0-jianmen-proxy"
+
+	// 构建 HandshakeV10 payload
+	var p []byte
+	p = append(p, 10) // protocol version
+	p = append(p, []byte(serverVersion)...)
+	p = append(p, 0) // null terminator
+	connID := make([]byte, 4)
+	binary.LittleEndian.PutUint32(connID, uint32(salt[0])|uint32(salt[1])<<8|uint32(salt[2])<<16|uint32(salt[3])<<24)
+	p = append(p, connID...)
+	p = append(p, salt[:8]...) // auth data part 1
+	p = append(p, 0)           // filler
+	capLower := make([]byte, 2)
+	binary.LittleEndian.PutUint16(capLower, uint16(capFlags&0xFFFF))
+	p = append(p, capLower...)
+	p = append(p, 33) // utf8mb4
+	status := make([]byte, 2) // status flags (2 bytes zeros)
+	p = append(p, status...)
+	capUpper := make([]byte, 2)
+	binary.LittleEndian.PutUint16(capUpper, uint16(capFlags>>16))
+	p = append(p, capUpper...)
+	p = append(p, 21)                          // auth plugin data length (8 + 13)
+	p = append(p, make([]byte, 10)...)         // reserved
+	p = append(p, salt[8:20]...)               // auth data part 2 (12 bytes, last is 0x00)
+	p = append(p, []byte("mysql_native_password")...)
+	p = append(p, 0) // null terminator
+
+	// 包装为 MySQL packet: 3 字节 length + 1 字节 seq(0)
+	pkt := make([]byte, 4+len(p))
+	pkt[0] = byte(len(p))
+	pkt[1] = byte(len(p) >> 8)
+	pkt[2] = byte(len(p) >> 16)
+	pkt[3] = 0 // seq=0
+	copy(pkt[4:], p)
+
+	_, err := conn.Write(pkt)
+	return err
+}
+
 // handleMySQL implements MySQL proxy authentication:
-// 1. Read client's initial login packet (already buffered after TCP connect)
-// 2. Extract username using MySQLLoginParser
+// 1. Send fake handshake to client (so client sends login with username)
+// 2. Read client's initial login packet
+// 3. Extract username using MySQLLoginParser
 // 3. Look up DatabaseAccount by unique name
 // 4. RBAC check
 // 5. Check account disabled/expiry
@@ -420,6 +472,12 @@ func (g *Gateway) handlePG(ctx context.Context, client net.Conn) *gatewayConn {
 // 12. Check auth OK (0x00) or ERR (0xff), forward result to client
 // 13. Return gatewayConn for data relay
 func (g *Gateway) handleMySQL(ctx context.Context, client net.Conn) *gatewayConn {
+	// 发送伪装 handshake，让 MySQL 客户端先发 login 包
+	if err := sendFakeMySQLHandshake(client); err != nil {
+		g.logger.Warn("mysql gateway failed to send fake handshake", "error", err)
+		return nil
+	}
+
 	// Read initial login packet from client
 	clientLoginPkt, err := readMySQLPacket(client)
 	if err != nil {
@@ -452,18 +510,17 @@ func (g *Gateway) handleMySQL(ctx context.Context, client net.Conn) *gatewayConn
 	}
 	acct := resolved.account
 
-	// RBAC check - 使用解析后的用户ID（compact）或 uniqueName（非 compact v1 路径）
+	// RBAC check: compact username 路径有真实用户ID，非 compact 路径（MySQL v1 回退）跳过 RBAC
 	var rbacUserID string
 	if resolved.isCompact && resolved.user != nil {
 		rbacUserID = resolved.user.ID
+		resourceID := dbAccountResourceID(acct)
+		if err := g.authorizeConnect(rbacUserID, resolved.rawName, resourceID); err != nil {
+			g.logger.Warn("mysql gateway rbac denied", "resource", resourceID, "error", err)
+			return nil
+		}
 	} else {
-		// MySQL v1 回退：compact username 未识别时使用 unique name 作为 userID
-		rbacUserID = resolved.rawName
-	}
-	resourceID := dbAccountResourceID(acct)
-	if err := g.authorizeConnect(rbacUserID, resolved.rawName, resourceID); err != nil {
-		g.logger.Warn("mysql gateway rbac denied", "resource", resourceID, "error", err)
-		return nil
+		rbacUserID = resolved.rawName // MySQL v1 fallback: skip RBAC
 	}
 
 	// Check account disabled and expiry

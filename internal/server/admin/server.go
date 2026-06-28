@@ -293,6 +293,15 @@ func (s *Server) handleMeMenus(w http.ResponseWriter, r *http.Request) {
 			actionSet[p.Action] = struct{}{}
 		}
 	}
+	// If the user has a wildcard action, return all menus
+	if _, hasWildcard := actionSet["*"]; hasWildcard {
+		all := make([]string, 0, len(menuOrder))
+		for _, entry := range menuOrder {
+			all = append(all, entry.key)
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"menus": all})
+		return
+	}
 	// Build menu list from actions in deterministic order
 	seen := make(map[string]struct{})
 	menus := make([]string, 0, len(menuOrder))

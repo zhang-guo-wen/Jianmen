@@ -1,7 +1,8 @@
 <template>
-  <el-alert v-if="error" :title="error" type="error" show-icon closable @close="error = ''" style="margin-bottom: 8px" />
+  <div class="view-stack">
+    <el-alert v-if="error" :title="error" type="error" show-icon closable @close="error = ''" />
 
-  <DataTableCard
+    <DataTableCard
     :data="roles"
     :loading="loading"
     :total="total"
@@ -120,6 +121,7 @@
       </div>
     </div>
   </FormDialog>
+  </div>
 </template>
 
 <script setup lang="ts">

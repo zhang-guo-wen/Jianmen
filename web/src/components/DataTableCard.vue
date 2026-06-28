@@ -32,7 +32,7 @@
         <slot></slot>
       </el-table>
     </div>
-    <div class="page-card__footer">
+    <div v-if="total > 0" class="page-card__footer">
       <el-pagination
         v-model:current-page="currentPageModel"
         v-model:page-size="currentPageSizeModel"

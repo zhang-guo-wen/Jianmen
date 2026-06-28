@@ -105,6 +105,8 @@ body {
 }
 
 .app-main {
+  display: flex;
+  flex-direction: column;
   height: calc(100vh - 72px);
   padding: 16px;
   background: #f5f7fb;

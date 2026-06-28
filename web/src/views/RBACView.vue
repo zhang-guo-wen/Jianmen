@@ -14,7 +14,7 @@
     </div>
 
     <!-- Tab 1: Roles -->
-    <div v-if="activeTab === 'roles'">
+    <div v-if="activeTab === 'roles'" class="page-container">
       <el-alert v-if="errors.roles" :title="errors.roles" type="error" show-icon style="margin-bottom: 12px" />
       <DataTableCard
         :data="roles"
@@ -74,7 +74,7 @@
     </div>
 
     <!-- Tab 2: Permissions -->
-    <div v-if="activeTab === 'permissions'">
+    <div v-if="activeTab === 'permissions'" class="page-container">
       <el-alert v-if="errors.permissions" :title="errors.permissions" type="error" show-icon style="margin-bottom: 12px" />
       <DataTableCard
         :data="permissions"
@@ -119,7 +119,7 @@
     </div>
 
     <!-- Tab 3: User-Role Bindings -->
-    <div v-if="activeTab === 'userRoles'">
+    <div v-if="activeTab === 'userRoles'" class="page-container">
       <el-form
         ref="userRoleFormRef"
         :model="userRoleForm"
@@ -206,7 +206,7 @@
     </div>
 
     <!-- Tab 4: Role-Permission Bindings -->
-    <div v-if="activeTab === 'rolePermissions'">
+    <div v-if="activeTab === 'rolePermissions'" class="page-container">
       <el-form
         ref="rolePermissionFormRef"
         :model="rolePermissionForm"

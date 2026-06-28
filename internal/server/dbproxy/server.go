@@ -38,8 +38,7 @@ type Gateway struct {
 }
 
 type databaseAccountResolver interface {
-	DatabaseAccountByUniqueName(uniqueName string) (*model.DatabaseAccount, error)
-	AuthenticateDirect(ctx context.Context, username, password string) (model.User, error)
+	// 仅保留以满足 store.Store 接口；网关不再使用
 }
 
 type permissionChecker interface {
@@ -157,9 +156,9 @@ func (g *Gateway) handleConn(ctx context.Context, client net.Conn) {
 }
 
 // handlePG implements two-layer PostgreSQL authentication:
-// 1. Extract username from PG StartupMessage
+// 1. Extract compact username from PG StartupMessage
 // 2. Request cleartext password from client (bastion user auth)
-// 3. Authenticate via StaticStore.AuthenticateDirect
+// 3. Validate via user session password
 // 4. RBAC check
 // 5. Check account disabled/expiry
 // 6. Connect to upstream and relay auth with UpstreamPassword
@@ -263,24 +262,18 @@ func (g *Gateway) handlePG(ctx context.Context, client net.Conn, firstByte byte)
 	// PG 密码消息以 \x00 结尾，需截断
 	password := strings.TrimRight(string(pwdBuf[5:5+pwdLen]), "\x00")
 
-	// Validate bastion user password
-	var userID string
-	if resolved.isCompact && resolved.user != nil {
-		// 通过 user session 验证堡垒机用户密码
-		if err := g.validateUserPassword(resolved.user, []byte(password)); err != nil {
-			g.logger.Warn("db gateway auth failed", "user", resolved.rawName, "error", err)
-			return nil
-		}
-		userID = resolved.user.ID
-		// RBAC check (仅 compact 路径)
-		resourceID := dbAccountResourceID(acct)
-		if err := g.authorizeConnect(userID, resolved.rawName, resourceID); err != nil {
-			g.logger.Warn("db gateway rbac denied", "user", userID, "resource", resourceID, "error", err)
-			return nil
-		}
-	} else {
-		// 非 compact username 路径：跳过堡垒机用户认证和 RBAC（同 MySQL v1）
-		userID = resolved.rawName
+	// 验证堡垒机用户密码
+	if err := g.validateUserPassword(resolved.user, []byte(password)); err != nil {
+		g.logger.Warn("db gateway auth failed", "user", resolved.rawName, "error", err)
+		return nil
+	}
+	userID := resolved.user.ID
+
+	// RBAC check
+	resourceID := dbAccountResourceID(acct)
+	if err := g.authorizeConnect(userID, resolved.rawName, resourceID); err != nil {
+		g.logger.Warn("db gateway rbac denied", "user", userID, "resource", resourceID, "error", err)
+		return nil
 	}
 
 	// Check account disabled and expiry
@@ -411,15 +404,6 @@ func (g *Gateway) handlePG(ctx context.Context, client net.Conn, firstByte byte)
 	}
 }
 
-// NOTE: Bastion user authentication via AuthenticateDirect is deferred for MySQL v1.
-// The PG path validates bastion credentials via cleartext password challenge before RBAC.
-// MySQL protocol does not support cleartext password, and implementing a full
-// mysql_native_password challenge-response for bastion auth requires storing
-// bastion user passwords or implementing AuthSwitchRequest. This is planned for v2.
-// For now, the RBAC check uses the account's uniqueName as userID, which means
-// any client that knows the compact username can attempt a connection.
-// Access control relies on: (1) obscure compact username, (2) account disabled/expiry checks.
-//
 // sendFakeMySQLHandshake 向客户端发送一个伪装 MySQL 8.0 握手包，
 // 让客户端先发送 login 包（包含用户名），以便网关解析账号。
 func sendFakeMySQLHandshake(conn net.Conn) error {
@@ -525,17 +509,12 @@ func (g *Gateway) handleMySQL(ctx context.Context, client net.Conn) *gatewayConn
 	}
 	acct := resolved.account
 
-	// RBAC check: compact username 路径有真实用户ID，非 compact 路径（MySQL v1 回退）跳过 RBAC
-	var rbacUserID string
-	if resolved.isCompact && resolved.user != nil {
-		rbacUserID = resolved.user.ID
-		resourceID := dbAccountResourceID(acct)
-		if err := g.authorizeConnect(rbacUserID, resolved.rawName, resourceID); err != nil {
-			g.logger.Warn("mysql gateway rbac denied", "resource", resourceID, "error", err)
-			return nil
-		}
-	} else {
-		rbacUserID = resolved.rawName // MySQL v1 fallback: skip RBAC
+	// RBAC check
+	rbacUserID := resolved.user.ID
+	resourceID := dbAccountResourceID(acct)
+	if err := g.authorizeConnect(rbacUserID, resolved.rawName, resourceID); err != nil {
+		g.logger.Warn("mysql gateway rbac denied", "resource", resourceID, "error", err)
+		return nil
 	}
 
 	// Check account disabled and expiry
@@ -860,28 +839,18 @@ func (g *Gateway) resolveAccount(rawUsername string) (*resolvedDBAccount, error)
 		return nil, errors.New("empty username")
 	}
 
-	// 尝试 compact username 解析
-	if len(rawUsername) == 10 {
-		prefix, _, _, err := util.ParseCompactUsername(rawUsername)
-		if err == nil && prefix == util.PrefixDatabase {
-			return g.resolveCompactAccount(rawUsername)
-		}
-		// 也支持 H 前缀（SSH 主机账号的 compact username 同样格式可用于 DB）
-		if err == nil && prefix == util.PrefixHost {
-			return g.resolveCompactAccount(rawUsername)
-		}
+	// 仅支持 compact username 登录（10位，D前缀）
+	if len(rawUsername) != 10 {
+		return nil, fmt.Errorf("invalid username format: must be 10-character compact username (D + resource_id + session_id)")
 	}
-
-	// 回退到 unique_name 查找
-	acct, err := g.store.DatabaseAccountByUniqueName(rawUsername)
+	prefix, _, _, err := util.ParseCompactUsername(rawUsername)
 	if err != nil {
-		return nil, fmt.Errorf("account not found by unique_name %q: %w", rawUsername, err)
+		return nil, fmt.Errorf("invalid compact username %q: %w", rawUsername, err)
 	}
-	return &resolvedDBAccount{
-		account:  acct,
-		isCompact: false,
-		rawName:  rawUsername,
-	}, nil
+	if prefix != util.PrefixDatabase && prefix != util.PrefixHost {
+		return nil, fmt.Errorf("unsupported prefix %q in username %q, expected D or H", prefix, rawUsername)
+	}
+	return g.resolveCompactAccount(rawUsername)
 }
 
 // resolveCompactAccount 从 compact username 解析并查找数据库账号和用户会话

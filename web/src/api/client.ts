@@ -204,6 +204,13 @@ export interface DBConnectionRecord {
   [key: string]: unknown;
 }
 
+export interface DBGatewayConfig {
+  enabled: boolean;
+  listen_addr: string;
+  host: string;
+  port: number;
+}
+
 export interface DBInstanceRecord {
   id?: string;
   name?: string;
@@ -525,6 +532,7 @@ export const apiClient = {
     ),
   getSessionReplay: (id: string | number) =>
     request<string>(`/api/sessions/${encodeURIComponent(String(id))}/replay`),
+  getDBGateway: () => request<DBGatewayConfig>('/api/db/gateway'),
   getDBInstances: () => request<ApiEnvelope<DBInstanceRecord[]> | DBInstanceRecord[]>('/api/db/instances'),
   createDBInstance: (payload: DBInstancePayload) =>
     request<ApiEnvelope<DBInstanceRecord> | DBInstanceRecord>('/api/db/instances', {

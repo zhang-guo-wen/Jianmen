@@ -673,7 +673,19 @@ func (s *DBStore) DatabaseAccountByUniqueName(uniqueName string) (*model.Databas
 	return &acct, nil
 }
 func (s *DBStore) AuthenticateDirect(_ context.Context, username, password string) (model.User, error) {
-	return model.User{}, errors.New("db store: authenticate not supported, use static adapter")
+	// 按用户名查找活跃用户
+	var user model.User
+	if err := s.db.Where("username = ? AND status = ?", username, "active").First(&user).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return model.User{}, errors.New("invalid username or password")
+		}
+		return model.User{}, err
+	}
+	// 使用 bcrypt 验证密码
+	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(password)); err != nil {
+		return model.User{}, errors.New("invalid username or password")
+	}
+	return user, nil
 }
 
 // -- connection --

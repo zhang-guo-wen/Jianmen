@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -23,6 +24,7 @@ import (
 	"jianmen/internal/config"
 	"jianmen/internal/model"
 	"jianmen/internal/rbac"
+	"jianmen/internal/util"
 	"jianmen/internal/store"
 )
 
@@ -135,6 +137,7 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 	mux.HandleFunc("/api/sessions", s.withAuthAndUser(s.handleSessions))
 	mux.HandleFunc("/api/sessions/", s.withAuthAndUser(s.handleSessionArtifact))
 	mux.HandleFunc("/api/user-sessions", s.withAuthAndUser(s.handleUserSessions))
+	mux.HandleFunc("/api/db/gateway", s.withAuthAndUser(s.handleDBGateway))
 	mux.HandleFunc("/api/db/instances", s.withAuthAndUser(s.handleDBInstances))
 	mux.HandleFunc("/api/db/instances/", s.withAuthAndUser(s.handleDBInstance))
 	mux.HandleFunc("/api/db/accounts/test/", s.withAuthAndUser(s.handleTestDBConnection))
@@ -772,6 +775,44 @@ func (s *Server) handleUpdateTarget(w http.ResponseWriter, r *http.Request, id s
 	writeJSON(w, http.StatusOK, view)
 }
 
+// -- db gateway config --
+
+func (s *Server) handleDBGateway(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", http.MethodGet)
+		writeErrorText(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	cfg := s.cfg.DatabaseGateway
+	host, port := parseListenAddr(cfg.ListenAddr)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"enabled":     cfg.Enabled,
+		"listen_addr": cfg.ListenAddr,
+		"host":        host,
+		"port":        port,
+	})
+}
+
+func parseListenAddr(addr string) (host string, port int) {
+	if addr == "" {
+		return "127.0.0.1", 33060
+	}
+	h, p, err := net.SplitHostPort(addr)
+	if err != nil {
+		return addr, 33060
+	}
+	host = h
+	if host == "" || host == "0.0.0.0" {
+		host = "127.0.0.1"
+	}
+	if n, err := strconv.Atoi(p); err == nil {
+		port = n
+	} else {
+		port = 33060
+	}
+	return
+}
+
 // -- db instances --
 
 func (s *Server) handleDBInstances(w http.ResponseWriter, r *http.Request) {
@@ -1037,19 +1078,41 @@ func (s *Server) handleUserSessions(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Look up the target to determine resource type and resource_id
-	var account model.HostAccount
-	if err := s.db.Where("id = ? AND status = ?", req.TargetID, "active").First(&account).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
+	// 先尝试主机账号，再尝试数据库账号
+	compactPrefix := util.PrefixHost
+	resourceType := "host_account"
+	var resourceID string
+
+	var hostAccount model.HostAccount
+	if err := s.db.Where("id = ? AND status = ?", req.TargetID, "active").First(&hostAccount).Error; err == nil {
+		// 主机账号
+		var host model.Host
+		if err := s.db.Where("id = ? AND status = ?", hostAccount.HostID, "active").First(&host).Error; err != nil {
+			writeErrorText(w, http.StatusForbidden, "host is disabled or not found")
+			return
+		}
+		resourceID = hostAccount.ResourceID
+	} else if errors.Is(err, gorm.ErrRecordNotFound) {
+		// 尝试数据库账号
+		var dbAccount model.DatabaseAccount
+		if err := s.db.Where("id = ? AND disabled = ?", req.TargetID, false).First(&dbAccount).Error; err == nil {
+			// 验证数据库实例未被禁用
+			if dbAccount.Instance.Disabled {
+				writeErrorText(w, http.StatusForbidden, "database instance is disabled")
+				return
+			}
+			compactPrefix = util.PrefixDatabase
+			resourceType = "database_account"
+			resourceID = dbAccount.ResourceID
+		} else if errors.Is(err, gorm.ErrRecordNotFound) {
 			writeErrorText(w, http.StatusNotFound, "target account not found or disabled")
+			return
 		} else {
 			writeErrorText(w, http.StatusInternalServerError, "failed to look up target")
+			return
 		}
-		return
-	}
-	// Verify host is not disabled
-	var host model.Host
-	if err := s.db.Where("id = ? AND status = ?", account.HostID, "active").First(&host).Error; err != nil {
-		writeErrorText(w, http.StatusForbidden, "host is disabled or not found")
+	} else {
+		writeErrorText(w, http.StatusInternalServerError, "failed to look up target")
 		return
 	}
 
@@ -1082,9 +1145,9 @@ func (s *Server) handleUserSessions(w http.ResponseWriter, r *http.Request) {
 		"session_seq":      permSession.SessionSeq,
 		"type":             permSession.Type,
 		"status":           permSession.Status,
-		"resource_id":      account.ResourceID,
-		"compact_username": "H" + account.ResourceID + permSession.SessionID,
-		"resource_type":    "host_account",
+		"resource_id":      resourceID,
+		"compact_username": compactPrefix + resourceID + permSession.SessionID,
+		"resource_type":    resourceType,
 	})
 }
 

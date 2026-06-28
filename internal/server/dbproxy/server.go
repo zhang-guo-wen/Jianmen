@@ -15,10 +15,12 @@ import (
 	"sync"
 	"time"
 
+	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
 	"jianmen/internal/config"
 	"jianmen/internal/model"
 	rbaccheck "jianmen/internal/rbac"
+	"jianmen/internal/util"
 )
 
 type Gateway struct {
@@ -228,12 +230,12 @@ func (g *Gateway) handlePG(ctx context.Context, client net.Conn) *gatewayConn {
 		return nil
 	}
 
-	uniqueName := strings.TrimSpace(username)
-	acct, err := g.store.DatabaseAccountByUniqueName(uniqueName)
+	resolved, err := g.resolveAccount(username)
 	if err != nil {
-		g.logger.Warn("db gateway account not found", "unique_name", uniqueName, "error", err)
+		g.logger.Warn("db gateway account resolution failed", "username", username, "error", err)
 		return nil
 	}
+	acct := resolved.account
 
 	// Request cleartext password from client
 	// PG AuthenticationCleartextPassword: 'R' type, int32(8) len, int32(3) auth type
@@ -254,31 +256,43 @@ func (g *Gateway) handlePG(ctx context.Context, client net.Conn) *gatewayConn {
 	}
 	password := string(pwdBuf[5 : 5+pwdLen])
 
-	// Validate bastion user password via StaticStore
-	user, err := g.store.AuthenticateDirect(ctx, uniqueName, password)
-	if err != nil {
-		g.logger.Warn("db gateway auth failed", "user", uniqueName, "error", err)
-		return nil
+	// Validate bastion user password
+	var userID string
+	if resolved.isCompact && resolved.user != nil {
+		// 通过 user session 验证堡垒机用户密码
+		if err := g.validateUserPassword(resolved.user, []byte(password)); err != nil {
+			g.logger.Warn("db gateway auth failed", "user", resolved.rawName, "error", err)
+			return nil
+		}
+		userID = resolved.user.ID
+	} else {
+		// 回退到 AuthenticateDirect (非 compact username 路径)
+		user, err := g.store.AuthenticateDirect(ctx, resolved.rawName, password)
+		if err != nil {
+			g.logger.Warn("db gateway auth failed", "user", resolved.rawName, "error", err)
+			return nil
+		}
+		userID = user.ID
 	}
 
 	// RBAC check
-	resourceID := rbaccheck.DatabaseAccountResourceID(uniqueName)
-	if err := g.authorizeConnect(user.ID, uniqueName, resourceID); err != nil {
-		g.logger.Warn("db gateway rbac denied", "user", user.ID, "resource", resourceID, "error", err)
+	resourceID := dbAccountResourceID(acct)
+	if err := g.authorizeConnect(userID, resolved.rawName, resourceID); err != nil {
+		g.logger.Warn("db gateway rbac denied", "user", userID, "resource", resourceID, "error", err)
 		return nil
 	}
 
 	// Check account disabled and expiry
 	if acct.Disabled {
-		g.logger.Warn("db gateway account disabled", "account", uniqueName)
+		g.logger.Warn("db gateway account disabled", "account", resolved.rawName)
 		return nil
 	}
 	if acct.ExpiresAt != nil && time.Now().UTC().After(*acct.ExpiresAt) {
-		g.logger.Warn("db gateway account expired", "account", uniqueName, "expires_at", acct.ExpiresAt)
+		g.logger.Warn("db gateway account expired", "account", resolved.rawName, "expires_at", acct.ExpiresAt)
 		return nil
 	}
 	if acct.Instance.Disabled {
-		g.logger.Warn("db gateway instance disabled", "account", uniqueName, "instance", acct.InstanceID)
+		g.logger.Warn("db gateway instance disabled", "account", resolved.rawName, "instance", acct.InstanceID)
 		return nil
 	}
 
@@ -377,8 +391,8 @@ func (g *Gateway) handlePG(ctx context.Context, client net.Conn) *gatewayConn {
 	}
 
 	return &gatewayConn{
-		protocol: "postgres", accountID: acct.ID, accountName: uniqueName,
-		upstream: upstream, upstreamAddr: acct.Instance.Address, userID: user.ID,
+		protocol: "postgres", accountID: acct.ID, accountName: resolved.rawName,
+		upstream: upstream, upstreamAddr: acct.Instance.Address, userID: userID,
 	}
 }
 
@@ -431,27 +445,34 @@ func (g *Gateway) handleMySQL(ctx context.Context, client net.Conn) *gatewayConn
 		return nil
 	}
 
-	uniqueName := strings.TrimSpace(obs.User)
-	acct, err := g.store.DatabaseAccountByUniqueName(uniqueName)
+	resolved, err := g.resolveAccount(obs.User)
 	if err != nil {
-		g.logger.Warn("mysql gateway account not found", "unique_name", uniqueName, "error", err)
+		g.logger.Warn("mysql gateway account resolution failed", "username", obs.User, "error", err)
 		return nil
 	}
+	acct := resolved.account
 
-	// RBAC check
-	resourceID := rbaccheck.DatabaseAccountResourceID(uniqueName)
-	if err := g.authorizeConnect(uniqueName, uniqueName, resourceID); err != nil {
+	// RBAC check - 使用解析后的用户ID（compact）或 uniqueName（非 compact v1 路径）
+	var rbacUserID string
+	if resolved.isCompact && resolved.user != nil {
+		rbacUserID = resolved.user.ID
+	} else {
+		// MySQL v1 回退：compact username 未识别时使用 unique name 作为 userID
+		rbacUserID = resolved.rawName
+	}
+	resourceID := dbAccountResourceID(acct)
+	if err := g.authorizeConnect(rbacUserID, resolved.rawName, resourceID); err != nil {
 		g.logger.Warn("mysql gateway rbac denied", "resource", resourceID, "error", err)
 		return nil
 	}
 
 	// Check account disabled and expiry
 	if acct.Disabled {
-		g.logger.Warn("mysql gateway account disabled", "account", uniqueName)
+		g.logger.Warn("mysql gateway account disabled", "account", resolved.rawName)
 		return nil
 	}
 	if acct.ExpiresAt != nil && time.Now().UTC().After(*acct.ExpiresAt) {
-		g.logger.Warn("mysql gateway account expired", "account", uniqueName, "expires_at", acct.ExpiresAt)
+		g.logger.Warn("mysql gateway account expired", "account", resolved.rawName, "expires_at", acct.ExpiresAt)
 		return nil
 	}
 
@@ -524,10 +545,10 @@ func (g *Gateway) handleMySQL(ctx context.Context, client net.Conn) *gatewayConn
 	return &gatewayConn{
 		protocol:     "mysql",
 		accountID:    acct.ID,
-		accountName:  uniqueName,
+		accountName:  resolved.rawName,
 		upstream:     upstream,
 		upstreamAddr: acct.Instance.Address,
-		userID:       uniqueName,
+		userID:       rbacUserID,
 	}
 }
 
@@ -543,6 +564,104 @@ func (g *Gateway) authorizeConnect(userID, uniqueName, resourceID string) error 
 		return fmt.Errorf("user %q not permitted to connect to %s", userID, resourceID)
 	}
 	return nil
+}
+
+// resolvedDBAccount 解析连接用户名后的数据库账号及关联用户信息
+type resolvedDBAccount struct {
+	account  *model.DatabaseAccount
+	user     *model.User   // compact username 认证后的堡垒机用户
+	isCompact bool          // 是否通过 compact username 解析
+	rawName  string        // 原始用户名（用于日志）
+}
+
+// resolveAccount 解析连接用户名：优先尝试 compact username (D/H前缀10位)，失败则回退到 unique_name 查找
+func (g *Gateway) resolveAccount(rawUsername string) (*resolvedDBAccount, error) {
+	rawUsername = strings.TrimSpace(rawUsername)
+	if rawUsername == "" {
+		return nil, errors.New("empty username")
+	}
+
+	// 尝试 compact username 解析
+	if len(rawUsername) == 10 {
+		prefix, _, _, err := util.ParseCompactUsername(rawUsername)
+		if err == nil && prefix == util.PrefixDatabase {
+			return g.resolveCompactAccount(rawUsername)
+		}
+		// 也支持 H 前缀（SSH 主机账号的 compact username 同样格式可用于 DB）
+		if err == nil && prefix == util.PrefixHost {
+			return g.resolveCompactAccount(rawUsername)
+		}
+	}
+
+	// 回退到 unique_name 查找
+	acct, err := g.store.DatabaseAccountByUniqueName(rawUsername)
+	if err != nil {
+		return nil, fmt.Errorf("account not found by unique_name %q: %w", rawUsername, err)
+	}
+	return &resolvedDBAccount{
+		account:  acct,
+		isCompact: false,
+		rawName:  rawUsername,
+	}, nil
+}
+
+// resolveCompactAccount 从 compact username 解析并查找数据库账号和用户会话
+func (g *Gateway) resolveCompactAccount(username string) (*resolvedDBAccount, error) {
+	resourceID := username[1:5]
+	sessionID := username[5:10]
+
+	// 查找数据库账号（按 resource_id）
+	var acct model.DatabaseAccount
+	if err := g.db.Preload("Instance").Where("resource_id = ?", resourceID).First(&acct).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, fmt.Errorf("database account not found for resource_id %q", resourceID)
+		}
+		return nil, fmt.Errorf("lookup database account: %w", err)
+	}
+
+	// 查找用户会话
+	var sess model.UserSession
+	if err := g.db.Where("session_id = ? AND status = ?", sessionID, "active").First(&sess).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, fmt.Errorf("invalid session %q", sessionID)
+		}
+		return nil, fmt.Errorf("lookup session: %w", err)
+	}
+
+	// 检查会话过期
+	if sess.ExpiresAt != nil && time.Now().UTC().After(*sess.ExpiresAt) {
+		g.db.Model(&sess).Update("status", "expired")
+		return nil, fmt.Errorf("session %q expired", sessionID)
+	}
+
+	// 查找用户
+	var user model.User
+	if err := g.db.Where("id = ? AND status = ?", sess.UserID, "active").First(&user).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, fmt.Errorf("user for session %q is disabled or not found", sessionID)
+		}
+		return nil, fmt.Errorf("lookup user: %w", err)
+	}
+
+	return &resolvedDBAccount{
+		account:  &acct,
+		user:     &user,
+		isCompact: true,
+		rawName:  username,
+	}, nil
+}
+
+// validateUserPassword 验证堡垒机用户密码（仅 compact username 路径使用）
+func (g *Gateway) validateUserPassword(user *model.User, password []byte) error {
+	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), password); err != nil {
+		return errors.New("authentication failed")
+	}
+	return nil
+}
+
+// dbAccountResourceID 获取数据库账号的 RBAC 资源ID
+func dbAccountResourceID(acct *model.DatabaseAccount) string {
+	return rbaccheck.DatabaseAccountResourceID(acct.UniqueName)
 }
 
 func copyClientToUpstream(client net.Conn, upstream net.Conn, observer queryObserver) {

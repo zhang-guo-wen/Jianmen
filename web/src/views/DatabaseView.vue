@@ -549,11 +549,32 @@ const connectSessionError = ref('');
 const connectTesting = ref(false);
 const connectTestResult = ref<{ ok: boolean; error?: string; latency_ms?: number } | null>(null);
 
+// Gateway config (fetched from /api/db/gateway)
+const gatewayConfig = ref<{ host: string; port: number; enabled: boolean }>({
+  host: '127.0.0.1',
+  port: 33060,
+  enabled: false,
+});
+
+async function loadGatewayConfig() {
+  try {
+    const cfg = await apiClient.getDBGateway();
+    if (cfg && typeof cfg === 'object') {
+      gatewayConfig.value = {
+        host: String(cfg.host || '127.0.0.1'),
+        port: Number(cfg.port) || 33060,
+        enabled: Boolean(cfg.enabled),
+      };
+    }
+  } catch {
+    // 使用默认值
+  }
+}
+
 const connectParams = computed(() => {
   if (!connectTarget.value || !selectedInstance.value) return [];
-  const inst = selectedInstance.value;
-  const { host, port } = parseAddress(inst.address || '127.0.0.1:3306');
-  const proxyPort = Number(port) + 30000;
+  const host = gatewayConfig.value.host;
+  const proxyPort = gatewayConfig.value.port;
   const resourceId = connectTarget.value.resource_id || '0000';
   const sessionId = userSessionId.value;
   const compactUser = sessionId ? 'D' + resourceId + sessionId : '';
@@ -610,9 +631,8 @@ const connectCommand = computed(() => {
   const resourceId = connectTarget.value.resource_id || '0000';
   const sessionId = userSessionId.value || '00001';
   const compactUser = `D${resourceId}${sessionId}`;
-  // Use proxy port convention: default port + 30000
-  const { host, port } = parseAddress(inst.address || '127.0.0.1:3306');
-  const proxyPort = Number(port) + 30000;
+  const host = gatewayConfig.value.host;
+  const proxyPort = gatewayConfig.value.port;
   if (protocol === 'mysql') {
     return `mysql --protocol=tcp -h ${host} -P ${proxyPort} -u ${compactUser} -p`;
   }
@@ -622,17 +642,6 @@ const connectCommand = computed(() => {
 // Helpers
 function unwrapArray<T>(payload: ApiEnvelope<T[]> | T[]): T[] {
   return Array.isArray(payload) ? payload : payload.data ?? [];
-}
-
-function parseAddress(address: string): { host: string; port: string } {
-  const lastColon = address.lastIndexOf(':');
-  if (lastColon > -1) {
-    const portPart = address.slice(lastColon + 1);
-    if (/^\d+$/.test(portPart)) {
-      return { host: address.slice(0, lastColon), port: portPart };
-    }
-  }
-  return { host: address, port: '3306' };
 }
 
 function formatTime(value: unknown): string {
@@ -1063,6 +1072,7 @@ watch(selectedInstance, (inst) => {
 });
 
 onMounted(() => {
+  loadGatewayConfig();
   loadInstances();
 });
 </script>

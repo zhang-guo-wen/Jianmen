@@ -570,8 +570,10 @@ function formatTime(value: unknown): string {
 }
 
 function formatDuration(value: unknown): string {
+  if (value === undefined || value === null) return t('common.none');
   const n = Number(value);
-  return Number.isFinite(n) ? `${n} ms` : t('common.none');
+  if (!Number.isFinite(n) || n === 0) return t('common.none');
+  return `${n} ms`;
 }
 
 function formatDurationSeconds(value: unknown): string {

@@ -276,6 +276,22 @@
         <el-alert v-else show-icon type="info" :closable="false"
           title="输入堡垒机的登录密码，不是目标主机的密码" />
 
+        <div style="margin-bottom: 8px; display: flex; align-items: center; gap: 8px;" v-if="!creatingSession">
+          <span style="font-size: 13px; color: #667085;">连通性：</span>
+          <el-tag v-if="connectionTesting" type="info" size="small">测试中...</el-tag>
+          <template v-else-if="connectionTestResult !== null">
+            <el-tag :type="connectionTestResult.ok ? 'success' : 'danger'" size="small">
+              {{ connectionTestResult.ok ? '可达' : '不可达' }}
+            </el-tag>
+            <span v-if="connectionTestResult.latency_ms !== undefined" style="font-size: 12px; color: #667085;">
+              延迟 {{ connectionTestResult.latency_ms }}ms
+            </span>
+            <span v-if="connectionTestResult.error" style="font-size: 12px; color: var(--el-color-danger);">
+              {{ connectionTestResult.error }}
+            </span>
+          </template>
+        </div>
+
         <div v-if="creatingSession" style="text-align: center; padding: 30px 0;">
           <el-icon class="is-loading" :size="28"><Loading /></el-icon>
           <p style="margin-top: 10px; color: #667085;">正在创建连接会话...</p>
@@ -405,6 +421,8 @@ const bastionPort = ref(47102)
 const userSessionId = ref('')
 const creatingSession = ref(false)
 const connectionError = ref('')
+const connectionTesting = ref(false)
+const connectionTestResult = ref<{ ok: boolean; error?: string; latency_ms?: number } | null>(null)
 
 // ── Refs ──
 const hostFormRef = ref<FormInstance>()
@@ -1203,8 +1221,11 @@ async function openConnectionDialog(target: TargetRecord) {
   selectedConnectionTarget.value = target
   userSessionId.value = ''
   connectionError.value = ''
+  connectionTestResult.value = null
   creatingSession.value = true
   connectionDialogVisible.value = true
+  // Run connectivity test in parallel
+  testHostConnection()
   try {
     const targetIdStr = String(target.id || target.resource_id || '')
     if (!targetIdStr) {
@@ -1217,6 +1238,21 @@ async function openConnectionDialog(target: TargetRecord) {
     connectionError.value = err instanceof Error ? err.message : '创建连接会话失败'
   } finally {
     creatingSession.value = false
+  }
+}
+
+async function testHostConnection() {
+  if (!selectedConnectionTarget.value) return
+  connectionTesting.value = true
+  connectionTestResult.value = null
+  try {
+    const target = selectedConnectionTarget.value
+    const result = await apiClient.testTargetConnection(targetStatusPayload(target, false))
+    connectionTestResult.value = { ok: result.ok, error: result.ok ? undefined : (result.message || '连接失败') }
+  } catch (err) {
+    connectionTestResult.value = { ok: false, error: err instanceof Error ? err.message : '连接失败' }
+  } finally {
+    connectionTesting.value = false
   }
 }
 

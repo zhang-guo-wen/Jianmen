@@ -175,6 +175,22 @@
         <el-alert show-icon type="info" :closable="false"
           title="输入堡垒机的登录密码，不是目标数据库的密码" />
 
+        <div style="margin-bottom: 8px; display: flex; align-items: center; gap: 8px;" v-if="!creatingSession">
+          <span style="font-size: 13px; color: #667085;">连通性：</span>
+          <el-tag v-if="connectionTesting" type="info" size="small">测试中...</el-tag>
+          <template v-else-if="connectionTestResult !== null">
+            <el-tag :type="connectionTestResult.ok ? 'success' : 'danger'" size="small">
+              {{ connectionTestResult.ok ? '可达' : '不可达' }}
+            </el-tag>
+            <span v-if="connectionTestResult.latency_ms !== undefined" style="font-size: 12px; color: #667085;">
+              延迟 {{ connectionTestResult.latency_ms }}ms
+            </span>
+            <span v-if="connectionTestResult.error" style="font-size: 12px; color: var(--el-color-danger);">
+              {{ connectionTestResult.error }}
+            </span>
+          </template>
+        </div>
+
         <div v-if="creatingSession" style="text-align: center; padding: 30px 0;">
           <el-icon class="is-loading" :size="28"><Loading /></el-icon>
           <p style="margin-top: 10px; color: #667085;">正在创建连接会话...</p>
@@ -315,6 +331,8 @@ async function loadGatewayConfig() {
 
 const creatingSession = ref(false)
 const connectionError = ref('')
+const connectionTesting = ref(false)
+const connectionTestResult = ref<{ ok: boolean; error?: string; latency_ms?: number } | null>(null)
 
 const compactUser = computed(() => {
   if (!connectTarget.value) return ''
@@ -632,6 +650,7 @@ async function openConnectDialog(acc: api.DBAccountRecord) {
   selectedInstance.value = instances.value.find(i => i.id === acc.instance_id) || selectedInstance.value
   userSessionId.value = ''
   connectionError.value = ''
+  connectionTestResult.value = null
   connectDialogVisible.value = true
 }
 
@@ -639,6 +658,8 @@ async function onConnectDialogOpened() {
   if (!connectTarget.value) return
   creatingSession.value = true
   connectionError.value = ''
+  connectionTestResult.value = null
+  testDBConnectionForTarget()
   try {
     const targetId = connectTarget.value.id || connectTarget.value.resource_id || ''
     if (targetId) {
@@ -649,6 +670,23 @@ async function onConnectDialogOpened() {
     connectionError.value = err instanceof Error ? err.message : '创建会话失败'
   } finally {
     creatingSession.value = false
+  }
+}
+
+async function testDBConnectionForTarget() {
+  if (!connectTarget.value) return
+  connectionTesting.value = true
+  connectionTestResult.value = null
+  try {
+    const id = connectTarget.value.id || connectTarget.value.resource_id || ''
+    if (!id) return
+    const result = await api.apiClient.testDBConnection(String(id))
+    const data = (result as any).data ?? result
+    connectionTestResult.value = { ok: data.ok, latency_ms: data.latency_ms, error: data.ok ? undefined : (data.error || '连接失败') }
+  } catch (err) {
+    connectionTestResult.value = { ok: false, error: err instanceof Error ? err.message : '连接失败' }
+  } finally {
+    connectionTesting.value = false
   }
 }
 

@@ -133,6 +133,7 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 	mux.HandleFunc(webTerminalPath, s.handleWebTerminal)
 	mux.HandleFunc("/api/sessions", s.withAuthAndUser(s.handleSessions))
 	mux.HandleFunc("/api/sessions/", s.withAuthAndUser(s.handleSessionArtifact))
+	mux.HandleFunc("/api/user-sessions", s.withAuthAndUser(s.handleUserSessions))
 	mux.HandleFunc("/api/db/instances", s.withAuthAndUser(s.handleDBInstances))
 	mux.HandleFunc("/api/db/instances/", s.withAuthAndUser(s.handleDBInstance))
 	mux.HandleFunc("/api/db/accounts/test/", s.withAuthAndUser(s.handleTestDBConnection))
@@ -971,6 +972,65 @@ func (s *Server) handleUpdateDBAccount(w http.ResponseWriter, r *http.Request, i
 		return
 	}
 	writeJSON(w, http.StatusOK, view)
+}
+
+func (s *Server) handleUserSessions(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", http.MethodPost)
+		writeErrorText(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	if !s.requirePermission(r, rbac.ActionSessionConnect) {
+		s.forbidden(w)
+		return
+	}
+	userID := userIDFromRequest(r)
+	if userID == "" {
+		writeErrorText(w, http.StatusUnauthorized, "user not authenticated")
+		return
+	}
+
+	var req struct {
+		TargetID string `json:"target_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErrorText(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if req.TargetID == "" {
+		writeErrorText(w, http.StatusBadRequest, "target_id is required")
+		return
+	}
+
+	// Look up the target to determine resource type and resource_id
+	var account model.HostAccount
+	if err := s.db.Where("id = ?", req.TargetID).First(&account).Error; err != nil {
+		writeErrorText(w, http.StatusNotFound, "target account not found")
+		return
+	}
+
+	sess := model.UserSession{
+		UserID:    userID,
+		Type:      "host",
+		Status:    "active",
+		CreatedBy: usernameFromRequest(r),
+	}
+	created, err := s.store.CreateUserSession(sess)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, map[string]any{
+		"id":               created.ID,
+		"session_id":       created.SessionID,
+		"session_seq":      created.SessionSeq,
+		"type":             created.Type,
+		"status":           created.Status,
+		"resource_id":      account.ResourceID,
+		"compact_username": "H" + account.ResourceID + created.SessionID,
+		"resource_type":    "host_account",
+	})
 }
 
 func (s *Server) handleSessions(w http.ResponseWriter, r *http.Request) {

@@ -68,30 +68,38 @@
 
     <el-dialog v-model="configVisible" :title="dialogTitle" class="form-dialog" destroy-on-close width="480px">
       <div v-if="selectedTarget" class="config-dialog">
-        <el-alert show-icon type="info" :closable="false"
+        <el-alert v-if="sessionError" show-icon type="error" :closable="false" :title="sessionError" />
+        <el-alert v-else show-icon type="info" :closable="false"
           title="输入堡垒机的登录密码，不是目标主机的密码" />
 
-        <el-descriptions :column="1" border size="small" style="margin-top: 12px">
-          <el-descriptions-item label="连接地址">
-            <code>{{ bastionHost || '127.0.0.1' }}:{{ bastionPort || 47102 }}</code>
-            <el-button link type="primary" size="small" style="margin-left: 8px" @click="copyValue(`${bastionHost || '127.0.0.1'}:${bastionPort || 47102}`)">复制</el-button>
-          </el-descriptions-item>
-          <el-descriptions-item label="用户名">
-            <code>{{ compactUser }}</code>
-            <el-button link type="primary" size="small" style="margin-left: 8px" @click="copyValue(compactUser)">复制</el-button>
-          </el-descriptions-item>
-          <el-descriptions-item label="密码">
-            堡垒机登录密码
-          </el-descriptions-item>
-        </el-descriptions>
-
-        <div style="margin-top: 12px">
-          <el-input :model-value="`ssh ${compactUser}@${bastionHost || '127.0.0.1'} -p ${bastionPort || 47102}`" readonly size="small">
-            <template #append>
-              <el-button @click="copyValue(`ssh ${compactUser}@${bastionHost || '127.0.0.1'} -p ${bastionPort || 47102}`)">复制</el-button>
-            </template>
-          </el-input>
+        <div v-if="creatingSession" style="text-align: center; padding: 30px 0;">
+          <el-icon class="is-loading" :size="28"><Loading /></el-icon>
+          <p style="margin-top: 10px; color: #667085;">{{ t('quickConnect.label.creatingSession') }}</p>
         </div>
+
+        <template v-else-if="!sessionError && compactUser">
+          <el-descriptions :column="1" border size="small" style="margin-top: 12px">
+            <el-descriptions-item label="连接地址">
+              <code>{{ bastionHost || '127.0.0.1' }}:{{ bastionPort || 47102 }}</code>
+              <el-button link type="primary" size="small" style="margin-left: 8px" @click="copyValue(`${bastionHost || '127.0.0.1'}:${bastionPort || 47102}`)">复制</el-button>
+            </el-descriptions-item>
+            <el-descriptions-item label="用户名">
+              <code>{{ compactUser }}</code>
+              <el-button link type="primary" size="small" style="margin-left: 8px" @click="copyValue(compactUser)">复制</el-button>
+            </el-descriptions-item>
+            <el-descriptions-item label="密码">
+              堡垒机登录密码
+            </el-descriptions-item>
+          </el-descriptions>
+
+          <div style="margin-top: 12px">
+            <el-input :model-value="`ssh ${compactUser}@${bastionHost || '127.0.0.1'} -p ${bastionPort || 47102}`" readonly size="small">
+              <template #append>
+                <el-button @click="copyValue(`ssh ${compactUser}@${bastionHost || '127.0.0.1'} -p ${bastionPort || 47102}`)">复制</el-button>
+              </template>
+            </el-input>
+          </div>
+        </template>
       </div>
     </el-dialog>
   </div>
@@ -99,7 +107,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
-import { Connection, Refresh } from '@element-plus/icons-vue';
+import { Connection, Loading, Refresh } from '@element-plus/icons-vue';
 import { ElMessage } from 'element-plus';
 
 import { apiClient, type ApiEnvelope, type TargetRecord } from '@/api/client';
@@ -116,7 +124,7 @@ const configVisible = ref(false);
 const bastionUser = ref('admin');
 const bastionHost = ref('127.0.0.1');
 const bastionPort = ref(47102);
-	const userSessionId = ref('00001');
+	const userSessionId = ref('');
 
 const filteredTargets = computed(() => {
   const query = keyword.value.trim().toLowerCase();
@@ -156,11 +164,11 @@ const dialogTitle = computed(() => {
 
 const compactUser = computed(() => {
   const target = selectedTarget.value;
-  if (!target) return 'H000000001';
+  if (!target) return '';
   const prefix = target.resource_type === 'database_account' ? 'D' : 'H';
   const resId = target.resource_id || targetId(target).slice(-4) || '0000';
-  const sessionId = userSessionId.value || '00001';
-  return `${prefix}${resId}${sessionId}`;
+  const sessionId = userSessionId.value;
+  return sessionId ? `${prefix}${resId}${sessionId}` : '';
 });
 
 function unwrapTargets(payload: ApiEnvelope<TargetRecord[]> | TargetRecord[]): TargetRecord[] {
@@ -227,9 +235,29 @@ function statusTagType(target: TargetRecord): 'success' | 'info' | 'warning' {
   return status === 'pending' ? 'warning' : 'success';
 }
 
-function openConfig(target: TargetRecord) {
+const creatingSession = ref(false);
+const sessionError = ref('');
+
+async function openConfig(target: TargetRecord) {
   selectedTarget.value = target;
+  userSessionId.value = '';
+  sessionError.value = '';
+  creatingSession.value = true;
   configVisible.value = true;
+
+  try {
+    const targetId = target.id || target.resource_id || '';
+    if (!targetId) {
+      sessionError.value = t('quickConnect.error.noTargetId');
+      return;
+    }
+    const session = await apiClient.createUserSession(String(targetId));
+    userSessionId.value = session?.session_id || '';
+  } catch (err) {
+    sessionError.value = err instanceof Error ? err.message : t('quickConnect.error.createSession');
+  } finally {
+    creatingSession.value = false;
+  }
 }
 
 async function copyValue(value: string) {

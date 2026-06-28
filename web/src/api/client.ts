@@ -145,6 +145,18 @@ export interface SessionRecord {
   [key: string]: unknown;
 }
 
+export interface UserSessionRecord {
+  id?: string;
+  session_id?: string;
+  session_seq?: number;
+  type?: string;
+  status?: string;
+  resource_id?: string;
+  resource_type?: string;
+  compact_username?: string;
+  [key: string]: unknown;
+}
+
 export interface SessionMetaRecord {
   session_id?: string;
   id?: string;
@@ -486,6 +498,11 @@ export const apiClient = {
     request<TestConnectionResult>('/api/targets/test-connection', {
       method: 'POST',
       body: JSON.stringify(payload)
+    }),
+  createUserSession: (targetId: string) =>
+    request<UserSessionRecord>('/api/user-sessions', {
+      method: 'POST',
+      body: JSON.stringify({ target_id: targetId })
     }),
   getSessions: () => request<ApiEnvelope<SessionRecord[]> | SessionRecord[]>('/api/sessions'),
   getSessionMeta: (id: string | number) =>

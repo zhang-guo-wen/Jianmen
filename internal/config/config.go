@@ -118,21 +118,15 @@ func (c *Config) applyDefaults() {
 	if c.TargetsFile == "" {
 		c.TargetsFile = "data/targets.json"
 	}
-	if c.Admin.ListenAddr == "" {
+	if adminEmpty {
 		c.Admin.ListenAddr = "127.0.0.1:47100"
-	}
-	if c.Admin.Token == "" {
 		c.Admin.Token = "dev-admin-token"
-	}
-	if adminEmpty && len(c.Admin.CORSAllowedOrigins) == 0 {
+		c.Admin.Enabled = true
 		c.Admin.CORSAllowedOrigins = []string{"http://127.0.0.1:47101", "http://localhost:47101"}
 	}
 	if !c.Recording.Enabled && !c.Recording.RecordCommands && !c.Recording.RecordInput {
 		c.Recording.Enabled = true
 		c.Recording.RecordCommands = true
-	}
-	if adminEmpty {
-		c.Admin.Enabled = true
 	}
 	if databaseEmpty {
 		c.Database.Enabled = true

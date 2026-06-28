@@ -91,7 +91,7 @@ async function submit() {
       return;
     }
     setToken(token);
-    router.push(typeof route.query.redirect === 'string' ? route.query.redirect : '/dashboard');
+    router.push(typeof route.query.redirect === 'string' ? route.query.redirect : '/quick-connect');
   } catch (err: any) {
     loginError.value = err?.message || '登录失败，请检查用户名和密码';
   } finally {

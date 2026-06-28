@@ -100,8 +100,8 @@
       :close-on-click-modal="!savingPerms"
       :title="permDialogTitle"
       class="form-dialog"
-      destroy-on-close
       width="min(680px, calc(100vw - 32px))"
+      @closed="onPermDialogClosed"
     >
       <div class="perm-dialog-header">
         <span class="perm-count-label">{{ selectedCountText }}</span>
@@ -116,11 +116,10 @@
             <el-button link size="small" @click="toggleGroup(group, true)">全选</el-button>
             <el-button link size="small" @click="toggleGroup(group, false)">取消全选</el-button>
           </div>
-          <div class="perm-check-grid">
+          <el-checkbox-group v-model="selectedPerms" class="perm-check-grid">
             <el-checkbox
               v-for="perm in group.permissions"
               :key="perm.action"
-              v-model="selectedPerms"
               :label="perm.action"
               :value="perm.action"
               class="perm-check-item"
@@ -128,7 +127,7 @@
               <span class="perm-action-label">{{ perm.action }}</span>
               <span class="perm-action-desc">{{ perm.desc }}</span>
             </el-checkbox>
-          </div>
+          </el-checkbox-group>
         </div>
       </div>
       <template #footer>
@@ -450,6 +449,12 @@ async function ensurePermissionsExist(actions: string[]) {
 }
 
 function onSearch() {}
+
+function onPermDialogClosed() {
+  selectedPerms.value = [];
+  currentPermRole.value = null;
+}
+
 onMounted(async () => {
   await loadRoles();
   // Also load all permissions once for the dialog mapping

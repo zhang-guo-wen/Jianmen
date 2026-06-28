@@ -4,7 +4,7 @@ import { apiClient, getToken } from '@/api/client';
 import type { TranslationKey } from '@/i18n';
 import { usePermissionStore } from '@/stores/permission';
 import AuditView from '@/views/AuditView.vue';
-import DashboardView from '@/views/DashboardView.vue';
+
 import DatabaseView from '@/views/DatabaseView.vue';
 import HostsView from '@/views/HostsView.vue';
 import LoginView from '@/views/LoginView.vue';
@@ -12,9 +12,8 @@ import QuickConnectView from '@/views/QuickConnectView.vue';
 import SetupView from '@/views/SetupView.vue';
 import RBACView from '@/views/RBACView.vue';
 import RolesView from '@/views/RolesView.vue';
-import SessionsView from '@/views/SessionsView.vue';
+
 import UsersView from '@/views/UsersView.vue';
-import WebTerminalView from '@/views/WebTerminalView.vue';
 
 type AppRouteMeta = {
   public?: boolean;
@@ -23,22 +22,19 @@ type AppRouteMeta = {
 };
 
 const routeMenuMap: Record<string, string> = {
-  '/dashboard': 'dashboard',
+
   '/hosts': 'hosts',
   '/databases': 'databases',
   '/quick-connect': 'quickConnect',
-  '/sessions': 'sessions',
-  '/rbac': 'rbac',
   '/audit': 'audit',
-  '/web-terminal': 'webTerminal',
-  '/users': 'rbac',
-  '/roles': 'rbac',
+  '/users': 'users',
+  '/roles': 'roles',
 };
 
 const routes: RouteRecordRaw[] = [
   {
     path: '/',
-    redirect: '/dashboard'
+    redirect: '/quick-connect'
   },
   {
     path: '/setup',
@@ -60,15 +56,7 @@ const routes: RouteRecordRaw[] = [
       descriptionKey: 'route.login.description'
     } satisfies AppRouteMeta
   },
-  {
-    path: '/dashboard',
-    name: 'dashboard',
-    component: DashboardView,
-    meta: {
-      titleKey: 'route.dashboard.title',
-      descriptionKey: 'route.dashboard.description'
-    } satisfies AppRouteMeta
-  },
+
   {
     path: '/hosts',
     name: 'hosts',
@@ -96,15 +84,7 @@ const routes: RouteRecordRaw[] = [
       descriptionKey: 'route.quickConnect.description'
     } satisfies AppRouteMeta
   },
-  {
-    path: '/sessions',
-    name: 'sessions',
-    component: SessionsView,
-    meta: {
-      titleKey: 'route.sessions.title',
-      descriptionKey: 'route.sessions.description'
-    } satisfies AppRouteMeta
-  },
+
   {
     path: '/rbac',
     name: 'rbac',
@@ -141,18 +121,10 @@ const routes: RouteRecordRaw[] = [
       descriptionKey: 'route.audit.description'
     } satisfies AppRouteMeta
   },
-  {
-    path: '/web-terminal',
-    name: 'web-terminal',
-    component: WebTerminalView,
-    meta: {
-      titleKey: 'route.webTerminal.title',
-      descriptionKey: 'route.webTerminal.description'
-    } satisfies AppRouteMeta
-  },
+
   {
     path: '/:pathMatch(.*)*',
-    redirect: '/dashboard'
+    redirect: '/quick-connect'
   }
 ];
 
@@ -200,7 +172,7 @@ router.beforeEach(async (to, from) => {
       }
       const menuKey = routeMenuMap[to.path];
       if (menuKey && !store.canAccessMenu(menuKey)) {
-        return { name: 'dashboard' };
+        return { name: 'quick-connect' };
       }
     }
     return true;

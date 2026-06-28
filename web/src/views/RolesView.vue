@@ -158,51 +158,43 @@ interface PermGroup { resource: string; icon: string; permissions: PermItem[]; }
 
 const PERM_GROUPS: PermGroup[] = [
   {
-    resource: '主机 (host)', icon: '🖥️', permissions: [
+    resource: '主机管理', icon: '🖥️', permissions: [
       { action: 'host:view',   label: '查看主机',   desc: '浏览主机列表与详情' },
       { action: 'host:create', label: '创建主机',   desc: '新增纳管主机' },
       { action: 'host:update', label: '编辑主机',   desc: '修改主机配置' },
       { action: 'host:delete', label: '删除主机',   desc: '移除纳管主机' },
-    ],
-  },
-  {
-    resource: '数据库 (database)', icon: '🗄️', permissions: [
-      { action: 'dbproxy:view',   label: '查看实例',       desc: '浏览数据库实例' },
-      { action: 'dbproxy:create', label: '创建实例',       desc: '新增数据库代理实例' },
-      { action: 'dbproxy:update', label: '编辑实例',       desc: '修改数据库代理配置' },
-      { action: 'dbproxy:delete', label: '删除实例',       desc: '删除数据库代理实例' },
-      { action: 'db:connect',     label: '连接数据库',      desc: '通过代理连接' },
-      { action: 'db:audit:view',  label: '查看数据库审计',  desc: '浏览数据库审计记录' },
-    ],
-  },
-  {
-    resource: '会话 (session)', icon: '📡', permissions: [
-      { action: 'session:connect', label: '连接会话', desc: '建立SSH会话' },
-      { action: 'session:view',    label: '查看会话', desc: '浏览活跃和历史会话' },
-    ],
-  },
-  {
-    resource: 'SFTP', icon: '📁', permissions: [
-      { action: 'sftp:read',  label: '读取文件', desc: '通过SFTP下载' },
-      { action: 'sftp:write', label: '写入文件', desc: '通过SFTP上传' },
-    ],
-  },
-  {
-    resource: '审计 (audit)', icon: '📋', permissions: [
-      { action: 'audit:view', label: '查看审计', desc: '浏览SSH审计日志' },
-    ],
-  },
-  {
-    resource: '权限管理 (rbac)', icon: '🔐', permissions: [
-      { action: 'rbac:manage', label: '管理RBAC', desc: '管理角色、权限和绑定' },
-    ],
-  },
-  {
-    resource: '目标 (target)', icon: '🎯', permissions: [
       { action: 'target:view',   label: '查看目标', desc: '浏览目标资产' },
       { action: 'target:create', label: '创建目标', desc: '新增目标资产' },
       { action: 'target:update', label: '编辑目标', desc: '修改目标配置' },
       { action: 'target:delete', label: '删除目标', desc: '移除目标资产' },
+    ],
+  },
+  {
+    resource: '数据库管理', icon: '🗄️', permissions: [
+      { action: 'dbproxy:view',   label: '查看实例',      desc: '浏览数据库实例列表' },
+      { action: 'dbproxy:create', label: '创建实例',      desc: '新增数据库代理实例' },
+      { action: 'dbproxy:update', label: '编辑实例',      desc: '修改数据库代理配置' },
+      { action: 'dbproxy:delete', label: '删除实例',      desc: '删除数据库代理实例' },
+      { action: 'db:connect',     label: '连接数据库',     desc: '通过代理连接数据库' },
+      { action: 'db:audit:view',  label: '查看数据库审计', desc: '浏览数据库审计记录' },
+    ],
+  },
+  {
+    resource: '用户与角色', icon: '👥', permissions: [
+      { action: 'rbac:manage', label: '管理用户与角色', desc: '创建用户、角色并分配权限' },
+    ],
+  },
+  {
+    resource: '会话与传输', icon: '📡', permissions: [
+      { action: 'session:connect', label: '连接会话', desc: '建立 SSH 连接' },
+      { action: 'session:view',    label: '查看会话', desc: '浏览会话记录' },
+      { action: 'sftp:read',       label: 'SFTP 读取', desc: '通过 SFTP 下载文件' },
+      { action: 'sftp:write',      label: 'SFTP 写入', desc: '通过 SFTP 上传文件' },
+    ],
+  },
+  {
+    resource: '审计日志', icon: '📋', permissions: [
+      { action: 'audit:view', label: '查看审计', desc: '浏览操作审计日志' },
     ],
   },
 ];

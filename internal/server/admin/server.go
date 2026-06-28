@@ -60,6 +60,10 @@ type dbConnectionListItem struct {
 	ClientAddr   string `json:"client_addr"`
 	UpstreamAddr string `json:"upstream_addr"`
 	StartedAt    string `json:"started_at"`
+	EndedAt      string `json:"ended_at,omitempty"`
+	DurationMs   int64  `json:"duration_ms,omitempty"`
+	AccountName  string `json:"account_name,omitempty"`
+	InstanceName string `json:"instance_name,omitempty"`
 	Path         string `json:"path"`
 }
 
@@ -1354,6 +1358,10 @@ func (s *Server) listDBConnections() ([]dbConnectionListItem, error) {
 			ClientAddr   string `json:"client_addr"`
 			UpstreamAddr string `json:"upstream_addr"`
 			StartedAt    string `json:"started_at"`
+			EndedAt      string `json:"ended_at"`
+			DurationMs   int64  `json:"duration_ms"`
+			AccountName  string `json:"account_name"`
+			InstanceName string `json:"instance_name"`
 		}
 		if err := readJSON(filepath.Join(dir, "meta.json"), &meta); err != nil {
 			continue
@@ -1365,6 +1373,10 @@ func (s *Server) listDBConnections() ([]dbConnectionListItem, error) {
 			ClientAddr:   meta.ClientAddr,
 			UpstreamAddr: meta.UpstreamAddr,
 			StartedAt:    meta.StartedAt,
+			EndedAt:      meta.EndedAt,
+			DurationMs:   meta.DurationMs,
+			AccountName:  meta.AccountName,
+			InstanceName: meta.InstanceName,
 			Path:         dir,
 		})
 	}

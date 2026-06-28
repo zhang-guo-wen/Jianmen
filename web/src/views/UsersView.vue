@@ -16,10 +16,7 @@
     <el-table v-else v-loading="loading" :data="filteredUsers" height="420" row-key="id">
       <el-table-column :label="t('users.username')" min-width="140">
         <template #default="{ row }">
-          <div>
-            <strong>{{ row.username }}</strong>
-            <div class="col-mono">{{ row.id }}</div>
-          </div>
+          <strong>{{ row.username }}</strong>
         </template>
       </el-table-column>
       <el-table-column prop="display_name" :label="t('users.displayName')" min-width="120" />

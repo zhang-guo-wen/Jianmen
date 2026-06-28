@@ -115,7 +115,7 @@ func (o *mysqlObserver) handleClientPacket(seq byte, payload []byte) *queryDecis
 	}
 	cmd := payload[0]
 	switch cmd {
-	case 0x03:
+	case 0x03: // COM_QUERY
 		record, decision := o.sink.StartQuery(string(payload[1:]), map[string]any{
 			"protocol": "mysql",
 			"command":  "COM_QUERY",
@@ -125,10 +125,22 @@ func (o *mysqlObserver) handleClientPacket(seq byte, payload []byte) *queryDecis
 			return &decision
 		}
 		o.pending = append(o.pending, record)
-	case 0x16:
+	case 0x16: // COM_STMT_PREPARE
 		record, decision := o.sink.StartQuery(string(payload[1:]), map[string]any{
 			"protocol": "mysql",
 			"command":  "COM_STMT_PREPARE",
+			"seq":      seq,
+		})
+		if !decision.Allowed {
+			return &decision
+		}
+		o.pending = append(o.pending, record)
+	case 0x17: // COM_STMT_EXECUTE
+		stmtID := int(binary.LittleEndian.Uint32(payload[1:5]))
+		record, decision := o.sink.StartQuery(fmt.Sprintf("EXECUTE stmt_id=%d", stmtID), map[string]any{
+			"protocol": "mysql",
+			"command":  "COM_STMT_EXECUTE",
+			"stmt_id":  stmtID,
 			"seq":      seq,
 		})
 		if !decision.Allowed {

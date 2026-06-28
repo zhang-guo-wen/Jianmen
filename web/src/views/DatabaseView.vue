@@ -11,6 +11,7 @@
     >
       <template #toolbar-extra>
         <el-button type="primary" @click="openCreateInstance">新增实例</el-button>
+        <el-button @click="openQuickCreateAccount">新建账号</el-button>
       </template>
       <el-table-column prop="name" label="名称" min-width="130" show-overflow-tooltip />
       <el-table-column prop="address" label="地址" min-width="130" show-overflow-tooltip />
@@ -70,6 +71,17 @@
         </el-collapse>
       </el-form>
     </FormDialog>
+
+    <!-- 快速新建账号：选择实例 -->
+    <el-dialog v-model="quickAccountVisible" title="选择实例" width="420px" destroy-on-close>
+      <el-select v-model="quickAccountInstanceId" placeholder="选择数据库实例" filterable style="width:100%">
+        <el-option v-for="inst in allInstances" :key="inst.id" :label="inst.name" :value="inst.id" />
+      </el-select>
+      <template #footer>
+        <el-button @click="quickAccountVisible = false">取消</el-button>
+        <el-button type="primary" :disabled="!quickAccountInstanceId" @click="confirmQuickCreateAccount">确定</el-button>
+      </template>
+    </el-dialog>
 
     <!-- 账号列表弹窗 -->
     <el-dialog
@@ -269,6 +281,9 @@ const instancePage = ref(1)
 const instancePageSize = ref(20)
 const instanceTotal = ref(0)
 const instanceSearchKeyword = ref('')
+const allInstances = ref<api.DatabaseInstanceView[]>([])
+const quickAccountVisible = ref(false)
+const quickAccountInstanceId = ref('')
 const showInstanceDialog = ref(false)
 const submitting = ref(false)
 const editingInstance = ref<api.DatabaseInstanceView | null>(null)
@@ -449,6 +464,22 @@ function onInstanceSearch(keyword: string) {
   instanceSearchKeyword.value = keyword
   instancePage.value = 1
   loadInstances()
+}
+
+async function openQuickCreateAccount() {
+  const res = await api.apiClient.getDBInstances({ page_size: 9999 })
+  allInstances.value = res.items
+  quickAccountInstanceId.value = ''
+  quickAccountVisible.value = true
+}
+
+function confirmQuickCreateAccount() {
+  if (!quickAccountInstanceId.value) return
+  const inst = allInstances.value.find(i => i.id === quickAccountInstanceId.value)
+  if (inst) {
+    quickAccountVisible.value = false
+    showAccounts(inst)
+  }
 }
 
 function openCreateInstance() {

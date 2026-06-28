@@ -63,11 +63,11 @@ type TargetView struct {
 	HostID                string   `json:"host_id,omitempty"`
 	ResourceType          string   `json:"resource_type"`
 	ResourceID            string   `json:"resource_id"`
+	ResourceSeq           int      `json:"resource_seq"`
 	HostResourceID        string   `json:"host_resource_id"`
 	Name                  string   `json:"name"`
-	Group                 string   `json:"group,omitempty"`
+	Group                 string   `json:"group"`
 	Remark                string   `json:"remark,omitempty"`
-	Disabled              bool     `json:"disabled"`
 	ExpiresAt             string   `json:"expires_at,omitempty"`
 	Status                string   `json:"status"`
 	Host                  string   `json:"host"`
@@ -77,16 +77,15 @@ type TargetView struct {
 	InsecureIgnoreHostKey bool     `json:"insecure_ignore_host_key"`
 	HostKeyFingerprint    string   `json:"host_key_fingerprint"`
 	KnownHostsPath        string   `json:"known_hosts_path"`
-	Static                bool     `json:"static"`
 }
 
 type HostRecord struct {
-	ID       string `json:"id"`
-	Name     string `json:"name"`
-	Group    string `json:"group,omitempty"`
-	Host     string `json:"host"`
-	Port     int    `json:"port"`
-	Remark   string `json:"remark,omitempty"`
+	ID      string `json:"id"`
+	Name    string `json:"name"`
+	Group   string `json:"group,omitempty"`
+	Host    string `json:"host"`
+	Port    int    `json:"port"`
+	Remark  string `json:"remark,omitempty"`
 	Disabled bool   `json:"disabled"`
 }
 
@@ -97,10 +96,8 @@ type HostView struct {
 	Host         string `json:"host"`
 	Port         int    `json:"port"`
 	Remark       string `json:"remark,omitempty"`
-	Disabled     bool   `json:"disabled"`
 	Status       string `json:"status"`
 	AccountCount int    `json:"account_count"`
-	Static       bool   `json:"static"`
 }
 
 type DatabaseInstanceView struct {
@@ -1017,7 +1014,7 @@ func (s *StaticStore) hostViewLocked(id string) (HostView, bool) {
 
 func (s *StaticStore) hostDisabledLocked(id string) bool {
 	host, ok := s.hostViewLocked(id)
-	return ok && host.Disabled
+	return ok && host.Status == "disabled"
 }
 
 func (s *StaticStore) targetAvailableLocked(target config.Target) error {
@@ -1226,9 +1223,7 @@ func hostView(host HostRecord, static bool) HostView {
 		Host:     host.Host,
 		Port:     normalizedPort(host.Port),
 		Remark:   host.Remark,
-		Disabled: host.Disabled,
 		Status:   status,
-		Static:   static,
 	}
 }
 
@@ -1244,7 +1239,6 @@ func targetView(target config.Target, static bool, hostDisabled bool) TargetView
 		Name:                  target.Name,
 		Group:                 target.Group,
 		Remark:                target.Remark,
-		Disabled:              target.Disabled,
 		ExpiresAt:             target.ExpiresAt,
 		Status:                status,
 		Host:                  target.Host,
@@ -1254,7 +1248,6 @@ func targetView(target config.Target, static bool, hostDisabled bool) TargetView
 		InsecureIgnoreHostKey: target.InsecureIgnoreHostKey,
 		HostKeyFingerprint:    target.HostKeyFingerprint,
 		KnownHostsPath:        target.KnownHostsPath,
-		Static:                static,
 	}
 }
 

@@ -123,9 +123,6 @@ func TestUpdateTargetPersistsRuntimeTarget(t *testing.T) {
 	if view.ID != "runtime-a" || view.Name != "updated runtime" || view.Host != "10.0.0.2" || view.Port != 2200 || view.Username != "ubuntu" {
 		t.Fatalf("unexpected view: %#v", view)
 	}
-	if view.Static {
-		t.Fatalf("updated runtime target was marked static: %#v", view)
-	}
 	if len(view.AuthMethods) != 1 || view.AuthMethods[0] != "password" {
 		t.Fatalf("auth methods = %#v, want [password]", view.AuthMethods)
 	}

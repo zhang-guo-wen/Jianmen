@@ -70,7 +70,7 @@ func TestHandleTargetCRUD(t *testing.T) {
 	if err := json.Unmarshal(getRec.Body.Bytes(), &got); err != nil {
 		t.Fatalf("unmarshal get response: %v", err)
 	}
-	if got.ID != "runtime-a" || got.Static {
+	if got.ID != "runtime-a" {
 		t.Fatalf("unexpected get target view: %#v", got)
 	}
 	assertTargetResponseHasNoSecrets(t, getRec.Body.Bytes())
@@ -120,7 +120,7 @@ func TestHandleHostsPaginationAndLazyAccounts(t *testing.T) {
 			"id": "prod-a",
 			"name": "Production A",
 			"group": "prod",
-			"host": "10.0.0.10",
+			"address": "10.0.0.10",
 			"port": 2201,
 			"remark": "primary host"
 		}`,
@@ -128,7 +128,7 @@ func TestHandleHostsPaginationAndLazyAccounts(t *testing.T) {
 			"id": "prod-b",
 			"name": "Production B",
 			"group": "prod",
-			"host": "10.0.0.11",
+			"address": "10.0.0.11",
 			"port": 2202
 		}`,
 	} {

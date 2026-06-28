@@ -102,8 +102,7 @@ type Host struct {
 	Name      string    `gorm:"size:255;not null" json:"name"`
 	Address   string    `gorm:"index;size:255;not null" json:"address"`
 	Port      int       `gorm:"not null;default:22" json:"port"`
-	Protocol  string    `gorm:"size:32;not null;default:ssh" json:"protocol"`
-	Labels    string    `gorm:"type:text" json:"labels,omitempty"`
+	GroupName string    `gorm:"size:128" json:"group"`
 	Remark    string    `gorm:"type:text" json:"remark,omitempty"`
 	Status    string    `gorm:"index;size:32;not null;default:active" json:"status"`
 	CreatedAt time.Time `json:"created_at"`
@@ -121,8 +120,9 @@ type HostAccount struct {
 	Status        string         `gorm:"index;size:32;not null;default:active" json:"status"`
 	ResourceSeq   int            `gorm:"index;not null;default:0" json:"resource_seq"`
 	ResourceID    string         `gorm:"uniqueIndex;size:4" json:"resource_id"`
-	Labels        string         `gorm:"type:text" json:"labels,omitempty"`
+	GroupName     string         `gorm:"size:128" json:"group"`
 	Remark        string         `gorm:"type:text" json:"remark,omitempty"`
+	ExpiresAt     *time.Time     `gorm:"index" json:"expires_at"`
 	CreatedAt     time.Time      `json:"created_at"`
 	UpdatedAt     time.Time      `json:"updated_at"`
 	Host          Host           `gorm:"constraint:OnUpdate:CASCADE,OnDelete:CASCADE;" json:"-"`

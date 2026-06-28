@@ -21,26 +21,26 @@ type UserView struct {
 }
 
 type HostRecord struct {
-	ID       string `json:"id"`
-	Name     string `json:"name"`
-	Group    string `json:"group,omitempty"`
-	Host     string `json:"host"`
-	Port     int    `json:"port"`
-	Remark   string `json:"remark,omitempty"`
-	Disabled bool   `json:"disabled"`
+	ID      string `json:"id"`
+	Name    string `json:"name"`
+	Group   string `json:"group"`
+	Address string `json:"address"`
+	Port    int    `json:"port"`
+	Remark  string `json:"remark"`
+	Status  string `json:"status"`
 }
 
 type HostView struct {
 	ID           string `json:"id"`
 	Name         string `json:"name"`
-	Group        string `json:"group,omitempty"`
-	Host         string `json:"host"`
+	Group        string `json:"group"`
+	Address      string `json:"address"`
 	Port         int    `json:"port"`
-	Remark       string `json:"remark,omitempty"`
-	Disabled     bool   `json:"disabled"`
+	Remark       string `json:"remark"`
 	Status       string `json:"status"`
 	AccountCount int    `json:"account_count"`
-	Static       bool   `json:"static"`
+	CreatedAt    string `json:"created_at"`
+	UpdatedAt    string `json:"updated_at"`
 }
 
 type TargetView struct {
@@ -51,9 +51,8 @@ type TargetView struct {
 	ResourceSeq           int      `json:"resource_seq"`
 	HostResourceID        string   `json:"host_resource_id"`
 	Name                  string   `json:"name"`
-	Group                 string   `json:"group,omitempty"`
+	Group                 string   `json:"group"`
 	Remark                string   `json:"remark,omitempty"`
-	Disabled              bool     `json:"disabled"`
 	ExpiresAt             string   `json:"expires_at,omitempty"`
 	Status                string   `json:"status"`
 	Host                  string   `json:"host"`
@@ -63,7 +62,6 @@ type TargetView struct {
 	InsecureIgnoreHostKey bool     `json:"insecure_ignore_host_key"`
 	HostKeyFingerprint    string   `json:"host_key_fingerprint"`
 	KnownHostsPath        string   `json:"known_hosts_path"`
-	Static                bool     `json:"static"`
 }
 
 // TargetConfig carries enough info to dial a target host via SSH.

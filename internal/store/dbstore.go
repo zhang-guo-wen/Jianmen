@@ -152,16 +152,18 @@ func (s *DBStore) Users() []UserView {
 // -- hosts --
 
 func (s *DBStore) hostView(m model.Host) HostView {
-	status := "enabled"
-	if m.Status == "disabled" {
-		status = "disabled"
+	status := m.Status
+	if status == "" {
+		status = "active"
 	}
 	var count int64
 	s.db.Model(&model.HostAccount{}).Where("host_id = ?", m.ID).Count(&count)
 	return HostView{
-		ID: m.ID, Name: m.Name, Group: m.Labels, Remark: m.Remark,
-		Host: m.Address, Port: m.Port, Status: status,
-		Disabled: m.Status == "disabled", AccountCount: int(count),
+		ID: m.ID, Name: m.Name, Group: m.GroupName, Address: m.Address,
+		Port: m.Port, Remark: m.Remark, Status: status,
+		AccountCount: int(count),
+		CreatedAt:    m.CreatedAt.Format(time.RFC3339),
+		UpdatedAt:    m.UpdatedAt.Format(time.RFC3339),
 	}
 }
 
@@ -188,15 +190,14 @@ func (s *DBStore) Host(id string) (HostView, error) {
 func (s *DBStore) AddHost(host HostRecord) (HostView, error) {
 	normalized := normalizeHostRecord(host)
 	m := model.Host{
-		ID:       normalized.ID,
-		Name:     normalized.Name,
-		Address:  normalized.Host,
-		Port:     normalized.Port,
-		Protocol: "ssh",
-		Labels:   normalized.Group,
-		Remark:   normalized.Remark,
+		ID:        normalized.ID,
+		Name:      normalized.Name,
+		Address:   normalized.Address,
+		Port:      normalized.Port,
+		GroupName: normalized.Group,
+		Remark:    normalized.Remark,
 	}
-	if normalized.Disabled {
+	if normalized.Status == "disabled" {
 		m.Status = "disabled"
 	}
 	if err := s.db.Create(&m).Error; err != nil {
@@ -212,12 +213,12 @@ func (s *DBStore) UpdateHost(id string, host HostRecord) (HostView, error) {
 	}
 	normalized := normalizeHostRecord(host)
 	m.Name = normalized.Name
-	m.Address = normalized.Host
+	m.Address = normalized.Address
 	m.Port = normalized.Port
-	m.Labels = normalized.Group
+	m.GroupName = normalized.Group
 	m.Remark = normalized.Remark
 	m.Status = "active"
-	if normalized.Disabled {
+	if normalized.Status == "disabled" {
 		m.Status = "disabled"
 	}
 	if err := s.db.Save(&m).Error; err != nil {
@@ -254,9 +255,9 @@ func (s *DBStore) targetView(a model.HostAccount) TargetView {
 		ID: a.ID, HostID: a.HostID,
 		ResourceType: model.ResourceTypeHostAccount, ResourceID: a.ResourceID,
 		ResourceSeq: a.ResourceSeq,
-		Name: name, Group: a.Labels, Remark: a.Remark,
-		Username: a.Username, Status: status, Disabled: a.Status == "disabled",
-		AuthMethods: authMethods, Static: false,
+		Name: name, Group: a.GroupName, Remark: a.Remark,
+		Username: a.Username, Status: status,
+		AuthMethods: authMethods,
 	}
 }
 
@@ -333,7 +334,7 @@ func (s *DBStore) AddTarget(target config.Target) (TargetView, error) {
 		Password:     model.NewEncryptedField(target.Password),
 		PrivateKeyPEM: model.NewEncryptedField(target.PrivateKeyPEM),
 		Passphrase:   model.NewEncryptedField(target.Passphrase),
-		Labels:       target.Group,
+		GroupName:    target.Group,
 		Remark:       target.Remark,
 		ResourceSeq:  seq,
 		ResourceID:   util.ResourceIDFromSeq(util.PrefixHost, seq),
@@ -361,7 +362,7 @@ func (s *DBStore) UpdateTarget(id string, target config.Target) (TargetView, err
 		return TargetView{}, fmt.Errorf("%w: %q", ErrTargetNotFound, id)
 	}
 	a.Username = target.Username
-	a.Labels = target.Group
+	a.GroupName = target.Group
 	a.Remark = target.Remark
 	if target.Password != "" {
 		a.AuthType = "password"
@@ -822,16 +823,16 @@ func normalizeHostRecord(h HostRecord) HostRecord {
 	h.ID = strings.TrimSpace(h.ID)
 	h.Name = strings.TrimSpace(h.Name)
 	h.Group = strings.TrimSpace(h.Group)
-	h.Host = strings.TrimSpace(h.Host)
+	h.Address = strings.TrimSpace(h.Address)
 	h.Remark = strings.TrimSpace(h.Remark)
 	if h.Port == 0 {
 		h.Port = 22
 	}
 	if h.ID == "" {
-		h.ID = fmt.Sprintf("%s-%d", strings.ToLower(h.Host), h.Port)
+		h.ID = fmt.Sprintf("%s-%d", strings.ToLower(h.Address), h.Port)
 	}
 	if h.Name == "" {
-		h.Name = formatHostAddress(h.Host, h.Port)
+		h.Name = formatHostAddress(h.Address, h.Port)
 	}
 	return h
 }

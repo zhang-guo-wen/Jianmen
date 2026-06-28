@@ -1552,7 +1552,7 @@ func paginateHosts(hosts []store.HostView, r *http.Request) pagedHostList {
 				host.ID,
 				host.Name,
 				host.Group,
-				host.Host,
+				host.Address,
 				strconv.Itoa(host.Port),
 				host.Remark,
 			}

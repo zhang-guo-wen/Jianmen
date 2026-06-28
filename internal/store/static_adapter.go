@@ -53,9 +53,9 @@ func (a *StaticAdapter) Hosts() []HostView {
 	for i := range raw {
 		out[i] = HostView{
 			ID: raw[i].ID, Name: raw[i].Name, Group: raw[i].Group,
-			Host: raw[i].Host, Port: raw[i].Port, Remark: raw[i].Remark,
-			Disabled: raw[i].Disabled, Status: raw[i].Status,
-			AccountCount: raw[i].AccountCount, Static: raw[i].Static,
+			Address: raw[i].Host, Port: raw[i].Port, Remark: raw[i].Remark,
+			Status: raw[i].Status,
+			AccountCount: raw[i].AccountCount,
 		}
 	}
 	return out
@@ -68,41 +68,49 @@ func (a *StaticAdapter) Host(id string) (HostView, error) {
 	}
 	return HostView{
 		ID: h.ID, Name: h.Name, Group: h.Group,
-		Host: h.Host, Port: h.Port, Remark: h.Remark,
-		Disabled: h.Disabled, Status: h.Status,
-		AccountCount: h.AccountCount, Static: h.Static,
+		Address: h.Host, Port: h.Port, Remark: h.Remark,
+		Status: h.Status,
+		AccountCount: h.AccountCount,
 	}, nil
 }
 
 func (a *StaticAdapter) AddHost(host HostRecord) (HostView, error) {
+	status := host.Status
+	if status == "" {
+		status = "active"
+	}
 	h, err := a.inner.AddHost(access.HostRecord{
 		ID: host.ID, Name: host.Name, Group: host.Group,
-		Host: host.Host, Port: host.Port, Remark: host.Remark, Disabled: host.Disabled,
+		Host: host.Address, Port: host.Port, Remark: host.Remark, Disabled: status == "disabled",
 	})
 	if err != nil {
 		return HostView{}, err
 	}
 	return HostView{
 		ID: h.ID, Name: h.Name, Group: h.Group,
-		Host: h.Host, Port: h.Port, Remark: h.Remark,
-		Disabled: h.Disabled, Status: h.Status,
-		AccountCount: h.AccountCount, Static: h.Static,
+		Address: h.Host, Port: h.Port, Remark: h.Remark,
+		Status: h.Status,
+		AccountCount: h.AccountCount,
 	}, nil
 }
 
 func (a *StaticAdapter) UpdateHost(id string, host HostRecord) (HostView, error) {
+	status := host.Status
+	if status == "" {
+		status = "active"
+	}
 	h, err := a.inner.UpdateHost(id, access.HostRecord{
 		ID: host.ID, Name: host.Name, Group: host.Group,
-		Host: host.Host, Port: host.Port, Remark: host.Remark, Disabled: host.Disabled,
+		Host: host.Address, Port: host.Port, Remark: host.Remark, Disabled: status == "disabled",
 	})
 	if err != nil {
 		return HostView{}, err
 	}
 	return HostView{
 		ID: h.ID, Name: h.Name, Group: h.Group,
-		Host: h.Host, Port: h.Port, Remark: h.Remark,
-		Disabled: h.Disabled, Status: h.Status,
-		AccountCount: h.AccountCount, Static: h.Static,
+		Address: h.Host, Port: h.Port, Remark: h.Remark,
+		Status: h.Status,
+		AccountCount: h.AccountCount,
 	}, nil
 }
 
@@ -155,12 +163,12 @@ func (a *StaticAdapter) DeleteTarget(id string) error { return a.inner.DeleteTar
 func adaptTargetView(t access.TargetView) TargetView {
 	return TargetView{
 		ID: t.ID, HostID: t.HostID, ResourceType: t.ResourceType,
-		ResourceID: t.ResourceID, HostResourceID: t.HostResourceID,
+		ResourceID: t.ResourceID, ResourceSeq: t.ResourceSeq,
 		Name: t.Name, Group: t.Group, Remark: t.Remark,
-		Disabled: t.Disabled, ExpiresAt: t.ExpiresAt, Status: t.Status,
+		ExpiresAt: t.ExpiresAt, Status: t.Status,
 		Host: t.Host, Port: t.Port, Username: t.Username,
 		AuthMethods: t.AuthMethods, InsecureIgnoreHostKey: t.InsecureIgnoreHostKey,
-		HostKeyFingerprint: t.HostKeyFingerprint, KnownHostsPath: t.KnownHostsPath, Static: t.Static,
+		HostKeyFingerprint: t.HostKeyFingerprint, KnownHostsPath: t.KnownHostsPath,
 	}
 }
 

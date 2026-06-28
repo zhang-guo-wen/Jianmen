@@ -186,6 +186,8 @@ func (s *Server) handleInitSetup(w http.ResponseWriter, r *http.Request) {
 	}
 	if s.dataDir != "" {
 		saveSuperAdminID(s.dataDir, createdUserID)
+		// 清理旧的加密密钥标记文件，避免重置数据库后无法重新获取密钥
+		os.Remove(filepath.Join(s.dataDir, ".encryption_key_shown"))
 	}
 
 	writeJSON(w, http.StatusCreated, SetupResponse{Token: token})

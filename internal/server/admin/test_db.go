@@ -36,7 +36,7 @@ func (s *Server) handleTestDBConnection(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	if acct.Disabled {
+	if acct.Status == "disabled" {
 		writeErrorText(w, http.StatusForbidden, "account is disabled")
 		return
 	}
@@ -44,7 +44,7 @@ func (s *Server) handleTestDBConnection(w http.ResponseWriter, r *http.Request) 
 		writeErrorText(w, http.StatusForbidden, "account has expired")
 		return
 	}
-	if acct.Instance.Disabled {
+	if acct.Instance.Status == "disabled" {
 		writeErrorText(w, http.StatusForbidden, "database instance is disabled")
 		return
 	}
@@ -59,7 +59,7 @@ func (s *Server) handleTestDBConnection(w http.ResponseWriter, r *http.Request) 
 	}
 	defer conn.Close()
 
-	err = testDBAuth(conn, acct.Instance.Protocol, acct.UpstreamUsername, acct.UpstreamPassword.GetPlaintext())
+	err = testDBAuth(conn, acct.Instance.Protocol, acct.Username, acct.Password.GetPlaintext())
 	latencyMs := time.Since(start).Milliseconds()
 	if err != nil {
 		writeJSON(w, http.StatusOK, map[string]any{

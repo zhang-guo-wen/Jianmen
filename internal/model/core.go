@@ -133,23 +133,24 @@ type DatabaseInstance struct {
 	Name      string    `gorm:"uniqueIndex;size:255;not null" json:"name"`
 	Protocol  string    `gorm:"size:32;not null;default:mysql" json:"protocol"`
 	Address   string    `gorm:"size:255;not null" json:"address"`
-	GroupName string    `gorm:"size:128" json:"group_name,omitempty"`
+	Port      int       `gorm:"not null;default:3306" json:"port"`
+	GroupName string    `gorm:"size:128" json:"group"`
 	Remark    string    `gorm:"type:text" json:"remark,omitempty"`
-	Disabled  bool      `json:"disabled"`
+	Status    string    `gorm:"index;size:32;not null;default:active" json:"status"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
 type DatabaseAccount struct {
-	ID               string         `gorm:"primaryKey;size:64" json:"id"`
-	InstanceID       string         `gorm:"index;size:64;not null" json:"instance_id"`
-	UniqueName       string         `gorm:"uniqueIndex;size:128;not null" json:"unique_name"`
-	UpstreamUsername string         `gorm:"size:128;not null" json:"upstream_username"`
-	UpstreamPassword EncryptedField `gorm:"type:text" json:"-"`
-	GroupName        string         `gorm:"size:128" json:"group_name,omitempty"`
-	Remark           string         `gorm:"type:text" json:"remark,omitempty"`
-	ExpiresAt        *time.Time     `gorm:"index" json:"expires_at,omitempty"`
-	Disabled         bool           `json:"disabled"`
+	ID         string         `gorm:"primaryKey;size:64" json:"id"`
+	InstanceID string         `gorm:"index;size:64;not null" json:"instance_id"`
+	UniqueName string         `gorm:"uniqueIndex;size:128;not null" json:"unique_name"`
+	Username   string         `gorm:"size:128;not null" json:"username"`
+	Password   EncryptedField `gorm:"type:text" json:"-"`
+	GroupName  string         `gorm:"size:128" json:"group"`
+	Remark     string         `gorm:"type:text" json:"remark,omitempty"`
+	ExpiresAt  *time.Time     `gorm:"index" json:"expires_at"`
+	Status     string         `gorm:"index;size:32;not null;default:active" json:"status"`
 	ResourceSeq      int            `gorm:"index;not null;default:0" json:"resource_seq"`
 	ResourceID       string         `gorm:"uniqueIndex;size:4" json:"resource_id"`
 	CreatedAt        time.Time      `json:"created_at"`

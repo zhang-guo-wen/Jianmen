@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -412,18 +413,7 @@ func (s *DBStore) DatabaseInstances() []DatabaseInstanceView {
 	for _, inst := range instances {
 		var count int64
 		s.db.Model(&model.DatabaseAccount{}).Where("instance_id = ?", inst.ID).Count(&count)
-		views = append(views, DatabaseInstanceView{
-			ID:           inst.ID,
-			Name:         inst.Name,
-			Protocol:     inst.Protocol,
-			Address:      inst.Address,
-			GroupName:    inst.GroupName,
-			Remark:       inst.Remark,
-			Disabled:     inst.Disabled,
-			AccountCount: int(count),
-			CreatedAt:    inst.CreatedAt.Format(time.RFC3339),
-			UpdatedAt:    inst.UpdatedAt.Format(time.RFC3339),
-		})
+		views = append(views, s.databaseInstanceView(inst, int(count)))
 	}
 	return views
 }
@@ -439,18 +429,7 @@ func (s *DBStore) DatabaseInstance(id string) (DatabaseInstanceView, error) {
 	}
 	var count int64
 	s.db.Model(&model.DatabaseAccount{}).Where("instance_id = ?", inst.ID).Count(&count)
-	return DatabaseInstanceView{
-		ID:           inst.ID,
-		Name:         inst.Name,
-		Protocol:     inst.Protocol,
-		Address:      inst.Address,
-		GroupName:    inst.GroupName,
-		Remark:       inst.Remark,
-		Disabled:     inst.Disabled,
-		AccountCount: int(count),
-		CreatedAt:    inst.CreatedAt.Format(time.RFC3339),
-		UpdatedAt:    inst.UpdatedAt.Format(time.RFC3339),
-	}, nil
+	return s.databaseInstanceView(inst, int(count)), nil
 }
 
 func normalizeDBProtocol(protocol string) (string, error) {
@@ -464,20 +443,25 @@ func normalizeDBProtocol(protocol string) (string, error) {
 	return protocol, nil
 }
 
-func (s *DBStore) AddDatabaseInstance(name, protocol, address, groupName, remark string) (DatabaseInstanceView, error) {
+func (s *DBStore) AddDatabaseInstance(name, protocol, address string, port int, group, remark string) (DatabaseInstanceView, error) {
 	protocol, err := normalizeDBProtocol(protocol)
 	if err != nil {
 		return DatabaseInstanceView{}, err
 	}
-	_, _, err = net.SplitHostPort(address)
-	if err != nil {
-		return DatabaseInstanceView{}, fmt.Errorf("invalid address %q: %w", address, err)
+	address = strings.TrimSpace(address)
+	if port <= 0 || port > 65535 {
+		port = defaultDBPort(protocol)
+	}
+	if _, _, err = net.SplitHostPort(address); err != nil {
+		// address does not contain port, append it
+		address = net.JoinHostPort(address, strconv.Itoa(port))
 	}
 	inst := model.DatabaseInstance{
 		Name:      strings.TrimSpace(name),
 		Protocol:  protocol,
-		Address:   strings.TrimSpace(address),
-		GroupName: strings.TrimSpace(groupName),
+		Address:   address,
+		Port:      port,
+		GroupName: strings.TrimSpace(group),
 		Remark:    strings.TrimSpace(remark),
 	}
 	if inst.Name == "" {
@@ -486,20 +470,10 @@ func (s *DBStore) AddDatabaseInstance(name, protocol, address, groupName, remark
 	if err := s.db.Create(&inst).Error; err != nil {
 		return DatabaseInstanceView{}, err
 	}
-	return DatabaseInstanceView{
-		ID:        inst.ID,
-		Name:      inst.Name,
-		Protocol:  inst.Protocol,
-		Address:   inst.Address,
-		GroupName: inst.GroupName,
-		Remark:    inst.Remark,
-		Disabled:  inst.Disabled,
-		CreatedAt: inst.CreatedAt.Format(time.RFC3339),
-		UpdatedAt: inst.UpdatedAt.Format(time.RFC3339),
-	}, nil
+	return s.databaseInstanceView(inst, 0), nil
 }
 
-func (s *DBStore) UpdateDatabaseInstance(id, name, protocol, address, groupName, remark string, disabled bool) (DatabaseInstanceView, error) {
+func (s *DBStore) UpdateDatabaseInstance(id, name, protocol, address string, port int, group, remark, status string) (DatabaseInstanceView, error) {
 	id = strings.TrimSpace(id)
 	var inst model.DatabaseInstance
 	if err := s.db.First(&inst, "id = ?", id).Error; err != nil {
@@ -512,15 +486,22 @@ func (s *DBStore) UpdateDatabaseInstance(id, name, protocol, address, groupName,
 	if err != nil {
 		return DatabaseInstanceView{}, err
 	}
+	address = strings.TrimSpace(address)
+	if port <= 0 || port > 65535 {
+		port = inst.Port
+	}
 	if _, _, err := net.SplitHostPort(address); err != nil {
-		return DatabaseInstanceView{}, fmt.Errorf("invalid address %q: %w", address, err)
+		address = net.JoinHostPort(address, strconv.Itoa(port))
 	}
 	inst.Name = strings.TrimSpace(name)
 	inst.Protocol = protocol
-	inst.Address = strings.TrimSpace(address)
-	inst.GroupName = strings.TrimSpace(groupName)
+	inst.Address = address
+	inst.Port = port
+	inst.GroupName = strings.TrimSpace(group)
 	inst.Remark = strings.TrimSpace(remark)
-	inst.Disabled = disabled
+	if status != "" {
+		inst.Status = status
+	}
 	if inst.Name == "" {
 		inst.Name = inst.Address
 	}
@@ -529,18 +510,7 @@ func (s *DBStore) UpdateDatabaseInstance(id, name, protocol, address, groupName,
 	}
 	var count int64
 	s.db.Model(&model.DatabaseAccount{}).Where("instance_id = ?", inst.ID).Count(&count)
-	return DatabaseInstanceView{
-		ID:           inst.ID,
-		Name:         inst.Name,
-		Protocol:     inst.Protocol,
-		Address:      inst.Address,
-		GroupName:    inst.GroupName,
-		Remark:       inst.Remark,
-		Disabled:     inst.Disabled,
-		AccountCount: int(count),
-		CreatedAt:    inst.CreatedAt.Format(time.RFC3339),
-		UpdatedAt:    inst.UpdatedAt.Format(time.RFC3339),
-	}, nil
+	return s.databaseInstanceView(inst, int(count)), nil
 }
 
 func (s *DBStore) DeleteDatabaseInstance(id string) error {
@@ -562,7 +532,7 @@ func (s *DBStore) DeleteDatabaseInstance(id string) error {
 
 func (s *DBStore) InstanceAccounts(instanceID string) ([]DatabaseAccountView, error) {
 	var accounts []model.DatabaseAccount
-	if err := s.db.Where("instance_id = ?", instanceID).Order("upstream_username ASC").Find(&accounts).Error; err != nil {
+	if err := s.db.Where("instance_id = ?", instanceID).Order("username ASC").Find(&accounts).Error; err != nil {
 		return nil, err
 	}
 	views := make([]DatabaseAccountView, 0, len(accounts))
@@ -584,11 +554,11 @@ func (s *DBStore) DatabaseAccount(id string) (DatabaseAccountView, error) {
 	return s.databaseAccountView(acct), nil
 }
 
-func (s *DBStore) AddDatabaseAccount(instanceID, upstreamUsername, upstreamPassword, groupName, remark string, expiresAt *time.Time) (DatabaseAccountView, error) {
+func (s *DBStore) AddDatabaseAccount(instanceID, username, password, group, remark string, expiresAt *time.Time) (DatabaseAccountView, error) {
 	instanceID = strings.TrimSpace(instanceID)
-	upstreamUsername = strings.TrimSpace(upstreamUsername)
-	if upstreamUsername == "" {
-		return DatabaseAccountView{}, errors.New("upstream username is required")
+	username = strings.TrimSpace(username)
+	if username == "" {
+		return DatabaseAccountView{}, errors.New("username is required")
 	}
 	// Verify instance exists
 	var inst model.DatabaseInstance
@@ -608,15 +578,15 @@ func (s *DBStore) AddDatabaseAccount(instanceID, upstreamUsername, upstreamPassw
 		return DatabaseAccountView{}, err
 	}
 	acct := model.DatabaseAccount{
-		InstanceID:       instanceID,
-		UniqueName:       uniqueName,
-		UpstreamUsername: upstreamUsername,
-		UpstreamPassword: model.NewEncryptedField(upstreamPassword),
-		GroupName:        strings.TrimSpace(groupName),
-		Remark:           strings.TrimSpace(remark),
-		ExpiresAt:        expiresAt,
-		ResourceSeq:      seq,
-		ResourceID:       util.ResourceIDFromSeq(util.PrefixDatabase, seq),
+		InstanceID: instanceID,
+		UniqueName: uniqueName,
+		Username:   username,
+		Password:   model.NewEncryptedField(password),
+		GroupName:  strings.TrimSpace(group),
+		Remark:     strings.TrimSpace(remark),
+		ExpiresAt:  expiresAt,
+		ResourceSeq: seq,
+		ResourceID:  util.ResourceIDFromSeq(util.PrefixDatabase, seq),
 	}
 	if err := s.db.Create(&acct).Error; err != nil {
 		return DatabaseAccountView{}, err
@@ -624,9 +594,9 @@ func (s *DBStore) AddDatabaseAccount(instanceID, upstreamUsername, upstreamPassw
 	return s.databaseAccountView(acct), nil
 }
 
-func (s *DBStore) UpdateDatabaseAccount(id, upstreamUsername, upstreamPassword, groupName, remark string, expiresAt *time.Time, disabled bool) (DatabaseAccountView, error) {
+func (s *DBStore) UpdateDatabaseAccount(id, username, password, group, remark string, expiresAt *time.Time, status string) (DatabaseAccountView, error) {
 	id = strings.TrimSpace(id)
-	upstreamUsername = strings.TrimSpace(upstreamUsername)
+	username = strings.TrimSpace(username)
 	var acct model.DatabaseAccount
 	if err := s.db.First(&acct, "id = ?", id).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -634,16 +604,18 @@ func (s *DBStore) UpdateDatabaseAccount(id, upstreamUsername, upstreamPassword, 
 		}
 		return DatabaseAccountView{}, err
 	}
-	if upstreamUsername != "" {
-		acct.UpstreamUsername = upstreamUsername
+	if username != "" {
+		acct.Username = username
 	}
-	if upstreamPassword != "" {
-		acct.UpstreamPassword = model.NewEncryptedField(upstreamPassword)
+	if password != "" {
+		acct.Password = model.NewEncryptedField(password)
 	}
-	acct.GroupName = strings.TrimSpace(groupName)
+	acct.GroupName = strings.TrimSpace(group)
 	acct.Remark = strings.TrimSpace(remark)
 	acct.ExpiresAt = expiresAt
-	acct.Disabled = disabled
+	if status != "" {
+		acct.Status = status
+	}
 	if err := s.db.Save(&acct).Error; err != nil {
 		return DatabaseAccountView{}, err
 	}
@@ -790,18 +762,16 @@ func (s *DBStore) UserSessionByID(sessionID string, userID string) (*model.UserS
 
 func (s *DBStore) databaseAccountView(acct model.DatabaseAccount) DatabaseAccountView {
 	return DatabaseAccountView{
-		ID:               acct.ID,
-		InstanceID:       acct.InstanceID,
-		UniqueName:       acct.UniqueName,
-		UpstreamUsername: acct.UpstreamUsername,
-		GroupName:        acct.GroupName,
-		Remark:           acct.Remark,
-		ExpiresAt:        acct.ExpiresAt,
-		Disabled:         acct.Disabled,
-		ResourceID:       acct.ResourceID,
-		ResourceSeq:      acct.ResourceSeq,
-		CreatedAt:        acct.CreatedAt.Format(time.RFC3339),
-		UpdatedAt:        acct.UpdatedAt.Format(time.RFC3339),
+		ID:          acct.ID,
+		InstanceID:  acct.InstanceID,
+		UniqueName:  acct.UniqueName,
+		Username:    acct.Username,
+		Group:       acct.GroupName,
+		Remark:      acct.Remark,
+		ExpiresAt:   acct.ExpiresAt,
+		Status:      normalizeDBStatus(acct.Status),
+		ResourceID:  acct.ResourceID,
+		ResourceSeq: acct.ResourceSeq,
 	}
 }
 
@@ -815,6 +785,40 @@ func (s *DBStore) generateUniqueName() (string, error) {
 		}
 	}
 	return "", errors.New("failed to generate unique database account name after 10 attempts")
+}
+
+// ---- DB view helpers ----
+
+func (s *DBStore) databaseInstanceView(inst model.DatabaseInstance, accountCount int) DatabaseInstanceView {
+	status := inst.Status
+	if status == "" {
+		status = "active"
+	}
+	return DatabaseInstanceView{
+		ID:           inst.ID,
+		Name:         inst.Name,
+		Protocol:     inst.Protocol,
+		Address:      inst.Address,
+		Port:         inst.Port,
+		Group:        inst.GroupName,
+		Remark:       inst.Remark,
+		Status:       status,
+		AccountCount: accountCount,
+	}
+}
+
+func normalizeDBStatus(status string) string {
+	if status == "" {
+		return "active"
+	}
+	return status
+}
+
+func defaultDBPort(protocol string) int {
+	if protocol == "postgres" {
+		return 5432
+	}
+	return 3306
 }
 
 // ---- normalize helpers (subset, for DB entries) ----

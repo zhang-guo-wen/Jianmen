@@ -512,7 +512,7 @@ func (g *Gateway) handleMySQL(ctx context.Context, client net.Conn) *gatewayConn
 	}
 
 	// Build upstream login with upstream credentials
-	upstreamLogin := BuildMySQLUpstreamLogin(hs, acct.UpstreamUsername, acct.UpstreamPassword.GetPlaintext(), hs.AuthPluginName)
+	upstreamLogin := BuildMySQLUpstreamLogin(hs, acct.UpstreamUsername, acct.UpstreamPassword.GetPlaintext(), hs.AuthPluginName, 1)
 	if _, err := upstream.Write(upstreamLogin); err != nil {
 		g.logger.Warn("mysql gateway failed to send upstream login", "error", err)
 		upstream.Close()
@@ -600,8 +600,21 @@ func (g *Gateway) handleMySQL(ctx context.Context, client net.Conn) *gatewayConn
 	}
 }
 
+// BuildMySQLAuthResponse 计算指定 auth plugin 的认证响应（仅 auth bytes，不含完整 login 包）
+func BuildMySQLAuthResponse(plugin, password string, salt []byte) []byte {
+	switch plugin {
+	case "mysql_native_password":
+		return BuildMySQLNativePassword(password, salt)
+	case "caching_sha2_password":
+		return BuildMySQLCachingSha2Password(password, salt)
+	default:
+		return nil
+	}
+}
+
 // handleMySQLAuthSwitch 处理 MySQL AuthSwitchRequest (0xfe)
 // payload 是 0xfe 之后的部分：plugin name (null-terminated) + auth data
+// AuthSwitch 响应只需发送 raw auth response（不是完整 login 包）
 func (g *Gateway) handleMySQLAuthSwitch(upstream net.Conn, acct *model.DatabaseAccount, hs *MySQLHandshake, payload []byte) (*mysqlPacket, error) {
 	// 解析新 auth plugin name
 	nullPos := 0
@@ -611,14 +624,20 @@ func (g *Gateway) handleMySQLAuthSwitch(upstream net.Conn, acct *model.DatabaseA
 	newPlugin := string(payload[:nullPos])
 	authData := payload[nullPos+1:]
 
-	// 更新 salt 用于新 plugin
-	if len(authData) > 0 {
-		hs.AuthData = authData
+	// 构建 raw auth response
+	authResp := BuildMySQLAuthResponse(newPlugin, acct.UpstreamPassword.GetPlaintext(), authData)
+	if authResp == nil {
+		return nil, fmt.Errorf("unsupported auth switch plugin: %s", newPlugin)
 	}
 
-	// 构建新 auth plugin 的响应
-	switchLogin := BuildMySQLUpstreamLogin(hs, acct.UpstreamUsername, acct.UpstreamPassword.GetPlaintext(), newPlugin)
-	if _, err := upstream.Write(switchLogin); err != nil {
+	// 发送 auth switch 响应：仅 auth response bytes，seq=3
+	resp := make([]byte, 4+len(authResp))
+	resp[0] = byte(len(authResp))
+	resp[1] = byte(len(authResp) >> 8)
+	resp[2] = byte(len(authResp) >> 16)
+	resp[3] = 3
+	copy(resp[4:], authResp)
+	if _, err := upstream.Write(resp); err != nil {
 		return nil, fmt.Errorf("write auth switch: %w", err)
 	}
 
@@ -962,7 +981,7 @@ func readMySQLPacket(conn net.Conn) (*mysqlPacket, error) {
 
 // BuildMySQLUpstreamLogin builds a MySQL login packet for the upstream server.
 // Exported for use by test connection in admin package.
-func BuildMySQLUpstreamLogin(hs *MySQLHandshake, username, password, authPlugin string) []byte {
+func BuildMySQLUpstreamLogin(hs *MySQLHandshake, username, password, authPlugin string, seq byte) []byte {
 	var authResp []byte
 	switch authPlugin {
 	case "mysql_native_password":
@@ -995,7 +1014,7 @@ func BuildMySQLUpstreamLogin(hs *MySQLHandshake, username, password, authPlugin 
 	pkt[0] = byte(len(payload))
 	pkt[1] = byte(len(payload) >> 8)
 	pkt[2] = byte(len(payload) >> 16)
-	pkt[3] = 1
+	pkt[3] = seq
 	copy(pkt[4:], payload)
 	return pkt
 }

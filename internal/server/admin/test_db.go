@@ -177,7 +177,7 @@ func testMySQLAuth(conn net.Conn, username, password string) error {
 
 	// 使用 handshake 中声明的 auth plugin，而非硬编码
 	authPlugin := hs.AuthPluginName
-	loginPkt := dbproxy.BuildMySQLUpstreamLogin(hs, username, password, authPlugin)
+	loginPkt := dbproxy.BuildMySQLUpstreamLogin(hs, username, password, authPlugin, 1)
 	if _, err := conn.Write(loginPkt); err != nil {
 		return fmt.Errorf("auth: %w", err)
 	}
@@ -192,6 +192,44 @@ func testMySQLAuth(conn net.Conn, username, password string) error {
 	}
 	if len(buf) >= 4+authPayloadLen && buf[4] == 0x00 {
 		return nil
+	}
+	// AuthSwitchRequest (0xfe): 服务器要求切换 auth plugin
+	if len(buf) >= 4+authPayloadLen && buf[4] == 0xfe {
+		payload := buf[5 : 4+authPayloadLen]
+		nullPos := 0
+		for nullPos < len(payload) && payload[nullPos] != 0 {
+			nullPos++
+		}
+		newPlugin := string(payload[:nullPos])
+		authData := payload[nullPos+1:]
+		if len(authData) > 0 {
+			hs.AuthData = authData
+		}
+		authRespBytes := dbproxy.BuildMySQLAuthResponse(newPlugin, password, authData)
+		if authRespBytes == nil {
+			return fmt.Errorf("unsupported auth switch plugin: %s", newPlugin)
+		}
+		resp := make([]byte, 4+len(authRespBytes))
+		resp[0] = byte(len(authRespBytes))
+		resp[1] = byte(len(authRespBytes) >> 8)
+		resp[2] = byte(len(authRespBytes) >> 16)
+		resp[3] = 3
+		copy(resp[4:], authRespBytes)
+		if _, err := conn.Write(resp); err != nil {
+			return fmt.Errorf("auth switch: %w", err)
+		}
+		n3, err := conn.Read(buf)
+		if err != nil || n3 < 4 {
+			return fmt.Errorf("auth switch read: %w", err)
+		}
+		payloadLen2 := int(buf[0]) | int(buf[1])<<8 | int(buf[2])<<16
+		if len(buf) >= 4+payloadLen2 && buf[4] == 0x00 {
+			return nil
+		}
+		if len(buf) >= 4+payloadLen2 && buf[4] == 0xff {
+			return fmt.Errorf("auth denied after switch: %s", dbproxy.ParseMySQLErrorMessage(buf[4:4+payloadLen2]))
+		}
+		return fmt.Errorf("unexpected auth after switch: payload[4]=0x%02x", buf[4])
 	}
 	// caching_sha2_password fast auth 第二阶段：0x01 + 0x03
 	if len(buf) >= 4+authPayloadLen && buf[4] == 0x01 {

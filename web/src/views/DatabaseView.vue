@@ -166,73 +166,44 @@
     <!-- 连接弹窗 -->
     <el-dialog
       v-model="connectDialogVisible"
-      title="数据库连接"
-      class="form-dialog"
       destroy-on-close
-      width="min(560px, calc(100vw - 32px))"
+      title="连接数据库账号"
+      width="min(720px, calc(100vw - 32px))"
       @opened="onConnectDialogOpened"
     >
-      <div v-if="connectTarget" class="dialog-stack">
-        <section class="connect-section">
-          <div class="connect-section-title">连接状态</div>
-          <div class="connect-status-card" v-loading="connectTesting">
-            <template v-if="connectTestResult !== null">
-              <el-tag :type="connectTestResult.ok ? 'success' : 'danger'" size="small">
-                {{ connectTestResult.ok ? '可达' : '不可达' }}
-              </el-tag>
-              <span class="connect-latency" v-if="connectTestResult.latency_ms !== undefined" style="margin-left: 8px;">
-                延迟: {{ connectTestResult.latency_ms }}ms
-              </span>
-              <div class="connect-error" v-if="connectTestResult.error" style="margin-top: 4px; color: var(--el-color-danger); font-size: 12px;">
-                {{ connectTestResult.error }}
-              </div>
-            </template>
-          </div>
-          <div class="connect-status-tags" style="margin-top: 8px;">
-            <el-tag :type="connectTarget.status === 'active' ? 'success' : 'info'" size="small">
-              {{ connectTarget.status === 'active' ? '启用' : '禁用' }}
-            </el-tag>
-            <el-tag v-if="isExpired(connectTarget.expires_at)" type="danger" size="small" style="margin-left: 4px;">
-              已过期
-            </el-tag>
-            <el-tag v-else-if="connectTarget.expires_at" type="warning" size="small" style="margin-left: 4px;">
-              过期: {{ formatTime(connectTarget.expires_at) }}
-            </el-tag>
-          </div>
-        </section>
+      <div v-if="connectTarget" class="connection-dialog">
+        <el-alert show-icon type="info" :closable="false"
+          title="输入堡垒机的登录密码，不是目标数据库的密码" />
 
-        <section class="connect-section">
-          <div class="connect-section-title">连接参数</div>
-          <div class="config-row" v-for="param in connectParams" :key="param.label">
-            <div class="config-label">{{ param.label }}</div>
-            <el-input :model-value="param.value" readonly>
+        <div v-if="creatingSession" style="text-align: center; padding: 30px 0;">
+          <el-icon class="is-loading" :size="28"><Loading /></el-icon>
+          <p style="margin-top: 10px; color: #667085;">正在创建连接会话...</p>
+        </div>
+
+        <template v-else-if="!connectionError && compactUser">
+          <el-descriptions :column="1" border size="small" style="margin-top: 12px">
+            <el-descriptions-item label="连接地址">
+              <code>{{ gatewayHost }}:{{ gatewayPort }}</code>
+              <el-button link type="primary" size="small" style="margin-left: 8px" @click="copyText(`${gatewayHost}:${gatewayPort}`)">复制</el-button>
+            </el-descriptions-item>
+            <el-descriptions-item label="用户名">
+              <code>{{ compactUser }}</code>
+              <el-button link type="primary" size="small" style="margin-left: 8px" @click="copyText(compactUser)">复制</el-button>
+            </el-descriptions-item>
+            <el-descriptions-item label="密码">堡垒机登录密码</el-descriptions-item>
+          </el-descriptions>
+
+          <div style="margin-top: 12px">
+            <el-input :model-value="connectCommand" readonly size="small">
               <template #append>
-                <el-tooltip content="复制">
-                  <el-button aria-label="复制" @click="copyText(param.value)" />
-                </el-tooltip>
+                <el-button @click="copyText(connectCommand)">复制命令</el-button>
               </template>
             </el-input>
           </div>
-        </section>
-
-        <section class="connect-section">
-          <div class="connect-section-title">连接命令</div>
-          <div class="config-row">
-            <div class="config-label">Shell</div>
-            <el-input :model-value="connectCommand" readonly>
-              <template #append>
-                <el-tooltip content="复制">
-                  <el-button aria-label="复制" @click="copyText(connectCommand)" />
-                </el-tooltip>
-              </template>
-            </el-input>
-          </div>
-        </section>
+        </template>
       </div>
-
       <template #footer>
         <el-button @click="connectDialogVisible = false">关闭</el-button>
-        <el-button type="primary" @click="copyAllConnect">复制全部</el-button>
       </template>
     </el-dialog>
   </div>
@@ -241,6 +212,7 @@
 <script setup lang="ts">
 import { ref, reactive, watch, computed, onMounted, nextTick } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { Loading } from '@element-plus/icons-vue'
 import DataTableCard from '@/components/DataTableCard.vue'
 import FormDialog from '@/components/FormDialog.vue'
 import StatusSwitch from '@/components/StatusSwitch.vue'
@@ -318,8 +290,6 @@ const accountForm = reactive<AccountFormState>({
 const connectDialogVisible = ref(false)
 const connectTarget = ref<api.DBAccountRecord | null>(null)
 const userSessionId = ref('')
-const connectTesting = ref(false)
-const connectTestResult = ref<{ ok: boolean; error?: string; latency_ms?: number } | null>(null)
 
 // ── Gateway config ──
 const gatewayConfig = ref<{ host: string; port: number; enabled: boolean }>({
@@ -343,21 +313,17 @@ async function loadGatewayConfig() {
   }
 }
 
-const connectParams = computed(() => {
-  if (!connectTarget.value || !selectedInstance.value) return []
-  const host = gatewayConfig.value.host
-  const proxyPort = gatewayConfig.value.port
+const creatingSession = ref(false)
+const connectionError = ref('')
+
+const compactUser = computed(() => {
+  if (!connectTarget.value) return ''
   const resourceId = connectTarget.value.resource_id || '0000'
   const sessionId = userSessionId.value
-  const compactUser = sessionId ? 'D' + resourceId + sessionId : ''
-  const accountName = connectTarget.value.username || connectTarget.value.unique_name || '-'
-  return [
-    { label: '数据库账号', value: accountName },
-    { label: '代理用户', value: compactUser },
-    { label: '主机', value: host },
-    { label: '端口', value: String(proxyPort) },
-  ]
+  return sessionId ? 'D' + resourceId + sessionId : ''
 })
+const gatewayHost = computed(() => gatewayConfig.value.host)
+const gatewayPort = computed(() => gatewayConfig.value.port)
 
 const connectCommand = computed(() => {
   if (!connectTarget.value || !selectedInstance.value) return ''
@@ -386,13 +352,6 @@ function formatTime(value: unknown): string {
   if (!d || Number.isNaN(d.getTime())) return ''
   const pad = (n: number) => String(n).padStart(2, '0')
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
-}
-
-function isExpired(expiresAt: unknown): boolean {
-  if (typeof expiresAt !== 'string' || !expiresAt.trim()) return false
-  const d = new Date(expiresAt)
-  if (Number.isNaN(d.getTime())) return false
-  return d.getTime() < Date.now()
 }
 
 async function writeClipboard(value: string) {
@@ -425,13 +384,6 @@ async function copyText(value: string) {
   } catch {
     ElMessage.warning('复制失败')
   }
-}
-
-function copyAllConnect() {
-  if (!connectTarget.value) return
-  const lines = connectParams.value.map(p => `${p.label}: ${p.value}`)
-  lines.push(`Shell: ${connectCommand.value}`)
-  copyText(lines.join('\n'))
 }
 
 // ── Instance methods ──
@@ -676,33 +628,27 @@ async function deleteAccount(account: api.DBAccountRecord) {
 
 // ── Connect dialog ──
 async function openConnectDialog(acc: api.DBAccountRecord) {
-  connectTestResult.value = null
   connectTarget.value = acc
+  selectedInstance.value = instances.value.find(i => i.id === acc.instance_id) || selectedInstance.value
   userSessionId.value = ''
+  connectionError.value = ''
   connectDialogVisible.value = true
-
-  try {
-    const targetId = acc.id || acc.resource_id || ''
-    if (!targetId) return
-    const session = await api.apiClient.createUserSession(String(targetId))
-    userSessionId.value = session?.session_id || ''
-  } catch {
-    // 静默失败
-  }
 }
 
 async function onConnectDialogOpened() {
-  if (!connectTarget.value?.id) return
-  connectTesting.value = true
-  connectTestResult.value = null
+  if (!connectTarget.value) return
+  creatingSession.value = true
+  connectionError.value = ''
   try {
-    const result = await api.apiClient.testDBConnection(connectTarget.value.id)
-    const data = ('data' in result ? (result as api.ApiEnvelope<{ ok: boolean; error?: string; latency_ms?: number }>).data : result) as { ok: boolean; error?: string; latency_ms?: number }
-    connectTestResult.value = data ?? null
+    const targetId = connectTarget.value.id || connectTarget.value.resource_id || ''
+    if (targetId) {
+      const session = await api.apiClient.createUserSession(String(targetId))
+      userSessionId.value = session?.session_id || ''
+    }
   } catch (err) {
-    connectTestResult.value = { ok: false, error: err instanceof Error ? err.message : 'test failed' }
+    connectionError.value = err instanceof Error ? err.message : '创建会话失败'
   } finally {
-    connectTesting.value = false
+    creatingSession.value = false
   }
 }
 

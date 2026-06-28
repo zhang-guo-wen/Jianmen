@@ -27,12 +27,13 @@ import (
 )
 
 type Server struct {
-	cfg         *config.Config
-	store       store.Store
-	db          *gorm.DB
-	rbacChecker *rbac.Checker
-	logger      *slog.Logger
-	dataDir     string
+	cfg           *config.Config
+	store         store.Store
+	db            *gorm.DB
+	rbacChecker   *rbac.Checker
+	logger        *slog.Logger
+	dataDir       string
+	superAdminIDs map[string]bool // 超级管理员用户 ID 集合，直接拥有全部权限
 }
 
 type sessionListItem struct {
@@ -112,7 +113,18 @@ func New(cfg *config.Config, store store.Store, logger *slog.Logger, dataDir str
 		db = dbs[0]
 		checker = rbac.NewChecker(db)
 	}
-	return &Server{cfg: cfg, store: store, db: db, rbacChecker: checker, logger: logger, dataDir: dataDir}
+	// 收集配置文件中定义的超级管理员用户 ID
+	superAdminIDs := make(map[string]bool)
+	for _, u := range cfg.Users {
+		id := strings.TrimSpace(u.ID)
+		if id == "" {
+			id = strings.TrimSpace(u.Username)
+		}
+		if id != "" {
+			superAdminIDs[id] = true
+		}
+	}
+	return &Server{cfg: cfg, store: store, db: db, rbacChecker: checker, logger: logger, dataDir: dataDir, superAdminIDs: superAdminIDs}
 }
 
 func (s *Server) ListenAndServe(ctx context.Context) error {
@@ -221,6 +233,11 @@ func (s *Server) handleMePermissions(w http.ResponseWriter, r *http.Request) {
 		writeErrorText(w, http.StatusNotFound, "user not found")
 		return
 	}
+	// 超级管理员拥有全部权限
+	if s.isSuperAdmin(userID) {
+		writeJSON(w, http.StatusOK, map[string]any{"actions": []string{"*"}})
+		return
+	}
 	if s.db == nil || s.rbacChecker == nil {
 		writeJSON(w, http.StatusOK, map[string]any{"actions": []string{}})
 		return
@@ -261,6 +278,15 @@ func (s *Server) handleMeMenus(w http.ResponseWriter, r *http.Request) {
 	userID := userIDFromRequest(r)
 	if userID == "" {
 		writeErrorText(w, http.StatusNotFound, "user not found")
+		return
+	}
+	// 超级管理员看到全部菜单
+	if s.isSuperAdmin(userID) {
+		all := make([]string, 0, len(menuOrder))
+		for _, entry := range menuOrder {
+			all = append(all, entry.key)
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"menus": all})
 		return
 	}
 	if s.db == nil || s.rbacChecker == nil {
@@ -1004,8 +1030,18 @@ func (s *Server) handleUserSessions(w http.ResponseWriter, r *http.Request) {
 
 	// Look up the target to determine resource type and resource_id
 	var account model.HostAccount
-	if err := s.db.Where("id = ?", req.TargetID).First(&account).Error; err != nil {
-		writeErrorText(w, http.StatusNotFound, "target account not found")
+	if err := s.db.Where("id = ? AND status = ?", req.TargetID, "active").First(&account).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			writeErrorText(w, http.StatusNotFound, "target account not found or disabled")
+		} else {
+			writeErrorText(w, http.StatusInternalServerError, "failed to look up target")
+		}
+		return
+	}
+	// Verify host is not disabled
+	var host model.Host
+	if err := s.db.Where("id = ? AND status = ?", account.HostID, "active").First(&host).Error; err != nil {
+		writeErrorText(w, http.StatusForbidden, "host is disabled or not found")
 		return
 	}
 
@@ -1260,7 +1296,7 @@ func (s *Server) withAuthAndUser(next http.HandlerFunc) http.HandlerFunc {
 			hash := sha256.Sum256([]byte(token))
 			hashStr := hex.EncodeToString(hash[:])
 			var user model.User
-			if err := s.db.Where("token_hash = ?", hashStr).First(&user).Error; err == nil {
+			if err := s.db.Where("token_hash = ? AND status = ?", hashStr, "active").First(&user).Error; err == nil {
 				ctx := context.WithValue(r.Context(), ctxKeyUserID, user.ID)
 				ctx = context.WithValue(ctx, ctxKeyUsername, user.Username)
 				next(w, r.WithContext(ctx))
@@ -1298,6 +1334,10 @@ func (s *Server) requirePermission(r *http.Request, action string) bool {
 		// Shared token fallback — no per-user RBAC, allow all
 		return true
 	}
+	// 超级管理员拥有全部权限，无需 RBAC 检查
+	if s.isSuperAdmin(userID) {
+		return true
+	}
 	if s.rbacChecker == nil {
 		return true
 	}
@@ -1307,6 +1347,14 @@ func (s *Server) requirePermission(r *http.Request, action string) bool {
 		return false
 	}
 	return allowed
+}
+
+// isSuperAdmin 判断用户是否为超级管理员（配置文件中定义的用户 或 setup 向导创建的管理员）。
+func (s *Server) isSuperAdmin(userID string) bool {
+	if s.superAdminIDs == nil {
+		return false
+	}
+	return s.superAdminIDs[userID]
 }
 
 func (s *Server) forbidden(w http.ResponseWriter) {

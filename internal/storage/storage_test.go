@@ -5,7 +5,6 @@ import (
 
 	"jianmen/internal/config"
 	"jianmen/internal/model"
-	"jianmen/internal/rbac"
 )
 
 func TestOpenAndAutoMigrateSQLite(t *testing.T) {
@@ -36,7 +35,7 @@ func TestOpenRejectsMissingNetworkDSN(t *testing.T) {
 	}
 }
 
-func TestBootstrapMetadataSeedsUsersRolesAndAdminGrant(t *testing.T) {
+func TestBootstrapMetadataSeedsUsersOnly(t *testing.T) {
 	db, err := Open(Config{
 		Driver: DriverSQLite,
 		DSN:    ":memory:",
@@ -66,65 +65,21 @@ func TestBootstrapMetadataSeedsUsersRolesAndAdminGrant(t *testing.T) {
 		t.Fatalf("users = %d, want 2: %#v", len(users), users)
 	}
 
+	// 去掉预置角色后，bootstrap 不应创建任何角色
 	var roles []model.Role
 	if err := db.Find(&roles).Error; err != nil {
 		t.Fatalf("list roles: %v", err)
 	}
-	if len(roles) < 4 {
-		t.Fatalf("roles = %d, want at least 4", len(roles))
+	if len(roles) != 0 {
+		t.Fatalf("roles = %d, want 0 — no builtin roles should exist", len(roles))
 	}
 
-	allowed, err := rbac.NewChecker(db).HasPermission("u-admin", "session:connect", "host_account", "target-local")
-	if err != nil {
-		t.Fatalf("check permission: %v", err)
+	// 去掉预置权限后，bootstrap 不应创建任何权限
+	var permissions []model.Permission
+	if err := db.Find(&permissions).Error; err != nil {
+		t.Fatalf("list permissions: %v", err)
 	}
-	if !allowed {
-		t.Fatal("bootstrapped admin should have wildcard permission")
-	}
-
-	operatorAllowed, err := rbac.NewChecker(db).HasPermission("operator", "session:connect", "host_account", "target-local")
-	if err != nil {
-		t.Fatalf("check operator permission: %v", err)
-	}
-	if operatorAllowed {
-		t.Fatal("non-first config user should not be granted builtin admin automatically")
-	}
-
-	if err := db.Create(&model.UserRole{
-		ID:     "ur-operator-ssh",
-		UserID: "operator",
-		RoleID: builtinSSHOperatorRoleID,
-	}).Error; err != nil {
-		t.Fatalf("grant operator ssh role: %v", err)
-	}
-	operatorSSHAllowed, err := rbac.NewChecker(db).HasPermission("operator", "session:connect", model.ResourceTypeHostAccount, "target-local")
-	if err != nil {
-		t.Fatalf("check operator ssh permission: %v", err)
-	}
-	if !operatorSSHAllowed {
-		t.Fatal("builtin ssh operator should grant session connect over all host accounts")
-	}
-
-	dbAllowed, err := rbac.NewChecker(db).HasPermission("operator", rbac.ActionDBConnect, model.ResourceTypeDatabaseAccount, "dbacct-mysql-local-app")
-	if err != nil {
-		t.Fatalf("check operator database permission before grant: %v", err)
-	}
-	if dbAllowed {
-		t.Fatal("builtin db operator should not be granted automatically")
-	}
-
-	if err := db.Create(&model.UserRole{
-		ID:     "ur-operator-db",
-		UserID: "operator",
-		RoleID: builtinDBOperatorRoleID,
-	}).Error; err != nil {
-		t.Fatalf("grant operator db role: %v", err)
-	}
-	operatorDBAllowed, err := rbac.NewChecker(db).HasPermission("operator", rbac.ActionDBConnect, model.ResourceTypeDatabaseAccount, "dbacct-mysql-local-app")
-	if err != nil {
-		t.Fatalf("check operator database permission after grant: %v", err)
-	}
-	if !operatorDBAllowed {
-		t.Fatal("builtin db operator should grant db:connect over all database accounts")
+	if len(permissions) != 0 {
+		t.Fatalf("permissions = %d, want 0 — no builtin permissions should exist", len(permissions))
 	}
 }

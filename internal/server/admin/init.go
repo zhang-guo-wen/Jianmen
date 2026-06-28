@@ -142,6 +142,7 @@ func (s *Server) handleInitSetup(w http.ResponseWriter, r *http.Request) {
 	tokenHash := sha256.Sum256([]byte(token))
 	tokenHashStr := hex.EncodeToString(tokenHash[:])
 
+	var createdUserID string
 	var created bool
 	err = s.db.Transaction(func(tx *gorm.DB) error {
 		var count int64
@@ -165,8 +166,7 @@ func (s *Server) handleInitSetup(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 
-		// 分配 admin 角色（如果内置角色已存在）
-		assignAdminRole(tx, user.ID)
+		createdUserID = user.ID
 		created = true
 		return nil
 	})
@@ -177,6 +177,11 @@ func (s *Server) handleInitSetup(w http.ResponseWriter, r *http.Request) {
 	if !created {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "already initialized"})
 		return
+	}
+
+	// setup 向导创建的用户即为超级管理员，直接拥有全部权限
+	if s.superAdminIDs != nil {
+		s.superAdminIDs[createdUserID] = true
 	}
 
 	writeJSON(w, http.StatusCreated, SetupResponse{Token: token})
@@ -221,16 +226,3 @@ func (s *Server) handleInitEncryptionKey(w http.ResponseWriter, r *http.Request)
 	})
 }
 
-// assignAdminRole 为新创建的管理员用户分配 builtin-admin 角色
-func assignAdminRole(db *gorm.DB, userID string) {
-	var adminRole model.Role
-	if err := db.Where("name = ?", "builtin-admin").First(&adminRole).Error; err != nil {
-		return // 角色不存在就跳过
-	}
-	userRole := model.UserRole{
-		ID:     model.NewID(),
-		UserID: userID,
-		RoleID: adminRole.ID,
-	}
-	db.Create(&userRole)
-}

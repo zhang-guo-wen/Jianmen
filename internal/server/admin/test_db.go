@@ -175,7 +175,9 @@ func testMySQLAuth(conn net.Conn, username, password string) error {
 		return fmt.Errorf("auth: %w", err)
 	}
 
-	loginPkt := dbproxy.BuildMySQLUpstreamLogin(hs, username, password, "mysql_native_password")
+	// 使用 handshake 中声明的 auth plugin，而非硬编码
+	authPlugin := hs.AuthPluginName
+	loginPkt := dbproxy.BuildMySQLUpstreamLogin(hs, username, password, authPlugin)
 	if _, err := conn.Write(loginPkt); err != nil {
 		return fmt.Errorf("auth: %w", err)
 	}
@@ -191,5 +193,20 @@ func testMySQLAuth(conn net.Conn, username, password string) error {
 	if len(buf) >= 4+authPayloadLen && buf[4] == 0x00 {
 		return nil
 	}
-	return fmt.Errorf("unexpected auth result")
+	// caching_sha2_password fast auth 第二阶段：0x01 + 0x03
+	if len(buf) >= 4+authPayloadLen && buf[4] == 0x01 {
+		n3, err := conn.Read(buf)
+		if err != nil || n3 < 4 {
+			return fmt.Errorf("auth phase 2: %w", err)
+		}
+		payloadLen2 := int(buf[0]) | int(buf[1])<<8 | int(buf[2])<<16
+		if len(buf) >= 4+payloadLen2 && buf[4] == 0x03 {
+			return nil
+		}
+		if len(buf) >= 4+payloadLen2 && buf[4] == 0x00 {
+			return nil
+		}
+		return fmt.Errorf("auth phase 2 unexpected: payload[4]=0x%02x", buf[4])
+	}
+	return fmt.Errorf("unexpected auth result: payload[4]=0x%02x", buf[4])
 }

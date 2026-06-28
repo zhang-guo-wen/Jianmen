@@ -512,7 +512,7 @@ func (g *Gateway) handleMySQL(ctx context.Context, client net.Conn) *gatewayConn
 	}
 
 	// Build upstream login with upstream credentials
-	upstreamLogin := BuildMySQLUpstreamLogin(hs, acct.UpstreamUsername, acct.UpstreamPassword.GetPlaintext(), "mysql_native_password")
+	upstreamLogin := BuildMySQLUpstreamLogin(hs, acct.UpstreamUsername, acct.UpstreamPassword.GetPlaintext(), hs.AuthPluginName)
 	if _, err := upstream.Write(upstreamLogin); err != nil {
 		g.logger.Warn("mysql gateway failed to send upstream login", "error", err)
 		upstream.Close()
@@ -527,13 +527,61 @@ func (g *Gateway) handleMySQL(ctx context.Context, client net.Conn) *gatewayConn
 		return nil
 	}
 
-	// Check auth result: OK (0x00) or ERR (0xff)
+	// Check auth result
 	if len(authPkt.payload) > 0 && authPkt.payload[0] == 0xff {
 		errMsg := ParseMySQLErrorMessage(authPkt.payload)
 		g.logger.Warn("mysql gateway upstream auth failed", "error", errMsg)
 		client.Write(authPkt.raw)
 		upstream.Close()
 		return nil
+	}
+
+	// Handle AuthSwitchRequest (0xfe) — MySQL 8.0 可能要求切换 auth plugin
+	if len(authPkt.payload) > 1 && authPkt.payload[0] == 0xfe {
+		switched, err := g.handleMySQLAuthSwitch(upstream, acct, hs, authPkt.payload[1:])
+		if err != nil {
+			g.logger.Warn("mysql gateway auth switch failed", "error", err)
+			upstream.Close()
+			return nil
+		}
+		authPkt = switched
+	}
+
+	// Handle caching_sha2_password full auth: 0x01 (more data) + 0x03 (fast auth success)
+	if len(authPkt.payload) > 0 && authPkt.payload[0] == 0x01 {
+		extraPkt, err := readMySQLPacket(upstream)
+		if err != nil {
+			g.logger.Warn("mysql gateway failed to read auth extra", "error", err)
+			upstream.Close()
+			return nil
+		}
+		if len(extraPkt.payload) > 0 && extraPkt.payload[0] == 0x03 {
+			// fast auth success — forward to client
+			if _, err := client.Write(authPkt.raw); err != nil {
+				upstream.Close()
+				return nil
+			}
+			if _, err := client.Write(extraPkt.raw); err != nil {
+				upstream.Close()
+				return nil
+			}
+			return &gatewayConn{
+				protocol:     "mysql",
+				accountID:    acct.ID,
+				accountName:  resolved.rawName,
+				upstream:     upstream,
+				upstreamAddr: acct.Instance.Address,
+				userID:       rbacUserID,
+			}
+		}
+		// 0x04 = full auth with public key — 暂不支持，回传错误
+		if len(extraPkt.payload) > 0 && extraPkt.payload[0] == 0x04 {
+			g.logger.Warn("mysql gateway caching_sha2_password full auth (0x04) not supported, need SSL or native_password")
+			client.Write(authPkt.raw)
+			client.Write(extraPkt.raw)
+			upstream.Close()
+			return nil
+		}
 	}
 
 	// Forward OK to client
@@ -550,6 +598,31 @@ func (g *Gateway) handleMySQL(ctx context.Context, client net.Conn) *gatewayConn
 		upstreamAddr: acct.Instance.Address,
 		userID:       rbacUserID,
 	}
+}
+
+// handleMySQLAuthSwitch 处理 MySQL AuthSwitchRequest (0xfe)
+// payload 是 0xfe 之后的部分：plugin name (null-terminated) + auth data
+func (g *Gateway) handleMySQLAuthSwitch(upstream net.Conn, acct *model.DatabaseAccount, hs *MySQLHandshake, payload []byte) (*mysqlPacket, error) {
+	// 解析新 auth plugin name
+	nullPos := 0
+	for nullPos < len(payload) && payload[nullPos] != 0 {
+		nullPos++
+	}
+	newPlugin := string(payload[:nullPos])
+	authData := payload[nullPos+1:]
+
+	// 更新 salt 用于新 plugin
+	if len(authData) > 0 {
+		hs.AuthData = authData
+	}
+
+	// 构建新 auth plugin 的响应
+	switchLogin := BuildMySQLUpstreamLogin(hs, acct.UpstreamUsername, acct.UpstreamPassword.GetPlaintext(), newPlugin)
+	if _, err := upstream.Write(switchLogin); err != nil {
+		return nil, fmt.Errorf("write auth switch: %w", err)
+	}
+
+	return readMySQLPacket(upstream)
 }
 
 func (g *Gateway) authorizeConnect(userID, uniqueName, resourceID string) error {
@@ -891,8 +964,11 @@ func readMySQLPacket(conn net.Conn) (*mysqlPacket, error) {
 // Exported for use by test connection in admin package.
 func BuildMySQLUpstreamLogin(hs *MySQLHandshake, username, password, authPlugin string) []byte {
 	var authResp []byte
-	if authPlugin == "mysql_native_password" {
+	switch authPlugin {
+	case "mysql_native_password":
 		authResp = BuildMySQLNativePassword(password, hs.AuthData)
+	case "caching_sha2_password":
+		authResp = BuildMySQLCachingSha2Password(password, hs.AuthData)
 	}
 
 	capFlags := uint32(mysqlClientProtocol41 | mysqlClientSecureConnection | mysqlClientPluginAuth)

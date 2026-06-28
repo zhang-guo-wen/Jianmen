@@ -3,6 +3,7 @@ package dbproxy
 import (
 	"bytes"
 	"crypto/sha1"
+	"crypto/sha256"
 	"encoding/binary"
 	"errors"
 	"strings"
@@ -174,6 +175,34 @@ func BuildMySQLNativePassword(password string, salt []byte) []byte {
 	// XOR h1 with h3 for final 20-byte result
 	result := make([]byte, 20)
 	for i := 0; i < 20; i++ {
+		result[i] = h1[i] ^ h3[i]
+	}
+
+	return result
+}
+
+// BuildMySQLCachingSha2Password computes a caching_sha2_password authentication response.
+// Algorithm: SHA256(password) XOR SHA256(salt + SHA256(SHA256(password)))
+func BuildMySQLCachingSha2Password(password string, salt []byte) []byte {
+	if len(salt) > 20 {
+		salt = salt[:20]
+	}
+
+	// SHA256(password)
+	h1 := sha256.Sum256([]byte(password))
+
+	// SHA256(SHA256(password))
+	h2 := sha256.Sum256(h1[:])
+
+	// SHA256(salt + SHA256(SHA256(password)))
+	combined := make([]byte, 0, len(salt)+32)
+	combined = append(combined, salt...)
+	combined = append(combined, h2[:]...)
+	h3 := sha256.Sum256(combined)
+
+	// XOR h1 with h3 for final 32-byte result
+	result := make([]byte, 32)
+	for i := 0; i < 32; i++ {
 		result[i] = h1[i] ^ h3[i]
 	}
 

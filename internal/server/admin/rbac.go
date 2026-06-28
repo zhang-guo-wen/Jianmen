@@ -62,12 +62,25 @@ func (s *Server) handleRBACRoles(w http.ResponseWriter, r *http.Request) {
 
 	switch r.Method {
 	case http.MethodGet:
+		q := strings.TrimSpace(r.URL.Query().Get("q"))
+		tx := db.Model(&model.Role{})
+		if q != "" {
+			like := "%" + q + "%"
+			tx = tx.Where("name LIKE ? OR description LIKE ?", like, like)
+		}
+		var total int64
+		tx.Count(&total)
+		page := positiveIntRequestQuery(r, "page", 1)
+		pageSize := positiveIntRequestQuery(r, "page_size", 20)
+		if pageSize > 200 {
+			pageSize = 200
+		}
 		var roles []model.Role
-		if err := db.Order("created_at DESC").Find(&roles).Error; err != nil {
+		if err := tx.Order("created_at DESC").Offset((page-1)*pageSize).Limit(pageSize).Find(&roles).Error; err != nil {
 			writeRBACDBError(w, err)
 			return
 		}
-		writeJSON(w, http.StatusOK, roles)
+		writeJSON(w, http.StatusOK, pageResponse{Items: roles, Total: int(total), Page: page, PageSize: pageSize})
 	case http.MethodPost:
 		s.handleCreateRBACRole(w, r, db)
 	default:
@@ -168,12 +181,25 @@ func (s *Server) handleRBACPermissions(w http.ResponseWriter, r *http.Request) {
 
 	switch r.Method {
 	case http.MethodGet:
+		q := strings.TrimSpace(r.URL.Query().Get("q"))
+		tx := db.Model(&model.Permission{})
+		if q != "" {
+			like := "%" + q + "%"
+			tx = tx.Where("name LIKE ? OR action LIKE ? OR description LIKE ?", like, like, like)
+		}
+		var total int64
+		tx.Count(&total)
+		page := positiveIntRequestQuery(r, "page", 1)
+		pageSize := positiveIntRequestQuery(r, "page_size", 20)
+		if pageSize > 200 {
+			pageSize = 200
+		}
 		var permissions []model.Permission
-		if err := db.Order("created_at DESC").Find(&permissions).Error; err != nil {
+		if err := tx.Order("created_at DESC").Offset((page-1)*pageSize).Limit(pageSize).Find(&permissions).Error; err != nil {
 			writeRBACDBError(w, err)
 			return
 		}
-		writeJSON(w, http.StatusOK, permissions)
+		writeJSON(w, http.StatusOK, pageResponse{Items: permissions, Total: int(total), Page: page, PageSize: pageSize})
 	case http.MethodPost:
 		s.handleCreateRBACPermission(w, r, db)
 	default:
@@ -270,12 +296,25 @@ func (s *Server) handleRBACUserRoles(w http.ResponseWriter, r *http.Request) {
 
 	switch r.Method {
 	case http.MethodGet:
+		q := strings.TrimSpace(r.URL.Query().Get("q"))
+		tx := db.Model(&model.UserRole{})
+		if q != "" {
+			like := "%" + q + "%"
+			tx = tx.Where("user_id LIKE ? OR role_id LIKE ?", like, like)
+		}
+		var total int64
+		tx.Count(&total)
+		page := positiveIntRequestQuery(r, "page", 1)
+		pageSize := positiveIntRequestQuery(r, "page_size", 20)
+		if pageSize > 200 {
+			pageSize = 200
+		}
 		var userRoles []model.UserRole
-		if err := db.Order("created_at DESC").Find(&userRoles).Error; err != nil {
+		if err := tx.Order("created_at DESC").Offset((page-1)*pageSize).Limit(pageSize).Find(&userRoles).Error; err != nil {
 			writeRBACDBError(w, err)
 			return
 		}
-		writeJSON(w, http.StatusOK, userRoles)
+		writeJSON(w, http.StatusOK, pageResponse{Items: userRoles, Total: int(total), Page: page, PageSize: pageSize})
 	case http.MethodPost:
 		s.handleCreateRBACUserRole(w, r, db)
 	default:
@@ -337,12 +376,25 @@ func (s *Server) handleRBACRolePermissions(w http.ResponseWriter, r *http.Reques
 
 	switch r.Method {
 	case http.MethodGet:
+		q := strings.TrimSpace(r.URL.Query().Get("q"))
+		tx := db.Model(&model.RolePermission{})
+		if q != "" {
+			like := "%" + q + "%"
+			tx = tx.Where("role_id LIKE ? OR permission_id LIKE ?", like, like)
+		}
+		var total int64
+		tx.Count(&total)
+		page := positiveIntRequestQuery(r, "page", 1)
+		pageSize := positiveIntRequestQuery(r, "page_size", 20)
+		if pageSize > 200 {
+			pageSize = 200
+		}
 		var rolePermissions []model.RolePermission
-		if err := db.Order("created_at DESC").Find(&rolePermissions).Error; err != nil {
+		if err := tx.Order("created_at DESC").Offset((page-1)*pageSize).Limit(pageSize).Find(&rolePermissions).Error; err != nil {
 			writeRBACDBError(w, err)
 			return
 		}
-		writeJSON(w, http.StatusOK, rolePermissions)
+		writeJSON(w, http.StatusOK, pageResponse{Items: rolePermissions, Total: int(total), Page: page, PageSize: pageSize})
 	case http.MethodPost:
 		s.handleCreateRBACRolePermission(w, r, db)
 	default:

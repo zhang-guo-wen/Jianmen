@@ -167,15 +167,24 @@ func TestHandleHostsPaginationAndLazyAccounts(t *testing.T) {
 	if listRec.Code != http.StatusOK {
 		t.Fatalf("list hosts status = %d, want %d; body=%s", listRec.Code, http.StatusOK, listRec.Body.String())
 	}
-	var page pagedHostList
+	var page pageResponse
 	if err := json.Unmarshal(listRec.Body.Bytes(), &page); err != nil {
 		t.Fatalf("unmarshal hosts page: %v; body=%s", err, listRec.Body.String())
 	}
-	if page.Total != 2 || page.Page != 1 || page.PageSize != 1 || len(page.Data) != 1 {
+	if page.Total != 2 || page.Page != 1 || page.PageSize != 1 {
 		t.Fatalf("unexpected hosts page: %#v", page)
 	}
-	if page.Data[0].ID != "prod-a" || page.Data[0].AccountCount != 1 || page.Data[0].Group != "prod" || page.Data[0].Remark != "primary host" {
-		t.Fatalf("unexpected first host page item: %#v", page.Data[0])
+	// page.Items is []interface{} after JSON unmarshal; re-marshal to get typed HostView
+	itemsJSON, _ := json.Marshal(page.Items)
+	var hostItems []store.HostView
+	if err := json.Unmarshal(itemsJSON, &hostItems); err != nil {
+		t.Fatalf("unmarshal host items: %v", err)
+	}
+	if len(hostItems) != 1 {
+		t.Fatalf("unexpected host items count: %d", len(hostItems))
+	}
+	if hostItems[0].ID != "prod-a" || hostItems[0].AccountCount != 1 || hostItems[0].Group != "prod" || hostItems[0].Remark != "primary host" {
+		t.Fatalf("unexpected first host page item: %#v", hostItems[0])
 	}
 
 	accountsReq := httptest.NewRequest(http.MethodGet, "/api/hosts/prod-a/accounts", nil)
@@ -184,9 +193,14 @@ func TestHandleHostsPaginationAndLazyAccounts(t *testing.T) {
 	if accountsRec.Code != http.StatusOK {
 		t.Fatalf("host accounts status = %d, want %d; body=%s", accountsRec.Code, http.StatusOK, accountsRec.Body.String())
 	}
+	var accountsPage pageResponse
+	if err := json.Unmarshal(accountsRec.Body.Bytes(), &accountsPage); err != nil {
+		t.Fatalf("unmarshal host accounts page: %v; body=%s", err, accountsRec.Body.String())
+	}
+	accItemsJSON, _ := json.Marshal(accountsPage.Items)
 	var accounts []store.TargetView
-	if err := json.Unmarshal(accountsRec.Body.Bytes(), &accounts); err != nil {
-		t.Fatalf("unmarshal host accounts: %v; body=%s", err, accountsRec.Body.String())
+	if err := json.Unmarshal(accItemsJSON, &accounts); err != nil {
+		t.Fatalf("unmarshal host accounts items: %v; body=%s", err, accItemsJSON)
 	}
 	if len(accounts) != 1 {
 		t.Fatalf("account count = %d, want 1: %#v", len(accounts), accounts)

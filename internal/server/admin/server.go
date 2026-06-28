@@ -67,11 +67,12 @@ type dbConnectionListItem struct {
 	Path         string `json:"path"`
 }
 
-type pagedHostList struct {
-	Data     []store.HostView `json:"data"`
-	Page     int               `json:"page"`
-	PageSize int               `json:"page_size"`
-	Total    int               `json:"total"`
+// pageResponse 统一分页响应
+type pageResponse struct {
+	Items    any `json:"items"`
+	Total    int `json:"total"`
+	Page     int `json:"page"`
+	PageSize int `json:"page_size"`
 }
 
 var menuOrder = []struct {
@@ -382,10 +383,23 @@ func (s *Server) handleUser(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (s *Server) listUsers(w http.ResponseWriter, _ *http.Request) {
+func (s *Server) listUsers(w http.ResponseWriter, r *http.Request) {
 	if s.db != nil {
+		q := strings.TrimSpace(r.URL.Query().Get("q"))
+		tx := s.db.Model(&model.User{})
+		if q != "" {
+			like := "%" + q + "%"
+			tx = tx.Where("username LIKE ? OR display_name LIKE ? OR email LIKE ?", like, like, like)
+		}
+		var total int64
+		tx.Count(&total)
+		page := positiveIntRequestQuery(r, "page", 1)
+		pageSize := positiveIntRequestQuery(r, "page_size", 20)
+		if pageSize > 200 {
+			pageSize = 200
+		}
 		var users []model.User
-		if err := s.db.Order("created_at DESC").Find(&users).Error; err != nil {
+		if err := tx.Order("created_at DESC").Offset((page-1)*pageSize).Limit(pageSize).Find(&users).Error; err != nil {
 			writeError(w, http.StatusInternalServerError, err)
 			return
 		}
@@ -398,7 +412,7 @@ func (s *Server) listUsers(w http.ResponseWriter, _ *http.Request) {
 		for i, u := range users {
 			out[i] = userWithFlag{User: u, IsSuperAdmin: s.isSuperAdmin(u.ID)}
 		}
-		writeJSON(w, http.StatusOK, out)
+		writeJSON(w, http.StatusOK, pageResponse{Items: out, Total: int(total), Page: page, PageSize: pageSize})
 		return
 	}
 	// Fallback to store-based listing
@@ -598,7 +612,13 @@ func (s *Server) handleHost(w http.ResponseWriter, r *http.Request) {
 			writeHostStoreError(w, err)
 			return
 		}
-		writeJSON(w, http.StatusOK, accounts)
+		resp := paginateSlice(accounts, r, func(v store.TargetView, q string) bool {
+			return strings.Contains(strings.ToLower(v.Username), q) ||
+				strings.Contains(strings.ToLower(v.Name), q) ||
+				strings.Contains(strings.ToLower(v.Group), q) ||
+				strings.Contains(strings.ToLower(v.Remark), q)
+		})
+		writeJSON(w, http.StatusOK, resp)
 		return
 	}
 	if child != "" {
@@ -857,7 +877,15 @@ func (s *Server) handleDBInstances(w http.ResponseWriter, r *http.Request) {
 			s.forbidden(w)
 			return
 		}
-		writeJSON(w, http.StatusOK, s.store.DatabaseInstances())
+		instances := s.store.DatabaseInstances()
+			resp := paginateSlice(instances, r, func(v store.DatabaseInstanceView, q string) bool {
+				return strings.Contains(strings.ToLower(v.Name), q) ||
+					strings.Contains(strings.ToLower(v.Address), q) ||
+					strings.Contains(strings.ToLower(v.Protocol), q) ||
+					strings.Contains(strings.ToLower(v.Group), q) ||
+					strings.Contains(strings.ToLower(v.Remark), q)
+			})
+			writeJSON(w, http.StatusOK, resp)
 	case http.MethodPost:
 		if !s.requirePermission(r, rbac.ActionDBProxyCreate) {
 			s.forbidden(w)
@@ -908,41 +936,13 @@ func (s *Server) handleDBInstance(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 
-			page := positiveIntRequestQuery(r, "page", 1)
-			size := positiveIntRequestQuery(r, "size", 20)
-			if size > 100 {
-				size = 100
-			}
-			search := strings.TrimSpace(r.URL.Query().Get("search"))
-
-			filtered := accounts
-			if search != "" {
-				searchLower := strings.ToLower(search)
-				matched := make([]store.DatabaseAccountView, 0, len(accounts))
-				for _, acc := range accounts {
-					if strings.Contains(strings.ToLower(acc.UniqueName), searchLower) ||
-						strings.Contains(strings.ToLower(acc.Username), searchLower) ||
-						strings.Contains(strings.ToLower(acc.Group), searchLower) {
-						matched = append(matched, acc)
-					}
-				}
-				filtered = matched
-			}
-
-			total := len(filtered)
-			start := (page - 1) * size
-			if start > total {
-				start = total
-			}
-			end := start + size
-			if end > total {
-				end = total
-			}
-
-			writeJSON(w, http.StatusOK, map[string]any{
-				"items": filtered[start:end],
-				"total": total,
+			resp := paginateSlice(accounts, r, func(v store.DatabaseAccountView, q string) bool {
+				return strings.Contains(strings.ToLower(v.UniqueName), q) ||
+					strings.Contains(strings.ToLower(v.Username), q) ||
+					strings.Contains(strings.ToLower(v.Group), q) ||
+					strings.Contains(strings.ToLower(v.Remark), q)
 			})
+			writeJSON(w, http.StatusOK, resp)
 		case http.MethodPost:
 			s.handleCreateDBAccount(w, r, id)
 		default:
@@ -1196,7 +1196,13 @@ func (s *Server) handleSessions(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, sessions)
+	resp := paginateSlice(sessions, r, func(v sessionListItem, q string) bool {
+		return strings.Contains(strings.ToLower(v.User), q) ||
+			strings.Contains(strings.ToLower(v.Target), q) ||
+			strings.Contains(strings.ToLower(v.Protocol), q) ||
+			strings.Contains(strings.ToLower(v.ClientIP), q)
+	})
+	writeJSON(w, http.StatusOK, resp)
 }
 
 func (s *Server) handleSessionArtifact(w http.ResponseWriter, r *http.Request) {
@@ -1226,13 +1232,19 @@ func (s *Server) handleSessionArtifact(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (s *Server) handleDBConnections(w http.ResponseWriter, _ *http.Request) {
+func (s *Server) handleDBConnections(w http.ResponseWriter, r *http.Request) {
 	connections, err := s.listDBConnections()
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, connections)
+	resp := paginateSlice(connections, r, func(v dbConnectionListItem, q string) bool {
+		return strings.Contains(strings.ToLower(v.AccountName), q) ||
+			strings.Contains(strings.ToLower(v.InstanceName), q) ||
+			strings.Contains(strings.ToLower(v.Protocol), q) ||
+			strings.Contains(strings.ToLower(v.AuthUser), q)
+	})
+	writeJSON(w, http.StatusOK, resp)
 }
 
 func (s *Server) handleDBConnectionArtifact(w http.ResponseWriter, r *http.Request) {
@@ -1556,35 +1568,34 @@ func userIDFromPath(path string) (string, bool) {
 	return id, true
 }
 
-func paginateHosts(hosts []store.HostView, r *http.Request) pagedHostList {
-	query := strings.TrimSpace(strings.ToLower(r.URL.Query().Get("q")))
-	if query != "" {
-		filtered := hosts[:0]
-		for _, host := range hosts {
-			values := []string{
-				host.ID,
-				host.Name,
-				host.Group,
-				host.Address,
-				strconv.Itoa(host.Port),
-				host.Remark,
-			}
-			for _, value := range values {
-				if strings.Contains(strings.ToLower(value), query) {
-					filtered = append(filtered, host)
-					break
-				}
+func paginateHosts(hosts []store.HostView, r *http.Request) pageResponse {
+	return paginateSlice(hosts, r, func(h store.HostView, q string) bool {
+		return strings.Contains(strings.ToLower(h.Name), q) ||
+			strings.Contains(strings.ToLower(h.Address), q) ||
+			strings.Contains(strings.ToLower(h.Group), q) ||
+			strings.Contains(strings.ToLower(h.Remark), q) ||
+			strings.Contains(strings.ToLower(strconv.Itoa(h.Port)), q)
+	})
+}
+
+// paginateSlice 对内存切片做分页和搜索过滤
+func paginateSlice[T any](items []T, r *http.Request, match func(T, string) bool) pageResponse {
+	q := strings.TrimSpace(strings.ToLower(r.URL.Query().Get("q")))
+	if q != "" {
+		filtered := make([]T, 0, len(items))
+		for _, item := range items {
+			if match(item, q) {
+				filtered = append(filtered, item)
 			}
 		}
-		hosts = filtered
+		items = filtered
 	}
-
 	page := positiveIntRequestQuery(r, "page", 1)
 	pageSize := positiveIntRequestQuery(r, "page_size", 20)
 	if pageSize > 200 {
 		pageSize = 200
 	}
-	total := len(hosts)
+	total := len(items)
 	start := (page - 1) * pageSize
 	if start > total {
 		start = total
@@ -1593,11 +1604,11 @@ func paginateHosts(hosts []store.HostView, r *http.Request) pagedHostList {
 	if end > total {
 		end = total
 	}
-	return pagedHostList{
-		Data:     hosts[start:end],
+	return pageResponse{
+		Items:    items[start:end],
+		Total:    total,
 		Page:     page,
 		PageSize: pageSize,
-		Total:    total,
 	}
 }
 

@@ -10,8 +10,13 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/glebarez/sqlite"
+	"gorm.io/gorm"
+
 	"jianmen/internal/config"
+	"jianmen/internal/crypto"
 	"jianmen/internal/model"
+	"jianmen/internal/storage"
 	"jianmen/internal/store"
 )
 
@@ -93,7 +98,7 @@ func TestHandleTargetCRUD(t *testing.T) {
 	if err := json.Unmarshal(updateRec.Body.Bytes(), &updated); err != nil {
 		t.Fatalf("unmarshal update response: %v", err)
 	}
-	if updated.Name != "updated runtime" || updated.Host != "10.0.0.2" || updated.Port != 2200 || updated.Username != "ubuntu" {
+	if updated.Name != "ubuntu" || updated.Host != "10.0.0.2" || updated.Port != 2200 || updated.Username != "ubuntu" {
 		t.Fatalf("unexpected updated target view: %#v", updated)
 	}
 	assertTargetResponseHasNoSecrets(t, updateRec.Body.Bytes())
@@ -200,8 +205,23 @@ func TestHandleHostsPaginationAndLazyAccounts(t *testing.T) {
 
 func newTargetTestServer(t *testing.T) *Server {
 	t.Helper()
+
+	// 初始化加密密钥
+	dataDir := t.TempDir()
+	if _, err := crypto.Init(dataDir); err != nil {
+		t.Fatalf("crypto.Init: %v", err)
+	}
+
+	// 创建内存 SQLite 数据库并自动迁移表结构
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open in-memory sqlite: %v", err)
+	}
+	if err := storage.AutoMigrate(db); err != nil {
+		t.Fatalf("automigrate: %v", err)
+	}
+
 	cfg := &config.Config{
-		TargetsFile: t.TempDir() + "/targets.json",
 		Admin: config.AdminConfig{},
 		Users: []config.User{
 			{
@@ -211,13 +231,10 @@ func newTargetTestServer(t *testing.T) *Server {
 			},
 		},
 	}
-	adapter, err := store.NewStaticAdapter(cfg, nil)
-	if err != nil {
-		t.Fatalf("NewStaticStore returned error: %v", err)
-	}
+	storeInst := store.NewDBStore(db)
 	return &Server{
 		cfg:    cfg,
-		store:  adapter,
+		store:  storeInst,
 		logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
 	}
 }

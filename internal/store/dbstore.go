@@ -250,18 +250,55 @@ func (s *DBStore) targetView(a model.HostAccount) TargetView {
 	if name == "" {
 		name = a.ID
 	}
+	host, port := s.hostAddressPort(a.Host, a.HostID)
 	return TargetView{
 		ID: a.ID, HostID: a.HostID,
 		ResourceType: model.ResourceTypeHostAccount, ResourceID: a.ResourceID,
 		ResourceSeq: a.ResourceSeq,
 		Name: name, Group: a.GroupName, Remark: a.Remark,
+		Host: host, Port: port,
 		Username: a.Username, Status: status,
 		AuthMethods: authMethods,
 	}
 }
 
+// hostAddressPort 从 HostAccount 的 Host 关联中提取地址和端口，若未预加载则查询 Host 表。
+func (s *DBStore) hostAddressPort(h model.Host, hostID string) (host string, port int) {
+	host = h.Address
+	port = h.Port
+	if host == "" && hostID != "" {
+		var loaded model.Host
+		if err := s.db.First(&loaded, "id = ?", hostID).Error; err == nil {
+			host = loaded.Address
+			port = loaded.Port
+		}
+	}
+	return
+}
+
+// ensureHost ensures a Host record exists for the given hostID, creating a minimal one if it doesn't.
+func (s *DBStore) ensureHost(hostID, address string, port int) {
+	var existing model.Host
+	if err := s.db.First(&existing, "id = ?", hostID).Error; err == nil {
+		return // already exists
+	}
+	name := address
+	if port != 0 && port != 22 {
+		name = fmt.Sprintf("%s:%d", address, port)
+	}
+	if name == "" {
+		name = hostID
+	}
+	s.db.Create(&model.Host{
+		ID:      hostID,
+		Name:    name,
+		Address: address,
+		Port:    port,
+	})
+}
+
 func (s *DBStore) targetConfig(a model.HostAccount) TargetConfig {
-	host, port := a.Host.Address, a.Host.Port
+	host, port := s.hostAddressPort(a.Host, a.HostID)
 	if host == "" {
 		host = "127.0.0.1"
 	}
@@ -320,6 +357,8 @@ func (s *DBStore) AddTarget(target config.Target) (TargetView, error) {
 	if target.HostID == "" {
 		target.HostID = fmt.Sprintf("%s-%d", target.Host, target.Port)
 	}
+	// ensure the host record exists
+	s.ensureHost(target.HostID, target.Host, target.Port)
 	// 鍒嗛厤璧勬簮ID
 	seq, err := s.nextHostResourceSeq()
 	if err != nil {
@@ -389,7 +428,30 @@ func (s *DBStore) UpdateTarget(id string, target config.Target) (TargetView, err
 	if err := s.db.Save(&a).Error; err != nil {
 		return TargetView{}, fmt.Errorf("update target: %w", err)
 	}
+	// update host address/port when provided
+	hostID := target.HostID
+	if hostID == "" {
+		hostID = a.HostID
+	}
+	s.updateHostIfChanged(hostID, target.Host, target.Port)
 	return s.targetView(a), nil
+}
+
+func (s *DBStore) updateHostIfChanged(hostID string, host string, port int) {
+	if host == "" && port == 0 {
+		return
+	}
+	var h model.Host
+	if err := s.db.First(&h, "id = ?", hostID).Error; err != nil {
+		return
+	}
+	if host != "" {
+		h.Address = host
+	}
+	if port != 0 {
+		h.Port = port
+	}
+	s.db.Save(&h)
 }
 
 func (s *DBStore) DeleteTarget(id string) error {

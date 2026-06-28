@@ -20,7 +20,6 @@ import (
 
 	"golang.org/x/crypto/ssh"
 	"gorm.io/gorm"
-	"jianmen/internal/access"
 	"jianmen/internal/config"
 	"jianmen/internal/model"
 	"jianmen/internal/rbac"
@@ -713,7 +712,23 @@ func (s *Server) handleTestConnection(w http.ResponseWriter, r *http.Request) {
 		target.InsecureIgnoreHostKey = true
 	}
 
-	clientConfig, err := access.ClientConfigForTarget(target)
+	clientConfig, err := store.ClientConfigForTarget(store.TargetConfig{
+			ID:                    target.ID,
+			Name:                  target.Name,
+			Host:                  target.Host,
+			Port:                  target.Port,
+			Username:              target.Username,
+			Password:              target.Password,
+			PrivateKeyPath:        target.PrivateKeyPath,
+			PrivateKeyPEM:         target.PrivateKeyPEM,
+			Passphrase:            target.Passphrase,
+			InsecureIgnoreHostKey: target.InsecureIgnoreHostKey,
+			HostKeyFingerprint:    target.HostKeyFingerprint,
+			KnownHostsPath:        target.KnownHostsPath,
+			Disabled:              target.Disabled,
+			ExpiresAt:             target.ExpiresAt,
+			HostID:                target.HostID,
+		})
 	if err != nil {
 		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "message": "配置错误: " + err.Error()})
 		return
@@ -1638,7 +1653,7 @@ func dbAccountIDFromPath(path string) (string, bool) {
 
 func writeHostStoreError(w http.ResponseWriter, err error) {
 	switch {
-	case errors.Is(err, store.ErrHostNotFound) || errors.Is(err, access.ErrHostNotFound):
+	case errors.Is(err, store.ErrHostNotFound):
 		writeError(w, http.StatusNotFound, err)
 	default:
 		writeError(w, http.StatusBadRequest, err)
@@ -1647,8 +1662,7 @@ func writeHostStoreError(w http.ResponseWriter, err error) {
 
 func writeDBStoreError(w http.ResponseWriter, err error) {
 	switch {
-	case errors.Is(err, store.ErrDBProxyNotFound) || errors.Is(err, store.ErrDBAccountNotFound) || errors.Is(err, store.ErrDBInstanceNotFound) ||
-		errors.Is(err, access.ErrDBProxyNotFound) || errors.Is(err, access.ErrDBAccountNotFound) || errors.Is(err, access.ErrDBInstanceNotFound):
+	case errors.Is(err, store.ErrDBProxyNotFound) || errors.Is(err, store.ErrDBAccountNotFound) || errors.Is(err, store.ErrDBInstanceNotFound):
 		writeError(w, http.StatusNotFound, err)
 	default:
 		writeError(w, http.StatusBadRequest, err)
@@ -1657,7 +1671,7 @@ func writeDBStoreError(w http.ResponseWriter, err error) {
 
 func writeTargetStoreError(w http.ResponseWriter, err error) {
 	switch {
-	case errors.Is(err, store.ErrTargetNotFound) || errors.Is(err, access.ErrTargetNotFound):
+	case errors.Is(err, store.ErrTargetNotFound):
 		writeError(w, http.StatusNotFound, err)
 	default:
 		writeError(w, http.StatusBadRequest, err)

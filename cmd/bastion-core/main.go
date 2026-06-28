@@ -83,19 +83,8 @@ func main() {
 		logger.Info("metadata database ready", "driver", cfg.Database.Driver, "auto_migrate", cfg.Database.AutoMigrate)
 	}
 
-	var appStore store.Store
-	if metadataDB != nil {
-		appStore = store.NewDBStore(metadataDB)
-		logger.Info("using database-backed store")
-	} else {
-		adapter, err := store.NewStaticAdapter(cfg, metadataDB)
-		if err != nil {
-			logger.Error("failed to initialize static store", "error", err)
-			os.Exit(1)
-		}
-		appStore = adapter
-		logger.Info("using file-backed static store (no database configured)")
-	}
+	appStore := store.NewDBStore(metadataDB)
+	logger.Info("using database-backed store")
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()

@@ -46,6 +46,62 @@ func (s *Server) handleInitStatus(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, InitStatusResponse{Initialized: count > 0})
 }
 
+// handleLogin handles username+password login, returns an API token.
+func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", "POST")
+		writeErrorText(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	var req struct {
+		Username string `json:"username"`
+		Password string `json:"password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+		return
+	}
+	username := strings.TrimSpace(req.Username)
+	password := req.Password
+	if username == "" || password == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "username and password are required"})
+		return
+	}
+
+	// Find user by username
+	var user model.User
+	if err := s.db.Where("username = ? AND status = ?", username, "active").First(&user).Error; err != nil {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid username or password"})
+		return
+	}
+
+	// Verify password
+	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(password)); err != nil {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid username or password"})
+		return
+	}
+
+	// Generate new API token
+	tokenBytes := make([]byte, 32)
+	if _, err := io.ReadFull(rand.Reader, tokenBytes); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to generate token"})
+		return
+	}
+	token := hex.EncodeToString(tokenBytes)
+	tokenHash := sha256.Sum256([]byte(token))
+	tokenHashStr := hex.EncodeToString(tokenHash[:])
+
+	// Store token hash
+	user.TokenHash = tokenHashStr
+	if err := s.db.Save(&user).Error; err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to save token"})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"token": token})
+}
+
 // handleInitSetup 创建超级管理员用户（事务保护 TOCTOU）
 func (s *Server) handleInitSetup(w http.ResponseWriter, r *http.Request) {
 	var req SetupRequest

@@ -121,6 +121,7 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 	mux.HandleFunc("/api/init/status", s.handleInitStatus)
 	mux.HandleFunc("/api/init/setup", s.handleInitSetup)
 	mux.HandleFunc("/api/init/encryption-key", s.handleInitEncryptionKey)
+	mux.HandleFunc("/api/login", s.handleLogin)
 	mux.HandleFunc("/api/health", s.withAuthAndUser(s.handleHealth))
 	mux.HandleFunc("/api/users", s.withAuthAndUser(s.handleUsers))
 	mux.HandleFunc("/api/users/", s.withAuthAndUser(s.handleUser))

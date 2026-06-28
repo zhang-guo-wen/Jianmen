@@ -13,10 +13,10 @@
       <template #toolbar-extra>
         <el-button type="primary" @click="openCreateHostDialog">新增主机</el-button>
       </template>
-      <el-table-column label="主机名称" min-width="120" show-overflow-tooltip>
+      <el-table-column label="主机名称" min-width="130" show-overflow-tooltip>
         <template #default="{ row }">{{ hostName(row) }}</template>
       </el-table-column>
-      <el-table-column label="地址" min-width="140" show-overflow-tooltip>
+      <el-table-column label="地址" min-width="130" show-overflow-tooltip>
         <template #default="{ row }">{{ hostAddress(row) }}</template>
       </el-table-column>
       <el-table-column label="账号数" width="80" align="center">

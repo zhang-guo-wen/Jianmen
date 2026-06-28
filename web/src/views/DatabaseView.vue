@@ -12,9 +12,9 @@
       <template #toolbar-extra>
         <el-button type="primary" @click="openCreateInstance">新增实例</el-button>
       </template>
-      <el-table-column prop="name" label="名称" min-width="120" show-overflow-tooltip />
+      <el-table-column prop="name" label="名称" min-width="130" show-overflow-tooltip />
       <el-table-column prop="protocol" label="协议" width="80" />
-      <el-table-column prop="address" label="地址" min-width="140" show-overflow-tooltip />
+      <el-table-column prop="address" label="地址" min-width="130" show-overflow-tooltip />
       <el-table-column prop="port" label="端口" width="70" />
       <el-table-column label="账号数" width="80" align="center">
         <template #default="{ row }">

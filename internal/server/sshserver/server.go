@@ -128,6 +128,11 @@ func (s *Server) handleConn(ctx context.Context, rawConn net.Conn, serverConfig 
 		return
 	}
 
+	if target.Disabled {
+		s.logger.Warn("target is disabled", "user", user.Username, "target", target.ID)
+		return
+	}
+
 	if s.rbacChecker != nil {
 		allowed, err := s.rbacChecker.HasPermission(user.ID, rbac.ActionSessionConnect, model.ResourceTypeHostAccount, target.ID)
 		if err != nil {

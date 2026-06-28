@@ -68,6 +68,10 @@ func (s *Server) handleWebTerminal(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, err)
 		return
 	}
+	if target.Disabled {
+		writeErrorText(w, http.StatusForbidden, "target is disabled or unavailable")
+		return
+	}
 	targetClient, err := dialWebTerminalTarget(target)
 	if err != nil {
 		writeError(w, http.StatusBadGateway, err)

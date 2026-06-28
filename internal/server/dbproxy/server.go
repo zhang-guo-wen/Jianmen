@@ -276,6 +276,10 @@ func (g *Gateway) handlePG(ctx context.Context, client net.Conn) *gatewayConn {
 		g.logger.Warn("db gateway account expired", "account", uniqueName, "expires_at", acct.ExpiresAt)
 		return nil
 	}
+	if acct.Instance.Disabled {
+		g.logger.Warn("db gateway instance disabled", "account", uniqueName, "instance", acct.InstanceID)
+		return nil
+	}
 
 	// Connect to upstream
 	upstream, err := net.DialTimeout("tcp", acct.Instance.Address, 10*time.Second)

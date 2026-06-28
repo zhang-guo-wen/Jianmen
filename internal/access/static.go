@@ -218,7 +218,10 @@ func (s *StaticStore) authenticateCompact(login LoginName, password string) (mod
 	}
 	// 3. 验证用户密码
 	var user model.User
-	if err := s.db.Where("id = ?", userSession.UserID).First(&user).Error; err != nil {
+	if err := s.db.Where("id = ? AND status = ?", userSession.UserID, "active").First(&user).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return model.User{}, errors.New("user is disabled or not found")
+		}
 		return model.User{}, err
 	}
 	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(password)); err != nil {
@@ -247,7 +250,10 @@ func (s *StaticStore) authenticateCompactPublicKey(login LoginName, key ssh.Publ
 	}
 	// 3. 查找用户并验证公钥
 	var user model.User
-	if err := s.db.Where("id = ?", userSession.UserID).First(&user).Error; err != nil {
+	if err := s.db.Where("id = ? AND status = ?", userSession.UserID, "active").First(&user).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return model.User{}, errors.New("user is disabled or not found")
+		}
 		return model.User{}, err
 	}
 	var pubKeys []model.UserPublicKey

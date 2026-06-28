@@ -72,7 +72,10 @@ func (s *DBStore) authenticateCompact(login LoginName, password string) (model.U
 	}
 	// 3. 验证用户密码
 	var user model.User
-	if err := s.db.Where("id = ?", userSession.UserID).First(&user).Error; err != nil {
+	if err := s.db.Where("id = ? AND status = ?", userSession.UserID, "active").First(&user).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return model.User{}, errors.New("user is disabled or not found")
+		}
 		return model.User{}, err
 	}
 	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(password)); err != nil {
@@ -101,7 +104,10 @@ func (s *DBStore) authenticateCompactPublicKey(login LoginName, key ssh.PublicKe
 	}
 	// 3. 查找用户并验证公钥
 	var user model.User
-	if err := s.db.Where("id = ?", userSession.UserID).First(&user).Error; err != nil {
+	if err := s.db.Where("id = ? AND status = ?", userSession.UserID, "active").First(&user).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return model.User{}, errors.New("user is disabled or not found")
+		}
 		return model.User{}, err
 	}
 	var pubKeys []model.UserPublicKey
@@ -260,6 +266,7 @@ func (s *DBStore) targetConfig(a model.HostAccount) TargetConfig {
 	if port == 0 {
 		port = 22
 	}
+	disabled := a.Status == "disabled" || a.Host.Status == "disabled"
 	return TargetConfig{
 		ID: a.ID, Username: a.Username,
 		Name:                  a.Username + "@" + formatHostAddress(host, port),
@@ -270,6 +277,7 @@ func (s *DBStore) targetConfig(a model.HostAccount) TargetConfig {
 		Passphrase:            a.Passphrase.GetPlaintext(),
 		InsecureIgnoreHostKey: true,
 		HostID:                a.HostID,
+		Disabled:              disabled,
 	}
 }
 
@@ -667,18 +675,29 @@ func (s *DBStore) AuthenticateDirect(_ context.Context, username, password strin
 func (s *DBStore) DefaultTarget(_ context.Context, user model.User) (TargetConfig, error) {
 	if user.RequestedTargetID != "" {
 		var a model.HostAccount
-		if err := s.db.Preload("Host").First(&a, "id = ?", user.RequestedTargetID).Error; err != nil {
+		if err := s.db.Preload("Host").Where("id = ? AND status = ?", user.RequestedTargetID, "active").First(&a).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return TargetConfig{}, fmt.Errorf("%w: target %q is not available", ErrTargetUnavailable, user.RequestedTargetID)
+			}
 			return TargetConfig{}, fmt.Errorf("target %q not found", user.RequestedTargetID)
+		}
+		if a.Host.Status == "disabled" {
+			return TargetConfig{}, fmt.Errorf("%w: host %q is disabled", ErrTargetUnavailable, a.HostID)
 		}
 		return s.targetConfig(a), nil
 	}
 
-	// Pick first active account.
-	var a model.HostAccount
-	if err := s.db.Preload("Host").Where("status = ?", "active").First(&a).Error; err != nil {
-		return TargetConfig{}, errors.New("no target accounts available")
+	// Pick first active account whose host is also active.
+	var accounts []model.HostAccount
+	if err := s.db.Preload("Host").Where("status = ?", "active").Find(&accounts).Error; err != nil {
+		return TargetConfig{}, fmt.Errorf("list accounts: %w", err)
 	}
-	return s.targetConfig(a), nil
+	for _, a := range accounts {
+		if a.Host.Status != "disabled" {
+			return s.targetConfig(a), nil
+		}
+	}
+	return TargetConfig{}, errors.New("no target accounts available")
 }
 
 // -- user sessions --

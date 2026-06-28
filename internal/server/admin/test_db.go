@@ -34,6 +34,19 @@ func (s *Server) handleTestDBConnection(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	if acct.Disabled {
+		writeErrorText(w, http.StatusForbidden, "account is disabled")
+		return
+	}
+	if acct.ExpiresAt != nil && time.Now().UTC().After(*acct.ExpiresAt) {
+		writeErrorText(w, http.StatusForbidden, "account has expired")
+		return
+	}
+	if acct.Instance.Disabled {
+		writeErrorText(w, http.StatusForbidden, "database instance is disabled")
+		return
+	}
+
 	start := time.Now()
 	conn, err := net.DialTimeout("tcp", acct.Instance.Address, 5*time.Second)
 	if err != nil {

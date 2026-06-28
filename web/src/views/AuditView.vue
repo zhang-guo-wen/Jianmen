@@ -219,29 +219,28 @@
           </div>
         </div>
 
-        <el-table v-else-if="isDBQueries" :data="queryEvents" height="420">
-          <el-table-column prop="seq" :label="t('audit.column.seq')" width="90" />
-          <el-table-column prop="type" :label="t('audit.column.event')" min-width="150" />
-          <el-table-column prop="query_kind" :label="t('audit.column.queryKind')" min-width="120" />
-          <el-table-column :label="t('audit.column.result')" width="140">
+        <el-table v-else-if="isDBQueries" :data="mergedQueryEvents" height="420">
+          <el-table-column prop="seq" :label="t('audit.column.seq')" width="70" />
+          <el-table-column prop="query_kind" :label="t('audit.column.queryKind')" width="100" />
+          <el-table-column :label="t('audit.column.result')" width="90">
             <template #default="{ row }">
-              <el-tag :type="queryStatusType(row.status)">
+              <el-tag :type="queryStatusType(row.status)" size="small">
                 {{ row.status || t('dashboard.unknown') }}
               </el-tag>
             </template>
           </el-table-column>
-          <el-table-column :label="t('audit.column.duration')" width="130">
+          <el-table-column :label="t('audit.column.duration')" width="100">
             <template #default="{ row }">
               {{ formatDuration(row.duration_ms) }}
             </template>
           </el-table-column>
-          <el-table-column :label="t('audit.column.time')" width="180" show-overflow-tooltip class-name="col-time">
+          <el-table-column :label="t('audit.column.time')" width="170" show-overflow-tooltip class-name="col-time">
             <template #default="{ row }">
               {{ formatTime(row.started_at) }}
             </template>
           </el-table-column>
           <el-table-column prop="sql" :label="t('audit.column.sql')" min-width="320" show-overflow-tooltip />
-          <el-table-column prop="error_message" :label="t('audit.column.error')" min-width="220" show-overflow-tooltip />
+          <el-table-column prop="error_message" :label="t('audit.column.error')" min-width="180" show-overflow-tooltip />
         </el-table>
 
         <template v-else-if="isCommands">
@@ -436,6 +435,37 @@ const isFiles = computed(() => detailKind.value === 'files' && Array.isArray(det
 const isReplay = computed(() => detailKind.value === 'replay' && isReplayData(detailData.value));
 const dbMeta = computed(() => (isRecord(detailData.value) ? (detailData.value as DBConnectionMetaRecord) : {}));
 const queryEvents = computed(() => (Array.isArray(detailData.value) ? (detailData.value as DBQueryEventRecord[]) : []));
+
+// 合并 start/finish 事件为一行
+interface MergedQueryEvent {
+  seq: number;
+  sql: string;
+  query_kind: string;
+  status: string;
+  duration_ms: number;
+  started_at: number;
+  error_code?: string;
+  error_message?: string;
+}
+const mergedQueryEvents = computed<MergedQueryEvent[]>(() => {
+  const map = new Map<number, MergedQueryEvent>();
+  for (const ev of queryEvents.value) {
+    const seq = ev.seq ?? 0;
+    const cur = map.get(seq) ?? { seq, sql: ev.sql ?? '', query_kind: ev.query_kind ?? '', status: 'unknown', duration_ms: 0, started_at: ev.started_at ?? 0 };
+    if (ev.type === 'query_started') {
+      cur.sql = ev.sql || cur.sql;
+      cur.query_kind = ev.query_kind || cur.query_kind;
+      cur.started_at = ev.started_at ?? cur.started_at;
+    } else {
+      cur.status = ev.status ?? cur.status;
+      cur.duration_ms = ev.duration_ms ?? cur.duration_ms;
+      cur.error_code = ev.error_code;
+      cur.error_message = ev.error_message;
+    }
+    map.set(seq, cur);
+  }
+  return Array.from(map.values()).sort((a, b) => a.seq - b.seq);
+});
 const commandEvents = computed(() =>
   Array.isArray(detailData.value) ? (detailData.value as SessionCommandRecord[]) : []
 );

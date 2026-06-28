@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"golang.org/x/crypto/bcrypt"
 
@@ -24,9 +25,10 @@ type InitStatusResponse struct {
 
 // SetupRequest 初始化设置请求
 type SetupRequest struct {
-	Username string `json:"username"`
-	Password string `json:"password"`
-	Email    string `json:"email"`
+	Username    string `json:"username"`
+	Password    string `json:"password"`
+	Email       string `json:"email"`
+	DisplayName string `json:"display_name"`
 }
 
 // SetupResponse 初始化设置响应
@@ -92,8 +94,10 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	tokenHash := sha256.Sum256([]byte(token))
 	tokenHashStr := hex.EncodeToString(tokenHash[:])
 
-	// Store token hash
+	// Store token hash and update last login time
+	now := time.Now().UTC()
 	user.TokenHash = tokenHashStr
+	user.LastLoginAt = &now
 	if err := s.db.Save(&user).Error; err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to save token"})
 		return
@@ -157,6 +161,7 @@ func (s *Server) handleInitSetup(w http.ResponseWriter, r *http.Request) {
 			ID:           model.NewID(),
 			Username:     username,
 			PasswordHash: string(passwordHash),
+			DisplayName:  strings.TrimSpace(req.DisplayName),
 			TokenHash:    tokenHashStr,
 			Email:        email,
 			Status:       "active",

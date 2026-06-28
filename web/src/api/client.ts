@@ -22,6 +22,8 @@ export interface UserRecord {
   email?: string;
   role?: string;
   status?: string;
+  is_super_admin?: boolean;
+  last_login_at?: string;
   created_at?: string;
   updated_at?: string;
   [key: string]: unknown;
@@ -664,7 +666,7 @@ export const apiClient = {
       body: JSON.stringify({ username, password }),
     }),
   getInitStatus: () => request<{ initialized: boolean }>('/api/init/status'),
-  setup: (payload: { username: string; password: string; email: string }) =>
+  setup: (payload: { username: string; password: string; email: string; display_name?: string }) =>
     request<{ token: string }>('/api/init/setup', {
       method: 'POST',
       body: JSON.stringify(payload)

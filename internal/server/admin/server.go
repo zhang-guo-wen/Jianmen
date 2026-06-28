@@ -382,7 +382,16 @@ func (s *Server) listUsers(w http.ResponseWriter, _ *http.Request) {
 			writeError(w, http.StatusInternalServerError, err)
 			return
 		}
-		writeJSON(w, http.StatusOK, users)
+		// 为每个用户附加 is_super_admin 标记
+		type userWithFlag struct {
+			model.User
+			IsSuperAdmin bool `json:"is_super_admin"`
+		}
+		out := make([]userWithFlag, len(users))
+		for i, u := range users {
+			out[i] = userWithFlag{User: u, IsSuperAdmin: s.isSuperAdmin(u.ID)}
+		}
+		writeJSON(w, http.StatusOK, out)
 		return
 	}
 	// Fallback to store-based listing
@@ -483,6 +492,11 @@ func (s *Server) updateUser(w http.ResponseWriter, r *http.Request, id string) {
 			writeErrorText(w, http.StatusBadRequest, "status must be active or disabled")
 			return
 		}
+		// 不允许禁用超级管理员
+		if status == "disabled" && s.isSuperAdmin(id) {
+			writeErrorText(w, http.StatusForbidden, "cannot disable super admin")
+			return
+		}
 		user.Status = status
 	}
 	if err := s.db.Save(&user).Error; err != nil {
@@ -500,6 +514,11 @@ func (s *Server) deleteUser(w http.ResponseWriter, r *http.Request, id string) {
 	currentUserID := userIDFromRequest(r)
 	if currentUserID != "" && currentUserID == id {
 		writeErrorText(w, http.StatusBadRequest, "cannot delete yourself")
+		return
+	}
+	// 不允许删除超级管理员
+	if s.isSuperAdmin(id) {
+		writeErrorText(w, http.StatusForbidden, "cannot delete super admin")
 		return
 	}
 	var user model.User

@@ -17,6 +17,9 @@
           <el-form-item :label="t('setup.username')" prop="username">
             <el-input v-model="form.username" autocomplete="username" />
           </el-form-item>
+          <el-form-item :label="t('users.displayName')" prop="display_name">
+            <el-input v-model="form.display_name" placeholder="可选，如：超级管理员" />
+          </el-form-item>
           <el-form-item :label="t('setup.email')" prop="email">
             <el-input v-model="form.email" type="email" autocomplete="email" />
           </el-form-item>
@@ -129,6 +132,7 @@ const formRef = ref<FormInstance>();
 
 const form = reactive({
   username: '',
+  display_name: '',
   email: '',
   password: '',
   confirmPassword: '',
@@ -170,6 +174,7 @@ async function handleSetup() {
       username: form.username.trim(),
       password: form.password,
       email: form.email.trim(),
+      display_name: form.display_name.trim() || undefined,
     });
 
     try {

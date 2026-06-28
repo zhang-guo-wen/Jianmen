@@ -55,18 +55,21 @@
       <el-table-column :label="t('common.actions')" fixed="right" width="300">
         <template #default="{ row }">
           <el-button link type="primary" @click="openEditDialog(row)">{{ t('common.edit') }}</el-button>
-          <el-button
-            link
-            :type="row.status === 'disabled' ? 'success' : 'warning'"
-            :loading="togglingUserId === row.id"
-            @click="toggleStatus(row)"
-          >
-            {{ row.status === 'disabled' ? '启用' : '禁用' }}
-          </el-button>
-          <el-button link type="primary" @click="openRoleDialog(row)">{{ t('users.assignRole') }}</el-button>
-          <el-button link type="danger" :loading="deletingUserId === row.id" @click="deleteUser(row)">
-            {{ t('common.delete') }}
-          </el-button>
+          <template v-if="!row.is_super_admin">
+            <el-button
+              link
+              :type="row.status === 'disabled' ? 'success' : 'warning'"
+              :loading="togglingUserId === row.id"
+              @click="toggleStatus(row)"
+            >
+              {{ row.status === 'disabled' ? '启用' : '禁用' }}
+            </el-button>
+            <el-button link type="primary" @click="openRoleDialog(row)">{{ t('users.assignRole') }}</el-button>
+            <el-button link type="danger" :loading="deletingUserId === row.id" @click="deleteUser(row)">
+              {{ t('common.delete') }}
+            </el-button>
+          </template>
+          <el-tag v-else type="warning" size="small">超级管理员</el-tag>
         </template>
       </el-table-column>
     </el-table>

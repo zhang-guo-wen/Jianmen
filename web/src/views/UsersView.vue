@@ -34,9 +34,9 @@
           <el-tag v-else type="warning" size="small">内置</el-tag>
         </template>
       </el-table-column>
-      <el-table-column :label="t('users.lastLogin')" min-width="150">
+      <el-table-column :label="t('users.lastLogin')" width="140">
         <template #default="{ row }">
-          <span class="text-muted">{{ row.last_login_at || '—' }}</span>
+          <span class="text-muted">{{ row.last_login_at ? new Date(row.last_login_at).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '—' }}</span>
         </template>
       </el-table-column>
       <el-table-column :label="t('users.roles')" min-width="180">

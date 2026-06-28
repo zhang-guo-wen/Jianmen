@@ -12,23 +12,23 @@
       <template #toolbar-extra>
         <el-button type="primary" @click="openCreateInstance">新增实例</el-button>
       </template>
-      <el-table-column prop="name" label="名称" min-width="120" />
-      <el-table-column prop="protocol" label="协议" width="90" />
-      <el-table-column prop="address" label="地址" min-width="160" />
-      <el-table-column prop="port" label="端口" width="80" />
+      <el-table-column prop="name" label="名称" min-width="120" show-overflow-tooltip />
+      <el-table-column prop="protocol" label="协议" width="80" />
+      <el-table-column prop="address" label="地址" min-width="140" show-overflow-tooltip />
+      <el-table-column prop="port" label="端口" width="70" />
       <el-table-column label="账号数" width="80" align="center">
         <template #default="{ row }">
           <el-button link type="primary" @click="showAccounts(row)">{{ row.account_count ?? 0 }}</el-button>
         </template>
       </el-table-column>
-      <el-table-column prop="group" label="分组" width="100" />
-      <el-table-column label="状态" width="80" align="center">
+      <el-table-column prop="group" label="分组" width="100" show-overflow-tooltip />
+      <el-table-column label="状态" width="70" align="center">
         <template #default="{ row }">
           <StatusSwitch :model-value="row.status === 'active'" @update:model-value="toggleInstance(row)" />
         </template>
       </el-table-column>
       <el-table-column prop="remark" label="备注" min-width="120" show-overflow-tooltip />
-      <el-table-column label="操作" width="160" fixed="right">
+      <el-table-column label="操作" width="150">
         <template #default="{ row }">
           <el-button link type="primary" size="small" @click="editInstance(row)">编辑</el-button>
           <el-button link type="danger" size="small" @click="deleteInstance(row)">删除</el-button>

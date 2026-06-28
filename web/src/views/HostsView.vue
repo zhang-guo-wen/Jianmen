@@ -13,23 +13,23 @@
       <template #toolbar-extra>
         <el-button type="primary" @click="openCreateHostDialog">新增主机</el-button>
       </template>
-      <el-table-column label="主机名称" min-width="150" show-overflow-tooltip>
+      <el-table-column label="主机名称" min-width="120" show-overflow-tooltip>
         <template #default="{ row }">{{ hostName(row) }}</template>
       </el-table-column>
-      <el-table-column label="地址" min-width="160" show-overflow-tooltip>
+      <el-table-column label="地址" min-width="140" show-overflow-tooltip>
         <template #default="{ row }">{{ hostAddress(row) }}</template>
       </el-table-column>
-      <el-table-column label="账号数" width="90" align="center">
+      <el-table-column label="账号数" width="80" align="center">
         <template #default="{ row }">
           <el-button link type="primary" @click="openAccountsDialog(row)">
             {{ numberFrom(row.account_count, 0) }}
           </el-button>
         </template>
       </el-table-column>
-      <el-table-column label="分组" width="110" show-overflow-tooltip>
+      <el-table-column label="分组" width="100" show-overflow-tooltip>
         <template #default="{ row }">{{ row.group || '-' }}</template>
       </el-table-column>
-      <el-table-column label="状态" width="80" align="center">
+      <el-table-column label="状态" width="70" align="center">
         <template #default="{ row }">
           <StatusSwitch
             :model-value="row.status === 'active'"
@@ -38,10 +38,10 @@
           />
         </template>
       </el-table-column>
-      <el-table-column label="备注" min-width="130" show-overflow-tooltip>
+      <el-table-column label="备注" min-width="120" show-overflow-tooltip>
         <template #default="{ row }">{{ row.remark || '-' }}</template>
       </el-table-column>
-      <el-table-column label="操作" width="200" fixed="right">
+      <el-table-column label="操作" width="150">
         <template #default="{ row }">
           <el-button link type="primary" size="small" @click="openEditHostDialog(row)">编辑</el-button>
           <el-button link type="success" size="small" @click="openConnectionForHost(row)">连接</el-button>

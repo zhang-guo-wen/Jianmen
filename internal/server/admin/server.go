@@ -813,6 +813,23 @@ func parseListenAddr(addr string) (host string, port int) {
 	return
 }
 
+// ensureDBPort 确保数据库地址包含端口，缺省则按协议补默认端口
+func ensureDBPort(address, protocol string) string {
+	address = strings.TrimSpace(address)
+	if address == "" {
+		return address
+	}
+	// 已含端口则原样返回
+	if _, _, err := net.SplitHostPort(address); err == nil {
+		return address
+	}
+	defaultPort := "3306"
+	if protocol == "postgres" {
+		defaultPort = "5432"
+	}
+	return address + ":" + defaultPort
+}
+
 // -- db instances --
 
 func (s *Server) handleDBInstances(w http.ResponseWriter, r *http.Request) {
@@ -849,7 +866,7 @@ func (s *Server) handleCreateDBInstance(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	view, err := s.store.AddDatabaseInstance(payload.Name, payload.Protocol, payload.Address, payload.GroupName, payload.Remark)
+	view, err := s.store.AddDatabaseInstance(payload.Name, payload.Protocol, ensureDBPort(payload.Address, payload.Protocol), payload.GroupName, payload.Remark)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
@@ -961,7 +978,7 @@ func (s *Server) handleUpdateDBInstance(w http.ResponseWriter, r *http.Request, 
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	view, err := s.store.UpdateDatabaseInstance(id, payload.Name, payload.Protocol, payload.Address, payload.GroupName, payload.Remark, payload.Disabled)
+	view, err := s.store.UpdateDatabaseInstance(id, payload.Name, payload.Protocol, ensureDBPort(payload.Address, payload.Protocol), payload.GroupName, payload.Remark, payload.Disabled)
 	if err != nil {
 		writeDBStoreError(w, err)
 		return

@@ -243,7 +243,7 @@ const zhCN = {
   'audit.column.confidence': '置信度',
   'audit.column.database': '数据库',
   'audit.column.dbAccounts': '数据库账号资源',
-  'audit.column.duration': '耗时',
+  'audit.column.duration': '时长',
   'audit.column.error': '错误',
   'audit.column.observation': '认证观察',
   'audit.column.path': '路径',

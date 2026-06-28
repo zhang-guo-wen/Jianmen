@@ -480,6 +480,10 @@ const mergedQueryEvents = computed<MergedQueryEvent[]>(() => {
       cur.duration_ms = ev.duration_ms ?? cur.duration_ms;
       cur.error_code = ev.error_code;
       cur.error_message = ev.error_message;
+      // 如果没有 duration_ms，用 started_at 和 completed_at 计算
+      if (!cur.duration_ms && cur.started_at && ev.completed_at) {
+        cur.duration_ms = ev.completed_at - cur.started_at;
+      }
     }
     map.set(seq, cur);
   }
@@ -566,7 +570,8 @@ function formatTime(value: unknown): string {
 }
 
 function formatDuration(value: unknown): string {
-  return typeof value === 'number' && Number.isFinite(value) ? `${value} ms` : t('common.none');
+  const n = Number(value);
+  return Number.isFinite(n) ? `${n} ms` : t('common.none');
 }
 
 function formatDurationSeconds(value: unknown): string {

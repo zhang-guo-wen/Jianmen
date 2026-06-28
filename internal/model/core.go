@@ -75,7 +75,6 @@ type Resource struct {
 	Type       string    `gorm:"index;size:64;not null" json:"type"`
 	Name       string    `gorm:"size:255" json:"name,omitempty"`
 	ParentID   string    `gorm:"index;size:64" json:"parent_id,omitempty"`
-	Attributes string    `gorm:"type:text" json:"attributes,omitempty"`
 	CreatedAt  time.Time `json:"created_at"`
 	UpdatedAt  time.Time `json:"updated_at"`
 }
@@ -119,8 +118,6 @@ type HostAccount struct {
 	Password      EncryptedField `gorm:"type:text" json:"-"`
 	PrivateKeyPEM EncryptedField `gorm:"type:text" json:"-"`
 	Passphrase    EncryptedField `gorm:"type:text" json:"-"`
-	CredentialRef string         `gorm:"size:255" json:"credential_ref,omitempty"`
-	IsPrivileged  bool           `json:"is_privileged"`
 	Status        string         `gorm:"index;size:32;not null;default:active" json:"status"`
 	ResourceSeq   int            `gorm:"index;not null;default:0" json:"resource_seq"`
 	ResourceID    string         `gorm:"uniqueIndex;size:4" json:"resource_id"`

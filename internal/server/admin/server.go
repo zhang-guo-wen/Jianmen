@@ -125,15 +125,9 @@ func New(cfg *config.Config, store store.Store, logger *slog.Logger, dataDir str
 			superAdminIDs[id] = true
 		}
 	}
-	// 当配置文件中未定义用户时，将数据库中已有用户视为超级管理员
-	// 这覆盖了 setup 向导创建的管理员（在改代码之前就已经存在的账号）
-	if len(superAdminIDs) == 0 && db != nil {
-		var users []model.User
-		if err := db.Where("status = ?", "active").Find(&users).Error; err == nil {
-			for _, u := range users {
-				superAdminIDs[u.ID] = true
-			}
-		}
+	// 从持久化文件中恢复 setup 向导创建的超级管理员
+	if dataDir != "" {
+		loadSuperAdminIDsFromFile(dataDir, superAdminIDs)
 	}
 	return &Server{cfg: cfg, store: store, db: db, rbacChecker: checker, logger: logger, dataDir: dataDir, superAdminIDs: superAdminIDs}
 }
@@ -1366,6 +1360,34 @@ func (s *Server) isSuperAdmin(userID string) bool {
 		return false
 	}
 	return s.superAdminIDs[userID]
+}
+
+const superAdminIDsFile = ".super_admin_ids"
+
+// loadSuperAdminIDsFromFile 从持久化文件读取 setup 向导创建的管理员 ID。
+func loadSuperAdminIDsFromFile(dataDir string, ids map[string]bool) {
+	path := filepath.Join(dataDir, superAdminIDsFile)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		id := strings.TrimSpace(line)
+		if id != "" {
+			ids[id] = true
+		}
+	}
+}
+
+// saveSuperAdminID 将 setup 向导创建的管理员 ID 持久化到文件。
+func saveSuperAdminID(dataDir, userID string) {
+	path := filepath.Join(dataDir, superAdminIDsFile)
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	f.WriteString(userID + "\n")
 }
 
 func (s *Server) forbidden(w http.ResponseWriter) {

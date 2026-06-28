@@ -180,8 +180,12 @@ func (s *Server) handleInitSetup(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// setup 向导创建的用户即为超级管理员，直接拥有全部权限
+	// 同时持久化到文件，确保重启后仍然有效
 	if s.superAdminIDs != nil {
 		s.superAdminIDs[createdUserID] = true
+	}
+	if s.dataDir != "" {
+		saveSuperAdminID(s.dataDir, createdUserID)
 	}
 
 	writeJSON(w, http.StatusCreated, SetupResponse{Token: token})

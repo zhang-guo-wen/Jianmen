@@ -105,6 +105,7 @@ type Host struct {
 	Port      int       `gorm:"not null;default:22" json:"port"`
 	Protocol  string    `gorm:"size:32;not null;default:ssh" json:"protocol"`
 	Labels    string    `gorm:"type:text" json:"labels,omitempty"`
+	Remark    string    `gorm:"type:text" json:"remark,omitempty"`
 	Status    string    `gorm:"index;size:32;not null;default:active" json:"status"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`

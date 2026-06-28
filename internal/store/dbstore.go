@@ -159,7 +159,7 @@ func (s *DBStore) hostView(m model.Host) HostView {
 	var count int64
 	s.db.Model(&model.HostAccount{}).Where("host_id = ?", m.ID).Count(&count)
 	return HostView{
-		ID: m.ID, Name: m.Name, Group: m.Labels,
+		ID: m.ID, Name: m.Name, Group: m.Labels, Remark: m.Remark,
 		Host: m.Address, Port: m.Port, Status: status,
 		Disabled: m.Status == "disabled", AccountCount: int(count),
 	}
@@ -194,6 +194,7 @@ func (s *DBStore) AddHost(host HostRecord) (HostView, error) {
 		Port:     normalized.Port,
 		Protocol: "ssh",
 		Labels:   normalized.Group,
+		Remark:   normalized.Remark,
 	}
 	if normalized.Disabled {
 		m.Status = "disabled"
@@ -214,6 +215,7 @@ func (s *DBStore) UpdateHost(id string, host HostRecord) (HostView, error) {
 	m.Address = normalized.Host
 	m.Port = normalized.Port
 	m.Labels = normalized.Group
+	m.Remark = normalized.Remark
 	m.Status = "active"
 	if normalized.Disabled {
 		m.Status = "disabled"

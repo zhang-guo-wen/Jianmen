@@ -21,6 +21,7 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"golang.org/x/crypto/ssh"
 	"gorm.io/gorm"
+	gormlogger "gorm.io/gorm/logger"
 
 	"jianmen/internal/config"
 	"jianmen/internal/crypto"
@@ -261,6 +262,7 @@ func newMetadataFixture(t *testing.T) metadataFixture {
 	if err != nil {
 		t.Fatalf("open metadata db: %v", err)
 	}
+	db = db.Session(&gorm.Session{Logger: gormlogger.Default.LogMode(gormlogger.Silent)})
 	sqlDB, err := db.DB()
 	if err != nil {
 		t.Fatalf("get metadata sql db: %v", err)

@@ -64,7 +64,7 @@ func runContainer(t *testing.T, namePrefix string, args ...string) string {
 	t.Helper()
 	name := fmt.Sprintf("%s-%d", namePrefix, time.Now().UnixNano())
 	runArgs := append([]string{"run", "--rm", "-d", "--name", name}, args...)
-	id := strings.TrimSpace(dockerOutput(t, 5*time.Minute, runArgs...))
+	id := dockerContainerID(t, dockerOutput(t, 5*time.Minute, runArgs...))
 	if id == "" {
 		t.Fatalf("docker run returned empty container id for %s", name)
 	}
@@ -79,6 +79,31 @@ func runContainer(t *testing.T, namePrefix string, args ...string) string {
 		_ = exec.CommandContext(ctx, cli.name, rmArgs...).Run()
 	})
 	return id
+}
+
+func dockerContainerID(t *testing.T, output string) string {
+	t.Helper()
+	lines := strings.Split(output, "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		line := strings.TrimSpace(lines[i])
+		if isDockerContainerID(line) {
+			return line
+		}
+	}
+	t.Fatalf("docker run output did not contain a container id:\n%s", output)
+	return ""
+}
+
+func isDockerContainerID(value string) bool {
+	if len(value) != 64 {
+		return false
+	}
+	for _, r := range value {
+		if (r < '0' || r > '9') && (r < 'a' || r > 'f') {
+			return false
+		}
+	}
+	return true
 }
 
 func dockerOutput(t *testing.T, timeout time.Duration, args ...string) string {

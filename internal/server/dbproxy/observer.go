@@ -24,7 +24,7 @@ func newQueryObserver(protocol string, sink querySink) queryObserver {
 	case "mysql":
 		return &mysqlObserver{sink: sink}
 	case "postgres":
-		return &postgresObserver{sink: sink}
+		return &postgresObserver{sink: sink, startupDone: true}
 	default:
 		return noopObserver{}
 	}

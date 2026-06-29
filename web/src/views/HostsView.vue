@@ -253,6 +253,37 @@
                 <el-option v-for="g in accountGroupOptions" :key="g" :label="g" :value="g" />
               </el-select>
             </el-form-item>
+            <el-form-item label="主机密钥" prop="host_key_mode">
+              <div class="host-key-field">
+                <el-radio-group v-model="accountForm.host_key_mode" @change="handleHostKeyModeChange">
+                  <el-radio-button label="fingerprint">指纹</el-radio-button>
+                  <el-radio-button label="known_hosts">known_hosts</el-radio-button>
+                  <el-radio-button label="ignore">忽略校验</el-radio-button>
+                </el-radio-group>
+                <el-alert
+                  v-if="accountForm.host_key_mode === 'ignore'"
+                  class="host-key-alert"
+                  show-icon
+                  type="warning"
+                  :closable="false"
+                  title="仅在受控测试环境中使用，忽略校验会降低 SSH 主机身份保护。"
+                />
+              </div>
+            </el-form-item>
+            <el-form-item v-if="accountForm.host_key_mode === 'fingerprint'" label="主机指纹" prop="host_key_fingerprint">
+              <el-input
+                v-model="accountForm.host_key_fingerprint"
+                placeholder="SHA256:..."
+                clearable
+              />
+            </el-form-item>
+            <el-form-item v-if="accountForm.host_key_mode === 'known_hosts'" label="known_hosts" prop="known_hosts_path">
+              <el-input
+                v-model="accountForm.known_hosts_path"
+                placeholder="/home/app/.ssh/known_hosts"
+                clearable
+              />
+            </el-form-item>
             <el-form-item label="备注">
               <el-input v-model="accountForm.remark" :autosize="{ minRows: 3, maxRows: 5 }" type="textarea" />
             </el-form-item>
@@ -485,8 +516,11 @@ const hostRules: FormRules<HostForm> = {
 const accountRules: FormRules<AccountForm> = {
   username: [{ required: true, message: t('hosts.required.username'), trigger: 'blur' }],
   auth_method: [{ required: true, message: t('hosts.required.authMethod'), trigger: 'change' }],
+  host_key_mode: [{ required: true, message: '请选择主机密钥校验方式', trigger: 'change' }],
   password: [{ validator: validatePassword, trigger: 'blur' }],
   private_key_pem: [{ validator: validatePrivateKeyPEM, trigger: 'blur' }],
+  host_key_fingerprint: [{ validator: validateHostKeyFingerprint, trigger: 'blur' }],
+  known_hosts_path: [{ validator: validateKnownHostsPath, trigger: 'blur' }],
 }
 
 // ════════════════════════════════════════════════════════════════
@@ -696,8 +730,8 @@ function emptyAccountForm(): AccountForm {
     password: '',
     private_key_pem: '',
     passphrase: '',
-    host_key_mode: 'ignore',
-    insecure_ignore_host_key: true,
+    host_key_mode: 'fingerprint',
+    insecure_ignore_host_key: false,
     host_key_fingerprint: '',
     known_hosts_path: '',
   }
@@ -747,19 +781,17 @@ function recordToAccountForm(target: TargetRecord): AccountForm {
     private_key_pem: '',
     passphrase: '',
     host_key_mode: hostKeyMode,
-    insecure_ignore_host_key:
-      typeof target.insecure_ignore_host_key === 'boolean' ? target.insecure_ignore_host_key : true,
+    insecure_ignore_host_key: target.insecure_ignore_host_key === true,
     host_key_fingerprint: stringFrom(target.host_key_fingerprint),
     known_hosts_path: stringFrom(target.known_hosts_path),
   }
 }
 
 function hostKeyModeForTarget(target: TargetRecord): HostKeyMode {
-  if (target.insecure_ignore_host_key === false) {
-    if (hasValue(target.host_key_fingerprint)) return 'fingerprint'
-    if (hasValue(target.known_hosts_path)) return 'known_hosts'
-  }
-  return 'ignore'
+  if (target.insecure_ignore_host_key === true) return 'ignore'
+  if (hasValue(target.host_key_fingerprint)) return 'fingerprint'
+  if (hasValue(target.known_hosts_path)) return 'known_hosts'
+  return 'fingerprint'
 }
 
 // ════════════════════════════════════════════════════════════════
@@ -793,6 +825,7 @@ function hostPayloadFromRecord(host: HostView): HostPayload {
 function buildAccountPayload(): TargetPayload {
   const host = selectedHost.value
   const username = accountForm.username.trim()
+  const hostKey = accountHostKeyPayload()
   const payload: TargetPayload = {
     id: accountForm.id.trim() || (host ? generatedAccountID(host, username) : sanitizeID(username)),
     host_id: host ? hostId(host) : undefined,
@@ -808,9 +841,9 @@ function buildAccountPayload(): TargetPayload {
     private_key_path: '',
     private_key_pem: '',
     passphrase: '',
-    insecure_ignore_host_key: accountForm.insecure_ignore_host_key,
-    host_key_fingerprint: accountForm.host_key_fingerprint,
-    known_hosts_path: accountForm.known_hosts_path,
+    insecure_ignore_host_key: hostKey.insecure_ignore_host_key,
+    host_key_fingerprint: hostKey.host_key_fingerprint,
+    known_hosts_path: hostKey.known_hosts_path,
   }
   if (accountForm.auth_method === 'password') {
     payload.password = accountForm.password
@@ -824,6 +857,7 @@ function buildAccountPayload(): TargetPayload {
 }
 
 function targetStatusPayload(target: TargetRecord, disabled: boolean): TargetPayload {
+  const mode = hostKeyModeForTarget(target)
   return {
     id: targetId(target),
     host_id: stringFrom(target.host_id).trim() || undefined,
@@ -839,10 +873,18 @@ function targetStatusPayload(target: TargetRecord, disabled: boolean): TargetPay
     private_key_path: '',
     private_key_pem: '',
     passphrase: '',
-    insecure_ignore_host_key:
-      typeof target.insecure_ignore_host_key === 'boolean' ? target.insecure_ignore_host_key : true,
-    host_key_fingerprint: stringFrom(target.host_key_fingerprint).trim(),
-    known_hosts_path: stringFrom(target.known_hosts_path).trim(),
+    insecure_ignore_host_key: mode === 'ignore',
+    host_key_fingerprint: mode === 'fingerprint' ? stringFrom(target.host_key_fingerprint).trim() : '',
+    known_hosts_path: mode === 'known_hosts' ? stringFrom(target.known_hosts_path).trim() : '',
+  }
+}
+
+function accountHostKeyPayload() {
+  const mode = accountForm.host_key_mode
+  return {
+    insecure_ignore_host_key: mode === 'ignore',
+    host_key_fingerprint: mode === 'fingerprint' ? accountForm.host_key_fingerprint.trim() : '',
+    known_hosts_path: mode === 'known_hosts' ? accountForm.known_hosts_path.trim() : '',
   }
 }
 
@@ -871,8 +913,35 @@ function validatePrivateKeyPEM(_rule: unknown, value: unknown, callback: (error?
   callback()
 }
 
+function validateHostKeyFingerprint(_rule: unknown, value: unknown, callback: (error?: Error) => void) {
+  if (accountForm.host_key_mode === 'fingerprint' && !hasValue(value)) {
+    callback(new Error('请输入 SSH 主机密钥指纹'))
+    return
+  }
+  callback()
+}
+
+function validateKnownHostsPath(_rule: unknown, value: unknown, callback: (error?: Error) => void) {
+  if (accountForm.host_key_mode === 'known_hosts' && !hasValue(value)) {
+    callback(new Error('请输入 known_hosts 文件路径'))
+    return
+  }
+  callback()
+}
+
 function handleAuthMethodChange() {
   accountFormRef.value?.clearValidate(['password', 'private_key_pem', 'passphrase'])
+}
+
+function handleHostKeyModeChange() {
+  accountForm.insecure_ignore_host_key = accountForm.host_key_mode === 'ignore'
+  if (accountForm.host_key_mode !== 'fingerprint') {
+    accountForm.host_key_fingerprint = ''
+  }
+  if (accountForm.host_key_mode !== 'known_hosts') {
+    accountForm.known_hosts_path = ''
+  }
+  accountFormRef.value?.clearValidate(['host_key_fingerprint', 'known_hosts_path'])
 }
 
 function triggerPrivateKeyFileSelect() {
@@ -1138,6 +1207,8 @@ async function testConnection() {
     ElMessage.error('请先选择主机')
     return
   }
+  const valid = await accountFormRef.value?.validate().catch(() => false)
+  if (!valid) return
   const username = accountForm.username.trim()
   if (!username) {
     ElMessage.warning('请输入登录账号')
@@ -1376,6 +1447,29 @@ onMounted(() => {
 }
 .private-key-file-input {
   display: none;
+}
+
+/* Host key verification */
+.host-key-field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+}
+.host-key-field :deep(.el-radio-group) {
+  display: flex;
+  width: 100%;
+}
+.host-key-field :deep(.el-radio-button) {
+  flex: 1;
+}
+.host-key-field :deep(.el-radio-button__inner) {
+  width: 100%;
+  padding-inline: 8px;
+  white-space: nowrap;
+}
+.host-key-alert {
+  line-height: 1.4;
 }
 
 /* Expiry */

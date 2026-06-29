@@ -14,8 +14,8 @@ import (
 	"log/slog"
 	"net"
 	"os"
-	"strconv"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -428,11 +428,9 @@ func sendFakeMySQLHandshake(conn net.Conn) error {
 	if _, err := rand.Read(salt); err != nil {
 		return err
 	}
-	salt[19] = 0 // 最后一位用 0x00 终止符
-
 	capFlags := uint32(mysqlClientProtocol41 | mysqlClientSecureConnection | mysqlClientPluginAuth)
 	serverVersion := "8.0.28"
-	authPluginName := "caching_sha2_password" // MySQL 8.0 默认，兼容 JDBC/DBeaver
+	authPluginName := "mysql_native_password"
 
 	// 构建 HandshakeV10 payload
 	var p []byte
@@ -447,15 +445,16 @@ func sendFakeMySQLHandshake(conn net.Conn) error {
 	capLower := make([]byte, 2)
 	binary.LittleEndian.PutUint16(capLower, uint16(capFlags&0xFFFF))
 	p = append(p, capLower...)
-	p = append(p, 33) // utf8mb4
+	p = append(p, 33)         // utf8mb4
 	status := make([]byte, 2) // status flags (2 bytes zeros)
 	p = append(p, status...)
 	capUpper := make([]byte, 2)
 	binary.LittleEndian.PutUint16(capUpper, uint16(capFlags>>16))
 	p = append(p, capUpper...)
-	p = append(p, 21)                          // auth plugin data length (8 + 12 + 1 null)
-	p = append(p, make([]byte, 10)...)         // reserved
-	p = append(p, salt[8:20]...)               // auth data part 2 (12 bytes)
+	p = append(p, 21)                  // auth plugin data length (8 + 12 + 1 null)
+	p = append(p, make([]byte, 10)...) // reserved
+	p = append(p, salt[8:20]...)       // auth data part 2 (12 bytes)
+	p = append(p, 0)                   // terminating NUL for auth data
 	p = append(p, []byte(authPluginName)...)
 	p = append(p, 0) // null terminator
 
@@ -584,7 +583,7 @@ func (g *Gateway) handleMySQL(ctx context.Context, client net.Conn) *gatewayConn
 	if len(authPkt.payload) > 0 && authPkt.payload[0] == 0xff {
 		errMsg := ParseMySQLErrorMessage(authPkt.payload)
 		g.logger.Warn("mysql gateway upstream auth failed", "error", errMsg)
-		client.Write(authPkt.raw)
+		_ = writeMySQLPacketWithClientAuthSeq(client, authPkt)
 		upstream.Close()
 		return nil
 	}
@@ -609,38 +608,36 @@ func (g *Gateway) handleMySQL(ctx context.Context, client net.Conn) *gatewayConn
 			return nil
 		}
 		if len(extraPkt.payload) > 0 && extraPkt.payload[0] == 0x03 {
-			// fast auth success — forward to client
-			if _, err := client.Write(authPkt.raw); err != nil {
+			finalPkt, err := readMySQLPacket(upstream)
+			if err != nil {
+				g.logger.Warn("mysql gateway failed to read final auth ok", "error", err)
 				upstream.Close()
 				return nil
 			}
-			if _, err := client.Write(extraPkt.raw); err != nil {
-				upstream.Close()
-				return nil
-			}
-			return &gatewayConn{
-				protocol:     "mysql",
-				accountID:    acct.ID,
-				accountName:  resolved.rawName,
-				upstream:     upstream,
-				upstreamAddr: upstreamAddress(acct.Instance),
-				userID:       rbacUserID,
-				accountUser:  acct.Username,
-				instanceName: acct.Instance.Name,
-			}
+			authPkt = finalPkt
 		}
 		// 0x04 = full auth with public key — 暂不支持，回传错误
 		if len(extraPkt.payload) > 0 && extraPkt.payload[0] == 0x04 {
 			g.logger.Warn("mysql gateway caching_sha2_password full auth (0x04) not supported, need SSL or native_password")
-			client.Write(authPkt.raw)
-			client.Write(extraPkt.raw)
 			upstream.Close()
 			return nil
 		}
 	}
 
-	// Forward OK to client
-	if _, err := client.Write(authPkt.raw); err != nil {
+	if len(authPkt.payload) > 0 && authPkt.payload[0] == 0xff {
+		errMsg := ParseMySQLErrorMessage(authPkt.payload)
+		g.logger.Warn("mysql gateway upstream auth failed", "error", errMsg)
+		_ = writeMySQLPacketWithClientAuthSeq(client, authPkt)
+		upstream.Close()
+		return nil
+	}
+	if len(authPkt.payload) == 0 || authPkt.payload[0] != 0x00 {
+		g.logger.Warn("mysql gateway unexpected upstream auth result", "payload_len", len(authPkt.payload))
+		upstream.Close()
+		return nil
+	}
+
+	if err := writeMySQLClientAuthOK(client); err != nil {
 		upstream.Close()
 		return nil
 	}
@@ -655,6 +652,25 @@ func (g *Gateway) handleMySQL(ctx context.Context, client net.Conn) *gatewayConn
 		accountUser:  acct.Username,
 		instanceName: acct.Instance.Name,
 	}
+}
+
+func writeMySQLClientAuthOK(conn net.Conn) error {
+	// The fake server handshake is seq=0 and the client login packet is seq=1,
+	// so the client-side auth result must be seq=2 regardless of upstream auth
+	// switches or multi-step authentication.
+	payload := []byte{0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00}
+	_, err := conn.Write(mysqlPacketWithSeq(2, payload))
+	return err
+}
+
+func writeMySQLPacketWithClientAuthSeq(conn net.Conn, pkt *mysqlPacket) error {
+	if pkt == nil || len(pkt.raw) < 4 {
+		return nil
+	}
+	raw := append([]byte(nil), pkt.raw...)
+	raw[3] = 2
+	_, err := conn.Write(raw)
+	return err
 }
 
 // BuildMySQLAuthResponse 计算指定 auth plugin 的认证响应（仅 auth bytes，不含完整 login 包）
@@ -846,10 +862,10 @@ func (g *Gateway) authorizeConnect(userID, uniqueName, resourceID string) error 
 
 // resolvedDBAccount 解析连接用户名后的数据库账号及关联用户信息
 type resolvedDBAccount struct {
-	account  *model.DatabaseAccount
-	user     *model.User   // compact username 认证后的堡垒机用户
-	isCompact bool          // 是否通过 compact username 解析
-	rawName  string        // 原始用户名（用于日志）
+	account   *model.DatabaseAccount
+	user      *model.User // compact username 认证后的堡垒机用户
+	isCompact bool        // 是否通过 compact username 解析
+	rawName   string      // 原始用户名（用于日志）
 }
 
 // resolveAccount 解析连接用户名：优先尝试 compact username (D/H前缀10位)，失败则回退到 unique_name 查找
@@ -867,8 +883,8 @@ func (g *Gateway) resolveAccount(rawUsername string) (*resolvedDBAccount, error)
 	if err != nil {
 		return nil, fmt.Errorf("invalid compact username %q: %w", rawUsername, err)
 	}
-	if prefix != util.PrefixDatabase && prefix != util.PrefixHost {
-		return nil, fmt.Errorf("unsupported prefix %q in username %q, expected D or H", prefix, rawUsername)
+	if prefix != util.PrefixDatabase {
+		return nil, fmt.Errorf("unsupported prefix %q in username %q, expected D", prefix, rawUsername)
 	}
 	return g.resolveCompactAccount(rawUsername)
 }
@@ -880,11 +896,14 @@ func (g *Gateway) resolveCompactAccount(username string) (*resolvedDBAccount, er
 
 	// 查找数据库账号（按 resource_id）
 	var acct model.DatabaseAccount
-	if err := g.db.Preload("Instance").Where("resource_id = ?", resourceID).First(&acct).Error; err != nil {
+	if err := g.db.Preload("Instance").Where("resource_id = ? AND status = ?", resourceID, "active").First(&acct).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, fmt.Errorf("database account not found for resource_id %q", resourceID)
 		}
 		return nil, fmt.Errorf("lookup database account: %w", err)
+	}
+	if acct.Instance.Status == "disabled" {
+		return nil, fmt.Errorf("database instance %q is disabled", acct.InstanceID)
 	}
 
 	// 查找用户会话
@@ -912,10 +931,10 @@ func (g *Gateway) resolveCompactAccount(username string) (*resolvedDBAccount, er
 	}
 
 	return &resolvedDBAccount{
-		account:  &acct,
-		user:     &user,
+		account:   &acct,
+		user:      &user,
 		isCompact: true,
-		rawName:  username,
+		rawName:   username,
 	}, nil
 }
 

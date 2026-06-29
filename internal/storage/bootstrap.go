@@ -22,8 +22,9 @@ func BootstrapMetadata(db *gorm.DB, cfg *config.Config) error {
 	if cfg == nil {
 		return fmt.Errorf("bootstrap metadata: nil config")
 	}
-	// Config-defined users are only created when they don't exist yet,
-	// providing a dev convenience without blocking the setup wizard.
+	if err := ReconcileMetadata(db); err != nil {
+		return fmt.Errorf("reconcile metadata: %w", err)
+	}
 	if err := bootstrapConfigUsers(db, cfg.Users); err != nil {
 		return err
 	}
@@ -40,6 +41,7 @@ func bootstrapConfigUsers(db *gorm.DB, users []config.User) error {
 		if userID == "" || username == "" {
 			continue
 		}
+
 		user := model.User{
 			ID:       userID,
 			Username: username,
@@ -56,6 +58,7 @@ func bootstrapConfigUsers(db *gorm.DB, users []config.User) error {
 			hash := sha256.Sum256([]byte(token))
 			user.TokenHash = hex.EncodeToString(hash[:])
 		}
+
 		if err := db.Clauses(clause.OnConflict{
 			Columns: []clause.Column{{Name: "id"}},
 			DoUpdates: clause.Assignments(map[string]any{
@@ -68,42 +71,108 @@ func bootstrapConfigUsers(db *gorm.DB, users []config.User) error {
 			return fmt.Errorf("bootstrap metadata user %q: %w", userID, err)
 		}
 
-		// Auto-create permanent session for bootstrap user
 		var userSessionCount int64
-		db.Model(&model.UserSession{}).Where("user_id = ? AND type = ?", userID, "permanent").Count(&userSessionCount)
-		if userSessionCount == 0 {
-			var maxSeq int
-			db.Model(&model.UserSession{}).Where("user_id = ?", userID).
-				Select("COALESCE(MAX(session_seq), 0)").Scan(&maxSeq)
-			seq := maxSeq + 1
-			permSession := model.UserSession{
-				UserID:     userID,
-				Type:       "permanent",
-				Status:     "active",
-				SessionSeq: seq,
-				SessionID:  util.EncodeBase62Padded(uint64(seq), 5),
-			}
-			db.Create(&permSession)
+		if err := db.Model(&model.UserSession{}).
+			Where("user_id = ? AND type = ?", userID, "permanent").
+			Count(&userSessionCount).Error; err != nil {
+			return fmt.Errorf("count permanent sessions for %s: %w", userID, err)
+		}
+		if userSessionCount > 0 {
+			continue
+		}
+
+		if err := ensureUserSessionSequenceFloor(db); err != nil {
+			return err
+		}
+		seq, err := NextSequenceValue(db, SequenceUserSession, MaxCompactSessionSeq)
+		if err != nil {
+			return fmt.Errorf("allocate permanent session for %s: %w", userID, err)
+		}
+		permSession := model.UserSession{
+			UserID:     userID,
+			Type:       "permanent",
+			Status:     "active",
+			SessionSeq: seq,
+			SessionID:  util.EncodeBase62Padded(uint64(seq), 5),
+		}
+		if err := db.Create(&permSession).Error; err != nil {
+			return fmt.Errorf("create permanent session for %s: %w", userID, err)
 		}
 	}
 	return nil
 }
 
-// repairUserSessions 修复已有但session_seq=0或session_id为空的UserSession
 func repairUserSessions(db *gorm.DB) error {
-	var broken []model.UserSession
-	db.Where("session_seq = 0 OR session_id = ''").Find(&broken)
-	for _, s := range broken {
-		var maxSeq int
-		db.Model(&model.UserSession{}).Where("user_id = ?", s.UserID).
-			Select("COALESCE(MAX(session_seq), 0)").Scan(&maxSeq)
-		seq := maxSeq + 1
-		db.Model(&s).Updates(map[string]interface{}{
-			"session_seq": seq,
-			"session_id":  util.EncodeBase62Padded(uint64(seq), 5),
-		})
+	var sessions []model.UserSession
+	if err := db.Order("user_id ASC, session_seq ASC, id ASC").Find(&sessions).Error; err != nil {
+		return err
+	}
+
+	maxSeq := 0
+	usedSeqs := make(map[int]struct{}, len(sessions))
+	usedSessID := make(map[string]struct{}, len(sessions))
+	for _, sess := range sessions {
+		if sess.SessionSeq > maxSeq {
+			maxSeq = sess.SessionSeq
+		}
+	}
+	for _, sess := range sessions {
+		sessionID := ""
+		if sess.SessionSeq > 0 {
+			sessionID = util.EncodeBase62Padded(uint64(sess.SessionSeq), 5)
+		}
+		_, duplicateSeq := usedSeqs[sess.SessionSeq]
+		_, duplicateID := usedSessID[sess.SessionID]
+		needsRepair := sess.SessionSeq <= 0 ||
+			sess.SessionID == "" ||
+			sess.SessionID != sessionID ||
+			duplicateSeq ||
+			duplicateID
+
+		if needsRepair {
+			for {
+				if maxSeq >= MaxCompactSessionSeq {
+					return fmt.Errorf("user session sequence exhausted at %d", MaxCompactSessionSeq)
+				}
+				maxSeq++
+				sessionID = util.EncodeBase62Padded(uint64(maxSeq), 5)
+				if _, ok := usedSeqs[maxSeq]; ok {
+					continue
+				}
+				if _, ok := usedSessID[sessionID]; ok {
+					continue
+				}
+				break
+			}
+			if err := db.Model(&sess).Updates(map[string]interface{}{
+				"session_seq": maxSeq,
+				"session_id":  sessionID,
+			}).Error; err != nil {
+				return err
+			}
+			sess.SessionSeq = maxSeq
+			sess.SessionID = sessionID
+		}
+		usedSeqs[sess.SessionSeq] = struct{}{}
+		usedSessID[sess.SessionID] = struct{}{}
+	}
+	if maxSeq > MaxCompactSessionSeq {
+		return fmt.Errorf("user session sequence exceeds compact limit %d", MaxCompactSessionSeq)
+	}
+	if err := EnsureSequenceNextValue(db, SequenceUserSession, maxSeq+1); err != nil {
+		return err
 	}
 	return nil
+}
+
+func ensureUserSessionSequenceFloor(db *gorm.DB) error {
+	var maxSeq int
+	if err := db.Model(&model.UserSession{}).
+		Select("COALESCE(MAX(session_seq), 0)").
+		Scan(&maxSeq).Error; err != nil {
+		return fmt.Errorf("user session sequence floor: %w", err)
+	}
+	return EnsureSequenceNextValue(db, SequenceUserSession, maxSeq+1)
 }
 
 func configUserID(user config.User) string {

@@ -2,7 +2,7 @@ package store
 
 import (
 	"context"
-	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -14,13 +14,8 @@ import (
 	"jianmen/internal/util"
 )
 
-func TestCompactUsernameAuthIntegration(t *testing.T) {
-	dbPath := "../../data/bastion_test.db"
-	// Clean up from previous failed runs
-	os.Remove(dbPath)
-	os.Remove(dbPath + "-wal")
-	os.Remove(dbPath + "-shm")
-	defer os.Remove(dbPath)
+func TestDBStoreAuthenticatesCompactUsernameFromTemporaryDatabase(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "bastion_test.db")
 
 	// Initialize encryption with a test data directory
 	tmpDir := t.TempDir()
@@ -33,6 +28,11 @@ func TestCompactUsernameAuthIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}
+	sqlDB, err := db.DB()
+	if err != nil {
+		t.Fatalf("sql db: %v", err)
+	}
+	defer sqlDB.Close()
 	if err := storage.AutoMigrate(db); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
@@ -40,8 +40,8 @@ func TestCompactUsernameAuthIntegration(t *testing.T) {
 		t.Fatalf("bootstrap: %v", err)
 	}
 
-	// Create a test user with bcrypt-hashed password "admin"
-	pwHash, err := bcrypt.GenerateFromPassword([]byte("admin"), bcrypt.MinCost)
+	const testPassword = "test-password"
+	pwHash, err := bcrypt.GenerateFromPassword([]byte(testPassword), bcrypt.MinCost)
 	if err != nil {
 		t.Fatalf("hash: %v", err)
 	}
@@ -57,10 +57,11 @@ func TestCompactUsernameAuthIntegration(t *testing.T) {
 
 	// Create an active session with session_id "00001"
 	session := model.UserSession{
-		UserID:    "test-compact-auth-user",
-		SessionID: "00001",
-		Status:    "active",
-		ExpiresAt: ptrTime(time.Now().Add(24 * time.Hour)),
+		UserID:     "test-compact-auth-user",
+		SessionSeq: 1,
+		SessionID:  "00001",
+		Status:     "active",
+		ExpiresAt:  ptrTime(time.Now().Add(24 * time.Hour)),
 	}
 	if err := db.Create(&session).Error; err != nil {
 		t.Fatalf("create session: %v", err)
@@ -96,7 +97,7 @@ func TestCompactUsernameAuthIntegration(t *testing.T) {
 	compactUser := "H" + acct.ResourceID + "00001"
 
 	s := NewDBStore(db)
-	user, err := s.Authenticate(context.Background(), compactUser, "admin")
+	user, err := s.Authenticate(context.Background(), compactUser, testPassword)
 	if err != nil {
 		t.Fatalf("AUTH FAILED: %v", err)
 	}

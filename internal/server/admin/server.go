@@ -3,9 +3,6 @@ package admin
 import (
 	"bufio"
 	"context"
-	"crypto/rand"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -35,6 +32,7 @@ type Server struct {
 	logger        *slog.Logger
 	dataDir       string
 	superAdminIDs map[string]bool // 超级管理员用户 ID 集合，直接拥有全部权限
+	loginLimiter  *loginLimiter
 }
 
 type sessionListItem struct {
@@ -121,7 +119,7 @@ func New(cfg *config.Config, store store.Store, logger *slog.Logger, dataDir str
 	}
 	// 收集所有超级管理员用户 ID
 	superAdminIDs := LoadSuperAdminIDs(cfg, dataDir)
-	return &Server{cfg: cfg, store: store, db: db, rbacChecker: checker, logger: logger, dataDir: dataDir, superAdminIDs: superAdminIDs}
+	return &Server{cfg: cfg, store: store, db: db, rbacChecker: checker, logger: logger, dataDir: dataDir, superAdminIDs: superAdminIDs, loginLimiter: newDefaultLoginLimiter()}
 }
 
 func (s *Server) ListenAndServe(ctx context.Context) error {
@@ -129,7 +127,7 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 	mux.HandleFunc("/", s.handleIndex)
 	mux.HandleFunc("/api/init/status", s.handleInitStatus)
 	mux.HandleFunc("/api/init/setup", s.handleInitSetup)
-	mux.HandleFunc("/api/init/encryption-key", s.handleInitEncryptionKey)
+	mux.HandleFunc("/api/init/encryption-key", s.withAuthAndUser(s.handleInitEncryptionKey))
 	mux.HandleFunc("/api/login", s.handleLogin)
 	mux.HandleFunc("/api/health", s.withAuthAndUser(s.handleHealth))
 	mux.HandleFunc("/api/users", s.withAuthAndUser(s.handleUsers))
@@ -442,22 +440,22 @@ func (s *Server) createUser(w http.ResponseWriter, r *http.Request) {
 		writeErrorText(w, http.StatusBadRequest, "password is required")
 		return
 	}
-	// Hash password
-	pwHash := sha256.Sum256([]byte(password))
-	// Generate random token
-	tokenBytes := make([]byte, 32)
-	if _, err := rand.Read(tokenBytes); err != nil {
+	passwordHash, err := hashPassword(password)
+	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	rawToken := hex.EncodeToString(tokenBytes)
-	tokenHash := sha256.Sum256([]byte(rawToken))
+	rawToken, tokenHash, err := newAPIToken()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
 
 	user := model.User{
 		ID:           model.NewID(),
 		Username:     username,
-		PasswordHash: hex.EncodeToString(pwHash[:]),
-		TokenHash:    hex.EncodeToString(tokenHash[:]),
+		PasswordHash: passwordHash,
+		TokenHash:    tokenHash,
 		DisplayName:  strings.TrimSpace(req.DisplayName),
 		Email:        strings.TrimSpace(req.Email),
 		Status:       "active",
@@ -733,11 +731,6 @@ func (s *Server) handleTestConnection(w http.ResponseWriter, r *http.Request) {
 	if addr == "" || target.Username == "" {
 		writeErrorText(w, http.StatusBadRequest, "host, port, and username are required")
 		return
-	}
-
-	// 测试连接默认允许跳过主机密钥验证（除非用户明确配置了指纹或 known_hosts）
-	if !target.InsecureIgnoreHostKey && target.HostKeyFingerprint == "" && target.KnownHostsPath == "" {
-		target.InsecureIgnoreHostKey = true
 	}
 
 	clientConfig, err := store.ClientConfigForTarget(store.TargetConfig{
@@ -1440,23 +1433,9 @@ func (s *Server) withAuthAndUser(next http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 
-		// Dev token shortcut: find first active admin
-		if token == "dev-admin-token" && s.db != nil {
-			var admin model.User
-			if err := s.db.Where("status = ?", "active").First(&admin).Error; err == nil {
-				ctx := context.WithValue(r.Context(), ctxKeyUserID, admin.ID)
-				ctx = context.WithValue(ctx, ctxKeyUsername, admin.Username)
-				next(w, r.WithContext(ctx))
-				return
-			}
-		}
-
-		// Try per-user token lookup first
 		if s.db != nil {
-			hash := sha256.Sum256([]byte(token))
-			hashStr := hex.EncodeToString(hash[:])
 			var user model.User
-			if err := s.db.Where("token_hash = ? AND status = ?", hashStr, "active").First(&user).Error; err == nil {
+			if err := s.db.Where("token_hash = ? AND status = ?", hashToken(token), "active").First(&user).Error; err == nil {
 				ctx := context.WithValue(r.Context(), ctxKeyUserID, user.ID)
 				ctx = context.WithValue(ctx, ctxKeyUsername, user.Username)
 				next(w, r.WithContext(ctx))
@@ -1485,15 +1464,16 @@ func usernameFromRequest(r *http.Request) string {
 func (s *Server) requirePermission(r *http.Request, action string) bool {
 	userID := userIDFromRequest(r)
 	if userID == "" {
-		// Shared token fallback — no per-user RBAC, allow all
-		return true
+		s.logger.Warn("permission denied: missing authenticated user", "action", action)
+		return false
 	}
 	// 超级管理员拥有全部权限，无需 RBAC 检查
 	if s.isSuperAdmin(userID) {
 		return true
 	}
 	if s.rbacChecker == nil {
-		return true
+		s.logger.Warn("permission denied: rbac checker unavailable", "user_id", userID, "action", action)
+		return false
 	}
 	allowed, err := s.rbacChecker.HasPermission(userID, action, "", "")
 	if err != nil {

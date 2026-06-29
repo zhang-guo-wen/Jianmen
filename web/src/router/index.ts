@@ -3,17 +3,6 @@ import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router'
 import { apiClient, getToken } from '@/api/client';
 import type { TranslationKey } from '@/i18n';
 import { usePermissionStore } from '@/stores/permission';
-import AuditView from '@/views/AuditView.vue';
-
-import DatabaseView from '@/views/DatabaseView.vue';
-import HostsView from '@/views/HostsView.vue';
-import LoginView from '@/views/LoginView.vue';
-import QuickConnectView from '@/views/QuickConnectView.vue';
-import SetupView from '@/views/SetupView.vue';
-import RBACView from '@/views/RBACView.vue';
-import RolesView from '@/views/RolesView.vue';
-
-import UsersView from '@/views/UsersView.vue';
 
 type AppRouteMeta = {
   public?: boolean;
@@ -30,6 +19,16 @@ const routeMenuMap: Record<string, string> = {
   '/users': 'users',
   '/roles': 'roles',
 };
+
+const AuditView = () => import('@/views/AuditView.vue');
+const DatabaseView = () => import('@/views/DatabaseView.vue');
+const HostsView = () => import('@/views/HostsView.vue');
+const LoginView = () => import('@/views/LoginView.vue');
+const QuickConnectView = () => import('@/views/QuickConnectView.vue');
+const RBACView = () => import('@/views/RBACView.vue');
+const RolesView = () => import('@/views/RolesView.vue');
+const SetupView = () => import('@/views/SetupView.vue');
+const UsersView = () => import('@/views/UsersView.vue');
 
 const routes: RouteRecordRaw[] = [
   {
@@ -168,7 +167,10 @@ router.beforeEach(async (to, from) => {
     if (!to.meta.public) {
       const store = usePermissionStore();
       if (!store.loaded) {
-        await store.fetch();
+        const permissionReady = await store.fetch();
+        if (!permissionReady) {
+          return to.name === 'quick-connect' ? true : { name: 'quick-connect' };
+        }
       }
       const menuKey = routeMenuMap[to.path];
       if (menuKey && !store.canAccessMenu(menuKey)) {

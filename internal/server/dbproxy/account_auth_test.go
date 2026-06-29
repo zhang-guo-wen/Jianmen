@@ -1,71 +1,68 @@
-//go:build ignore
-
 package dbproxy
 
 import (
 	"encoding/binary"
+	"net"
 	"testing"
 )
 
-func TestMySQLAccountAuthAcceptsAllowedUser(t *testing.T) {
-	auth, err := newAccountAuth("mysql", []string{"app"})
+func TestMySQLLoginParserObservesUser(t *testing.T) {
+	parser := &MySQLLoginParser{}
+	observation, ready, err := parser.Observe(mysqlLoginPacket("app"))
 	if err != nil {
-		t.Fatalf("newAccountAuth returned error: %v", err)
+		t.Fatalf("Observe returned error: %v", err)
 	}
-	ready, err := auth.ObserveClientBytes(mysqlLoginPacket("app"))
-	if err != nil {
-		t.Fatalf("ObserveClientBytes returned error: %v", err)
-	}
-	if !ready || !auth.Ready() || auth.Observation().User != "app" {
-		t.Fatalf("unexpected auth state ready=%v user=%q", ready, auth.Observation().User)
+	if !ready || observation.User != "app" || !observation.MetadataVisible {
+		t.Fatalf("unexpected observation ready=%v observation=%#v", ready, observation)
 	}
 }
 
-func TestMySQLAccountAuthRejectsDeniedUser(t *testing.T) {
-	auth, err := newAccountAuth("mysql", []string{"app"})
+func TestPostgresLoginParserObservesUser(t *testing.T) {
+	parser := &postgresLoginParser{}
+	observation, ready, err := parser.Observe(postgresStartupPacket("app", "appdb"))
 	if err != nil {
-		t.Fatalf("newAccountAuth returned error: %v", err)
+		t.Fatalf("Observe returned error: %v", err)
 	}
-	if _, err := auth.ObserveClientBytes(mysqlLoginPacket("root")); err == nil {
-		t.Fatal("ObserveClientBytes accepted denied user")
+	if !ready || observation.User != "app" || observation.Database != "appdb" || !observation.MetadataVisible {
+		t.Fatalf("unexpected observation ready=%v observation=%#v", ready, observation)
 	}
 }
 
-func TestPostgresAccountAuthAcceptsAllowedUser(t *testing.T) {
-	auth, err := newAccountAuth("postgres", []string{"app"})
+func TestPostgresLoginParserAllowsTLSWhenMetadataHidden(t *testing.T) {
+	parser := &postgresLoginParser{}
+	observation, ready, err := parser.Observe(postgresSSLRequestPacket())
 	if err != nil {
-		t.Fatalf("newAccountAuth returned error: %v", err)
+		t.Fatalf("Observe returned error: %v", err)
 	}
-	ready, err := auth.ObserveClientBytes(postgresStartupPacket("app", "appdb"))
-	if err != nil {
-		t.Fatalf("ObserveClientBytes returned error: %v", err)
-	}
-	if !ready || !auth.Ready() || auth.Observation().User != "app" {
-		t.Fatalf("unexpected auth state ready=%v user=%q", ready, auth.Observation().User)
+	if !ready || !observation.TLSRequested || observation.MetadataVisible || observation.Observation != "hidden_by_tls" {
+		t.Fatalf("unexpected observation ready=%v observation=%#v", ready, observation)
 	}
 }
 
-func TestPostgresAccountAuthAllowsTLSWhenNotEnforced(t *testing.T) {
-	auth, err := newAccountAuth("postgres", nil)
-	if err != nil {
-		t.Fatalf("newAccountAuth returned error: %v", err)
-	}
-	ready, err := auth.ObserveClientBytes(postgresSSLRequestPacket())
-	if err != nil {
-		t.Fatalf("ObserveClientBytes returned error: %v", err)
-	}
-	if !ready || !auth.Ready() || auth.Observation().Observation != "hidden_by_tls" {
-		t.Fatalf("unexpected auth state ready=%v observation=%#v", ready, auth.Observation())
-	}
-}
+func TestFakeMySQLHandshakeAdvertisesCompleteAuthPluginName(t *testing.T) {
+	client, server := net.Pipe()
+	defer client.Close()
+	defer server.Close()
 
-func TestPostgresAccountAuthRejectsDeniedUser(t *testing.T) {
-	auth, err := newAccountAuth("postgres", []string{"app"})
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- sendFakeMySQLHandshake(server)
+	}()
+
+	packet, err := readMySQLPacket(client)
 	if err != nil {
-		t.Fatalf("newAccountAuth returned error: %v", err)
+		t.Fatalf("read fake handshake: %v", err)
 	}
-	if _, err := auth.ObserveClientBytes(postgresStartupPacket("postgres", "appdb")); err == nil {
-		t.Fatal("ObserveClientBytes accepted denied user")
+	if err := <-errCh; err != nil {
+		t.Fatalf("send fake handshake: %v", err)
+	}
+
+	handshake, err := ParseMySQLHandshake(packet.payload)
+	if err != nil {
+		t.Fatalf("parse fake handshake: %v", err)
+	}
+	if handshake.AuthPluginName != "mysql_native_password" {
+		t.Fatalf("auth plugin = %q, want mysql_native_password", handshake.AuthPluginName)
 	}
 }
 

@@ -1,21 +1,16 @@
 package admin
 
 import (
-	"crypto/rand"
-	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"io"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
-	"golang.org/x/crypto/bcrypt"
-
-	"jianmen/internal/model"
 	"gorm.io/gorm"
+	"jianmen/internal/model"
 )
 
 // InitStatusResponse 系统初始化状态
@@ -43,8 +38,20 @@ type EncryptionKeyResponse struct {
 
 // handleInitStatus 返回系统初始化状态（检查是否已有用户）
 func (s *Server) handleInitStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", http.MethodGet)
+		writeErrorText(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	if s.db == nil {
+		writeErrorText(w, http.StatusServiceUnavailable, "metadata database unavailable")
+		return
+	}
 	var count int64
-	s.db.Model(&model.User{}).Count(&count)
+	if err := s.db.Model(&model.User{}).Count(&count).Error; err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to check setup status"})
+		return
+	}
 	writeJSON(w, http.StatusOK, InitStatusResponse{Initialized: count > 0})
 }
 
@@ -55,12 +62,20 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		writeErrorText(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
+	if s.db == nil {
+		writeErrorText(w, http.StatusServiceUnavailable, "metadata database unavailable")
+		return
+	}
+	defer r.Body.Close()
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<18)
 
 	var req struct {
 		Username string `json:"username"`
 		Password string `json:"password"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
 		return
 	}
@@ -70,32 +85,39 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "username and password are required"})
 		return
 	}
+	now := time.Now().UTC()
+	limiter := s.loginLimiterForRequest()
+	limitKey := loginLimitKey(r, username)
+	if retryAfter := limiter.retryAfter(limitKey, now); retryAfter > 0 {
+		setRetryAfter(w, retryAfter)
+		s.logLogin(r, username, "blocked", "rate_limited")
+		writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "too many failed login attempts; try again later"})
+		return
+	}
 
 	// Find user by username
 	var user model.User
 	if err := s.db.Where("username = ? AND status = ?", username, "active").First(&user).Error; err != nil {
+		limiter.recordFailure(limitKey, now)
+		s.logLogin(r, username, "failure", "invalid_credentials")
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid username or password"})
 		return
 	}
 
-	// Verify password
-	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(password)); err != nil {
+	if !verifyPassword(user.PasswordHash, password) {
+		limiter.recordFailure(limitKey, now)
+		s.logLogin(r, username, "failure", "invalid_credentials")
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid username or password"})
 		return
 	}
 
-	// Generate new API token
-	tokenBytes := make([]byte, 32)
-	if _, err := io.ReadFull(rand.Reader, tokenBytes); err != nil {
+	token, tokenHashStr, err := newAPIToken()
+	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to generate token"})
 		return
 	}
-	token := hex.EncodeToString(tokenBytes)
-	tokenHash := sha256.Sum256([]byte(token))
-	tokenHashStr := hex.EncodeToString(tokenHash[:])
 
 	// Store token hash and update last login time
-	now := time.Now().UTC()
 	user.TokenHash = tokenHashStr
 	user.LastLoginAt = &now
 	if err := s.db.Save(&user).Error; err != nil {
@@ -103,13 +125,28 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	limiter.reset(limitKey)
+	s.logLogin(r, username, "success", "")
 	writeJSON(w, http.StatusOK, map[string]string{"token": token})
 }
 
 // handleInitSetup 创建超级管理员用户（事务保护 TOCTOU）
 func (s *Server) handleInitSetup(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", http.MethodPost)
+		writeErrorText(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	if s.db == nil {
+		writeErrorText(w, http.StatusServiceUnavailable, "metadata database unavailable")
+		return
+	}
+	defer r.Body.Close()
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<18)
 	var req SetupRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
 		return
 	}
@@ -127,24 +164,17 @@ func (s *Server) handleInitSetup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// bcrypt 哈希密码
-	passwordHash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	passwordHash, err := hashPassword(password)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to hash password"})
 		return
 	}
 
-	// 生成 API token
-	tokenBytes := make([]byte, 32)
-	if _, err := io.ReadFull(rand.Reader, tokenBytes); err != nil {
+	token, tokenHashStr, err := newAPIToken()
+	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to generate token"})
 		return
 	}
-	token := hex.EncodeToString(tokenBytes)
-
-	// SHA-256 哈希 token 存储
-	tokenHash := sha256.Sum256([]byte(token))
-	tokenHashStr := hex.EncodeToString(tokenHash[:])
 
 	var createdUserID string
 	var created bool
@@ -200,9 +230,25 @@ func (s *Server) handleInitSetup(w http.ResponseWriter, r *http.Request) {
 
 // handleInitEncryptionKey 返回加密密钥（一次性读取，原子标记防并发）
 func (s *Server) handleInitEncryptionKey(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", http.MethodGet)
+		writeErrorText(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	if s.db == nil {
+		writeErrorText(w, http.StatusServiceUnavailable, "metadata database unavailable")
+		return
+	}
+	if !s.isSuperAdmin(userIDFromRequest(r)) {
+		s.forbidden(w)
+		return
+	}
 	// 检查是否已初始化
 	var count int64
-	s.db.Model(&model.User{}).Count(&count)
+	if err := s.db.Model(&model.User{}).Count(&count).Error; err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to check setup status"})
+		return
+	}
 	if count == 0 {
 		writeJSON(w, http.StatusPreconditionFailed, map[string]string{"error": "setup not completed"})
 		return
@@ -236,4 +282,3 @@ func (s *Server) handleInitEncryptionKey(w http.ResponseWriter, r *http.Request)
 		Key: hex.EncodeToString(keyData),
 	})
 }
-

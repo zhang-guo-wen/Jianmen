@@ -120,7 +120,7 @@ func (s *Server) authenticateWebTerminal(r *http.Request) bool {
 	hash := sha256.Sum256([]byte(token))
 	hashStr := hex.EncodeToString(hash[:])
 	var user model.User
-	return s.db.Where("token_hash = ?", hashStr).First(&user).Error == nil
+	return s.db.Where("token_hash = ? AND status = ?", hashStr, "active").First(&user).Error == nil
 }
 
 func (s *Server) resolveWebTerminalTarget(ctx context.Context, targetID string) (store.TargetConfig, error) {

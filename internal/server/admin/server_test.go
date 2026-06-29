@@ -2,6 +2,7 @@ package admin
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"log/slog"
@@ -58,14 +59,23 @@ func TestHandleTargetCRUD(t *testing.T) {
 		"insecure_ignore_host_key": true
 	}`
 	createReq := httptest.NewRequest(http.MethodPost, "/api/targets", bytes.NewBufferString(createBody))
+	createReq = asTestSuperAdmin(createReq)
 	createRec := httptest.NewRecorder()
 	server.handleTargets(createRec, createReq)
 	if createRec.Code != http.StatusCreated {
 		t.Fatalf("create status = %d, want %d; body=%s", createRec.Code, http.StatusCreated, createRec.Body.String())
 	}
+	var created store.TargetView
+	if err := json.Unmarshal(createRec.Body.Bytes(), &created); err != nil {
+		t.Fatalf("unmarshal create response: %v; body=%s", err, createRec.Body.String())
+	}
+	if !created.InsecureIgnoreHostKey {
+		t.Fatalf("created target did not preserve explicit insecure host key mode: %#v", created)
+	}
 	assertTargetResponseHasNoSecrets(t, createRec.Body.Bytes())
 
 	getReq := httptest.NewRequest(http.MethodGet, "/api/targets/runtime-a", nil)
+	getReq = asTestSuperAdmin(getReq)
 	getRec := httptest.NewRecorder()
 	server.handleTarget(getRec, getReq)
 	if getRec.Code != http.StatusOK {
@@ -86,9 +96,11 @@ func TestHandleTargetCRUD(t *testing.T) {
 		"host": "10.0.0.2",
 		"port": 2200,
 		"username": "ubuntu",
-		"insecure_ignore_host_key": true
+		"insecure_ignore_host_key": false,
+		"host_key_fingerprint": "SHA256:test-fingerprint"
 	}`
 	updateReq := httptest.NewRequest(http.MethodPut, "/api/targets/runtime-a", bytes.NewBufferString(updateBody))
+	updateReq = asTestSuperAdmin(updateReq)
 	updateRec := httptest.NewRecorder()
 	server.handleTarget(updateRec, updateReq)
 	if updateRec.Code != http.StatusOK {
@@ -101,9 +113,13 @@ func TestHandleTargetCRUD(t *testing.T) {
 	if updated.Name != "ubuntu" || updated.Host != "10.0.0.2" || updated.Port != 2200 || updated.Username != "ubuntu" {
 		t.Fatalf("unexpected updated target view: %#v", updated)
 	}
+	if updated.InsecureIgnoreHostKey || updated.HostKeyFingerprint != "SHA256:test-fingerprint" || updated.KnownHostsPath != "" {
+		t.Fatalf("unexpected updated host key settings: %#v", updated)
+	}
 	assertTargetResponseHasNoSecrets(t, updateRec.Body.Bytes())
 
 	deleteReq := httptest.NewRequest(http.MethodDelete, "/api/targets/runtime-a", nil)
+	deleteReq = asTestSuperAdmin(deleteReq)
 	deleteRec := httptest.NewRecorder()
 	server.handleTarget(deleteRec, deleteReq)
 	if deleteRec.Code != http.StatusNoContent {
@@ -111,6 +127,7 @@ func TestHandleTargetCRUD(t *testing.T) {
 	}
 
 	missingReq := httptest.NewRequest(http.MethodGet, "/api/targets/runtime-a", nil)
+	missingReq = asTestSuperAdmin(missingReq)
 	missingRec := httptest.NewRecorder()
 	server.handleTarget(missingRec, missingReq)
 	if missingRec.Code != http.StatusNotFound {
@@ -138,6 +155,7 @@ func TestHandleHostsPaginationAndLazyAccounts(t *testing.T) {
 		}`,
 	} {
 		req := httptest.NewRequest(http.MethodPost, "/api/hosts", bytes.NewBufferString(body))
+		req = asTestSuperAdmin(req)
 		rec := httptest.NewRecorder()
 		server.handleHosts(rec, req)
 		if rec.Code != http.StatusCreated {
@@ -155,6 +173,7 @@ func TestHandleHostsPaginationAndLazyAccounts(t *testing.T) {
 		"password": "secret",
 		"insecure_ignore_host_key": true
 	}`))
+	createAccountReq = asTestSuperAdmin(createAccountReq)
 	createAccountRec := httptest.NewRecorder()
 	server.handleTargets(createAccountRec, createAccountReq)
 	if createAccountRec.Code != http.StatusCreated {
@@ -162,6 +181,7 @@ func TestHandleHostsPaginationAndLazyAccounts(t *testing.T) {
 	}
 
 	listReq := httptest.NewRequest(http.MethodGet, "/api/hosts?page=1&page_size=1&q=prod", nil)
+	listReq = asTestSuperAdmin(listReq)
 	listRec := httptest.NewRecorder()
 	server.handleHosts(listRec, listReq)
 	if listRec.Code != http.StatusOK {
@@ -188,6 +208,7 @@ func TestHandleHostsPaginationAndLazyAccounts(t *testing.T) {
 	}
 
 	accountsReq := httptest.NewRequest(http.MethodGet, "/api/hosts/prod-a/accounts", nil)
+	accountsReq = asTestSuperAdmin(accountsReq)
 	accountsRec := httptest.NewRecorder()
 	server.handleHost(accountsRec, accountsReq)
 	if accountsRec.Code != http.StatusOK {
@@ -214,6 +235,180 @@ func TestHandleHostsPaginationAndLazyAccounts(t *testing.T) {
 	}
 	if strings.Contains(accountsRec.Body.String(), "secret") {
 		t.Fatalf("host accounts response leaked secret: %s", accountsRec.Body.String())
+	}
+}
+
+func TestProtectedHandlersFailClosedWithoutAuthenticatedUser(t *testing.T) {
+	server := newTargetTestServer(t)
+	req := httptest.NewRequest(http.MethodGet, "/api/targets", nil)
+	rec := httptest.NewRecorder()
+
+	server.handleTargets(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusForbidden, rec.Body.String())
+	}
+}
+
+func TestCreateUserStoresBcryptHashAndLoginWorks(t *testing.T) {
+	server, db := newAdminDBTestServer(t)
+
+	createReq := httptest.NewRequest(http.MethodPost, "/api/users", bytes.NewBufferString(`{
+		"username": "alice",
+		"password": "correct horse battery staple",
+		"display_name": "Alice"
+	}`))
+	createRec := httptest.NewRecorder()
+	server.createUser(createRec, createReq)
+	if createRec.Code != http.StatusCreated {
+		t.Fatalf("create status = %d, want %d; body=%s", createRec.Code, http.StatusCreated, createRec.Body.String())
+	}
+
+	var created struct {
+		User  model.User `json:"user"`
+		Token string     `json:"token"`
+	}
+	if err := json.Unmarshal(createRec.Body.Bytes(), &created); err != nil {
+		t.Fatalf("unmarshal create response: %v; body=%s", err, createRec.Body.String())
+	}
+	if created.Token == "" {
+		t.Fatal("create response did not include an API token")
+	}
+
+	var stored model.User
+	if err := db.First(&stored, "id = ?", created.User.ID).Error; err != nil {
+		t.Fatalf("load stored user: %v", err)
+	}
+	if !verifyPassword(stored.PasswordHash, "correct horse battery staple") {
+		t.Fatalf("stored password hash does not verify; hash=%q", stored.PasswordHash)
+	}
+
+	loginReq := httptest.NewRequest(http.MethodPost, "/api/login", bytes.NewBufferString(`{
+		"username": "alice",
+		"password": "correct horse battery staple"
+	}`))
+	loginRec := httptest.NewRecorder()
+	server.handleLogin(loginRec, loginReq)
+	if loginRec.Code != http.StatusOK {
+		t.Fatalf("login status = %d, want %d; body=%s", loginRec.Code, http.StatusOK, loginRec.Body.String())
+	}
+}
+
+func TestLoginRateLimitAfterRepeatedFailures(t *testing.T) {
+	server, db := newAdminDBTestServer(t)
+	passwordHash, err := hashPassword("correct-password")
+	if err != nil {
+		t.Fatalf("hash password: %v", err)
+	}
+	if err := db.Create(&model.User{
+		ID:           "rate-limited-user",
+		Username:     "rate-limited",
+		PasswordHash: passwordHash,
+		Status:       "active",
+	}).Error; err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+
+	for i := 0; i < loginFailureLimit; i++ {
+		req := httptest.NewRequest(http.MethodPost, "/api/login", bytes.NewBufferString(`{
+			"username": "rate-limited",
+			"password": "wrong-password"
+		}`))
+		req.RemoteAddr = "203.0.113.10:12345"
+		rec := httptest.NewRecorder()
+		server.handleLogin(rec, req)
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("attempt %d status = %d, want %d; body=%s", i+1, rec.Code, http.StatusUnauthorized, rec.Body.String())
+		}
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/login", bytes.NewBufferString(`{
+		"username": "rate-limited",
+		"password": "wrong-password"
+	}`))
+	req.RemoteAddr = "203.0.113.10:12345"
+	rec := httptest.NewRecorder()
+	server.handleLogin(rec, req)
+	if rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("blocked status = %d, want %d; body=%s", rec.Code, http.StatusTooManyRequests, rec.Body.String())
+	}
+	if rec.Header().Get("Retry-After") == "" {
+		t.Fatal("Retry-After header was not set")
+	}
+}
+
+func TestDevAdminTokenIsRejected(t *testing.T) {
+	server, db := newAdminDBTestServer(t)
+	if err := db.Create(&model.User{ID: "admin", Username: "admin", Status: "active"}).Error; err != nil {
+		t.Fatalf("create admin: %v", err)
+	}
+
+	called := false
+	handler := server.withAuthAndUser(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		w.WriteHeader(http.StatusNoContent)
+	})
+	req := httptest.NewRequest(http.MethodGet, "/api/health", nil)
+	req.Header.Set("Authorization", "Bearer dev-admin-token")
+	rec := httptest.NewRecorder()
+	handler(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusUnauthorized, rec.Body.String())
+	}
+	if called {
+		t.Fatal("handler was called with dev-admin-token")
+	}
+}
+
+func TestEncryptionKeyRequiresSuperAdminToken(t *testing.T) {
+	server, db := newAdminDBTestServer(t)
+	users := []model.User{
+		{ID: "regular", Username: "regular", Status: "active", TokenHash: hashToken("regular-token")},
+		{ID: "admin", Username: "admin", Status: "active", TokenHash: hashToken("admin-token")},
+	}
+	if err := db.Create(&users).Error; err != nil {
+		t.Fatalf("create users: %v", err)
+	}
+	server.superAdminIDs = map[string]bool{"admin": true}
+	handler := server.withAuthAndUser(server.handleInitEncryptionKey)
+
+	missingAuthReq := httptest.NewRequest(http.MethodGet, "/api/init/encryption-key", nil)
+	missingAuthRec := httptest.NewRecorder()
+	handler(missingAuthRec, missingAuthReq)
+	if missingAuthRec.Code != http.StatusUnauthorized {
+		t.Fatalf("missing auth status = %d, want %d", missingAuthRec.Code, http.StatusUnauthorized)
+	}
+
+	regularReq := httptest.NewRequest(http.MethodGet, "/api/init/encryption-key", nil)
+	regularReq.Header.Set("Authorization", "Bearer regular-token")
+	regularRec := httptest.NewRecorder()
+	handler(regularRec, regularReq)
+	if regularRec.Code != http.StatusForbidden {
+		t.Fatalf("regular status = %d, want %d; body=%s", regularRec.Code, http.StatusForbidden, regularRec.Body.String())
+	}
+
+	adminReq := httptest.NewRequest(http.MethodGet, "/api/init/encryption-key", nil)
+	adminReq.Header.Set("Authorization", "Bearer admin-token")
+	adminRec := httptest.NewRecorder()
+	handler(adminRec, adminReq)
+	if adminRec.Code != http.StatusOK {
+		t.Fatalf("admin status = %d, want %d; body=%s", adminRec.Code, http.StatusOK, adminRec.Body.String())
+	}
+	var keyResp EncryptionKeyResponse
+	if err := json.Unmarshal(adminRec.Body.Bytes(), &keyResp); err != nil {
+		t.Fatalf("unmarshal key response: %v; body=%s", err, adminRec.Body.String())
+	}
+	if len(keyResp.Key) != 64 {
+		t.Fatalf("key length = %d, want 64 hex chars", len(keyResp.Key))
+	}
+
+	secondAdminReq := httptest.NewRequest(http.MethodGet, "/api/init/encryption-key", nil)
+	secondAdminReq.Header.Set("Authorization", "Bearer admin-token")
+	secondAdminRec := httptest.NewRecorder()
+	handler(secondAdminRec, secondAdminReq)
+	if secondAdminRec.Code != http.StatusForbidden {
+		t.Fatalf("second admin status = %d, want %d; body=%s", secondAdminRec.Code, http.StatusForbidden, secondAdminRec.Body.String())
 	}
 }
 
@@ -247,10 +442,47 @@ func newTargetTestServer(t *testing.T) *Server {
 	}
 	storeInst := store.NewDBStore(db)
 	return &Server{
-		cfg:    cfg,
-		store:  storeInst,
-		logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		cfg:           cfg,
+		store:         storeInst,
+		logger:        slog.New(slog.NewTextHandler(io.Discard, nil)),
+		superAdminIDs: map[string]bool{"u-admin": true},
 	}
+}
+
+func newAdminDBTestServer(t *testing.T) (*Server, *gorm.DB) {
+	t.Helper()
+
+	dataDir := t.TempDir()
+	if _, err := crypto.Init(dataDir); err != nil {
+		t.Fatalf("crypto.Init: %v", err)
+	}
+
+	db, err := storage.Open(storage.Config{
+		Driver: storage.DriverSQLite,
+		DSN:    ":memory:",
+	})
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	if err := storage.AutoMigrate(db); err != nil {
+		t.Fatalf("automigrate: %v", err)
+	}
+
+	cfg := &config.Config{Admin: config.AdminConfig{}}
+	return &Server{
+		cfg:           cfg,
+		store:         store.NewDBStore(db),
+		db:            db,
+		logger:        slog.New(slog.NewTextHandler(io.Discard, nil)),
+		dataDir:       dataDir,
+		superAdminIDs: map[string]bool{},
+	}, db
+}
+
+func asTestSuperAdmin(req *http.Request) *http.Request {
+	ctx := context.WithValue(req.Context(), ctxKeyUserID, "u-admin")
+	ctx = context.WithValue(ctx, ctxKeyUsername, "admin")
+	return req.WithContext(ctx)
 }
 
 func assertTargetResponseHasNoSecrets(t *testing.T, raw []byte) {

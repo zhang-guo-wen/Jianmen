@@ -2,7 +2,7 @@
   <div class="setup-container">
     <el-card class="setup-card">
       <!-- Step 1: Create admin user -->
-      <template v-if="step === 1">
+      <template v-if="step === 1 && !encryptionKeyNeeded">
         <div class="setup-header">
           <h2>{{ t('setup.title') }}</h2>
           <p class="setup-desc">{{ t('setup.description') }}</p>
@@ -84,7 +84,7 @@
       </template>
 
       <!-- Step 1.5: Admin created, retry getting encryption key -->
-      <template v-else-if="step === 1 && encryptionKeyNeeded">
+      <template v-else-if="encryptionKeyNeeded">
         <div class="setup-success">
           <el-icon :size="48" color="#67c23a"><CircleCheckFilled /></el-icon>
           <h3>{{ t('setup.adminCreated') }}</h3>
@@ -118,7 +118,7 @@ import { CircleCheckFilled } from '@element-plus/icons-vue';
 import { ElMessage } from 'element-plus';
 import type { FormInstance, FormRules } from 'element-plus';
 
-import { apiClient } from '@/api/client';
+import { apiClient, clearToken, setToken } from '@/api/client';
 import { useI18n } from '@/i18n';
 
 const { t } = useI18n();
@@ -170,12 +170,16 @@ async function handleSetup() {
 
   submitting.value = true;
   try {
-    await apiClient.setup({
+    const setupResult = await apiClient.setup({
       username: form.username.trim(),
       password: form.password,
       email: form.email.trim(),
       display_name: form.display_name.trim() || undefined,
     });
+    if (!setupResult.token) {
+      throw new Error(t('setup.error.setup'));
+    }
+    setToken(setupResult.token);
 
     try {
       const keyResult = await apiClient.getEncryptionKey();
@@ -217,6 +221,7 @@ async function copyKey() {
 }
 
 function handleFinish() {
+  clearToken();
   router.replace('/login');
 }
 </script>

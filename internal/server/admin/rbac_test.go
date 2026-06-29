@@ -211,6 +211,7 @@ func requestRBAC(t *testing.T, handler http.HandlerFunc, method, target, body st
 		reader = bytes.NewBufferString(body)
 	}
 	req := httptest.NewRequest(method, target, reader)
+	req = asTestSuperAdmin(req)
 	if body != "" {
 		req.Header.Set("Content-Type", "application/json")
 	}

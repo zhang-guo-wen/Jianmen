@@ -19,5 +19,6 @@
 - [docs/current-progress.md](docs/current-progress.md) — 当前实现进展
 - [docs/phase2-roadmap.md](docs/phase2-roadmap.md) — 后续开发计划
 - [docs/development.md](docs/development.md) — 本地开发与调试
+- [docs/testing.md](docs/testing.md) — 单元测试与 Docker 集成测试分层
 - [docs/design.md](docs/design.md) — 架构设计
 - [docs/competitive-analysis.md](docs/competitive-analysis.md) — 竞品/开源实现调研

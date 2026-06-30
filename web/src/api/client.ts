@@ -105,39 +105,11 @@ export interface TargetPayload {
 
 export interface HostView {
   id?: string;
-  name?: string;
+  name: string;
   group?: string;
-  address?: string;
-  port?: number;
+  address: string;
+  port: number;
   remark?: string;
-  status?: string;
-  account_count?: number;
-  created_at?: string;
-  updated_at?: string;
-  [key: string]: unknown;
-}
-
-/** @deprecated use HostView */
-export interface HostRecord {
-  id?: string;
-  name?: string;
-  group?: string;
-  host?: string;
-  port?: number;
-  remark?: string;
-  disabled?: boolean;
-  status?: string;
-  account_count?: number;
-  static?: boolean;
-  [key: string]: unknown;
-}
-
-/** @deprecated use PageResponse<HostView> */
-export interface PagedHostRecord {
-  data?: HostRecord[];
-  page?: number;
-  page_size?: number;
-  total?: number;
 }
 
 export interface HostPayload {
@@ -255,22 +227,7 @@ export interface DatabaseInstanceView {
   [key: string]: unknown;
 }
 
-/** @deprecated use DatabaseInstanceView */
-export interface DBInstanceRecord {
-  id?: string;
-  name?: string;
-  protocol?: string;
-  address?: string;
-  group_name?: string;
-  remark?: string;
-  disabled?: boolean;
-  account_count?: number;
-  created_at?: string;
-  updated_at?: string;
-}
-
 export interface DBAccountRecord {
-  id?: string;
   instance_id?: string;
   unique_name?: string;
   username?: string;

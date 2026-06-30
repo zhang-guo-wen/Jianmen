@@ -744,7 +744,6 @@ function formatFileAction(action: string): string {
 
 function isSFTP(row: SessionRecord): boolean {
   if (row.protocol_subtype === 'sftp') return true;
-  // Fallback: old sessions without subtype and without replay are likely SFTP
   if (!row.protocol_subtype && !(row.has_replay ?? false)) return true;
   return false;
 }

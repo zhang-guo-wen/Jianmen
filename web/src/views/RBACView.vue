@@ -294,7 +294,7 @@
       </DataTableCard>
     </div>
 
-    <!-- Tab 5: Effective Check (保持原有表单逻辑) -->
+    <!-- Tab 5: Effective Check -->
     <el-card v-if="activeTab === 'effective'" shadow="never">
       <template #header>
         <span>{{ t('rbac.title.effectiveCheck') }}</span>
@@ -495,7 +495,7 @@ import {
   apiClient,
   type ApiEnvelope,
   type DBAccountRecord,
-  type DBInstanceRecord,
+  type DatabaseInstanceView,
   type PageResponse,
   type RBACEffectiveCheckPayload,
   type RBACEffectiveCheckResult,
@@ -580,7 +580,7 @@ const rolePermissionPageSize = ref(20);
 
 // ── Resource state (for resource picker) ──
 const targets = ref<TargetRecord[]>([]);
-const dbInstances = ref<DBInstanceRecord[]>([]);
+const dbInstances = ref<DatabaseInstanceView[]>([]);
 const dbAccounts = ref<DBAccountRecord[]>([]);
 
 const effectiveResult = ref<RBACEffectiveCheckResult | null>(null);
@@ -789,7 +789,7 @@ function hostResourceOption(target: TargetRecord): ResourceOption | null {
   return makeResourceOption(resourceType, resourceId, name, trim(target.source));
 }
 
-function databaseResourceOption(instance: DBInstanceRecord, account: DBAccountRecord): ResourceOption | null {
+function databaseResourceOption(instance: DatabaseInstanceView, account: DBAccountRecord): ResourceOption | null {
   const resourceType = 'database_account';
   const resourceId = trim(account.id) || trim(account.unique_name);
   const accountName = trim(account.unique_name) || trim(account.upstream_username) || resourceId;
@@ -995,7 +995,7 @@ async function loadResources() {
     if (dbInstancesResult.status === 'fulfilled') {
       dbInstances.value = Array.isArray(dbInstancesResult.value)
         ? dbInstancesResult.value
-        : (dbInstancesResult.value as ApiEnvelope<DBInstanceRecord[]>).data ?? [];
+        : (dbInstancesResult.value as ApiEnvelope<DatabaseInstanceView[]>).data ?? [];
       // Load accounts for all instances
       const accountResults = await Promise.allSettled(
         dbInstances.value.map((inst) =>

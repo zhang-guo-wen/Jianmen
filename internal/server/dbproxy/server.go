@@ -717,8 +717,7 @@ func (g *Gateway) handleMySQLAuthSwitch(upstream net.Conn, acct *model.DatabaseA
 	return readMySQLPacket(upstream)
 }
 
-// TODO(SCRAM): pgSCRAMExchange 的 SASL PasswordMessage 格式有问题，上游不响应。
-// 详见 docs/known-issues.md — PostgreSQL SCRAM-SHA-256 认证未完全支持
+// TODO(SCRAM): pgSCRAMExchange SASL PasswordMessage 格式有问题，上游不响应。
 // pgSCRAMExchange 用存储凭据完成 SCRAM-SHA-256 交换
 func (g *Gateway) pgSCRAMExchange(upstream net.Conn, username, password string, saslMsg []byte) error {
 	// SASLInitialResponse: 选 SCRAM-SHA-256

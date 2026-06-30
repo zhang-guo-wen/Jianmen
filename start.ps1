@@ -4,74 +4,206 @@
 
 $ErrorActionPreference = "Stop"
 
-Write-Host "=== Jianmen Dev Startup ===" -ForegroundColor Cyan
-Write-Host ""
-
-# ---- 0. Cleanup old instances ----
-Write-Host "[1/5] Stopping old instances..." -ForegroundColor Yellow
-Get-Process -Name "bastion-core" -ErrorAction SilentlyContinue | Stop-Process -Force
-$oldNode = Get-Process -Name "node" -ErrorAction SilentlyContinue | Where-Object { $_.CommandLine -like "*vite*" }
-if ($oldNode) { $oldNode | Stop-Process -Force }
-Start-Sleep -Seconds 1
-
-# ---- 1. Config ----
-Write-Host "[2/5] Preparing config..." -ForegroundColor Yellow
-if (-not (Test-Path config.local.json)) {
-    Copy-Item config.example.json config.local.json
-    Write-Host "  Created config.local.json from template" -ForegroundColor Green
-} else {
-    Write-Host "  config.local.json already exists" -ForegroundColor Gray
+function Write-Step($Message) {
+    Write-Host $Message -ForegroundColor Yellow
 }
 
-# ---- 2. Build backend ----
-Write-Host "[3/5] Building backend..." -ForegroundColor Yellow
-go build -o bin\bastion-core.exe .\cmd\bastion-core
-if ($LASTEXITCODE -ne 0) { throw "Backend build failed" }
-Write-Host "  Backend built: bin\bastion-core.exe" -ForegroundColor Green
+function Write-Ok($Message) {
+    Write-Host "  $Message" -ForegroundColor Green
+}
 
-# ---- 3. Start backend ----
-Write-Host "[4/5] Starting backend..." -ForegroundColor Yellow
-$backendJob = Start-Job -Name "bastion-core" -ScriptBlock {
-    Set-Location $using:PWD
-    .\bin\bastion-core.exe -config config.local.json 2>&1 | Out-File "logs\backend.log" -Encoding utf8
+function Write-Info($Message) {
+    Write-Host "  $Message" -ForegroundColor Gray
 }
-Start-Sleep -Seconds 3
-$backendStatus = Get-Job -Name "bastion-core"
-if ($backendStatus.State -eq "Failed") {
-    Write-Host "  Backend failed to start! Check logs\backend.log" -ForegroundColor Red
-    Receive-Job -Name "bastion-core"
-    throw "Backend startup failed"
-}
-Write-Host "  Backend running (PID $($backendStatus.ChildJobs[0].Process.Id))" -ForegroundColor Green
 
-# ---- 4. Frontend deps ----
-Write-Host "[5/5] Starting frontend..." -ForegroundColor Yellow
-Push-Location web
-if (-not (Test-Path node_modules)) {
-    Write-Host "  Installing npm dependencies..." -ForegroundColor Gray
-    npm install 2>&1 | Out-Null
+function Show-LogTail($Path, $Lines) {
+    if (Test-Path $Path) {
+        Write-Host "--- $Path (last $Lines lines) ---" -ForegroundColor DarkGray
+        Get-Content $Path -Tail $Lines
+    } else {
+        Write-Host "--- $Path not found ---" -ForegroundColor DarkGray
+    }
 }
-$frontendJob = Start-Job -Name "vite-dev" -ScriptBlock {
-    Set-Location "$using:PWD\web"
-    npm run dev 2>&1 | Out-File "..\logs\frontend.log" -Encoding utf8
-}
-Pop-Location
-Start-Sleep -Seconds 3
-$frontendStatus = Get-Job -Name "vite-dev"
-if ($frontendStatus.State -eq "Failed") {
-    Write-Host "  Frontend failed to start! Check logs\frontend.log" -ForegroundColor Red
-    Receive-Job -Name "vite-dev"
-    throw "Frontend startup failed"
-}
-Write-Host "  Frontend running" -ForegroundColor Green
 
-# ---- Done ----
-Write-Host ""
-Write-Host "=== All services started ===" -ForegroundColor Cyan
-Write-Host ""
-Write-Host "  Admin API : http://127.0.0.1:47100/" -ForegroundColor White
-Write-Host "  Web UI    : http://127.0.0.1:47101/" -ForegroundColor White
-Write-Host "  SSH GW    : 127.0.0.1:47102" -ForegroundColor White
-Write-Host "  Token     : dev-admin-token" -ForegroundColor Gray
-Write-Host ""
-Write-Host "Stop with: Get-Job | Stop-Job" -ForegroundColor Gray
+function Stop-ProcessFromPidFile($PidFile, $Name) {
+    if (Test-Path $PidFile) {
+        $rawPid = (Get-Content $PidFile -ErrorAction SilentlyContinue | Select-Object -First 1)
+        if ($rawPid) {
+            $proc = Get-Process -Id ([int]$rawPid) -ErrorAction SilentlyContinue
+            if ($proc) {
+                Write-Info "Stopping $Name PID $rawPid"
+                Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+            }
+        }
+        Remove-Item $PidFile -Force -ErrorAction SilentlyContinue
+    }
+}
+
+function Stop-ProcessOnPort($Port, $Name) {
+    $connections = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue
+    foreach ($connection in $connections) {
+        $proc = Get-Process -Id $connection.OwningProcess -ErrorAction SilentlyContinue
+        if ($proc) {
+            Write-Info "Stopping $Name port $Port PID $($proc.Id) ($($proc.ProcessName))"
+            Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+
+function Wait-HttpOk($Name, $Url, $TimeoutSeconds, $Headers) {
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    $lastError = $null
+    while ((Get-Date) -lt $deadline) {
+        try {
+            if ($Headers) {
+                $response = Invoke-WebRequest $Url -UseBasicParsing -TimeoutSec 2 -Headers $Headers
+            } else {
+                $response = Invoke-WebRequest $Url -UseBasicParsing -TimeoutSec 2
+            }
+            if ($response.StatusCode -ge 200 -and $response.StatusCode -lt 500) {
+                Write-Ok "$Name ready: $Url ($($response.StatusCode))"
+                return
+            }
+        } catch {
+            $lastError = $_.Exception.Message
+            if ($_.Exception.Response -and $_.Exception.Response.StatusCode) {
+                $statusCode = [int]$_.Exception.Response.StatusCode
+                if ($statusCode -ge 200 -and $statusCode -lt 500) {
+                    Write-Ok "$Name ready: $Url ($statusCode)"
+                    return
+                }
+            }
+        }
+        Start-Sleep -Milliseconds 500
+    }
+    throw "$Name not ready after ${TimeoutSeconds}s: $Url; last error: $lastError"
+}
+
+function Wait-TcpPort($Name, $HostName, $Port, $TimeoutSeconds) {
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    while ((Get-Date) -lt $deadline) {
+        $client = New-Object System.Net.Sockets.TcpClient
+        try {
+            $iar = $client.BeginConnect($HostName, $Port, $null, $null)
+            if ($iar.AsyncWaitHandle.WaitOne(1000, $false)) {
+                $client.EndConnect($iar)
+                Write-Ok "$Name ready: ${HostName}:$Port"
+                return
+            }
+        } catch {
+        } finally {
+            $client.Close()
+        }
+        Start-Sleep -Milliseconds 500
+    }
+    throw "$Name not ready after ${TimeoutSeconds}s: ${HostName}:$Port"
+}
+
+function Fail-WithDiagnostics($Message) {
+    Write-Host ""
+    Write-Host "Startup failed: $Message" -ForegroundColor Red
+    Show-LogTail "logs\backend.err.log" 80
+    Show-LogTail "logs\backend.log" 80
+    Show-LogTail "logs\frontend.err.log" 80
+    Show-LogTail "logs\frontend.log" 80
+    exit 1
+}
+
+try {
+    $root = (Get-Location).Path
+    $logsDir = Join-Path $root "logs"
+    $binDir = Join-Path $root "bin"
+    $backendLog = Join-Path $logsDir "backend.log"
+    $backendErrLog = Join-Path $logsDir "backend.err.log"
+    $backendPid = Join-Path $logsDir "backend.pid"
+    $frontendLog = Join-Path $logsDir "frontend.log"
+    $frontendErrLog = Join-Path $logsDir "frontend.err.log"
+    $frontendPid = Join-Path $logsDir "frontend.pid"
+
+    Write-Host "=== Jianmen Dev Startup ===" -ForegroundColor Cyan
+    Write-Host ""
+
+    Write-Step "[1/6] Preparing directories..."
+    New-Item -ItemType Directory -Force -Path $binDir | Out-Null
+    New-Item -ItemType Directory -Force -Path $logsDir | Out-Null
+    Write-Ok "runtime directories ready"
+
+    Write-Step "[2/6] Stopping old instances..."
+    Stop-ProcessFromPidFile $backendPid "bastion-core"
+    Stop-ProcessFromPidFile $frontendPid "vite-dev"
+    Stop-ProcessOnPort 47100 "Admin API"
+    Stop-ProcessOnPort 47101 "Web UI"
+    Stop-ProcessOnPort 47102 "SSH gateway"
+    Stop-ProcessOnPort 33060 "Database gateway"
+    Get-Process -Name "bastion-core" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+    $oldNode = Get-Process -Name "node" -ErrorAction SilentlyContinue | Where-Object { $_.CommandLine -like "*vite*" -or $_.CommandLine -like "*npm*run*dev*" }
+    if ($oldNode) { $oldNode | Stop-Process -Force -ErrorAction SilentlyContinue }
+    Start-Sleep -Seconds 1
+    Write-Ok "old instances stopped"
+
+    Write-Step "[3/6] Preparing config..."
+    if (-not (Test-Path "config.local.json")) {
+        Copy-Item "config.example.json" "config.local.json"
+        Write-Ok "created config.local.json from template"
+    } else {
+        Write-Info "config.local.json already exists"
+    }
+
+    Write-Step "[4/6] Building backend..."
+    go build -o "bin\bastion-core.exe" ".\cmd\bastion-core"
+    if ($LASTEXITCODE -ne 0) { throw "Backend build failed" }
+    Write-Ok "backend built: bin\bastion-core.exe"
+
+    Write-Step "[5/6] Starting backend..."
+    Remove-Item $backendLog, $backendErrLog -Force -ErrorAction SilentlyContinue
+    $backend = Start-Process -FilePath (Join-Path $binDir "bastion-core.exe") -ArgumentList "-config", "config.local.json" -WorkingDirectory $root -RedirectStandardOutput $backendLog -RedirectStandardError $backendErrLog -PassThru
+    Set-Content -Path $backendPid -Value $backend.Id -Encoding ascii
+    Write-Ok "backend process started: PID $($backend.Id)"
+
+    Wait-HttpOk "Admin API" "http://127.0.0.1:47100/api/health" 20 $null
+    Wait-TcpPort "Database gateway" "127.0.0.1" 33060 10
+    Wait-TcpPort "SSH gateway" "127.0.0.1" 47102 10
+
+    Write-Step "[6/6] Starting frontend..."
+    Push-Location "web"
+    try {
+        if (-not (Test-Path "node_modules")) {
+            Write-Info "installing npm dependencies..."
+            npm install
+            if ($LASTEXITCODE -ne 0) { throw "npm install failed" }
+        }
+    } finally {
+        Pop-Location
+    }
+
+    Remove-Item $frontendLog, $frontendErrLog -Force -ErrorAction SilentlyContinue
+    $npmCommand = (Get-Command "npm.cmd" -ErrorAction SilentlyContinue).Source
+    if (-not $npmCommand) { $npmCommand = (Get-Command "npm" -ErrorAction Stop).Source }
+    $frontend = Start-Process -FilePath $npmCommand -ArgumentList "run", "dev", "--", "--host", "127.0.0.1", "--strictPort" -WorkingDirectory (Join-Path $root "web") -RedirectStandardOutput $frontendLog -RedirectStandardError $frontendErrLog -PassThru
+    Set-Content -Path $frontendPid -Value $frontend.Id -Encoding ascii
+    Write-Ok "frontend process started: PID $($frontend.Id)"
+
+    Wait-HttpOk "Web UI" "http://127.0.0.1:47101/" 30 $null
+    Wait-HttpOk "Frontend API proxy" "http://127.0.0.1:47101/api/hosts" 15 @{Authorization='Bearer dev-admin-token'}
+
+    Write-Host ""
+    Write-Host "=== All services started and verified ===" -ForegroundColor Cyan
+    Write-Host ""
+    Write-Host "  Admin API : http://127.0.0.1:47100/" -ForegroundColor White
+    Write-Host "  Web UI    : http://127.0.0.1:47101/" -ForegroundColor White
+    Write-Host "  SSH GW    : 127.0.0.1:47102" -ForegroundColor White
+    Write-Host "  DB GW     : 127.0.0.1:33060" -ForegroundColor White
+    Write-Host "  Token     : dev-admin-token" -ForegroundColor Gray
+    Write-Host ""
+    Write-Host "Logs:" -ForegroundColor Gray
+    Write-Host "  logs\backend.log" -ForegroundColor Gray
+    Write-Host "  logs\backend.err.log" -ForegroundColor Gray
+    Write-Host "  logs\frontend.log" -ForegroundColor Gray
+    Write-Host "  logs\frontend.err.log" -ForegroundColor Gray
+    Write-Host ""
+    Write-Host "Stop with:" -ForegroundColor Gray
+    Write-Host "  Stop-Process -Id (Get-Content logs\backend.pid) -Force" -ForegroundColor Gray
+    Write-Host "  Stop-Process -Id (Get-Content logs\frontend.pid) -Force" -ForegroundColor Gray
+} catch {
+    Fail-WithDiagnostics $_.Exception.Message
+}

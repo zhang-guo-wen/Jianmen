@@ -370,14 +370,18 @@ func (g *Gateway) handlePG(ctx context.Context, client net.Conn, firstByte byte)
 					return nil
 				}
 			} else if authType == 5 {
-				// MD5Password: for v1, try sending cleartext anyway
 				plainPwd := acct.Password.GetPlaintext()
-				pwdMsg := make([]byte, 0, 5+len(plainPwd)+1)
+				if nr < 13 {
+					upstream.Close()
+					return nil
+				}
+				md5Pwd := BuildPostgresPasswordResponse(authType, acct.Username, plainPwd, respBuf[9:13])
+				pwdMsg := make([]byte, 0, 5+len(md5Pwd)+1)
 				pwdMsg = append(pwdMsg, 'p')
 				pwdLenBytes := make([]byte, 4)
-				binary.BigEndian.PutUint32(pwdLenBytes, uint32(4+len(plainPwd)+1))
+				binary.BigEndian.PutUint32(pwdLenBytes, uint32(4+len(md5Pwd)+1))
 				pwdMsg = append(pwdMsg, pwdLenBytes...)
-				pwdMsg = append(pwdMsg, []byte(plainPwd)...)
+				pwdMsg = append(pwdMsg, []byte(md5Pwd)...)
 				pwdMsg = append(pwdMsg, 0)
 				if _, err := upstream.Write(pwdMsg); err != nil {
 					upstream.Close()

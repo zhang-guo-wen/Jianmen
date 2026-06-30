@@ -2,9 +2,11 @@ package dbproxy
 
 import (
 	"bytes"
+	"crypto/md5"
 	"crypto/sha1"
 	"crypto/sha256"
 	"encoding/binary"
+	"encoding/hex"
 	"errors"
 	"strings"
 )
@@ -207,6 +209,20 @@ func BuildMySQLCachingSha2Password(password string, salt []byte) []byte {
 	}
 
 	return result
+}
+
+// BuildPostgresPasswordResponse returns the password payload PostgreSQL expects for the given auth type.
+func BuildPostgresPasswordResponse(authType uint32, username, password string, salt []byte) string {
+	if authType != 5 {
+		return password
+	}
+	h1 := md5.Sum([]byte(password + username))
+	h1Hex := hex.EncodeToString(h1[:])
+	h2Input := make([]byte, len(h1Hex)+len(salt))
+	copy(h2Input, h1Hex)
+	copy(h2Input[len(h1Hex):], salt)
+	h2 := md5.Sum(h2Input)
+	return "md5" + hex.EncodeToString(h2[:])
 }
 
 type databaseLoginParser interface {

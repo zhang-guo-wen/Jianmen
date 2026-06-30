@@ -1,7 +1,9 @@
 package dbproxy
 
 import (
+	"crypto/md5"
 	"encoding/binary"
+	"encoding/hex"
 	"net"
 	"testing"
 )
@@ -63,6 +65,20 @@ func TestFakeMySQLHandshakeAdvertisesCompleteAuthPluginName(t *testing.T) {
 	}
 	if handshake.AuthPluginName != "mysql_native_password" {
 		t.Fatalf("auth plugin = %q, want mysql_native_password", handshake.AuthPluginName)
+	}
+}
+
+func TestBuildPostgresMD5PasswordResponseUsesUsernameSaltAndPassword(t *testing.T) {
+	got := BuildPostgresPasswordResponse(5, "user_dba", "secret", []byte{1, 2, 3, 4})
+
+	h1 := md5.Sum([]byte("secret" + "user_dba"))
+	h1Hex := hex.EncodeToString(h1[:])
+	h2Input := append([]byte(h1Hex), 1, 2, 3, 4)
+	h2 := md5.Sum(h2Input)
+	want := "md5" + hex.EncodeToString(h2[:])
+
+	if got != want {
+		t.Fatalf("password response = %q, want %q", got, want)
 	}
 }
 

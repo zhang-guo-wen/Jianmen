@@ -82,6 +82,25 @@ func TestBuildPostgresMD5PasswordResponseUsesUsernameSaltAndPassword(t *testing.
 	}
 }
 
+func TestBuildPostgresUpstreamStartupMessageIncludesDatabase(t *testing.T) {
+	msg := BuildPostgresUpstreamStartupMessage("user_dba", "appdb")
+	params := postgresStartupParams(msg[8:])
+
+	if params["user"] != "user_dba" {
+		t.Fatalf("user = %q, want user_dba", params["user"])
+	}
+	if params["database"] != "appdb" {
+		t.Fatalf("database = %q, want appdb", params["database"])
+	}
+}
+
+func TestPostgresUpstreamDatabaseDefaultsWhenClientUsesProxyUsername(t *testing.T) {
+	got := postgresUpstreamDatabase("D000200001")
+	if got != "postgres" {
+		t.Fatalf("database = %q, want postgres", got)
+	}
+}
+
 func mysqlLoginPacket(username string) []byte {
 	payload := make([]byte, 0, 64)
 	capabilities := uint32(mysqlClientProtocol41)

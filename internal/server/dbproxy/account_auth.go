@@ -9,6 +9,8 @@ import (
 	"encoding/hex"
 	"errors"
 	"strings"
+
+	"jianmen/internal/util"
 )
 
 const (
@@ -223,6 +225,38 @@ func BuildPostgresPasswordResponse(authType uint32, username, password string, s
 	copy(h2Input[len(h1Hex):], salt)
 	h2 := md5.Sum(h2Input)
 	return "md5" + hex.EncodeToString(h2[:])
+}
+
+func postgresUpstreamDatabase(clientDatabase string) string {
+	clientDatabase = strings.TrimSpace(clientDatabase)
+	if clientDatabase == "" {
+		return "postgres"
+	}
+	if _, _, _, err := util.ParseCompactUsername(clientDatabase); err == nil {
+		return "postgres"
+	}
+	return clientDatabase
+}
+
+func BuildPostgresUpstreamStartupMessage(username, database string) []byte {
+	var sb strings.Builder
+	sb.WriteString("user")
+	sb.WriteByte(0)
+	sb.WriteString(username)
+	sb.WriteByte(0)
+	sb.WriteString("database")
+	sb.WriteByte(0)
+	sb.WriteString(postgresUpstreamDatabase(database))
+	sb.WriteByte(0)
+
+	startupPayload := sb.String()
+	startupLen := 4 + 4 + len(startupPayload) + 1 // length field + protocol + params + trailing \0
+	startupMsg := make([]byte, startupLen)
+	binary.BigEndian.PutUint32(startupMsg[0:4], uint32(startupLen))
+	binary.BigEndian.PutUint32(startupMsg[4:8], 196608) // PG 3.0
+	copy(startupMsg[8:], startupPayload)
+	startupMsg[startupLen-1] = 0
+	return startupMsg
 }
 
 type databaseLoginParser interface {

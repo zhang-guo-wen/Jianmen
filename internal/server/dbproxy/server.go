@@ -223,6 +223,7 @@ func (g *Gateway) handlePG(ctx context.Context, client net.Conn, firstByte byte)
 
 	// Parse StartupMessage key-value pairs
 	username := ""
+	database := ""
 	pos := 8
 	for pos < msgLen-1 {
 		keyEnd := pos
@@ -243,6 +244,9 @@ func (g *Gateway) handlePG(ctx context.Context, client net.Conn, firstByte byte)
 		value := string(buf[keyEnd+1 : valEnd])
 		if key == "user" {
 			username = value
+		}
+		if key == "database" {
+			database = value
 		}
 		pos = valEnd + 1
 	}
@@ -312,21 +316,8 @@ func (g *Gateway) handlePG(ctx context.Context, client net.Conn, firstByte byte)
 		return nil
 	}
 
-	// Forward a new StartupMessage to upstream with Username
-	upUsername := acct.Username
-	var sb strings.Builder
-	sb.WriteString("user")
-	sb.WriteByte(0)
-	sb.WriteString(upUsername)
-	sb.WriteByte(0)
-
-	startupPayload := sb.String()
-	startupLen := 4 + 4 + len(startupPayload) + 1 // length field + protocol + params + trailing \0
-	startupMsg := make([]byte, startupLen)
-	binary.BigEndian.PutUint32(startupMsg[0:4], uint32(startupLen))
-	binary.BigEndian.PutUint32(startupMsg[4:8], 196608) // PG 3.0
-	copy(startupMsg[8:], startupPayload)
-	startupMsg[startupLen-1] = 0
+	// Forward a new StartupMessage to upstream with the upstream username and target database.
+	startupMsg := BuildPostgresUpstreamStartupMessage(acct.Username, database)
 
 	if _, err := upstream.Write(startupMsg); err != nil {
 		upstream.Close()

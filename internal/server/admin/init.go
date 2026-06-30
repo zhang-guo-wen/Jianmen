@@ -15,7 +15,14 @@ import (
 
 // InitStatusResponse 系统初始化状态
 type InitStatusResponse struct {
-	Initialized bool `json:"initialized"`
+	Initialized bool              `json:"initialized"`
+	Admin       *InitAdminSummary `json:"admin,omitempty"`
+}
+
+type InitAdminSummary struct {
+	Username    string `json:"username"`
+	DisplayName string `json:"display_name,omitempty"`
+	Email       string `json:"email,omitempty"`
 }
 
 // SetupRequest 初始化设置请求
@@ -52,7 +59,29 @@ func (s *Server) handleInitStatus(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to check setup status"})
 		return
 	}
-	writeJSON(w, http.StatusOK, InitStatusResponse{Initialized: count > 0})
+	resp := InitStatusResponse{Initialized: count > 0}
+	if resp.Initialized {
+		if admin := s.initStatusAdminSummary(); admin != nil {
+			resp.Admin = admin
+		}
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (s *Server) initStatusAdminSummary() *InitAdminSummary {
+	if s.db == nil {
+		return nil
+	}
+	var user model.User
+	for id := range s.superAdminIDs {
+		if err := s.db.First(&user, "id = ?", id).Error; err == nil {
+			return &InitAdminSummary{Username: user.Username, DisplayName: user.DisplayName, Email: user.Email}
+		}
+	}
+	if err := s.db.Order("created_at ASC").First(&user).Error; err != nil {
+		return nil
+	}
+	return &InitAdminSummary{Username: user.Username, DisplayName: user.DisplayName, Email: user.Email}
 }
 
 // handleLogin handles username+password login, returns an API token.

@@ -21,6 +21,15 @@ export interface HealthResponse {
   [key: string]: unknown;
 }
 
+export interface InitStatusResponse {
+  initialized: boolean;
+  admin?: {
+    username?: string;
+    display_name?: string;
+    email?: string;
+  };
+}
+
 export interface UserRecord {
   id?: string | number;
   username?: string;
@@ -759,7 +768,7 @@ export const apiClient = {
       method: 'POST',
       body: JSON.stringify({ username, password }),
     }),
-  getInitStatus: () => request<{ initialized: boolean }>('/api/init/status'),
+  getInitStatus: () => request<InitStatusResponse>('/api/init/status'),
   setup: (payload: { username: string; password: string; email: string; display_name?: string }) =>
     request<{ token: string }>('/api/init/setup', {
       method: 'POST',

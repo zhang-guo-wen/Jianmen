@@ -3,16 +3,21 @@ package admin
 import (
 	"bytes"
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/glebarez/sqlite"
+	"golang.org/x/crypto/ssh"
 	"gorm.io/gorm"
 
 	"jianmen/internal/config"
@@ -239,6 +244,63 @@ func TestHandleHostsPaginationAndLazyAccounts(t *testing.T) {
 	}
 }
 
+func TestHandleTestConnectionUsesStoredCredentialsWhenPayloadOmitsSecrets(t *testing.T) {
+	server := newTargetTestServer(t)
+	sshAddr := startTestPasswordSSHServer(t, "root", "secret")
+	host, portText, err := net.SplitHostPort(sshAddr)
+	if err != nil {
+		t.Fatalf("split ssh addr: %v", err)
+	}
+	port, err := strconv.Atoi(portText)
+	if err != nil {
+		t.Fatalf("parse ssh port: %v", err)
+	}
+
+	createReq := httptest.NewRequest(http.MethodPost, "/api/targets", bytes.NewBufferString(fmt.Sprintf(`{
+		"id": "stored-secret-account",
+		"host_id": "stored-secret-host",
+		"host": %q,
+		"port": %d,
+		"username": "root",
+		"password": "secret",
+		"insecure_ignore_host_key": true
+	}`, host, port)))
+	createReq = asTestSuperAdmin(createReq)
+	createRec := httptest.NewRecorder()
+	server.handleTargets(createRec, createReq)
+	if createRec.Code != http.StatusCreated {
+		t.Fatalf("create status = %d, want %d; body=%s", createRec.Code, http.StatusCreated, createRec.Body.String())
+	}
+
+	testReq := httptest.NewRequest(http.MethodPost, "/api/targets/test-connection", bytes.NewBufferString(fmt.Sprintf(`{
+		"id": "stored-secret-account",
+		"host_id": "stored-secret-host",
+		"host": %q,
+		"port": %d,
+		"username": "root",
+		"password": "",
+		"private_key_pem": "",
+		"passphrase": "",
+		"insecure_ignore_host_key": true
+	}`, host, port)))
+	testReq = asTestSuperAdmin(testReq)
+	testRec := httptest.NewRecorder()
+	server.handleTestConnection(testRec, testReq)
+	if testRec.Code != http.StatusOK {
+		t.Fatalf("test status = %d, want %d; body=%s", testRec.Code, http.StatusOK, testRec.Body.String())
+	}
+	var result struct {
+		OK      bool   `json:"ok"`
+		Message string `json:"message"`
+	}
+	if err := json.Unmarshal(testRec.Body.Bytes(), &result); err != nil {
+		t.Fatalf("unmarshal test response: %v; body=%s", err, testRec.Body.String())
+	}
+	if !result.OK {
+		t.Fatalf("test connection ok = false, want true; message=%q body=%s", result.Message, testRec.Body.String())
+	}
+}
+
 func TestProtectedHandlersFailClosedWithoutAuthenticatedUser(t *testing.T) {
 	server := newTargetTestServer(t)
 	req := httptest.NewRequest(http.MethodGet, "/api/targets", nil)
@@ -248,6 +310,40 @@ func TestProtectedHandlersFailClosedWithoutAuthenticatedUser(t *testing.T) {
 
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusForbidden, rec.Body.String())
+	}
+}
+
+func TestInitStatusReturnsSuperAdminSummaryAfterSetup(t *testing.T) {
+	server, db := newAdminDBTestServer(t)
+	if err := db.Create(&model.User{
+		ID:          "admin-user",
+		Username:    "admin",
+		DisplayName: "超级管理员",
+		Email:       "admin@example.com",
+		Status:      "active",
+	}).Error; err != nil {
+		t.Fatalf("create admin user: %v", err)
+	}
+	server.superAdminIDs = map[string]bool{"admin-user": true}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/init/status", nil)
+	rec := httptest.NewRecorder()
+	server.handleInitStatus(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	var got InitStatusResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("unmarshal response: %v; body=%s", err, rec.Body.String())
+	}
+	if !got.Initialized {
+		t.Fatal("initialized = false, want true")
+	}
+	if got.Admin == nil {
+		t.Fatalf("admin summary is nil; body=%s", rec.Body.String())
+	}
+	if got.Admin.Username != "admin" || got.Admin.DisplayName != "超级管理员" || got.Admin.Email != "admin@example.com" {
+		t.Fatalf("unexpected admin summary: %#v", got.Admin)
 	}
 }
 
@@ -522,6 +618,56 @@ func asTestSuperAdmin(req *http.Request) *http.Request {
 	ctx := context.WithValue(req.Context(), ctxKeyUserID, "u-admin")
 	ctx = context.WithValue(ctx, ctxKeyUsername, "admin")
 	return req.WithContext(ctx)
+}
+
+func startTestPasswordSSHServer(t *testing.T, username, password string) string {
+	t.Helper()
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen test SSH server: %v", err)
+	}
+	t.Cleanup(func() { listener.Close() })
+
+	_, privateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("generate host key: %v", err)
+	}
+	signer, err := ssh.NewSignerFromKey(privateKey)
+	if err != nil {
+		t.Fatalf("new host signer: %v", err)
+	}
+	serverConfig := &ssh.ServerConfig{
+		PasswordCallback: func(conn ssh.ConnMetadata, got []byte) (*ssh.Permissions, error) {
+			if conn.User() == username && string(got) == password {
+				return nil, nil
+			}
+			return nil, fmt.Errorf("invalid credentials")
+		},
+	}
+	serverConfig.AddHostKey(signer)
+
+	go func() {
+		for {
+			rawConn, err := listener.Accept()
+			if err != nil {
+				return
+			}
+			go func() {
+				defer rawConn.Close()
+				conn, chans, reqs, err := ssh.NewServerConn(rawConn, serverConfig)
+				if err != nil {
+					return
+				}
+				defer conn.Close()
+				go ssh.DiscardRequests(reqs)
+				for ch := range chans {
+					ch.Reject(ssh.Prohibited, "not supported")
+				}
+			}()
+		}
+	}()
+
+	return listener.Addr().String()
 }
 
 func assertTargetResponseHasNoSecrets(t *testing.T, raw []byte) {

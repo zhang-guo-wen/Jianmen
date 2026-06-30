@@ -22,7 +22,7 @@ import (
 )
 
 func main() {
-	configPath := flag.String("config", "config.json", "path to config file")
+	configPath := flag.String("config", "config.local.json", "path to config file")
 	flag.Parse()
 
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{

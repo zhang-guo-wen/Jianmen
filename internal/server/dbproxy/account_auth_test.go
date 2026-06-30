@@ -101,6 +101,18 @@ func TestPostgresUpstreamDatabaseDefaultsWhenClientUsesProxyUsername(t *testing.
 	}
 }
 
+func TestShouldForwardPostgresAuthMessageOnlyForAuthOk(t *testing.T) {
+	md5Challenge := []byte{'R', 0, 0, 0, 12, 0, 0, 0, 5, 1, 2, 3, 4}
+	if shouldForwardPostgresAuthMessage(md5Challenge) {
+		t.Fatal("MD5 authentication challenge must not be forwarded to client")
+	}
+
+	authOK := []byte{'R', 0, 0, 0, 8, 0, 0, 0, 0}
+	if !shouldForwardPostgresAuthMessage(authOK) {
+		t.Fatal("AuthenticationOk should be forwarded to client")
+	}
+}
+
 func mysqlLoginPacket(username string) []byte {
 	payload := make([]byte, 0, 64)
 	capabilities := uint32(mysqlClientProtocol41)

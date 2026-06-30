@@ -259,6 +259,13 @@ func BuildPostgresUpstreamStartupMessage(username, database string) []byte {
 	return startupMsg
 }
 
+func shouldForwardPostgresAuthMessage(msg []byte) bool {
+	if len(msg) < 9 || msg[0] != 'R' {
+		return true
+	}
+	return binary.BigEndian.Uint32(msg[5:9]) == 0
+}
+
 type databaseLoginParser interface {
 	Observe(data []byte) (loginObservation, bool, error)
 }

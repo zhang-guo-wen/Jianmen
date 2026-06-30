@@ -333,10 +333,15 @@ func (g *Gateway) handlePG(ctx context.Context, client net.Conn, firstByte byte)
 			return nil
 		}
 
-		// Forward the server message to client
-		if _, err := client.Write(respBuf[:nr]); err != nil {
-			upstream.Close()
-			return nil
+		// Forward only messages the client should see. Upstream authentication
+		// challenges are answered by the proxy using stored credentials; forwarding
+		// them would make the client send an extra PasswordMessage that PostgreSQL
+		// later rejects after authentication completes.
+		if shouldForwardPostgresAuthMessage(respBuf[:nr]) {
+			if _, err := client.Write(respBuf[:nr]); err != nil {
+				upstream.Close()
+				return nil
+			}
 		}
 
 		if nr >= 6 && respBuf[0] == 'R' {

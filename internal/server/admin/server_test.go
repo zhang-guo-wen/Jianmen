@@ -313,6 +313,40 @@ func TestProtectedHandlersFailClosedWithoutAuthenticatedUser(t *testing.T) {
 	}
 }
 
+func TestInitStatusReturnsSuperAdminSummaryAfterSetup(t *testing.T) {
+	server, db := newAdminDBTestServer(t)
+	if err := db.Create(&model.User{
+		ID:          "admin-user",
+		Username:    "admin",
+		DisplayName: "超级管理员",
+		Email:       "admin@example.com",
+		Status:      "active",
+	}).Error; err != nil {
+		t.Fatalf("create admin user: %v", err)
+	}
+	server.superAdminIDs = map[string]bool{"admin-user": true}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/init/status", nil)
+	rec := httptest.NewRecorder()
+	server.handleInitStatus(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	var got InitStatusResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("unmarshal response: %v; body=%s", err, rec.Body.String())
+	}
+	if !got.Initialized {
+		t.Fatal("initialized = false, want true")
+	}
+	if got.Admin == nil {
+		t.Fatalf("admin summary is nil; body=%s", rec.Body.String())
+	}
+	if got.Admin.Username != "admin" || got.Admin.DisplayName != "超级管理员" || got.Admin.Email != "admin@example.com" {
+		t.Fatalf("unexpected admin summary: %#v", got.Admin)
+	}
+}
+
 func TestCreateUserStoresBcryptHashAndLoginWorks(t *testing.T) {
 	server, db := newAdminDBTestServer(t)
 

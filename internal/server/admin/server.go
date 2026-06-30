@@ -722,10 +722,30 @@ func (s *Server) handleTestConnection(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer r.Body.Close()
-	var target config.Target
-	if err := json.NewDecoder(r.Body).Decode(&target); err != nil {
+	var raw map[string]json.RawMessage
+	if err := json.NewDecoder(r.Body).Decode(&raw); err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
+	}
+	encoded, err := json.Marshal(raw)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	var target config.Target
+	if err := json.Unmarshal(encoded, &target); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	hostKeyConfigProvided := false
+	if _, ok := raw["insecure_ignore_host_key"]; ok {
+		hostKeyConfigProvided = true
+	}
+	if _, ok := raw["host_key_fingerprint"]; ok {
+		hostKeyConfigProvided = true
+	}
+	if _, ok := raw["known_hosts_path"]; ok {
+		hostKeyConfigProvided = true
 	}
 
 	targetCfg := store.TargetConfig{
@@ -758,9 +778,11 @@ func (s *Server) handleTestConnection(w http.ResponseWriter, r *http.Request) {
 		storedTarget.Username = firstNonEmpty(targetCfg.Username, storedTarget.Username)
 		storedTarget.Name = firstNonEmpty(targetCfg.Name, storedTarget.Name)
 		storedTarget.HostID = firstNonEmpty(targetCfg.HostID, storedTarget.HostID)
-		storedTarget.InsecureIgnoreHostKey = targetCfg.InsecureIgnoreHostKey
-		storedTarget.HostKeyFingerprint = targetCfg.HostKeyFingerprint
-		storedTarget.KnownHostsPath = targetCfg.KnownHostsPath
+		if hostKeyConfigProvided {
+			storedTarget.InsecureIgnoreHostKey = targetCfg.InsecureIgnoreHostKey
+			storedTarget.HostKeyFingerprint = targetCfg.HostKeyFingerprint
+			storedTarget.KnownHostsPath = targetCfg.KnownHostsPath
+		}
 		storedTarget.Disabled = targetCfg.Disabled
 		storedTarget.ExpiresAt = targetCfg.ExpiresAt
 		targetCfg = storedTarget

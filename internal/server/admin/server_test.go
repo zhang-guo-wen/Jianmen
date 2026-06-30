@@ -280,9 +280,55 @@ func TestHandleTestConnectionUsesStoredCredentialsWhenPayloadOmitsSecrets(t *tes
 		"username": "root",
 		"password": "",
 		"private_key_pem": "",
-		"passphrase": "",
+		"passphrase": ""
+	}`, host, port)))
+	testReq = asTestSuperAdmin(testReq)
+	testRec := httptest.NewRecorder()
+	server.handleTestConnection(testRec, testReq)
+	if testRec.Code != http.StatusOK {
+		t.Fatalf("test status = %d, want %d; body=%s", testRec.Code, http.StatusOK, testRec.Body.String())
+	}
+	var result struct {
+		OK      bool   `json:"ok"`
+		Message string `json:"message"`
+	}
+	if err := json.Unmarshal(testRec.Body.Bytes(), &result); err != nil {
+		t.Fatalf("unmarshal test response: %v; body=%s", err, testRec.Body.String())
+	}
+	if !result.OK {
+		t.Fatalf("test connection ok = false, want true; message=%q body=%s", result.Message, testRec.Body.String())
+	}
+}
+
+func TestHandleTestConnectionUsesStoredTargetWhenOnlyIDProvided(t *testing.T) {
+	server := newTargetTestServer(t)
+	sshAddr := startTestPasswordSSHServer(t, "root", "secret")
+	host, portText, err := net.SplitHostPort(sshAddr)
+	if err != nil {
+		t.Fatalf("split ssh addr: %v", err)
+	}
+	port, err := strconv.Atoi(portText)
+	if err != nil {
+		t.Fatalf("parse ssh port: %v", err)
+	}
+
+	createReq := httptest.NewRequest(http.MethodPost, "/api/targets", bytes.NewBufferString(fmt.Sprintf(`{
+		"id": "stored-target-only-id",
+		"host_id": "stored-target-host",
+		"host": %q,
+		"port": %d,
+		"username": "root",
+		"password": "secret",
 		"insecure_ignore_host_key": true
 	}`, host, port)))
+	createReq = asTestSuperAdmin(createReq)
+	createRec := httptest.NewRecorder()
+	server.handleTargets(createRec, createReq)
+	if createRec.Code != http.StatusCreated {
+		t.Fatalf("create status = %d, want %d; body=%s", createRec.Code, http.StatusCreated, createRec.Body.String())
+	}
+
+	testReq := httptest.NewRequest(http.MethodPost, "/api/targets/test-connection", bytes.NewBufferString(`{"id":"stored-target-only-id"}`))
 	testReq = asTestSuperAdmin(testReq)
 	testRec := httptest.NewRecorder()
 	server.handleTestConnection(testRec, testReq)

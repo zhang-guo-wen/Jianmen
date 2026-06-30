@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -409,6 +410,44 @@ func TestEncryptionKeyRequiresSuperAdminToken(t *testing.T) {
 	handler(secondAdminRec, secondAdminReq)
 	if secondAdminRec.Code != http.StatusForbidden {
 		t.Fatalf("second admin status = %d, want %d; body=%s", secondAdminRec.Code, http.StatusForbidden, secondAdminRec.Body.String())
+	}
+}
+
+func TestHandleTestDBConnectionPayloadRequiresCredentials(t *testing.T) {
+	server, _ := newAdminDBTestServer(t)
+	req := httptest.NewRequest(http.MethodPost, "/api/db/accounts/test", strings.NewReader(`{"instance_id":"","username":"","password":""}`))
+	req = asTestSuperAdmin(req)
+	rec := httptest.NewRecorder()
+
+	server.handleTestDBConnection(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusBadRequest, rec.Body.String())
+	}
+}
+
+func TestHandleTestDBConnectionPayloadDoesNotCreateAccount(t *testing.T) {
+	server, db := newAdminDBTestServer(t)
+	inst := model.DatabaseInstance{Name: "temp-test", Protocol: "mysql", Address: "127.0.0.1", Port: 1, Status: "active"}
+	if err := db.Create(&inst).Error; err != nil {
+		t.Fatalf("create instance: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/db/accounts/test", strings.NewReader(fmt.Sprintf(`{"instance_id":%q,"username":"probe","password":"secret"}`, inst.ID)))
+	req = asTestSuperAdmin(req)
+	rec := httptest.NewRecorder()
+
+	server.handleTestDBConnection(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	var count int64
+	if err := db.Model(&model.DatabaseAccount{}).Where("username = ?", "probe").Count(&count).Error; err != nil {
+		t.Fatalf("count accounts: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("temporary test created %d database accounts, want 0", count)
 	}
 }
 

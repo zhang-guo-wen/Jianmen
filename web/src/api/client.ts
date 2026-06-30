@@ -293,6 +293,12 @@ export interface DBAccountPayload {
   expires_at?: string;
 }
 
+export interface DBAccountTestPayload {
+  instance_id: string;
+  username: string;
+  password: string;
+}
+
 export interface DBAccountUpdatePayload {
   username: string;
   password?: string;
@@ -651,6 +657,11 @@ export const apiClient = {
       `/api/db/accounts/test/${encodeURIComponent(id)}`,
       { method: 'POST' }
     ),
+  testDBConnectionPayload: (payload: DBAccountTestPayload) =>
+    request<ApiEnvelope<{ ok: boolean; error?: string; latency_ms: number }>>('/api/db/accounts/test', {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    }),
 
   // database connections (audit)
   getDBConnections: (params?: { page?: number; page_size?: number; q?: string }) =>

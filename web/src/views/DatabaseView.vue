@@ -141,6 +141,40 @@
           <el-input v-model="accountForm.password" type="password" show-password
             :placeholder="editingAccount ? '留空则保留原密码' : '数据库登录密码'" />
         </el-form-item>
+        <el-form-item label="连接测试">
+          <div class="test-connection-row">
+            <el-button :loading="accountFormTesting" @click="testAccountFormConnection">测试连接</el-button>
+            <template v-if="accountFormTestResult">
+              <el-tag :type="accountFormTestResult.ok ? 'success' : 'danger'" size="small">
+                {{ accountFormTestResult.ok ? '可达' : '不可达' }}
+              </el-tag>
+              <span v-if="accountFormTestResult.latency_ms !== undefined" class="test-connection-meta">
+                延迟 {{ accountFormTestResult.latency_ms }}ms
+              </span>
+              <span v-if="accountFormTestResult.error" class="test-connection-error">
+                {{ accountFormTestResult.error }}
+              </span>
+            </template>
+          </div>
+          <div v-if="editingAccount" class="test-connection-hint">
+            点击测试连接时必须重新输入数据库密码；保存时密码留空仍会保留原密码。
+          </div>
+          <div v-if="editingAccount" class="test-connection-row saved-credential-row">
+            <span class="test-connection-meta">已保存凭据：</span>
+            <el-tag v-if="savedCredentialTesting" type="info" size="small">测试中...</el-tag>
+            <template v-else-if="savedCredentialTestResult">
+              <el-tag :type="savedCredentialTestResult.ok ? 'success' : 'danger'" size="small">
+                {{ savedCredentialTestResult.ok ? '可达' : '不可达' }}
+              </el-tag>
+              <span v-if="savedCredentialTestResult.latency_ms !== undefined" class="test-connection-meta">
+                延迟 {{ savedCredentialTestResult.latency_ms }}ms
+              </span>
+              <span v-if="savedCredentialTestResult.error" class="test-connection-error">
+                {{ savedCredentialTestResult.error }}
+              </span>
+            </template>
+          </div>
+        </el-form-item>
         <el-form-item label="有效期">
           <div style="display:flex;gap:8px;flex-wrap:wrap">
             <el-button v-for="opt in expiryOptions" :key="opt.label" size="small"
@@ -333,6 +367,10 @@ const creatingSession = ref(false)
 const connectionError = ref('')
 const connectionTesting = ref(false)
 const connectionTestResult = ref<{ ok: boolean; error?: string; latency_ms?: number } | null>(null)
+const accountFormTesting = ref(false)
+const accountFormTestResult = ref<{ ok: boolean; error?: string; latency_ms?: number } | null>(null)
+const savedCredentialTesting = ref(false)
+const savedCredentialTestResult = ref<{ ok: boolean; error?: string; latency_ms?: number } | null>(null)
 
 const compactUser = computed(() => {
   if (!connectTarget.value) return ''
@@ -565,6 +603,8 @@ function openCreateAccount() {
   accountForm.remark = ''
   accountForm.expiresAt = null
   expiryPreset.value = ''
+  accountFormTestResult.value = null
+  savedCredentialTestResult.value = null
   accountDialogVisible.value = true
 }
 
@@ -576,7 +616,10 @@ function editAccount(row: api.DBAccountRecord) {
   accountForm.remark = row.remark || ''
   accountForm.expiresAt = row.expires_at ? new Date(row.expires_at) : null
   expiryPreset.value = ''
+  accountFormTestResult.value = null
+  savedCredentialTestResult.value = null
   accountDialogVisible.value = true
+  testSavedAccountConnection(row)
 }
 
 function setExpiry(opt: { label: string; hours: number }) {
@@ -585,6 +628,52 @@ function setExpiry(opt: { label: string; hours: number }) {
     accountForm.expiresAt = null
   } else {
     accountForm.expiresAt = new Date(Date.now() + opt.hours * 3600 * 1000)
+  }
+}
+
+async function testSavedAccountConnection(row: api.DBAccountRecord) {
+  const id = row.id || row.resource_id || ''
+  if (!id) return
+  savedCredentialTesting.value = true
+  savedCredentialTestResult.value = null
+  try {
+    const result = await api.apiClient.testDBConnection(String(id))
+    const data = (result as any).data ?? result
+    savedCredentialTestResult.value = { ok: data.ok, latency_ms: data.latency_ms, error: data.ok ? undefined : (data.error || '连接失败') }
+  } catch (err) {
+    savedCredentialTestResult.value = { ok: false, error: err instanceof Error ? err.message : '连接失败' }
+  } finally {
+    savedCredentialTesting.value = false
+  }
+}
+
+async function testAccountFormConnection() {
+  if (!selectedInstance.value?.id) {
+    ElMessage.warning('请先选择数据库实例')
+    return
+  }
+  if (!accountForm.username.trim()) {
+    ElMessage.warning('请输入目标用户名')
+    return
+  }
+  if (!accountForm.password) {
+    ElMessage.warning('请先输入数据库密码再测试连接')
+    return
+  }
+  accountFormTesting.value = true
+  accountFormTestResult.value = null
+  try {
+    const result = await api.apiClient.testDBConnectionPayload({
+      instance_id: selectedInstance.value.id,
+      username: accountForm.username.trim(),
+      password: accountForm.password,
+    })
+    const data = (result as any).data ?? result
+    accountFormTestResult.value = { ok: data.ok, latency_ms: data.latency_ms, error: data.ok ? undefined : (data.error || '连接失败') }
+  } catch (err) {
+    accountFormTestResult.value = { ok: false, error: err instanceof Error ? err.message : '连接失败' }
+  } finally {
+    accountFormTesting.value = false
   }
 }
 
@@ -734,6 +823,35 @@ onMounted(() => {
   color: #344054;
   font-size: 13px;
   font-weight: 650;
+}
+
+.test-connection-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.saved-credential-row {
+  margin-top: 8px;
+}
+
+.test-connection-meta {
+  color: #667085;
+  font-size: 12px;
+}
+
+.test-connection-error {
+  color: var(--el-color-danger);
+  font-size: 12px;
+}
+
+.test-connection-hint {
+  color: #667085;
+  font-size: 12px;
+  line-height: 1.5;
+  margin-top: 6px;
+  width: 100%;
 }
 
 @media (max-width: 720px) {

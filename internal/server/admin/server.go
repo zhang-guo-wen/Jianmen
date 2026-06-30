@@ -727,13 +727,7 @@ func (s *Server) handleTestConnection(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	addr := target.Addr()
-	if addr == "" || target.Username == "" {
-		writeErrorText(w, http.StatusBadRequest, "host, port, and username are required")
-		return
-	}
-
-	clientConfig, err := store.ClientConfigForTarget(store.TargetConfig{
+	targetCfg := store.TargetConfig{
 		ID:                    target.ID,
 		Name:                  target.Name,
 		Host:                  target.Host,
@@ -749,7 +743,35 @@ func (s *Server) handleTestConnection(w http.ResponseWriter, r *http.Request) {
 		Disabled:              target.Disabled,
 		ExpiresAt:             target.ExpiresAt,
 		HostID:                target.HostID,
-	})
+	}
+	if targetCfg.Password == "" && targetCfg.PrivateKeyPath == "" && targetCfg.PrivateKeyPEM == "" && targetCfg.ID != "" {
+		storedTarget, err := s.store.TargetConfig(targetCfg.ID)
+		if err != nil {
+			writeJSON(w, http.StatusOK, map[string]any{"ok": false, "message": "配置错误: " + err.Error()})
+			return
+		}
+		storedTarget.Host = firstNonEmpty(targetCfg.Host, storedTarget.Host)
+		if targetCfg.Port != 0 {
+			storedTarget.Port = targetCfg.Port
+		}
+		storedTarget.Username = firstNonEmpty(targetCfg.Username, storedTarget.Username)
+		storedTarget.Name = firstNonEmpty(targetCfg.Name, storedTarget.Name)
+		storedTarget.HostID = firstNonEmpty(targetCfg.HostID, storedTarget.HostID)
+		storedTarget.InsecureIgnoreHostKey = targetCfg.InsecureIgnoreHostKey
+		storedTarget.HostKeyFingerprint = targetCfg.HostKeyFingerprint
+		storedTarget.KnownHostsPath = targetCfg.KnownHostsPath
+		storedTarget.Disabled = targetCfg.Disabled
+		storedTarget.ExpiresAt = targetCfg.ExpiresAt
+		targetCfg = storedTarget
+	}
+
+	addr := targetCfg.Addr()
+	if addr == "" || targetCfg.Username == "" {
+		writeErrorText(w, http.StatusBadRequest, "host, port, and username are required")
+		return
+	}
+
+	clientConfig, err := store.ClientConfigForTarget(targetCfg)
 	if err != nil {
 		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "message": "配置错误: " + err.Error()})
 		return

@@ -112,6 +112,120 @@
 - 删除和禁用操作要针对账号资源，避免误删主机容器导致理解混乱。
 - 账号有效期、禁用状态、主机禁用状态都要在连接路径实际生效。
 
+## Go 后端开发规范
+
+日期：2026-06-30
+
+### 包组织
+
+| 包 | 职责 |
+|---|------|
+| `cmd/` | 入口点，只做依赖组装和 `main()`，不放业务逻辑 |
+| `internal/model/` | 纯 GORM 实体定义，每个实体一个文件 |
+| `internal/store/` | 数据访问接口 + 实现，接口定义和错误哨兵放 `store.go` |
+| `internal/server/<name>/` | 服务器启动、路由注册、中间件 |
+| `internal/handler/<name>/` | HTTP handler 函数，按资源拆分文件 |
+| `internal/service/` | 纯业务逻辑，不依赖 HTTP/SSH 框架，供 handler 和 server 共享 |
+| `internal/proxy/` | 代理会话协议处理 |
+| `internal/config/` | 配置结构体和加载函数，不包含业务类型 |
+| `internal/util/` | 无状态工具函数 |
+
+### 分层原则
+
+```
+cmd/                  ← 组装依赖、启动
+  ↓
+internal/server/      ← 协议层（端口监听、路由、中间件）
+  ↓
+internal/handler/     ← 请求解析、响应序列化、调用 service
+  ↓
+internal/service/     ← 纯业务逻辑（不依赖 http.Request / ssh.Session）
+  ↓
+internal/store/       ← 数据访问
+internal/model/       ← 实体定义
+```
+
+**规则：**
+- handler 不做业务判断，只做参数校验和响应格式化
+- service 不做 SQL 操作，通过 store 接口访问数据
+- server 不做请求处理，只做路由和中间件
+- model 不 import 其他内部包（加密字段类型除外）
+- store 接口使用 `context.Context` 作为第一个参数
+
+### handler 拆分规则
+
+handler 包按资源拆分文件，每个文件包含该资源全套 handler 方法。
+
+### model 拆分规则
+
+- 每个 GORM 实体一个文件，文件名为实体名的 snake_case
+- 关联紧密的实体（如 User 和 UserPublicKey）可放同一文件
+
+### View 类型
+
+- View/DTO 类型属于表现层，定义在 `internal/handler/<name>/` 或独立的 `internal/dto/` 包
+- 不在 `store.go` 里堆 View 类型
+- 不在 model 包里定义 JSON 标签
+
+### server 包规则
+
+- `server.go` 只放 Server 结构体和 `New()` 构造函数
+- 路由注册放在 `routes.go`
+- 中间件放在 `middleware.go`
+- server 通过 handler 实例调用 handler 方法
+
+### 接口设计
+
+- 接口在使用方定义，不在实现方导出（Go 核心惯例）
+- 接口方法按资源分组，一个接口对应一个资源实体
+- 哨兵错误（ErrXxxNotFound）和接口定义同包
+- 外部类型不进接口签名，接口定义自己的参数/返回类型
+- 接口方法第一个参数必须是 `context.Context`
+
+### 构造函数
+
+- 构造函数命名 `New`，带依赖的用 `NewXxx`
+- 通过构造函数注入依赖，函数签名体现所有外部依赖
+- 不接受 `nil` 依赖，`nil` 意味着"不需要"而非"忘记传"
+
+### 错误处理
+
+- 使用 `fmt.Errorf("...: %w", err)` 包装错误，保留调用链
+- 错误字符串小写开头，不以句号结尾
+- 用 `errors.Is` / `errors.As` 做错误判断，不用 `==`
+- 返回 error 时其他值应为零值，调用方不应依赖 error 路径的返回值
+
+### 命名
+
+- handler 方法以 `handle` 开头
+- 文件名和包名一致
+- 避免 stutter：用 `rbac.Checker` 而不是 `rbac.RBACChecker`
+- 测试文件命名 `<file>_test.go`，与源文件同目录
+
+### 单文件行数硬上限
+
+| 层级 | 上限 |
+|------|------|
+| 入口 `cmd/` | 150 |
+| model 文件 | 200 |
+| handler 文件 | 500 |
+| service 文件 | 500 |
+| store 实现文件 | 500 |
+| server 路由文件 | 300 |
+| 代理会话文件 | 600 |
+| 通用工具 | 200 |
+
+超过上限时，必须先拆分再继续添加新功能。
+
+### 测试规范
+
+- 单元测试和源文件同目录，白盒测试
+- 集成测试也和源文件同目录（Go 惯例），用 build tag `//go:build integration` 区分
+- 不需要额外基础设施的集成测试（如 SQLite 内存库）不加 build tag，和单元测试一起跑
+- 需要 Docker/外部服务的集成测试加 `//go:build integration`，CI 中通过 `-tags=integration` 执行
+- handler 测试 mock store 接口，不连真实数据库
+- 测试辅助函数放 `test_helper.go`
+
 ## 实现和测试问题
 
 - 每次资源模型变化后，后端 API、前端页面、RBAC、审计、快速连接必须一起检查。

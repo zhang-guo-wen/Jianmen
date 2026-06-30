@@ -1,6 +1,9 @@
-# Jianmen one-click dev startup
-# Usage: .\start.ps1
-# First run will set up everything automatically
+# Jianmen dev startup / restart
+# Usage:
+#   .\start.ps1           - Full: stop old, build, launch, verify
+#   .\start.ps1 -SkipBuild - Skip build step (quick restart after code changes)
+
+param([switch]$SkipBuild)
 
 $ErrorActionPreference = "Stop"
 
@@ -121,14 +124,15 @@ try {
     $frontendPid = Join-Path $logsDir "frontend.pid"
 
     Write-Host "=== Jianmen Dev Startup ===" -ForegroundColor Cyan
+    if ($SkipBuild) { Write-Host "(skip build)" -ForegroundColor DarkGray }
     Write-Host ""
 
-    Write-Step "[1/6] Preparing directories..."
+    Write-Step "[1/5] Preparing directories..."
     New-Item -ItemType Directory -Force -Path $binDir | Out-Null
     New-Item -ItemType Directory -Force -Path $logsDir | Out-Null
     Write-Ok "runtime directories ready"
 
-    Write-Step "[2/6] Stopping old instances..."
+    Write-Step "[2/5] Stopping old instances..."
     Stop-ProcessFromPidFile $backendPid "bastion-core"
     Stop-ProcessFromPidFile $frontendPid "vite-dev"
     Stop-ProcessOnPort 47100 "Admin API"
@@ -141,20 +145,24 @@ try {
     Start-Sleep -Seconds 1
     Write-Ok "old instances stopped"
 
-    Write-Step "[3/6] Preparing config..."
-    if (-not (Test-Path "config.local.json")) {
-        Copy-Item "config.example.json" "config.local.json"
-        Write-Ok "created config.local.json from template"
+    if (-not $SkipBuild) {
+        Write-Step "[3/5] Building backend..."
+        go build -o "bin\bastion-core.exe" ".\cmd\bastion-core"
+        if ($LASTEXITCODE -ne 0) { throw "Backend build failed" }
+        Write-Ok "backend built: bin\bastion-core.exe"
     } else {
-        Write-Info "config.local.json already exists"
+        Write-Step "[3/5] Skipping build..."
+        if (-not (Test-Path "bin\bastion-core.exe")) {
+            Write-Info "binary not found, building anyway..."
+            go build -o "bin\bastion-core.exe" ".\cmd\bastion-core"
+            if ($LASTEXITCODE -ne 0) { throw "Backend build failed" }
+            Write-Ok "backend built: bin\bastion-core.exe"
+        } else {
+            Write-Ok "using existing binary"
+        }
     }
 
-    Write-Step "[4/6] Building backend..."
-    go build -o "bin\bastion-core.exe" ".\cmd\bastion-core"
-    if ($LASTEXITCODE -ne 0) { throw "Backend build failed" }
-    Write-Ok "backend built: bin\bastion-core.exe"
-
-    Write-Step "[5/6] Starting backend..."
+    Write-Step "[4/5] Starting backend..."
     Remove-Item $backendLog, $backendErrLog -Force -ErrorAction SilentlyContinue
     $backend = Start-Process -FilePath (Join-Path $binDir "bastion-core.exe") -ArgumentList "-config", "config.local.json" -WorkingDirectory $root -RedirectStandardOutput $backendLog -RedirectStandardError $backendErrLog -PassThru
     Set-Content -Path $backendPid -Value $backend.Id -Encoding ascii
@@ -164,7 +172,7 @@ try {
     Wait-TcpPort "Database gateway" "127.0.0.1" 33060 10
     Wait-TcpPort "SSH gateway" "127.0.0.1" 47102 10
 
-    Write-Step "[6/6] Starting frontend..."
+    Write-Step "[5/5] Starting frontend..."
     Push-Location "web"
     try {
         if (-not (Test-Path "node_modules")) {

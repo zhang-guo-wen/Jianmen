@@ -102,18 +102,18 @@ type DatabaseInstanceView struct {
 }
 
 type DatabaseAccountView struct {
-	ID         string     `json:"id"`
-	InstanceID string     `json:"instance_id"`
-	UniqueName string     `json:"unique_name"`
-	Username   string     `json:"username"`
-	Group      string     `json:"group,omitempty"`
-	Remark     string     `json:"remark,omitempty"`
-	ExpiresAt  *time.Time `json:"expires_at,omitempty"`
-	Status     string     `json:"status"`
-	ResourceID string     `json:"resource_id,omitempty"`
-	ResourceSeq int       `json:"resource_seq,omitempty"`
-	CreatedAt  string     `json:"created_at,omitempty"`
-	UpdatedAt  string     `json:"updated_at,omitempty"`
+	ID          string     `json:"id"`
+	InstanceID  string     `json:"instance_id"`
+	UniqueName  string     `json:"unique_name"`
+	Username    string     `json:"username"`
+	Group       string     `json:"group,omitempty"`
+	Remark      string     `json:"remark,omitempty"`
+	ExpiresAt   *time.Time `json:"expires_at,omitempty"`
+	Status      string     `json:"status"`
+	ResourceID  string     `json:"resource_id,omitempty"`
+	ResourceSeq int        `json:"resource_seq,omitempty"`
+	CreatedAt   string     `json:"created_at,omitempty"`
+	UpdatedAt   string     `json:"updated_at,omitempty"`
 }
 
 type SessionView struct {
@@ -130,12 +130,12 @@ type SessionView struct {
 }
 
 var (
-	ErrTargetNotFound      = errSentinel("target not found")
-	ErrHostNotFound        = errSentinel("host not found")
-	ErrDBProxyNotFound     = errSentinel("database proxy not found")
-	ErrDBAccountNotFound   = errSentinel("database account not found")
-	ErrDBInstanceNotFound  = errSentinel("database instance not found")
-	ErrTargetUnavailable   = errSentinel("target unavailable")
+	ErrTargetNotFound     = errSentinel("target not found")
+	ErrHostNotFound       = errSentinel("host not found")
+	ErrDBProxyNotFound    = errSentinel("database proxy not found")
+	ErrDBAccountNotFound  = errSentinel("database account not found")
+	ErrDBInstanceNotFound = errSentinel("database instance not found")
+	ErrTargetUnavailable  = errSentinel("target unavailable")
 )
 
 type sentinelError struct{ msg string }
@@ -160,6 +160,7 @@ type Store interface {
 	HostAccounts(hostID string) ([]TargetView, error)
 	Targets() []TargetView
 	Target(id string) (TargetView, error)
+	TargetConfig(id string) (TargetConfig, error)
 	AddTarget(target config.Target) (TargetView, error)
 	UpdateTarget(id string, target config.Target) (TargetView, error)
 	DeleteTarget(id string) error

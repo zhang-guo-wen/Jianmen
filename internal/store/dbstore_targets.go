@@ -138,6 +138,14 @@ func (s *DBStore) Target(id string) (TargetView, error) {
 	return s.targetView(a), nil
 }
 
+func (s *DBStore) TargetConfig(id string) (TargetConfig, error) {
+	var a model.HostAccount
+	if err := s.db.Preload("Host").First(&a, "id = ?", id).Error; err != nil {
+		return TargetConfig{}, fmt.Errorf("%w: %q", ErrTargetNotFound, id)
+	}
+	return s.targetConfig(a), nil
+}
+
 func (s *DBStore) AddTarget(target config.Target) (TargetView, error) {
 	target = normalizeConfigTarget(target)
 	if target.HostID == "" {

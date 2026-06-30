@@ -34,6 +34,10 @@ func main() {
 		logger.Error("failed to load config", "path", *configPath, "error", err)
 		os.Exit(1)
 	}
+	if !cfg.Database.Enabled {
+		logger.Error("metadata database is required; set database.enabled to true")
+		os.Exit(1)
+	}
 
 	// 初始化加密密钥（在任何数据库操作之前）
 	dataDir := filepath.Dir(cfg.Database.DSN)
@@ -69,33 +73,27 @@ func main() {
 			os.Exit(1)
 		}
 		defer sqlDB.Close()
+		migrationMode := "versioned"
 		if cfg.Database.AutoMigrate {
+			migrationMode = "automigrate"
 			if err := storage.AutoMigrate(db); err != nil {
 				logger.Error("failed to migrate metadata database", "driver", cfg.Database.Driver, "error", err)
 				os.Exit(1)
 			}
+		} else if err := storage.Migrate(db); err != nil {
+			logger.Error("failed to migrate metadata database", "driver", cfg.Database.Driver, "error", err)
+			os.Exit(1)
 		}
 		if err := storage.BootstrapMetadata(db, cfg); err != nil {
 			logger.Error("failed to bootstrap metadata database", "driver", cfg.Database.Driver, "error", err)
 			os.Exit(1)
 		}
 		metadataDB = db
-		logger.Info("metadata database ready", "driver", cfg.Database.Driver, "auto_migrate", cfg.Database.AutoMigrate)
+		logger.Info("metadata database ready", "driver", cfg.Database.Driver, "migration_mode", migrationMode)
 	}
 
-	var appStore store.Store
-	if metadataDB != nil {
-		appStore = store.NewDBStore(metadataDB)
-		logger.Info("using database-backed store")
-	} else {
-		adapter, err := store.NewStaticAdapter(cfg, metadataDB)
-		if err != nil {
-			logger.Error("failed to initialize static store", "error", err)
-			os.Exit(1)
-		}
-		appStore = adapter
-		logger.Info("using file-backed static store (no database configured)")
-	}
+	appStore := store.NewDBStore(metadataDB)
+	logger.Info("using database-backed store")
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()

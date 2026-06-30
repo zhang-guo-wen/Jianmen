@@ -1,154 +1,146 @@
 <template>
   <div class="view-stack">
-    <div class="toolbar">
-      <el-input
-        v-model="searchQuery"
-        clearable
-        :placeholder="t('roles.search')"
-        class="search-input"
-        @input="onSearch"
-      />
+    <el-alert v-if="error" :title="error" type="error" show-icon closable @close="error = ''" />
+
+    <DataTableCard
+    :data="roles"
+    :loading="loading"
+    :total="total"
+    v-model:page="page"
+    v-model:page-size="pageSize"
+    search-placeholder="搜索角色名称、描述"
+    @search="onSearch"
+  >
+    <template #toolbar-extra>
       <el-button type="primary" @click="openCreateDialog">{{ t('roles.create') }}</el-button>
+    </template>
+
+    <el-table-column :label="t('roles.name')" min-width="160">
+      <template #default="{ row }">
+        <strong>{{ row.name }}</strong>
+      </template>
+    </el-table-column>
+    <el-table-column prop="description" :label="t('roles.description')" min-width="200" show-overflow-tooltip />
+    <el-table-column :label="t('roles.builtin')" width="80">
+      <template #default="{ row }">
+        <el-tag :type="row.builtin ? 'warning' : 'info'" size="small">
+          {{ row.builtin ? t('common.yes') : t('common.no') }}
+        </el-tag>
+      </template>
+    </el-table-column>
+    <el-table-column :label="t('common.status')" width="80" align="center">
+      <template #default="{ row }">
+        <StatusSwitch
+          :model-value="row.status === 'active'"
+          :loading="togglingRoleId === String(row.id ?? '')"
+          @update:model-value="(val: boolean) => toggleStatus(row, val)"
+        />
+      </template>
+    </el-table-column>
+    <el-table-column :label="t('roles.permissionCount')" width="80" align="center">
+      <template #default="{ row }">
+        <span class="perm-count">{{ rolePermCount(row.id) }}</span>
+      </template>
+    </el-table-column>
+    <el-table-column :label="t('common.actions')" fixed="right" width="200">
+      <template #default="{ row }">
+        <el-button link type="primary" size="small" @click="openPermDialog(row)">分配权限</el-button>
+        <template v-if="!row.builtin">
+          <el-button
+            link
+            type="danger"
+            size="small"
+            :loading="deletingRoleId === String(row.id ?? '')"
+            @click="deleteRole(row)"
+          >
+            {{ t('common.delete') }}
+          </el-button>
+        </template>
+        <el-tooltip v-else content="内置角色不可删除" placement="top">
+          <span class="builtin-hint">内置</span>
+        </el-tooltip>
+      </template>
+    </el-table-column>
+  </DataTableCard>
+
+  <!-- Create Role Dialog -->
+  <FormDialog
+    v-model:visible="createDialogVisible"
+    :title="t('roles.create')"
+    :loading="submitting"
+    @submit="submitCreateRole"
+  >
+    <el-form ref="createFormRef" :model="createForm" :rules="createFormRules" label-position="top">
+      <el-form-item :label="t('roles.name')" prop="name">
+        <el-input v-model="createForm.name" placeholder="如：运维工程师" />
+      </el-form-item>
+      <el-collapse v-model="createMorePanels" class="more-collapse">
+        <el-collapse-item title="更多设置" name="more">
+          <el-form-item :label="t('roles.description')" prop="description">
+            <el-input v-model="createForm.description" type="textarea" :autosize="{ minRows: 2, maxRows: 4 }" placeholder="角色用途说明" />
+          </el-form-item>
+        </el-collapse-item>
+      </el-collapse>
+    </el-form>
+  </FormDialog>
+
+  <!-- Permission Assignment Dialog -->
+  <FormDialog
+    v-model:visible="permDialogVisible"
+    :title="permDialogTitle"
+    width="min(680px, calc(100vw - 32px))"
+    :loading="savingPerms"
+    submit-text="保存"
+    @submit="savePermissions"
+  >
+    <div class="perm-dialog-header">
+      <span class="perm-count-label">{{ selectedCountText }}</span>
     </div>
-
-    <el-alert v-if="error" :title="error" type="error" show-icon />
-
-    <el-table v-else v-loading="loading" :data="filteredRoles" height="420" row-key="id">
-      <el-table-column :label="t('roles.name')" min-width="160">
-        <template #default="{ row }">
-          <strong>{{ row.name }}</strong>
-        </template>
-      </el-table-column>
-      <el-table-column prop="description" :label="t('roles.description')" min-width="200" show-overflow-tooltip />
-      <el-table-column :label="t('roles.builtin')" width="80">
-        <template #default="{ row }">
-          <el-tag :type="row.builtin ? 'warning' : 'info'" size="small">
-            {{ row.builtin ? t('common.yes') : t('common.no') }}
-          </el-tag>
-        </template>
-      </el-table-column>
-      <el-table-column :label="t('common.status')" width="90">
-        <template #default="{ row }">
-          <el-tag :type="row.status === 'disabled' ? 'info' : 'success'" size="small">
-            {{ row.status === 'active' ? '已启用' : '已禁用' }}
-          </el-tag>
-        </template>
-      </el-table-column>
-      <el-table-column :label="t('roles.permissionCount')" width="80">
-        <template #default="{ row }">
-          <span class="perm-count">{{ rolePermCount(row.id) }}</span>
-        </template>
-      </el-table-column>
-      <el-table-column :label="t('common.actions')" fixed="right" width="260">
-        <template #default="{ row }">
-          <el-button link type="primary" @click="openPermDialog(row)">分配权限</el-button>
-          <template v-if="!row.builtin">
-            <el-button
-              link
-              :type="row.status === 'disabled' ? 'success' : 'warning'"
-              :loading="togglingRoleId === row.id"
-              @click="toggleStatus(row)"
-            >
-              {{ row.status === 'disabled' ? '启用' : '禁用' }}
-            </el-button>
-            <el-button link type="danger" :loading="deletingRoleId === row.id" @click="deleteRole(row)">
-              {{ t('common.delete') }}
-            </el-button>
-          </template>
-          <el-tooltip v-else content="内置角色不可删除" placement="top">
-            <span class="builtin-hint">内置角色</span>
-          </el-tooltip>
-        </template>
-      </el-table-column>
-    </el-table>
-
-    <el-empty v-if="!loading && !filteredRoles.length && !error" :description="t('roles.empty')" />
-
-    <!-- Create Role Dialog -->
-    <el-dialog
-      v-model="createDialogVisible"
-      :close-on-click-modal="!submitting"
-      :title="t('roles.create')"
-      class="form-dialog"
-      destroy-on-close
-      width="min(440px, calc(100vw - 32px))"
-    >
-      <el-form ref="createFormRef" :model="createForm" :rules="createFormRules" label-position="top">
-        <el-form-item :label="t('roles.name')" prop="name">
-          <el-input v-model="createForm.name" placeholder="如：运维工程师" />
-        </el-form-item>
-        <el-collapse v-model="createMorePanels" class="more-collapse">
-          <el-collapse-item title="更多设置" name="more">
-            <el-form-item :label="t('roles.description')" prop="description">
-              <el-input v-model="createForm.description" type="textarea" :autosize="{ minRows: 2, maxRows: 4 }" placeholder="角色用途说明" />
-            </el-form-item>
-          </el-collapse-item>
-        </el-collapse>
-      </el-form>
-      <template #footer>
-        <el-button :disabled="submitting" @click="createDialogVisible = false">{{ t('common.cancel') }}</el-button>
-        <el-button :loading="submitting" type="primary" @click="submitCreateRole">{{ t('common.create') }}</el-button>
-      </template>
-    </el-dialog>
-
-    <!-- Permission Assignment Dialog -->
-    <el-dialog
-      v-model="permDialogVisible"
-      :close-on-click-modal="!savingPerms"
-      :title="permDialogTitle"
-      class="form-dialog"
-      width="min(680px, calc(100vw - 32px))"
-      @closed="onPermDialogClosed"
-    >
-      <div class="perm-dialog-header">
-        <span class="perm-count-label">{{ selectedCountText }}</span>
-      </div>
-      <div class="perm-groups">
-        <div v-for="group in permGroups" :key="group.resource" class="perm-group">
-          <div class="perm-group-title">
-            <span class="perm-resource-icon">{{ group.icon }}</span>
-            {{ group.resource }}
-          </div>
-          <div class="perm-group-actions">
-            <el-button link size="small" @click="toggleGroup(group, true)">全选</el-button>
-            <el-button link size="small" @click="toggleGroup(group, false)">取消全选</el-button>
-          </div>
-          <el-checkbox-group v-model="selectedPerms" class="perm-check-grid">
-            <el-checkbox
-              v-for="perm in group.permissions"
-              :key="perm.action"
-              :label="perm.action"
-              :value="perm.action"
-              class="perm-check-item"
-            >
-              <span class="perm-action-label">{{ perm.action }}</span>
-              <span class="perm-action-desc">{{ perm.desc }}</span>
-            </el-checkbox>
-          </el-checkbox-group>
+    <div class="perm-groups">
+      <div v-for="group in permGroups" :key="group.resource" class="perm-group">
+        <div class="perm-group-title">
+          <span class="perm-resource-icon">{{ group.icon }}</span>
+          {{ group.resource }}
         </div>
+        <div class="perm-group-actions">
+          <el-button link size="small" @click="toggleGroup(group, true)">全选</el-button>
+          <el-button link size="small" @click="toggleGroup(group, false)">取消全选</el-button>
+        </div>
+        <el-checkbox-group v-model="selectedPerms" class="perm-check-grid">
+          <el-checkbox
+            v-for="perm in group.permissions"
+            :key="perm.action"
+            :label="perm.action"
+            :value="perm.action"
+            class="perm-check-item"
+          >
+            <span class="perm-action-label">{{ perm.action }}</span>
+            <span class="perm-action-desc">{{ perm.desc }}</span>
+          </el-checkbox>
+        </el-checkbox-group>
       </div>
-      <template #footer>
-        <el-button :disabled="savingPerms" @click="permDialogVisible = false">{{ t('common.cancel') }}</el-button>
-        <el-button :loading="savingPerms" type="primary" @click="savePermissions">保存</el-button>
-      </template>
-    </el-dialog>
+    </div>
+  </FormDialog>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue';
+import { computed, onMounted, reactive, ref, watch } from 'vue';
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus';
 
-import {
-  apiClient,
-  type RBACPermissionRecord,
-  type RBACRolePermissionRecord,
-  type RBACRoleRecord,
-  type RBACRolePayload,
-} from '@/api/client';
+import DataTableCard from '@/components/DataTableCard.vue';
+import FormDialog from '@/components/FormDialog.vue';
+import StatusSwitch from '@/components/StatusSwitch.vue';
+import * as api from '@/api/client';
 import { useI18n } from '@/i18n';
 
 const { t } = useI18n();
+const { apiClient } = api;
+
+type RBACRoleRecord = api.RBACRoleRecord;
+type RBACRolePayload = api.RBACRolePayload;
+type RBACPermissionRecord = api.RBACPermissionRecord;
+type RBACRolePermissionRecord = api.RBACRolePermissionRecord;
 
 interface PermItem { action: string; label: string; desc: string; }
 interface PermGroup { resource: string; icon: string; permissions: PermItem[]; }
@@ -199,10 +191,15 @@ const PERM_GROUPS: PermGroup[] = [
 const roles = ref<RBACRoleRecord[]>([]);
 const loading = ref(false);
 const error = ref('');
-const searchQuery = ref('');
 const submitting = ref(false);
-const togglingRoleId = ref<string>('');
-const deletingRoleId = ref<string>('');
+const togglingRoleId = ref('');
+const deletingRoleId = ref('');
+
+// Pagination
+const page = ref(1);
+const pageSize = ref(20);
+const total = ref(0);
+const keyword = ref('');
 
 // Create role
 const createDialogVisible = ref(false);
@@ -223,20 +220,12 @@ const allPermissions = ref<RBACPermissionRecord[]>([]);
 
 const permGroups = PERM_GROUPS;
 
-const filteredRoles = computed(() => {
-  const q = searchQuery.value.trim().toLowerCase();
-  if (!q) return roles.value;
-  return roles.value.filter(r =>
-    [r.name, r.description, String(r.id ?? '')].some(v => String(v ?? '').toLowerCase().includes(q))
-  );
-});
-
 const permDialogTitle = computed(() =>
-  currentPermRole.value ? `分配权限 — ${currentPermRole.value.name}` : '分配权限'
+  currentPermRole.value ? `分配权限 — ${currentPermRole.value.name}` : '分配权限',
 );
 
 const selectedCountText = computed(() =>
-  `${selectedPerms.value.length} 项已选`
+  `${selectedPerms.value.length} 项已选`,
 );
 
 const rolePermCountMap = computed(() => {
@@ -257,17 +246,30 @@ async function loadRoles() {
   loading.value = true;
   error.value = '';
   try {
-    const res = await apiClient.getRBACRoles();
-    roles.value = Array.isArray(res) ? res : (res as any).data ?? [];
+    const res = await apiClient.getRBACRoles({
+      page: page.value,
+      page_size: pageSize.value,
+      q: keyword.value || undefined,
+    });
+    roles.value = res.items ?? [];
+    total.value = res.total ?? 0;
     // Load all role-permission bindings
-    const bindings = await apiClient.getRBACRolePermissions();
-    existingBindings.value = Array.isArray(bindings) ? bindings : (bindings as any).data ?? [];
+    const bindingsRes = await apiClient.getRBACRolePermissions();
+    existingBindings.value = bindingsRes.items ?? [];
   } catch (err) {
     error.value = err instanceof Error ? err.message : t('roles.error.load');
   } finally {
     loading.value = false;
   }
 }
+
+function onSearch(q: string) {
+  keyword.value = q;
+  page.value = 1;
+  loadRoles();
+}
+
+watch([page, pageSize], () => loadRoles());
 
 // ── Create role ──
 function openCreateDialog() {
@@ -298,9 +300,9 @@ async function submitCreateRole() {
 }
 
 // ── Toggle / Delete ──
-async function toggleStatus(role: RBACRoleRecord) {
+async function toggleStatus(role: RBACRoleRecord, val: boolean) {
   const id = String(role.id ?? '');
-  const newStatus = role.status === 'disabled' ? 'active' : 'disabled';
+  const newStatus = val ? 'active' : 'disabled';
   togglingRoleId.value = id;
   try {
     await apiClient.updateRBACRole(id, {
@@ -324,7 +326,7 @@ async function deleteRole(role: RBACRoleRecord) {
     await ElMessageBox.confirm(
       `确认删除角色 "${role.name}"？`,
       t('common.delete'),
-      { confirmButtonText: t('common.delete'), cancelButtonText: t('common.cancel'), type: 'warning' }
+      { confirmButtonText: t('common.delete'), cancelButtonText: t('common.cancel'), type: 'warning' },
     );
   } catch { return; }
   deletingRoleId.value = id;
@@ -353,6 +355,13 @@ async function openPermDialog(role: RBACRoleRecord) {
   permDialogVisible.value = true;
 }
 
+watch(permDialogVisible, (val) => {
+  if (!val) {
+    selectedPerms.value = [];
+    currentPermRole.value = null;
+  }
+});
+
 function toggleGroup(group: PermGroup, select: boolean) {
   const actions = group.permissions.map(p => p.action);
   if (select) {
@@ -370,12 +379,12 @@ async function savePermissions() {
 
   savingPerms.value = true;
   try {
-    // 先确保所有选中 action 都有对应的 Permission 记录（不存在则自动创建）
+    // Ensure all selected actions have Permission records
     await ensurePermissionsExist(selectedPerms.value);
 
-    // 重新加载权限列表
+    // Reload permissions
     const permsRes = await apiClient.getRBACPermissions();
-    allPermissions.value = Array.isArray(permsRes) ? permsRes : (permsRes as any).data ?? [];
+    allPermissions.value = permsRes.items ?? [];
 
     // Build action → permission_id map
     const actionToPermId = new Map<string, string>();
@@ -390,7 +399,7 @@ async function savePermissions() {
       current.map(b => {
         const perm = allPermissions.value.find(p => String(p.id) === String(b.permission_id));
         return perm?.action ?? '';
-      }).filter(Boolean)
+      }).filter(Boolean),
     );
 
     const desiredActions = new Set(selectedPerms.value);
@@ -413,9 +422,9 @@ async function savePermissions() {
       }
     }
 
-    // Reload
-    const bindings = await apiClient.getRBACRolePermissions();
-    existingBindings.value = Array.isArray(bindings) ? bindings : (bindings as any).data ?? [];
+    // Reload bindings
+    const bindingsRes = await apiClient.getRBACRolePermissions();
+    existingBindings.value = bindingsRes.items ?? [];
 
     ElMessage.success(`权限已更新（${selectedPerms.value.length} 项）`);
     permDialogVisible.value = false;
@@ -427,7 +436,6 @@ async function savePermissions() {
 }
 
 async function ensurePermissionsExist(actions: string[]) {
-  // 构建已存在 action 的集合
   const existing = new Set(allPermissions.value.map(p => p.action).filter(Boolean) as string[]);
   for (const action of actions) {
     if (!existing.has(action)) {
@@ -437,28 +445,17 @@ async function ensurePermissionsExist(actions: string[]) {
   }
 }
 
-function onSearch() {}
-
-function onPermDialogClosed() {
-  selectedPerms.value = [];
-  currentPermRole.value = null;
-}
-
 onMounted(async () => {
   await loadRoles();
   // Also load all permissions once for the dialog mapping
   try {
     const res = await apiClient.getRBACPermissions();
-    allPermissions.value = Array.isArray(res) ? res : (res as any).data ?? [];
+    allPermissions.value = res.items ?? [];
   } catch { /* non-critical */ }
 });
 </script>
 
 <style scoped>
-.view-stack { display: grid; gap: 14px; }
-.toolbar { display: flex; gap: 10px; align-items: center; }
-.search-input { max-width: 280px; }
-.col-mono { font-family: "SF Mono", "Cascadia Code", "Consolas", monospace; font-size: 11px; color: #64748b; }
 .perm-count { font-weight: 600; color: var(--el-color-primary); }
 .builtin-hint { font-size: 12px; color: #94a3b8; cursor: default; }
 
@@ -478,5 +475,4 @@ onMounted(async () => {
 .more-collapse { border-top: 1px solid #eef2f7; border-bottom: 0; }
 .more-collapse :deep(.el-collapse-item__header) { color: #374151; font-size: 13px; font-weight: 700; }
 .more-collapse :deep(.el-collapse-item__wrap) { border-bottom: 0; }
-:global(.form-dialog .el-dialog__body) { max-height: min(66vh, 620px); overflow-y: auto; padding-right: 22px; }
 </style>

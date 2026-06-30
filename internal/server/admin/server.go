@@ -3,9 +3,6 @@ package admin
 import (
 	"bufio"
 	"context"
-	"crypto/rand"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -20,12 +17,11 @@ import (
 
 	"golang.org/x/crypto/ssh"
 	"gorm.io/gorm"
-	"jianmen/internal/access"
 	"jianmen/internal/config"
 	"jianmen/internal/model"
 	"jianmen/internal/rbac"
-	"jianmen/internal/util"
 	"jianmen/internal/store"
+	"jianmen/internal/util"
 )
 
 type Server struct {
@@ -36,12 +32,14 @@ type Server struct {
 	logger        *slog.Logger
 	dataDir       string
 	superAdminIDs map[string]bool // 超级管理员用户 ID 集合，直接拥有全部权限
+	loginLimiter  *loginLimiter
 }
 
 type sessionListItem struct {
 	ID              string  `json:"id"`
 	User            string  `json:"user"`
 	Target          string  `json:"target"`
+	AccountUsername string  `json:"account_username,omitempty"`
 	ClientIP        string  `json:"client_ip"`
 	StartedAt       string  `json:"started_at"`
 	EndedAt         string  `json:"ended_at,omitempty"`
@@ -68,11 +66,12 @@ type dbConnectionListItem struct {
 	Path         string `json:"path"`
 }
 
-type pagedHostList struct {
-	Data     []store.HostView `json:"data"`
-	Page     int               `json:"page"`
-	PageSize int               `json:"page_size"`
-	Total    int               `json:"total"`
+// pageResponse 统一分页响应
+type pageResponse struct {
+	Items    any `json:"items"`
+	Total    int `json:"total"`
+	Page     int `json:"page"`
+	PageSize int `json:"page_size"`
 }
 
 var menuOrder = []struct {
@@ -120,7 +119,7 @@ func New(cfg *config.Config, store store.Store, logger *slog.Logger, dataDir str
 	}
 	// 收集所有超级管理员用户 ID
 	superAdminIDs := LoadSuperAdminIDs(cfg, dataDir)
-	return &Server{cfg: cfg, store: store, db: db, rbacChecker: checker, logger: logger, dataDir: dataDir, superAdminIDs: superAdminIDs}
+	return &Server{cfg: cfg, store: store, db: db, rbacChecker: checker, logger: logger, dataDir: dataDir, superAdminIDs: superAdminIDs, loginLimiter: newDefaultLoginLimiter()}
 }
 
 func (s *Server) ListenAndServe(ctx context.Context) error {
@@ -128,7 +127,7 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 	mux.HandleFunc("/", s.handleIndex)
 	mux.HandleFunc("/api/init/status", s.handleInitStatus)
 	mux.HandleFunc("/api/init/setup", s.handleInitSetup)
-	mux.HandleFunc("/api/init/encryption-key", s.handleInitEncryptionKey)
+	mux.HandleFunc("/api/init/encryption-key", s.withAuthAndUser(s.handleInitEncryptionKey))
 	mux.HandleFunc("/api/login", s.handleLogin)
 	mux.HandleFunc("/api/health", s.withAuthAndUser(s.handleHealth))
 	mux.HandleFunc("/api/users", s.withAuthAndUser(s.handleUsers))
@@ -145,6 +144,7 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 	mux.HandleFunc("/api/db/gateway", s.withAuthAndUser(s.handleDBGateway))
 	mux.HandleFunc("/api/db/instances", s.withAuthAndUser(s.handleDBInstances))
 	mux.HandleFunc("/api/db/instances/", s.withAuthAndUser(s.handleDBInstance))
+	mux.HandleFunc("/api/db/accounts/test", s.withAuthAndUser(s.handleTestDBConnection))
 	mux.HandleFunc("/api/db/accounts/test/", s.withAuthAndUser(s.handleTestDBConnection))
 	mux.HandleFunc("/api/db/accounts/", s.withAuthAndUser(s.handleDBAccount))
 	mux.HandleFunc("/api/db/connections", s.withAuthAndUser(s.handleDBConnections))
@@ -383,10 +383,23 @@ func (s *Server) handleUser(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (s *Server) listUsers(w http.ResponseWriter, _ *http.Request) {
+func (s *Server) listUsers(w http.ResponseWriter, r *http.Request) {
 	if s.db != nil {
+		q := strings.TrimSpace(r.URL.Query().Get("q"))
+		tx := s.db.Model(&model.User{})
+		if q != "" {
+			like := "%" + q + "%"
+			tx = tx.Where("username LIKE ? OR display_name LIKE ? OR email LIKE ?", like, like, like)
+		}
+		var total int64
+		tx.Count(&total)
+		page := positiveIntRequestQuery(r, "page", 1)
+		pageSize := positiveIntRequestQuery(r, "page_size", 20)
+		if pageSize > 200 {
+			pageSize = 200
+		}
 		var users []model.User
-		if err := s.db.Order("created_at DESC").Find(&users).Error; err != nil {
+		if err := tx.Order("created_at DESC").Offset((page - 1) * pageSize).Limit(pageSize).Find(&users).Error; err != nil {
 			writeError(w, http.StatusInternalServerError, err)
 			return
 		}
@@ -399,7 +412,7 @@ func (s *Server) listUsers(w http.ResponseWriter, _ *http.Request) {
 		for i, u := range users {
 			out[i] = userWithFlag{User: u, IsSuperAdmin: s.isSuperAdmin(u.ID)}
 		}
-		writeJSON(w, http.StatusOK, out)
+		writeJSON(w, http.StatusOK, pageResponse{Items: out, Total: int(total), Page: page, PageSize: pageSize})
 		return
 	}
 	// Fallback to store-based listing
@@ -428,22 +441,22 @@ func (s *Server) createUser(w http.ResponseWriter, r *http.Request) {
 		writeErrorText(w, http.StatusBadRequest, "password is required")
 		return
 	}
-	// Hash password
-	pwHash := sha256.Sum256([]byte(password))
-	// Generate random token
-	tokenBytes := make([]byte, 32)
-	if _, err := rand.Read(tokenBytes); err != nil {
+	passwordHash, err := hashPassword(password)
+	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	rawToken := hex.EncodeToString(tokenBytes)
-	tokenHash := sha256.Sum256([]byte(rawToken))
+	rawToken, tokenHash, err := newAPIToken()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
 
 	user := model.User{
 		ID:           model.NewID(),
 		Username:     username,
-		PasswordHash: hex.EncodeToString(pwHash[:]),
-		TokenHash:    hex.EncodeToString(tokenHash[:]),
+		PasswordHash: passwordHash,
+		TokenHash:    tokenHash,
 		DisplayName:  strings.TrimSpace(req.DisplayName),
 		Email:        strings.TrimSpace(req.Email),
 		Status:       "active",
@@ -599,7 +612,13 @@ func (s *Server) handleHost(w http.ResponseWriter, r *http.Request) {
 			writeHostStoreError(w, err)
 			return
 		}
-		writeJSON(w, http.StatusOK, accounts)
+		resp := paginateSlice(accounts, r, func(v store.TargetView, q string) bool {
+			return strings.Contains(strings.ToLower(v.Username), q) ||
+				strings.Contains(strings.ToLower(v.Name), q) ||
+				strings.Contains(strings.ToLower(v.Group), q) ||
+				strings.Contains(strings.ToLower(v.Remark), q)
+		})
+		writeJSON(w, http.StatusOK, resp)
 		return
 	}
 	if child != "" {
@@ -656,7 +675,14 @@ func (s *Server) handleTargets(w http.ResponseWriter, r *http.Request) {
 			s.forbidden(w)
 			return
 		}
-		writeJSON(w, http.StatusOK, s.store.Targets())
+		resp := paginateSlice(s.store.Targets(), r, func(v store.TargetView, q string) bool {
+			return strings.Contains(strings.ToLower(v.Name), q) ||
+				strings.Contains(strings.ToLower(v.Username), q) ||
+				strings.Contains(strings.ToLower(v.Host), q) ||
+				strings.Contains(strings.ToLower(v.Group), q) ||
+				strings.Contains(strings.ToLower(v.Remark), q)
+		})
+		writeJSON(w, http.StatusOK, resp)
 	case http.MethodPost:
 		if !s.requirePermission(r, rbac.ActionTargetCreate) {
 			s.forbidden(w)
@@ -696,25 +722,79 @@ func (s *Server) handleTestConnection(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer r.Body.Close()
-	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
-	var target config.Target
-	if err := json.NewDecoder(r.Body).Decode(&target); err != nil {
+	var raw map[string]json.RawMessage
+	if err := json.NewDecoder(r.Body).Decode(&raw); err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
+	encoded, err := json.Marshal(raw)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	var target config.Target
+	if err := json.Unmarshal(encoded, &target); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	hostKeyConfigProvided := false
+	if _, ok := raw["insecure_ignore_host_key"]; ok {
+		hostKeyConfigProvided = true
+	}
+	if _, ok := raw["host_key_fingerprint"]; ok {
+		hostKeyConfigProvided = true
+	}
+	if _, ok := raw["known_hosts_path"]; ok {
+		hostKeyConfigProvided = true
+	}
 
-	addr := target.Addr()
-	if addr == "" || target.Username == "" {
+	targetCfg := store.TargetConfig{
+		ID:                    target.ID,
+		Name:                  target.Name,
+		Host:                  target.Host,
+		Port:                  target.Port,
+		Username:              target.Username,
+		Password:              target.Password,
+		PrivateKeyPath:        target.PrivateKeyPath,
+		PrivateKeyPEM:         target.PrivateKeyPEM,
+		Passphrase:            target.Passphrase,
+		InsecureIgnoreHostKey: target.InsecureIgnoreHostKey,
+		HostKeyFingerprint:    target.HostKeyFingerprint,
+		KnownHostsPath:        target.KnownHostsPath,
+		Disabled:              target.Disabled,
+		ExpiresAt:             target.ExpiresAt,
+		HostID:                target.HostID,
+	}
+	if targetCfg.Password == "" && targetCfg.PrivateKeyPath == "" && targetCfg.PrivateKeyPEM == "" && targetCfg.ID != "" {
+		storedTarget, err := s.store.TargetConfig(targetCfg.ID)
+		if err != nil {
+			writeJSON(w, http.StatusOK, map[string]any{"ok": false, "message": "配置错误: " + err.Error()})
+			return
+		}
+		storedTarget.Host = firstNonEmpty(targetCfg.Host, storedTarget.Host)
+		if targetCfg.Port != 0 {
+			storedTarget.Port = targetCfg.Port
+		}
+		storedTarget.Username = firstNonEmpty(targetCfg.Username, storedTarget.Username)
+		storedTarget.Name = firstNonEmpty(targetCfg.Name, storedTarget.Name)
+		storedTarget.HostID = firstNonEmpty(targetCfg.HostID, storedTarget.HostID)
+		if hostKeyConfigProvided {
+			storedTarget.InsecureIgnoreHostKey = targetCfg.InsecureIgnoreHostKey
+			storedTarget.HostKeyFingerprint = targetCfg.HostKeyFingerprint
+			storedTarget.KnownHostsPath = targetCfg.KnownHostsPath
+		}
+		storedTarget.Disabled = targetCfg.Disabled
+		storedTarget.ExpiresAt = targetCfg.ExpiresAt
+		targetCfg = storedTarget
+	}
+
+	addr := targetCfg.Addr()
+	if addr == "" || targetCfg.Username == "" {
 		writeErrorText(w, http.StatusBadRequest, "host, port, and username are required")
 		return
 	}
 
-	// 测试连接默认允许跳过主机密钥验证（除非用户明确配置了指纹或 known_hosts）
-	if !target.InsecureIgnoreHostKey && target.HostKeyFingerprint == "" && target.KnownHostsPath == "" {
-		target.InsecureIgnoreHostKey = true
-	}
-
-	clientConfig, err := access.ClientConfigForTarget(target)
+	clientConfig, err := store.ClientConfigForTarget(targetCfg)
 	if err != nil {
 		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "message": "配置错误: " + err.Error()})
 		return
@@ -766,7 +846,6 @@ func (s *Server) handleTarget(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleUpdateTarget(w http.ResponseWriter, r *http.Request, id string) {
 	defer r.Body.Close()
-	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	var target config.Target
 	if err := json.NewDecoder(r.Body).Decode(&target); err != nil {
 		writeError(w, http.StatusBadRequest, err)
@@ -818,6 +897,23 @@ func parseListenAddr(addr string) (host string, port int) {
 	return
 }
 
+// ensureDBPort 确保数据库地址包含端口，缺省则按协议补默认端口
+func ensureDBPort(address, protocol string) string {
+	address = strings.TrimSpace(address)
+	if address == "" {
+		return address
+	}
+	// 已含端口则原样返回
+	if _, _, err := net.SplitHostPort(address); err == nil {
+		return address
+	}
+	defaultPort := "3306"
+	if protocol == "postgres" {
+		defaultPort = "5432"
+	}
+	return address + ":" + defaultPort
+}
+
 // -- db instances --
 
 func (s *Server) handleDBInstances(w http.ResponseWriter, r *http.Request) {
@@ -827,7 +923,15 @@ func (s *Server) handleDBInstances(w http.ResponseWriter, r *http.Request) {
 			s.forbidden(w)
 			return
 		}
-		writeJSON(w, http.StatusOK, s.store.DatabaseInstances())
+		instances := s.store.DatabaseInstances()
+		resp := paginateSlice(instances, r, func(v store.DatabaseInstanceView, q string) bool {
+			return strings.Contains(strings.ToLower(v.Name), q) ||
+				strings.Contains(strings.ToLower(v.Address), q) ||
+				strings.Contains(strings.ToLower(v.Protocol), q) ||
+				strings.Contains(strings.ToLower(v.Group), q) ||
+				strings.Contains(strings.ToLower(v.Remark), q)
+		})
+		writeJSON(w, http.StatusOK, resp)
 	case http.MethodPost:
 		if !s.requirePermission(r, rbac.ActionDBProxyCreate) {
 			s.forbidden(w)
@@ -878,41 +982,13 @@ func (s *Server) handleDBInstance(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 
-			page := positiveIntRequestQuery(r, "page", 1)
-			size := positiveIntRequestQuery(r, "size", 20)
-			if size > 100 {
-				size = 100
-			}
-			search := strings.TrimSpace(r.URL.Query().Get("search"))
-
-			filtered := accounts
-			if search != "" {
-				searchLower := strings.ToLower(search)
-				matched := make([]store.DatabaseAccountView, 0, len(accounts))
-				for _, acc := range accounts {
-					if strings.Contains(strings.ToLower(acc.UniqueName), searchLower) ||
-						strings.Contains(strings.ToLower(acc.Username), searchLower) ||
-						strings.Contains(strings.ToLower(acc.Group), searchLower) {
-						matched = append(matched, acc)
-					}
-				}
-				filtered = matched
-			}
-
-			total := len(filtered)
-			start := (page - 1) * size
-			if start > total {
-				start = total
-			}
-			end := start + size
-			if end > total {
-				end = total
-			}
-
-			writeJSON(w, http.StatusOK, map[string]any{
-				"items": filtered[start:end],
-				"total": total,
+			resp := paginateSlice(accounts, r, func(v store.DatabaseAccountView, q string) bool {
+				return strings.Contains(strings.ToLower(v.UniqueName), q) ||
+					strings.Contains(strings.ToLower(v.Username), q) ||
+					strings.Contains(strings.ToLower(v.Group), q) ||
+					strings.Contains(strings.ToLower(v.Remark), q)
 			})
+			writeJSON(w, http.StatusOK, resp)
 		case http.MethodPost:
 			s.handleCreateDBAccount(w, r, id)
 		default:
@@ -978,7 +1054,6 @@ func (s *Server) handleUpdateDBInstance(w http.ResponseWriter, r *http.Request, 
 
 func (s *Server) handleCreateDBAccount(w http.ResponseWriter, r *http.Request, instanceID string) {
 	defer r.Body.Close()
-	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	var payload struct {
 		Username  string     `json:"username"`
 		Password  string     `json:"password"`
@@ -1035,7 +1110,6 @@ func (s *Server) handleDBAccount(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleUpdateDBAccount(w http.ResponseWriter, r *http.Request, id string) {
 	defer r.Body.Close()
-	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	var payload struct {
 		Username  string     `json:"username"`
 		Password  string     `json:"password"`
@@ -1102,7 +1176,7 @@ func (s *Server) handleUserSessions(w http.ResponseWriter, r *http.Request) {
 	} else if errors.Is(err, gorm.ErrRecordNotFound) {
 		// 尝试数据库账号
 		var dbAccount model.DatabaseAccount
-		if err := s.db.Where("id = ? AND status = ?", req.TargetID, "active").First(&dbAccount).Error; err == nil {
+		if err := s.db.Preload("Instance").Where("id = ? AND status = ?", req.TargetID, "active").First(&dbAccount).Error; err == nil {
 			// 验证数据库实例未被禁用
 			if dbAccount.Instance.Status == "disabled" {
 				writeErrorText(w, http.StatusForbidden, "database instance is disabled")
@@ -1168,7 +1242,13 @@ func (s *Server) handleSessions(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, sessions)
+	resp := paginateSlice(sessions, r, func(v sessionListItem, q string) bool {
+		return strings.Contains(strings.ToLower(v.User), q) ||
+			strings.Contains(strings.ToLower(v.Target), q) ||
+			strings.Contains(strings.ToLower(v.Protocol), q) ||
+			strings.Contains(strings.ToLower(v.ClientIP), q)
+	})
+	writeJSON(w, http.StatusOK, resp)
 }
 
 func (s *Server) handleSessionArtifact(w http.ResponseWriter, r *http.Request) {
@@ -1198,13 +1278,19 @@ func (s *Server) handleSessionArtifact(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (s *Server) handleDBConnections(w http.ResponseWriter, _ *http.Request) {
+func (s *Server) handleDBConnections(w http.ResponseWriter, r *http.Request) {
 	connections, err := s.listDBConnections()
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, connections)
+	resp := paginateSlice(connections, r, func(v dbConnectionListItem, q string) bool {
+		return strings.Contains(strings.ToLower(v.AccountName), q) ||
+			strings.Contains(strings.ToLower(v.InstanceName), q) ||
+			strings.Contains(strings.ToLower(v.Protocol), q) ||
+			strings.Contains(strings.ToLower(v.AuthUser), q)
+	})
+	writeJSON(w, http.StatusOK, resp)
 }
 
 func (s *Server) handleDBConnectionArtifact(w http.ResponseWriter, r *http.Request) {
@@ -1247,6 +1333,7 @@ func (s *Server) listSessions() ([]sessionListItem, error) {
 			SessionID       string `json:"session_id"`
 			User            string `json:"user"`
 			Target          string `json:"target"`
+			AccountUsername string `json:"account_username"`
 			ClientIP        string `json:"client_ip"`
 			StartedAt       string `json:"started_at"`
 			EndedAt         string `json:"ended_at"`
@@ -1267,6 +1354,7 @@ func (s *Server) listSessions() ([]sessionListItem, error) {
 			ID:              firstNonEmpty(meta.SessionID, entry.Name()),
 			User:            meta.User,
 			Target:          meta.Target,
+			AccountUsername: meta.AccountUsername,
 			ClientIP:        meta.ClientIP,
 			StartedAt:       meta.StartedAt,
 			EndedAt:         meta.EndedAt,
@@ -1390,12 +1478,9 @@ func (s *Server) withAuthAndUser(next http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 
-		// Try per-user token lookup first
 		if s.db != nil {
-			hash := sha256.Sum256([]byte(token))
-			hashStr := hex.EncodeToString(hash[:])
 			var user model.User
-			if err := s.db.Where("token_hash = ? AND status = ?", hashStr, "active").First(&user).Error; err == nil {
+			if err := s.db.Where("token_hash = ? AND status = ?", hashToken(token), "active").First(&user).Error; err == nil {
 				ctx := context.WithValue(r.Context(), ctxKeyUserID, user.ID)
 				ctx = context.WithValue(ctx, ctxKeyUsername, user.Username)
 				next(w, r.WithContext(ctx))
@@ -1424,15 +1509,16 @@ func usernameFromRequest(r *http.Request) string {
 func (s *Server) requirePermission(r *http.Request, action string) bool {
 	userID := userIDFromRequest(r)
 	if userID == "" {
-		// Shared token fallback — no per-user RBAC, allow all
-		return true
+		s.logger.Warn("permission denied: missing authenticated user", "action", action)
+		return false
 	}
 	// 超级管理员拥有全部权限，无需 RBAC 检查
 	if s.isSuperAdmin(userID) {
 		return true
 	}
 	if s.rbacChecker == nil {
-		return true
+		s.logger.Warn("permission denied: rbac checker unavailable", "user_id", userID, "action", action)
+		return false
 	}
 	allowed, err := s.rbacChecker.HasPermission(userID, action, "", "")
 	if err != nil {
@@ -1528,35 +1614,34 @@ func userIDFromPath(path string) (string, bool) {
 	return id, true
 }
 
-func paginateHosts(hosts []store.HostView, r *http.Request) pagedHostList {
-	query := strings.TrimSpace(strings.ToLower(r.URL.Query().Get("q")))
-	if query != "" {
-		filtered := hosts[:0]
-		for _, host := range hosts {
-			values := []string{
-				host.ID,
-				host.Name,
-				host.Group,
-				host.Address,
-				strconv.Itoa(host.Port),
-				host.Remark,
-			}
-			for _, value := range values {
-				if strings.Contains(strings.ToLower(value), query) {
-					filtered = append(filtered, host)
-					break
-				}
+func paginateHosts(hosts []store.HostView, r *http.Request) pageResponse {
+	return paginateSlice(hosts, r, func(h store.HostView, q string) bool {
+		return strings.Contains(strings.ToLower(h.Name), q) ||
+			strings.Contains(strings.ToLower(h.Address), q) ||
+			strings.Contains(strings.ToLower(h.Group), q) ||
+			strings.Contains(strings.ToLower(h.Remark), q) ||
+			strings.Contains(strings.ToLower(strconv.Itoa(h.Port)), q)
+	})
+}
+
+// paginateSlice 对内存切片做分页和搜索过滤
+func paginateSlice[T any](items []T, r *http.Request, match func(T, string) bool) pageResponse {
+	q := strings.TrimSpace(strings.ToLower(r.URL.Query().Get("q")))
+	if q != "" {
+		filtered := make([]T, 0, len(items))
+		for _, item := range items {
+			if match(item, q) {
+				filtered = append(filtered, item)
 			}
 		}
-		hosts = filtered
+		items = filtered
 	}
-
 	page := positiveIntRequestQuery(r, "page", 1)
 	pageSize := positiveIntRequestQuery(r, "page_size", 20)
 	if pageSize > 200 {
 		pageSize = 200
 	}
-	total := len(hosts)
+	total := len(items)
 	start := (page - 1) * pageSize
 	if start > total {
 		start = total
@@ -1565,11 +1650,11 @@ func paginateHosts(hosts []store.HostView, r *http.Request) pagedHostList {
 	if end > total {
 		end = total
 	}
-	return pagedHostList{
-		Data:     hosts[start:end],
+	return pageResponse{
+		Items:    items[start:end],
+		Total:    total,
 		Page:     page,
 		PageSize: pageSize,
-		Total:    total,
 	}
 }
 
@@ -1625,7 +1710,7 @@ func dbAccountIDFromPath(path string) (string, bool) {
 
 func writeHostStoreError(w http.ResponseWriter, err error) {
 	switch {
-	case errors.Is(err, store.ErrHostNotFound) || errors.Is(err, access.ErrHostNotFound):
+	case errors.Is(err, store.ErrHostNotFound):
 		writeError(w, http.StatusNotFound, err)
 	default:
 		writeError(w, http.StatusBadRequest, err)
@@ -1634,8 +1719,7 @@ func writeHostStoreError(w http.ResponseWriter, err error) {
 
 func writeDBStoreError(w http.ResponseWriter, err error) {
 	switch {
-	case errors.Is(err, store.ErrDBProxyNotFound) || errors.Is(err, store.ErrDBAccountNotFound) || errors.Is(err, store.ErrDBInstanceNotFound) ||
-		errors.Is(err, access.ErrDBProxyNotFound) || errors.Is(err, access.ErrDBAccountNotFound) || errors.Is(err, access.ErrDBInstanceNotFound):
+	case errors.Is(err, store.ErrDBProxyNotFound) || errors.Is(err, store.ErrDBAccountNotFound) || errors.Is(err, store.ErrDBInstanceNotFound):
 		writeError(w, http.StatusNotFound, err)
 	default:
 		writeError(w, http.StatusBadRequest, err)
@@ -1644,7 +1728,7 @@ func writeDBStoreError(w http.ResponseWriter, err error) {
 
 func writeTargetStoreError(w http.ResponseWriter, err error) {
 	switch {
-	case errors.Is(err, store.ErrTargetNotFound) || errors.Is(err, access.ErrTargetNotFound):
+	case errors.Is(err, store.ErrTargetNotFound):
 		writeError(w, http.StatusNotFound, err)
 	default:
 		writeError(w, http.StatusBadRequest, err)

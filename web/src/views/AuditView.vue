@@ -1,5 +1,5 @@
 <template>
-  <div class="view-stack">
+  <div class="view-stack audit-view">
     <div class="toolbar">
       <el-segmented v-model="auditScope" :options="scopeOptions" />
       <el-button :loading="currentLoading" type="primary" @click="refreshCurrent">
@@ -7,137 +7,107 @@
       </el-button>
     </div>
 
-    <el-card v-if="auditScope === 'ssh'" class="placeholder-panel" shadow="never">
-      <template #header>
-        <div class="toolbar">
-          <span>{{ t('audit.title.sshSessions') }}</span>
-          <el-tag>{{ filteredSessions.length }}</el-tag>
-        </div>
-      </template>
-      <div class="filter-bar">
-        <el-input
-          v-model="filterUser"
-          placeholder="用户"
-          :prefix-icon="Search"
-          clearable
-          size="small"
-          style="width:140px"
-        />
-        <el-input
-          v-model="filterTarget"
-          placeholder="目标"
-          :prefix-icon="Search"
-          clearable
-          size="small"
-          style="width:160px"
-        />
-        <el-date-picker
-          v-model="filterDateRange"
-          type="datetimerange"
-          :shortcuts="dateShortcuts"
-          range-separator="至"
-          start-placeholder="开始"
-          end-placeholder="结束"
-          size="small"
-          clearable
-          format="MM/DD HH:mm"
-          style="width:280px"
-        />
-        <el-button v-if="hasFilter" size="small" text type="primary" @click="clearFilters">清除</el-button>
+    <template v-if="auditScope === 'ssh'">
+      <el-alert v-if="sessionError" :title="sessionError" type="error" show-icon style="margin-bottom: 12px" />
+      <div class="page-container">
+        <DataTableCard
+          :data="sessions"
+          :loading="sessionsLoading"
+          :total="sessionTotal"
+          v-model:page="sessionPage"
+          v-model:page-size="sessionPageSize"
+          search-placeholder="搜索会话..."
+          @search="onSessionSearch"
+        >
+          <el-table-column :label="t('audit.column.instance')" min-width="150" show-overflow-tooltip>
+            <template #default="{ row }">
+              {{ row.target || row.target_id || t('common.none') }}
+            </template>
+          </el-table-column>
+          <el-table-column :label="t('audit.column.account')" min-width="120" show-overflow-tooltip>
+            <template #default="{ row }">
+              {{ row.account_username || '-' }}
+            </template>
+          </el-table-column>
+          <el-table-column :label="t('audit.column.operator')" min-width="120">
+            <template #default="{ row }">
+              {{ sessionUser(row) }}
+            </template>
+          </el-table-column>
+          <el-table-column :label="t('audit.column.protocol')" width="90">
+            <template #default="{ row }">
+              <el-tag :type="sessionProtocolTag(row)" size="small" effect="plain">{{ sessionProtocol(row) }}</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column :label="t('sessions.column.started')" width="170" show-overflow-tooltip class-name="col-time">
+            <template #default="{ row }">
+              {{ formatTime(row.started_at ?? row.startedAt) }}
+            </template>
+          </el-table-column>
+          <el-table-column :label="t('audit.column.duration')" width="90">
+            <template #default="{ row }">
+              {{ formatDurationSeconds(row.duration_seconds) }}
+            </template>
+          </el-table-column>
+          <el-table-column :label="t('common.actions')" fixed="right" width="180">
+            <template #default="{ row }">
+              <el-button :disabled="!hasReplay(row)" link type="success" @click="loadSessionArtifact(row, 'replay')">
+                {{ t('audit.action.replay') }}
+              </el-button>
+              <el-button link type="primary" @click="loadSessionLog(row)">
+                {{ t('audit.action.log') }}
+              </el-button>
+            </template>
+          </el-table-column>
+        </DataTableCard>
       </div>
-      <el-alert v-if="sessionError" :title="sessionError" type="error" show-icon />
-      <el-table v-else v-loading="sessionsLoading" :data="pagedSessions" height="380" row-key="id">
-        <el-table-column :label="t('audit.column.instance')" min-width="150" show-overflow-tooltip>
-          <template #default="{ row }">
-            {{ row.target || row.target_id || t('common.none') }}
-          </template>
-        </el-table-column>
-        <el-table-column :label="t('audit.column.account')" min-width="120" show-overflow-tooltip>
-          <template #default="{ row }">
-            {{ row.account_username || '-' }}
-          </template>
-        </el-table-column>
-        <el-table-column :label="t('audit.column.operator')" min-width="120">
-          <template #default="{ row }">
-            {{ sessionUser(row) }}
-          </template>
-        </el-table-column>
-        <el-table-column :label="t('audit.column.protocol')" width="90">
-          <template #default="{ row }">
-            <el-tag :type="sessionProtocolTag(row)" size="small" effect="plain">{{ sessionProtocol(row) }}</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column :label="t('sessions.column.started')" width="170" show-overflow-tooltip class-name="col-time">
-          <template #default="{ row }">
-            {{ formatTime(row.started_at ?? row.startedAt) }}
-          </template>
-        </el-table-column>
-        <el-table-column :label="t('audit.column.duration')" width="90">
-          <template #default="{ row }">
-            {{ formatDurationSeconds(row.duration_seconds) }}
-          </template>
-        </el-table-column>
-        <el-table-column :label="t('common.actions')" fixed="right" width="180">
-          <template #default="{ row }">
-            <el-button :disabled="!hasReplay(row)" link type="success" @click="loadSessionArtifact(row, 'replay')">
-              {{ t('audit.action.replay') }}
-            </el-button>
-            <el-button link type="primary" @click="loadSessionLog(row)">
-              {{ t('audit.action.log') }}
-            </el-button>
-          </template>
-        </el-table-column>
-      </el-table>
-      <PaginationBar
-        v-model:current-page="sessionPage"
-        v-model:page-size="sessionPageSize"
-        :total="filteredSessions.length"
-      />
-      <el-empty v-if="!sessionsLoading && !filteredSessions.length && !sessionError" :description="t('sessions.empty')" />
-    </el-card>
+    </template>
 
-    <el-card v-if="auditScope === 'db'" class="placeholder-panel" shadow="never">
-      <template #header>
-        <div class="toolbar">
-          <span>{{ t('audit.title.dbConnections') }}</span>
-          <el-tag>{{ dbConnections.length }}</el-tag>
-        </div>
-      </template>
-      <el-alert v-if="dbError" :title="dbError" type="warning" show-icon />
-      <el-table v-else v-loading="dbLoading" :data="dbConnections" height="380" row-key="id">
-        <el-table-column :label="t('audit.column.instance')" min-width="150" show-overflow-tooltip>
-          <template #default="{ row }">{{ row.instance_name || row.upstream_addr || '-' }}</template>
-        </el-table-column>
-        <el-table-column :label="t('audit.column.account')" min-width="120" show-overflow-tooltip>
-          <template #default="{ row }">{{ row.account_name || '-' }}</template>
-        </el-table-column>
-        <el-table-column :label="t('audit.column.operator')" min-width="120" show-overflow-tooltip>
-          <template #default="{ row }">{{ row.auth_user || row.name || '-' }}</template>
-        </el-table-column>
-        <el-table-column prop="protocol" :label="t('audit.column.protocol')" width="90" />
-        <el-table-column :label="t('sessions.column.started')" min-width="170" show-overflow-tooltip class-name="col-time">
-          <template #default="{ row }">
-            {{ formatTime(row.started_at) }}
-          </template>
-        </el-table-column>
-        <el-table-column :label="t('audit.column.duration')" width="100">
-          <template #default="{ row }">
-            {{ formatDuration(row.duration_ms) }}
-          </template>
-        </el-table-column>
-        <el-table-column :label="t('common.actions')" fixed="right" width="170">
-          <template #default="{ row }">
-            <el-button link type="primary" @click="loadDBArtifact(row, 'meta')">
-              {{ t('audit.action.meta') }}
-            </el-button>
-            <el-button link type="primary" @click="loadDBArtifact(row, 'queries')">
-              {{ t('audit.action.queries') }}
-            </el-button>
-          </template>
-        </el-table-column>
-      </el-table>
-      <el-empty v-if="!dbLoading && !dbConnections.length && !dbError" :description="t('audit.empty.dbConnections')" />
-    </el-card>
+    <template v-if="auditScope === 'db'">
+      <el-alert v-if="dbError" :title="dbError" type="warning" show-icon style="margin-bottom: 12px" />
+      <div class="page-container">
+        <DataTableCard
+          :data="dbConnections"
+          :loading="dbLoading"
+          :total="dbTotal"
+          v-model:page="dbPage"
+          v-model:page-size="dbPageSize"
+          search-placeholder="搜索数据库连接..."
+          @search="onDBSearch"
+        >
+          <el-table-column :label="t('audit.column.instance')" min-width="150" show-overflow-tooltip>
+            <template #default="{ row }">{{ row.instance_name || row.upstream_addr || '-' }}</template>
+          </el-table-column>
+          <el-table-column :label="t('audit.column.account')" min-width="120" show-overflow-tooltip>
+            <template #default="{ row }">{{ row.account_name || '-' }}</template>
+          </el-table-column>
+          <el-table-column :label="t('audit.column.operator')" min-width="120" show-overflow-tooltip>
+            <template #default="{ row }">{{ row.auth_user || row.name || '-' }}</template>
+          </el-table-column>
+          <el-table-column prop="protocol" :label="t('audit.column.protocol')" width="90" />
+          <el-table-column :label="t('sessions.column.started')" min-width="170" show-overflow-tooltip class-name="col-time">
+            <template #default="{ row }">
+              {{ formatTime(row.started_at) }}
+            </template>
+          </el-table-column>
+          <el-table-column :label="t('audit.column.duration')" width="100">
+            <template #default="{ row }">
+              {{ formatDuration(row.duration_ms) }}
+            </template>
+          </el-table-column>
+          <el-table-column :label="t('common.actions')" fixed="right" width="170">
+            <template #default="{ row }">
+              <el-button link type="primary" @click="loadDBArtifact(row, 'meta')">
+                {{ t('audit.action.meta') }}
+              </el-button>
+              <el-button link type="primary" @click="loadDBArtifact(row, 'queries')">
+                {{ t('audit.action.queries') }}
+              </el-button>
+            </template>
+          </el-table-column>
+        </DataTableCard>
+      </div>
+    </template>
 
     <el-drawer
       v-model="drawerVisible"
@@ -233,7 +203,14 @@
           </div>
         </div>
 
-        <el-table v-else-if="isDBQueries" :data="mergedQueryEvents" height="420">
+        <DataTableCard
+          v-else-if="isDBQueries"
+          :data="pagedQueryEvents"
+          :total="mergedQueryEvents.length"
+          :show-search="false"
+          v-model:page="logPage"
+          v-model:page-size="logPageSize"
+        >
           <el-table-column prop="seq" :label="t('audit.column.seq')" width="70" />
           <el-table-column prop="query_kind" :label="t('audit.column.queryKind')" width="100" />
           <el-table-column :label="t('audit.column.result')" width="90">
@@ -256,61 +233,57 @@
           <el-table-column prop="comment" :label="t('audit.column.comment')" min-width="140" show-overflow-tooltip />
           <el-table-column prop="sql" :label="t('audit.column.sql')" min-width="320" show-overflow-tooltip />
           <el-table-column prop="error_message" :label="t('audit.column.error')" min-width="180" show-overflow-tooltip />
-        </el-table>
+        </DataTableCard>
 
-        <template v-else-if="isCommands">
-          <div class="log-block">
-            <el-table :data="pagedCommandEvents" height="420">
-              <el-table-column :label="t('audit.column.time')" width="175" show-overflow-tooltip class-name="col-time">
-                <template #default="{ row }">
-                  {{ formatTime(row.started_at) }}
-                </template>
-              </el-table-column>
-              <el-table-column prop="command" :label="t('audit.column.command')" min-width="280" show-overflow-tooltip />
-              <el-table-column prop="preview" :label="t('audit.column.preview')" min-width="280" show-overflow-tooltip />
-            </el-table>
-            <PaginationBar
-              v-model:current-page="logPage"
-              v-model:page-size="logPageSize"
-              :total="commandEvents.length"
-            />
-          </div>
-        </template>
+        <DataTableCard
+          v-else-if="isCommands"
+          :data="pagedCommandEvents"
+          :total="commandEvents.length"
+          :show-search="false"
+          v-model:page="logPage"
+          v-model:page-size="logPageSize"
+        >
+          <el-table-column :label="t('audit.column.time')" width="175" show-overflow-tooltip class-name="col-time">
+            <template #default="{ row }">
+              {{ formatTime(row.started_at) }}
+            </template>
+          </el-table-column>
+          <el-table-column prop="command" :label="t('audit.column.command')" min-width="280" show-overflow-tooltip />
+          <el-table-column prop="preview" :label="t('audit.column.preview')" min-width="280" show-overflow-tooltip />
+        </DataTableCard>
 
-        <template v-else-if="isFiles">
-          <div class="log-block">
-          <el-table :data="pagedFileEvents" height="420" row-key="seq">
-            <el-table-column :label="t('audit.column.time')" width="175" show-overflow-tooltip class-name="col-time">
-              <template #default="{ row }">
-                {{ formatTime(row.started_at) }}
-              </template>
-            </el-table-column>
-            <el-table-column :label="t('audit.column.action')" width="80">
-              <template #default="{ row }">
-                {{ formatFileAction(row.action) }}
-              </template>
-            </el-table-column>
-            <el-table-column prop="path" :label="t('audit.column.path')" min-width="420" show-overflow-tooltip />
-            <el-table-column :label="t('audit.column.result')" width="75">
-              <template #default="{ row }">
-                <el-tag :type="row.result === 'success' ? 'success' : 'danger'" size="small">
-                  {{ row.result === 'success' ? t('audit.result.success') : t('audit.result.failure') }}
-                </el-tag>
-              </template>
-            </el-table-column>
-            <el-table-column :label="t('audit.column.size')" width="75">
-              <template #default="{ row }">
-                <template v-if="row.size > 0">{{ formatBytes(row.size) }}</template>
-              </template>
-            </el-table-column>
-          </el-table>
-          <PaginationBar
-            v-model:current-page="logPage"
-            v-model:page-size="logPageSize"
-            :total="fileEvents.length"
-          />
-          </div>
-        </template>
+        <DataTableCard
+          v-else-if="isFiles"
+          :data="pagedFileEvents"
+          :total="fileEvents.length"
+          :show-search="false"
+          v-model:page="logPage"
+          v-model:page-size="logPageSize"
+        >
+          <el-table-column :label="t('audit.column.time')" width="175" show-overflow-tooltip class-name="col-time">
+            <template #default="{ row }">
+              {{ formatTime(row.started_at) }}
+            </template>
+          </el-table-column>
+          <el-table-column :label="t('audit.column.action')" width="80">
+            <template #default="{ row }">
+              {{ formatFileAction(row.action) }}
+            </template>
+          </el-table-column>
+          <el-table-column prop="path" :label="t('audit.column.path')" min-width="420" show-overflow-tooltip />
+          <el-table-column :label="t('audit.column.result')" width="75">
+            <template #default="{ row }">
+              <el-tag :type="row.result === 'success' ? 'success' : 'danger'" size="small">
+                {{ row.result === 'success' ? t('audit.result.success') : t('audit.result.failure') }}
+              </el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column :label="t('audit.column.size')" width="75">
+            <template #default="{ row }">
+              <template v-if="row.size > 0">{{ formatBytes(row.size) }}</template>
+            </template>
+          </el-table-column>
+        </DataTableCard>
 
         <el-empty v-else :description="t('audit.empty.detail')" />
       </div>
@@ -323,9 +296,8 @@ import { Terminal } from '@xterm/xterm';
 import '@xterm/xterm/css/xterm.css';
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { ElMessage } from 'element-plus';
-import { Search } from '@element-plus/icons-vue';
 
-import PaginationBar from '@/components/PaginationBar.vue';
+import DataTableCard from '@/components/DataTableCard.vue';
 import {
   apiClient,
   type ApiEnvelope,
@@ -353,75 +325,36 @@ type ReplayData = {
 
 const { t } = useI18n();
 const auditScope = ref<AuditScope>('ssh');
+
+// ── SSH session list state ──
 const sessions = ref<SessionRecord[]>([]);
-const dbConnections = ref<DBConnectionRecord[]>([]);
-const sessionsLoading = ref(false);
-const dbLoading = ref(false);
-const filterUser = ref('');
-const filterTarget = ref('');
-const filterDateRange = ref<[Date, Date] | null>(null);
+const sessionTotal = ref(0);
 const sessionPage = ref(1);
-const logPage = ref(1);
-const sessionPageSize = ref(30);
-const logPageSize = ref(30);
-
-const hasFilter = computed(() => !!filterUser.value || !!filterTarget.value || !!filterDateRange.value);
-
-const dateShortcuts = [
-  { text: '最近1小时', value: () => [new Date(Date.now() - 3600000), new Date()] },
-  { text: '最近24小时', value: () => [new Date(Date.now() - 86400000), new Date()] },
-  { text: '最近7天', value: () => [new Date(Date.now() - 604800000), new Date()] },
-];
-
-function parseTime(v: unknown): number {
-  if (typeof v === 'number') return v;
-  if (typeof v === 'string') { const d = Date.parse(v); return Number.isNaN(d) ? 0 : d; }
-  return 0;
-}
-
-const filteredSessions = computed(() => {
-  let list = sessions.value;
-  const u = filterUser.value.trim().toLowerCase();
-  if (u) {
-    list = list.filter(s =>
-      (s.user || s.user_username || '').toLowerCase().includes(u)
-    );
-  }
-  const t = filterTarget.value.trim().toLowerCase();
-  if (t) {
-    list = list.filter(s => (s.target || '').toLowerCase().includes(t));
-  }
-  if (filterDateRange.value && filterDateRange.value.length === 2) {
-    const [start, end] = filterDateRange.value;
-    const ts = start.getTime();
-    const te = end.getTime();
-    list = list.filter(s => {
-      const at = parseTime(s.started_at ?? s.startedAt);
-      return at >= ts && at <= te;
-    });
-  }
-  return list;
-});
-
-const pagedSessions = computed(() => {
-  const start = (sessionPage.value - 1) * sessionPageSize.value;
-  return filteredSessions.value.slice(start, start + sessionPageSize.value);
-});
-
-function clearFilters() {
-  filterUser.value = '';
-  filterTarget.value = '';
-  filterDateRange.value = null;
-  sessionPage.value = 1;
-}
-const detailLoading = ref(false);
+const sessionPageSize = ref(20);
+const sessionKeyword = ref('');
+const sessionsLoading = ref(false);
 const sessionError = ref('');
+
+// ── DB connection list state ──
+const dbConnections = ref<DBConnectionRecord[]>([]);
+const dbTotal = ref(0);
+const dbPage = ref(1);
+const dbPageSize = ref(20);
+const dbKeyword = ref('');
+const dbLoading = ref(false);
 const dbError = ref('');
+
+// ── Drawer state ──
+const detailLoading = ref(false);
 const detailError = ref('');
 const detailTitle = ref('');
 const detailKind = ref<DetailKind>('');
 const detailData = ref<unknown>(null);
 const drawerVisible = ref(false);
+const logPage = ref(1);
+const logPageSize = ref(30);
+
+// ── Replay state ──
 const playbackSpeed = ref(1);
 const speedOptions = [1, 2, 4, 8];
 const replayPlaying = ref(false);
@@ -436,6 +369,7 @@ let replayStartedAt = 0;
 let replayStartOffset = 0;
 let replayFrameIndex = 0;
 
+// ── Computed ──
 const scopeOptions = computed(() => [
   { label: t('audit.scope.ssh'), value: 'ssh' },
   { label: t('audit.scope.db'), value: 'db' }
@@ -502,6 +436,12 @@ const commandEvents = computed(() =>
 const fileEvents = computed(() =>
   Array.isArray(detailData.value) ? (detailData.value as SessionFileEventRecord[]) : []
 );
+
+// Client-side pagination for drawer sub-tables
+const pagedQueryEvents = computed(() => {
+  const start = (logPage.value - 1) * logPageSize.value;
+  return mergedQueryEvents.value.slice(start, start + logPageSize.value);
+});
 const pagedCommandEvents = computed(() => {
   const start = (logPage.value - 1) * logPageSize.value;
   return commandEvents.value.slice(start, start + logPageSize.value);
@@ -510,6 +450,7 @@ const pagedFileEvents = computed(() => {
   const start = (logPage.value - 1) * logPageSize.value;
   return fileEvents.value.slice(start, start + logPageSize.value);
 });
+
 const replayData = computed(() => (isReplayData(detailData.value) ? detailData.value : { header: {}, frames: [], raw: '' }));
 const replayFrames = computed(() => replayData.value.frames);
 const replayOutputFrames = computed(() => replayFrames.value.filter((frame) => frame.stream === 'o'));
@@ -533,6 +474,8 @@ const replayTerminalMessage = computed(() => {
   }
   return '';
 });
+
+// ── Helpers ──
 
 function unwrapArray<T>(payload: ApiEnvelope<T[]> | T[]): T[] {
   return Array.isArray(payload) ? payload : payload.data ?? [];
@@ -563,24 +506,29 @@ function hasReplay(session: SessionRecord): boolean {
 }
 
 function formatTime(value: unknown): string {
+  let d: Date | null = null
   if (typeof value === 'number' && Number.isFinite(value)) {
-    return new Date(value).toLocaleString();
+    d = new Date(value)
+  } else if (typeof value === 'string' && value.trim()) {
+    const parsed = Date.parse(value)
+    if (!Number.isNaN(parsed)) d = new Date(parsed)
   }
-
-  if (typeof value === 'string' && value.trim()) {
-    const parsed = Date.parse(value);
-
-    return Number.isNaN(parsed) ? value : new Date(parsed).toLocaleString();
-  }
-
-  return t('common.none');
+  if (!d || Number.isNaN(d.getTime())) return t('common.none')
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
 }
 
 function formatDuration(value: unknown): string {
   if (value === undefined || value === null) return t('common.none');
   const n = Number(value);
   if (!Number.isFinite(n)) return t('common.none');
-  return `${n} ms`;
+  // n is milliseconds
+  if (n < 1000) return `${Math.round(n)}ms`;
+  const totalSeconds = n / 1000;
+  if (totalSeconds < 60) return `${Math.round(totalSeconds * 10) / 10}s`;
+  const mins = Math.floor(totalSeconds / 60);
+  const secs = Math.round(totalSeconds % 60);
+  return `${mins}m ${secs}s`;
 }
 
 function formatDurationSeconds(value: unknown): string {
@@ -673,12 +621,20 @@ function closeDetail() {
   playbackSpeed.value = 1;
 }
 
+// ── Data fetching ──
+
 async function loadSessions() {
   sessionsLoading.value = true;
   sessionError.value = '';
 
   try {
-    sessions.value = unwrapArray(await apiClient.getSessions());
+    const res = await apiClient.getSessions({
+      page: sessionPage.value,
+      page_size: sessionPageSize.value,
+      q: sessionKeyword.value || undefined,
+    });
+    sessions.value = res.items ?? [];
+    sessionTotal.value = res.total ?? 0;
   } catch (err) {
     sessionError.value = err instanceof Error ? err.message : t('sessions.loadError');
   } finally {
@@ -691,7 +647,13 @@ async function loadDBConnections() {
   dbError.value = '';
 
   try {
-    dbConnections.value = unwrapArray(await apiClient.getDBConnections());
+    const res = await apiClient.getDBConnections({
+      page: dbPage.value,
+      page_size: dbPageSize.value,
+      q: dbKeyword.value || undefined,
+    });
+    dbConnections.value = res.items ?? [];
+    dbTotal.value = res.total ?? 0;
   } catch (err) {
     dbConnections.value = [];
     dbError.value = err instanceof Error ? err.message : t('audit.error.loadDBConnections');
@@ -708,6 +670,20 @@ async function refreshCurrent() {
 
   await loadDBConnections();
 }
+
+function onSessionSearch(q: string) {
+  sessionKeyword.value = q;
+  sessionPage.value = 1;
+  loadSessions();
+}
+
+function onDBSearch(q: string) {
+  dbKeyword.value = q;
+  dbPage.value = 1;
+  loadDBConnections();
+}
+
+// ── Session artifacts ──
 
 async function loadSessionArtifact(session: SessionRecord, kind: Exclude<DetailKind, '' | 'queries'>) {
   const id = sessionId(session);
@@ -780,6 +756,8 @@ function loadSessionLog(session: SessionRecord) {
     void loadSessionArtifact(session, 'commands');
   }
 }
+
+// ── Replay ──
 
 function parseReplayCast(raw: string): ReplayData {
   const lines = raw.split(/\r?\n/).filter((line) => line.trim().length > 0);
@@ -1014,6 +992,8 @@ function utf8ByteLength(value: string): number {
   return new TextEncoder().encode(value).length;
 }
 
+// ── DB artifacts ──
+
 async function loadDBArtifact(connection: DBConnectionRecord, kind: 'meta' | 'queries') {
   const id = String(connection.id ?? '');
 
@@ -1038,6 +1018,8 @@ async function loadDBArtifact(connection: DBConnectionRecord, kind: 'meta' | 'qu
   }
 }
 
+// ── Lifecycle & watchers ──
+
 onMounted(() => {
   void Promise.all([loadSessions(), loadDBConnections()]);
 });
@@ -1050,6 +1032,14 @@ watch(isReplay, async (value) => {
   }
 });
 
+// Watch pagination changes for main lists
+watch([sessionPage, sessionPageSize], () => {
+  if (auditScope.value === 'ssh') loadSessions();
+});
+watch([dbPage, dbPageSize], () => {
+  if (auditScope.value === 'db') loadDBConnections();
+});
+
 onBeforeUnmount(() => {
   stopReplay();
   destroyReplayTerminal();
@@ -1057,6 +1047,12 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
+.audit-view {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
 .placeholder-panel :deep(.el-segmented) {
   max-width: 100%;
 }
@@ -1064,26 +1060,6 @@ onBeforeUnmount(() => {
 :deep(.col-time) {
   white-space: nowrap;
 }
-
-.filter-bar {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-bottom: 12px;
-  padding: 10px 12px;
-  background: #f9fafb;
-  border-radius: 8px;
-}
-
-@media (max-width: 640px) {
-  .filter-bar {
-    flex-wrap: wrap;
-  }
-  .filter-bar > * {
-    flex: 1;
-  }
-}
-
 
 /* Make drawer body a flex column so terminal can fill remaining space */
 :deep(.el-drawer__body) {
@@ -1097,17 +1073,6 @@ onBeforeUnmount(() => {
   flex-direction: column;
   flex: 1;
   min-height: 0;
-}
-
-.log-block {
-  display: flex;
-  flex-direction: column;
-  flex: 1;
-  min-height: 0;
-}
-
-.log-block :deep(.el-table) {
-  flex: 1;
 }
 
 .replay-panel {
@@ -1213,5 +1178,4 @@ onBeforeUnmount(() => {
     align-items: stretch;
   }
 }
-
 </style>

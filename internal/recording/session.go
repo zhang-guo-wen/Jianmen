@@ -108,6 +108,7 @@ func NewSessionRecorder(root string, session model.Session, recordInput, recordC
 		"session_id":       session.ID,
 		"user":             session.User.Username,
 		"target":           session.Target,
+		"account_username": session.AccountUsername,
 		"client_ip":        session.ClientIP,
 		"started_at":       startedAt.Format(time.RFC3339Nano),
 		"protocol":         protocol,

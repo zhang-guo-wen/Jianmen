@@ -7,78 +7,71 @@
 
     <!-- SSH Tab -->
     <template v-if="activeTab === 'ssh'">
-      <div class="toolbar">
-        <el-input v-model="keyword" clearable :placeholder="t('quickConnect.placeholder.search')" style="max-width: 340px" />
-        <div class="endpoint-toolbar">
-          <el-input v-model="bastionUser" :placeholder="t('quickConnect.placeholder.bastionUser')">
-            <template #prepend>{{ t('quickConnect.field.bastionUser') }}</template>
-          </el-input>
-          <el-input v-model="bastionHost" :placeholder="t('quickConnect.placeholder.bastionHost')">
-            <template #prepend>{{ t('quickConnect.field.bastionHost') }}</template>
-          </el-input>
-          <el-input-number v-model="bastionPort" :max="65535" :min="1" controls-position="right" />
+      <DataTableCard
+        :data="targets"
+        :loading="sshLoading"
+        :total="targetTotal"
+        v-model:page="targetPage"
+        v-model:page-size="targetPageSize"
+        search-placeholder="搜索主机、账号..."
+        @search="onSSHSearch"
+      >
+        <template #toolbar-extra>
           <el-button :loading="sshLoading" :icon="Refresh" @click="loadTargets">{{ t('common.refresh') }}</el-button>
-        </div>
-      </div>
-
-      <el-card class="placeholder-panel" shadow="never">
-        <el-alert v-if="sshError" :title="sshError" type="error" show-icon />
-        <el-table v-else v-loading="sshLoading" :data="filteredTargets" height="520" :row-key="targetRowKey">
-          <el-table-column :label="t('quickConnect.column.host')" min-width="190">
-            <template #default="{ row }">{{ targetHost(row) || '-' }}:{{ targetPort(row) }}</template>
-          </el-table-column>
-          <el-table-column :label="t('quickConnect.column.account')" min-width="150">
-            <template #default="{ row }">{{ accountName(row) || '-' }}</template>
-          </el-table-column>
-          <el-table-column :label="t('common.status')" width="90">
-            <template #default="{ row }">
-              <el-tag :type="statusTagType(row)" size="small">{{ row.status || t('common.enabled') }}</el-tag>
-            </template>
-          </el-table-column>
-          <el-table-column :label="t('common.actions')" fixed="right" width="100">
-            <template #default="{ row }">
-              <el-button link type="primary" @click="openSSHConfig(row)">{{ t('quickConnect.action.connect') }}</el-button>
-            </template>
-          </el-table-column>
-        </el-table>
-        <el-empty v-if="!sshLoading && !filteredTargets.length && !sshError" :description="t('quickConnect.empty')" />
-      </el-card>
+        </template>
+        <el-table-column :label="t('quickConnect.column.host')" min-width="190">
+          <template #default="{ row }">{{ targetHost(row) || '-' }}:{{ targetPort(row) }}</template>
+        </el-table-column>
+        <el-table-column :label="t('quickConnect.column.account')" min-width="150">
+          <template #default="{ row }">{{ accountName(row) || '-' }}</template>
+        </el-table-column>
+        <el-table-column :label="t('common.status')" width="90">
+          <template #default="{ row }">
+            <el-tag :type="row.status === 'disabled' ? 'info' : 'success'" size="small">{{ row.status === 'disabled' ? t('common.disabled') : t('common.enabled') }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column :label="t('common.actions')" fixed="right" width="100">
+          <template #default="{ row }">
+            <el-button link type="primary" @click="openSSHConfig(row)">{{ t('quickConnect.action.connect') }}</el-button>
+          </template>
+        </el-table-column>
+      </DataTableCard>
     </template>
 
     <!-- Database Tab -->
     <template v-if="activeTab === 'db'">
-      <div class="toolbar">
-        <el-input v-model="dbKeyword" clearable :placeholder="t('quickConnect.placeholder.search')" style="max-width: 340px" />
-        <div class="endpoint-toolbar">
+      <DataTableCard
+        :data="displayedDBAccounts"
+        :loading="dbLoading"
+        :total="dbTotal"
+        v-model:page="dbPage"
+        v-model:page-size="dbPageSize"
+        search-placeholder="搜索实例、账号..."
+        @search="onDBSearch"
+      >
+        <template #toolbar-extra>
           <el-button :loading="dbLoading" :icon="Refresh" @click="loadDBAccounts">{{ t('common.refresh') }}</el-button>
-        </div>
-      </div>
-
-      <el-card class="placeholder-panel" shadow="never">
-        <el-alert v-if="dbError" :title="dbError" type="error" show-icon />
-        <el-table v-else v-loading="dbLoading" :data="filteredDBAccounts" height="520" row-key="id">
-          <el-table-column :label="t('audit.column.instance')" min-width="160" show-overflow-tooltip>
-            <template #default="{ row }">{{ row._instance_name || '-' }}</template>
-          </el-table-column>
-          <el-table-column :label="t('audit.column.account')" min-width="130" show-overflow-tooltip>
-            <template #default="{ row }">{{ row.upstream_username || '-' }}</template>
-          </el-table-column>
-          <el-table-column :label="t('audit.column.protocol')" width="100">
-            <template #default="{ row }">{{ row._protocol || 'mysql' }}</template>
-          </el-table-column>
-          <el-table-column :label="t('common.status')" width="90">
-            <template #default="{ row }">
-              <el-tag :type="row.disabled ? 'info' : 'success'" size="small">{{ row.disabled ? t('common.disabled') : t('common.enabled') }}</el-tag>
-            </template>
-          </el-table-column>
-          <el-table-column :label="t('common.actions')" fixed="right" width="100">
-            <template #default="{ row }">
-              <el-button link type="primary" @click="openDBConfig(row)">{{ t('quickConnect.action.connect') }}</el-button>
-            </template>
-          </el-table-column>
-        </el-table>
-        <el-empty v-if="!dbLoading && !filteredDBAccounts.length && !dbError" :description="t('database.empty.accounts')" />
-      </el-card>
+        </template>
+        <el-table-column :label="t('audit.column.instance')" min-width="160" show-overflow-tooltip>
+          <template #default="{ row }">{{ row._instance_name || '-' }}</template>
+        </el-table-column>
+        <el-table-column :label="t('audit.column.account')" min-width="130" show-overflow-tooltip>
+          <template #default="{ row }">{{ row.username || '-' }}</template>
+        </el-table-column>
+        <el-table-column :label="t('audit.column.protocol')" width="100">
+          <template #default="{ row }">{{ row._protocol || 'mysql' }}</template>
+        </el-table-column>
+        <el-table-column :label="t('common.status')" width="90">
+          <template #default="{ row }">
+            <el-tag :type="row.status === 'disabled' ? 'info' : 'success'" size="small">{{ row.status === 'disabled' ? t('common.disabled') : t('common.enabled') }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column :label="t('common.actions')" fixed="right" width="100">
+          <template #default="{ row }">
+            <el-button link type="primary" @click="openDBConfig(row)">{{ t('quickConnect.action.connect') }}</el-button>
+          </template>
+        </el-table-column>
+      </DataTableCard>
     </template>
 
     <!-- Connect Dialog -->
@@ -119,32 +112,37 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 import { Refresh } from '@element-plus/icons-vue';
 import { ElMessage } from 'element-plus';
-import { apiClient, type TargetRecord, type DBAccountRecord } from '@/api/client';
+import DataTableCard from '@/components/DataTableCard.vue';
+import { apiClient, type PageResponse, type TargetRecord, type DBAccountRecord } from '@/api/client';
 import { useI18n } from '@/i18n';
 
 const { t } = useI18n();
 const activeTab = ref('ssh');
 
-// SSH state
-const keyword = ref('');
+// ── SSH state ──
+const sshKeyword = ref('');
 const sshLoading = ref(false);
 const sshError = ref('');
 const targets = ref<TargetRecord[]>([]);
-const bastionUser = ref('admin');
+const targetTotal = ref(0);
+const targetPage = ref(1);
+const targetPageSize = ref(20);
 const bastionHost = ref('127.0.0.1');
 const bastionPort = ref(47102);
 
-// DB state
+// ── DB state ──
 const dbKeyword = ref('');
 const dbLoading = ref(false);
 const dbError = ref('');
 const dbAccounts = ref<(DBAccountRecord & { _instance_name?: string; _protocol?: string })[]>([]);
+const dbPage = ref(1);
+const dbPageSize = ref(20);
 const gatewayPort = ref(33060);
 
-// Dialog state
+// ── Dialog state ──
 const configVisible = ref(false);
 const creatingSession = ref(false);
 const sessionError = ref('');
@@ -153,26 +151,33 @@ const connectType = ref<'ssh' | 'db'>('ssh');
 
 const dialogTitle = computed(() => connectType.value === 'ssh' ? 'SSH 连接' : '数据库连接');
 
-// --- SSH ---
-const filteredTargets = computed(() => {
-  const query = keyword.value.trim().toLowerCase();
-  if (!query) return targets.value;
-  return targets.value.filter(t =>
-    [t.id, t.name, t.host, t.username].some(v => String(v ?? '').toLowerCase().includes(query))
-  );
-});
-
+// ── SSH ──
 function targetHost(t: TargetRecord): string { return String(t.host || t.address || ''); }
 function targetPort(t: TargetRecord): number { return Number(t.port) || 22; }
 function accountName(t: TargetRecord): string { return String(t.username || ''); }
-function targetRowKey(t: TargetRecord): string { return String(t.id || `${targetHost(t)}:${targetPort(t)}`); }
-function statusTagType(t: TargetRecord): 'success' | 'info' { return t.status === 'disabled' ? 'info' : 'success'; }
-
 async function loadTargets() {
-  sshLoading.value = true; sshError.value = '';
-  try { targets.value = (await apiClient.getTargets() as any)?.data ?? await apiClient.getTargets() as any ?? []; }
-  catch (e: any) { sshError.value = e.message; }
-  finally { sshLoading.value = false; }
+  sshLoading.value = true;
+  sshError.value = '';
+  try {
+    const res: PageResponse<TargetRecord> = await apiClient.getTargets({
+      page: targetPage.value,
+      page_size: targetPageSize.value,
+      q: sshKeyword.value.trim() || undefined,
+    });
+    targets.value = res.items ?? [];
+    targetTotal.value = res.total ?? 0;
+  } catch (e: any) {
+    sshError.value = e.message;
+    ElMessage.error(e.message);
+  } finally {
+    sshLoading.value = false;
+  }
+}
+
+function onSSHSearch(q: string) {
+  sshKeyword.value = q;
+  targetPage.value = 1;
+  loadTargets();
 }
 
 async function openSSHConfig(target: TargetRecord) {
@@ -192,24 +197,19 @@ async function openSSHConfig(target: TargetRecord) {
   finally { creatingSession.value = false; }
 }
 
-// --- DB ---
-const filteredDBAccounts = computed(() => {
-  const q = dbKeyword.value.trim().toLowerCase();
-  if (!q) return dbAccounts.value;
-  return dbAccounts.value.filter(a =>
-    [a._instance_name, a.upstream_username, a._protocol].some(v => String(v ?? '').toLowerCase().includes(q))
-  );
-});
-
+// ── DB ──
 async function loadDBAccounts() {
-  dbLoading.value = true; dbError.value = '';
+  dbLoading.value = true;
+  dbError.value = '';
+  dbPage.value = 1;
   try {
-    const insts = (await apiClient.getDBInstances() as any)?.data ?? await apiClient.getDBInstances() as any ?? [];
+    const instRes = await apiClient.getDBInstances({ page: 1, page_size: 999 });
+    const insts = instRes.items ?? [];
     const all: any[] = [];
     for (const inst of insts) {
-      if (inst.disabled) continue;
-      const accs = (await apiClient.getDBAccounts(String(inst.id))) as any;
-      const items = accs?.items ?? accs?.data ?? accs ?? [];
+      if (inst.status === 'disabled') continue;
+      const accRes = await apiClient.getDBAccounts(String(inst.id), { page: 1, page_size: 999 });
+      const items = accRes.items ?? [];
       for (const a of items) {
         a._instance_name = inst.name;
         a._protocol = inst.protocol || 'mysql';
@@ -220,11 +220,35 @@ async function loadDBAccounts() {
     dbAccounts.value = all;
     // Load gateway config
     try {
-      const gw = await apiClient.getDBGateway() as any;
+      const gw = await apiClient.getDBGateway();
       if (gw?.port) gatewayPort.value = Number(gw.port);
-    } catch {}
-  } catch (e: any) { dbError.value = e.message; }
-  finally { dbLoading.value = false; }
+    } catch { /* ignore */ }
+  } catch (e: any) {
+    dbError.value = e.message;
+    ElMessage.error(e.message);
+  } finally {
+    dbLoading.value = false;
+  }
+}
+
+const dbFiltered = computed(() => {
+  const q = dbKeyword.value.trim().toLowerCase();
+  if (!q) return dbAccounts.value;
+  return dbAccounts.value.filter(a =>
+    [a._instance_name, a.username, a._protocol].some(v => String(v ?? '').toLowerCase().includes(q))
+  );
+});
+
+const dbTotal = computed(() => dbFiltered.value.length);
+
+const displayedDBAccounts = computed(() => {
+  const start = (dbPage.value - 1) * dbPageSize.value;
+  return dbFiltered.value.slice(start, start + dbPageSize.value);
+});
+
+function onDBSearch(q: string) {
+  dbKeyword.value = q;
+  dbPage.value = 1;
 }
 
 async function openDBConfig(acc: any) {
@@ -244,7 +268,7 @@ async function openDBConfig(acc: any) {
   finally { creatingSession.value = false; }
 }
 
-// --- Common ---
+// ── Common ──
 async function copyValue(value: string) {
   try {
     await navigator.clipboard.writeText(value);
@@ -252,10 +276,19 @@ async function copyValue(value: string) {
   } catch { ElMessage.error(t('quickConnect.error.copy')); }
 }
 
+// ── Watchers ──
+watch([targetPage, targetPageSize], () => loadTargets());
+
+// 切换到 DB tab 时自动加载数据
+watch(activeTab, (tab) => {
+  if (tab === 'db' && dbAccounts.value.length === 0) {
+    loadDBAccounts();
+  }
+});
+
 onMounted(() => { loadTargets(); });
 </script>
 
 <style scoped>
-.endpoint-toolbar { display: flex; flex: 1; flex-wrap: wrap; justify-content: flex-end; gap: 10px; }
 .config-dialog { min-height: 100px; }
 </style>

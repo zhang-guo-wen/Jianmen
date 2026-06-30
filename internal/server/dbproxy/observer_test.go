@@ -1,29 +1,21 @@
-//go:build ignore
-
 package dbproxy
 
 import (
 	"encoding/binary"
 	"testing"
 	"time"
-
-	"jianmen/internal/config"
 )
 
 type captureSink struct {
 	queries  []string
 	details  []map[string]any
 	finished []queryFinish
-	policy   *sqlPolicy
+	deny     bool
 }
 
 func (s *captureSink) StartQuery(sql string, detail map[string]any) (queryRecord, queryDecision) {
 	s.queries = append(s.queries, sql)
 	s.details = append(s.details, detail)
-	decision := allowQuery()
-	if s.policy != nil {
-		decision = s.policy.Evaluate(sql)
-	}
 	record := queryRecord{
 		seq:       int64(len(s.queries)),
 		protocol:  "test",
@@ -32,15 +24,21 @@ func (s *captureSink) StartQuery(sql string, detail map[string]any) (queryRecord
 		detail:    detail,
 		startedAt: time.Now(),
 	}
-	if !decision.Allowed {
+	if s.deny {
+		decision := queryDecision{
+			Allowed:      false,
+			Status:       queryStatusPolicyDenied,
+			ErrorCode:    "POLICY_DENIED",
+			ErrorMessage: "denied by test policy",
+		}
 		s.finished = append(s.finished, queryFinish{
 			Status:       decision.Status,
 			ErrorCode:    decision.ErrorCode,
 			ErrorMessage: decision.ErrorMessage,
-			Detail:       decision.Detail,
 		})
+		return record, decision
 	}
-	return record, decision
+	return record, allowQuery()
 }
 
 func (s *captureSink) FinishQuery(_ queryRecord, finish queryFinish) {
@@ -50,7 +48,7 @@ func (s *captureSink) FinishQuery(_ queryRecord, finish queryFinish) {
 func TestMySQLObserverCapturesQueryAcrossChunks(t *testing.T) {
 	sink := &captureSink{}
 	observer := &mysqlObserver{sink: sink}
-	packet := mysqlPacket(0, append([]byte{0x03}, []byte("select 1")...))
+	packet := buildMySQLPacket(0, append([]byte{0x03}, []byte("select 1")...))
 
 	if decision := observer.ObserveClientBytes(packet[:3]); decision != nil {
 		t.Fatalf("unexpected decision for partial packet: %#v", decision)
@@ -70,10 +68,10 @@ func TestMySQLObserverCapturesQueryAcrossChunks(t *testing.T) {
 	}
 }
 
-func TestMySQLObserverRejectsReadOnlyPolicyViolation(t *testing.T) {
-	sink := &captureSink{policy: newSQLPolicy(config.DatabaseQueryPolicyConfig{ReadOnly: true})}
+func TestMySQLObserverReturnsErrorResponseWhenDenied(t *testing.T) {
+	sink := &captureSink{deny: true}
 	observer := &mysqlObserver{sink: sink}
-	packet := mysqlPacket(0, append([]byte{0x03}, []byte("delete from users")...))
+	packet := buildMySQLPacket(0, append([]byte{0x03}, []byte("delete from users")...))
 
 	decision := observer.ObserveClientBytes(packet)
 
@@ -115,7 +113,24 @@ func TestPostgresObserverCapturesSimpleQuery(t *testing.T) {
 	}
 }
 
-func mysqlPacket(seq byte, payload []byte) []byte {
+func TestNewPostgresQueryObserverCapturesPostAuthQuery(t *testing.T) {
+	sink := &captureSink{}
+	observer := newQueryObserver("postgres", sink)
+	query := postgresMessage('Q', append([]byte("select 1"), 0))
+
+	if decision := observer.ObserveClientBytes(query); decision != nil {
+		t.Fatalf("unexpected decision: %#v", decision)
+	}
+
+	if len(sink.queries) != 1 {
+		t.Fatalf("expected 1 query, got %d", len(sink.queries))
+	}
+	if sink.queries[0] != "select 1" {
+		t.Fatalf("unexpected query %q", sink.queries[0])
+	}
+}
+
+func buildMySQLPacket(seq byte, payload []byte) []byte {
 	packet := make([]byte, 4+len(payload))
 	packet[0] = byte(len(payload))
 	packet[1] = byte(len(payload) >> 8)

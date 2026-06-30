@@ -138,6 +138,7 @@ const indexHTML = `<!doctype html>
             <input id="targetPort" class="small" placeholder="22" value="22">
             <input id="targetUser" placeholder="ssh username">
             <input id="targetPassword" type="password" placeholder="ssh password">
+            <input id="targetFingerprint" placeholder="host key fingerprint, SHA256:...">
             <button id="addTarget">Add</button>
           </div>
           <div class="hint">Saved to <code>data/targets.json</code>. The target can be used immediately.</div>
@@ -161,7 +162,7 @@ const indexHTML = `<!doctype html>
     const tokenInput = document.querySelector("#token");
     const statusEl = document.querySelector("#status");
     const detailEl = document.querySelector("#detail");
-    tokenInput.value = localStorage.getItem("jianmen_token") || "dev-admin-token";
+    tokenInput.value = localStorage.getItem("jianmen_token") || "";
 
     document.querySelector("#saveToken").onclick = () => {
       localStorage.setItem("jianmen_token", tokenInput.value);
@@ -211,8 +212,12 @@ const indexHTML = `<!doctype html>
           port: Number(document.querySelector("#targetPort").value || "22"),
           username: document.querySelector("#targetUser").value.trim(),
           password: document.querySelector("#targetPassword").value,
-          insecure_ignore_host_key: true
+          insecure_ignore_host_key: false,
+          host_key_fingerprint: document.querySelector("#targetFingerprint").value.trim()
         };
+        if (!target.host_key_fingerprint) {
+          throw new Error("host key fingerprint is required");
+        }
         const created = await api("/api/targets", {
           method: "POST",
           headers: { "Content-Type": "application/json" },

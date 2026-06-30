@@ -70,7 +70,7 @@ func hostKeyCallback(target TargetConfig) (ssh.HostKeyCallback, error) {
 	if target.KnownHostsPath != "" {
 		return knownhosts.New(target.KnownHostsPath)
 	}
-	return ssh.InsecureIgnoreHostKey(), nil
+	return nil, errors.New("host key verification is required: set host_key_fingerprint, known_hosts_path, or insecure_ignore_host_key")
 }
 
 func normalizeFingerprint(fp string) string {

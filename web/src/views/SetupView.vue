@@ -1,8 +1,40 @@
 <template>
   <div class="setup-container">
     <el-card class="setup-card">
+      <template v-if="loadingStatus">
+        <div class="setup-success">
+          <el-skeleton :rows="4" animated />
+        </div>
+      </template>
+
+      <!-- Already initialized -->
+      <template v-else-if="alreadyInitialized">
+        <div class="setup-success">
+          <el-icon :size="48" color="#409eff"><CircleCheckFilled /></el-icon>
+          <h3>{{ t('setup.alreadyInitialized') }}</h3>
+          <p class="setup-desc">{{ t('setup.alreadyInitializedHint') }}</p>
+        </div>
+        <div class="admin-summary">
+          <div class="admin-summary-row">
+            <span>{{ t('setup.username') }}</span>
+            <strong>{{ initAdmin.username || '-' }}</strong>
+          </div>
+          <div class="admin-summary-row">
+            <span>{{ t('users.displayName') }}</span>
+            <strong>{{ initAdmin.display_name || '-' }}</strong>
+          </div>
+          <div class="admin-summary-row">
+            <span>{{ t('setup.email') }}</span>
+            <strong>{{ initAdmin.email || '-' }}</strong>
+          </div>
+        </div>
+        <el-button type="primary" class="setup-submit-btn" @click="handleFinish">
+          {{ t('setup.goToLogin') }}
+        </el-button>
+      </template>
+
       <!-- Step 1: Create admin user -->
-      <template v-if="step === 1">
+      <template v-else-if="step === 1 && !encryptionKeyNeeded">
         <div class="setup-header">
           <h2>{{ t('setup.title') }}</h2>
           <p class="setup-desc">{{ t('setup.description') }}</p>
@@ -84,7 +116,7 @@
       </template>
 
       <!-- Step 1.5: Admin created, retry getting encryption key -->
-      <template v-else-if="step === 1 && encryptionKeyNeeded">
+      <template v-else-if="encryptionKeyNeeded">
         <div class="setup-success">
           <el-icon :size="48" color="#67c23a"><CircleCheckFilled /></el-icon>
           <h3>{{ t('setup.adminCreated') }}</h3>
@@ -112,19 +144,26 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive } from 'vue';
+import { ref, reactive, onMounted } from 'vue';
 import { useRouter } from 'vue-router';
 import { CircleCheckFilled } from '@element-plus/icons-vue';
 import { ElMessage } from 'element-plus';
 import type { FormInstance, FormRules } from 'element-plus';
 
-import { apiClient } from '@/api/client';
+import { apiClient, clearToken, setToken } from '@/api/client';
 import { useI18n } from '@/i18n';
 
 const { t } = useI18n();
 const router = useRouter();
 
 const step = ref(1);
+const loadingStatus = ref(true);
+const alreadyInitialized = ref(false);
+const initAdmin = reactive({
+  username: '',
+  display_name: '',
+  email: '',
+});
 const submitting = ref(false);
 const encryptionKey = ref('');
 const encryptionKeyNeeded = ref(false);
@@ -164,18 +203,42 @@ const rules: FormRules = {
   ],
 };
 
+onMounted(() => {
+  void loadInitStatus();
+});
+
+async function loadInitStatus() {
+  loadingStatus.value = true;
+  try {
+    const status = await apiClient.getInitStatus();
+    alreadyInitialized.value = status.initialized;
+    initAdmin.username = status.admin?.username ?? '';
+    initAdmin.display_name = status.admin?.display_name ?? '';
+    initAdmin.email = status.admin?.email ?? '';
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : t('setup.error.status');
+    ElMessage.error(message);
+  } finally {
+    loadingStatus.value = false;
+  }
+}
+
 async function handleSetup() {
   const valid = await formRef.value?.validate().catch(() => false);
   if (!valid) return;
 
   submitting.value = true;
   try {
-    await apiClient.setup({
+    const setupResult = await apiClient.setup({
       username: form.username.trim(),
       password: form.password,
       email: form.email.trim(),
       display_name: form.display_name.trim() || undefined,
     });
+    if (!setupResult.token) {
+      throw new Error(t('setup.error.setup'));
+    }
+    setToken(setupResult.token);
 
     try {
       const keyResult = await apiClient.getEncryptionKey();
@@ -217,6 +280,7 @@ async function copyKey() {
 }
 
 function handleFinish() {
+  clearToken();
   router.replace('/login');
 }
 </script>
@@ -252,6 +316,32 @@ function handleFinish() {
 .setup-success {
   text-align: center;
   margin-bottom: 24px;
+}
+
+.admin-summary {
+  margin-bottom: 20px;
+  padding: 16px;
+  border: 1px solid #e4e7ed;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.admin-summary-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 8px 0;
+  color: #667085;
+}
+
+.admin-summary-row + .admin-summary-row {
+  border-top: 1px solid #edf0f5;
+}
+
+.admin-summary-row strong {
+  color: #1f2937;
+  text-align: right;
+  word-break: break-all;
 }
 
 .setup-success h3 {

@@ -49,6 +49,10 @@
           </div>
         </el-header>
         <el-main class="app-main">
+          <div v-if="permission.error" class="permission-banner" role="status">
+            <span>{{ permission.error }}</span>
+            <el-button link type="primary" :loading="permission.loading" @click="retryPermissions">重试</el-button>
+          </div>
           <router-view />
         </el-main>
       </el-container>
@@ -116,8 +120,13 @@ watchEffect(() => {
 });
 
 function logout() {
+  permission.reset();
   clearToken();
   router.push({ name: 'login' });
+}
+
+async function retryPermissions() {
+  await permission.fetch({ force: true });
 }
 </script>
 
@@ -130,6 +139,21 @@ function logout() {
 
 .language-select {
   width: 128px;
+}
+
+.permission-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  border: 1px solid #fed7aa;
+  border-radius: 8px;
+  background: #fff7ed;
+  color: #9a3412;
+  font-size: 13px;
+  line-height: 1.4;
 }
 
 @media (max-width: 780px) {

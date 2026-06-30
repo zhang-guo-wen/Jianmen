@@ -1,1184 +1,800 @@
 <template>
   <div class="view-stack">
-    <el-tabs v-model="activeTab" @tab-change="handleTabChange">
-      <el-tab-pane :label="t('database.instance.title')" name="instances" />
-      <el-tab-pane :disabled="!selectedInstance" :label="t('database.account.title')" name="accounts" />
-    </el-tabs>
+    <DataTableCard
+      :data="instances"
+      :loading="instancesLoading"
+      :total="instanceTotal"
+      v-model:page="instancePage"
+      v-model:page-size="instancePageSize"
+      search-placeholder="搜索实例名称、地址、协议..."
+      @search="onInstanceSearch"
+    >
+      <template #toolbar-extra>
+        <el-button type="primary" @click="openCreateInstance">新增实例</el-button>
+      </template>
+      <el-table-column prop="name" label="名称" min-width="130" show-overflow-tooltip />
+      <el-table-column prop="address" label="地址" min-width="130" show-overflow-tooltip />
+      <el-table-column prop="port" label="端口" width="70" />
+      <el-table-column label="协议" width="80" align="center">
+        <template #default="{ row }">
+          <el-tag size="small" :type="row.protocol === 'mysql' ? 'success' : 'primary'" effect="plain">{{ row.protocol === 'mysql' ? 'MySQL' : 'PG' }}</el-tag>
+        </template>
+      </el-table-column>
+      <el-table-column label="账号数" width="80" align="center">
+        <template #default="{ row }">
+          <el-button link type="primary" @click="showAccounts(row)">{{ row.account_count ?? 0 }}</el-button>
+        </template>
+      </el-table-column>
+      <el-table-column prop="group" label="分组" width="100" show-overflow-tooltip />
+      <el-table-column label="状态" width="70" align="center">
+        <template #default="{ row }">
+          <StatusSwitch :model-value="row.status === 'active'" @update:model-value="toggleInstance(row)" />
+        </template>
+      </el-table-column>
+      <el-table-column prop="remark" label="备注" min-width="120" show-overflow-tooltip />
+      <el-table-column label="操作" width="220">
+        <template #default="{ row }">
+          <el-button link type="primary" size="small" @click="editInstance(row)">编辑</el-button>
+          <el-button link type="primary" size="small" @click="openCreateAccountForInstance(row)">新建账号</el-button>
+          <el-button link type="danger" size="small" @click="deleteInstance(row)">删除</el-button>
+        </template>
+      </el-table-column>
+    </DataTableCard>
 
-    <!-- Tab: Instances -->
-    <template v-if="activeTab === 'instances'">
-      <div class="toolbar">
-        <el-input
-          v-model="instanceKeyword"
-          clearable
-          :placeholder="t('database.instance.placeholder.search')"
-          style="max-width: 360px"
-          @keyup.enter="loadInstances"
-        />
-        <div class="toolbar-actions">
-          <el-button :loading="instancesLoading" @click="loadInstances">
-            {{ t('common.refresh') }}
-          </el-button>
-          <el-button type="primary" @click="openCreateInstanceDialog">
-            {{ t('database.instance.create') }}
-          </el-button>
-        </div>
-      </div>
+    <!-- 创建/编辑实例弹窗 -->
+    <FormDialog v-model:visible="showInstanceDialog" :title="editingInstance ? '编辑实例' : '新增实例'" width="640px" :loading="submitting" @submit="submitInstance">
+      <el-form :model="instanceForm" label-width="80px">
+        <el-form-item label="名称" required>
+          <el-input v-model="instanceForm.name" />
+        </el-form-item>
+        <el-form-item label="协议" required>
+          <el-select v-model="instanceForm.protocol">
+            <el-option label="MySQL" value="mysql" />
+            <el-option label="PostgreSQL" value="postgres" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="上游地址" required>
+          <el-input v-model="instanceForm.address" placeholder="host:port 或 IP" />
+        </el-form-item>
+        <el-form-item label="端口">
+          <el-input-number v-model="instanceForm.port" :min="1" :max="65535" />
+        </el-form-item>
+        <el-collapse>
+          <el-collapse-item title="更多设置">
+            <el-form-item label="分组">
+              <el-input v-model="instanceForm.group" />
+            </el-form-item>
+            <el-form-item label="备注">
+              <el-input v-model="instanceForm.remark" type="textarea" />
+            </el-form-item>
+          </el-collapse-item>
+        </el-collapse>
+      </el-form>
+    </FormDialog>
 
-      <el-card class="placeholder-panel" shadow="never">
-        <el-alert v-if="instanceError" :title="instanceError" type="error" show-icon />
-        <el-table v-else v-loading="instancesLoading" :data="filteredInstances" row-key="id">
-          <el-table-column :label="t('database.instance.name')" min-width="160" show-overflow-tooltip>
-            <template #default="{ row }">
-              <strong class="primary-cell">{{ row.name || '-' }}</strong>
-            </template>
-          </el-table-column>
-          <el-table-column :label="t('database.instance.protocol')" width="110">
-            <template #default="{ row }">
-              <el-tag size="small">{{ row.protocol || t('common.none') }}</el-tag>
-            </template>
-          </el-table-column>
-          <el-table-column :label="t('database.instance.address')" min-width="190" show-overflow-tooltip>
-            <template #default="{ row }">
-              <span class="mono-text">{{ row.address || t('common.none') }}</span>
-            </template>
-          </el-table-column>
-          <el-table-column :label="t('database.instance.group')" min-width="120" show-overflow-tooltip>
-            <template #default="{ row }">
-              {{ row.group_name || '-' }}
-            </template>
-          </el-table-column>
-          <el-table-column :label="t('database.instance.accountCount')" width="100">
-            <template #default="{ row }">
-              <el-button link type="primary" @click="openAccountsTab(row)">
-                {{ row.account_count ?? 0 }}
-              </el-button>
-            </template>
-          </el-table-column>
-          <el-table-column :label="t('common.status')" width="90">
-            <template #default="{ row }">
-              <el-tag :type="row.disabled ? 'info' : 'success'">
-                {{ row.disabled ? t('common.disabled') : t('common.enabled') }}
-              </el-tag>
-            </template>
-          </el-table-column>
-          <el-table-column :label="t('database.instance.remark')" min-width="160" show-overflow-tooltip>
-            <template #default="{ row }">
-              {{ row.remark || '-' }}
-            </template>
-          </el-table-column>
-          <el-table-column :label="t('common.actions')" fixed="right" width="290">
-            <template #default="{ row }">
-              <el-button link type="primary" @click="openEditInstanceDialog(row)">
-                {{ t('database.instance.edit') }}
-              </el-button>
-              <el-button
-                :loading="instanceStatusUpdatingId === row.id"
-                link
-                :type="row.disabled ? 'success' : 'warning'"
-                @click="toggleInstanceStatus(row)"
-              >
-                {{ row.disabled ? t('common.enabled') : t('common.disabled') }}
-              </el-button>
-              <el-button
-                :loading="instanceDeletingId === row.id"
-                link
-                type="danger"
-                @click="confirmDeleteInstance(row)"
-              >
-                {{ t('database.instance.delete') }}
-              </el-button>
-              <el-button link type="success" @click="openAccountsTab(row)">
-                {{ t('database.account.title') }}
-              </el-button>
-            </template>
-          </el-table-column>
-        </el-table>
-        <el-empty v-if="!instancesLoading && !filteredInstances.length && !instanceError" :description="t('database.instance.empty')" />
-        <div class="pagination-row">
-          <el-pagination
-            v-model:current-page="instancePage"
-            v-model:page-size="instancePageSize"
-            background
-            layout="total, sizes, prev, pager, next"
-            :page-sizes="[20, 50, 100]"
-            :total="instanceTotal"
-            @current-change="loadInstances"
-            @size-change="handleInstancePageSizeChange"
-          />
-        </div>
-      </el-card>
-
-      <!-- Instance Create/Edit Dialog -->
-      <el-dialog
-        v-model="instanceDialogVisible"
-        :close-on-click-modal="!submittingInstance"
-        :title="editingInstanceId ? t('database.instance.edit') : t('database.instance.create')"
-        class="form-dialog"
-        destroy-on-close
-        width="min(560px, calc(100vw - 32px))"
+    <!-- 账号列表弹窗 -->
+    <el-dialog
+      v-model="accountsDialogVisible"
+      :title="accountsDialogTitle"
+      destroy-on-close
+      width="min(960px, calc(100vw - 32px))"
+    >
+      <DataTableCard
+        :data="accounts"
+        :loading="accountsLoading"
+        :total="accountTotal"
+        v-model:page="accountPage"
+        v-model:page-size="accountPageSize"
+        :show-search="false"
+        row-key="id"
       >
-        <el-form ref="instanceFormRef" :model="instanceForm" :rules="instanceRules" label-position="top">
-          <div class="form-sections">
-            <section class="form-section">
-              <div class="form-section-title">连接信息</div>
-              <div class="form-grid">
-                <el-form-item :label="t('database.instance.name')" prop="name">
-                  <el-input v-model="instanceForm.name" :placeholder="t('database.instance.placeholder.name')" />
-                </el-form-item>
-                <el-form-item :label="t('database.instance.protocol')" prop="protocol">
-                  <el-select v-model="instanceForm.protocol">
-                    <el-option label="MySQL" value="mysql" />
-                    <el-option label="PostgreSQL" value="postgres" />
-                  </el-select>
-                </el-form-item>
-                <el-form-item :label="t('database.instance.address')" prop="address" class="form-full">
-                  <el-input v-model="instanceForm.address" :placeholder="t('database.instance.placeholder.address')" />
-                </el-form-item>
-              </div>
-            </section>
-
-            <el-collapse v-model="instanceMorePanels" class="more-collapse">
-              <el-collapse-item :title="t('database.account.moreSettings')" name="more">
-                <div class="form-grid">
-                  <el-form-item :label="t('database.instance.group')" prop="group_name">
-                    <el-select
-                      v-model="instanceForm.group_name"
-                      allow-create
-                      clearable
-                      filterable
-                      placeholder="选择或输入分组"
-                    >
-                      <el-option
-                        v-for="group in instanceGroupOptions"
-                        :key="group"
-                        :label="group"
-                        :value="group"
-                      />
-                    </el-select>
-                  </el-form-item>
-                  <el-form-item :label="t('database.instance.remark')" prop="remark" class="form-full">
-                    <el-input v-model="instanceForm.remark" :autosize="{ minRows: 3, maxRows: 5 }" type="textarea" />
-                  </el-form-item>
-                </div>
-              </el-collapse-item>
-            </el-collapse>
-          </div>
-        </el-form>
-
-        <template #footer>
-          <el-button :disabled="submittingInstance" @click="instanceDialogVisible = false">
-            {{ t('common.cancel') }}
-          </el-button>
-          <el-button :loading="submittingInstance" type="primary" @click="submitInstance">
-            {{ t('common.create') }}
+        <template #toolbar-extra>
+          <el-button :loading="accountsLoading" @click="loadSelectedInstanceAccounts">刷新</el-button>
+          <el-button type="primary" :disabled="!selectedInstance" @click="openCreateAccount">
+            新增账号
           </el-button>
         </template>
-      </el-dialog>
-    </template>
+        <el-table-column label="连接账号" min-width="130">
+          <template #default="{ row }">{{ row.username || '-' }}</template>
+        </el-table-column>
+        <el-table-column label="分组" width="110">
+          <template #default="{ row }">{{ row.group || '-' }}</template>
+        </el-table-column>
+        <el-table-column label="状态" width="80" align="center">
+          <template #default="{ row }">
+            <StatusSwitch
+              :model-value="row.status === 'active'"
+              :loading="statusUpdatingId === row.id"
+              @update:model-value="(val: boolean) => toggleAccountStatus(row, val)"
+            />
+          </template>
+        </el-table-column>
+        <el-table-column label="过期时间" min-width="140">
+          <template #default="{ row }">{{ formatTime(row.expires_at) || '永久' }}</template>
+        </el-table-column>
+        <el-table-column label="备注" min-width="120" show-overflow-tooltip>
+          <template #default="{ row }">{{ row.remark || '-' }}</template>
+        </el-table-column>
+        <el-table-column label="操作" width="200" fixed="right">
+          <template #default="{ row }">
+            <el-button link type="success" size="small" @click="openConnectDialog(row)">连接</el-button>
+            <el-button link type="primary" size="small" @click="editAccount(row)">编辑</el-button>
+            <el-button link type="danger" size="small" @click="deleteAccount(row)">删除</el-button>
+          </template>
+        </el-table-column>
+      </DataTableCard>
+    </el-dialog>
 
-    <!-- Tab: Accounts -->
-    <template v-if="activeTab === 'accounts' && selectedInstance">
-      <div class="toolbar">
-        <div class="toolbar-breadcrumb">
-          <el-button link type="primary" @click="activeTab = 'instances'">
-            &larr; {{ t('database.instance.title') }}
-          </el-button>
-          <span class="breadcrumb-separator">/</span>
-          <strong>{{ selectedInstance.name || '-' }}</strong>
-        </div>
-        <div class="toolbar-actions">
-          <el-button :loading="accountsLoading" @click="loadAccounts">
-            {{ t('common.refresh') }}
-          </el-button>
-          <el-button type="primary" @click="openCreateAccountDialog">
-            {{ t('database.account.create') }}
-          </el-button>
-        </div>
-      </div>
-
-      <el-card class="placeholder-panel" shadow="never">
-        <el-alert v-if="accountError" :title="accountError" type="error" show-icon />
-        <el-table v-else v-loading="accountsLoading" :data="accounts" row-key="id">
-          <el-table-column :label="t('database.account.uniqueName')" min-width="180" show-overflow-tooltip>
-            <template #default="{ row }">
-              <span class="mono-text">{{ row.unique_name || t('common.none') }}</span>
-            </template>
-          </el-table-column>
-          <el-table-column :label="t('database.account.upstreamUsername')" min-width="150" show-overflow-tooltip>
-            <template #default="{ row }">
-              {{ row.upstream_username || t('common.none') }}
-            </template>
-          </el-table-column>
-          <el-table-column :label="t('database.account.group')" min-width="120" show-overflow-tooltip>
-            <template #default="{ row }">
-              {{ row.group_name || '-' }}
-            </template>
-          </el-table-column>
-          <el-table-column :label="t('common.status')" width="90">
-            <template #default="{ row }">
-              <el-tag :type="row.disabled ? 'info' : 'success'">
-                {{ row.disabled ? t('common.disabled') : t('common.enabled') }}
+    <!-- 创建/编辑账号弹窗 -->
+    <FormDialog
+      v-model:visible="accountDialogVisible"
+      :title="editingAccount ? '编辑账号' : '新增账号'"
+      width="620px"
+      :loading="accountSubmitting"
+      @submit="submitAccount"
+    >
+      <el-form :model="accountForm" label-width="100px">
+        <el-form-item label="目标用户名" required>
+          <el-input v-model="accountForm.username" placeholder="数据库登录用户名" />
+        </el-form-item>
+        <el-form-item label="目标密码">
+          <el-input v-model="accountForm.password" type="password" show-password
+            :placeholder="editingAccount ? '留空则保留原密码' : '数据库登录密码'" />
+        </el-form-item>
+        <el-form-item label="连接测试">
+          <div class="test-connection-row">
+            <el-button :loading="accountFormTesting" @click="testAccountFormConnection">测试连接</el-button>
+            <template v-if="accountFormTestResult">
+              <el-tag :type="accountFormTestResult.ok ? 'success' : 'danger'" size="small">
+                {{ accountFormTestResult.ok ? '可达' : '不可达' }}
               </el-tag>
+              <span v-if="accountFormTestResult.latency_ms !== undefined" class="test-connection-meta">
+                延迟 {{ accountFormTestResult.latency_ms }}ms
+              </span>
+              <span v-if="accountFormTestResult.error" class="test-connection-error">
+                {{ accountFormTestResult.error }}
+              </span>
             </template>
-          </el-table-column>
-          <el-table-column :label="t('database.account.expiresAt')" min-width="160" show-overflow-tooltip>
-            <template #default="{ row }">
-              {{ formatTime(row.expires_at) || t('common.none') }}
-            </template>
-          </el-table-column>
-          <el-table-column :label="t('common.actions')" fixed="right" width="280">
-            <template #default="{ row }">
-              <el-button link type="success" @click="openConnectDialog(row)">
-                {{ t('database.account.connect') }}
-              </el-button>
-              <el-button link type="primary" @click="openEditAccountDialog(row)">
-                {{ t('database.account.edit') }}
-              </el-button>
-              <el-button
-                :loading="accountStatusUpdatingId === row.id"
-                link
-                :type="row.disabled ? 'success' : 'warning'"
-                @click="toggleAccountStatus(row)"
-              >
-                {{ row.disabled ? t('common.enabled') : t('common.disabled') }}
-              </el-button>
-              <el-button
-                :loading="accountDeletingId === row.id"
-                link
-                type="danger"
-                @click="confirmDeleteAccount(row)"
-              >
-                {{ t('database.account.delete') }}
-              </el-button>
-            </template>
-          </el-table-column>
-        </el-table>
-        <el-empty v-if="!accountsLoading && !accounts.length && !accountError" :description="t('database.empty.accounts')" />
-        <div v-if="accountTotal > 0" class="pagination-row">
-          <el-pagination
-            v-model:current-page="accountPage"
-            v-model:page-size="accountPageSize"
-            background
-            layout="total, sizes, prev, pager, next"
-            :page-sizes="[20, 50, 100]"
-            :total="accountTotal"
-            @current-change="loadAccounts"
-            @size-change="handleAccountPageSizeChange"
-          />
-        </div>
-      </el-card>
-
-      <!-- Account Create/Edit Dialog -->
-      <el-dialog
-        v-model="accountDialogVisible"
-        :close-on-click-modal="!submittingAccount"
-        :title="editingAccountId ? t('database.account.edit') : t('database.account.create')"
-        class="form-dialog"
-        destroy-on-close
-        width="min(560px, calc(100vw - 32px))"
-      >
-        <el-form ref="accountFormRef" :model="accountForm" :rules="accountRules" label-position="top">
-          <div class="form-sections">
-            <section class="form-section">
-              <div class="form-section-title">账号信息</div>
-              <div class="form-grid">
-                <el-form-item :label="t('database.account.upstreamUsername')" prop="upstream_username">
-                  <el-input
-                    v-model="accountForm.upstream_username"
-                    :disabled="editingAccountId !== null"
-                    placeholder="数据库登录用户名"
-                  />
-                </el-form-item>
-                <el-form-item
-                  :label="t('database.account.password.label')"
-                  prop="upstream_password"
-                >
-                  <el-input
-                    v-model="accountForm.upstream_password"
-                    :placeholder="editingAccountId ? t('database.account.password.emptyHint') : ''"
-                    show-password
-                    type="password"
-                  />
-                </el-form-item>
-              </div>
-            </section>
-
-            <section class="form-section">
-              <div class="form-section-title">有效期</div>
-              <div class="expire-shortcuts">
-                <el-button
-                  v-for="shortcut in expireShortcuts"
-                  :key="shortcut.value"
-                  :type="expireShortcutActive === shortcut.value ? 'primary' : ''"
-                  size="small"
-                  @click="applyExpireShortcut(shortcut.value)"
-                >
-                  {{ shortcut.label }}
-                </el-button>
-              </div>
-              <el-date-picker
-                v-model="accountForm.expires_at"
-                class="expire-picker"
-                placeholder="选择日期时间"
-                type="datetime"
-                value-format="YYYY-MM-DDTHH:mm:ss.SSS[Z]"
-              />
-            </section>
-
-            <el-collapse v-model="accountMorePanels" class="more-collapse">
-              <el-collapse-item :title="t('database.account.moreSettings')" name="more">
-                <div class="form-grid">
-                  <el-form-item :label="t('database.account.group')" prop="group_name">
-                    <el-select
-                      v-model="accountForm.group_name"
-                      allow-create
-                      clearable
-                      filterable
-                      placeholder="选择或输入分组"
-                    >
-                      <el-option
-                        v-for="group in accountGroupOptions"
-                        :key="group"
-                        :label="group"
-                        :value="group"
-                      />
-                    </el-select>
-                  </el-form-item>
-                  <el-form-item :label="t('database.account.remark')" prop="remark" class="form-full">
-                    <el-input v-model="accountForm.remark" :autosize="{ minRows: 3, maxRows: 5 }" type="textarea" />
-                  </el-form-item>
-                </div>
-              </el-collapse-item>
-            </el-collapse>
           </div>
-        </el-form>
+          <div v-if="editingAccount" class="test-connection-hint">
+            点击测试连接时必须重新输入数据库密码；保存时密码留空仍会保留原密码。
+          </div>
+          <div v-if="editingAccount" class="test-connection-row saved-credential-row">
+            <span class="test-connection-meta">已保存凭据：</span>
+            <el-tag v-if="savedCredentialTesting" type="info" size="small">测试中...</el-tag>
+            <template v-else-if="savedCredentialTestResult">
+              <el-tag :type="savedCredentialTestResult.ok ? 'success' : 'danger'" size="small">
+                {{ savedCredentialTestResult.ok ? '可达' : '不可达' }}
+              </el-tag>
+              <span v-if="savedCredentialTestResult.latency_ms !== undefined" class="test-connection-meta">
+                延迟 {{ savedCredentialTestResult.latency_ms }}ms
+              </span>
+              <span v-if="savedCredentialTestResult.error" class="test-connection-error">
+                {{ savedCredentialTestResult.error }}
+              </span>
+            </template>
+          </div>
+        </el-form-item>
+        <el-form-item label="有效期">
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <el-button v-for="opt in expiryOptions" :key="opt.label" size="small"
+              :type="expiryPreset === opt.label ? 'primary' : ''"
+              @click="setExpiry(opt)">{{ opt.label }}</el-button>
+          </div>
+          <el-date-picker v-model="accountForm.expiresAt" type="datetime"
+            placeholder="自定义时间" style="margin-top:8px;width:100%" />
+        </el-form-item>
+        <el-collapse>
+          <el-collapse-item title="更多设置">
+            <el-form-item label="分组">
+              <el-input v-model="accountForm.group" placeholder="输入或选择分组" />
+            </el-form-item>
+            <el-form-item label="备注">
+              <el-input v-model="accountForm.remark" type="textarea" placeholder="备注信息" />
+            </el-form-item>
+          </el-collapse-item>
+        </el-collapse>
+      </el-form>
+    </FormDialog>
 
-        <template #footer>
-          <el-button :disabled="submittingAccount" @click="accountDialogVisible = false">
-            {{ t('common.cancel') }}
-          </el-button>
-          <el-button :loading="submittingAccount" type="primary" @click="submitAccount">
-            {{ t('common.create') }}
-          </el-button>
-        </template>
-      </el-dialog>
+    <!-- 连接弹窗 -->
+    <el-dialog
+      v-model="connectDialogVisible"
+      destroy-on-close
+      title="连接数据库账号"
+      width="min(720px, calc(100vw - 32px))"
+      @opened="onConnectDialogOpened"
+    >
+      <div v-if="connectTarget" class="connection-dialog">
+        <el-alert show-icon type="info" :closable="false"
+          title="输入堡垒机的登录密码，不是目标数据库的密码" />
 
-      <!-- Connect Dialog -->
-      <el-dialog
-        v-model="connectDialogVisible"
-        :title="t('database.account.connection')"
-        class="form-dialog"
-        destroy-on-close
-        width="min(560px, calc(100vw - 32px))"
-        @opened="onConnectDialogOpened"
-      >
-        <div v-if="connectTarget" class="dialog-stack">
-          <!-- Status section -->
-          <section class="connect-section">
-            <div class="connect-section-title">● {{ t('database.connect.status') }}</div>
-            <div class="connect-status-card" v-loading="connectTesting">
-              <template v-if="connectTestResult !== null">
-                <el-tag :type="connectTestResult.ok ? 'success' : 'danger'" size="small">
-                  {{ connectTestResult.ok ? '🟢 ' + t('database.connect.reachable') : '🔴 ' + t('database.connect.unreachable') }}
-                </el-tag>
-                <span class="connect-latency" v-if="connectTestResult.latency_ms !== undefined" style="margin-left: 8px;">
-                  {{ t('database.connect.latency') }}: {{ connectTestResult.latency_ms }}ms
-                </span>
-                <div class="connect-error" v-if="connectTestResult.error" style="margin-top: 4px; color: var(--el-color-danger); font-size: 12px;">
-                  {{ connectTestResult.error }}
-                </div>
+        <div style="margin-bottom: 8px; display: flex; align-items: center; gap: 8px;" v-if="!creatingSession">
+          <span style="font-size: 13px; color: #667085;">连通性：</span>
+          <el-tag v-if="connectionTesting" type="info" size="small">测试中...</el-tag>
+          <template v-else-if="connectionTestResult !== null">
+            <el-tag :type="connectionTestResult.ok ? 'success' : 'danger'" size="small">
+              {{ connectionTestResult.ok ? '可达' : '不可达' }}
+            </el-tag>
+            <span v-if="connectionTestResult.latency_ms !== undefined" style="font-size: 12px; color: #667085;">
+              延迟 {{ connectionTestResult.latency_ms }}ms
+            </span>
+            <span v-if="connectionTestResult.error" style="font-size: 12px; color: var(--el-color-danger);">
+              {{ connectionTestResult.error }}
+            </span>
+          </template>
+        </div>
+
+        <div v-if="creatingSession" style="text-align: center; padding: 30px 0;">
+          <el-icon class="is-loading" :size="28"><Loading /></el-icon>
+          <p style="margin-top: 10px; color: #667085;">正在创建连接会话...</p>
+        </div>
+
+        <template v-else-if="!connectionError && compactUser">
+          <el-descriptions :column="1" border size="small" style="margin-top: 12px">
+            <el-descriptions-item label="连接地址">
+              <code>{{ gatewayHost }}:{{ gatewayPort }}</code>
+              <el-button link type="primary" size="small" style="margin-left: 8px" @click="copyText(`${gatewayHost}:${gatewayPort}`)">复制</el-button>
+            </el-descriptions-item>
+            <el-descriptions-item label="用户名">
+              <code>{{ compactUser }}</code>
+              <el-button link type="primary" size="small" style="margin-left: 8px" @click="copyText(compactUser)">复制</el-button>
+            </el-descriptions-item>
+            <el-descriptions-item label="密码">堡垒机登录密码</el-descriptions-item>
+          </el-descriptions>
+
+          <div style="margin-top: 12px">
+            <el-input :model-value="connectCommand" readonly size="small">
+              <template #append>
+                <el-button @click="copyText(connectCommand)">复制命令</el-button>
               </template>
-            </div>
-            <div class="connect-status-tags" style="margin-top: 8px;">
-              <el-tag :type="connectTarget.disabled ? 'info' : 'success'" size="small">
-                {{ connectTarget.disabled ? t('common.disabled') : t('common.enabled') }}
-              </el-tag>
-              <el-tag v-if="isExpired(connectTarget.expires_at)" type="danger" size="small" style="margin-left: 4px;">
-                {{ t('database.connect.expired') }}
-              </el-tag>
-              <el-tag v-else-if="connectTarget.expires_at" type="warning" size="small" style="margin-left: 4px;">
-                {{ t('database.connect.expires') }}: {{ formatTime(connectTarget.expires_at) }}
-              </el-tag>
-            </div>
-          </section>
-
-          <!-- Params section -->
-          <section class="connect-section">
-            <div class="connect-section-title">● {{ t('database.connect.params') }}</div>
-            <div class="config-row" v-for="param in connectParams" :key="param.label">
-              <div class="config-label">{{ param.label }}</div>
-              <el-input :model-value="param.value" readonly>
-                <template #append>
-                  <el-tooltip :content="t('database.account.copy')">
-                    <el-button :aria-label="t('database.account.copy')" @click="copyText(param.value)" />
-                  </el-tooltip>
-                </template>
-              </el-input>
-            </div>
-          </section>
-
-          <!-- Command section -->
-          <section class="connect-section">
-            <div class="connect-section-title">● {{ t('database.connect.command') }}</div>
-            <div class="config-row">
-              <div class="config-label">Shell</div>
-              <el-input :model-value="connectCommand" readonly>
-                <template #append>
-                  <el-tooltip :content="t('database.account.copy')">
-                    <el-button :aria-label="t('database.account.copy')" @click="copyText(connectCommand)" />
-                  </el-tooltip>
-                </template>
-              </el-input>
-            </div>
-          </section>
-        </div>
-
-        <template #footer>
-          <el-button @click="connectDialogVisible = false">{{ t('common.close') }}</el-button>
-          <el-button type="primary" @click="copyAllConnect">{{ t('database.connect.copyAll') }}</el-button>
+            </el-input>
+          </div>
         </template>
-      </el-dialog>
-    </template>
+      </div>
+      <template #footer>
+        <el-button @click="connectDialogVisible = false">关闭</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue';
-import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus';
-import {
-  apiClient,
-  type ApiEnvelope,
-  type DBInstanceRecord,
-  type DBInstancePayload,
-  type DBAccountRecord,
-  type DBAccountPayload,
-  type DBAccountUpdatePayload
-} from '@/api/client';
-import { useI18n } from '@/i18n';
+import { ref, reactive, watch, computed, onMounted, nextTick } from 'vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { Loading } from '@element-plus/icons-vue'
+import DataTableCard from '@/components/DataTableCard.vue'
+import FormDialog from '@/components/FormDialog.vue'
+import StatusSwitch from '@/components/StatusSwitch.vue'
+import * as api from '@/api/client'
 
 interface InstanceForm {
-  name: string;
-  protocol: string;
-  address: string;
-  group_name: string;
-  remark: string;
+  name: string
+  protocol: string
+  address: string
+  port: number
+  group: string
+  remark: string
 }
 
-interface AccountForm {
-  upstream_username: string;
-  upstream_password: string;
-  group_name: string;
-  remark: string;
-  expires_at: string;
+interface AccountFormState {
+  username: string
+  password: string
+  group: string
+  remark: string
+  expiresAt: Date | null
 }
 
-const { t } = useI18n();
-
-// Tab state
-const activeTab = ref('instances');
-
-// Instance state
-const instanceKeyword = ref('');
-const instances = ref<DBInstanceRecord[]>([]);
-const instancesLoading = ref(false);
-const instanceError = ref('');
-const instanceDeletingId = ref('');
-const instanceStatusUpdatingId = ref('');
-const instancePage = ref(1);
-const instancePageSize = ref(20);
-const instanceTotal = ref(0);
-const instanceDialogVisible = ref(false);
-const submittingInstance = ref(false);
-const editingInstanceId = ref<string | null>(null);
-const instanceMorePanels = ref<string[]>([]);
-const instanceFormRef = ref<FormInstance>();
-const instanceGroupOptions = ref<string[]>([]);
-
+// ── Instance state ──
+const instances = ref<api.DatabaseInstanceView[]>([])
+const instancesLoading = ref(false)
+const instancePage = ref(1)
+const instancePageSize = ref(20)
+const instanceTotal = ref(0)
+const instanceSearchKeyword = ref('')
+const showInstanceDialog = ref(false)
+const submitting = ref(false)
+const editingInstance = ref<api.DatabaseInstanceView | null>(null)
 const instanceForm = reactive<InstanceForm>({
   name: '',
   protocol: 'mysql',
   address: '',
-  group_name: '',
+  port: 3306,
+  group: '',
   remark: ''
-});
+})
 
-const instanceRules: FormRules = {
-  name: [{ required: true, message: '请输入实例名称', trigger: 'blur' }],
-  protocol: [{ required: true, message: '请选择协议', trigger: 'change' }],
-  address: [{ required: true, message: '请输入上游地址', trigger: 'blur' }]
-};
+// ── Account dialog state ──
+const accountsDialogVisible = ref(false)
+const selectedInstance = ref<api.DatabaseInstanceView | null>(null)
+const accountsDialogTitle = computed(() => selectedInstance.value ? `${selectedInstance.value.name} - 账号` : '数据库账号')
 
-// Account state
-const selectedInstance = ref<DBInstanceRecord | null>(null);
-const accounts = ref<DBAccountRecord[]>([]);
-const accountsLoading = ref(false);
-const accountError = ref('');
-const accountDeletingId = ref('');
-const accountStatusUpdatingId = ref('');
-const accountDialogVisible = ref(false);
-const submittingAccount = ref(false);
-const editingAccountId = ref<string | null>(null);
-const accountMorePanels = ref<string[]>([]);
-const accountFormRef = ref<FormInstance>();
-const expireShortcutActive = ref('');
-const accountGroupOptions = ref<string[]>([]);
-const accountPage = ref(1);
-const accountPageSize = ref(20);
-const accountTotal = ref(0);
+const accounts = ref<api.DBAccountRecord[]>([])
+const accountsLoading = ref(false)
+const accountTotal = ref(0)
+const accountPage = ref(1)
+const accountPageSize = ref(20)
 
-const accountForm = reactive<AccountForm>({
-  upstream_username: '',
-  upstream_password: '',
-  group_name: '',
+const accountDialogVisible = ref(false)
+const editingAccount = ref<api.DBAccountRecord | null>(null)
+const accountSubmitting = ref(false)
+const statusUpdatingId = ref('')
+
+const expiryPreset = ref('')
+const expiryOptions = [
+  { label: '8小时', hours: 8 },
+  { label: '7天', hours: 7 * 24 },
+  { label: '1年', hours: 365 * 24 },
+  { label: '永久', hours: -1 },
+]
+
+const accountForm = reactive<AccountFormState>({
+  username: '',
+  password: '',
+  group: '',
   remark: '',
-  expires_at: ''
-});
+  expiresAt: null,
+})
 
-const accountRules: FormRules = {
-  upstream_username: [{ required: true, message: '请输入目标用户名', trigger: 'blur' }],
-  upstream_password: [{ required: true, message: '请输入目标密码', trigger: 'blur' }]
-};
+// ── Connect dialog state ──
+const connectDialogVisible = ref(false)
+const connectTarget = ref<api.DBAccountRecord | null>(null)
+const userSessionId = ref('')
 
-// Connect dialog state
-const connectDialogVisible = ref(false);
-const connectTarget = ref<DBAccountRecord | null>(null);
-const userSessionId = ref('');
-const connectSessionLoading = ref(false);
-const connectSessionError = ref('');
-const connectTesting = ref(false);
-const connectTestResult = ref<{ ok: boolean; error?: string; latency_ms?: number } | null>(null);
-
-// Gateway config (fetched from /api/db/gateway)
+// ── Gateway config ──
 const gatewayConfig = ref<{ host: string; port: number; enabled: boolean }>({
   host: '127.0.0.1',
   port: 33060,
   enabled: false,
-});
+})
 
 async function loadGatewayConfig() {
   try {
-    const cfg = await apiClient.getDBGateway();
+    const cfg = await api.apiClient.getDBGateway()
     if (cfg && typeof cfg === 'object') {
       gatewayConfig.value = {
         host: String(cfg.host || '127.0.0.1'),
         port: Number(cfg.port) || 33060,
         enabled: Boolean(cfg.enabled),
-      };
+      }
     }
   } catch {
     // 使用默认值
   }
 }
 
-const connectParams = computed(() => {
-  if (!connectTarget.value || !selectedInstance.value) return [];
-  const host = gatewayConfig.value.host;
-  const proxyPort = gatewayConfig.value.port;
-  const resourceId = connectTarget.value.resource_id || '0000';
-  const sessionId = userSessionId.value;
-  const compactUser = sessionId ? 'D' + resourceId + sessionId : '';
-  return [
-    { label: t('database.connect.host') as string, value: host },
-    { label: t('database.connect.port') as string, value: String(proxyPort) },
-    { label: t('database.connect.username') as string, value: compactUser },
-  ];
-});
+const creatingSession = ref(false)
+const connectionError = ref('')
+const connectionTesting = ref(false)
+const connectionTestResult = ref<{ ok: boolean; error?: string; latency_ms?: number } | null>(null)
+const accountFormTesting = ref(false)
+const accountFormTestResult = ref<{ ok: boolean; error?: string; latency_ms?: number } | null>(null)
+const savedCredentialTesting = ref(false)
+const savedCredentialTestResult = ref<{ ok: boolean; error?: string; latency_ms?: number } | null>(null)
 
-function isExpired(expiresAt: unknown): boolean {
-  if (typeof expiresAt !== 'string' || !expiresAt.trim()) return false;
-  const d = new Date(expiresAt);
-  if (Number.isNaN(d.getTime())) return false;
-  return d.getTime() < Date.now();
-}
-
-async function onConnectDialogOpened() {
-  if (!connectTarget.value?.id) return;
-  connectTesting.value = true;
-  connectTestResult.value = null;
-  try {
-    const result = await apiClient.testDBConnection(connectTarget.value.id);
-    const data = ('data' in result ? (result as ApiEnvelope<{ ok: boolean; error?: string; latency_ms?: number }>).data : result) as { ok: boolean; error?: string; latency_ms?: number };
-    connectTestResult.value = data ?? null;
-  } catch (err) {
-    connectTestResult.value = { ok: false, error: err instanceof Error ? err.message : 'test failed' };
-  } finally {
-    connectTesting.value = false;
-  }
-}
-
-// Computed
-const filteredInstances = computed(() => {
-  const query = instanceKeyword.value.trim().toLowerCase();
-  if (!query) return instances.value;
-  return instances.value.filter((inst) =>
-    [inst.name, inst.protocol, inst.address, inst.group_name, inst.remark]
-      .some((v) => String(v ?? '').toLowerCase().includes(query))
-  );
-});
-
-const expireShortcuts = computed(() => [
-  { label: t('database.account.expireShortcuts.hours8'), value: '8h' },
-  { label: t('database.account.expireShortcuts.days7'), value: '7d' },
-  { label: t('database.account.expireShortcuts.year1'), value: '1y' },
-  { label: t('database.account.expireShortcuts.permanent'), value: 'permanent' }
-]);
+const compactUser = computed(() => {
+  if (!connectTarget.value) return ''
+  const resourceId = connectTarget.value.resource_id || '0000'
+  const sessionId = userSessionId.value
+  return sessionId ? 'D' + resourceId + sessionId : ''
+})
+const gatewayHost = computed(() => gatewayConfig.value.host)
+const gatewayPort = computed(() => gatewayConfig.value.port)
 
 const connectCommand = computed(() => {
-  if (!connectTarget.value || !selectedInstance.value) return '';
-  const inst = selectedInstance.value;
-  const protocol = inst.protocol || 'mysql';
-  const resourceId = connectTarget.value.resource_id || '0000';
-  const sessionId = userSessionId.value || '00001';
-  const compactUser = `D${resourceId}${sessionId}`;
-  const host = gatewayConfig.value.host;
-  const proxyPort = gatewayConfig.value.port;
+  if (!connectTarget.value || !selectedInstance.value) return ''
+  const inst = selectedInstance.value
+  const protocol = inst.protocol || 'mysql'
+  const resourceId = connectTarget.value.resource_id || '0000'
+  const sessionId = userSessionId.value || '00001'
+  const compactUser = `D${resourceId}${sessionId}`
+  const host = gatewayConfig.value.host
+  const proxyPort = gatewayConfig.value.port
   if (protocol === 'mysql') {
-    return `mysql --protocol=tcp -h ${host} -P ${proxyPort} -u ${compactUser} -p`;
+    return `mysql --protocol=tcp -h ${host} -P ${proxyPort} -u ${compactUser} -p`
   }
-  return `psql -h ${host} -p ${proxyPort} -U ${compactUser}`;
-});
+  return `psql -h ${host} -p ${proxyPort} -U ${compactUser}`
+})
 
-// Helpers
-function unwrapArray<T>(payload: ApiEnvelope<T[]> | T[]): T[] {
-  return Array.isArray(payload) ? payload : payload.data ?? [];
-}
-
+// ── Helpers ──
 function formatTime(value: unknown): string {
-  if (typeof value === 'string' && value.trim()) {
-    const d = new Date(value);
-    return Number.isNaN(d.getTime()) ? value : d.toLocaleString();
+  let d: Date | null = null
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    d = new Date(value)
+  } else if (typeof value === 'string' && value.trim()) {
+    const parsed = Date.parse(value)
+    if (!Number.isNaN(parsed)) d = new Date(parsed)
   }
-  return '';
-}
-
-function computeExpiry(value: string): string {
-  if (!value || value === 'permanent') return '';
-  const now = new Date();
-  const match = /^(\d+)([hdmy])$/.exec(value);
-  if (!match) return '';
-  const num = Number(match[1]);
-  const unit = match[2];
-  switch (unit) {
-    case 'h': now.setHours(now.getHours() + num); break;
-    case 'd': now.setDate(now.getDate() + num); break;
-    case 'm': now.setMonth(now.getMonth() + num); break;
-    case 'y': now.setFullYear(now.getFullYear() + num); break;
-  }
-  return now.toISOString().replace('Z', '') + 'Z';
+  if (!d || Number.isNaN(d.getTime())) return ''
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
 }
 
 async function writeClipboard(value: string) {
   if (navigator.clipboard?.writeText) {
-    await navigator.clipboard.writeText(value);
-    return;
+    await navigator.clipboard.writeText(value)
+    return
   }
-  const textarea = document.createElement('textarea');
-  textarea.value = value;
-  textarea.setAttribute('readonly', 'true');
-  textarea.style.position = 'fixed';
-  textarea.style.top = '-9999px';
-  document.body.appendChild(textarea);
-  textarea.select();
+  const textarea = document.createElement('textarea')
+  textarea.value = value
+  textarea.setAttribute('readonly', 'true')
+  textarea.style.position = 'fixed'
+  textarea.style.top = '-9999px'
+  document.body.appendChild(textarea)
+  textarea.select()
   try {
-    if (!document.execCommand('copy')) throw new Error('copy command failed');
+    if (!document.execCommand('copy')) throw new Error('copy command failed')
   } finally {
-    document.body.removeChild(textarea);
+    document.body.removeChild(textarea)
   }
 }
 
 async function copyText(value: string) {
   if (!value.trim()) {
-    ElMessage.warning('没有可复制的内容');
-    return;
+    ElMessage.warning('没有可复制的内容')
+    return
   }
   try {
-    await writeClipboard(value);
-    ElMessage.success(t('database.account.copied'));
+    await writeClipboard(value)
+    ElMessage.success('已复制')
   } catch {
-    ElMessage.warning('复制失败');
+    ElMessage.warning('复制失败')
   }
 }
 
-function copyAllConnect() {
-  if (!connectTarget.value) return;
-  const lines = connectParams.value.map(p => `${p.label}: ${p.value}`);
-  lines.push(`Shell: ${connectCommand.value}`);
-  copyText(lines.join('\n'));
-}
-
-// Instance methods
+// ── Instance methods ──
 async function loadInstances() {
-  instancesLoading.value = true;
-  instanceError.value = '';
+  instancesLoading.value = true
   try {
-    const data = unwrapArray(await apiClient.getDBInstances());
-    // Collect unique groups
-    const groups = new Set<string>();
-    for (const inst of data) {
-      if (inst.group_name) groups.add(inst.group_name);
-    }
-    instanceGroupOptions.value = Array.from(groups).sort();
-    instances.value = data;
-    instanceTotal.value = data.length;
+    const res = await api.apiClient.getDBInstances({
+      page: instancePage.value,
+      page_size: instancePageSize.value,
+      q: instanceSearchKeyword.value || undefined
+    })
+    instances.value = res.items
+    instanceTotal.value = res.total
   } catch (err) {
-    instances.value = [];
-    instanceError.value = err instanceof Error ? err.message : t('database.error.loadResources');
+    instances.value = []
+    ElMessage.error(err instanceof Error ? err.message : '加载实例失败')
   } finally {
-    instancesLoading.value = false;
+    instancesLoading.value = false
   }
 }
 
-async function openCreateInstanceDialog() {
-  editingInstanceId.value = null;
-  instanceMorePanels.value = [];
+function onInstanceSearch(keyword: string) {
+  instanceSearchKeyword.value = keyword
+  instancePage.value = 1
+  loadInstances()
+}
+
+async function openCreateAccountForInstance(inst: api.DatabaseInstanceView) {
+  showAccounts(inst)
+  await nextTick()
+  openCreateAccount()
+}
+
+function openCreateInstance() {
+  editingInstance.value = null
   Object.assign(instanceForm, {
     name: '',
     protocol: 'mysql',
     address: '',
-    group_name: '',
+    port: 3306,
+    group: '',
     remark: ''
-  });
-  instanceDialogVisible.value = true;
-  await nextTick();
-  instanceFormRef.value?.clearValidate();
+  })
+  showInstanceDialog.value = true
 }
 
-async function openEditInstanceDialog(inst: DBInstanceRecord) {
-  editingInstanceId.value = inst.id ?? null;
-  instanceMorePanels.value = [];
+function editInstance(inst: api.DatabaseInstanceView) {
+  editingInstance.value = inst
   Object.assign(instanceForm, {
     name: inst.name || '',
     protocol: inst.protocol || 'mysql',
     address: inst.address || '',
-    group_name: inst.group_name || '',
+    port: inst.port || 3306,
+    group: inst.group || '',
     remark: inst.remark || ''
-  });
-  instanceDialogVisible.value = true;
-  await nextTick();
-  instanceFormRef.value?.clearValidate();
+  })
+  showInstanceDialog.value = true
 }
 
 async function submitInstance() {
-  const valid = await instanceFormRef.value?.validate().catch(() => false);
-  if (!valid) return;
-  submittingInstance.value = true;
+  if (!instanceForm.name.trim() || !instanceForm.address.trim()) {
+    ElMessage.warning('请填写必填字段')
+    return
+  }
+  submitting.value = true
   try {
-    const payload: DBInstancePayload = {
+    const payload: api.DBInstancePayload = {
       name: instanceForm.name.trim(),
       protocol: instanceForm.protocol,
       address: instanceForm.address.trim(),
-      group_name: instanceForm.group_name.trim() || undefined,
+      port: instanceForm.port,
+      group: instanceForm.group.trim() || undefined,
       remark: instanceForm.remark.trim() || undefined
-    };
-    if (editingInstanceId.value) {
-      await apiClient.updateDBInstance(editingInstanceId.value, { ...payload, disabled: undefined });
-      ElMessage.success('数据库实例已更新');
-    } else {
-      await apiClient.createDBInstance(payload);
-      ElMessage.success('数据库实例已创建');
     }
-    instanceDialogVisible.value = false;
-    await loadInstances();
+    if (editingInstance.value?.id) {
+      await api.apiClient.updateDBInstance(editingInstance.value.id, payload)
+      ElMessage.success('数据库实例已更新')
+    } else {
+      await api.apiClient.createDBInstance(payload)
+      ElMessage.success('数据库实例已创建')
+    }
+    showInstanceDialog.value = false
+    await loadInstances()
   } catch (err) {
-    ElMessage.error(err instanceof Error ? err.message : '保存失败');
+    ElMessage.error(err instanceof Error ? err.message : '保存失败')
   } finally {
-    submittingInstance.value = false;
+    submitting.value = false
   }
 }
 
-async function toggleInstanceStatus(inst: DBInstanceRecord) {
-  const id = inst.id;
-  if (!id) return;
-  const newDisabled = !inst.disabled;
-  instanceStatusUpdatingId.value = id;
+async function toggleInstance(inst: api.DatabaseInstanceView) {
+  const id = inst.id
+  if (!id) return
+  const newStatus = inst.status === 'active' ? 'disabled' : 'active'
   try {
-    await apiClient.updateDBInstance(id, {
+    await api.apiClient.updateDBInstance(id, {
       name: inst.name || '',
       protocol: inst.protocol || 'mysql',
       address: inst.address || '',
-      group_name: inst.group_name || undefined,
+      port: inst.port,
+      group: inst.group || undefined,
       remark: inst.remark || undefined,
-      disabled: newDisabled
-    });
-    ElMessage.success(newDisabled ? '数据库实例已禁用' : '数据库实例已启用');
-    await loadInstances();
+      status: newStatus
+    })
+    ElMessage.success(newStatus === 'active' ? '数据库实例已启用' : '数据库实例已禁用')
+    await loadInstances()
   } catch (err) {
-    ElMessage.error(err instanceof Error ? err.message : '保存失败');
-  } finally {
-    instanceStatusUpdatingId.value = '';
+    ElMessage.error(err instanceof Error ? err.message : '状态切换失败')
   }
 }
 
-async function confirmDeleteInstance(inst: DBInstanceRecord) {
-  const id = inst.id;
-  if (!id) return;
+async function deleteInstance(inst: api.DatabaseInstanceView) {
+  const id = inst.id
+  if (!id) return
   try {
     await ElMessageBox.confirm(
-      t('database.instance.deleteConfirm'),
-      t('database.instance.delete'),
-      { cancelButtonText: t('common.cancel'), confirmButtonText: t('common.delete'), type: 'warning' }
-    );
+      `确定要删除数据库实例「${inst.name || id}」吗？`,
+      '删除实例',
+      { cancelButtonText: '取消', confirmButtonText: '删除', type: 'warning' }
+    )
   } catch {
-    return;
+    return
   }
-  instanceDeletingId.value = id;
   try {
-    await apiClient.deleteDBInstance(id);
-    ElMessage.success('数据库实例已删除');
-    if (selectedInstance.value?.id === id) {
-      selectedInstance.value = null;
-      accounts.value = [];
-      activeTab.value = 'instances';
-    }
-    await loadInstances();
+    await api.apiClient.deleteDBInstance(id)
+    ElMessage.success('数据库实例已删除')
+    await loadInstances()
   } catch (err) {
-    ElMessage.error(err instanceof Error ? err.message : t('hosts.error.delete'));
-  } finally {
-    instanceDeletingId.value = '';
+    ElMessage.error(err instanceof Error ? err.message : '删除失败')
   }
 }
 
-function handleInstancePageSizeChange() {
-  instancePage.value = 1;
-  loadInstances();
+// ── Account methods ──
+function showAccounts(inst: api.DatabaseInstanceView) {
+  selectedInstance.value = inst
+  accountPage.value = 1
+  accountsDialogVisible.value = true
+  loadSelectedInstanceAccounts()
 }
 
-function handleAccountPageSizeChange() {
-  accountPage.value = 1;
-  loadAccounts();
-}
-
-// Account methods
-function openAccountsTab(inst: DBInstanceRecord) {
-  selectedInstance.value = inst;
-  accounts.value = [];
-  accountError.value = '';
-  activeTab.value = 'accounts';
-  loadAccounts();
-  // Collect group options
-  loadAccountGroups();
-}
-
-async function loadAccounts() {
-  const inst = selectedInstance.value;
-  if (!inst?.id) return;
-  accountsLoading.value = true;
-  accountError.value = '';
+async function loadSelectedInstanceAccounts() {
+  if (!selectedInstance.value) return
+  accountsLoading.value = true
   try {
-    const data = await apiClient.getDBAccounts(inst.id, {
+    const res = await api.apiClient.getDBAccounts(selectedInstance.value.id!, {
       page: accountPage.value,
-      size: accountPageSize.value
-    });
-    if (Array.isArray(data)) {
-      accounts.value = data;
-      accountTotal.value = data.length;
-    } else if (data && typeof data === 'object' && 'items' in data) {
-      accounts.value = (data as any).items ?? [];
-      accountTotal.value = (data as any).total ?? 0;
-    } else {
-      const unwrapped = unwrapArray(data as any);
-      accounts.value = unwrapped as DBAccountRecord[];
-      accountTotal.value = unwrapped.length;
-    }
-  } catch (err) {
-    accounts.value = [];
-    accountError.value = err instanceof Error ? err.message : t('database.error.loadAccounts');
+      page_size: accountPageSize.value,
+    })
+    accounts.value = res.items
+    accountTotal.value = res.total
   } finally {
-    accountsLoading.value = false;
+    accountsLoading.value = false
   }
 }
 
-async function loadAccountGroups() {
-  const inst = selectedInstance.value;
-  if (!inst?.id) return;
-  try {
-    const raw = await apiClient.getDBAccounts(inst.id);
-    const data = Array.isArray(raw) ? raw : (raw as any).data ?? raw;
-    const records = Array.isArray(data) ? data : (data as any)?.items ?? [];
-    const groups = new Set<string>();
-    for (const acc of records) {
-      if (acc.group_name) groups.add(acc.group_name);
-    }
-    accountGroupOptions.value = Array.from(groups).sort();
-  } catch {
-    // ignore
-  }
+function openCreateAccount() {
+  editingAccount.value = null
+  accountForm.username = ''
+  accountForm.password = ''
+  accountForm.group = ''
+  accountForm.remark = ''
+  accountForm.expiresAt = null
+  expiryPreset.value = ''
+  accountFormTestResult.value = null
+  savedCredentialTestResult.value = null
+  accountDialogVisible.value = true
 }
 
-async function openCreateAccountDialog() {
-  editingAccountId.value = null;
-  accountMorePanels.value = [];
-  expireShortcutActive.value = '';
-  Object.assign(accountForm, {
-    upstream_username: '',
-    upstream_password: '',
-    group_name: '',
-    remark: '',
-    expires_at: ''
-  });
-  accountDialogVisible.value = true;
-  await nextTick();
-  accountFormRef.value?.clearValidate();
-  // Dynamic rule: password required only for create
-  accountRules.upstream_password = [{ required: true, message: '请输入目标密码', trigger: 'blur' }];
+function editAccount(row: api.DBAccountRecord) {
+  editingAccount.value = row
+  accountForm.username = row.username || ''
+  accountForm.password = ''
+  accountForm.group = row.group || ''
+  accountForm.remark = row.remark || ''
+  accountForm.expiresAt = row.expires_at ? new Date(row.expires_at) : null
+  expiryPreset.value = ''
+  accountFormTestResult.value = null
+  savedCredentialTestResult.value = null
+  accountDialogVisible.value = true
+  testSavedAccountConnection(row)
 }
 
-async function openEditAccountDialog(acc: DBAccountRecord) {
-  editingAccountId.value = acc.id ?? null;
-  accountMorePanels.value = [];
-  expireShortcutActive.value = '';
-  Object.assign(accountForm, {
-    upstream_username: acc.upstream_username || '',
-    upstream_password: '',
-    group_name: acc.group_name || '',
-    remark: acc.remark || '',
-    expires_at: acc.expires_at || ''
-  });
-  accountDialogVisible.value = true;
-  await nextTick();
-  accountFormRef.value?.clearValidate();
-  // Dynamic rule: password optional for edit
-  accountRules.upstream_password = [];
-}
-
-function applyExpireShortcut(value: string) {
-  expireShortcutActive.value = value;
-  if (value === 'permanent') {
-    accountForm.expires_at = '';
+function setExpiry(opt: { label: string; hours: number }) {
+  expiryPreset.value = opt.label
+  if (opt.hours === -1) {
+    accountForm.expiresAt = null
   } else {
-    accountForm.expires_at = computeExpiry(value);
+    accountForm.expiresAt = new Date(Date.now() + opt.hours * 3600 * 1000)
+  }
+}
+
+async function testSavedAccountConnection(row: api.DBAccountRecord) {
+  const id = row.id || row.resource_id || ''
+  if (!id) return
+  savedCredentialTesting.value = true
+  savedCredentialTestResult.value = null
+  try {
+    const result = await api.apiClient.testDBConnection(String(id))
+    const data = (result as any).data ?? result
+    savedCredentialTestResult.value = { ok: data.ok, latency_ms: data.latency_ms, error: data.ok ? undefined : (data.error || '连接失败') }
+  } catch (err) {
+    savedCredentialTestResult.value = { ok: false, error: err instanceof Error ? err.message : '连接失败' }
+  } finally {
+    savedCredentialTesting.value = false
+  }
+}
+
+async function testAccountFormConnection() {
+  if (!selectedInstance.value?.id) {
+    ElMessage.warning('请先选择数据库实例')
+    return
+  }
+  if (!accountForm.username.trim()) {
+    ElMessage.warning('请输入目标用户名')
+    return
+  }
+  if (!accountForm.password) {
+    ElMessage.warning('请先输入数据库密码再测试连接')
+    return
+  }
+  accountFormTesting.value = true
+  accountFormTestResult.value = null
+  try {
+    const result = await api.apiClient.testDBConnectionPayload({
+      instance_id: selectedInstance.value.id,
+      username: accountForm.username.trim(),
+      password: accountForm.password,
+    })
+    const data = (result as any).data ?? result
+    accountFormTestResult.value = { ok: data.ok, latency_ms: data.latency_ms, error: data.ok ? undefined : (data.error || '连接失败') }
+  } catch (err) {
+    accountFormTestResult.value = { ok: false, error: err instanceof Error ? err.message : '连接失败' }
+  } finally {
+    accountFormTesting.value = false
   }
 }
 
 async function submitAccount() {
-  const inst = selectedInstance.value;
-  if (!inst?.id) {
-    ElMessage.error('请先选择数据库实例');
-    return;
-  }
-  const valid = await accountFormRef.value?.validate().catch(() => false);
-  if (!valid) return;
-  submittingAccount.value = true;
+  if (!accountForm.username.trim()) { ElMessage.warning('请输入目标用户名'); return }
+  accountSubmitting.value = true
   try {
-    const basePayload: DBAccountPayload = {
-      upstream_username: accountForm.upstream_username.trim(),
-      upstream_password: accountForm.upstream_password,
-      group_name: accountForm.group_name.trim() || undefined,
-      remark: accountForm.remark.trim() || undefined,
-      expires_at: accountForm.expires_at || undefined
-    };
-    if (editingAccountId.value) {
-      const updatePayload: DBAccountUpdatePayload = {
-        ...basePayload,
-        upstream_password: accountForm.upstream_password || undefined
-      };
-      await apiClient.updateDBAccount(editingAccountId.value, updatePayload);
-      ElMessage.success('数据库账号已更新');
+    if (editingAccount.value) {
+      await api.apiClient.updateDBAccount(editingAccount.value.id!, {
+        username: accountForm.username,
+        password: accountForm.password || undefined,
+        group: accountForm.group,
+        remark: accountForm.remark,
+        status: editingAccount.value.status,
+        expires_at: accountForm.expiresAt?.toISOString(),
+      })
+      ElMessage.success('账号已更新')
     } else {
-      await apiClient.createDBAccount(inst.id, basePayload);
-      ElMessage.success('数据库账号已创建');
+      await api.apiClient.createDBAccount(selectedInstance.value!.id!, {
+        username: accountForm.username,
+        password: accountForm.password,
+        group: accountForm.group,
+        remark: accountForm.remark,
+        expires_at: accountForm.expiresAt?.toISOString(),
+      })
+      ElMessage.success('账号已创建')
     }
-    accountDialogVisible.value = false;
-    await Promise.all([loadInstances(), loadAccounts(), loadAccountGroups()]);
-  } catch (err) {
-    ElMessage.error(err instanceof Error ? err.message : '保存失败');
+    accountDialogVisible.value = false
+    loadSelectedInstanceAccounts()
+    loadInstances()
   } finally {
-    submittingAccount.value = false;
+    accountSubmitting.value = false
   }
 }
 
-async function toggleAccountStatus(acc: DBAccountRecord) {
-  const id = acc.id;
-  if (!id) return;
-  const newDisabled = !acc.disabled;
-  accountStatusUpdatingId.value = id;
+async function toggleAccountStatus(account: api.DBAccountRecord, active: boolean) {
+  statusUpdatingId.value = account.id!
   try {
-    await apiClient.updateDBAccount(id, {
-      upstream_username: acc.upstream_username || '',
-      disabled: newDisabled
-    });
-    ElMessage.success(newDisabled ? '数据库账号已禁用' : '数据库账号已启用');
-    await loadAccounts();
-  } catch (err) {
-    ElMessage.error(err instanceof Error ? err.message : '保存失败');
+    await api.apiClient.updateDBAccount(account.id!, {
+      username: account.username || '',
+      group: account.group || '',
+      remark: account.remark || '',
+      status: active ? 'active' : 'disabled',
+    })
+    ElMessage.success(active ? '账号已启用' : '账号已禁用')
+    loadSelectedInstanceAccounts()
   } finally {
-    accountStatusUpdatingId.value = '';
+    statusUpdatingId.value = ''
   }
 }
 
-async function confirmDeleteAccount(acc: DBAccountRecord) {
-  const id = acc.id;
-  if (!id) return;
-  try {
-    await ElMessageBox.confirm(
-      t('database.account.deleteConfirm'),
-      t('database.account.delete'),
-      { cancelButtonText: t('common.cancel'), confirmButtonText: t('common.delete'), type: 'warning' }
-    );
-  } catch {
-    return;
-  }
-  accountDeletingId.value = id;
-  try {
-    await apiClient.deleteDBAccount(id);
-    ElMessage.success('数据库账号已删除');
-    await Promise.all([loadInstances(), loadAccounts()]);
-  } catch (err) {
-    ElMessage.error(err instanceof Error ? err.message : t('hosts.error.delete'));
-  } finally {
-    accountDeletingId.value = '';
-  }
+async function deleteAccount(account: api.DBAccountRecord) {
+  await ElMessageBox.confirm(`确认删除账号"${account.username}"？`, '删除账号', { type: 'warning' })
+  await api.apiClient.deleteDBAccount(account.id!)
+  ElMessage.success('账号已删除')
+  loadSelectedInstanceAccounts()
+  loadInstances()
 }
 
-// Connect dialog
-async function openConnectDialog(acc: DBAccountRecord) {
-  console.log('[Database] creating session for account:', acc.id || acc.resource_id);
-  connectTestResult.value = null;
-  connectTarget.value = acc;
-  userSessionId.value = '';
-  connectSessionError.value = '';
-  connectSessionLoading.value = true;
-  connectDialogVisible.value = true;
+// ── Connect dialog ──
+async function openConnectDialog(acc: api.DBAccountRecord) {
+  connectTarget.value = acc
+  selectedInstance.value = instances.value.find(i => i.id === acc.instance_id) || selectedInstance.value
+  userSessionId.value = ''
+  connectionError.value = ''
+  connectionTestResult.value = null
+  connectDialogVisible.value = true
+}
 
+async function onConnectDialogOpened() {
+  if (!connectTarget.value) return
+  creatingSession.value = true
+  connectionError.value = ''
+  connectionTestResult.value = null
+  testDBConnectionForTarget()
   try {
-    const targetId = acc.id || acc.resource_id || '';
-    if (!targetId) {
-      connectSessionError.value = '无法获取账号ID';
-      return;
+    const targetId = connectTarget.value.id || connectTarget.value.resource_id || ''
+    if (targetId) {
+      const session = await api.apiClient.createUserSession(String(targetId))
+      userSessionId.value = session?.session_id || ''
     }
-    const session = await apiClient.createUserSession(String(targetId));
-    userSessionId.value = session?.session_id || '';
   } catch (err) {
-    connectSessionError.value = err instanceof Error ? err.message : '创建连接会话失败';
+    connectionError.value = err instanceof Error ? err.message : '创建会话失败'
   } finally {
-    connectSessionLoading.value = false;
+    creatingSession.value = false
   }
 }
 
-// Tab change
-function handleTabChange(tabName: string | number) {
-  if (tabName === 'instances') {
-    loadInstances();
+async function testDBConnectionForTarget() {
+  if (!connectTarget.value) return
+  connectionTesting.value = true
+  connectionTestResult.value = null
+  try {
+    const id = connectTarget.value.id || connectTarget.value.resource_id || ''
+    if (!id) return
+    const result = await api.apiClient.testDBConnection(String(id))
+    const data = (result as any).data ?? result
+    connectionTestResult.value = { ok: data.ok, latency_ms: data.latency_ms, error: data.ok ? undefined : (data.error || '连接失败') }
+  } catch (err) {
+    connectionTestResult.value = { ok: false, error: err instanceof Error ? err.message : '连接失败' }
+  } finally {
+    connectionTesting.value = false
   }
 }
 
-// Watch for instance selection changes to reload
-watch(selectedInstance, (inst) => {
-  if (inst && activeTab.value === 'accounts') {
-    loadAccounts();
-    loadAccountGroups();
-  }
-});
+// ── Watchers ──
+watch([accountPage, accountPageSize], () => {
+  if (accountsDialogVisible.value) loadSelectedInstanceAccounts()
+})
 
 onMounted(() => {
-  loadGatewayConfig();
-  loadInstances();
-});
+  loadGatewayConfig()
+  loadInstances()
+})
 </script>
 
 <style scoped>
-.toolbar-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-}
-
-.toolbar-breadcrumb {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.breadcrumb-separator {
-  color: #98a2b3;
-}
-
-.primary-cell {
-  color: #111827;
-  font-weight: 650;
-}
-
-.mono-text {
-  overflow-wrap: anywhere;
-  color: #475467;
-  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
-  font-size: 12px;
-}
-
-.pagination-row {
-  display: flex;
-  justify-content: flex-end;
-  margin-top: 16px;
-}
-
 .dialog-stack {
   display: flex;
   flex-direction: column;
   gap: 18px;
-}
-
-.form-sections {
-  display: flex;
-  flex-direction: column;
-  gap: 18px;
-}
-
-.form-section {
-  min-width: 0;
-}
-
-.form-section + .form-section {
-  padding-top: 16px;
-  border-top: 1px solid #eef2f7;
-}
-
-.form-section-title {
-  margin-bottom: 12px;
-  color: #374151;
-  font-size: 13px;
-  font-weight: 700;
-  line-height: 1;
-}
-
-.more-collapse {
-  border-top: 1px solid #eef2f7;
-  border-bottom: 0;
-}
-
-.more-collapse :deep(.el-collapse-item__header) {
-  color: #374151;
-  font-size: 13px;
-  font-weight: 700;
-}
-
-.more-collapse :deep(.el-collapse-item__wrap) {
-  border-bottom: 0;
-}
-
-.form-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  column-gap: 16px;
-}
-
-.form-grid .el-input-number {
-  width: 100%;
-}
-
-.form-full {
-  grid-column: 1 / -1;
-}
-
-.expire-shortcuts {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-bottom: 12px;
-}
-
-.expire-picker {
-  width: 100%;
 }
 
 .connect-section + .connect-section {
@@ -1198,7 +814,7 @@ onMounted(() => {
 
 .config-row {
   display: grid;
-  grid-template-columns: minmax(100px, 140px) minmax(0, 1fr);
+  grid-template-columns: minmax(80px, 120px) minmax(0, 1fr);
   gap: 12px;
   align-items: center;
 }
@@ -1209,14 +825,36 @@ onMounted(() => {
   font-weight: 650;
 }
 
-:global(.form-dialog .el-dialog__body) {
-  max-height: min(66vh, 620px);
-  overflow-y: auto;
-  padding-right: 22px;
+.test-connection-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.saved-credential-row {
+  margin-top: 8px;
+}
+
+.test-connection-meta {
+  color: #667085;
+  font-size: 12px;
+}
+
+.test-connection-error {
+  color: var(--el-color-danger);
+  font-size: 12px;
+}
+
+.test-connection-hint {
+  color: #667085;
+  font-size: 12px;
+  line-height: 1.5;
+  margin-top: 6px;
+  width: 100%;
 }
 
 @media (max-width: 720px) {
-  .form-grid,
   .config-row {
     grid-template-columns: 1fr;
   }

@@ -1,4 +1,18 @@
 :root {
+  --gap-xs: 4px;
+  --gap-sm: 8px;
+  --gap-md: 16px;
+  --gap-lg: 24px;
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --color-bg: #f5f7fb;
+  --color-card: #ffffff;
+  --color-border: #eaecf0;
+  --color-text: #101828;
+  --color-text-secondary: #667085;
+  --sidebar-width: 236px;
+  --header-height: 72px;
+
   color: #101828;
   font-family:
     Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
@@ -91,12 +105,18 @@ body {
 }
 
 .app-main {
-  padding: 28px;
+  display: flex;
+  flex-direction: column;
+  height: calc(100vh - 72px);
+  padding: 16px;
   background: #f5f7fb;
+  overflow: hidden;
 }
 
 .view-stack {
-  display: grid;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
   gap: 18px;
 }
 
@@ -106,22 +126,6 @@ body {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-}
-
-.metric-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  gap: 16px;
-}
-
-.metric-card {
-  min-height: 112px;
-}
-
-.metric-value {
-  margin-top: 12px;
-  font-size: 28px;
-  font-weight: 760;
 }
 
 .placeholder-panel {
@@ -134,40 +138,6 @@ body {
   color: #667085;
   place-items: center;
   text-align: center;
-}
-
-.terminal-frame {
-  overflow: hidden;
-  min-height: 420px;
-  color: #d0d5dd;
-  background: #0b1220;
-  border-radius: 8px;
-}
-
-.terminal-bar {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  height: 40px;
-  padding: 0 14px;
-  background: #111827;
-}
-
-.terminal-dot {
-  width: 10px;
-  height: 10px;
-  background: #475467;
-  border-radius: 999px;
-}
-
-.terminal-content {
-  margin: 0;
-  padding: 20px;
-  color: #e4e7ec;
-  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
-  font-size: 13px;
-  line-height: 1.7;
-  white-space: pre-wrap;
 }
 
 .login-page {
@@ -192,26 +162,71 @@ body {
   color: #667085;
 }
 
-@media (max-width: 780px) {
-  .app-shell {
-    display: block;
-  }
+.page-container {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  gap: 16px;
+}
 
-  .app-sidebar {
-    width: 100% !important;
-  }
+.page-card {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  background: #ffffff;
+  border-radius: 8px;
+  border: 1px solid #eaecf0;
+  overflow: hidden;
+}
 
-  .brand {
-    height: 64px;
-  }
+.page-card__toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 16px;
+  border-bottom: 1px solid #eaecf0;
+  flex-shrink: 0;
+}
 
-  .app-header {
-    height: auto;
-    align-items: flex-start;
-    padding: 18px;
-  }
+.page-card__body {
+  flex: 1;
+  overflow: auto;
+  min-height: 0;
+}
 
-  .app-main {
-    padding: 18px;
-  }
+.page-card__footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 8px 16px;
+  border-top: 1px solid #eaecf0;
+  flex-shrink: 0;
+}
+
+.page-tabs {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.page-tabs > .el-tabs__header {
+  flex-shrink: 0;
+  margin-bottom: 0;
+  padding: 0 16px;
+}
+
+.page-tabs > .el-tabs__content {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.page-tabs .el-tab-pane {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
 }

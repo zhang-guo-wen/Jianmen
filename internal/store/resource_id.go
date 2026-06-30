@@ -1,25 +1,34 @@
 package store
 
 import (
+	"fmt"
+
 	"jianmen/internal/model"
+	"jianmen/internal/storage"
 )
 
-// nextHostResourceSeq 获取主机账号下一个自增序号
 func (s *DBStore) nextHostResourceSeq() (int, error) {
 	var maxSeq int
 	if err := s.db.Model(&model.HostAccount{}).
-		Select("COALESCE(MAX(resource_seq), 0)").Scan(&maxSeq).Error; err != nil {
+		Select("COALESCE(MAX(resource_seq), 0)").
+		Scan(&maxSeq).Error; err != nil {
+		return 0, fmt.Errorf("host resource sequence floor: %w", err)
+	}
+	if err := storage.EnsureSequenceNextValue(s.db, storage.SequenceHostAccount, maxSeq+1); err != nil {
 		return 0, err
 	}
-	return maxSeq + 1, nil
+	return storage.NextSequenceValue(s.db, storage.SequenceHostAccount, storage.MaxCompactResourceSeq)
 }
 
-// nextDBResourceSeq 获取数据库账号下一个自增序号
 func (s *DBStore) nextDBResourceSeq() (int, error) {
 	var maxSeq int
 	if err := s.db.Model(&model.DatabaseAccount{}).
-		Select("COALESCE(MAX(resource_seq), 0)").Scan(&maxSeq).Error; err != nil {
+		Select("COALESCE(MAX(resource_seq), 0)").
+		Scan(&maxSeq).Error; err != nil {
+		return 0, fmt.Errorf("database resource sequence floor: %w", err)
+	}
+	if err := storage.EnsureSequenceNextValue(s.db, storage.SequenceDatabaseAccount, maxSeq+1); err != nil {
 		return 0, err
 	}
-	return maxSeq + 1, nil
+	return storage.NextSequenceValue(s.db, storage.SequenceDatabaseAccount, storage.MaxCompactResourceSeq)
 }

@@ -1,71 +1,115 @@
-//go:build ignore
-
 package dbproxy
 
 import (
+	"crypto/md5"
 	"encoding/binary"
+	"encoding/hex"
+	"net"
 	"testing"
 )
 
-func TestMySQLAccountAuthAcceptsAllowedUser(t *testing.T) {
-	auth, err := newAccountAuth("mysql", []string{"app"})
+func TestMySQLLoginParserObservesUser(t *testing.T) {
+	parser := &MySQLLoginParser{}
+	observation, ready, err := parser.Observe(mysqlLoginPacket("app"))
 	if err != nil {
-		t.Fatalf("newAccountAuth returned error: %v", err)
+		t.Fatalf("Observe returned error: %v", err)
 	}
-	ready, err := auth.ObserveClientBytes(mysqlLoginPacket("app"))
-	if err != nil {
-		t.Fatalf("ObserveClientBytes returned error: %v", err)
-	}
-	if !ready || !auth.Ready() || auth.Observation().User != "app" {
-		t.Fatalf("unexpected auth state ready=%v user=%q", ready, auth.Observation().User)
+	if !ready || observation.User != "app" || !observation.MetadataVisible {
+		t.Fatalf("unexpected observation ready=%v observation=%#v", ready, observation)
 	}
 }
 
-func TestMySQLAccountAuthRejectsDeniedUser(t *testing.T) {
-	auth, err := newAccountAuth("mysql", []string{"app"})
+func TestPostgresLoginParserObservesUser(t *testing.T) {
+	parser := &postgresLoginParser{}
+	observation, ready, err := parser.Observe(postgresStartupPacket("app", "appdb"))
 	if err != nil {
-		t.Fatalf("newAccountAuth returned error: %v", err)
+		t.Fatalf("Observe returned error: %v", err)
 	}
-	if _, err := auth.ObserveClientBytes(mysqlLoginPacket("root")); err == nil {
-		t.Fatal("ObserveClientBytes accepted denied user")
+	if !ready || observation.User != "app" || observation.Database != "appdb" || !observation.MetadataVisible {
+		t.Fatalf("unexpected observation ready=%v observation=%#v", ready, observation)
 	}
 }
 
-func TestPostgresAccountAuthAcceptsAllowedUser(t *testing.T) {
-	auth, err := newAccountAuth("postgres", []string{"app"})
+func TestPostgresLoginParserAllowsTLSWhenMetadataHidden(t *testing.T) {
+	parser := &postgresLoginParser{}
+	observation, ready, err := parser.Observe(postgresSSLRequestPacket())
 	if err != nil {
-		t.Fatalf("newAccountAuth returned error: %v", err)
+		t.Fatalf("Observe returned error: %v", err)
 	}
-	ready, err := auth.ObserveClientBytes(postgresStartupPacket("app", "appdb"))
-	if err != nil {
-		t.Fatalf("ObserveClientBytes returned error: %v", err)
-	}
-	if !ready || !auth.Ready() || auth.Observation().User != "app" {
-		t.Fatalf("unexpected auth state ready=%v user=%q", ready, auth.Observation().User)
+	if !ready || !observation.TLSRequested || observation.MetadataVisible || observation.Observation != "hidden_by_tls" {
+		t.Fatalf("unexpected observation ready=%v observation=%#v", ready, observation)
 	}
 }
 
-func TestPostgresAccountAuthAllowsTLSWhenNotEnforced(t *testing.T) {
-	auth, err := newAccountAuth("postgres", nil)
+func TestFakeMySQLHandshakeAdvertisesCompleteAuthPluginName(t *testing.T) {
+	client, server := net.Pipe()
+	defer client.Close()
+	defer server.Close()
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- sendFakeMySQLHandshake(server)
+	}()
+
+	packet, err := readMySQLPacket(client)
 	if err != nil {
-		t.Fatalf("newAccountAuth returned error: %v", err)
+		t.Fatalf("read fake handshake: %v", err)
 	}
-	ready, err := auth.ObserveClientBytes(postgresSSLRequestPacket())
+	if err := <-errCh; err != nil {
+		t.Fatalf("send fake handshake: %v", err)
+	}
+
+	handshake, err := ParseMySQLHandshake(packet.payload)
 	if err != nil {
-		t.Fatalf("ObserveClientBytes returned error: %v", err)
+		t.Fatalf("parse fake handshake: %v", err)
 	}
-	if !ready || !auth.Ready() || auth.Observation().Observation != "hidden_by_tls" {
-		t.Fatalf("unexpected auth state ready=%v observation=%#v", ready, auth.Observation())
+	if handshake.AuthPluginName != "mysql_native_password" {
+		t.Fatalf("auth plugin = %q, want mysql_native_password", handshake.AuthPluginName)
 	}
 }
 
-func TestPostgresAccountAuthRejectsDeniedUser(t *testing.T) {
-	auth, err := newAccountAuth("postgres", []string{"app"})
-	if err != nil {
-		t.Fatalf("newAccountAuth returned error: %v", err)
+func TestBuildPostgresMD5PasswordResponseUsesUsernameSaltAndPassword(t *testing.T) {
+	got := BuildPostgresPasswordResponse(5, "user_dba", "secret", []byte{1, 2, 3, 4})
+
+	h1 := md5.Sum([]byte("secret" + "user_dba"))
+	h1Hex := hex.EncodeToString(h1[:])
+	h2Input := append([]byte(h1Hex), 1, 2, 3, 4)
+	h2 := md5.Sum(h2Input)
+	want := "md5" + hex.EncodeToString(h2[:])
+
+	if got != want {
+		t.Fatalf("password response = %q, want %q", got, want)
 	}
-	if _, err := auth.ObserveClientBytes(postgresStartupPacket("postgres", "appdb")); err == nil {
-		t.Fatal("ObserveClientBytes accepted denied user")
+}
+
+func TestBuildPostgresUpstreamStartupMessageIncludesDatabase(t *testing.T) {
+	msg := BuildPostgresUpstreamStartupMessage("user_dba", "appdb")
+	params := postgresStartupParams(msg[8:])
+
+	if params["user"] != "user_dba" {
+		t.Fatalf("user = %q, want user_dba", params["user"])
+	}
+	if params["database"] != "appdb" {
+		t.Fatalf("database = %q, want appdb", params["database"])
+	}
+}
+
+func TestPostgresUpstreamDatabaseDefaultsWhenClientUsesProxyUsername(t *testing.T) {
+	got := postgresUpstreamDatabase("D000200001")
+	if got != "postgres" {
+		t.Fatalf("database = %q, want postgres", got)
+	}
+}
+
+func TestShouldForwardPostgresAuthMessageOnlyForAuthOk(t *testing.T) {
+	md5Challenge := []byte{'R', 0, 0, 0, 12, 0, 0, 0, 5, 1, 2, 3, 4}
+	if shouldForwardPostgresAuthMessage(md5Challenge) {
+		t.Fatal("MD5 authentication challenge must not be forwarded to client")
+	}
+
+	authOK := []byte{'R', 0, 0, 0, 8, 0, 0, 0, 0}
+	if !shouldForwardPostgresAuthMessage(authOK) {
+		t.Fatal("AuthenticationOk should be forwarded to client")
 	}
 }
 

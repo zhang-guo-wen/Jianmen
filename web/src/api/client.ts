@@ -7,11 +7,27 @@ export interface ApiEnvelope<T> {
   message?: string;
 }
 
+export interface PageResponse<T> {
+  items: T[]
+  total: number
+  page: number
+  page_size: number
+}
+
 export interface HealthResponse {
   status?: string;
   version?: string;
   time?: string;
   [key: string]: unknown;
+}
+
+export interface InitStatusResponse {
+  initialized: boolean;
+  admin?: {
+    username?: string;
+    display_name?: string;
+    email?: string;
+  };
 }
 
 export interface UserRecord {
@@ -41,6 +57,8 @@ export interface MyMenusResponse {
   menus: string[];
 }
 
+// ── Target / HostAccount ──────────────────────────────────────────────
+
 export interface TargetRecord {
   id?: string | number;
   host_id?: string;
@@ -51,26 +69,15 @@ export interface TargetRecord {
   name?: string;
   group?: string;
   remark?: string;
-  disabled?: boolean;
   expires_at?: string;
   host?: string;
   port?: number;
   username?: string;
   auth_methods?: string[];
-  auth_type?: string;
-  password?: string;
-  private_key_path?: string;
-  private_key_pem?: string;
-  passphrase?: string;
   insecure_ignore_host_key?: boolean;
   host_key_fingerprint?: string;
   known_hosts_path?: string;
-  address?: string;
   status?: string;
-  source?: string;
-  static?: boolean;
-  readonly?: boolean;
-  deletable?: boolean;
   [key: string]: unknown;
 }
 
@@ -82,7 +89,7 @@ export interface TargetPayload {
   remark?: string;
   disabled?: boolean;
   expires_at?: string;
-  host: string;
+  address: string;
   port: number;
   username: string;
   password: string;
@@ -94,6 +101,23 @@ export interface TargetPayload {
   known_hosts_path: string;
 }
 
+// ── Host ───────────────────────────────────────────────────────────────
+
+export interface HostView {
+  id?: string;
+  name?: string;
+  group?: string;
+  address?: string;
+  port?: number;
+  remark?: string;
+  status?: string;
+  account_count?: number;
+  created_at?: string;
+  updated_at?: string;
+  [key: string]: unknown;
+}
+
+/** @deprecated use HostView */
 export interface HostRecord {
   id?: string;
   name?: string;
@@ -108,22 +132,24 @@ export interface HostRecord {
   [key: string]: unknown;
 }
 
-export interface HostPayload {
-  id?: string;
-  name: string;
-  group?: string;
-  host: string;
-  port: number;
-  remark?: string;
-  disabled?: boolean;
-}
-
+/** @deprecated use PageResponse<HostView> */
 export interface PagedHostRecord {
   data?: HostRecord[];
   page?: number;
   page_size?: number;
   total?: number;
 }
+
+export interface HostPayload {
+  id?: string;
+  name: string;
+  group?: string;
+  address: string;
+  port: number;
+  remark?: string;
+}
+
+// ── Sessions ───────────────────────────────────────────────────────────
 
 export interface SessionRecord {
   id?: string | number;
@@ -132,6 +158,7 @@ export interface SessionRecord {
   user_username?: string;
   target?: string;
   target_id?: string;
+  account_username?: string;
   client_ip?: string;
   status?: string;
   state?: string;
@@ -193,6 +220,8 @@ export interface SessionFileEventRecord {
   [key: string]: unknown;
 }
 
+// ── Database ───────────────────────────────────────────────────────────
+
 export interface DBConnectionRecord {
   id?: string;
   name?: string;
@@ -211,6 +240,22 @@ export interface DBGatewayConfig {
   port: number;
 }
 
+export interface DatabaseInstanceView {
+  id?: string;
+  name?: string;
+  protocol?: string;
+  address?: string;
+  port?: number;
+  group?: string;
+  remark?: string;
+  status?: string;
+  account_count?: number;
+  created_at?: string;
+  updated_at?: string;
+  [key: string]: unknown;
+}
+
+/** @deprecated use DatabaseInstanceView */
 export interface DBInstanceRecord {
   id?: string;
   name?: string;
@@ -228,40 +273,48 @@ export interface DBAccountRecord {
   id?: string;
   instance_id?: string;
   unique_name?: string;
-  upstream_username?: string;
-  group_name?: string;
+  username?: string;
+  group?: string;
   remark?: string;
   expires_at?: string;
-  disabled?: boolean;
+  status?: string;
   resource_id?: string;
   resource_seq?: number;
   created_at?: string;
   updated_at?: string;
+  [key: string]: unknown;
 }
 
 export interface DBInstancePayload {
   name: string;
   protocol: string;
   address: string;
-  group_name?: string;
+  port?: number;
+  group?: string;
   remark?: string;
 }
 
 export interface DBAccountPayload {
-  upstream_username: string;
-  upstream_password: string;
-  group_name?: string;
+  username: string;
+  password: string;
+  group?: string;
   remark?: string;
   expires_at?: string;
 }
 
+export interface DBAccountTestPayload {
+  instance_id: string;
+  username: string;
+  password: string;
+}
+
 export interface DBAccountUpdatePayload {
-  upstream_username: string;
-  upstream_password?: string;
-  group_name?: string;
+  username: string;
+  password?: string;
+  group?: string;
   remark?: string;
   expires_at?: string;
-  disabled?: boolean;
+  status?: string;
 }
 
 export interface DBConnectionMetaRecord extends DBConnectionRecord {
@@ -295,6 +348,8 @@ export interface DBQueryEventRecord {
   rows?: number | null;
   [key: string]: unknown;
 }
+
+// ── RBAC ───────────────────────────────────────────────────────────────
 
 export interface RBACRoleRecord {
   id?: string;
@@ -389,6 +444,20 @@ export interface TestConnectionResult {
   message: string;
 }
 
+// ── helpers ────────────────────────────────────────────────────────────
+
+function buildQS(params?: Record<string, string | number | undefined>): string {
+  if (!params) return '';
+  const qs = new URLSearchParams();
+  for (const [k, v] of Object.entries(params)) {
+    if (v !== undefined && v !== '') {
+      qs.set(k, String(v));
+    }
+  }
+  const s = qs.toString();
+  return s ? `?${s}` : '';
+}
+
 export function getToken(): string {
   return localStorage.getItem(TOKEN_KEY) ?? '';
 }
@@ -446,9 +515,15 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   return payload as T;
 }
 
+// ── API client ─────────────────────────────────────────────────────────
+
 export const apiClient = {
+  // health
   getHealth: () => request<HealthResponse>('/api/health'),
-  getUsers: () => request<ApiEnvelope<UserRecord[]> | UserRecord[]>('/api/users'),
+
+  // users
+  getUsers: (params?: { page?: number; page_size?: number; q?: string }) =>
+    request<PageResponse<UserRecord>>(`/api/users${buildQS(params as Record<string, string | number | undefined>)}`),
   createUser: (payload: UserPayload) =>
     request<ApiEnvelope<{ user: UserRecord; token: string }> | { user: UserRecord; token: string }>('/api/users', {
       method: 'POST',
@@ -463,31 +538,23 @@ export const apiClient = {
     request<ApiEnvelope<unknown> | unknown>(`/api/users/${encodeURIComponent(String(id))}`, {
       method: 'DELETE',
     }),
+
+  // me
   getMyMenus: () =>
     request<MyMenusResponse>('/api/me/menus'),
   getMyPermissions: () =>
     request<{ actions: string[] }>('/api/me/permissions'),
-  getHosts: (params: { page?: number; page_size?: number; q?: string } = {}) => {
-    const search = new URLSearchParams();
-    if (params.page) {
-      search.set('page', String(params.page));
-    }
-    if (params.page_size) {
-      search.set('page_size', String(params.page_size));
-    }
-    if (params.q) {
-      search.set('q', params.q);
-    }
-    const suffix = search.toString() ? `?${search.toString()}` : '';
-    return request<PagedHostRecord | ApiEnvelope<HostRecord[]> | HostRecord[]>(`/api/hosts${suffix}`);
-  },
+
+  // hosts
+  getHosts: (params?: { page?: number; page_size?: number; q?: string }) =>
+    request<PageResponse<HostView>>(`/api/hosts${buildQS(params as Record<string, string | number | undefined>)}`),
   createHost: (payload: HostPayload) =>
-    request<ApiEnvelope<HostRecord> | HostRecord>('/api/hosts', {
+    request<ApiEnvelope<HostView> | HostView>('/api/hosts', {
       method: 'POST',
       body: JSON.stringify(payload)
     }),
   updateHost: (id: string | number, payload: HostPayload) =>
-    request<ApiEnvelope<HostRecord> | HostRecord>(`/api/hosts/${encodeURIComponent(String(id))}`, {
+    request<ApiEnvelope<HostView> | HostView>(`/api/hosts/${encodeURIComponent(String(id))}`, {
       method: 'PUT',
       body: JSON.stringify(payload)
     }),
@@ -495,9 +562,14 @@ export const apiClient = {
     request<ApiEnvelope<unknown> | unknown>(`/api/hosts/${encodeURIComponent(String(id))}`, {
       method: 'DELETE'
     }),
-  getHostAccounts: (id: string | number) =>
-    request<ApiEnvelope<TargetRecord[]> | TargetRecord[]>(`/api/hosts/${encodeURIComponent(String(id))}/accounts`),
-  getTargets: () => request<ApiEnvelope<TargetRecord[]> | TargetRecord[]>('/api/targets'),
+
+  // host accounts
+  getHostAccounts: (id: string | number, params?: { page?: number; page_size?: number; q?: string }) =>
+    request<PageResponse<TargetRecord>>(`/api/hosts/${encodeURIComponent(String(id))}/accounts${buildQS(params as Record<string, string | number | undefined>)}`),
+
+  // targets
+  getTargets: (params?: { page?: number; page_size?: number; q?: string }) =>
+    request<PageResponse<TargetRecord>>(`/api/targets${buildQS(params as Record<string, string | number | undefined>)}`),
   getTarget: (id: string | number) =>
     request<ApiEnvelope<TargetRecord> | TargetRecord>(`/api/targets/${encodeURIComponent(String(id))}`),
   createTarget: (payload: TargetPayload) =>
@@ -519,12 +591,15 @@ export const apiClient = {
       method: 'POST',
       body: JSON.stringify(payload)
     }),
+
+  // sessions
   createUserSession: (targetId: string) =>
     request<UserSessionRecord>('/api/user-sessions', {
       method: 'POST',
       body: JSON.stringify({ target_id: targetId })
     }),
-  getSessions: () => request<ApiEnvelope<SessionRecord[]> | SessionRecord[]>('/api/sessions'),
+  getSessions: (params?: { page?: number; page_size?: number; q?: string }) =>
+    request<PageResponse<SessionRecord>>(`/api/sessions${buildQS(params as Record<string, string | number | undefined>)}`),
   getSessionMeta: (id: string | number) =>
     request<ApiEnvelope<SessionMetaRecord> | SessionMetaRecord>(
       `/api/sessions/${encodeURIComponent(String(id))}/meta`
@@ -543,15 +618,19 @@ export const apiClient = {
     ),
   getSessionReplay: (id: string | number) =>
     request<string>(`/api/sessions/${encodeURIComponent(String(id))}/replay`),
+
+  // database gateway & instances
   getDBGateway: () => request<DBGatewayConfig>('/api/db/gateway'),
-  getDBInstances: () => request<ApiEnvelope<DBInstanceRecord[]> | DBInstanceRecord[]>('/api/db/instances'),
+
+  getDBInstances: (params?: { page?: number; page_size?: number; q?: string }) =>
+    request<PageResponse<DatabaseInstanceView>>(`/api/db/instances${buildQS(params as Record<string, string | number | undefined>)}`),
   createDBInstance: (payload: DBInstancePayload) =>
-    request<ApiEnvelope<DBInstanceRecord> | DBInstanceRecord>('/api/db/instances', {
+    request<ApiEnvelope<DatabaseInstanceView> | DatabaseInstanceView>('/api/db/instances', {
       method: 'POST',
       body: JSON.stringify(payload)
     }),
-  updateDBInstance: (id: string, payload: DBInstancePayload & { disabled?: boolean }) =>
-    request<ApiEnvelope<DBInstanceRecord> | DBInstanceRecord>(`/api/db/instances/${encodeURIComponent(id)}`, {
+  updateDBInstance: (id: string, payload: DBInstancePayload & { status?: string }) =>
+    request<ApiEnvelope<DatabaseInstanceView> | DatabaseInstanceView>(`/api/db/instances/${encodeURIComponent(id)}`, {
       method: 'PUT',
       body: JSON.stringify(payload)
     }),
@@ -559,18 +638,10 @@ export const apiClient = {
     request<ApiEnvelope<unknown> | unknown>(`/api/db/instances/${encodeURIComponent(id)}`, {
       method: 'DELETE'
     }),
-  getDBAccounts: (instanceID: string, params?: { page?: number; size?: number; search?: string }) => {
-    let path = `/api/db/instances/${encodeURIComponent(instanceID)}/accounts`;
-    if (params) {
-      const searchParams = new URLSearchParams();
-      if (params.page !== undefined) searchParams.set('page', String(params.page));
-      if (params.size !== undefined) searchParams.set('size', String(params.size));
-      if (params.search !== undefined) searchParams.set('search', params.search);
-      const suffix = searchParams.toString();
-      if (suffix) path += '?' + suffix;
-    }
-    return request<ApiEnvelope<DBAccountRecord[]> | DBAccountRecord[]>(path);
-  },
+
+  // database accounts
+  getDBAccounts: (instanceID: string, params?: { page?: number; page_size?: number; q?: string }) =>
+    request<PageResponse<DBAccountRecord>>(`/api/db/instances/${encodeURIComponent(instanceID)}/accounts${buildQS(params as Record<string, string | number | undefined>)}`),
   createDBAccount: (instanceID: string, payload: DBAccountPayload) =>
     request<ApiEnvelope<DBAccountRecord> | DBAccountRecord>(
       `/api/db/instances/${encodeURIComponent(instanceID)}/accounts`,
@@ -595,8 +666,15 @@ export const apiClient = {
       `/api/db/accounts/test/${encodeURIComponent(id)}`,
       { method: 'POST' }
     ),
-  getDBConnections: () =>
-    request<ApiEnvelope<DBConnectionRecord[]> | DBConnectionRecord[]>('/api/db/connections'),
+  testDBConnectionPayload: (payload: DBAccountTestPayload) =>
+    request<ApiEnvelope<{ ok: boolean; error?: string; latency_ms: number }>>('/api/db/accounts/test', {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    }),
+
+  // database connections (audit)
+  getDBConnections: (params?: { page?: number; page_size?: number; q?: string }) =>
+    request<PageResponse<DBConnectionRecord>>(`/api/db/connections${buildQS(params as Record<string, string | number | undefined>)}`),
   getDBConnectionMeta: (id: string | number) =>
     request<ApiEnvelope<DBConnectionMetaRecord> | DBConnectionMetaRecord>(
       `/api/db/connections/${encodeURIComponent(String(id))}/meta`
@@ -605,7 +683,10 @@ export const apiClient = {
     request<ApiEnvelope<DBQueryEventRecord[]> | DBQueryEventRecord[]>(
       `/api/db/connections/${encodeURIComponent(String(id))}/queries`
     ),
-  getRBACRoles: () => request<ApiEnvelope<RBACRoleRecord[]> | RBACRoleRecord[]>('/api/rbac/roles'),
+
+  // rbac
+  getRBACRoles: (params?: { page?: number; page_size?: number; q?: string }) =>
+    request<PageResponse<RBACRoleRecord>>(`/api/rbac/roles${buildQS(params as Record<string, string | number | undefined>)}`),
   createRBACRole: (payload: RBACRolePayload) =>
     request<ApiEnvelope<RBACRoleRecord> | RBACRoleRecord>('/api/rbac/roles', {
       method: 'POST',
@@ -620,8 +701,9 @@ export const apiClient = {
     request<ApiEnvelope<unknown> | unknown>(`/api/rbac/roles/${encodeURIComponent(String(id))}`, {
       method: 'DELETE'
     }),
-  getRBACPermissions: () =>
-    request<ApiEnvelope<RBACPermissionRecord[]> | RBACPermissionRecord[]>('/api/rbac/permissions'),
+
+  getRBACPermissions: (params?: { page?: number; page_size?: number; q?: string }) =>
+    request<PageResponse<RBACPermissionRecord>>(`/api/rbac/permissions${buildQS(params as Record<string, string | number | undefined>)}`),
   createRBACPermission: (payload: RBACPermissionPayload) =>
     request<ApiEnvelope<RBACPermissionRecord> | RBACPermissionRecord>('/api/rbac/permissions', {
       method: 'POST',
@@ -634,8 +716,9 @@ export const apiClient = {
         method: 'DELETE'
       }
     ),
-  getRBACUserRoles: () =>
-    request<ApiEnvelope<RBACUserRoleRecord[]> | RBACUserRoleRecord[]>('/api/rbac/user-roles'),
+
+  getRBACUserRoles: (params?: { page?: number; page_size?: number; q?: string }) =>
+    request<PageResponse<RBACUserRoleRecord>>(`/api/rbac/user-roles${buildQS(params as Record<string, string | number | undefined>)}`),
   createRBACUserRole: (payload: RBACUserRolePayload) =>
     request<ApiEnvelope<RBACUserRoleRecord> | RBACUserRoleRecord>('/api/rbac/user-roles', {
       method: 'POST',
@@ -645,10 +728,9 @@ export const apiClient = {
     request<ApiEnvelope<unknown> | unknown>(`/api/rbac/user-roles/${encodeURIComponent(String(id))}`, {
       method: 'DELETE'
     }),
-  getRBACRolePermissions: () =>
-    request<ApiEnvelope<RBACRolePermissionRecord[]> | RBACRolePermissionRecord[]>(
-      '/api/rbac/role-permissions'
-    ),
+
+  getRBACRolePermissions: (params?: { page?: number; page_size?: number; q?: string }) =>
+    request<PageResponse<RBACRolePermissionRecord>>(`/api/rbac/role-permissions${buildQS(params as Record<string, string | number | undefined>)}`),
   createRBACRolePermission: (payload: RBACRolePermissionPayload) =>
     request<ApiEnvelope<RBACRolePermissionRecord> | RBACRolePermissionRecord>(
       '/api/rbac/role-permissions',
@@ -679,12 +761,14 @@ export const apiClient = {
       `/api/rbac/effective?${params.toString()}`
     );
   },
+
+  // auth & init
   login: (username: string, password: string) =>
     request<{ token: string }>('/api/login', {
       method: 'POST',
       body: JSON.stringify({ username, password }),
     }),
-  getInitStatus: () => request<{ initialized: boolean }>('/api/init/status'),
+  getInitStatus: () => request<InitStatusResponse>('/api/init/status'),
   setup: (payload: { username: string; password: string; email: string; display_name?: string }) =>
     request<{ token: string }>('/api/init/setup', {
       method: 'POST',

@@ -57,6 +57,14 @@ func AutoMigrate(db *gorm.DB) error {
 	if db == nil {
 		return errors.New("storage: nil database")
 	}
+	if err := db.AutoMigrate(&model.ResourceSequence{}); err != nil {
+		return fmt.Errorf("auto migrate sequences: %w", err)
+	}
+	if db.Migrator().HasTable(&model.UserSession{}) {
+		if err := repairUserSessions(db); err != nil {
+			return fmt.Errorf("repair user sessions before auto migrate: %w", err)
+		}
+	}
 	if err := db.AutoMigrate(model.AllModels()...); err != nil {
 		return fmt.Errorf("auto migrate: %w", err)
 	}

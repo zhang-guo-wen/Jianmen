@@ -737,16 +737,7 @@ func (s *Server) handleTestConnection(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	hostKeyConfigProvided := false
-	if _, ok := raw["insecure_ignore_host_key"]; ok {
-		hostKeyConfigProvided = true
-	}
-	if _, ok := raw["host_key_fingerprint"]; ok {
-		hostKeyConfigProvided = true
-	}
-	if _, ok := raw["known_hosts_path"]; ok {
-		hostKeyConfigProvided = true
-	}
+	hostKeyConfigProvided := target.InsecureIgnoreHostKey || target.HostKeyFingerprint != "" || target.KnownHostsPath != ""
 
 	targetCfg := store.TargetConfig{
 		ID:                    target.ID,
@@ -792,6 +783,11 @@ func (s *Server) handleTestConnection(w http.ResponseWriter, r *http.Request) {
 	if addr == "" || targetCfg.Username == "" {
 		writeErrorText(w, http.StatusBadRequest, "host, port, and username are required")
 		return
+	}
+
+	// 测试连接默认允许跳过主机密钥验证（除非用户明确配置了指纹或 known_hosts）
+	if !targetCfg.InsecureIgnoreHostKey && targetCfg.HostKeyFingerprint == "" && targetCfg.KnownHostsPath == "" {
+		targetCfg.InsecureIgnoreHostKey = true
 	}
 
 	clientConfig, err := store.ClientConfigForTarget(targetCfg)

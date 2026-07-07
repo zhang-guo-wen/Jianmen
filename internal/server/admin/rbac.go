@@ -76,7 +76,7 @@ func (s *Server) handleRBACRoles(w http.ResponseWriter, r *http.Request) {
 			pageSize = 200
 		}
 		var roles []model.Role
-		if err := tx.Order("created_at DESC").Offset((page-1)*pageSize).Limit(pageSize).Find(&roles).Error; err != nil {
+		if err := tx.Order("created_at DESC").Offset((page - 1) * pageSize).Limit(pageSize).Find(&roles).Error; err != nil {
 			writeRBACDBError(w, err)
 			return
 		}
@@ -195,7 +195,7 @@ func (s *Server) handleRBACPermissions(w http.ResponseWriter, r *http.Request) {
 			pageSize = 200
 		}
 		var permissions []model.Permission
-		if err := tx.Order("created_at DESC").Offset((page-1)*pageSize).Limit(pageSize).Find(&permissions).Error; err != nil {
+		if err := tx.Order("created_at DESC").Offset((page - 1) * pageSize).Limit(pageSize).Find(&permissions).Error; err != nil {
 			writeRBACDBError(w, err)
 			return
 		}
@@ -310,7 +310,7 @@ func (s *Server) handleRBACUserRoles(w http.ResponseWriter, r *http.Request) {
 			pageSize = 200
 		}
 		var userRoles []model.UserRole
-		if err := tx.Order("created_at DESC").Offset((page-1)*pageSize).Limit(pageSize).Find(&userRoles).Error; err != nil {
+		if err := tx.Order("created_at DESC").Offset((page - 1) * pageSize).Limit(pageSize).Find(&userRoles).Error; err != nil {
 			writeRBACDBError(w, err)
 			return
 		}
@@ -390,7 +390,7 @@ func (s *Server) handleRBACRolePermissions(w http.ResponseWriter, r *http.Reques
 			pageSize = 200
 		}
 		var rolePermissions []model.RolePermission
-		if err := tx.Order("created_at DESC").Offset((page-1)*pageSize).Limit(pageSize).Find(&rolePermissions).Error; err != nil {
+		if err := tx.Order("created_at DESC").Offset((page - 1) * pageSize).Limit(pageSize).Find(&rolePermissions).Error; err != nil {
 			writeRBACDBError(w, err)
 			return
 		}

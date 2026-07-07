@@ -9,8 +9,9 @@ import (
 	"strings"
 	"time"
 
-	"gorm.io/gorm"
 	"jianmen/internal/model"
+
+	"gorm.io/gorm"
 )
 
 // InitStatusResponse 系统初始化状态

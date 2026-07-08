@@ -123,15 +123,17 @@ func (g *Gateway) handleRedis(ctx context.Context, client net.Conn, firstByte by
 	}
 
 	// Parse AUTH arguments: AUTH [username] password
-	// Redis 6+ ACL: AUTH username password (2 args)
-	// Legacy: AUTH password (1 arg)
+	// args[0] is the command name ("AUTH"), skip it
+	// Redis 6+ ACL: AUTH username password (total 3 args)
+	// Legacy: AUTH password (total 2 args)
+	authArgs := args[1:]
 	var compactUser, bastionPassword string
-	switch len(args) {
+	switch len(authArgs) {
 	case 1:
-		bastionPassword = args[0]
+		bastionPassword = authArgs[0]
 	case 2:
-		compactUser = args[0]
-		bastionPassword = args[1]
+		compactUser = authArgs[0]
+		bastionPassword = authArgs[1]
 	default:
 		g.logger.Warn("redis gateway invalid AUTH args", "count", len(args))
 		writeRESPError(client, "invalid password")
@@ -141,7 +143,7 @@ func (g *Gateway) handleRedis(ctx context.Context, client net.Conn, firstByte by
 	// If compactUser not provided by ACL-style AUTH, extract from password arg
 	// (client sends: AUTH <compact_username> <bastion_password>)
 	// If only 1 arg, client sent compact username as sole argument, so compactUser is the first arg
-	if compactUser == "" && len(args) == 1 {
+	if compactUser == "" && len(authArgs) == 1 {
 		compactUser = bastionPassword
 		// In single-arg mode, the client sends AUTH <compact_username> and we need
 		// the bastion password too. But we don't have it. So we expect 2-arg mode.

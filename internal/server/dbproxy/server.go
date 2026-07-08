@@ -874,16 +874,16 @@ func (g *Gateway) resolveAccount(rawUsername string) (*resolvedDBAccount, error)
 		return nil, errors.New("empty username")
 	}
 
-	// 仅支持 compact username 登录（10位，D前缀）
+	// 仅支持 compact username 登录（10位，D或R前缀）
 	if len(rawUsername) != 10 {
-		return nil, fmt.Errorf("invalid username format: must be 10-character compact username (D + resource_id + session_id)")
+		return nil, fmt.Errorf("invalid username format: must be 10-character compact username (D/R + resource_id + session_id)")
 	}
 	prefix, _, _, err := util.ParseCompactUsername(rawUsername)
 	if err != nil {
 		return nil, fmt.Errorf("invalid compact username %q: %w", rawUsername, err)
 	}
-	if prefix != util.PrefixDatabase {
-		return nil, fmt.Errorf("unsupported prefix %q in username %q, expected D", prefix, rawUsername)
+	if prefix != util.PrefixDatabase && prefix != util.PrefixRedis {
+		return nil, fmt.Errorf("unsupported prefix %q in username %q, expected D or R", prefix, rawUsername)
 	}
 	return g.resolveCompactAccount(rawUsername)
 }

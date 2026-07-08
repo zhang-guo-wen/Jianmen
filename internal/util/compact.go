@@ -6,6 +6,7 @@ import "fmt"
 const (
 	PrefixHost     = "H"
 	PrefixDatabase = "D"
+	PrefixRedis    = "R"
 )
 
 // ResourceIDFromSeq 从序号生成资源ID（4位62进制，不含前缀）

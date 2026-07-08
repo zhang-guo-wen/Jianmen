@@ -95,8 +95,8 @@ func (s *Server) handleTestDBConnectionPayload(w http.ResponseWriter, r *http.Re
 	}
 	payload.InstanceID = strings.TrimSpace(payload.InstanceID)
 	payload.Username = strings.TrimSpace(payload.Username)
-	if payload.InstanceID == "" || payload.Username == "" || payload.Password == "" {
-		writeErrorText(w, http.StatusBadRequest, "instance_id, username and password are required")
+	if payload.InstanceID == "" || payload.Password == "" {
+		writeErrorText(w, http.StatusBadRequest, "instance_id and password are required")
 		return
 	}
 

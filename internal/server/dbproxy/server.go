@@ -124,7 +124,7 @@ func upstreamAddress(inst model.DatabaseInstance) string {
 func (g *Gateway) handleConn(ctx context.Context, client net.Conn) {
 	defer client.Close()
 
-	client.SetReadDeadline(time.Now().Add(200 * time.Millisecond))
+	client.SetReadDeadline(time.Now().Add(3 * time.Second))
 	firstByte := make([]byte, 1)
 	_, err := io.ReadFull(client, firstByte)
 	client.SetReadDeadline(time.Time{})

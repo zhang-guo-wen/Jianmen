@@ -72,6 +72,10 @@ func (s *Server) handleUserSessions(w http.ResponseWriter, r *http.Request) {
 			compactPrefix = util.PrefixDatabase
 			resourceType = "database_account"
 			resourceID = dbAccount.ResourceID
+			// Redis 实例使用 R 前缀
+			if dbAccount.Instance.Protocol == "redis" {
+				compactPrefix = util.PrefixRedis
+			}
 		} else if errors.Is(err, gorm.ErrRecordNotFound) {
 			writeErrorText(w, http.StatusNotFound, "target account not found or disabled")
 			return

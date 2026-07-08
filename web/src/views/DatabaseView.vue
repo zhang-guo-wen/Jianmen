@@ -48,7 +48,7 @@
           <el-input v-model="instanceForm.name" />
         </el-form-item>
         <el-form-item label="协议" required>
-          <el-select v-model="instanceForm.protocol">
+          <el-select v-model="instanceForm.protocol" @change="onProtocolChange">
             <el-option label="MySQL" value="mysql" />
             <el-option label="PostgreSQL" value="postgres" />
             <el-option label="Redis" value="redis" />
@@ -507,6 +507,16 @@ function editInstance(inst: api.DatabaseInstanceView) {
   showInstanceDialog.value = true
 }
 
+function onProtocolChange(protocol: string) {
+  if (!editingInstance.value) {
+    switch (protocol) {
+      case 'redis': instanceForm.port = 6379; break
+      case 'postgres': instanceForm.port = 5432; break
+      default: instanceForm.port = 3306; break
+    }
+  }
+}
+
 async function submitInstance() {
   if (!instanceForm.name.trim() || !instanceForm.address.trim()) {
     ElMessage.warning('请填写必填字段')
@@ -660,7 +670,8 @@ async function testAccountFormConnection() {
     ElMessage.warning('请先选择数据库实例')
     return
   }
-  if (!accountForm.username.trim()) {
+  const isRedis = selectedInstance.value.protocol === 'redis'
+  if (!isRedis && !accountForm.username.trim()) {
     ElMessage.warning('请输入目标用户名')
     return
   }

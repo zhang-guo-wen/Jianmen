@@ -141,6 +141,8 @@ func (g *Gateway) handleConn(ctx context.Context, client net.Conn) {
 		switch {
 		case firstByte[0] == 0x00:
 			conn = g.handlePG(ctx, client, firstByte[0])
+		case firstByte[0] == '*':
+			conn = g.handleRedis(ctx, client, firstByte[0])
 		default:
 			g.logger.Warn("db gateway unsupported protocol", "first_byte", firstByte[0])
 			return

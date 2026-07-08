@@ -143,6 +143,8 @@ func testDBAuth(conn net.Conn, protocol, username, password string) error {
 		return testPostgresAuth(conn, username, password)
 	case "mysql":
 		return testMySQLAuth(conn, username, password)
+	case "redis":
+		return testRedisAuth(conn, username, password)
 	default:
 		return fmt.Errorf("unsupported protocol %q", protocol)
 	}
@@ -391,4 +393,38 @@ func testMySQLAuth(conn net.Conn, username, password string) error {
 		return fmt.Errorf("auth phase 2 unexpected: payload[4]=0x%02x", buf[4])
 	}
 	return fmt.Errorf("unexpected auth result: payload[4]=0x%02x", buf[4])
+}
+
+// testRedisAuth 测试 Redis 上游认证。
+// 使用 ACL 模式（AUTH username password），若 username 为空则使用单密码模式。
+func testRedisAuth(conn net.Conn, username, password string) error {
+	conn.SetDeadline(time.Now().Add(10 * time.Second))
+	defer conn.SetDeadline(time.Time{})
+
+	var authCmd string
+	if username != "" {
+		authCmd = fmt.Sprintf("*3\r\n$4\r\nAUTH\r\n$%d\r\n%s\r\n$%d\r\n%s\r\n",
+			len(username), username, len(password), password)
+	} else {
+		authCmd = fmt.Sprintf("*2\r\n$4\r\nAUTH\r\n$%d\r\n%s\r\n",
+			len(password), password)
+	}
+
+	if _, err := fmt.Fprint(conn, authCmd); err != nil {
+		return fmt.Errorf("auth: %w", err)
+	}
+
+	buf := make([]byte, 4096)
+	n, err := conn.Read(buf)
+	if err != nil {
+		return fmt.Errorf("auth: %w", err)
+	}
+	resp := strings.TrimSpace(string(buf[:n]))
+	if strings.HasPrefix(resp, "+") {
+		return nil
+	}
+	if strings.HasPrefix(resp, "-") {
+		return fmt.Errorf("auth denied: %s", resp[1:])
+	}
+	return fmt.Errorf("unexpected auth response: %s", resp)
 }

@@ -17,7 +17,7 @@
       <el-table-column prop="port" label="端口" width="70" />
       <el-table-column label="协议" width="80" align="center">
         <template #default="{ row }">
-          <el-tag size="small" :type="row.protocol === 'mysql' ? 'success' : 'primary'" effect="plain">{{ row.protocol === 'mysql' ? 'MySQL' : 'PG' }}</el-tag>
+          <el-tag size="small" :type="row.protocol === 'mysql' ? 'success' : row.protocol === 'redis' ? 'danger' : 'primary'" effect="plain">{{ row.protocol === 'mysql' ? 'MySQL' : row.protocol === 'redis' ? 'Redis' : 'PG' }}</el-tag>
         </template>
       </el-table-column>
       <el-table-column label="账号数" width="80" align="center">
@@ -51,6 +51,7 @@
           <el-select v-model="instanceForm.protocol">
             <el-option label="MySQL" value="mysql" />
             <el-option label="PostgreSQL" value="postgres" />
+            <el-option label="Redis" value="redis" />
           </el-select>
         </el-form-item>
         <el-form-item label="上游地址" required>
@@ -134,8 +135,8 @@
       @submit="submitAccount"
     >
       <el-form :model="accountForm" label-width="100px">
-        <el-form-item label="目标用户名" required>
-          <el-input v-model="accountForm.username" placeholder="数据库登录用户名" />
+        <el-form-item :label="selectedInstance?.protocol === 'redis' ? '目标用户名' : '目标用户名'" :required="selectedInstance?.protocol !== 'redis'">
+          <el-input v-model="accountForm.username" :placeholder="selectedInstance?.protocol === 'redis' ? 'Redis ACL 用户名（可选，留空则使用单一密码认证）' : '数据库登录用户名'" />
         </el-form-item>
         <el-form-item label="目标密码">
           <el-input v-model="accountForm.password" type="password" show-password
@@ -376,7 +377,10 @@ const compactUser = computed(() => {
   if (!connectTarget.value) return ''
   const resourceId = connectTarget.value.resource_id || '0000'
   const sessionId = userSessionId.value
-  return sessionId ? 'D' + resourceId + sessionId : ''
+  if (!sessionId) return ''
+  const inst = selectedInstance.value
+  const prefix = inst?.protocol === 'redis' ? 'R' : 'D'
+  return prefix + resourceId + sessionId
 })
 const gatewayHost = computed(() => gatewayConfig.value.host)
 const gatewayPort = computed(() => gatewayConfig.value.port)
@@ -387,11 +391,15 @@ const connectCommand = computed(() => {
   const protocol = inst.protocol || 'mysql'
   const resourceId = connectTarget.value.resource_id || '0000'
   const sessionId = userSessionId.value || '00001'
-  const compactUser = `D${resourceId}${sessionId}`
+  const prefix = protocol === 'redis' ? 'R' : 'D'
+  const compactUser = `${prefix}${resourceId}${sessionId}`
   const host = gatewayConfig.value.host
   const proxyPort = gatewayConfig.value.port
   if (protocol === 'mysql') {
     return `mysql --protocol=tcp -h ${host} -P ${proxyPort} -u ${compactUser} -p`
+  }
+  if (protocol === 'redis') {
+    return `redis-cli -h ${host} -p ${proxyPort} -a ${compactUser} --user ${connectTarget.value.username || 'default'}`
   }
   return `psql -h ${host} -p ${proxyPort} -U ${compactUser}`
 })
@@ -678,7 +686,8 @@ async function testAccountFormConnection() {
 }
 
 async function submitAccount() {
-  if (!accountForm.username.trim()) { ElMessage.warning('请输入目标用户名'); return }
+  const isRedis = selectedInstance.value?.protocol === 'redis'
+  if (!isRedis && !accountForm.username.trim()) { ElMessage.warning('请输入目标用户名'); return }
   accountSubmitting.value = true
   try {
     if (editingAccount.value) {

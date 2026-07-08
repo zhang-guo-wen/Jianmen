@@ -228,6 +228,7 @@ export interface DatabaseInstanceView {
 }
 
 export interface DBAccountRecord {
+  id?: string;
   instance_id?: string;
   unique_name?: string;
   username?: string;

@@ -89,15 +89,16 @@ func writeRESPError(conn net.Conn, msg string) error {
 }
 
 // handleRedis implements the Redis proxy authentication flow:
-// 1. Read the first RESP command (expected AUTH)
-// 2. Extract compact username (R prefix) and bastion password
-// 3. Resolve account via compact username lookup
-// 4. Validate bastion user password
-// 5. RBAC + account/instance status checks
-// 6. Connect to upstream Redis
-// 7. Authenticate to upstream with stored credentials (ACL or legacy)
-// 8. Relay upstream response to client
-// 9. Return gatewayConn for transparent data relay
+// 1. Read the first RESP command (expected AUTH or HELLO)
+// 2. If HELLO, negotiate protocol then AUTH
+// 3. Extract compact username (R prefix) and bastion password
+// 4. Resolve account via compact username lookup
+// 5. Validate bastion user password
+// 6. RBAC + account/instance status checks
+// 7. Connect to upstream Redis
+// 8. Authenticate to upstream with stored credentials (ACL or legacy)
+// 9. Relay upstream response to client
+// 10. Return gatewayConn for transparent data relay
 func (g *Gateway) handleRedis(ctx context.Context, client net.Conn, firstByte byte) *gatewayConn {
 	cmd, args, _, err := readRESPCommandFromBuf(client, firstByte)
 	if err != nil {
@@ -106,16 +107,17 @@ func (g *Gateway) handleRedis(ctx context.Context, client net.Conn, firstByte by
 	}
 
 	if cmd != "AUTH" {
-		// Redis clients may send HELLO first (Redis 6+)
 		if cmd == "HELLO" {
-			// Read the next command which should be AUTH
-			cmd2, args2, _, err2 := readRESPCommand(client)
-			if err2 != nil || cmd2 != "AUTH" {
-				g.logger.Warn("redis gateway expected AUTH after HELLO", "cmd", cmd2, "error", err2)
+			// RDM sends HELLO 3 AUTH username password
+			if len(args) >= 4 && strings.ToUpper(args[1]) == "AUTH" {
+				args = args[2:] // ["AUTH", user, pass]
+				cmd = "AUTH"
+			} else {
+				writeRESPSimple(client, "OK")
 				return nil
 			}
-			cmd, args = cmd2, args2
-		} else {
+		}
+		if cmd != "AUTH" {
 			g.logger.Warn("redis gateway expected AUTH, got", "cmd", cmd)
 			writeRESPError(client, "NOAUTH Authentication required.")
 			return nil

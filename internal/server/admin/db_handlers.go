@@ -215,6 +215,10 @@ func (s *Server) handleCreateDBAccount(w http.ResponseWriter, r *http.Request, i
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
+	if strings.TrimSpace(payload.Password) == "" {
+		writeErrorText(w, http.StatusBadRequest, "password is required")
+		return
+	}
 	view, err := s.store.AddDatabaseAccount(instanceID, payload.Username, payload.Password, payload.Group, payload.Remark, payload.ExpiresAt)
 	if err != nil {
 		writeDBStoreError(w, err)

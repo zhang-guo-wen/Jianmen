@@ -251,8 +251,8 @@ func (s *DBStore) DatabaseAccount(id string) (DatabaseAccountView, error) {
 func (s *DBStore) AddDatabaseAccount(instanceID, username, password, group, remark string, expiresAt *time.Time) (DatabaseAccountView, error) {
 	instanceID = strings.TrimSpace(instanceID)
 	username = strings.TrimSpace(username)
-	if username == "" {
-		return DatabaseAccountView{}, errors.New("username is required")
+	if password == "" {
+		return DatabaseAccountView{}, errors.New("password is required")
 	}
 	// Verify instance exists
 	var inst model.DatabaseInstance
@@ -262,8 +262,10 @@ func (s *DBStore) AddDatabaseAccount(instanceID, username, password, group, rema
 		}
 		return DatabaseAccountView{}, err
 	}
-	if err := s.ensureDatabaseAccountUsernameAvailable(instanceID, username, ""); err != nil {
-		return DatabaseAccountView{}, err
+	if username != "" {
+		if err := s.ensureDatabaseAccountUsernameAvailable(instanceID, username, ""); err != nil {
+			return DatabaseAccountView{}, err
+		}
 	}
 	uniqueName, err := s.generateUniqueName()
 	if err != nil {

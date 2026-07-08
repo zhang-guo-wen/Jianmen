@@ -8,6 +8,7 @@ import (
 	"golang.org/x/crypto/bcrypt"
 
 	"jianmen/internal/config"
+	"jianmen/internal/crypto"
 	"jianmen/internal/model"
 	"jianmen/internal/storage"
 	"jianmen/internal/util"
@@ -158,6 +159,11 @@ func TestDBStoreRejectsDuplicateAccountNamesPerParent(t *testing.T) {
 	if err := storage.AutoMigrate(db); err != nil {
 		t.Fatalf("auto migrate: %v", err)
 	}
+	// crypto 初始化确保 EncryptedField 可以工作
+	tmpDir := t.TempDir()
+	if _, err := crypto.Init(tmpDir); err != nil {
+		t.Fatalf("crypto init: %v", err)
+	}
 	st := NewDBStore(db)
 
 	_, err = st.AddTarget(config.Target{
@@ -185,10 +191,10 @@ func TestDBStoreRejectsDuplicateAccountNamesPerParent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("add database instance: %v", err)
 	}
-	if _, err := st.AddDatabaseAccount(instance.ID, "app", "", "", "", nil); err != nil {
+	if _, err := st.AddDatabaseAccount(instance.ID, "app", "pass1", "", "", nil); err != nil {
 		t.Fatalf("add database account: %v", err)
 	}
-	_, err = st.AddDatabaseAccount(instance.ID, "app", "", "", "", nil)
+	_, err = st.AddDatabaseAccount(instance.ID, "app", "pass2", "", "", nil)
 	if err == nil || !strings.Contains(err.Error(), "already exists") {
 		t.Fatalf("duplicate database account error = %v, want already exists", err)
 	}

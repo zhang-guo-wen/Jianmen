@@ -51,7 +51,7 @@ func normalizeDBProtocol(protocol string) (string, error) {
 	if protocol == "" || protocol == "pg" || protocol == "postgresql" {
 		protocol = "postgres"
 	}
-	if protocol != "mysql" && protocol != "postgres" && protocol != "tcp" {
+	if protocol != "mysql" && protocol != "postgres" && protocol != "redis" && protocol != "tcp" {
 		return "", fmt.Errorf("unsupported database protocol %q", protocol)
 	}
 	return protocol, nil

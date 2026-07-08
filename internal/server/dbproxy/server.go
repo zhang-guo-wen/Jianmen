@@ -109,9 +109,12 @@ type gatewayConn struct {
 func upstreamAddress(inst model.DatabaseInstance) string {
 	port := inst.Port
 	if port == 0 {
-		if inst.Protocol == "postgres" {
+		switch inst.Protocol {
+		case "postgres":
 			port = 5432
-		} else {
+		case "redis":
+			port = 6379
+		default:
 			port = 3306
 		}
 	}

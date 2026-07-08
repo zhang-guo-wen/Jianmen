@@ -114,6 +114,16 @@ func (s *Server) handleTestDBConnectionPayload(w http.ResponseWriter, r *http.Re
 	upstreamAddr := inst.Address
 	if inst.Port > 0 {
 		upstreamAddr = fmt.Sprintf("%s:%d", inst.Address, inst.Port)
+	} else {
+		addr := inst.Address
+		port := 3306
+		switch strings.ToLower(inst.Protocol) {
+		case "postgres", "postgresql":
+			port = 5432
+		case "redis":
+			port = 6379
+		}
+		upstreamAddr = fmt.Sprintf("%s:%d", addr, port)
 	}
 	conn, err := net.DialTimeout("tcp", upstreamAddr, 5*time.Second)
 	if err != nil {

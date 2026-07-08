@@ -109,7 +109,7 @@ func (g *Gateway) handleRedis(ctx context.Context, client net.Conn, firstByte by
 	if cmd != "AUTH" {
 		if cmd == "HELLO" {
 			// RDM sends HELLO 3 AUTH username password
-			if len(args) >= 4 && strings.ToUpper(args[1]) == "AUTH" {
+			if len(args) >= 4 && strings.ToUpper(args[2]) == "AUTH" {
 				args = args[2:] // ["AUTH", user, pass]
 				cmd = "AUTH"
 			} else {

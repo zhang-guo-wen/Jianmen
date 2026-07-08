@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"strconv"
 	"strings"
 	"unicode"
 )
@@ -25,6 +26,8 @@ func newQueryObserver(protocol string, sink querySink) queryObserver {
 		return &mysqlObserver{sink: sink}
 	case "postgres":
 		return &postgresObserver{sink: sink, startupDone: true}
+	case "redis":
+		return &redisObserver{sink: sink}
 	default:
 		return noopObserver{}
 	}
@@ -518,4 +521,158 @@ func mergeDetails(values ...map[string]any) map[string]any {
 		}
 	}
 	return out
+}
+
+type redisObserver struct {
+	sink    querySink
+	buf     []byte
+	pending []queryRecord
+}
+
+func (o *redisObserver) ObserveClientBytes(data []byte) *queryDecision {
+	if len(data) == 0 || o.sink == nil {
+		return nil
+	}
+	o.buf = append(o.buf, data...)
+	for {
+		if len(o.buf) == 0 {
+			return nil
+		}
+		// RESP 命令必须以 '*' 开头
+		if o.buf[0] != '*' {
+			// 非 RESP 命令，有可能在 AUTH 之后，但 RESP 都是 * 开头
+			// 跳过无法识别的字节
+			o.buf = nil
+			return nil
+		}
+		// 找到第一个 \r\n 获取参数数量
+		crlfIdx := indexCRLF(o.buf)
+		if crlfIdx < 0 {
+			// 等待更多数据
+			if len(o.buf) > 64*1024 {
+				o.buf = nil
+			}
+			return nil
+		}
+		count, err := strconv.Atoi(string(o.buf[1:crlfIdx]))
+		if err != nil || count <= 0 || count > 256 {
+			o.buf = nil
+			return nil
+		}
+		pos := crlfIdx + 2
+		args := make([]string, 0, count)
+		valid := true
+		for i := 0; i < count; i++ {
+			if pos >= len(o.buf) || o.buf[pos] != '$' {
+				valid = false
+				break
+			}
+			crlf := indexCRLF(o.buf[pos:])
+			if crlf < 0 {
+				if len(o.buf) > 64*1024 {
+					o.buf = nil
+				}
+				return nil
+			}
+			argLen, err := strconv.Atoi(string(o.buf[pos+1 : pos+crlf]))
+			if err != nil || argLen < 0 || argLen > 512*1024*1024 {
+				valid = false
+				break
+			}
+			pos += crlf + 2
+			dataEnd := pos + argLen + 2 // arg + \r\n
+			if dataEnd > len(o.buf) {
+				// 等待更多数据
+				return nil
+			}
+			args = append(args, string(o.buf[pos:pos+argLen]))
+			pos = dataEnd
+		}
+		if !valid {
+			o.buf = nil
+			return nil
+		}
+
+		// 记录命令（跳过 AUTH、PING、QUIT 等非数据命令）
+		cmd := ""
+		if len(args) > 0 {
+			cmd = strings.ToUpper(args[0])
+		}
+		if shouldRecordRedisCommand(cmd) {
+			sql := strings.Join(args, " ")
+			record, decision := o.sink.StartQuery(sql, map[string]any{
+				"protocol": "redis",
+				"command":  cmd,
+			})
+			if !decision.Allowed {
+				return &decision
+			}
+			o.pending = append(o.pending, record)
+		}
+		o.buf = o.buf[pos:]
+	}
+}
+
+func (o *redisObserver) ObserveServerBytes(data []byte) {
+	if len(data) == 0 || len(o.pending) == 0 || o.sink == nil {
+		return
+	}
+	// Match RESP response prefixes
+	if len(data) > 0 {
+		var finish queryFinish
+		switch data[0] {
+		case '+':
+			finish = queryFinish{Status: queryStatusSuccess}
+		case '-':
+			finish = queryFinish{Status: queryStatusError}
+			errMsg := strings.TrimSpace(string(data[1:]))
+			if idx := strings.IndexAny(errMsg, "\r\n"); idx >= 0 {
+				errMsg = errMsg[:idx]
+			}
+			// Parse Redis error: "-ERR message" or "-WRONGTYPE ..."
+			if strings.HasPrefix(errMsg, "ERR ") {
+				errMsg = errMsg[4:]
+			}
+			finish.ErrorMessage = errMsg
+		case ':':
+			finish = queryFinish{Status: queryStatusSuccess}
+		case '$':
+			finish = queryFinish{Status: queryStatusSuccess}
+		case '*':
+			finish = queryFinish{Status: queryStatusSuccess}
+		default:
+			return // not a complete response header we recognize
+		}
+		record := o.pending[0]
+		o.pending = o.pending[1:]
+		o.sink.FinishQuery(record, finish)
+	}
+}
+
+func (o *redisObserver) ErrorResponse(decision queryDecision) []byte {
+	message := decision.ErrorMessage
+	if message == "" {
+		message = "command denied by database proxy policy"
+	}
+	return []byte(fmt.Sprintf("-ERR %s\r\n", message))
+}
+
+// shouldRecordRedisCommand returns true for data commands (skips AUTH, PING, QUIT, etc.)
+func shouldRecordRedisCommand(cmd string) bool {
+	switch cmd {
+	case "AUTH", "PING", "QUIT", "ECHO", "SELECT", "HELLO", "COMMAND":
+		return false
+	default:
+		return true
+	}
+}
+
+// indexCRLF returns the index of first \r\n in b, or -1
+func indexCRLF(b []byte) int {
+	for i := 0; i < len(b)-1; i++ {
+		if b[i] == '\r' && b[i+1] == '\n' {
+			return i
+		}
+	}
+	return -1
 }

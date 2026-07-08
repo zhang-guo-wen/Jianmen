@@ -81,6 +81,14 @@ type Target struct {
 func Load(path string) (*Config, error) {
 	file, err := os.Open(path)
 	if err != nil {
+		// 配置文件不存在时使用默认值，零配置启动
+		if os.IsNotExist(err) {
+			cfg := defaultConfig()
+			if err := cfg.Validate(); err != nil {
+				return nil, err
+			}
+			return cfg, nil
+		}
 		return nil, err
 	}
 	defer file.Close()
@@ -97,6 +105,12 @@ func Load(path string) (*Config, error) {
 		return nil, err
 	}
 	return &cfg, nil
+}
+
+func defaultConfig() *Config {
+	cfg := &Config{}
+	cfg.applyDefaults()
+	return cfg
 }
 
 func (c *Config) applyDefaults() {
@@ -131,10 +145,9 @@ func (c *Config) applyDefaults() {
 		c.Database.DSN = "data/bastion.db"
 		c.Database.AutoMigrate = true
 	}
-	if c.DatabaseGateway.Enabled {
-		if c.DatabaseGateway.ListenAddr == "" {
-			c.DatabaseGateway.ListenAddr = "0.0.0.0:33060"
-		}
+	if !c.DatabaseGateway.Enabled && c.DatabaseGateway.ListenAddr == "" {
+		c.DatabaseGateway.Enabled = true
+		c.DatabaseGateway.ListenAddr = "0.0.0.0:33060"
 	}
 	if c.Database.Enabled && c.Database.Driver == "" {
 		c.Database.Driver = "sqlite"

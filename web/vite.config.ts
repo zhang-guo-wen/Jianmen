@@ -20,18 +20,12 @@ export default defineConfig(({ mode }) => {
       rolldownOptions: {
         output: {
           codeSplitting: {
-            minSize: 20_000,
+            minSize: 50_000,
             groups: [
               {
                 name: 'vendor-vue',
                 test: /node_modules[\\/](vue|vue-router|pinia)[\\/]/,
                 priority: 30
-              },
-              {
-                name: 'vendor-element-plus',
-                test: /node_modules[\\/](@element-plus|element-plus)[\\/]/,
-                priority: 20,
-                maxSize: 450_000
               },
               {
                 name: 'vendor-xterm',

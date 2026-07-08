@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"jianmen/internal/config"
+	"jianmen/internal/frontend"
 	"jianmen/internal/model"
 	"jianmen/internal/rbac"
 	"jianmen/internal/store"
@@ -115,7 +116,12 @@ func New(cfg *config.Config, store store.Store, logger *slog.Logger, dataDir str
 
 func (s *Server) ListenAndServe(ctx context.Context) error {
 	mux := http.NewServeMux()
-	mux.HandleFunc("/", s.handleIndex)
+	frontendHandler, err := frontend.Handler()
+	if err != nil {
+		mux.HandleFunc("/", s.handleIndex)
+	} else {
+		mux.Handle("/", frontendHandler)
+	}
 	mux.HandleFunc("/api/init/status", s.handleInitStatus)
 	mux.HandleFunc("/api/init/setup", s.handleInitSetup)
 	mux.HandleFunc("/api/init/encryption-key", s.withAuthAndUser(s.handleInitEncryptionKey))
@@ -167,7 +173,7 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 	}()
 
 	s.logger.Info("admin server listening", "addr", s.cfg.Admin.ListenAddr)
-	err := server.ListenAndServe()
+	err = server.ListenAndServe()
 	if errors.Is(err, http.ErrServerClosed) {
 		return nil
 	}

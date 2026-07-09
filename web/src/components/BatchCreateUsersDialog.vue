@@ -61,7 +61,7 @@
                 link
                 type="danger"
                 size="small"
-                :disabled="row.status === 'creating'"
+                :disabled="saving || row.status === 'creating'"
                 @click="removeRow($index)"
               >
                 删除
@@ -88,15 +88,24 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { pinyin } from 'pinyin-pro'
 import * as api from '@/api/client'
 
-defineProps<{ visible: boolean }>()
+const props = defineProps<{ visible: boolean }>()
 const emit = defineEmits<{
   'update:visible': [value: boolean]
   created: []
 }>()
+
+// ── 弹窗关闭时重置所有状态 ──
+watch(() => props.visible, (v) => {
+  if (!v) {
+    rawInput.value = ''
+    tableRows.value = []
+    saving.value = false
+  }
+})
 
 // ── 文本输入 ──
 const rawInput = ref('')

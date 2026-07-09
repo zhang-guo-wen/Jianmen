@@ -12,6 +12,7 @@ type AppRouteMeta = {
 
 const routeMenuMap: Record<string, string> = {
 
+  '/applications': 'applications',
   '/hosts': 'hosts',
   '/databases': 'databases',
   '/quick-connect': 'quickConnect',
@@ -20,6 +21,7 @@ const routeMenuMap: Record<string, string> = {
   '/roles': 'roles',
 };
 
+const ApplicationsView = () => import('@/views/ApplicationsView.vue');
 const AuditView = () => import('@/views/AuditView.vue');
 const DatabaseView = () => import('@/views/DatabaseView.vue');
 const HostsView = () => import('@/views/HostsView.vue');
@@ -72,6 +74,15 @@ const routes: RouteRecordRaw[] = [
     meta: {
       titleKey: 'route.databases.title',
       descriptionKey: 'route.databases.description'
+    } satisfies AppRouteMeta
+  },
+  {
+    path: '/applications',
+    name: 'applications',
+    component: ApplicationsView,
+    meta: {
+      titleKey: 'route.applications.title',
+      descriptionKey: 'route.applications.description'
     } satisfies AppRouteMeta
   },
   {

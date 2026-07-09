@@ -102,6 +102,7 @@ const zhCN = {
   'nav.assets': '资产管理',
   'nav.audit': '审计日志',
 
+  'nav.applications': '应用发布',
   'nav.databases': '数据库管理',
   'nav.hosts': '主机管理',
   'nav.quickConnect': '快速连接',
@@ -110,6 +111,8 @@ const zhCN = {
   'route.audit.description': '安全事件与合规审计轨迹',
   'route.audit.title': '审计日志',
 
+  'route.applications.description': 'Web 应用代理发布与管理',
+  'route.applications.title': '应用发布',
   'route.databases.description': '数据库代理实例与账号资源连接配置',
   'route.databases.title': '数据库管理',
   'route.hosts.description': '已纳管目标资产清单',

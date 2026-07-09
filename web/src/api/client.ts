@@ -183,8 +183,9 @@ export interface SessionFileEventRecord {
   path?: string;
   path2?: string;
   result?: string;
-  started_at?: string;
+  started_at?: string;   // 旧文件系统 API (files.jsonl)
   ended_at?: string;
+  timestamp?: string;     // 新 DB API (audit_sftp_events.timestamp)
   size?: number;
   [key: string]: unknown;
 }
@@ -599,7 +600,7 @@ export const apiClient = {
     ),
   getSessionFileSummary: (id: string | number) =>
     request<ApiEnvelope<Record<string, unknown>> | Record<string, unknown>>(
-      `/api/audit/ssh/${encodeURIComponent(String(id))}/files`
+      `/api/audit/ssh/${encodeURIComponent(String(id))}/file-summary`
     ),
   getSessionReplay: (id: string | number) =>
     request<string>(`/api/audit/ssh/${encodeURIComponent(String(id))}/replay`),

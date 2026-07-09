@@ -262,7 +262,7 @@
         >
           <el-table-column :label="t('audit.column.time')" width="175" show-overflow-tooltip class-name="col-time">
             <template #default="{ row }">
-              {{ formatTime(row.started_at) }}
+              {{ formatTime(row.timestamp ?? row.started_at) }}
             </template>
           </el-table-column>
           <el-table-column :label="t('audit.column.action')" width="80">
@@ -573,7 +573,6 @@ function sessionProtocol(row: SessionRecord): string {
   if (subtype === 'web-terminal') return 'Web';
   if (subtype === 'sftp') return 'SFTP';
   if (subtype === 'scp') return 'SCP';
-  if (!subtype && !hasReplay(row)) return 'SFTP';
   return 'SSH';
 }
 
@@ -582,7 +581,6 @@ function sessionProtocolTag(row: SessionRecord): 'success' | 'warning' | 'info' 
   if (subtype === 'web-terminal') return 'info';
   if (subtype === 'sftp') return 'warning';
   if (subtype === 'scp') return 'warning';
-  if (!subtype && !hasReplay(row)) return 'warning';
   return 'success';
 }
 
@@ -768,9 +766,7 @@ function formatFileAction(action: string): string {
 }
 
 function isSFTP(row: SessionRecord): boolean {
-  if (row.protocol_subtype === 'sftp') return true;
-  if (!row.protocol_subtype && !hasReplay(row)) return true;
-  return false;
+  return row.protocol_subtype === 'sftp';
 }
 
 function loadSessionLog(session: SessionRecord) {

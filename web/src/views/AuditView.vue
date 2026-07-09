@@ -377,12 +377,17 @@ const currentLoading = computed(() =>
   auditScope.value === 'ssh' ? sessionsLoading.value : dbLoading.value
 );
 const isDBMeta = computed(() => detailKind.value === 'meta' && isRecord(detailData.value) && 'protocol' in detailData.value);
-const isDBQueries = computed(() => detailKind.value === 'queries' && Array.isArray(detailData.value));
-const isCommands = computed(() => detailKind.value === 'commands' && Array.isArray(detailData.value));
-const isFiles = computed(() => detailKind.value === 'files' && Array.isArray(detailData.value));
+function hasItems(data: unknown): boolean {
+  if (Array.isArray(data)) return true;
+  if (data && typeof data === 'object' && 'items' in data && Array.isArray((data as Record<string, unknown>).items)) return true;
+  return false;
+}
+const isDBQueries = computed(() => detailKind.value === 'queries' && hasItems(detailData.value));
+const isCommands = computed(() => detailKind.value === 'commands' && hasItems(detailData.value));
+const isFiles = computed(() => detailKind.value === 'files' && hasItems(detailData.value));
 const isReplay = computed(() => detailKind.value === 'replay' && isReplayData(detailData.value));
 const dbMeta = computed(() => (isRecord(detailData.value) ? (detailData.value as DBConnectionMetaRecord) : {}));
-const queryEvents = computed(() => (Array.isArray(detailData.value) ? (detailData.value as DBQueryEventRecord[]) : []));
+const queryEvents = computed(() => extractItems<DBQueryEventRecord>(detailData.value));
 
 // 合并 start/finish 事件为一行
 interface MergedQueryEvent {
@@ -429,12 +434,15 @@ const mergedQueryEvents = computed<MergedQueryEvent[]>(() => {
   }
   return Array.from(map.values()).sort((a, b) => a.seq - b.seq);
 });
-const commandEvents = computed(() =>
-  Array.isArray(detailData.value) ? (detailData.value as SessionCommandRecord[]) : []
-);
-const fileEvents = computed(() =>
-  Array.isArray(detailData.value) ? (detailData.value as SessionFileEventRecord[]) : []
-);
+function extractItems<T>(data: unknown): T[] {
+  if (Array.isArray(data)) return data as T[];
+  if (data && typeof data === 'object' && 'items' in data && Array.isArray((data as Record<string, unknown>).items)) {
+    return (data as Record<string, unknown>).items as T[];
+  }
+  return [];
+}
+const commandEvents = computed(() => extractItems<SessionCommandRecord>(detailData.value));
+const fileEvents = computed(() => extractItems<SessionFileEventRecord>(detailData.value));
 
 // Client-side pagination for drawer sub-tables
 const pagedQueryEvents = computed(() => {

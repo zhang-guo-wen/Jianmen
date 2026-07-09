@@ -307,6 +307,32 @@ export interface DBQueryEventRecord {
   [key: string]: unknown;
 }
 
+// ── Application (Web App Proxy) ─────────────────────────────────────────
+
+export interface ApplicationView {
+  id?: string;
+  name: string;
+  group?: string;
+  listen_port: number;
+  internal_scheme: string;
+  internal_host: string;
+  internal_port: number;
+  remark?: string;
+  status?: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface ApplicationPayload {
+  name: string;
+  scheme?: string;
+  host: string;
+  port?: number;
+  listen_port?: number;
+  group?: string;
+  remark?: string;
+}
+
 // ── RBAC ───────────────────────────────────────────────────────────────
 
 export interface RBACRoleRecord {
@@ -641,6 +667,24 @@ export const apiClient = {
     request<ApiEnvelope<DBQueryEventRecord[]> | DBQueryEventRecord[]>(
       `/api/db/connections/${encodeURIComponent(String(id))}/queries`
     ),
+
+  // applications (web app proxy)
+  getApplications: (params?: { page?: number; page_size?: number; q?: string }) =>
+    request<PageResponse<ApplicationView>>(`/api/applications${buildQS(params as Record<string, string | number | undefined>)}`),
+  createApplication: (payload: ApplicationPayload) =>
+    request<ApiEnvelope<ApplicationView> | ApplicationView>('/api/applications', {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    }),
+  updateApplication: (id: string, payload: ApplicationPayload & { status?: string }) =>
+    request<ApiEnvelope<ApplicationView> | ApplicationView>(`/api/applications/${encodeURIComponent(id)}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload)
+    }),
+  deleteApplication: (id: string) =>
+    request<ApiEnvelope<unknown> | unknown>(`/api/applications/${encodeURIComponent(id)}`, {
+      method: 'DELETE'
+    }),
 
   // rbac
   getRBACRoles: (params?: { page?: number; page_size?: number; q?: string }) =>

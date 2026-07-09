@@ -12,6 +12,7 @@
     >
       <template #toolbar-extra>
         <el-button type="primary" @click="openCreateDialog">{{ t('users.create') }}</el-button>
+        <el-button type="success" @click="batchDialogVisible = true">批量新建</el-button>
       </template>
 
       <el-alert v-if="error" :title="error" type="error" show-icon style="margin-bottom: 8px" />
@@ -130,6 +131,12 @@
       </div>
     </el-dialog>
 
+    <!-- Batch Create Dialog -->
+    <BatchCreateUsersDialog
+      v-model:visible="batchDialogVisible"
+      @created="loadUsers"
+    />
+
     <!-- Create/Edit Dialog -->
     <FormDialog
       v-model:visible="dialogVisible"
@@ -167,6 +174,7 @@ import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'elem
 import DataTableCard from '@/components/DataTableCard.vue';
 import FormDialog from '@/components/FormDialog.vue';
 import StatusSwitch from '@/components/StatusSwitch.vue';
+import BatchCreateUsersDialog from '@/components/BatchCreateUsersDialog.vue';
 import * as api from '@/api/client';
 import { useI18n } from '@/i18n';
 
@@ -194,6 +202,7 @@ const submitting = ref(false);
 const togglingUserId = ref<string>('');
 const deletingUserId = ref<string>('');
 const dialogVisible = ref(false);
+const batchDialogVisible = ref(false);
 const editingUser = ref<api.UserRecord | null>(null);
 const morePanels = ref<string[]>([]);
 const formRef = ref<FormInstance>();

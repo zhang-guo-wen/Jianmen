@@ -83,8 +83,8 @@ func readMySQLAuthResult(conn net.Conn, hs *dbproxy.MySQLHandshake, password str
 		return nil, fmt.Errorf("auth denied: %s", dbproxy.ParseMySQLErrorMessage(buf[4:4+payloadLen]))
 	}
 	// AuthSwitchRequest (0xfe) — payload[1:] contains plugin name + auth data
-	if len(authPkt.payload) > 1 && authPkt.payload[0] == 0xfe {
-		payload := authPkt.payload[1:]
+	if len(buf) > 1 && buf[4] == 0xfe {
+		payload := buf[5 : 4+payloadLen]
 		nullPos := 0
 		for nullPos < len(payload) && payload[nullPos] != 0 {
 			nullPos++
@@ -172,17 +172,16 @@ func mysqlQuery(conn net.Conn, query string) ([][]string, error) {
 		return nil, fmt.Errorf("write query: %w", err)
 	}
 
-	buf := make([]byte, 65536)
-	_, err := conn.Read(buf)
+	// Read MySQL packet with proper header/payload separation
+	pkt2, err := readMySQLPacketFromConn(conn)
 	if err != nil {
 		return nil, fmt.Errorf("read query response: %w", err)
 	}
-	payloadLen := int(buf[0]) | int(buf[1])<<8 | int(buf[2])<<16
-	if len(buf) >= 4+payloadLen && buf[4] == 0xff {
-		return nil, fmt.Errorf("query error: %s", dbproxy.ParseMySQLErrorMessage(buf[4:4+payloadLen]))
+	if len(pkt2.payload) > 0 && pkt2.payload[0] == 0xff {
+		return nil, fmt.Errorf("query error: %s", dbproxy.ParseMySQLErrorMessage(pkt2.payload))
 	}
 
-	colCount, _ := readLenEncInt(buf[4:])
+	colCount, _ := readLenEncInt(pkt2.payload)
 	if colCount == 0 {
 		return nil, nil
 	}
@@ -200,17 +199,17 @@ func mysqlQuery(conn net.Conn, query string) ([][]string, error) {
 	// Read row data
 	var rows [][]string
 	for {
-		pkt2, err := readMySQLPacketFromConn(conn)
+		rpkt, err := readMySQLPacketFromConn(conn)
 		if err != nil {
 			return nil, fmt.Errorf("read row: %w", err)
 		}
-		if len(pkt2.payload) > 0 && pkt2.payload[0] == 0xfe {
+		if len(rpkt.payload) > 0 && rpkt.payload[0] == 0xfe {
 			break // EOF
 		}
-		if len(pkt2.payload) > 0 && pkt2.payload[0] == 0xff {
-			return nil, fmt.Errorf("query error: %s", dbproxy.ParseMySQLErrorMessage(pkt2.payload))
+		if len(rpkt.payload) > 0 && rpkt.payload[0] == 0xff {
+			return nil, fmt.Errorf("query error: %s", dbproxy.ParseMySQLErrorMessage(rpkt.payload))
 		}
-		rows = append(rows, parseMySQLTextRow(pkt2.payload))
+		rows = append(rows, parseMySQLTextRow(rpkt.payload))
 	}
 	return rows, nil
 }

@@ -172,6 +172,16 @@ try {
     Wait-TcpPort "Database gateway" "127.0.0.1" 33060 10
     Wait-TcpPort "SSH gateway" "127.0.0.1" 47102 10
 
+    # 获取 admin 用户的真实 token（用 admin/admin 登录）
+    try {
+        $loginResp = Invoke-RestMethod -Uri "http://127.0.0.1:47100/api/login" -Method Post -Body '{"username":"admin","password":"admin"}' -ContentType "application/json" -TimeoutSec 5
+        $realToken = $loginResp.token
+        Write-Ok "Admin login OK, token: $($realToken.Substring(0,16))..."
+    } catch {
+        $realToken = $null
+        Write-Info "Admin auto-login failed, login manually"
+    }
+
     Write-Step "[5/5] Starting frontend..."
     Push-Location "web"
     try {
@@ -192,7 +202,12 @@ try {
     Write-Ok "frontend process started: PID $($frontend.Id)"
 
     Wait-HttpOk "Web UI" "http://127.0.0.1:47101/" 30 $null
-    Wait-HttpOk "Frontend API proxy" "http://127.0.0.1:47101/api/hosts" 15 @{Authorization='Bearer dev-admin-token'}
+    # 用真实 token 验证 API 代理
+    if ($realToken) {
+        Wait-HttpOk "Frontend API proxy" "http://127.0.0.1:47101/api/hosts" 15 @{Authorization="Bearer $realToken"}
+    } else {
+        Wait-HttpOk "Frontend API proxy" "http://127.0.0.1:47101/api/hosts" 15 @{Authorization='Bearer dev-admin-token'}
+    }
 
     Write-Host ""
     Write-Host "=== All services started and verified ===" -ForegroundColor Cyan
@@ -201,7 +216,11 @@ try {
     Write-Host "  Web UI    : http://127.0.0.1:47101/" -ForegroundColor White
     Write-Host "  SSH GW    : 127.0.0.1:47102" -ForegroundColor White
     Write-Host "  DB GW     : 127.0.0.1:33060" -ForegroundColor White
-    Write-Host "  Token     : dev-admin-token" -ForegroundColor Gray
+    if ($realToken) {
+        Write-Host "  Token     : $realToken" -ForegroundColor Gray
+    } else {
+        Write-Host "  Token     : (login with admin/admin)" -ForegroundColor Gray
+    }
     Write-Host ""
     Write-Host "Logs:" -ForegroundColor Gray
     Write-Host "  logs\backend.log" -ForegroundColor Gray

@@ -120,7 +120,7 @@ func New(cfg *config.Config, store store.Store, logger *slog.Logger, dataDir str
 func (s *Server) ListenAndServe(ctx context.Context) error {
 	mux := http.NewServeMux()
 	frontendHandler, err := frontend.Handler()
-	if err != nil {
+	if err != nil || s.cfg.Admin.Dev {
 		mux.HandleFunc("/", s.handleIndex)
 	} else {
 		mux.Handle("/", frontendHandler)

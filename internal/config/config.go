@@ -26,6 +26,7 @@ type AdminConfig struct {
 	Enabled            bool     `json:"enabled"`
 	ListenAddr         string   `json:"listen_addr"`
 	CORSAllowedOrigins []string `json:"cors_allowed_origins"`
+	Dev                bool     `json:"dev"`
 }
 
 type DatabaseConfig struct {

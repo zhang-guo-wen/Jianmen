@@ -575,6 +575,7 @@ const enUS = {
   'nav.assets': 'Assets',
   'nav.audit': 'Audit Log',
 
+  'nav.applications': 'Applications',
   'nav.databases': 'Database Management',
   'nav.hosts': 'Host Management',
   'nav.quickConnect': 'Quick Connect',

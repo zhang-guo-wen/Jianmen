@@ -147,6 +147,24 @@ func (s *Server) handleDBInstance(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
+	if child == "databases" {
+		if r.Method != http.MethodGet {
+			w.Header().Set("Allow", http.MethodGet)
+			writeErrorText(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+		s.handleDBDatabases(w, r, id)
+		return
+	}
+	if child == "provision-account" {
+		if r.Method != http.MethodPost {
+			w.Header().Set("Allow", http.MethodPost)
+			writeErrorText(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+		s.handleDBProvisionAccount(w, r, id)
+		return
+	}
 	if child != "" {
 		writeErrorText(w, http.StatusNotFound, "not found")
 		return

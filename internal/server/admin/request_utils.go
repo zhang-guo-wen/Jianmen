@@ -121,8 +121,11 @@ func dbInstancePathParts(path string) (id, child string, ok bool) {
 	if len(parts) == 1 {
 		return parts[0], "", true
 	}
-	if len(parts) == 2 && parts[1] == "accounts" {
-		return parts[0], parts[1], true
+	if len(parts) == 2 {
+		switch parts[1] {
+		case "accounts", "databases", "provision-account":
+			return parts[0], parts[1], true
+		}
 	}
 	return "", "", false
 }

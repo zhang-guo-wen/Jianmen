@@ -56,7 +56,7 @@ func TestHandleWebTerminalRejectsMissingToken(t *testing.T) {
 func TestCopyWebTerminalOutputRecordsTerminalCast(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	session := model.NewSession(model.User{Username: "web"}, "target-1", "target", "127.0.0.1")
-	recorder, err := recording.NewSessionRecorder(t.TempDir(), session, false, false, logger)
+	recorder, err := recording.NewSessionRecorder(t.TempDir(), session, false, false, logger, nil)
 	if err != nil {
 		t.Fatalf("new recorder: %v", err)
 	}

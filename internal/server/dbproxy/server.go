@@ -36,17 +36,24 @@ type Gateway struct {
 	logger            *slog.Logger
 	permissionChecker permissionChecker
 	superAdminIDs     map[string]bool
+	audit             auditWriter
 }
 
 type databaseAccountResolver interface {
 	// 仅保留以满足 store.Store 接口；网关不再使用
 }
 
+type auditWriter interface {
+	CreateAuditSession(session *model.AuditSession) error
+	EndAuditSession(id string) error
+	CreateAuditDBQuery(query *model.AuditDBQuery) error
+}
+
 type permissionChecker interface {
 	HasPermission(userID, action, resourceType, resourceID string) (bool, error)
 }
 
-func NewGateway(cfg config.DatabaseGatewayConfig, store databaseAccountResolver, replayDir string, logger *slog.Logger, db *gorm.DB, superAdminIDs map[string]bool) *Gateway {
+func NewGateway(cfg config.DatabaseGatewayConfig, store databaseAccountResolver, replayDir string, logger *slog.Logger, db *gorm.DB, superAdminIDs map[string]bool, auditStore auditWriter) *Gateway {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -54,7 +61,7 @@ func NewGateway(cfg config.DatabaseGatewayConfig, store databaseAccountResolver,
 	if db != nil {
 		checker = rbaccheck.NewChecker(db)
 	}
-	return &Gateway{cfg: cfg, store: store, db: db, replayDir: replayDir, logger: logger, permissionChecker: checker, superAdminIDs: superAdminIDs}
+	return &Gateway{cfg: cfg, store: store, db: db, replayDir: replayDir, logger: logger, permissionChecker: checker, superAdminIDs: superAdminIDs, audit: auditStore}
 }
 
 func (g *Gateway) Enabled() bool {
@@ -96,14 +103,15 @@ func (g *Gateway) ListenAndServe(ctx context.Context) error {
 }
 
 type gatewayConn struct {
-	protocol     string
-	accountID    string
-	accountName  string
-	upstream     net.Conn
-	upstreamAddr string
-	userID       string
-	accountUser  string // 上游数据库登录名
-	instanceName string // 数据库实例名称
+	protocol      string
+	accountID     string
+	accountName   string
+	upstream      net.Conn
+	upstreamAddr  string
+	userID        string
+	accountUser   string // 上游数据库登录名
+	instanceName  string // 数据库实例名称
+	userSessionID string
 }
 
 func upstreamAddress(inst model.DatabaseInstance) string {
@@ -157,9 +165,42 @@ func (g *Gateway) handleConn(ctx context.Context, client net.Conn) {
 		"protocol", conn.protocol, "account", conn.accountName,
 		"client", client.RemoteAddr().String(), "upstream", conn.upstreamAddr)
 
-	recorder, _ := g.newRecorder(conn)
+	// 查找操作者用户名
+	var authUser string
+	if g.db != nil {
+		var u model.User
+		if err := g.db.First(&u, "id = ?", conn.userID).Error; err == nil {
+			authUser = u.Username
+		}
+	}
+
+	auditSession := &model.AuditSession{
+		UserID:       conn.userID,
+		Username:     authUser,
+		Protocol:     conn.protocol,
+		TargetName:   conn.instanceName,
+		AccountName:  conn.accountUser,
+		ClientIP:     "",
+		StartedAt:    time.Now().UTC(),
+		State:        "started",
+		ReplayDir:    filepath.Join(g.replayDir, "db", model.NewID()),
+	}
+	if conn.userSessionID != "" {
+		auditSession.UserSessionID = conn.userSessionID
+	}
+	auditSession.BeforeCreate(nil)
+	if g.audit != nil {
+		g.audit.CreateAuditSession(auditSession)
+	}
+
+	recorder, _ := g.newRecorder(conn, auditSession.ID)
 	if recorder != nil {
-		defer recorder.Close()
+		defer func() {
+			recorder.Close()
+			if g.audit != nil {
+				g.audit.EndAuditSession(auditSession.ID)
+			}
+		}()
 	}
 
 	observer := newQueryObserver(conn.protocol, recorder)
@@ -422,6 +463,7 @@ func (g *Gateway) handlePG(ctx context.Context, client net.Conn, firstByte byte)
 		protocol: "postgres", accountID: acct.ID, accountName: resolved.rawName,
 		upstream: upstream, upstreamAddr: upstreamAddress(acct.Instance), userID: userID,
 		accountUser: acct.Username, instanceName: acct.Instance.Name,
+		userSessionID: resolved.userSessionID,
 	}
 }
 
@@ -656,6 +698,7 @@ func (g *Gateway) handleMySQL(ctx context.Context, client net.Conn) *gatewayConn
 		userID:       rbacUserID,
 		accountUser:  acct.Username,
 		instanceName: acct.Instance.Name,
+		userSessionID: resolved.userSessionID,
 	}
 }
 
@@ -866,10 +909,11 @@ func (g *Gateway) authorizeConnect(userID, uniqueName, resourceID string) error 
 
 // resolvedDBAccount 解析连接用户名后的数据库账号及关联用户信息
 type resolvedDBAccount struct {
-	account   *model.DatabaseAccount
-	user      *model.User // compact username 认证后的堡垒机用户
-	isCompact bool        // 是否通过 compact username 解析
-	rawName   string      // 原始用户名（用于日志）
+	account       *model.DatabaseAccount
+	user          *model.User // compact username 认证后的堡垒机用户
+	isCompact     bool        // 是否通过 compact username 解析
+	rawName       string      // 原始用户名（用于日志）
+	userSessionID string
 }
 
 // resolveAccount 解析连接用户名：优先尝试 compact username (D/H前缀10位)，失败则回退到 unique_name 查找
@@ -935,10 +979,11 @@ func (g *Gateway) resolveCompactAccount(username string) (*resolvedDBAccount, er
 	}
 
 	return &resolvedDBAccount{
-		account:   &acct,
-		user:      &user,
-		isCompact: true,
-		rawName:   username,
+		account:       &acct,
+		user:          &user,
+		isCompact:     true,
+		rawName:       username,
+		userSessionID: sess.ID,
 	}, nil
 }
 
@@ -994,17 +1039,19 @@ func copyUpstreamToClient(client net.Conn, upstream net.Conn, observer queryObse
 }
 
 type connectionRecorder struct {
-	mu        sync.Mutex
-	id        string
-	protocol  string
-	metaPath  string
-	meta      DBConnectionMeta
-	file      *os.File
-	seq       int64
-	startedAt time.Time
+	mu             sync.Mutex
+	id             string
+	protocol       string
+	metaPath       string
+	meta           DBConnectionMeta
+	file           *os.File
+	seq            int64
+	startedAt      time.Time
+	audit          auditWriter
+	auditSessionID string
 }
 
-func (g *Gateway) newRecorder(conn *gatewayConn) (*connectionRecorder, error) {
+func (g *Gateway) newRecorder(conn *gatewayConn, auditSessionID string) (*connectionRecorder, error) {
 	id := model.NewID()
 	dir := filepath.Join(g.replayDir, "db", id)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -1035,12 +1082,14 @@ func (g *Gateway) newRecorder(conn *gatewayConn) (*connectionRecorder, error) {
 		return nil, err
 	}
 	recorder := &connectionRecorder{
-		id:        id,
-		protocol:  conn.protocol,
-		metaPath:  filepath.Join(dir, "meta.json"),
-		meta:      meta,
-		file:      file,
-		startedAt: startedAt,
+		id:             id,
+		protocol:       conn.protocol,
+		metaPath:       filepath.Join(dir, "meta.json"),
+		meta:           meta,
+		file:           file,
+		startedAt:      startedAt,
+		audit:          g.audit,
+		auditSessionID: auditSessionID,
 	}
 	if err := recorder.writeMetaLocked(); err != nil {
 		file.Close()
@@ -1121,6 +1170,15 @@ func (r *connectionRecorder) writeFinishLocked(record queryRecord, finish queryF
 		RowsAffected: finish.RowsAffected,
 		Rows:         finish.Rows,
 	})
+	if r.audit != nil && r.auditSessionID != "" {
+		r.audit.CreateAuditDBQuery(&model.AuditDBQuery{
+			AuditSessionID: r.auditSessionID,
+			Timestamp:      completedAt,
+			SQLText:        record.sql,
+			QueryKind:      record.queryKind,
+			DurationMs:     completedAt.Sub(record.startedAt).Milliseconds(),
+		})
+	}
 }
 
 func (r *connectionRecorder) writeQueryEventLocked(event DBQueryEvent) {

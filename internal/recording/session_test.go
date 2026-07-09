@@ -24,7 +24,7 @@ func TestSessionRecorderWritesAuditArtifacts(t *testing.T) {
 		StartedAt:       startedAt,
 	}
 
-	recorder, err := NewSessionRecorder(root, session, true, true, nil)
+	recorder, err := NewSessionRecorder(root, session, true, true, nil, nil)
 	if err != nil {
 		t.Fatalf("NewSessionRecorder: %v", err)
 	}

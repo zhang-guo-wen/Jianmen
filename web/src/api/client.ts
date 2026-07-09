@@ -125,10 +125,10 @@ export interface HostPayload {
 
 export interface SessionRecord {
   id?: string | number;
-  user?: string;
+  username?: string;
   user_id?: string;
   user_username?: string;
-  target?: string;
+  target_name?: string;
   target_id?: string;
   account_username?: string;
   client_ip?: string;
@@ -137,12 +137,9 @@ export interface SessionRecord {
   startedAt?: string;
   started_at?: string;
   ended_at?: string;
-  path?: string;
-  has_replay?: boolean;
-  replay_size?: number;
-  duration_seconds?: number;
   protocol?: string;
   protocol_subtype?: string;
+  replay_dir?: string;
   [key: string]: unknown;
 }
 
@@ -161,8 +158,8 @@ export interface UserSessionRecord {
 export interface SessionMetaRecord {
   session_id?: string;
   id?: string;
-  user?: string;
-  target?: string;
+  username?: string;
+  target_name?: string;
   client_ip?: string;
   started_at?: string;
   ended_at?: string;
@@ -196,12 +193,16 @@ export interface SessionFileEventRecord {
 
 export interface DBConnectionRecord {
   id?: string;
+  username?: string;
+  target_name?: string;
+  account_name?: string;
   name?: string;
   protocol?: string;
   client_addr?: string;
   upstream_addr?: string;
   started_at?: string;
-  path?: string;
+  ended_at?: string;
+  duration_ms?: number;
   [key: string]: unknown;
 }
 
@@ -583,25 +584,25 @@ export const apiClient = {
       body: JSON.stringify({ target_id: targetId })
     }),
   getSessions: (params?: { page?: number; page_size?: number; q?: string }) =>
-    request<PageResponse<SessionRecord>>(`/api/sessions${buildQS(params as Record<string, string | number | undefined>)}`),
+    request<PageResponse<SessionRecord>>(`/api/audit/ssh${buildQS(params as Record<string, string | number | undefined>)}`),
   getSessionMeta: (id: string | number) =>
     request<ApiEnvelope<SessionMetaRecord> | SessionMetaRecord>(
-      `/api/sessions/${encodeURIComponent(String(id))}/meta`
+      `/api/audit/ssh/${encodeURIComponent(String(id))}`
     ),
   getSessionCommands: (id: string | number) =>
     request<ApiEnvelope<SessionCommandRecord[]> | SessionCommandRecord[]>(
-      `/api/sessions/${encodeURIComponent(String(id))}/commands`
+      `/api/audit/ssh/${encodeURIComponent(String(id))}/commands`
     ),
   getSessionFiles: (id: string | number) =>
     request<ApiEnvelope<SessionFileEventRecord[]> | SessionFileEventRecord[]>(
-      `/api/sessions/${encodeURIComponent(String(id))}/files`
+      `/api/audit/ssh/${encodeURIComponent(String(id))}/files`
     ),
   getSessionFileSummary: (id: string | number) =>
     request<ApiEnvelope<Record<string, unknown>> | Record<string, unknown>>(
-      `/api/sessions/${encodeURIComponent(String(id))}/file-summary`
+      `/api/audit/ssh/${encodeURIComponent(String(id))}/files`
     ),
   getSessionReplay: (id: string | number) =>
-    request<string>(`/api/sessions/${encodeURIComponent(String(id))}/replay`),
+    request<string>(`/api/audit/ssh/${encodeURIComponent(String(id))}/replay`),
 
   // database gateway & instances
   getDBGateway: () => request<DBGatewayConfig>('/api/db/gateway'),
@@ -658,14 +659,14 @@ export const apiClient = {
 
   // database connections (audit)
   getDBConnections: (params?: { page?: number; page_size?: number; q?: string }) =>
-    request<PageResponse<DBConnectionRecord>>(`/api/db/connections${buildQS(params as Record<string, string | number | undefined>)}`),
+    request<PageResponse<DBConnectionRecord>>(`/api/audit/db${buildQS(params as Record<string, string | number | undefined>)}`),
   getDBConnectionMeta: (id: string | number) =>
     request<ApiEnvelope<DBConnectionMetaRecord> | DBConnectionMetaRecord>(
-      `/api/db/connections/${encodeURIComponent(String(id))}/meta`
+      `/api/audit/db/${encodeURIComponent(String(id))}`
     ),
   getDBConnectionQueries: (id: string | number) =>
     request<ApiEnvelope<DBQueryEventRecord[]> | DBQueryEventRecord[]>(
-      `/api/db/connections/${encodeURIComponent(String(id))}/queries`
+      `/api/audit/db/${encodeURIComponent(String(id))}/queries`
     ),
 
   // applications (web app proxy)

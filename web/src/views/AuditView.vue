@@ -21,7 +21,7 @@
         >
           <el-table-column :label="t('audit.column.instance')" min-width="150" show-overflow-tooltip>
             <template #default="{ row }">
-              {{ row.target || row.target_id || t('common.none') }}
+              {{ row.target_name || row.target_id || t('common.none') }}
             </template>
           </el-table-column>
           <el-table-column :label="t('audit.column.account')" min-width="120" show-overflow-tooltip>
@@ -46,7 +46,7 @@
           </el-table-column>
           <el-table-column :label="t('audit.column.duration')" width="90">
             <template #default="{ row }">
-              {{ formatDurationSeconds(row.duration_seconds) }}
+              {{ formatDurationSeconds(computeDuration(row.started_at, row.ended_at)) }}
             </template>
           </el-table-column>
           <el-table-column :label="t('common.actions')" fixed="right" width="180">
@@ -76,13 +76,13 @@
           @search="onDBSearch"
         >
           <el-table-column :label="t('audit.column.instance')" min-width="150" show-overflow-tooltip>
-            <template #default="{ row }">{{ row.instance_name || row.upstream_addr || '-' }}</template>
+            <template #default="{ row }">{{ row.target_name || row.upstream_addr || '-' }}</template>
           </el-table-column>
           <el-table-column :label="t('audit.column.account')" min-width="120" show-overflow-tooltip>
             <template #default="{ row }">{{ row.account_name || '-' }}</template>
           </el-table-column>
           <el-table-column :label="t('audit.column.operator')" min-width="120" show-overflow-tooltip>
-            <template #default="{ row }">{{ row.auth_user || row.name || '-' }}</template>
+            <template #default="{ row }">{{ row.username || row.name || '-' }}</template>
           </el-table-column>
           <el-table-column prop="protocol" :label="t('audit.column.protocol')" width="90" />
           <el-table-column :label="t('sessions.column.started')" min-width="170" show-overflow-tooltip class-name="col-time">
@@ -92,7 +92,7 @@
           </el-table-column>
           <el-table-column :label="t('audit.column.duration')" width="100">
             <template #default="{ row }">
-              {{ formatDuration(row.duration_ms) }}
+              {{ formatDuration(row.duration_ms ?? computeDurationMs(row.started_at, row.ended_at)) }}
             </template>
           </el-table-column>
           <el-table-column :label="t('common.actions')" fixed="right" width="170">
@@ -130,7 +130,7 @@
             {{ dbMeta.protocol || t('common.none') }}
           </el-descriptions-item>
           <el-descriptions-item :label="t('audit.column.authUser')">
-            {{ dbMeta.auth_user || t('common.none') }}
+            {{ dbMeta.username || t('common.none') }}
           </el-descriptions-item>
           <el-descriptions-item :label="t('audit.column.database')">
             {{ dbMeta.database || t('common.none') }}
@@ -498,11 +498,11 @@ function sessionId(session: SessionRecord): string {
 }
 
 function sessionUser(session: SessionRecord): string {
-  return String(session.user ?? session.user_username ?? session.user_id ?? t('common.none'));
+  return String(session.username ?? session.user_username ?? session.user_id ?? t('common.none'));
 }
 
 function hasReplay(session: SessionRecord): boolean {
-  return session.has_replay === true || (typeof session.replay_size === 'number' && session.replay_size > 0);
+  return typeof session.replay_dir === 'string' && session.replay_dir.length > 0;
 }
 
 function formatTime(value: unknown): string {
@@ -543,12 +543,35 @@ function formatDurationSeconds(value: unknown): string {
   return `${mins}m ${secs}s`;
 }
 
+function computeDuration(started_at: unknown, ended_at: unknown): number {
+  const s = toTimestamp(started_at);
+  const e = toTimestamp(ended_at);
+  if (s && e && e > s) return (e - s) / 1000;
+  return 0;
+}
+
+function computeDurationMs(started_at: unknown, ended_at: unknown): number {
+  const s = toTimestamp(started_at);
+  const e = toTimestamp(ended_at);
+  if (s && e && e > s) return e - s;
+  return 0;
+}
+
+function toTimestamp(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Date.parse(value);
+    if (!Number.isNaN(parsed)) return parsed;
+  }
+  return null;
+}
+
 function sessionProtocol(row: SessionRecord): string {
   const subtype = row.protocol_subtype || '';
   if (subtype === 'web-terminal') return 'Web';
   if (subtype === 'sftp') return 'SFTP';
   if (subtype === 'scp') return 'SCP';
-  if (!row.has_replay && !subtype) return 'SFTP';
+  if (!subtype && !hasReplay(row)) return 'SFTP';
   return 'SSH';
 }
 
@@ -557,7 +580,7 @@ function sessionProtocolTag(row: SessionRecord): 'success' | 'warning' | 'info' 
   if (subtype === 'web-terminal') return 'info';
   if (subtype === 'sftp') return 'warning';
   if (subtype === 'scp') return 'warning';
-  if (!row.has_replay && !subtype) return 'warning';
+  if (!subtype && !hasReplay(row)) return 'warning';
   return 'success';
 }
 
@@ -744,7 +767,7 @@ function formatFileAction(action: string): string {
 
 function isSFTP(row: SessionRecord): boolean {
   if (row.protocol_subtype === 'sftp') return true;
-  if (!row.protocol_subtype && !(row.has_replay ?? false)) return true;
+  if (!row.protocol_subtype && !hasReplay(row)) return true;
   return false;
 }
 

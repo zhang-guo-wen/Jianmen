@@ -199,14 +199,15 @@ func (s *Server) handleConn(ctx context.Context, rawConn net.Conn, serverConfig 
 	userSession, _ := s.store.FindUserSessionByCompactUsername(serverConn.User())
 
 	auditSession := model.AuditSession{
-		UserID:     user.ID,
-		Username:   user.Username,
-		Protocol:   "ssh",
-		TargetName: target.Name,
-		ClientIP:   session.ClientIP,
-		StartedAt:  time.Now().UTC(),
-		State:      "started",
-		ReplayDir:  filepath.Join(s.cfg.ReplayDir, "ssh", session.ID),
+		UserID:      user.ID,
+		Username:    user.Username,
+		Protocol:    "ssh",
+		TargetName:  target.Name,
+		AccountName: target.Username,
+		ClientIP:    session.ClientIP,
+		StartedAt:   time.Now().UTC(),
+		State:       "started",
+		ReplayDir:   filepath.Join(s.cfg.ReplayDir, "ssh", session.ID),
 	}
 	if userSession != nil {
 		auditSession.UserSessionID = userSession.ID

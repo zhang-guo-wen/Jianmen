@@ -2,6 +2,8 @@ package admin
 
 import (
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -58,7 +60,6 @@ func (s *Server) handleAuditDB(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAuditArtifact(w http.ResponseWriter, r *http.Request) {
-	// /api/audit/{protocol}/{id}/{artifact}
 	path := strings.TrimPrefix(r.URL.Path, "/api/audit/")
 	parts := strings.SplitN(path, "/", 3)
 	if len(parts) < 2 {
@@ -97,13 +98,20 @@ func (s *Server) handleAuditArtifact(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"items": items, "total": total})
+	case artifact == "file-summary" && (protocol == "ssh" || protocol == "sftp"):
+		summaryPath := filepath.Join(session.ReplayDir, "files-summary.json")
+		if _, err := os.Stat(summaryPath); err != nil {
+			writeJSON(w, http.StatusOK, []any{})
+			return
+		}
+		writeJSONFile(w, summaryPath)
 	case artifact == "replay" && (protocol == "ssh" || protocol == "sftp"):
 		replayPath := session.ReplayDir
 		if replayPath == "" {
 			writeErrorText(w, http.StatusNotFound, "no replay available")
 			return
 		}
-		writeTextFile(w, replayPath+"/terminal.cast", "application/x-asciicast; charset=utf-8")
+		writeTextFile(w, filepath.Join(replayPath, "terminal.cast"), "application/x-asciicast; charset=utf-8")
 	case artifact == "queries" && (protocol == "mysql" || protocol == "postgres" || protocol == "redis"):
 		limit, offset := pageFromQuery(r)
 		items, total, err := s.store.ListAuditDBQueries(sessionID, store.PageOpts{Limit: limit, Offset: offset})

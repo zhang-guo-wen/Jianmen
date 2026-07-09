@@ -104,14 +104,14 @@ func (s *Server) handleAuditArtifact(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusOK, []any{})
 			return
 		}
-		writeJSONFile(w, summaryPath)
+		s.writeJSONFile(w, r, summaryPath)
 	case artifact == "replay" && (protocol == "ssh" || protocol == "sftp"):
 		replayPath := session.ReplayDir
 		if replayPath == "" {
 			writeErrorText(w, http.StatusNotFound, "no replay available")
 			return
 		}
-		writeTextFile(w, filepath.Join(replayPath, "terminal.cast"), "application/x-asciicast; charset=utf-8")
+		s.writeTextFile(w, r, filepath.Join(replayPath, "terminal.cast"), "application/x-asciicast; charset=utf-8")
 	case artifact == "queries" && (protocol == "mysql" || protocol == "postgres" || protocol == "redis"):
 		limit, offset := pageFromQuery(r)
 		items, total, err := s.store.ListAuditDBQueries(sessionID, store.PageOpts{Limit: limit, Offset: offset})

@@ -155,15 +155,15 @@ func (s *Server) handleSessionArtifact(w http.ResponseWriter, r *http.Request) {
 	}
 	switch artifact {
 	case "meta":
-		writeJSONFile(w, filepath.Join(dir, "meta.json"))
+		s.writeJSONFile(w, r, filepath.Join(dir, "meta.json"))
 	case "commands":
-		writeJSONLines(w, filepath.Join(dir, "commands.jsonl"), 500)
+		s.writeJSONLines(w, r, filepath.Join(dir, "commands.jsonl"), 500)
 	case "files":
-		writeJSONLines(w, filepath.Join(dir, "files.jsonl"), 1000)
+		s.writeJSONLines(w, r, filepath.Join(dir, "files.jsonl"), 1000)
 	case "file-summary":
-		writeJSONFile(w, filepath.Join(dir, "files-summary.json"))
+		s.writeJSONFile(w, r, filepath.Join(dir, "files-summary.json"))
 	case "replay":
-		writeTextFile(w, filepath.Join(dir, "terminal.cast"), "application/x-asciicast; charset=utf-8")
+		s.writeTextFile(w, r, filepath.Join(dir, "terminal.cast"), "application/x-asciicast; charset=utf-8")
 	default:
 		writeErrorText(w, http.StatusNotFound, "not found")
 	}
@@ -197,9 +197,9 @@ func (s *Server) handleDBConnectionArtifact(w http.ResponseWriter, r *http.Reque
 	}
 	switch artifact {
 	case "meta":
-		writeJSONFile(w, filepath.Join(dir, "meta.json"))
+		s.writeJSONFile(w, r, filepath.Join(dir, "meta.json"))
 	case "queries":
-		writeJSONLines(w, filepath.Join(dir, "queries.jsonl"), 1000)
+		s.writeJSONLines(w, r, filepath.Join(dir, "queries.jsonl"), 1000)
 	default:
 		writeErrorText(w, http.StatusNotFound, "not found")
 	}

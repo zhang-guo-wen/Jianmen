@@ -630,6 +630,28 @@ export const apiClient = {
       body: JSON.stringify(payload)
     }),
 
+  // auto-provision
+  listDBDatabases: (instanceId: string, adminAccountId: string) =>
+    request<{ databases: string[] }>(`/api/db/instances/${encodeURIComponent(instanceId)}/databases?admin_account_id=${encodeURIComponent(adminAccountId)}`),
+
+  provisionDBAccount: (instanceId: string, payload: {
+    admin_account_id: string
+    new_username?: string
+    password?: string
+    host?: string
+    grants: Array<{ database: string; privilege: string }>
+    group?: string
+    remark?: string
+    expires_at?: string
+  }) =>
+    request<{ ok: boolean; account: any; generated_password: string }>(
+      `/api/db/instances/${encodeURIComponent(instanceId)}/provision-account`,
+      {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      }
+    ),
+
   // database connections (audit)
   getDBConnections: (params?: { page?: number; page_size?: number; q?: string }) =>
     request<PageResponse<DBConnectionRecord>>(`/api/db/connections${buildQS(params as Record<string, string | number | undefined>)}`),

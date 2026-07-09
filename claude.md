@@ -17,6 +17,14 @@
 
 本产品还没有发布，不需要考虑兼容性，直接该重构的就重构。不用考虑以前的数据，功能失效。
 如果是在worktree目录下，不启动服务，要回到主目录，合并代码回去，启动
+
+## 编译打包
+
+- Windows: `.\build.ps1`
+- Linux/macOS/Git Bash: `./build.sh`
+
+脚本会先构建前端（`npm run build`），将产物复制到 `internal/frontend/dist/`，然后交叉编译 Windows 和 Linux 两个平台的二进制文件，输出到 `dist/` 目录。
+
 # Jianmen 问题总结与后续准则
 
 日期：2026-06-24

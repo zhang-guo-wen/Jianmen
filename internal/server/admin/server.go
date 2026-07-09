@@ -11,6 +11,7 @@ import (
 	"jianmen/internal/frontend"
 	"jianmen/internal/model"
 	"jianmen/internal/rbac"
+	"jianmen/internal/server/appproxy"
 	"jianmen/internal/store"
 
 	"gorm.io/gorm"
@@ -25,6 +26,7 @@ type Server struct {
 	dataDir       string
 	superAdminIDs map[string]bool // 超级管理员用户 ID 集合，直接拥有全部权限
 	loginLimiter  *loginLimiter
+	appProxy      *appproxy.Server
 }
 
 type sessionListItem struct {
@@ -75,6 +77,7 @@ var menuOrder = []struct {
 	{"users", "rbac:manage"},
 	{"roles", "rbac:manage"},
 	{"audit", "audit:view"},
+	{"applications", "application:view"},
 	{"quickConnect", "session:connect"},
 }
 
@@ -99,7 +102,7 @@ type updateUserRequest struct {
 	Status      *string `json:"status,omitempty"`
 }
 
-func New(cfg *config.Config, store store.Store, logger *slog.Logger, dataDir string, dbs ...*gorm.DB) *Server {
+func New(cfg *config.Config, store store.Store, logger *slog.Logger, dataDir string, appProxy *appproxy.Server, dbs ...*gorm.DB) *Server {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -111,7 +114,7 @@ func New(cfg *config.Config, store store.Store, logger *slog.Logger, dataDir str
 	}
 	// 收集所有超级管理员用户 ID
 	superAdminIDs := LoadSuperAdminIDs(cfg, dataDir)
-	return &Server{cfg: cfg, store: store, db: db, rbacChecker: checker, logger: logger, dataDir: dataDir, superAdminIDs: superAdminIDs, loginLimiter: newDefaultLoginLimiter()}
+	return &Server{cfg: cfg, store: store, db: db, rbacChecker: checker, logger: logger, dataDir: dataDir, superAdminIDs: superAdminIDs, loginLimiter: newDefaultLoginLimiter(), appProxy: appProxy}
 }
 
 func (s *Server) ListenAndServe(ctx context.Context) error {
@@ -155,8 +158,14 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 	mux.HandleFunc("/api/rbac/role-permissions", s.withAuthAndUser(s.handleRBACRolePermissions))
 	mux.HandleFunc("/api/rbac/role-permissions/", s.withAuthAndUser(s.handleRBACRolePermission))
 	mux.HandleFunc("/api/rbac/effective", s.withAuthAndUser(s.handleRBACEffective))
+	// 新版审计 API（替代旧的 sessions / db/connections）
+	mux.HandleFunc("/api/audit/ssh", s.withAuthAndUser(s.handleAuditSSH))
+	mux.HandleFunc("/api/audit/db", s.withAuthAndUser(s.handleAuditDB))
+	mux.HandleFunc("/api/audit/", s.withAuthAndUser(s.handleAuditArtifact))
 	mux.HandleFunc("/api/me", s.withAuthAndUser(s.handleMe))
 	mux.HandleFunc("/api/me/permissions", s.withAuthAndUser(s.handleMePermissions))
+	mux.HandleFunc("/api/applications", s.withAuthAndUser(s.handleApplications))
+	mux.HandleFunc("/api/applications/", s.withAuthAndUser(s.handleApplication))
 	mux.HandleFunc("/api/me/menus", s.withAuthAndUser(s.handleMeMenus))
 
 	server := &http.Server{

@@ -164,3 +164,24 @@ func writeTargetStoreError(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusBadRequest, err)
 	}
 }
+
+func appPathParts(path string) (id, child string, ok bool) {
+	trimmed := strings.Trim(strings.TrimPrefix(path, "/api/applications/"), "/")
+	if trimmed == "" {
+		return "", "", false
+	}
+	parts := strings.Split(trimmed, "/")
+	if len(parts) == 1 {
+		return parts[0], "", true
+	}
+	return "", "", false
+}
+
+func writeApplicationStoreError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, store.ErrApplicationNotFound):
+		writeError(w, http.StatusNotFound, err)
+	default:
+		writeError(w, http.StatusBadRequest, err)
+	}
+}

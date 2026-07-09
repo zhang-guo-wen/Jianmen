@@ -14,6 +14,7 @@ const (
 	ResourceTypeHostAccount      = "host_account"
 	ResourceTypeDatabaseAccount  = "database_account"
 	ResourceTypeDatabaseInstance = "database_instance"
+	ResourceTypeApplication     = "application"
 )
 
 type UserPublicKey struct {
@@ -162,6 +163,20 @@ type DatabaseAccount struct {
 	Instance    DatabaseInstance `gorm:"constraint:OnUpdate:CASCADE,OnDelete:CASCADE;" json:"-"`
 }
 
+type Application struct {
+	ID             string    `gorm:"primaryKey;size:64" json:"id"`
+	Name           string    `gorm:"size:255;not null" json:"name"`
+	AppGroup       string    `gorm:"size:128" json:"group"`
+	ListenPort     int       `gorm:"uniqueIndex;not null" json:"listen_port"`
+	InternalScheme string    `gorm:"size:8;not null;default:http" json:"internal_scheme"`
+	InternalHost   string    `gorm:"size:255;not null" json:"internal_host"`
+	InternalPort   int       `gorm:"not null;default:80" json:"internal_port"`
+	Remark         string    `gorm:"type:text" json:"remark,omitempty"`
+	Status         string    `gorm:"index;size:32;not null;default:active" json:"status"`
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
+}
+
 type TemporaryAccount struct {
 	ID          string     `gorm:"primaryKey;size:64" json:"id"`
 	Username    string     `gorm:"uniqueIndex;size:128;not null" json:"username"`
@@ -219,11 +234,16 @@ func AllModels() []any {
 		&HostAccount{},
 		&DatabaseInstance{},
 		&DatabaseAccount{},
+	&Application{},
 		&Session{},
 		&UserSession{},
 		&TemporaryAccount{},
 		&TemporaryCredential{},
 		&TemporaryAccountGrant{},
+		&AuditSession{},
+		&AuditSSHCommand{},
+		&AuditDBQuery{},
+		&AuditSFTPEvent{},
 	}
 }
 
@@ -246,9 +266,14 @@ func (m *Host) BeforeCreate(_ *gorm.DB) error                { return ensureID(&
 func (m *HostAccount) BeforeCreate(_ *gorm.DB) error         { return ensureID(&m.ID) }
 func (m *DatabaseInstance) BeforeCreate(_ *gorm.DB) error    { return ensureID(&m.ID) }
 func (m *DatabaseAccount) BeforeCreate(_ *gorm.DB) error     { return ensureID(&m.ID) }
+func (m *Application) BeforeCreate(_ *gorm.DB) error        { return ensureID(&m.ID) }
 func (m *UserSession) BeforeCreate(_ *gorm.DB) error         { return ensureID(&m.ID) }
 func (m *TemporaryAccount) BeforeCreate(_ *gorm.DB) error    { return ensureID(&m.ID) }
 func (m *TemporaryCredential) BeforeCreate(_ *gorm.DB) error { return ensureID(&m.ID) }
 func (m *TemporaryAccountGrant) BeforeCreate(_ *gorm.DB) error {
 	return ensureID(&m.ID)
 }
+func (m *AuditSession) BeforeCreate(_ *gorm.DB) error    { return ensureID(&m.ID) }
+func (m *AuditSSHCommand) BeforeCreate(_ *gorm.DB) error { return ensureID(&m.ID) }
+func (m *AuditDBQuery) BeforeCreate(_ *gorm.DB) error    { return ensureID(&m.ID) }
+func (m *AuditSFTPEvent) BeforeCreate(_ *gorm.DB) error  { return ensureID(&m.ID) }

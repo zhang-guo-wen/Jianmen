@@ -116,6 +116,20 @@ type DatabaseAccountView struct {
 	UpdatedAt   string     `json:"updated_at,omitempty"`
 }
 
+type ApplicationView struct {
+	ID             string `json:"id"`
+	Name           string `json:"name"`
+	AppGroup       string `json:"group"`
+	ListenPort     int    `json:"listen_port"`
+	InternalScheme string `json:"internal_scheme"`
+	InternalHost   string `json:"internal_host"`
+	InternalPort   int    `json:"internal_port"`
+	Remark         string `json:"remark,omitempty"`
+	Status         string `json:"status"`
+	CreatedAt      string `json:"created_at"`
+	UpdatedAt      string `json:"updated_at"`
+}
+
 type SessionView struct {
 	ID         string     `json:"id"`
 	UserID     string     `json:"user_id"`
@@ -135,6 +149,7 @@ var (
 	ErrDBProxyNotFound    = errSentinel("database proxy not found")
 	ErrDBAccountNotFound  = errSentinel("database account not found")
 	ErrDBInstanceNotFound = errSentinel("database instance not found")
+	ErrApplicationNotFound = errSentinel("application not found")
 	ErrTargetUnavailable  = errSentinel("target unavailable")
 )
 
@@ -143,6 +158,35 @@ type sentinelError struct{ msg string }
 func (e *sentinelError) Error() string { return e.msg }
 
 func errSentinel(msg string) error { return &sentinelError{msg: msg} }
+
+// AuditListParams 审计列表查询参数。
+type AuditListParams struct {
+	Protocol string // 空表示不过滤，可逗号分隔多个协议
+	Search   string // 模糊搜索用户名/目标名
+	Date     string // YYYY-MM-DD 格式
+	Page     int
+	Size     int
+}
+
+// AuditSessionView 审计列表视图。
+type AuditSessionView struct {
+	ID          string `json:"id"`
+	Username    string `json:"username"`
+	Protocol    string `json:"protocol"`
+	TargetName  string `json:"target_name"`
+	AccountName string `json:"account_name,omitempty"`
+	ClientIP    string `json:"client_ip"`
+	StartedAt   string `json:"started_at"`
+	EndedAt     string `json:"ended_at,omitempty"`
+	State       string `json:"state"`
+	ReplayDir   string `json:"replay_dir,omitempty"`
+}
+
+// PageOpts 分页参数。
+type PageOpts struct {
+	Limit  int
+	Offset int
+}
 
 // Store abstracts runtime data access. Implementations may back with
 // JSON files (StaticAdapter) or a relational database (DBStore).
@@ -177,6 +221,13 @@ type Store interface {
 	UpdateDatabaseAccount(id, username, password, group, remark string, expiresAt *time.Time, status string) (DatabaseAccountView, error)
 	DeleteDatabaseAccount(id string) error
 
+	// Application CRUD
+	Applications() []ApplicationView
+	Application(id string) (ApplicationView, error)
+	AddApplication(name, scheme, host string, port, listenPort int, group, remark string) (ApplicationView, error)
+	UpdateApplication(id, name, scheme, host string, port, listenPort int, group, remark, status string) (ApplicationView, error)
+	DeleteApplication(id string) error
+
 	DatabaseAccountByUniqueName(uniqueName string) (*model.DatabaseAccount, error)
 	AuthenticateDirect(ctx context.Context, username, password string) (model.User, error)
 
@@ -187,4 +238,22 @@ type Store interface {
 	DisableUserSession(id string) error
 	EnableUserSession(id string) error
 	UserSessionByID(sessionID string, userID string) (*model.UserSession, error)
+
+	// -- audit --
+
+	CreateAuditSession(session *model.AuditSession) error
+	EndAuditSession(id string) error
+	GetAuditSession(id string) (*model.AuditSession, error)
+	ListAuditSessions(params AuditListParams) ([]AuditSessionView, int64, error)
+
+	CreateAuditSSHCommand(cmd *model.AuditSSHCommand) error
+	ListAuditSSHCommands(sessionID string, opts PageOpts) ([]model.AuditSSHCommand, int64, error)
+
+	CreateAuditSFTPEvent(event *model.AuditSFTPEvent) error
+	ListAuditSFTPEvents(sessionID string, opts PageOpts) ([]model.AuditSFTPEvent, int64, error)
+
+	CreateAuditDBQuery(query *model.AuditDBQuery) error
+	ListAuditDBQueries(sessionID string, opts PageOpts) ([]model.AuditDBQuery, int64, error)
+
+	FindUserSessionByCompactUsername(username string) (*model.UserSession, error)
 }

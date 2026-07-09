@@ -157,6 +157,15 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 
 	limiter.reset(limitKey)
 	s.logLogin(r, username, "success", "")
+	// Set jianmen_token cookie so proxy ports can authenticate via cookie
+	http.SetCookie(w, &http.Cookie{
+		Name:     "jianmen_token",
+		Value:    token,
+		Path:     "/",
+		HttpOnly: false,
+		Secure:   false,
+		SameSite: http.SameSiteLaxMode,
+	})
 	writeJSON(w, http.StatusOK, map[string]string{"token": token})
 }
 

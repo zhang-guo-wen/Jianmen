@@ -89,6 +89,7 @@ const selectedLocale = computed<Locale>({
 const ALL_NAV_ITEMS: Array<{ path: string; icon: Component; labelKey: TranslationKey; menuKey: string }> = [
   { path: '/hosts', icon: Monitor, labelKey: 'nav.hosts', menuKey: 'hosts' },
   { path: '/databases', icon: DataAnalysis, labelKey: 'nav.databases', menuKey: 'databases' },
+  { path: '/applications', icon: Monitor, labelKey: 'nav.applications', menuKey: 'applications' },
   { path: '/users', icon: UserFilled, labelKey: 'nav.users', menuKey: 'users' },
   { path: '/roles', icon: UserFilled, labelKey: 'nav.roles', menuKey: 'roles' },
   { path: '/audit', icon: DocumentChecked, labelKey: 'nav.audit', menuKey: 'audit' },

@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"jianmen/internal/rbac"
+	"jianmen/internal/server/dbproxy"
 	"jianmen/internal/store"
 )
 
@@ -112,14 +113,31 @@ func (s *Server) handleAuditArtifact(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		s.writeTextFile(w, r, filepath.Join(replayPath, "terminal.cast"), "application/x-asciicast; charset=utf-8")
-	case artifact == "queries" && (protocol == "mysql" || protocol == "postgres" || protocol == "redis"):
-		limit, offset := pageFromQuery(r)
-		items, total, err := s.store.ListAuditDBQueries(sessionID, store.PageOpts{Limit: limit, Offset: offset})
+	case artifact == "queries" && (protocol == "db" || protocol == "mysql" || protocol == "postgres" || protocol == "redis"):
+		items, err := s.store.ListAuditDBQueryEvents(sessionID)
 		if err != nil {
 			s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
 			return
 		}
-		s.writeJSON(w, r, http.StatusOK, map[string]any{"items": items, "total": total})
+		queryProtocol := session.Protocol
+		if queryProtocol == "" {
+			queryProtocol = protocol
+		}
+		events := make([]dbproxy.DBQueryEvent, 0, len(items)*2)
+		for i, q := range items {
+			seq := int64(i)
+			ts := q.Timestamp.UnixMilli()
+			events = append(events, dbproxy.DBQueryEvent{
+				Type: "query_started", ConnectionID: sessionID, Seq: seq,
+				Protocol: queryProtocol, SQL: q.SQLText, QueryKind: q.QueryKind,
+				StartedAt: ts,
+			}, dbproxy.DBQueryEvent{
+				Type: "query_finished", ConnectionID: sessionID, Seq: seq,
+				Protocol: queryProtocol, SQL: q.SQLText, QueryKind: q.QueryKind,
+				StartedAt: ts, CompletedAt: ts, DurationMs: q.DurationMs, Status: "success",
+			})
+		}
+		s.writeJSON(w, r, http.StatusOK, events)
 	default:
 		s.writeErrorText(w, r, http.StatusNotFound, "not found")
 	}

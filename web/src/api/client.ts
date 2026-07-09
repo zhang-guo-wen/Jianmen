@@ -659,7 +659,7 @@ export const apiClient = {
     ),
   getSessionFileSummary: (id: string | number) =>
     request<Record<string, unknown>>(
-      `/api/audit/ssh/${encodeURIComponent(String(id))}/files`
+      `/api/audit/ssh/${encodeURIComponent(String(id))}/file-summary`
     ),
   getSessionReplay: (id: string | number) =>
     request<string>(`/api/audit/ssh/${encodeURIComponent(String(id))}/replay`),

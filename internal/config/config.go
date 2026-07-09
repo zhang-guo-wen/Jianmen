@@ -14,8 +14,9 @@ type Config struct {
 	TargetsFile     string                `json:"targets_file"`
 	Admin           AdminConfig           `json:"admin"`
 	Database        DatabaseConfig        `json:"database"`
-	DatabaseGateway DatabaseGatewayConfig `json:"database_gateway"`
-	Recording       RecordingConfig       `json:"recording"`
+	DatabaseGateway    DatabaseGatewayConfig    `json:"database_gateway"`
+	ApplicationGateway ApplicationGatewayConfig `json:"application_gateway"`
+	Recording          RecordingConfig          `json:"recording"`
 	Users           []User                `json:"users"`
 	Targets         []Target              `json:"targets"`
 	DefaultTarget   string   `json:"default_target"`
@@ -40,6 +41,12 @@ type DatabaseConfig struct {
 type DatabaseGatewayConfig struct {
 	Enabled    bool   `json:"enabled"`
 	ListenAddr string `json:"listen_addr"`
+}
+
+type ApplicationGatewayConfig struct {
+	Enabled   bool `json:"enabled"`
+	PortStart int  `json:"port_start"`
+	PortEnd   int  `json:"port_end"`
 }
 
 type RecordingConfig struct {
@@ -149,6 +156,11 @@ func (c *Config) applyDefaults() {
 		c.DatabaseGateway.Enabled = true
 		c.DatabaseGateway.ListenAddr = "0.0.0.0:33060"
 	}
+	if !c.ApplicationGateway.Enabled && c.ApplicationGateway.PortStart == 0 && c.ApplicationGateway.PortEnd == 0 {
+		c.ApplicationGateway.Enabled = true
+		c.ApplicationGateway.PortStart = 47110
+		c.ApplicationGateway.PortEnd = 47199
+	}
 	if c.Database.Enabled && c.Database.Driver == "" {
 		c.Database.Driver = "sqlite"
 	}
@@ -186,6 +198,17 @@ func (c *Config) Validate() error {
 			if _, _, err := net.SplitHostPort(c.DatabaseGateway.ListenAddr); err != nil {
 				return fmt.Errorf("invalid database_gateway.listen_addr %q: %w", c.DatabaseGateway.ListenAddr, err)
 			}
+		}
+	}
+	if c.ApplicationGateway.Enabled {
+		if c.ApplicationGateway.PortStart <= 0 || c.ApplicationGateway.PortStart > 65535 {
+			return fmt.Errorf("invalid application_gateway.port_start %d", c.ApplicationGateway.PortStart)
+		}
+		if c.ApplicationGateway.PortEnd <= 0 || c.ApplicationGateway.PortEnd > 65535 {
+			return fmt.Errorf("invalid application_gateway.port_end %d", c.ApplicationGateway.PortEnd)
+		}
+		if c.ApplicationGateway.PortStart > c.ApplicationGateway.PortEnd {
+			return fmt.Errorf("application_gateway.port_start (%d) > port_end (%d)", c.ApplicationGateway.PortStart, c.ApplicationGateway.PortEnd)
 		}
 	}
 	// Users may be empty — the setup wizard creates the first admin user.

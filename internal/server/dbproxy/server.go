@@ -4,10 +4,13 @@ import (
 	"context"
 	"crypto/hmac"
 	"crypto/rand"
+	"crypto/rsa"
 	"crypto/sha256"
+	"crypto/x509"
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"io"
@@ -132,7 +135,10 @@ func upstreamAddress(inst model.DatabaseInstance) string {
 func (g *Gateway) handleConn(ctx context.Context, client net.Conn) {
 	defer client.Close()
 
-	client.SetReadDeadline(time.Now().Add(3 * time.Second))
+	// 协议检测：MySQL 客户端会等待服务器先发握手包，不主动发数据，
+	// 因此用短超时区分协议（PG/Redis 客户端会立刻发数据）。
+	// 原来 3s 导致每个 MySQL 连接固定 3s 延迟，DBeaver 打开多连接时延迟叠加。
+	client.SetReadDeadline(time.Now().Add(200 * time.Millisecond))
 	firstByte := make([]byte, 1)
 	_, err := io.ReadFull(client, firstByte)
 	client.SetReadDeadline(time.Time{})
@@ -666,11 +672,15 @@ func (g *Gateway) handleMySQL(ctx context.Context, client net.Conn) *gatewayConn
 			}
 			authPkt = finalPkt
 		}
-		// 0x04 = full auth with public key — 暂不支持，回传错误
+		// 0x04 = full auth with public key — 实现完整认证
 		if len(extraPkt.payload) > 0 && extraPkt.payload[0] == 0x04 {
-			g.logger.Warn("mysql gateway caching_sha2_password full auth (0x04) not supported, need SSL or native_password")
-			upstream.Close()
-			return nil
+			fullAuthPkt, err := g.handleMySQLCachingSha2FullAuth(upstream, acct.Password.GetPlaintext())
+			if err != nil {
+				g.logger.Warn("mysql gateway caching_sha2_password full auth failed", "error", err)
+				upstream.Close()
+				return nil
+			}
+			authPkt = fullAuthPkt
 		}
 	}
 
@@ -765,6 +775,76 @@ func (g *Gateway) handleMySQLAuthSwitch(upstream net.Conn, acct *model.DatabaseA
 		return nil, fmt.Errorf("write auth switch: %w", err)
 	}
 
+	return readMySQLPacket(upstream)
+}
+
+// handleMySQLCachingSha2FullAuth 处理 caching_sha2_password 完整认证流程。
+// 当密码未在服务器缓存中时（0x01/0x04），执行以下步骤：
+//  1. 发送 0x02 请求服务器公钥
+//  2. 读取服务器返回的 RSA 公钥（0x01 + PEM）
+//  3. 用 RSA-OAEP 加密密码
+//  4. 发送加密后的密码
+//  5. 返回最终认证结果
+func (g *Gateway) handleMySQLCachingSha2FullAuth(upstream net.Conn, password string) (*mysqlPacket, error) {
+	// Step 1: 请求服务器公钥
+	reqKey := []byte{0x02}
+	pkt := make([]byte, 4+len(reqKey))
+	pkt[0] = byte(len(reqKey))
+	pkt[1] = byte(len(reqKey) >> 8)
+	pkt[2] = byte(len(reqKey) >> 16)
+	pkt[3] = 3
+	copy(pkt[4:], reqKey)
+	if _, err := upstream.Write(pkt); err != nil {
+		return nil, fmt.Errorf("request public key: %w", err)
+	}
+
+	// Step 2: 读取服务器公钥
+	keyPkt, err := readMySQLPacket(upstream)
+	if err != nil {
+		return nil, fmt.Errorf("read public key: %w", err)
+	}
+	if len(keyPkt.payload) < 2 || keyPkt.payload[0] != 0x01 {
+		return nil, fmt.Errorf("unexpected public key response type=%x", keyPkt.payload[0])
+	}
+	pubKeyPEM := keyPkt.payload[1:]
+
+	// Step 3: 解析 PEM 公钥
+	block, _ := pem.Decode(pubKeyPEM)
+	if block == nil {
+		return nil, fmt.Errorf("failed to decode PEM public key")
+	}
+	var pubKey *rsa.PublicKey
+	if parsed, err := x509.ParsePKIXPublicKey(block.Bytes); err == nil {
+		pubKey, _ = parsed.(*rsa.PublicKey)
+	}
+	if pubKey == nil {
+		if parsed, err := x509.ParsePKCS1PublicKey(block.Bytes); err == nil {
+			pubKey = parsed
+		}
+	}
+	if pubKey == nil {
+		return nil, fmt.Errorf("public key is not RSA")
+	}
+
+	// Step 4: 用 RSA-OAEP 加密密码（null-terminated，与 MySQL 协议一致）
+	plaintext := append([]byte(password), 0)
+	encrypted, err := rsa.EncryptOAEP(sha256.New(), rand.Reader, pubKey, plaintext, nil)
+	if err != nil {
+		return nil, fmt.Errorf("rsa encrypt: %w", err)
+	}
+
+	// Step 5: 发送加密后的密码
+	resp := make([]byte, 4+len(encrypted))
+	resp[0] = byte(len(encrypted))
+	resp[1] = byte(len(encrypted) >> 8)
+	resp[2] = byte(len(encrypted) >> 16)
+	resp[3] = 4
+	copy(resp[4:], encrypted)
+	if _, err := upstream.Write(resp); err != nil {
+		return nil, fmt.Errorf("send encrypted password: %w", err)
+	}
+
+	// Step 6: 读取最终认证结果
 	return readMySQLPacket(upstream)
 }
 

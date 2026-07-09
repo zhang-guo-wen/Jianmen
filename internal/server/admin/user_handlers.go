@@ -10,7 +10,7 @@ import (
 
 func (s *Server) handleUsers(w http.ResponseWriter, r *http.Request) {
 	if !s.requirePermission(r, rbac.ActionRBACManage) {
-		s.forbidden(w)
+		s.forbidden(w, r)
 		return
 	}
 	switch r.Method {
@@ -20,30 +20,30 @@ func (s *Server) handleUsers(w http.ResponseWriter, r *http.Request) {
 		s.createUser(w, r)
 	default:
 		w.Header().Set("Allow", "GET, POST")
-		writeErrorText(w, http.StatusMethodNotAllowed, "method not allowed")
+		s.writeErrorText(w, r, http.StatusMethodNotAllowed, "method not allowed")
 	}
 }
 
 func (s *Server) handleUser(w http.ResponseWriter, r *http.Request) {
 	if !s.requirePermission(r, rbac.ActionRBACManage) {
-		s.forbidden(w)
+		s.forbidden(w, r)
 		return
 	}
 	id, ok := userIDFromPath(r.URL.Path)
 	if !ok {
-		writeErrorText(w, http.StatusNotFound, "not found")
+		s.writeErrorText(w, r, http.StatusNotFound, "not found")
 		return
 	}
 	switch r.Method {
 	case http.MethodGet:
-		s.getUser(w, id)
+		s.getUser(w, r, id)
 	case http.MethodPut:
 		s.updateUser(w, r, id)
 	case http.MethodDelete:
 		s.deleteUser(w, r, id)
 	default:
 		w.Header().Set("Allow", "GET, PUT, DELETE")
-		writeErrorText(w, http.StatusMethodNotAllowed, "method not allowed")
+		s.writeErrorText(w, r, http.StatusMethodNotAllowed, "method not allowed")
 	}
 }
 
@@ -64,7 +64,7 @@ func (s *Server) listUsers(w http.ResponseWriter, r *http.Request) {
 		}
 		var users []model.User
 		if err := tx.Order("created_at DESC").Offset((page - 1) * pageSize).Limit(pageSize).Find(&users).Error; err != nil {
-			writeError(w, http.StatusInternalServerError, err)
+			s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
 			return
 		}
 		// 为每个用户附加 is_super_admin 标记
@@ -76,43 +76,43 @@ func (s *Server) listUsers(w http.ResponseWriter, r *http.Request) {
 		for i, u := range users {
 			out[i] = userWithFlag{User: u, IsSuperAdmin: s.isSuperAdmin(u.ID)}
 		}
-		writeJSON(w, http.StatusOK, pageResponse{Items: out, Total: int(total), Page: page, PageSize: pageSize})
+		s.writeJSON(w, r, http.StatusOK, pageResponse{Items: out, Total: int(total), Page: page, PageSize: pageSize})
 		return
 	}
 	// Fallback to store-based listing
-	writeJSON(w, http.StatusOK, s.store.Users())
+	s.writeJSON(w, r, http.StatusOK, s.store.Users())
 }
 
 func (s *Server) createUser(w http.ResponseWriter, r *http.Request) {
 	if s.db == nil {
-		writeErrorText(w, http.StatusServiceUnavailable, "metadata database unavailable")
+		s.writeErrorText(w, r, http.StatusServiceUnavailable, "metadata database unavailable")
 		return
 	}
 	defer r.Body.Close()
 	r.Body = http.MaxBytesReader(w, r.Body, 1<<18)
 	var req createUserRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, err)
+		s.writeErrorText(w, r, http.StatusBadRequest, err.Error())
 		return
 	}
 	username := strings.TrimSpace(req.Username)
 	password := strings.TrimSpace(req.Password)
 	if username == "" {
-		writeErrorText(w, http.StatusBadRequest, "username is required")
+		s.writeErrorText(w, r, http.StatusBadRequest, "username is required")
 		return
 	}
 	if password == "" {
-		writeErrorText(w, http.StatusBadRequest, "password is required")
+		s.writeErrorText(w, r, http.StatusBadRequest, "password is required")
 		return
 	}
 	passwordHash, err := hashPassword(password)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
+		s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
 		return
 	}
 	rawToken, tokenHash, err := newAPIToken()
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
+		s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
 		return
 	}
 
@@ -126,43 +126,43 @@ func (s *Server) createUser(w http.ResponseWriter, r *http.Request) {
 		Status:       "active",
 	}
 	if err := s.db.Create(&user).Error; err != nil {
-		writeRBACDBError(w, err)
+		writeRBACDBError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, map[string]any{
+	s.writeJSON(w, r, http.StatusCreated, map[string]any{
 		"user":  user,
 		"token": rawToken,
 	})
 }
 
-func (s *Server) getUser(w http.ResponseWriter, id string) {
+func (s *Server) getUser(w http.ResponseWriter, r *http.Request, id string) {
 	if s.db == nil {
-		writeErrorText(w, http.StatusServiceUnavailable, "metadata database unavailable")
+		s.writeErrorText(w, r, http.StatusServiceUnavailable, "metadata database unavailable")
 		return
 	}
 	var user model.User
 	if err := s.db.First(&user, "id = ?", id).Error; err != nil {
-		writeRBACDBError(w, err)
+		writeRBACDBError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, user)
+	s.writeJSON(w, r, http.StatusOK, user)
 }
 
 func (s *Server) updateUser(w http.ResponseWriter, r *http.Request, id string) {
 	if s.db == nil {
-		writeErrorText(w, http.StatusServiceUnavailable, "metadata database unavailable")
+		s.writeErrorText(w, r, http.StatusServiceUnavailable, "metadata database unavailable")
 		return
 	}
 	var user model.User
 	if err := s.db.First(&user, "id = ?", id).Error; err != nil {
-		writeRBACDBError(w, err)
+		writeRBACDBError(w, r, err)
 		return
 	}
 	defer r.Body.Close()
 	r.Body = http.MaxBytesReader(w, r.Body, 1<<18)
 	var req updateUserRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, err)
+		s.writeErrorText(w, r, http.StatusBadRequest, err.Error())
 		return
 	}
 	if req.DisplayName != nil {
@@ -174,50 +174,50 @@ func (s *Server) updateUser(w http.ResponseWriter, r *http.Request, id string) {
 	if req.Status != nil {
 		status := strings.TrimSpace(*req.Status)
 		if status != "active" && status != "disabled" {
-			writeErrorText(w, http.StatusBadRequest, "status must be active or disabled")
+			s.writeErrorText(w, r, http.StatusBadRequest, "status must be active or disabled")
 			return
 		}
 		// 不允许禁用超级管理员
 		if status == "disabled" && s.isSuperAdmin(id) {
-			writeErrorText(w, http.StatusForbidden, "cannot disable super admin")
+			s.writeErrorText(w, r, http.StatusForbidden, "cannot disable super admin")
 			return
 		}
 		user.Status = status
 	}
 	if err := s.db.Save(&user).Error; err != nil {
-		writeRBACDBError(w, err)
+		writeRBACDBError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, user)
+	s.writeJSON(w, r, http.StatusOK, user)
 }
 
 func (s *Server) deleteUser(w http.ResponseWriter, r *http.Request, id string) {
 	if s.db == nil {
-		writeErrorText(w, http.StatusServiceUnavailable, "metadata database unavailable")
+		s.writeErrorText(w, r, http.StatusServiceUnavailable, "metadata database unavailable")
 		return
 	}
 	currentUserID := userIDFromRequest(r)
 	if currentUserID != "" && currentUserID == id {
-		writeErrorText(w, http.StatusBadRequest, "cannot delete yourself")
+		s.writeErrorText(w, r, http.StatusBadRequest, "cannot delete yourself")
 		return
 	}
 	// 不允许删除超级管理员
 	if s.isSuperAdmin(id) {
-		writeErrorText(w, http.StatusForbidden, "cannot delete super admin")
+		s.writeErrorText(w, r, http.StatusForbidden, "cannot delete super admin")
 		return
 	}
 	var user model.User
 	if err := s.db.First(&user, "id = ?", id).Error; err != nil {
-		writeRBACDBError(w, err)
+		writeRBACDBError(w, r, err)
 		return
 	}
 	// Cascade delete user_roles
 	if err := s.db.Where("user_id = ?", id).Delete(&model.UserRole{}).Error; err != nil {
-		writeError(w, http.StatusInternalServerError, err)
+		s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
 		return
 	}
 	if err := s.db.Delete(&user).Error; err != nil {
-		writeRBACDBError(w, err)
+		writeRBACDBError(w, r, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

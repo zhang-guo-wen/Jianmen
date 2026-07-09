@@ -72,7 +72,7 @@ func TestHandleTargetCRUD(t *testing.T) {
 		t.Fatalf("create status = %d, want %d; body=%s", createRec.Code, http.StatusCreated, createRec.Body.String())
 	}
 	var created store.TargetView
-	if err := json.Unmarshal(createRec.Body.Bytes(), &created); err != nil {
+	if err := decodeTestData(t, createRec.Body.Bytes(), &created); err != nil {
 		t.Fatalf("unmarshal create response: %v; body=%s", err, createRec.Body.String())
 	}
 	if !created.InsecureIgnoreHostKey {
@@ -88,7 +88,7 @@ func TestHandleTargetCRUD(t *testing.T) {
 		t.Fatalf("get status = %d, want %d; body=%s", getRec.Code, http.StatusOK, getRec.Body.String())
 	}
 	var got store.TargetView
-	if err := json.Unmarshal(getRec.Body.Bytes(), &got); err != nil {
+	if err := decodeTestData(t, getRec.Body.Bytes(), &got); err != nil {
 		t.Fatalf("unmarshal get response: %v", err)
 	}
 	if got.ID != "runtime-a" {
@@ -113,7 +113,7 @@ func TestHandleTargetCRUD(t *testing.T) {
 		t.Fatalf("update status = %d, want %d; body=%s", updateRec.Code, http.StatusOK, updateRec.Body.String())
 	}
 	var updated store.TargetView
-	if err := json.Unmarshal(updateRec.Body.Bytes(), &updated); err != nil {
+	if err := decodeTestData(t, updateRec.Body.Bytes(), &updated); err != nil {
 		t.Fatalf("unmarshal update response: %v", err)
 	}
 	if updated.Name != "ubuntu" || updated.Host != "10.0.0.2" || updated.Port != 2200 || updated.Username != "ubuntu" {
@@ -194,7 +194,7 @@ func TestHandleHostsPaginationAndLazyAccounts(t *testing.T) {
 		t.Fatalf("list hosts status = %d, want %d; body=%s", listRec.Code, http.StatusOK, listRec.Body.String())
 	}
 	var page pageResponse
-	if err := json.Unmarshal(listRec.Body.Bytes(), &page); err != nil {
+	if err := decodeTestData(t, listRec.Body.Bytes(), &page); err != nil {
 		t.Fatalf("unmarshal hosts page: %v; body=%s", err, listRec.Body.String())
 	}
 	if page.Total != 2 || page.Page != 1 || page.PageSize != 1 {
@@ -221,7 +221,7 @@ func TestHandleHostsPaginationAndLazyAccounts(t *testing.T) {
 		t.Fatalf("host accounts status = %d, want %d; body=%s", accountsRec.Code, http.StatusOK, accountsRec.Body.String())
 	}
 	var accountsPage pageResponse
-	if err := json.Unmarshal(accountsRec.Body.Bytes(), &accountsPage); err != nil {
+	if err := decodeTestData(t, accountsRec.Body.Bytes(), &accountsPage); err != nil {
 		t.Fatalf("unmarshal host accounts page: %v; body=%s", err, accountsRec.Body.String())
 	}
 	accItemsJSON, _ := json.Marshal(accountsPage.Items)
@@ -292,7 +292,7 @@ func TestHandleTestConnectionUsesStoredCredentialsWhenPayloadOmitsSecrets(t *tes
 		OK      bool   `json:"ok"`
 		Message string `json:"message"`
 	}
-	if err := json.Unmarshal(testRec.Body.Bytes(), &result); err != nil {
+	if err := decodeTestData(t, testRec.Body.Bytes(), &result); err != nil {
 		t.Fatalf("unmarshal test response: %v; body=%s", err, testRec.Body.String())
 	}
 	if !result.OK {
@@ -339,7 +339,7 @@ func TestHandleTestConnectionUsesStoredTargetWhenOnlyIDProvided(t *testing.T) {
 		OK      bool   `json:"ok"`
 		Message string `json:"message"`
 	}
-	if err := json.Unmarshal(testRec.Body.Bytes(), &result); err != nil {
+	if err := decodeTestData(t, testRec.Body.Bytes(), &result); err != nil {
 		t.Fatalf("unmarshal test response: %v; body=%s", err, testRec.Body.String())
 	}
 	if !result.OK {
@@ -379,7 +379,7 @@ func TestInitStatusReturnsSuperAdminSummaryAfterSetup(t *testing.T) {
 		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusOK, rec.Body.String())
 	}
 	var got InitStatusResponse
-	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+	if err := decodeTestData(t, rec.Body.Bytes(), &got); err != nil {
 		t.Fatalf("unmarshal response: %v; body=%s", err, rec.Body.String())
 	}
 	if !got.Initialized {
@@ -411,7 +411,7 @@ func TestCreateUserStoresBcryptHashAndLoginWorks(t *testing.T) {
 		User  model.User `json:"user"`
 		Token string     `json:"token"`
 	}
-	if err := json.Unmarshal(createRec.Body.Bytes(), &created); err != nil {
+	if err := decodeTestData(t, createRec.Body.Bytes(), &created); err != nil {
 		t.Fatalf("unmarshal create response: %v; body=%s", err, createRec.Body.String())
 	}
 	if created.Token == "" {
@@ -539,7 +539,7 @@ func TestEncryptionKeyRequiresSuperAdminToken(t *testing.T) {
 		t.Fatalf("admin status = %d, want %d; body=%s", adminRec.Code, http.StatusOK, adminRec.Body.String())
 	}
 	var keyResp EncryptionKeyResponse
-	if err := json.Unmarshal(adminRec.Body.Bytes(), &keyResp); err != nil {
+	if err := decodeTestData(t, adminRec.Body.Bytes(), &keyResp); err != nil {
 		t.Fatalf("unmarshal key response: %v; body=%s", err, adminRec.Body.String())
 	}
 	if len(keyResp.Key) != 64 {
@@ -716,14 +716,28 @@ func startTestPasswordSSHServer(t *testing.T, username, password string) string 
 	return listener.Addr().String()
 }
 
+// decodeTestData unpacks the "data" field from the unified API response wrapper.
+func decodeTestData(t *testing.T, raw []byte, dst any) error {
+	t.Helper()
+	var wrapper struct {
+		Data json.RawMessage `json:"data"`
+	}
+	if err := json.Unmarshal(raw, &wrapper); err != nil {
+		return err
+	}
+	return json.Unmarshal(wrapper.Data, dst)
+}
+
 func assertTargetResponseHasNoSecrets(t *testing.T, raw []byte) {
 	t.Helper()
-	var body map[string]any
-	if err := json.Unmarshal(raw, &body); err != nil {
+	var wrapper struct {
+		Data map[string]any `json:"data"`
+	}
+	if err := json.Unmarshal(raw, &wrapper); err != nil {
 		t.Fatalf("unmarshal response: %v", err)
 	}
 	for _, key := range []string{"password", "private_key_pem", "passphrase"} {
-		if _, ok := body[key]; ok {
+		if _, ok := wrapper.Data[key]; ok {
 			t.Fatalf("response leaked %q: %s", key, string(raw))
 		}
 	}

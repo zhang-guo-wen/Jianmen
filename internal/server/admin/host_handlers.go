@@ -16,19 +16,19 @@ func (s *Server) handleHosts(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
 		if !s.requirePermission(r, rbac.ActionHostView) {
-			s.forbidden(w)
+			s.forbidden(w, r)
 			return
 		}
-		writeJSON(w, http.StatusOK, paginateHosts(s.store.Hosts(), r))
+		s.writeJSON(w, r, http.StatusOK, paginateHosts(s.store.Hosts(), r))
 	case http.MethodPost:
 		if !s.requirePermission(r, rbac.ActionHostCreate) {
-			s.forbidden(w)
+			s.forbidden(w, r)
 			return
 		}
 		s.handleCreateHost(w, r)
 	default:
 		w.Header().Set("Allow", "GET, POST")
-		writeErrorText(w, http.StatusMethodNotAllowed, "method not allowed")
+		s.writeErrorText(w, r, http.StatusMethodNotAllowed, "method not allowed")
 	}
 }
 
@@ -37,32 +37,32 @@ func (s *Server) handleCreateHost(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	var host store.HostRecord
 	if err := json.NewDecoder(r.Body).Decode(&host); err != nil {
-		writeError(w, http.StatusBadRequest, err)
+		s.writeErrorText(w, r, http.StatusBadRequest, err.Error())
 		return
 	}
 	view, err := s.store.AddHost(host)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err)
+		s.writeErrorText(w, r, http.StatusBadRequest, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusCreated, view)
+	s.writeJSON(w, r, http.StatusCreated, view)
 }
 
 func (s *Server) handleHost(w http.ResponseWriter, r *http.Request) {
 	id, child, ok := hostPathParts(r.URL.Path)
 	if !ok {
-		writeErrorText(w, http.StatusNotFound, "not found")
+		s.writeErrorText(w, r, http.StatusNotFound, "not found")
 		return
 	}
 	if child == "accounts" {
 		if r.Method != http.MethodGet {
 			w.Header().Set("Allow", http.MethodGet)
-			writeErrorText(w, http.StatusMethodNotAllowed, "method not allowed")
+			s.writeErrorText(w, r, http.StatusMethodNotAllowed, "method not allowed")
 			return
 		}
 		accounts, err := s.store.HostAccounts(id)
 		if err != nil {
-			writeHostStoreError(w, err)
+			writeHostStoreError(w, r, err)
 			return
 		}
 		resp := paginateSlice(accounts, r, func(v store.TargetView, q string) bool {
@@ -71,37 +71,37 @@ func (s *Server) handleHost(w http.ResponseWriter, r *http.Request) {
 				strings.Contains(strings.ToLower(v.Group), q) ||
 				strings.Contains(strings.ToLower(v.Remark), q)
 		})
-		writeJSON(w, http.StatusOK, resp)
+		s.writeJSON(w, r, http.StatusOK, resp)
 		return
 	}
 	if child != "" {
-		writeErrorText(w, http.StatusNotFound, "not found")
+		s.writeErrorText(w, r, http.StatusNotFound, "not found")
 		return
 	}
 
 	switch r.Method {
 	case http.MethodGet:
 		if !s.requirePermission(r, rbac.ActionHostView) {
-			s.forbidden(w)
+			s.forbidden(w, r)
 			return
 		}
 		view, err := s.store.Host(id)
 		if err != nil {
-			writeHostStoreError(w, err)
+			writeHostStoreError(w, r, err)
 			return
 		}
-		writeJSON(w, http.StatusOK, view)
+		s.writeJSON(w, r, http.StatusOK, view)
 	case http.MethodPut:
 		s.handleUpdateHost(w, r, id)
 	case http.MethodDelete:
 		if err := s.store.DeleteHost(id); err != nil {
-			writeHostStoreError(w, err)
+			writeHostStoreError(w, r, err)
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)
 	default:
 		w.Header().Set("Allow", "GET, PUT, DELETE")
-		writeErrorText(w, http.StatusMethodNotAllowed, "method not allowed")
+		s.writeErrorText(w, r, http.StatusMethodNotAllowed, "method not allowed")
 	}
 }
 
@@ -110,22 +110,22 @@ func (s *Server) handleUpdateHost(w http.ResponseWriter, r *http.Request, id str
 	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	var host store.HostRecord
 	if err := json.NewDecoder(r.Body).Decode(&host); err != nil {
-		writeError(w, http.StatusBadRequest, err)
+		s.writeErrorText(w, r, http.StatusBadRequest, err.Error())
 		return
 	}
 	view, err := s.store.UpdateHost(id, host)
 	if err != nil {
-		writeHostStoreError(w, err)
+		writeHostStoreError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, view)
+	s.writeJSON(w, r, http.StatusOK, view)
 }
 
 func (s *Server) handleTargets(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
 		if !s.requirePermission(r, rbac.ActionTargetView) {
-			s.forbidden(w)
+			s.forbidden(w, r)
 			return
 		}
 		resp := paginateSlice(s.store.Targets(), r, func(v store.TargetView, q string) bool {
@@ -135,16 +135,16 @@ func (s *Server) handleTargets(w http.ResponseWriter, r *http.Request) {
 				strings.Contains(strings.ToLower(v.Group), q) ||
 				strings.Contains(strings.ToLower(v.Remark), q)
 		})
-		writeJSON(w, http.StatusOK, resp)
+		s.writeJSON(w, r, http.StatusOK, resp)
 	case http.MethodPost:
 		if !s.requirePermission(r, rbac.ActionTargetCreate) {
-			s.forbidden(w)
+			s.forbidden(w, r)
 			return
 		}
 		s.handleCreateTarget(w, r)
 	default:
 		w.Header().Set("Allow", "GET, POST")
-		writeErrorText(w, http.StatusMethodNotAllowed, "method not allowed")
+		s.writeErrorText(w, r, http.StatusMethodNotAllowed, "method not allowed")
 	}
 }
 
@@ -153,41 +153,41 @@ func (s *Server) handleCreateTarget(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	var target config.Target
 	if err := json.NewDecoder(r.Body).Decode(&target); err != nil {
-		writeError(w, http.StatusBadRequest, err)
+		s.writeErrorText(w, r, http.StatusBadRequest, err.Error())
 		return
 	}
 	view, err := s.store.AddTarget(target)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err)
+		s.writeErrorText(w, r, http.StatusBadRequest, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusCreated, view)
+	s.writeJSON(w, r, http.StatusCreated, view)
 }
 
 func (s *Server) handleTestConnection(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		w.Header().Set("Allow", http.MethodPost)
-		writeErrorText(w, http.StatusMethodNotAllowed, "method not allowed")
+		s.writeErrorText(w, r, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
 	if !s.requirePermission(r, rbac.ActionTargetCreate) {
-		s.forbidden(w)
+		s.forbidden(w, r)
 		return
 	}
 	defer r.Body.Close()
 	var raw map[string]json.RawMessage
 	if err := json.NewDecoder(r.Body).Decode(&raw); err != nil {
-		writeError(w, http.StatusBadRequest, err)
+		s.writeErrorText(w, r, http.StatusBadRequest, err.Error())
 		return
 	}
 	encoded, err := json.Marshal(raw)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err)
+		s.writeErrorText(w, r, http.StatusBadRequest, err.Error())
 		return
 	}
 	var target config.Target
 	if err := json.Unmarshal(encoded, &target); err != nil {
-		writeError(w, http.StatusBadRequest, err)
+		s.writeErrorText(w, r, http.StatusBadRequest, err.Error())
 		return
 	}
 	hostKeyConfigProvided := target.InsecureIgnoreHostKey || target.HostKeyFingerprint != "" || target.KnownHostsPath != ""
@@ -212,7 +212,7 @@ func (s *Server) handleTestConnection(w http.ResponseWriter, r *http.Request) {
 	if targetCfg.Password == "" && targetCfg.PrivateKeyPath == "" && targetCfg.PrivateKeyPEM == "" && targetCfg.ID != "" {
 		storedTarget, err := s.store.TargetConfig(targetCfg.ID)
 		if err != nil {
-			writeJSON(w, http.StatusOK, map[string]any{"ok": false, "message": "配置错误: " + err.Error()})
+			s.writeJSON(w, r, http.StatusOK, map[string]any{"ok": false, "message": "配置错误: " + err.Error()})
 			return
 		}
 		storedTarget.Host = firstNonEmpty(targetCfg.Host, storedTarget.Host)
@@ -234,7 +234,7 @@ func (s *Server) handleTestConnection(w http.ResponseWriter, r *http.Request) {
 
 	addr := targetCfg.Addr()
 	if addr == "" || targetCfg.Username == "" {
-		writeErrorText(w, http.StatusBadRequest, "host, port, and username are required")
+		s.writeErrorText(w, r, http.StatusBadRequest, "host, port, and username are required")
 		return
 	}
 
@@ -245,7 +245,7 @@ func (s *Server) handleTestConnection(w http.ResponseWriter, r *http.Request) {
 
 	clientConfig, err := store.ClientConfigForTarget(targetCfg)
 	if err != nil {
-		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "message": "配置错误: " + err.Error()})
+		s.writeJSON(w, r, http.StatusOK, map[string]any{"ok": false, "message": "配置错误: " + err.Error()})
 		return
 	}
 
@@ -253,43 +253,43 @@ func (s *Server) handleTestConnection(w http.ResponseWriter, r *http.Request) {
 
 	conn, err := ssh.Dial("tcp", addr, clientConfig)
 	if err != nil {
-		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "message": "连接失败: " + friendlySSHError(err)})
+		s.writeJSON(w, r, http.StatusOK, map[string]any{"ok": false, "message": "连接失败: " + friendlySSHError(err)})
 		return
 	}
 	conn.Close()
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "message": "连接成功 (" + addr + ")"})
+	s.writeJSON(w, r, http.StatusOK, map[string]any{"ok": true, "message": "连接成功 (" + addr + ")"})
 }
 
 func (s *Server) handleTarget(w http.ResponseWriter, r *http.Request) {
 	id, ok := targetIDFromPath(r.URL.Path)
 	if !ok {
-		writeErrorText(w, http.StatusNotFound, "not found")
+		s.writeErrorText(w, r, http.StatusNotFound, "not found")
 		return
 	}
 
 	switch r.Method {
 	case http.MethodGet:
 		if !s.requirePermission(r, rbac.ActionTargetView) {
-			s.forbidden(w)
+			s.forbidden(w, r)
 			return
 		}
 		view, err := s.store.Target(id)
 		if err != nil {
-			writeTargetStoreError(w, err)
+			writeTargetStoreError(w, r, err)
 			return
 		}
-		writeJSON(w, http.StatusOK, view)
+		s.writeJSON(w, r, http.StatusOK, view)
 	case http.MethodPut:
 		s.handleUpdateTarget(w, r, id)
 	case http.MethodDelete:
 		if err := s.store.DeleteTarget(id); err != nil {
-			writeTargetStoreError(w, err)
+			writeTargetStoreError(w, r, err)
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)
 	default:
 		w.Header().Set("Allow", "GET, PUT, DELETE")
-		writeErrorText(w, http.StatusMethodNotAllowed, "method not allowed")
+		s.writeErrorText(w, r, http.StatusMethodNotAllowed, "method not allowed")
 	}
 }
 
@@ -297,15 +297,15 @@ func (s *Server) handleUpdateTarget(w http.ResponseWriter, r *http.Request, id s
 	defer r.Body.Close()
 	var target config.Target
 	if err := json.NewDecoder(r.Body).Decode(&target); err != nil {
-		writeError(w, http.StatusBadRequest, err)
+		s.writeErrorText(w, r, http.StatusBadRequest, err.Error())
 		return
 	}
 	view, err := s.store.UpdateTarget(id, target)
 	if err != nil {
-		writeTargetStoreError(w, err)
+		writeTargetStoreError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, view)
+	s.writeJSON(w, r, http.StatusOK, view)
 }
 
 // -- db gateway config --

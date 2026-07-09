@@ -222,7 +222,13 @@ func requestRBAC(t *testing.T, handler http.HandlerFunc, method, target, body st
 
 func decodeRBACResponse(t *testing.T, rec *httptest.ResponseRecorder, dst any) {
 	t.Helper()
-	if err := json.Unmarshal(rec.Body.Bytes(), dst); err != nil {
-		t.Fatalf("unmarshal response: %v; body=%s", err, rec.Body.String())
+	var wrapper struct {
+		Data json.RawMessage `json:"data"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &wrapper); err != nil {
+		t.Fatalf("unmarshal response wrapper: %v; body=%s", err, rec.Body.String())
+	}
+	if err := json.Unmarshal(wrapper.Data, dst); err != nil {
+		t.Fatalf("unmarshal response data: %v; body=%s", err, rec.Body.String())
 	}
 }

@@ -20,16 +20,16 @@ import (
 func (s *Server) handleUserSessions(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		w.Header().Set("Allow", http.MethodPost)
-		writeErrorText(w, http.StatusMethodNotAllowed, "method not allowed")
+		s.writeErrorText(w, r, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
 	if !s.requirePermission(r, rbac.ActionSessionConnect) {
-		s.forbidden(w)
+		s.forbidden(w, r)
 		return
 	}
 	userID := userIDFromRequest(r)
 	if userID == "" {
-		writeErrorText(w, http.StatusUnauthorized, "user not authenticated")
+		s.writeErrorText(w, r, http.StatusUnauthorized, "user not authenticated")
 		return
 	}
 
@@ -37,11 +37,11 @@ func (s *Server) handleUserSessions(w http.ResponseWriter, r *http.Request) {
 		TargetID string `json:"target_id"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeErrorText(w, http.StatusBadRequest, "invalid request body")
+		s.writeErrorText(w, r, http.StatusBadRequest, "invalid request body")
 		return
 	}
 	if req.TargetID == "" {
-		writeErrorText(w, http.StatusBadRequest, "target_id is required")
+		s.writeErrorText(w, r, http.StatusBadRequest, "target_id is required")
 		return
 	}
 
@@ -56,7 +56,7 @@ func (s *Server) handleUserSessions(w http.ResponseWriter, r *http.Request) {
 		// 主机账号
 		var host model.Host
 		if err := s.db.Where("id = ? AND status = ?", hostAccount.HostID, "active").First(&host).Error; err != nil {
-			writeErrorText(w, http.StatusForbidden, "host is disabled or not found")
+			s.writeErrorText(w, r, http.StatusForbidden, "host is disabled or not found")
 			return
 		}
 		resourceID = hostAccount.ResourceID
@@ -66,7 +66,7 @@ func (s *Server) handleUserSessions(w http.ResponseWriter, r *http.Request) {
 		if err := s.db.Preload("Instance").Where("id = ? AND status = ?", req.TargetID, "active").First(&dbAccount).Error; err == nil {
 			// 验证数据库实例未被禁用
 			if dbAccount.Instance.Status == "disabled" {
-				writeErrorText(w, http.StatusForbidden, "database instance is disabled")
+				s.writeErrorText(w, r, http.StatusForbidden, "database instance is disabled")
 				return
 			}
 			compactPrefix = util.PrefixDatabase
@@ -77,14 +77,14 @@ func (s *Server) handleUserSessions(w http.ResponseWriter, r *http.Request) {
 				compactPrefix = util.PrefixRedis
 			}
 		} else if errors.Is(err, gorm.ErrRecordNotFound) {
-			writeErrorText(w, http.StatusNotFound, "target account not found or disabled")
+			s.writeErrorText(w, r, http.StatusNotFound, "target account not found or disabled")
 			return
 		} else {
-			writeErrorText(w, http.StatusInternalServerError, "failed to look up target")
+			s.writeErrorText(w, r, http.StatusInternalServerError, "failed to look up target")
 			return
 		}
 	} else {
-		writeErrorText(w, http.StatusInternalServerError, "failed to look up target")
+		s.writeErrorText(w, r, http.StatusInternalServerError, "failed to look up target")
 		return
 	}
 
@@ -101,17 +101,17 @@ func (s *Server) handleUserSessions(w http.ResponseWriter, r *http.Request) {
 			}
 			created, createErr := s.store.CreateUserSession(newSess)
 			if createErr != nil {
-				writeError(w, http.StatusInternalServerError, createErr)
+				s.writeErrorText(w, r, http.StatusInternalServerError, createErr.Error())
 				return
 			}
 			permSession = *created
 		} else {
-			writeError(w, http.StatusInternalServerError, err)
+			s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
 			return
 		}
 	}
 
-	writeJSON(w, http.StatusCreated, map[string]any{
+	s.writeJSON(w, r, http.StatusCreated, map[string]any{
 		"id":               permSession.ID,
 		"session_id":       permSession.SessionID,
 		"session_seq":      permSession.SessionSeq,
@@ -125,12 +125,12 @@ func (s *Server) handleUserSessions(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleSessions(w http.ResponseWriter, r *http.Request) {
 	if !s.requirePermission(r, rbac.ActionSessionView) {
-		s.forbidden(w)
+		s.forbidden(w, r)
 		return
 	}
 	sessions, err := s.listSessions()
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
+		s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
 		return
 	}
 	resp := paginateSlice(sessions, r, func(v sessionListItem, q string) bool {
@@ -139,18 +139,18 @@ func (s *Server) handleSessions(w http.ResponseWriter, r *http.Request) {
 			strings.Contains(strings.ToLower(v.Protocol), q) ||
 			strings.Contains(strings.ToLower(v.ClientIP), q)
 	})
-	writeJSON(w, http.StatusOK, resp)
+	s.writeJSON(w, r, http.StatusOK, resp)
 }
 
 func (s *Server) handleSessionArtifact(w http.ResponseWriter, r *http.Request) {
 	id, artifact, ok := splitArtifactPath(strings.TrimPrefix(r.URL.Path, "/api/sessions/"))
 	if !ok {
-		writeErrorText(w, http.StatusNotFound, "not found")
+		s.writeErrorText(w, r, http.StatusNotFound, "not found")
 		return
 	}
 	dir, ok := safeReplayDir(filepath.Join(s.cfg.ReplayDir, "ssh"), id)
 	if !ok {
-		writeErrorText(w, http.StatusBadRequest, "invalid session id")
+		s.writeErrorText(w, r, http.StatusBadRequest, "invalid session id")
 		return
 	}
 	switch artifact {
@@ -165,14 +165,14 @@ func (s *Server) handleSessionArtifact(w http.ResponseWriter, r *http.Request) {
 	case "replay":
 		s.writeTextFile(w, r, filepath.Join(dir, "terminal.cast"), "application/x-asciicast; charset=utf-8")
 	default:
-		writeErrorText(w, http.StatusNotFound, "not found")
+		s.writeErrorText(w, r, http.StatusNotFound, "not found")
 	}
 }
 
 func (s *Server) handleDBConnections(w http.ResponseWriter, r *http.Request) {
 	connections, err := s.listDBConnections()
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
+		s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
 		return
 	}
 	resp := paginateSlice(connections, r, func(v dbConnectionListItem, q string) bool {
@@ -181,18 +181,18 @@ func (s *Server) handleDBConnections(w http.ResponseWriter, r *http.Request) {
 			strings.Contains(strings.ToLower(v.Protocol), q) ||
 			strings.Contains(strings.ToLower(v.AuthUser), q)
 	})
-	writeJSON(w, http.StatusOK, resp)
+	s.writeJSON(w, r, http.StatusOK, resp)
 }
 
 func (s *Server) handleDBConnectionArtifact(w http.ResponseWriter, r *http.Request) {
 	id, artifact, ok := splitArtifactPath(strings.TrimPrefix(r.URL.Path, "/api/db/connections/"))
 	if !ok {
-		writeErrorText(w, http.StatusNotFound, "not found")
+		s.writeErrorText(w, r, http.StatusNotFound, "not found")
 		return
 	}
 	dir, ok := safeReplayDir(filepath.Join(s.cfg.ReplayDir, "db"), id)
 	if !ok {
-		writeErrorText(w, http.StatusBadRequest, "invalid connection id")
+		s.writeErrorText(w, r, http.StatusBadRequest, "invalid connection id")
 		return
 	}
 	switch artifact {
@@ -201,7 +201,7 @@ func (s *Server) handleDBConnectionArtifact(w http.ResponseWriter, r *http.Reque
 	case "queries":
 		s.writeJSONLines(w, r, filepath.Join(dir, "queries.jsonl"), 1000)
 	default:
-		writeErrorText(w, http.StatusNotFound, "not found")
+		s.writeErrorText(w, r, http.StatusNotFound, "not found")
 	}
 }
 

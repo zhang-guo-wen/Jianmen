@@ -16,51 +16,51 @@ import (
 // handleDBDatabases handles GET /api/db/instances/{id}/databases
 func (s *Server) handleDBDatabases(w http.ResponseWriter, r *http.Request, instanceID string) {
 	if !s.requirePermission(r, rbac.ActionDBProxyView) {
-		s.forbidden(w)
+		s.forbidden(w, r)
 		return
 	}
 
 	adminAccountID := strings.TrimSpace(r.URL.Query().Get("admin_account_id"))
 	if adminAccountID == "" {
-		writeErrorText(w, http.StatusBadRequest, "admin_account_id is required")
+		s.writeErrorText(w, r, http.StatusBadRequest, "admin_account_id is required")
 		return
 	}
 
 	var acct model.DatabaseAccount
 	if err := s.db.Preload("Instance").First(&acct, "id = ? AND instance_id = ?", adminAccountID, instanceID).Error; err != nil {
-		writeErrorText(w, http.StatusNotFound, "admin account not found")
+		s.writeErrorText(w, r, http.StatusNotFound, "admin account not found")
 		return
 	}
 	if acct.Status != "active" {
-		writeErrorText(w, http.StatusBadRequest, "admin account is not active")
+		s.writeErrorText(w, r, http.StatusBadRequest, "admin account is not active")
 		return
 	}
 	if acct.ExpiresAt != nil && time.Now().UTC().After(*acct.ExpiresAt) {
-		writeErrorText(w, http.StatusBadRequest, "admin account has expired")
+		s.writeErrorText(w, r, http.StatusBadRequest, "admin account has expired")
 		return
 	}
 	if acct.Instance.Status != "active" {
-		writeErrorText(w, http.StatusBadRequest, "database instance is disabled")
+		s.writeErrorText(w, r, http.StatusBadRequest, "database instance is disabled")
 		return
 	}
 	if acct.Instance.Protocol != "mysql" {
-		writeErrorText(w, http.StatusBadRequest, "only mysql instances support auto-provisioning")
+		s.writeErrorText(w, r, http.StatusBadRequest, "only mysql instances support auto-provisioning")
 		return
 	}
 
 	dbs, err := service.ListMySQLDatabases(acct.Instance, acct)
 	if err != nil {
-		writeError(w, http.StatusBadGateway, err)
+		s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{"databases": dbs})
+	s.writeJSON(w, r, http.StatusOK, map[string]any{"databases": dbs})
 }
 
 // handleDBProvisionAccount handles POST /api/db/instances/{id}/provision-account
 func (s *Server) handleDBProvisionAccount(w http.ResponseWriter, r *http.Request, instanceID string) {
 	if !s.requirePermission(r, rbac.ActionDBProxyCreate) {
-		s.forbidden(w)
+		s.forbidden(w, r)
 		return
 	}
 
@@ -78,7 +78,7 @@ func (s *Server) handleDBProvisionAccount(w http.ResponseWriter, r *http.Request
 		ExpiresAt      *time.Time        `json:"expires_at"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-		writeError(w, http.StatusBadRequest, err)
+		s.writeErrorText(w, r, http.StatusBadRequest, err.Error())
 		return
 	}
 	payload.AdminAccountID = strings.TrimSpace(payload.AdminAccountID)
@@ -86,7 +86,7 @@ func (s *Server) handleDBProvisionAccount(w http.ResponseWriter, r *http.Request
 	payload.Host = strings.TrimSpace(payload.Host)
 
 	if payload.AdminAccountID == "" {
-		writeErrorText(w, http.StatusBadRequest, "admin_account_id is required")
+		s.writeErrorText(w, r, http.StatusBadRequest, "admin_account_id is required")
 		return
 	}
 	if payload.Host == "" {
@@ -108,40 +108,40 @@ func (s *Server) handleDBProvisionAccount(w http.ResponseWriter, r *http.Request
 	// Load admin credentials (must belong to this instance)
 	var acct model.DatabaseAccount
 	if err := s.db.Preload("Instance").First(&acct, "id = ? AND instance_id = ?", payload.AdminAccountID, instanceID).Error; err != nil {
-		writeErrorText(w, http.StatusNotFound, "admin account not found for this instance")
+		s.writeErrorText(w, r, http.StatusNotFound, "admin account not found for this instance")
 		return
 	}
 	if acct.Status != "active" {
-		writeErrorText(w, http.StatusBadRequest, "admin account is not active")
+		s.writeErrorText(w, r, http.StatusBadRequest, "admin account is not active")
 		return
 	}
 	if acct.ExpiresAt != nil && time.Now().UTC().After(*acct.ExpiresAt) {
-		writeErrorText(w, http.StatusBadRequest, "admin account has expired")
+		s.writeErrorText(w, r, http.StatusBadRequest, "admin account has expired")
 		return
 	}
 	if acct.Instance.Status != "active" {
-		writeErrorText(w, http.StatusBadRequest, "database instance is disabled")
+		s.writeErrorText(w, r, http.StatusBadRequest, "database instance is disabled")
 		return
 	}
 	if acct.Instance.Protocol != "mysql" {
-		writeErrorText(w, http.StatusBadRequest, "only mysql protocol is supported for provisioning")
+		s.writeErrorText(w, r, http.StatusBadRequest, "only mysql protocol is supported for provisioning")
 		return
 	}
 
 	// Execute CREATE USER + GRANT on target MySQL
 	if err := service.ProvisionMySQLAccount(acct.Instance, acct, newUsername, generatedPassword, payload.Host, payload.Grants); err != nil {
-		writeError(w, http.StatusBadGateway, err)
+		s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
 		return
 	}
 
 	// Register in the bastion host
 	view, err := s.store.AddDatabaseAccount(instanceID, newUsername, generatedPassword, payload.Group, payload.Remark, payload.ExpiresAt)
 	if err != nil {
-		writeDBStoreError(w, err)
+		writeDBStoreError(w, r, err)
 		return
 	}
 
-	writeJSON(w, http.StatusCreated, map[string]any{
+	s.writeJSON(w, r, http.StatusCreated, map[string]any{
 		"ok":                 true,
 		"account":            view,
 		"generated_password": generatedPassword,

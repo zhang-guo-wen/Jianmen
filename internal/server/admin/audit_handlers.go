@@ -13,7 +13,7 @@ import (
 
 func (s *Server) handleAuditSSH(w http.ResponseWriter, r *http.Request) {
 	if !s.requirePermission(r, rbac.ActionSessionView) {
-		s.forbidden(w)
+		s.forbidden(w, r)
 		return
 	}
 	params := store.AuditListParams{
@@ -26,10 +26,10 @@ func (s *Server) handleAuditSSH(w http.ResponseWriter, r *http.Request) {
 
 	items, total, err := s.store.ListAuditSessions(params)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
+		s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	s.writeJSON(w, r, http.StatusOK, map[string]any{
 		"items": items, "total": total,
 		"page": params.Page, "size": params.Size,
 	})
@@ -50,10 +50,10 @@ func (s *Server) handleAuditDB(w http.ResponseWriter, r *http.Request) {
 
 	items, total, err := s.store.ListAuditSessions(params)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
+		s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	s.writeJSON(w, r, http.StatusOK, map[string]any{
 		"items": items, "total": total,
 		"page": params.Page, "size": params.Size,
 	})
@@ -63,7 +63,7 @@ func (s *Server) handleAuditArtifact(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimPrefix(r.URL.Path, "/api/audit/")
 	parts := strings.SplitN(path, "/", 3)
 	if len(parts) < 2 {
-		writeErrorText(w, http.StatusNotFound, "not found")
+		s.writeErrorText(w, r, http.StatusNotFound, "not found")
 		return
 	}
 	protocol := parts[0]
@@ -75,40 +75,40 @@ func (s *Server) handleAuditArtifact(w http.ResponseWriter, r *http.Request) {
 
 	session, err := s.store.GetAuditSession(sessionID)
 	if err != nil {
-		writeErrorText(w, http.StatusNotFound, "audit session not found")
+		s.writeErrorText(w, r, http.StatusNotFound, "audit session not found")
 		return
 	}
 
 	switch {
 	case artifact == "":
-		writeJSON(w, http.StatusOK, session)
+		s.writeJSON(w, r, http.StatusOK, session)
 	case artifact == "commands" && (protocol == "ssh" || protocol == "sftp"):
 		limit, offset := pageFromQuery(r)
 		items, total, err := s.store.ListAuditSSHCommands(sessionID, store.PageOpts{Limit: limit, Offset: offset})
 		if err != nil {
-			writeError(w, http.StatusInternalServerError, err)
+			s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"items": items, "total": total})
+		s.writeJSON(w, r, http.StatusOK, map[string]any{"items": items, "total": total})
 	case artifact == "files" && (protocol == "ssh" || protocol == "sftp"):
 		limit, offset := pageFromQuery(r)
 		items, total, err := s.store.ListAuditSFTPEvents(sessionID, store.PageOpts{Limit: limit, Offset: offset})
 		if err != nil {
-			writeError(w, http.StatusInternalServerError, err)
+			s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"items": items, "total": total})
+		s.writeJSON(w, r, http.StatusOK, map[string]any{"items": items, "total": total})
 	case artifact == "file-summary" && (protocol == "ssh" || protocol == "sftp"):
 		summaryPath := filepath.Join(session.ReplayDir, "files-summary.json")
 		if _, err := os.Stat(summaryPath); err != nil {
-			writeJSON(w, http.StatusOK, []any{})
+			s.writeJSON(w, r, http.StatusOK, []any{})
 			return
 		}
 		s.writeJSONFile(w, r, summaryPath)
 	case artifact == "replay" && (protocol == "ssh" || protocol == "sftp"):
 		replayPath := session.ReplayDir
 		if replayPath == "" {
-			writeErrorText(w, http.StatusNotFound, "no replay available")
+			s.writeErrorText(w, r, http.StatusNotFound, "no replay available")
 			return
 		}
 		s.writeTextFile(w, r, filepath.Join(replayPath, "terminal.cast"), "application/x-asciicast; charset=utf-8")
@@ -116,12 +116,12 @@ func (s *Server) handleAuditArtifact(w http.ResponseWriter, r *http.Request) {
 		limit, offset := pageFromQuery(r)
 		items, total, err := s.store.ListAuditDBQueries(sessionID, store.PageOpts{Limit: limit, Offset: offset})
 		if err != nil {
-			writeError(w, http.StatusInternalServerError, err)
+			s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"items": items, "total": total})
+		s.writeJSON(w, r, http.StatusOK, map[string]any{"items": items, "total": total})
 	default:
-		writeErrorText(w, http.StatusNotFound, "not found")
+		s.writeErrorText(w, r, http.StatusNotFound, "not found")
 	}
 }
 

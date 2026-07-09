@@ -116,6 +116,20 @@ type DatabaseAccountView struct {
 	UpdatedAt   string     `json:"updated_at,omitempty"`
 }
 
+type ApplicationView struct {
+	ID             string `json:"id"`
+	Name           string `json:"name"`
+	AppGroup       string `json:"group"`
+	ListenPort     int    `json:"listen_port"`
+	InternalScheme string `json:"internal_scheme"`
+	InternalHost   string `json:"internal_host"`
+	InternalPort   int    `json:"internal_port"`
+	Remark         string `json:"remark,omitempty"`
+	Status         string `json:"status"`
+	CreatedAt      string `json:"created_at"`
+	UpdatedAt      string `json:"updated_at"`
+}
+
 type SessionView struct {
 	ID         string     `json:"id"`
 	UserID     string     `json:"user_id"`
@@ -135,6 +149,7 @@ var (
 	ErrDBProxyNotFound    = errSentinel("database proxy not found")
 	ErrDBAccountNotFound  = errSentinel("database account not found")
 	ErrDBInstanceNotFound = errSentinel("database instance not found")
+	ErrApplicationNotFound = errSentinel("application not found")
 	ErrTargetUnavailable  = errSentinel("target unavailable")
 )
 
@@ -176,6 +191,13 @@ type Store interface {
 	AddDatabaseAccount(instanceID, username, password, group, remark string, expiresAt *time.Time) (DatabaseAccountView, error)
 	UpdateDatabaseAccount(id, username, password, group, remark string, expiresAt *time.Time, status string) (DatabaseAccountView, error)
 	DeleteDatabaseAccount(id string) error
+
+	// Application CRUD
+	Applications() []ApplicationView
+	Application(id string) (ApplicationView, error)
+	AddApplication(name, scheme, host string, port, listenPort int, group, remark string) (ApplicationView, error)
+	UpdateApplication(id, name, scheme, host string, port, listenPort int, group, remark, status string) (ApplicationView, error)
+	DeleteApplication(id string) error
 
 	DatabaseAccountByUniqueName(uniqueName string) (*model.DatabaseAccount, error)
 	AuthenticateDirect(ctx context.Context, username, password string) (model.User, error)

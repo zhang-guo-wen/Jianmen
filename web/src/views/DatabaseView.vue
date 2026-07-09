@@ -94,6 +94,9 @@
           <el-button type="primary" :disabled="!selectedInstance" @click="openCreateAccount">
             新增账号
           </el-button>
+          <el-button type="success" :disabled="!selectedInstance || selectedInstance.protocol !== 'mysql'" @click="openAutoProvision">
+            自动创建
+          </el-button>
         </template>
         <el-table-column label="连接账号" min-width="130">
           <template #default="{ row }">{{ row.username || '-' }}</template>
@@ -197,6 +200,92 @@
         </el-collapse>
       </el-form>
     </FormDialog>
+
+    <!-- 自动创建账号弹窗 -->
+    <el-dialog
+      v-model="autoProvisionVisible"
+      title="自动创建 MySQL 账号"
+      width="min(720px, calc(100vw - 32px))"
+      destroy-on-close
+      @closed="resetAutoProvision"
+    >
+      <template v-if="provisionStep === 1">
+        <el-form label-width="100px">
+          <el-form-item label="管理员凭据">
+            <el-select v-model="provision.adminAccountId" placeholder="选择用于创建账号的凭据" style="width:100%">
+              <el-option
+                v-for="acc in adminAccounts"
+                :key="acc.id"
+                :label="`${acc.username} (${acc.unique_name})`"
+                :value="acc.id"
+              />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="新用户名">
+            <el-input v-model="provision.newUsername" placeholder="留空自动生成" />
+          </el-form-item>
+          <el-form-item label="主机">
+            <el-input v-model="provision.host" placeholder="%" />
+          </el-form-item>
+        </el-form>
+      </template>
+
+      <template v-else-if="provisionStep === 2">
+        <div v-if="loadingDatabases" style="text-align:center;padding:30px 0">
+          <el-icon class="is-loading" :size="24"><Loading /></el-icon>
+          <p style="margin-top:8px;color:#999">正在获取数据库列表...</p>
+        </div>
+        <template v-else>
+          <div style="margin-bottom:8px;display:flex;gap:8px">
+            <el-button size="small" @click="setAllDBGrants('readwrite')">全部读写</el-button>
+            <el-button size="small" @click="setAllDBGrants('read')">全部只读</el-button>
+            <el-button size="small" @click="setAllDBGrants('')">全部无</el-button>
+          </div>
+          <el-table :data="dbGrants" size="small" max-height="340">
+            <el-table-column prop="database" label="数据库" />
+            <el-table-column label="权限" width="180" align="center">
+              <template #default="{ row }">
+                <el-radio-group v-model="row.privilege" size="small">
+                  <el-radio-button value="">无</el-radio-button>
+                  <el-radio-button value="read">读</el-radio-button>
+                  <el-radio-button value="readwrite">读写</el-radio-button>
+                </el-radio-group>
+              </template>
+            </el-table-column>
+          </el-table>
+        </template>
+      </template>
+
+      <template v-else-if="provisionStep === 3">
+        <div v-if="provisioning" style="text-align:center;padding:30px 0">
+          <el-icon class="is-loading" :size="28"><Loading /></el-icon>
+          <p style="margin-top:10px;color:#667085">正在目标 MySQL 上创建账号...</p>
+        </div>
+        <template v-else-if="provisionResult">
+          <el-alert type="success" title="账号创建成功" :closable="false" show-icon />
+          <el-descriptions :column="1" border size="small" style="margin-top:12px">
+            <el-descriptions-item label="用户名">
+              <code>{{ provisionResult.account.username }}</code>
+            </el-descriptions-item>
+            <el-descriptions-item label="密码">
+              <code>{{ provisionResult.generated_password }}</code>
+              <el-button link type="primary" size="small" style="margin-left:8px" @click="copyText(provisionResult.generated_password)">复制</el-button>
+            </el-descriptions-item>
+            <el-descriptions-item label="主机">{{ provision.host || '%' }}</el-descriptions-item>
+          </el-descriptions>
+          <el-alert type="warning" :closable="false" style="margin-top:8px" title="密码仅显示一次，请立即复制保存" />
+        </template>
+        <el-alert v-else-if="provisionError" type="error" :title="provisionError" :closable="false" show-icon />
+      </template>
+
+      <template #footer>
+        <el-button @click="autoProvisionVisible = false">取消</el-button>
+        <el-button v-if="provisionStep === 1" type="primary" :disabled="!provision.adminAccountId" @click="goProvisionStep2">下一步</el-button>
+        <el-button v-if="provisionStep === 2" :disabled="loadingDatabases" @click="provisionStep = 1">上一步</el-button>
+        <el-button v-if="provisionStep === 2" type="primary" :disabled="provisioning || loadingDatabases" @click="doProvision">创建</el-button>
+        <el-button v-if="provisionStep === 3 && !provisioning" type="primary" @click="closeProvisionAndRefresh">完成</el-button>
+      </template>
+    </el-dialog>
 
     <!-- 连接弹窗 -->
     <el-dialog
@@ -808,6 +897,104 @@ onMounted(() => {
   loadGatewayConfig()
   loadInstances()
 })
+
+// ── 自动创建 ──
+interface DBGrantRow {
+  database: string
+  privilege: '' | 'read' | 'readwrite'
+}
+
+const autoProvisionVisible = ref(false)
+const provisionStep = ref(1)
+const provisioning = ref(false)
+const loadingDatabases = ref(false)
+const provisionError = ref('')
+const provisionResult = ref<any>(null)
+const dbGrants = ref<DBGrantRow[]>([])
+const adminAccounts = ref<any[]>([])
+
+const provision = reactive({
+  adminAccountId: '',
+  newUsername: '',
+  host: '%',
+})
+
+async function openAutoProvision() {
+  if (!selectedInstance.value) return
+  const instId = selectedInstance.value.id!
+  try {
+    const res = await api.apiClient.getDBAccounts(instId, { page_size: 200 })
+    const items = (res as any).items || (Array.isArray(res) ? res : [])
+    adminAccounts.value = items.filter((a: any) => a.status === 'active')
+  } catch {
+    adminAccounts.value = []
+  }
+  if (adminAccounts.value.length > 0) {
+    provision.adminAccountId = adminAccounts.value[0].id
+  } else {
+    provision.adminAccountId = ''
+  }
+  provision.newUsername = ''
+  provision.host = '%'
+  provisionStep.value = 1
+  provisionError.value = ''
+  provisionResult.value = null
+  autoProvisionVisible.value = true
+}
+
+async function goProvisionStep2() {
+  if (!provision.adminAccountId || !selectedInstance.value) return
+  loadingDatabases.value = true
+  try {
+    const res = await api.apiClient.listDBDatabases(selectedInstance.value.id!, provision.adminAccountId)
+    const dbs: string[] = (res as any).databases || []
+    dbGrants.value = dbs.map(db => ({ database: db, privilege: '' as const }))
+    provisionStep.value = 2
+  } catch (e: any) {
+    ElMessage.error('获取数据库列表失败: ' + (e.message || e))
+  } finally {
+    loadingDatabases.value = false
+  }
+}
+
+function setAllDBGrants(p: '' | 'read' | 'readwrite') {
+  dbGrants.value.forEach(row => { row.privilege = p })
+}
+
+async function doProvision() {
+  if (!selectedInstance.value) return
+  provisioning.value = true
+  provisionError.value = ''
+  try {
+    const grants = dbGrants.value
+      .filter(r => r.privilege !== '')
+      .map(r => ({ database: r.database, privilege: r.privilege }))
+    const res = await api.apiClient.provisionDBAccount(selectedInstance.value.id!, {
+      admin_account_id: provision.adminAccountId,
+      new_username: provision.newUsername || undefined,
+      host: provision.host || '%',
+      grants,
+    })
+    provisionResult.value = (res as any)
+    provisionStep.value = 3
+  } catch (e: any) {
+    provisionError.value = e.message || String(e)
+  } finally {
+    provisioning.value = false
+  }
+}
+
+function resetAutoProvision() {
+  provisionStep.value = 1
+  provisionError.value = ''
+  provisionResult.value = null
+  dbGrants.value = []
+}
+
+function closeProvisionAndRefresh() {
+  autoProvisionVisible.value = false
+  loadSelectedInstanceAccounts()
+}
 </script>
 
 <style scoped>

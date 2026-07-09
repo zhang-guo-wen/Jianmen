@@ -17,6 +17,7 @@ import (
 type AuditSink interface {
 	WriteCommand(sessionID string, timestamp time.Time, command string) error
 	WriteFileEvent(sessionID string, timestamp time.Time, action, path string, size int64, result string) error
+	UpdateProtocol(sessionID string, protocol string) error
 }
 
 type SessionRecorder struct {
@@ -146,13 +147,16 @@ func (r *SessionRecorder) Dir() string {
 	return r.dir
 }
 
-// SetProtocolSubtype updates the protocol subtype (e.g. "sftp") in meta.json.
+// SetProtocolSubtype updates the protocol subtype (e.g. "sftp") in meta.json and in the database.
 func (r *SessionRecorder) SetProtocolSubtype(subtype string) {
 	if r == nil {
 		return
 	}
 	r.session.ProtocolSubtype = subtype
 	r.writeMetaField("protocol_subtype", subtype)
+	if r.auditSink != nil {
+		_ = r.auditSink.UpdateProtocol(r.session.ID, subtype)
+	}
 }
 
 func (r *SessionRecorder) writeMetaField(key, value string) {

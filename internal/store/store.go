@@ -170,16 +170,17 @@ type AuditListParams struct {
 
 // AuditSessionView 审计列表视图。
 type AuditSessionView struct {
-	ID          string `json:"id"`
-	Username    string `json:"username"`
-	Protocol    string `json:"protocol"`
-	TargetName  string `json:"target_name"`
-	AccountName string `json:"account_name,omitempty"`
-	ClientIP    string `json:"client_ip"`
-	StartedAt   string `json:"started_at"`
-	EndedAt     string `json:"ended_at,omitempty"`
-	State       string `json:"state"`
-	ReplayDir   string `json:"replay_dir,omitempty"`
+	ID             string `json:"id"`
+	Username       string `json:"username"`
+	Protocol       string `json:"protocol"`
+	ProtocolSubtype string `json:"protocol_subtype,omitempty"`
+	TargetName     string `json:"target_name"`
+	AccountName    string `json:"account_name,omitempty"`
+	ClientIP       string `json:"client_ip"`
+	StartedAt      string `json:"started_at"`
+	EndedAt        string `json:"ended_at,omitempty"`
+	State          string `json:"state"`
+	ReplayDir      string `json:"replay_dir,omitempty"`
 }
 
 // PageOpts 分页参数。
@@ -245,6 +246,7 @@ type Store interface {
 	EndAuditSession(id string) error
 	GetAuditSession(id string) (*model.AuditSession, error)
 	ListAuditSessions(params AuditListParams) ([]AuditSessionView, int64, error)
+	UpdateAuditProtocol(id string, protocol string) error
 
 	CreateAuditSSHCommand(cmd *model.AuditSSHCommand) error
 	ListAuditSSHCommands(sessionID string, opts PageOpts) ([]model.AuditSSHCommand, int64, error)

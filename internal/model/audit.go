@@ -9,6 +9,7 @@ type AuditSession struct {
 	UserID        string     `gorm:"index;size:64" json:"user_id"`
 	Username      string     `gorm:"index;size:128" json:"username"`
 	Protocol      string     `gorm:"index:idx_audit_sessions_protocol_started,priority:1;size:32" json:"protocol"`
+	ProtocolSubtype string   `gorm:"size:64" json:"protocol_subtype,omitempty"`
 	TargetName    string     `gorm:"size:255" json:"target_name"`
 	AccountName   string     `gorm:"size:128" json:"account_name"`
 	ClientIP      string     `gorm:"size:128" json:"client_ip"`

@@ -56,6 +56,10 @@ func (a *auditStore) WriteFileEvent(sessionID string, timestamp time.Time, actio
 	})
 }
 
+func (a *auditStore) UpdateProtocol(sessionID string, protocol string) error {
+	return a.store.UpdateAuditProtocol(a.sessionID, protocol)
+}
+
 func New(cfg *config.Config, s store.Store, logger *slog.Logger, dataDir string, dbs ...*gorm.DB) *Server {
 	if logger == nil {
 		logger = slog.Default()

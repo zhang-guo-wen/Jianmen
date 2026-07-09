@@ -24,6 +24,12 @@ func (s *DBStore) EndAuditSession(id string) error {
 		Updates(map[string]any{"state": "ended", "ended_at": now}).Error
 }
 
+func (s *DBStore) UpdateAuditProtocol(id string, protocol string) error {
+	return s.db.Model(&model.AuditSession{}).
+		Where("id = ?", id).
+		Updates(map[string]any{"protocol": "ssh", "protocol_subtype": protocol}).Error
+}
+
 func (s *DBStore) GetAuditSession(id string) (*model.AuditSession, error) {
 	var session model.AuditSession
 	if err := s.db.Where("id = ?", id).First(&session).Error; err != nil {
@@ -69,15 +75,16 @@ func (s *DBStore) ListAuditSessions(params AuditListParams) ([]AuditSessionView,
 	views := make([]AuditSessionView, len(sessions))
 	for i, sess := range sessions {
 		views[i] = AuditSessionView{
-			ID:          sess.ID,
-			Username:    sess.Username,
-			Protocol:    sess.Protocol,
-			TargetName:  sess.TargetName,
-			AccountName: sess.AccountName,
-			ClientIP:    sess.ClientIP,
-			StartedAt:   sess.StartedAt.Format(time.RFC3339Nano),
-			State:       sess.State,
-			ReplayDir:   sess.ReplayDir,
+			ID:               sess.ID,
+			Username:         sess.Username,
+			Protocol:         sess.Protocol,
+			ProtocolSubtype:  sess.ProtocolSubtype,
+			TargetName:       sess.TargetName,
+			AccountName:      sess.AccountName,
+			ClientIP:         sess.ClientIP,
+			StartedAt:        sess.StartedAt.Format(time.RFC3339Nano),
+			State:            sess.State,
+			ReplayDir:        sess.ReplayDir,
 		}
 		if sess.EndedAt != nil {
 			views[i].EndedAt = sess.EndedAt.Format(time.RFC3339Nano)

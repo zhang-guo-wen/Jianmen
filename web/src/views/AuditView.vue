@@ -477,8 +477,10 @@ const replayTerminalMessage = computed(() => {
 
 // ── Helpers ──
 
-function unwrapArray<T>(payload: ApiEnvelope<T[]> | T[]): T[] {
-  return Array.isArray(payload) ? payload : payload.data ?? [];
+function unwrapArray<T>(payload: ApiEnvelope<T[]> | T[] | Record<string, unknown>): T[] {
+  if (Array.isArray(payload)) return payload;
+  if (payload && 'items' in payload && Array.isArray(payload.items)) return payload.items as T[];
+  return (payload as ApiEnvelope<T[]>).data ?? [];
 }
 
 function unwrapObject<T>(payload: ApiEnvelope<T> | T): T {

@@ -3,13 +3,19 @@
     :model-value="visible"
     @update:model-value="emit('update:visible', $event)"
     title="批量新建用户"
-    width="700px"
+    width="800px"
     :close-on-click-modal="false"
     destroy-on-close
   >
     <div class="batch-body">
       <!-- 步骤1：多行文本输入 -->
       <div v-if="!tableRows.length" class="batch-input-area">
+        <div style="margin-bottom:12px">
+          <span style="font-size:13px;color:#374151;font-weight:600;margin-right:8px">角色（可选）</span>
+          <el-select v-model="defaultRoleId" placeholder="选择角色" size="small" clearable style="width:200px">
+            <el-option v-for="r in roles" :key="r.id" :label="r.name" :value="String(r.id ?? '')" />
+          </el-select>
+        </div>
         <el-input
           v-model="rawInput"
           type="textarea"
@@ -31,22 +37,29 @@
           </div>
         </div>
         <el-table :data="tableRows" size="small" max-height="400">
-          <el-table-column label="名称" min-width="100">
+          <el-table-column label="名称" min-width="90">
             <template #default="{ row }">
               <el-input v-model="row.displayName" size="small" />
             </template>
           </el-table-column>
-          <el-table-column label="账户名称" min-width="120">
+          <el-table-column label="账户名称" min-width="110">
             <template #default="{ row }">
               <el-input v-model="row.username" size="small" />
             </template>
           </el-table-column>
-          <el-table-column label="随机密码" min-width="140">
+          <el-table-column label="随机密码" min-width="130">
             <template #default="{ row }">
               <el-input v-model="row.password" size="small" show-password />
             </template>
           </el-table-column>
-          <el-table-column label="状态" width="100" align="center">
+          <el-table-column label="角色" min-width="130">
+            <template #default="{ row }">
+              <el-select v-model="row.roleId" placeholder="选择" size="small" clearable style="width:100%">
+                <el-option v-for="r in roles" :key="r.id" :label="r.name" :value="String(r.id ?? '')" />
+              </el-select>
+            </template>
+          </el-table-column>
+          <el-table-column label="状态" width="90" align="center">
             <template #default="{ row }">
               <el-tag v-if="row.status === 'success'" type="success" size="small">已创建</el-tag>
               <el-tag v-else-if="row.status === 'creating'" type="warning" size="small">创建中</el-tag>
@@ -92,6 +105,7 @@
 
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
+import { ElMessage } from 'element-plus'
 import { pinyin } from 'pinyin-pro'
 import * as api from '@/api/client'
 
@@ -101,16 +115,25 @@ const emit = defineEmits<{
   created: []
 }>()
 
-// ── 弹窗关闭时重置所有状态 ──
-watch(() => props.visible, (v) => {
-  if (!v) {
+// ── 角色列表 ──
+const roles = ref<api.RBACRoleRecord[]>([])
+const defaultRoleId = ref('')
+
+watch(() => props.visible, async (v) => {
+  if (v) {
     rawInput.value = ''
     tableRows.value = []
     saving.value = false
+    defaultRoleId.value = ''
+    // 加载角色列表
+    try {
+      const res = await api.apiClient.getRBACRoles()
+      roles.value = (res as api.PageResponse<api.RBACRoleRecord>).items ?? []
+    } catch { /* 非关键 */ }
   }
 })
 
-import { ElMessage } from 'element-plus'
+// ── 文本输入 ──
 const rawInput = ref('')
 
 // ── 表格行 ──
@@ -118,6 +141,7 @@ interface BatchRow {
   displayName: string
   username: string
   password: string
+  roleId: string
   status: 'pending' | 'creating' | 'success' | 'fail'
   error: string
 }
@@ -130,9 +154,7 @@ const allDone = computed(() =>
 )
 
 function toPinyin(name: string): string {
-  // 如果全是字母/数字，保留原样
   if (/^[a-zA-Z0-9]+$/.test(name)) return name
-  // 拼音转换，无音调，合并为一个字符串
   const parts = pinyin(name, { toneType: 'none', type: 'array' })
   return parts.join('').replace(/\s+/g, '')
 }
@@ -154,7 +176,6 @@ function formatRows() {
     .map(l => l.trim())
     .filter(l => l)
 
-  // 去重
   const seen = new Set<string>()
   const unique = lines.filter(l => {
     if (seen.has(l)) return false
@@ -166,6 +187,7 @@ function formatRows() {
     displayName: name,
     username: toPinyin(name),
     password: genPassword(),
+    roleId: defaultRoleId.value,
     status: 'pending' as const,
     error: '',
   }))
@@ -173,7 +195,11 @@ function formatRows() {
 
 function copyAll() {
   const text = tableRows.value
-    .map(r => `名称:${r.displayName}  账户:${r.username}  密码:${r.password}`)
+    .map(r => {
+      const roleName = roles.value.find(rr => String(rr.id) === r.roleId)?.name || ''
+      const part = `名称:${r.displayName}  账户:${r.username}  密码:${r.password}`
+      return roleName ? `${part}  角色:${roleName}` : part
+    })
     .join('\n')
   navigator.clipboard.writeText(text).then(
     () => ElMessage.success('已复制'),
@@ -198,16 +224,30 @@ async function saveAll() {
     if (row.status === 'success') continue
     row.status = 'creating'
     row.error = ''
+    let userId = ''
     try {
-      await api.apiClient.createUser({
+      const res = await api.apiClient.createUser({
         username: row.username.trim(),
         password: row.password,
         display_name: row.displayName.trim(),
       })
+      // 获取新用户 ID
+      const created = (res as any)?.user
+      userId = String(created?.id ?? '')
       row.status = 'success'
     } catch (err) {
       row.status = 'fail'
       row.error = err instanceof Error ? err.message : '创建失败'
+      continue
+    }
+    // 分配角色
+    if (userId && row.roleId) {
+      try {
+        await api.apiClient.createRBACUserRole({
+          user_id: userId,
+          role_id: row.roleId,
+        })
+      } catch { /* 角色分配失败不影响创建成功 */ }
     }
   }
   saving.value = false

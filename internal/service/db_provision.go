@@ -35,6 +35,7 @@ func mysqlConnect(addr string, username, password string) (net.Conn, error) {
 	if err != nil {
 		return nil, fmt.Errorf("connect: %w", err)
 	}
+	conn.SetDeadline(time.Now().Add(10 * time.Second))
 	buf := make([]byte, 4096)
 	n, err := conn.Read(buf)
 	if err != nil || n < 4 {
@@ -166,7 +167,7 @@ func mysqlQuery(conn net.Conn, query string) ([][]string, error) {
 	payload := make([]byte, 1+len(query))
 	payload[0] = 0x03 // COM_QUERY
 	copy(payload[1:], query)
-	pkt := mysqlPacketWithSeq(1, payload)
+	pkt := mysqlPacketWithSeq(0, payload)
 	if _, err := conn.Write(pkt); err != nil {
 		return nil, fmt.Errorf("write query: %w", err)
 	}
@@ -219,7 +220,7 @@ func mysqlExec(conn net.Conn, stmt string) error {
 	payload := make([]byte, 1+len(stmt))
 	payload[0] = 0x03
 	copy(payload[1:], stmt)
-	pkt := mysqlPacketWithSeq(1, payload)
+	pkt := mysqlPacketWithSeq(0, payload)
 	if _, err := conn.Write(pkt); err != nil {
 		return fmt.Errorf("write exec: %w", err)
 	}

@@ -227,7 +227,7 @@ func (s *Server) handleConn(ctx context.Context, rawConn net.Conn, serverConfig 
 			s.cfg.Recording.RecordInput,
 			s.cfg.Recording.RecordCommands,
 			s.logger,
-			&auditStore{store: s.store, sessionID: session.ID},
+			&auditStore{store: s.store, sessionID: auditSession.ID},
 		)
 		if err != nil {
 			s.logger.Warn("failed to initialize recorder", "session", session.ID, "error", err)

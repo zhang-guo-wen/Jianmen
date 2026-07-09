@@ -224,6 +224,10 @@ func AllModels() []any {
 		&TemporaryAccount{},
 		&TemporaryCredential{},
 		&TemporaryAccountGrant{},
+		&AuditSession{},
+		&AuditSSHCommand{},
+		&AuditDBQuery{},
+		&AuditSFTPEvent{},
 	}
 }
 
@@ -252,3 +256,7 @@ func (m *TemporaryCredential) BeforeCreate(_ *gorm.DB) error { return ensureID(&
 func (m *TemporaryAccountGrant) BeforeCreate(_ *gorm.DB) error {
 	return ensureID(&m.ID)
 }
+func (m *AuditSession) BeforeCreate(_ *gorm.DB) error    { return ensureID(&m.ID) }
+func (m *AuditSSHCommand) BeforeCreate(_ *gorm.DB) error { return ensureID(&m.ID) }
+func (m *AuditDBQuery) BeforeCreate(_ *gorm.DB) error    { return ensureID(&m.ID) }
+func (m *AuditSFTPEvent) BeforeCreate(_ *gorm.DB) error  { return ensureID(&m.ID) }

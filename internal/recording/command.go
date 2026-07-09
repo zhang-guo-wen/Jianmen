@@ -16,6 +16,8 @@ type CommandRecorder struct {
 	line            []rune
 	current         *commandEvent
 	sensitivePrompt bool
+	auditSink       AuditSink
+	sessionID       string
 }
 
 type commandEvent struct {
@@ -28,11 +30,13 @@ type commandEvent struct {
 	EndedAt    int64  `json:"ended_at"`
 }
 
-func NewCommandRecorder(file *os.File, startedAt time.Time) *CommandRecorder {
+func NewCommandRecorder(file *os.File, startedAt time.Time, sink AuditSink, sessionID string) *CommandRecorder {
 	return &CommandRecorder{
 		file:      file,
 		startedAt: startedAt,
 		line:      make([]rune, 0, 128),
+		auditSink: sink,
+		sessionID: sessionID,
 	}
 }
 
@@ -139,6 +143,9 @@ func (r *CommandRecorder) flushCurrentLocked() error {
 	}
 	if _, err := r.file.Write(append(raw, '\n')); err != nil {
 		return err
+	}
+	if r.auditSink != nil {
+		r.auditSink.WriteCommand(r.sessionID, time.UnixMilli(r.current.StartedAt), r.current.Command)
 	}
 	r.current = nil
 	return nil

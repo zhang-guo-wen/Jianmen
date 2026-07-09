@@ -13,6 +13,12 @@ import (
 	"jianmen/internal/model"
 )
 
+// AuditSink receives audit events during recording.
+type AuditSink interface {
+	WriteCommand(sessionID string, timestamp time.Time, command string) error
+	WriteFileEvent(sessionID string, timestamp time.Time, action, path string, size int64, result string) error
+}
+
 type SessionRecorder struct {
 	mu             sync.Mutex
 	session        model.Session
@@ -28,6 +34,7 @@ type SessionRecorder struct {
 	commands   *CommandRecorder
 	fileSeq    int64
 	files      map[string]*FileSummary
+	auditSink  AuditSink
 	closed     bool
 }
 
@@ -66,7 +73,7 @@ type FileSummary struct {
 	LastAt     int64            `json:"last_at,omitempty"`
 }
 
-func NewSessionRecorder(root string, session model.Session, recordInput, recordCommands bool, logger *slog.Logger) (*SessionRecorder, error) {
+func NewSessionRecorder(root string, session model.Session, recordInput, recordCommands bool, logger *slog.Logger, sink AuditSink) (*SessionRecorder, error) {
 	dir := filepath.Join(root, "ssh", session.ID)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, err
@@ -128,8 +135,9 @@ func NewSessionRecorder(root string, session model.Session, recordInput, recordC
 		terminal:       NewAsciinemaWriter(terminalFile, startedAt, 80, 24),
 		eventsFile:     eventsFile,
 		filesFile:      filesFile,
-		commands:       NewCommandRecorder(commandsFile, startedAt),
+		commands:       NewCommandRecorder(commandsFile, startedAt, sink, session.ID),
 		files:          make(map[string]*FileSummary),
+		auditSink:      sink,
 	}
 	return rec, nil
 }
@@ -242,6 +250,9 @@ func (r *SessionRecorder) RecordFileEvent(event FileEvent) {
 	event.Seq = r.fileSeq
 	event.SessionID = r.session.ID
 	r.updateFileSummaryLocked(event)
+		if r.auditSink != nil {
+			_ = r.auditSink.WriteFileEvent(r.session.ID, time.UnixMilli(event.StartedAt), event.Action, event.Path, event.Size, event.Result)
+		}
 
 	raw, err := json.Marshal(event)
 	if err != nil {

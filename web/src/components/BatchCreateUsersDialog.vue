@@ -25,7 +25,10 @@
       <div v-else class="batch-table-area">
         <div class="batch-table-toolbar">
           <el-button link type="primary" @click="backToInput">← 返回输入</el-button>
-          <span class="batch-table-count">共 {{ tableRows.length }} 条</span>
+          <div style="display:flex;align-items:center;gap:8px">
+            <el-button link type="primary" size="small" @click="copyAll">复制全部</el-button>
+            <span class="batch-table-count">共 {{ tableRows.length }} 条</span>
+          </div>
         </div>
         <el-table :data="tableRows" size="small" max-height="400">
           <el-table-column label="名称" min-width="100">
@@ -107,7 +110,7 @@ watch(() => props.visible, (v) => {
   }
 })
 
-// ── 文本输入 ──
+import { ElMessage } from 'element-plus'
 const rawInput = ref('')
 
 // ── 表格行 ──
@@ -166,6 +169,16 @@ function formatRows() {
     status: 'pending' as const,
     error: '',
   }))
+}
+
+function copyAll() {
+  const text = tableRows.value
+    .map(r => `名称:${r.displayName}  账户:${r.username}  密码:${r.password}`)
+    .join('\n')
+  navigator.clipboard.writeText(text).then(
+    () => ElMessage.success('已复制'),
+    () => ElMessage.error('复制失败')
+  )
 }
 
 function backToInput() {

@@ -22,7 +22,7 @@ import (
 func (s *Server) handleTestDBConnection(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		w.Header().Set("Allow", "POST")
-		writeErrorText(w, http.StatusMethodNotAllowed, "method not allowed")
+		s.writeErrorText(w, r, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
 	if strings.TrimSuffix(r.URL.Path, "/") == "/api/db/accounts/test" {
@@ -31,26 +31,26 @@ func (s *Server) handleTestDBConnection(w http.ResponseWriter, r *http.Request) 
 	}
 	id := strings.TrimPrefix(r.URL.Path, "/api/db/accounts/test/")
 	if id == "" || strings.Contains(id, "/") {
-		writeErrorText(w, http.StatusNotFound, "not found")
+		s.writeErrorText(w, r, http.StatusNotFound, "not found")
 		return
 	}
 
 	var acct model.DatabaseAccount
 	if err := s.db.Preload("Instance").First(&acct, "id = ?", id).Error; err != nil {
-		writeErrorText(w, http.StatusNotFound, "account not found")
+		s.writeErrorText(w, r, http.StatusNotFound, "account not found")
 		return
 	}
 
 	if acct.Status == "disabled" {
-		writeErrorText(w, http.StatusForbidden, "account is disabled")
+		s.writeErrorText(w, r, http.StatusForbidden, "account is disabled")
 		return
 	}
 	if acct.ExpiresAt != nil && time.Now().UTC().After(*acct.ExpiresAt) {
-		writeErrorText(w, http.StatusForbidden, "account has expired")
+		s.writeErrorText(w, r, http.StatusForbidden, "account has expired")
 		return
 	}
 	if acct.Instance.Status == "disabled" {
-		writeErrorText(w, http.StatusForbidden, "database instance is disabled")
+		s.writeErrorText(w, r, http.StatusForbidden, "database instance is disabled")
 		return
 	}
 
@@ -61,7 +61,7 @@ func (s *Server) handleTestDBConnection(w http.ResponseWriter, r *http.Request) 
 	}
 	conn, err := net.DialTimeout("tcp", upstreamAddr, 5*time.Second)
 	if err != nil {
-		writeJSON(w, http.StatusOK, map[string]any{
+		s.writeJSON(w, r, http.StatusOK, map[string]any{
 			"ok": false, "error": fmt.Sprintf("connect: %v", err), "latency_ms": time.Since(start).Milliseconds(),
 		})
 		return
@@ -71,12 +71,12 @@ func (s *Server) handleTestDBConnection(w http.ResponseWriter, r *http.Request) 
 	err = testDBAuth(conn, acct.Instance.Protocol, acct.Username, acct.Password.GetPlaintext())
 	latencyMs := time.Since(start).Milliseconds()
 	if err != nil {
-		writeJSON(w, http.StatusOK, map[string]any{
+		s.writeJSON(w, r, http.StatusOK, map[string]any{
 			"ok": false, "error": err.Error(), "latency_ms": latencyMs,
 		})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	s.writeJSON(w, r, http.StatusOK, map[string]any{
 		"ok": true, "latency_ms": latencyMs,
 	})
 }
@@ -90,23 +90,23 @@ type testDBConnectionPayload struct {
 func (s *Server) handleTestDBConnectionPayload(w http.ResponseWriter, r *http.Request) {
 	var payload testDBConnectionPayload
 	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-		writeErrorText(w, http.StatusBadRequest, "invalid json body")
+		s.writeErrorText(w, r, http.StatusBadRequest, "invalid json body")
 		return
 	}
 	payload.InstanceID = strings.TrimSpace(payload.InstanceID)
 	payload.Username = strings.TrimSpace(payload.Username)
 	if payload.InstanceID == "" || payload.Password == "" {
-		writeErrorText(w, http.StatusBadRequest, "instance_id and password are required")
+		s.writeErrorText(w, r, http.StatusBadRequest, "instance_id and password are required")
 		return
 	}
 
 	var inst model.DatabaseInstance
 	if err := s.db.First(&inst, "id = ?", payload.InstanceID).Error; err != nil {
-		writeErrorText(w, http.StatusNotFound, "instance not found")
+		s.writeErrorText(w, r, http.StatusNotFound, "instance not found")
 		return
 	}
 	if inst.Status == "disabled" {
-		writeErrorText(w, http.StatusForbidden, "database instance is disabled")
+		s.writeErrorText(w, r, http.StatusForbidden, "database instance is disabled")
 		return
 	}
 
@@ -127,7 +127,7 @@ func (s *Server) handleTestDBConnectionPayload(w http.ResponseWriter, r *http.Re
 	}
 	conn, err := net.DialTimeout("tcp", upstreamAddr, 5*time.Second)
 	if err != nil {
-		writeJSON(w, http.StatusOK, map[string]any{
+		s.writeJSON(w, r, http.StatusOK, map[string]any{
 			"ok": false, "error": fmt.Sprintf("connect: %v", err), "latency_ms": time.Since(start).Milliseconds(),
 		})
 		return
@@ -137,12 +137,12 @@ func (s *Server) handleTestDBConnectionPayload(w http.ResponseWriter, r *http.Re
 	err = testDBAuth(conn, inst.Protocol, payload.Username, payload.Password)
 	latencyMs := time.Since(start).Milliseconds()
 	if err != nil {
-		writeJSON(w, http.StatusOK, map[string]any{
+		s.writeJSON(w, r, http.StatusOK, map[string]any{
 			"ok": false, "error": err.Error(), "latency_ms": latencyMs,
 		})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	s.writeJSON(w, r, http.StatusOK, map[string]any{
 		"ok": true, "latency_ms": latencyMs,
 	})
 }

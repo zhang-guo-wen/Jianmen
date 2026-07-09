@@ -14,12 +14,12 @@ import (
 func (s *Server) handleDBGateway(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		w.Header().Set("Allow", http.MethodGet)
-		writeErrorText(w, http.StatusMethodNotAllowed, "method not allowed")
+		s.writeErrorText(w, r, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
 	cfg := s.cfg.DatabaseGateway
 	host, port := parseListenAddr(cfg.ListenAddr)
-	writeJSON(w, http.StatusOK, map[string]any{
+	s.writeJSON(w, r, http.StatusOK, map[string]any{
 		"enabled":     cfg.Enabled,
 		"listen_addr": cfg.ListenAddr,
 		"host":        host,
@@ -70,7 +70,7 @@ func (s *Server) handleDBInstances(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
 		if !s.requirePermission(r, rbac.ActionDBProxyView) {
-			s.forbidden(w)
+			s.forbidden(w, r)
 			return
 		}
 		instances := s.store.DatabaseInstances()
@@ -81,16 +81,16 @@ func (s *Server) handleDBInstances(w http.ResponseWriter, r *http.Request) {
 				strings.Contains(strings.ToLower(v.Group), q) ||
 				strings.Contains(strings.ToLower(v.Remark), q)
 		})
-		writeJSON(w, http.StatusOK, resp)
+		s.writeJSON(w, r, http.StatusOK, resp)
 	case http.MethodPost:
 		if !s.requirePermission(r, rbac.ActionDBProxyCreate) {
-			s.forbidden(w)
+			s.forbidden(w, r)
 			return
 		}
 		s.handleCreateDBInstance(w, r)
 	default:
 		w.Header().Set("Allow", "GET, POST")
-		writeErrorText(w, http.StatusMethodNotAllowed, "method not allowed")
+		s.writeErrorText(w, r, http.StatusMethodNotAllowed, "method not allowed")
 	}
 }
 
@@ -106,21 +106,21 @@ func (s *Server) handleCreateDBInstance(w http.ResponseWriter, r *http.Request) 
 		Remark   string `json:"remark"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-		writeError(w, http.StatusBadRequest, err)
+		s.writeErrorText(w, r, http.StatusBadRequest, err.Error())
 		return
 	}
 	view, err := s.store.AddDatabaseInstance(payload.Name, payload.Protocol, payload.Address, payload.Port, payload.Group, payload.Remark)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err)
+		s.writeErrorText(w, r, http.StatusBadRequest, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusCreated, view)
+	s.writeJSON(w, r, http.StatusCreated, view)
 }
 
 func (s *Server) handleDBInstance(w http.ResponseWriter, r *http.Request) {
 	id, child, ok := dbInstancePathParts(r.URL.Path)
 	if !ok {
-		writeErrorText(w, http.StatusNotFound, "not found")
+		s.writeErrorText(w, r, http.StatusNotFound, "not found")
 		return
 	}
 	if child == "accounts" {
@@ -128,7 +128,7 @@ func (s *Server) handleDBInstance(w http.ResponseWriter, r *http.Request) {
 		case http.MethodGet:
 			accounts, err := s.store.InstanceAccounts(id)
 			if err != nil {
-				writeDBStoreError(w, err)
+				writeDBStoreError(w, r, err)
 				return
 			}
 
@@ -138,19 +138,19 @@ func (s *Server) handleDBInstance(w http.ResponseWriter, r *http.Request) {
 					strings.Contains(strings.ToLower(v.Group), q) ||
 					strings.Contains(strings.ToLower(v.Remark), q)
 			})
-			writeJSON(w, http.StatusOK, resp)
+			s.writeJSON(w, r, http.StatusOK, resp)
 		case http.MethodPost:
 			s.handleCreateDBAccount(w, r, id)
 		default:
 			w.Header().Set("Allow", "GET, POST")
-			writeErrorText(w, http.StatusMethodNotAllowed, "method not allowed")
+			s.writeErrorText(w, r, http.StatusMethodNotAllowed, "method not allowed")
 		}
 		return
 	}
 	if child == "databases" {
 		if r.Method != http.MethodGet {
 			w.Header().Set("Allow", http.MethodGet)
-			writeErrorText(w, http.StatusMethodNotAllowed, "method not allowed")
+			s.writeErrorText(w, r, http.StatusMethodNotAllowed, "method not allowed")
 			return
 		}
 		s.handleDBDatabases(w, r, id)
@@ -159,40 +159,40 @@ func (s *Server) handleDBInstance(w http.ResponseWriter, r *http.Request) {
 	if child == "provision-account" {
 		if r.Method != http.MethodPost {
 			w.Header().Set("Allow", http.MethodPost)
-			writeErrorText(w, http.StatusMethodNotAllowed, "method not allowed")
+			s.writeErrorText(w, r, http.StatusMethodNotAllowed, "method not allowed")
 			return
 		}
 		s.handleDBProvisionAccount(w, r, id)
 		return
 	}
 	if child != "" {
-		writeErrorText(w, http.StatusNotFound, "not found")
+		s.writeErrorText(w, r, http.StatusNotFound, "not found")
 		return
 	}
 
 	switch r.Method {
 	case http.MethodGet:
 		if !s.requirePermission(r, rbac.ActionDBProxyView) {
-			s.forbidden(w)
+			s.forbidden(w, r)
 			return
 		}
 		view, err := s.store.DatabaseInstance(id)
 		if err != nil {
-			writeDBStoreError(w, err)
+			writeDBStoreError(w, r, err)
 			return
 		}
-		writeJSON(w, http.StatusOK, view)
+		s.writeJSON(w, r, http.StatusOK, view)
 	case http.MethodPut:
 		s.handleUpdateDBInstance(w, r, id)
 	case http.MethodDelete:
 		if err := s.store.DeleteDatabaseInstance(id); err != nil {
-			writeDBStoreError(w, err)
+			writeDBStoreError(w, r, err)
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)
 	default:
 		w.Header().Set("Allow", "GET, PUT, DELETE")
-		writeErrorText(w, http.StatusMethodNotAllowed, "method not allowed")
+		s.writeErrorText(w, r, http.StatusMethodNotAllowed, "method not allowed")
 	}
 }
 
@@ -209,15 +209,15 @@ func (s *Server) handleUpdateDBInstance(w http.ResponseWriter, r *http.Request, 
 		Status   string `json:"status"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-		writeError(w, http.StatusBadRequest, err)
+		s.writeErrorText(w, r, http.StatusBadRequest, err.Error())
 		return
 	}
 	view, err := s.store.UpdateDatabaseInstance(id, payload.Name, payload.Protocol, payload.Address, payload.Port, payload.Group, payload.Remark, payload.Status)
 	if err != nil {
-		writeDBStoreError(w, err)
+		writeDBStoreError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, view)
+	s.writeJSON(w, r, http.StatusOK, view)
 }
 
 func (s *Server) handleCreateDBAccount(w http.ResponseWriter, r *http.Request, instanceID string) {
@@ -230,19 +230,19 @@ func (s *Server) handleCreateDBAccount(w http.ResponseWriter, r *http.Request, i
 		ExpiresAt *time.Time `json:"expires_at"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-		writeError(w, http.StatusBadRequest, err)
+		s.writeErrorText(w, r, http.StatusBadRequest, err.Error())
 		return
 	}
 	if strings.TrimSpace(payload.Password) == "" {
-		writeErrorText(w, http.StatusBadRequest, "password is required")
+		s.writeErrorText(w, r, http.StatusBadRequest, "password is required")
 		return
 	}
 	view, err := s.store.AddDatabaseAccount(instanceID, payload.Username, payload.Password, payload.Group, payload.Remark, payload.ExpiresAt)
 	if err != nil {
-		writeDBStoreError(w, err)
+		writeDBStoreError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, view)
+	s.writeJSON(w, r, http.StatusCreated, view)
 }
 
 // -- db accounts (single-account CRUD) --
@@ -250,33 +250,33 @@ func (s *Server) handleCreateDBAccount(w http.ResponseWriter, r *http.Request, i
 func (s *Server) handleDBAccount(w http.ResponseWriter, r *http.Request) {
 	id, ok := dbAccountIDFromPath(r.URL.Path)
 	if !ok {
-		writeErrorText(w, http.StatusNotFound, "not found")
+		s.writeErrorText(w, r, http.StatusNotFound, "not found")
 		return
 	}
 
 	switch r.Method {
 	case http.MethodGet:
 		if !s.requirePermission(r, rbac.ActionDBProxyView) {
-			s.forbidden(w)
+			s.forbidden(w, r)
 			return
 		}
 		view, err := s.store.DatabaseAccount(id)
 		if err != nil {
-			writeDBStoreError(w, err)
+			writeDBStoreError(w, r, err)
 			return
 		}
-		writeJSON(w, http.StatusOK, view)
+		s.writeJSON(w, r, http.StatusOK, view)
 	case http.MethodPut:
 		s.handleUpdateDBAccount(w, r, id)
 	case http.MethodDelete:
 		if err := s.store.DeleteDatabaseAccount(id); err != nil {
-			writeDBStoreError(w, err)
+			writeDBStoreError(w, r, err)
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)
 	default:
 		w.Header().Set("Allow", "GET, PUT, DELETE")
-		writeErrorText(w, http.StatusMethodNotAllowed, "method not allowed")
+		s.writeErrorText(w, r, http.StatusMethodNotAllowed, "method not allowed")
 	}
 }
 
@@ -291,13 +291,13 @@ func (s *Server) handleUpdateDBAccount(w http.ResponseWriter, r *http.Request, i
 		Status    string     `json:"status"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-		writeError(w, http.StatusBadRequest, err)
+		s.writeErrorText(w, r, http.StatusBadRequest, err.Error())
 		return
 	}
 	view, err := s.store.UpdateDatabaseAccount(id, payload.Username, payload.Password, payload.Group, payload.Remark, payload.ExpiresAt, payload.Status)
 	if err != nil {
-		writeDBStoreError(w, err)
+		writeDBStoreError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, view)
+	s.writeJSON(w, r, http.StatusOK, view)
 }

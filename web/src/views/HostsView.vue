@@ -1163,8 +1163,7 @@ async function openEditAccountDialog(target: TargetRecord) {
   accountFormRef.value?.clearValidate()
   try {
     const detail = await apiClient.getTarget(id)
-    const unwrapped = (detail as any).data ?? detail
-    resetAccountForm(recordToAccountForm(unwrapped as TargetRecord))
+    resetAccountForm(recordToAccountForm(detail))
   } catch (err) {
     ElMessage.error(err instanceof Error ? err.message : t('hosts.error.loadDetail'))
   } finally {

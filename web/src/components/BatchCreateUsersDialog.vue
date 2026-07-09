@@ -128,7 +128,7 @@ watch(() => props.visible, async (v) => {
     // 加载角色列表
     try {
       const res = await api.apiClient.getRBACRoles()
-      roles.value = (res as api.PageResponse<api.RBACRoleRecord>).items ?? []
+      roles.value = res.items ?? []
     } catch { /* 非关键 */ }
   }
 })
@@ -232,7 +232,7 @@ async function saveAll() {
         display_name: row.displayName.trim(),
       })
       // 获取新用户 ID
-      const created = (res as any)?.user
+      const created = res?.user
       userId = String(created?.id ?? '')
       row.status = 'success'
     } catch (err) {

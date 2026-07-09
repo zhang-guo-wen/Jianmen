@@ -48,16 +48,16 @@ type EncryptionKeyResponse struct {
 func (s *Server) handleInitStatus(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		w.Header().Set("Allow", http.MethodGet)
-		writeErrorText(w, http.StatusMethodNotAllowed, "method not allowed")
+		s.writeErrorText(w, r, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
 	if s.db == nil {
-		writeErrorText(w, http.StatusServiceUnavailable, "metadata database unavailable")
+		s.writeErrorText(w, r, http.StatusServiceUnavailable, "metadata database unavailable")
 		return
 	}
 	var count int64
 	if err := s.db.Model(&model.User{}).Count(&count).Error; err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to check setup status"})
+		s.writeErrorText(w, r, http.StatusInternalServerError, "failed to check setup status")
 		return
 	}
 	resp := InitStatusResponse{Initialized: count > 0}
@@ -66,7 +66,7 @@ func (s *Server) handleInitStatus(w http.ResponseWriter, r *http.Request) {
 			resp.Admin = admin
 		}
 	}
-	writeJSON(w, http.StatusOK, resp)
+	s.writeJSON(w, r, http.StatusOK, resp)
 }
 
 func (s *Server) initStatusAdminSummary() *InitAdminSummary {
@@ -89,11 +89,11 @@ func (s *Server) initStatusAdminSummary() *InitAdminSummary {
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		w.Header().Set("Allow", "POST")
-		writeErrorText(w, http.StatusMethodNotAllowed, "method not allowed")
+		s.writeErrorText(w, r, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
 	if s.db == nil {
-		writeErrorText(w, http.StatusServiceUnavailable, "metadata database unavailable")
+		s.writeErrorText(w, r, http.StatusServiceUnavailable, "metadata database unavailable")
 		return
 	}
 	defer r.Body.Close()
@@ -106,13 +106,13 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	decoder := json.NewDecoder(r.Body)
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+		s.writeErrorText(w, r, http.StatusBadRequest, "invalid request body")
 		return
 	}
 	username := strings.TrimSpace(req.Username)
 	password := req.Password
 	if username == "" || password == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "username and password are required"})
+		s.writeErrorText(w, r, http.StatusBadRequest, "username and password are required")
 		return
 	}
 	now := time.Now().UTC()
@@ -121,7 +121,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	if retryAfter := limiter.retryAfter(limitKey, now); retryAfter > 0 {
 		setRetryAfter(w, retryAfter)
 		s.logLogin(r, username, "blocked", "rate_limited")
-		writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "too many failed login attempts; try again later"})
+		s.writeErrorText(w, r, http.StatusTooManyRequests, "too many failed login attempts; try again later")
 		return
 	}
 
@@ -130,20 +130,20 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	if err := s.db.Where("username = ? AND status = ?", username, "active").First(&user).Error; err != nil {
 		limiter.recordFailure(limitKey, now)
 		s.logLogin(r, username, "failure", "invalid_credentials")
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid username or password"})
+		s.writeErrorText(w, r, http.StatusUnauthorized, "invalid username or password")
 		return
 	}
 
 	if !verifyPassword(user.PasswordHash, password) {
 		limiter.recordFailure(limitKey, now)
 		s.logLogin(r, username, "failure", "invalid_credentials")
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid username or password"})
+		s.writeErrorText(w, r, http.StatusUnauthorized, "invalid username or password")
 		return
 	}
 
 	token, tokenHashStr, err := newAPIToken()
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to generate token"})
+		s.writeErrorText(w, r, http.StatusInternalServerError, "failed to generate token")
 		return
 	}
 
@@ -151,7 +151,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	user.TokenHash = tokenHashStr
 	user.LastLoginAt = &now
 	if err := s.db.Save(&user).Error; err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to save token"})
+		s.writeErrorText(w, r, http.StatusInternalServerError, "failed to save token")
 		return
 	}
 
@@ -166,18 +166,18 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		Secure:   false,
 		SameSite: http.SameSiteLaxMode,
 	})
-	writeJSON(w, http.StatusOK, map[string]string{"token": token})
+	s.writeJSON(w, r, http.StatusOK, map[string]string{"token": token})
 }
 
 // handleInitSetup 创建超级管理员用户（事务保护 TOCTOU）
 func (s *Server) handleInitSetup(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		w.Header().Set("Allow", http.MethodPost)
-		writeErrorText(w, http.StatusMethodNotAllowed, "method not allowed")
+		s.writeErrorText(w, r, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
 	if s.db == nil {
-		writeErrorText(w, http.StatusServiceUnavailable, "metadata database unavailable")
+		s.writeErrorText(w, r, http.StatusServiceUnavailable, "metadata database unavailable")
 		return
 	}
 	defer r.Body.Close()
@@ -186,7 +186,7 @@ func (s *Server) handleInitSetup(w http.ResponseWriter, r *http.Request) {
 	decoder := json.NewDecoder(r.Body)
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+		s.writeErrorText(w, r, http.StatusBadRequest, "invalid request body")
 		return
 	}
 
@@ -195,23 +195,23 @@ func (s *Server) handleInitSetup(w http.ResponseWriter, r *http.Request) {
 	email := strings.TrimSpace(req.Email)
 
 	if username == "" || password == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "username and password are required"})
+		s.writeErrorText(w, r, http.StatusBadRequest, "username and password are required")
 		return
 	}
 	if len(password) < 8 {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "password must be at least 8 characters"})
+		s.writeErrorText(w, r, http.StatusBadRequest, "password must be at least 8 characters")
 		return
 	}
 
 	passwordHash, err := hashPassword(password)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to hash password"})
+		s.writeErrorText(w, r, http.StatusInternalServerError, "failed to hash password")
 		return
 	}
 
 	token, tokenHashStr, err := newAPIToken()
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to generate token"})
+		s.writeErrorText(w, r, http.StatusInternalServerError, "failed to generate token")
 		return
 	}
 
@@ -245,11 +245,11 @@ func (s *Server) handleInitSetup(w http.ResponseWriter, r *http.Request) {
 		return nil
 	})
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to create user: " + err.Error()})
+		s.writeErrorText(w, r, http.StatusInternalServerError, "failed to create user: " + err.Error())
 		return
 	}
 	if !created {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "already initialized"})
+		s.writeErrorText(w, r, http.StatusForbidden, "already initialized")
 		return
 	}
 
@@ -264,39 +264,39 @@ func (s *Server) handleInitSetup(w http.ResponseWriter, r *http.Request) {
 		os.Remove(filepath.Join(s.dataDir, ".encryption_key_shown"))
 	}
 
-	writeJSON(w, http.StatusCreated, SetupResponse{Token: token})
+	s.writeJSON(w, r, http.StatusCreated, SetupResponse{Token: token})
 }
 
 // handleInitEncryptionKey 返回加密密钥（一次性读取，原子标记防并发）
 func (s *Server) handleInitEncryptionKey(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		w.Header().Set("Allow", http.MethodGet)
-		writeErrorText(w, http.StatusMethodNotAllowed, "method not allowed")
+		s.writeErrorText(w, r, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
 	if s.db == nil {
-		writeErrorText(w, http.StatusServiceUnavailable, "metadata database unavailable")
+		s.writeErrorText(w, r, http.StatusServiceUnavailable, "metadata database unavailable")
 		return
 	}
 	if !s.isSuperAdmin(userIDFromRequest(r)) {
-		s.forbidden(w)
+		s.forbidden(w, r)
 		return
 	}
 	// 检查是否已初始化
 	var count int64
 	if err := s.db.Model(&model.User{}).Count(&count).Error; err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to check setup status"})
+		s.writeErrorText(w, r, http.StatusInternalServerError, "failed to check setup status")
 		return
 	}
 	if count == 0 {
-		writeJSON(w, http.StatusPreconditionFailed, map[string]string{"error": "setup not completed"})
+		s.writeErrorText(w, r, http.StatusPreconditionFailed, "setup not completed")
 		return
 	}
 
 	keyPath := filepath.Join(s.dataDir, "encryption.key")
 	keyData, err := os.ReadFile(keyPath)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to read encryption key"})
+		s.writeErrorText(w, r, http.StatusInternalServerError, "failed to read encryption key")
 		return
 	}
 
@@ -305,19 +305,19 @@ func (s *Server) handleInitEncryptionKey(w http.ResponseWriter, r *http.Request)
 	f, err := os.OpenFile(markerPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
 	if err != nil {
 		if os.IsExist(err) {
-			writeJSON(w, http.StatusForbidden, map[string]string{"error": "encryption key has already been retrieved"})
+			s.writeErrorText(w, r, http.StatusForbidden, "encryption key has already been retrieved")
 			return
 		}
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to mark key as shown"})
+		s.writeErrorText(w, r, http.StatusInternalServerError, "failed to mark key as shown")
 		return
 	}
 	defer f.Close()
 	if _, err := f.Write([]byte("1")); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to mark key as shown"})
+		s.writeErrorText(w, r, http.StatusInternalServerError, "failed to mark key as shown")
 		return
 	}
 
-	writeJSON(w, http.StatusOK, EncryptionKeyResponse{
+	s.writeJSON(w, r, http.StatusOK, EncryptionKeyResponse{
 		Key: hex.EncodeToString(keyData),
 	})
 }

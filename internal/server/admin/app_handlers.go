@@ -13,7 +13,7 @@ func (s *Server) handleApplications(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
 		if !s.requirePermission(r, rbac.ActionAppView) {
-			s.forbidden(w)
+			s.forbidden(w, r)
 			return
 		}
 		apps := s.store.Applications()
@@ -23,16 +23,16 @@ func (s *Server) handleApplications(w http.ResponseWriter, r *http.Request) {
 				strings.Contains(strings.ToLower(v.AppGroup), q) ||
 				strings.Contains(strings.ToLower(v.Remark), q)
 		})
-		writeJSON(w, http.StatusOK, resp)
+		s.writeJSON(w, r, http.StatusOK, resp)
 	case http.MethodPost:
 		if !s.requirePermission(r, rbac.ActionAppCreate) {
-			s.forbidden(w)
+			s.forbidden(w, r)
 			return
 		}
 		s.handleCreateApplication(w, r)
 	default:
 		w.Header().Set("Allow", "GET, POST")
-		writeErrorText(w, http.StatusMethodNotAllowed, "method not allowed")
+		s.writeErrorText(w, r, http.StatusMethodNotAllowed, "method not allowed")
 	}
 }
 
@@ -49,12 +49,12 @@ func (s *Server) handleCreateApplication(w http.ResponseWriter, r *http.Request)
 		Remark     string `json:"remark"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-		writeError(w, http.StatusBadRequest, err)
+		s.writeErrorText(w, r, http.StatusBadRequest, err.Error())
 		return
 	}
 	view, err := s.store.AddApplication(payload.Name, payload.Scheme, payload.Host, payload.Port, payload.ListenPort, payload.Group, payload.Remark)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err)
+		s.writeErrorText(w, r, http.StatusBadRequest, err.Error())
 		return
 	}
 	if s.appProxy != nil && view.Status == "active" {
@@ -70,50 +70,50 @@ func (s *Server) handleCreateApplication(w http.ResponseWriter, r *http.Request)
 			s.logger.Warn("failed to start app proxy", "name", view.Name, "error", err)
 		}
 	}
-	writeJSON(w, http.StatusCreated, view)
+	s.writeJSON(w, r, http.StatusCreated, view)
 }
 
 func (s *Server) handleApplication(w http.ResponseWriter, r *http.Request) {
 	id, child, ok := appPathParts(r.URL.Path)
 	if !ok {
-		writeErrorText(w, http.StatusNotFound, "not found")
+		s.writeErrorText(w, r, http.StatusNotFound, "not found")
 		return
 	}
 	if child != "" {
-		writeErrorText(w, http.StatusNotFound, "not found")
+		s.writeErrorText(w, r, http.StatusNotFound, "not found")
 		return
 	}
 
 	switch r.Method {
 	case http.MethodGet:
 		if !s.requirePermission(r, rbac.ActionAppView) {
-			s.forbidden(w)
+			s.forbidden(w, r)
 			return
 		}
 		view, err := s.store.Application(id)
 		if err != nil {
-			writeApplicationStoreError(w, err)
+			writeApplicationStoreError(w, r, err)
 			return
 		}
-		writeJSON(w, http.StatusOK, view)
+		s.writeJSON(w, r, http.StatusOK, view)
 	case http.MethodPut:
 		if !s.requirePermission(r, rbac.ActionAppUpdate) {
-			s.forbidden(w)
+			s.forbidden(w, r)
 			return
 		}
 		s.handleUpdateApplication(w, r, id)
 	case http.MethodDelete:
 		if !s.requirePermission(r, rbac.ActionAppDelete) {
-			s.forbidden(w)
+			s.forbidden(w, r)
 			return
 		}
 		view, err := s.store.Application(id)
 		if err != nil {
-			writeApplicationStoreError(w, err)
+			writeApplicationStoreError(w, r, err)
 			return
 		}
 		if err := s.store.DeleteApplication(id); err != nil {
-			writeApplicationStoreError(w, err)
+			writeApplicationStoreError(w, r, err)
 			return
 		}
 		if s.appProxy != nil {
@@ -122,7 +122,7 @@ func (s *Server) handleApplication(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 	default:
 		w.Header().Set("Allow", "GET, PUT, DELETE")
-		writeErrorText(w, http.StatusMethodNotAllowed, "method not allowed")
+		s.writeErrorText(w, r, http.StatusMethodNotAllowed, "method not allowed")
 	}
 }
 
@@ -140,12 +140,12 @@ func (s *Server) handleUpdateApplication(w http.ResponseWriter, r *http.Request,
 		Status     string `json:"status"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-		writeError(w, http.StatusBadRequest, err)
+		s.writeErrorText(w, r, http.StatusBadRequest, err.Error())
 		return
 	}
 	view, err := s.store.UpdateApplication(id, payload.Name, payload.Scheme, payload.Host, payload.Port, payload.ListenPort, payload.Group, payload.Remark, payload.Status)
 	if err != nil {
-		writeApplicationStoreError(w, err)
+		writeApplicationStoreError(w, r, err)
 		return
 	}
 	if s.appProxy != nil {
@@ -165,5 +165,5 @@ func (s *Server) handleUpdateApplication(w http.ResponseWriter, r *http.Request,
 			s.appProxy.RemoveProxy(view.ListenPort)
 		}
 	}
-	writeJSON(w, http.StatusOK, view)
+	s.writeJSON(w, r, http.StatusOK, view)
 }

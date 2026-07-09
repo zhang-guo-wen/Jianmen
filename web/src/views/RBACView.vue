@@ -493,7 +493,6 @@ import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'elem
 
 import {
   apiClient,
-  type ApiEnvelope,
   type DBAccountRecord,
   type DatabaseInstanceView,
   type PageResponse,
@@ -983,9 +982,7 @@ async function loadResources() {
     const messages: string[] = [];
 
     if (targetsResult.status === 'fulfilled') {
-      targets.value = Array.isArray(targetsResult.value)
-        ? targetsResult.value
-        : (targetsResult.value as ApiEnvelope<TargetRecord[]>).data ?? [];
+      targets.value = targetsResult.value.items ?? [];
     } else {
       messages.push(
         targetsResult.reason instanceof Error ? targetsResult.reason.message : t('quickConnect.error.loadTargets')
@@ -993,21 +990,17 @@ async function loadResources() {
     }
 
     if (dbInstancesResult.status === 'fulfilled') {
-      dbInstances.value = Array.isArray(dbInstancesResult.value)
-        ? dbInstancesResult.value
-        : (dbInstancesResult.value as ApiEnvelope<DatabaseInstanceView[]>).data ?? [];
+      dbInstances.value = dbInstancesResult.value.items ?? [];
       // Load accounts for all instances
       const accountResults = await Promise.allSettled(
         dbInstances.value.map((inst) =>
-          inst.id ? apiClient.getDBAccounts(inst.id) : Promise.resolve([] as DBAccountRecord[])
+          inst.id ? apiClient.getDBAccounts(inst.id) : Promise.resolve({ items: [] as DBAccountRecord[], total: 0, page: 1, page_size: 999 })
         )
       );
       const allAccounts: DBAccountRecord[] = [];
       for (const result of accountResults) {
         if (result.status === 'fulfilled') {
-          allAccounts.push(
-            ...(Array.isArray(result.value) ? result.value : (result.value as ApiEnvelope<DBAccountRecord[]>).data ?? [])
-          );
+          allAccounts.push(...(result.value.items ?? []));
         }
       }
       dbAccounts.value = allAccounts;
@@ -1282,7 +1275,7 @@ async function submitEffectiveCheck() {
   effectiveResult.value = null;
   try {
     const result = await apiClient.checkRBACEffective(buildEffectivePayload());
-    effectiveResult.value = ((result as ApiEnvelope<RBACEffectiveCheckResult>).data ?? result) as RBACEffectiveCheckResult;
+    effectiveResult.value = result;
   } catch (err) {
     errors.effective = err instanceof Error ? err.message : t('rbac.error.checkEffective');
   } finally {

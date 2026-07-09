@@ -52,31 +52,31 @@ type webTerminalResize struct {
 func (s *Server) handleWebTerminal(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		w.Header().Set("Allow", http.MethodGet)
-		writeErrorText(w, http.StatusMethodNotAllowed, "method not allowed")
+		s.writeErrorText(w, r, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
 	if !s.authenticateWebTerminal(r) {
-		writeErrorText(w, http.StatusUnauthorized, "missing or invalid bearer token")
+		s.writeErrorText(w, r, http.StatusUnauthorized, "missing or invalid bearer token")
 		return
 	}
 
 	opts, err := webTerminalOptionsFromRequest(r)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err)
+		s.writeErrorText(w, r, http.StatusBadRequest, err.Error())
 		return
 	}
 	target, err := s.resolveWebTerminalTarget(r.Context(), opts.TargetID)
 	if err != nil {
-		writeError(w, http.StatusNotFound, err)
+		s.writeErrorText(w, r, http.StatusNotFound, err.Error())
 		return
 	}
 	if target.Disabled {
-		writeErrorText(w, http.StatusForbidden, "target is disabled or unavailable")
+		s.writeErrorText(w, r, http.StatusForbidden, "target is disabled or unavailable")
 		return
 	}
 	targetClient, err := dialWebTerminalTarget(target)
 	if err != nil {
-		writeError(w, http.StatusBadGateway, err)
+		s.writeErrorText(w, r, http.StatusBadGateway, err.Error())
 		return
 	}
 

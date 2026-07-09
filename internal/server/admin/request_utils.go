@@ -6,11 +6,12 @@ import (
 	"strconv"
 	"strings"
 
+	"jianmen/internal/pkg/apiresp"
 	"jianmen/internal/store"
 )
 
-func (s *Server) forbidden(w http.ResponseWriter) {
-	writeErrorText(w, http.StatusForbidden, "forbidden")
+func (s *Server) forbidden(w http.ResponseWriter, r *http.Request) {
+	s.writeErrorText(w, r, http.StatusForbidden, "forbidden")
 }
 
 func splitArtifactPath(path string) (string, string, bool) {
@@ -51,7 +52,6 @@ func paginateHosts(hosts []store.HostView, r *http.Request) pageResponse {
 	})
 }
 
-// paginateSlice 对内存切片做分页和搜索过滤
 func paginateSlice[T any](items []T, r *http.Request, match func(T, string) bool) pageResponse {
 	q := strings.TrimSpace(strings.ToLower(r.URL.Query().Get("q")))
 	if q != "" {
@@ -138,30 +138,30 @@ func dbAccountIDFromPath(path string) (string, bool) {
 	return id, true
 }
 
-func writeHostStoreError(w http.ResponseWriter, err error) {
+func writeHostStoreError(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
 	case errors.Is(err, store.ErrHostNotFound):
-		writeError(w, http.StatusNotFound, err)
+		apiresp.WriteError(w, http.StatusNotFound, apiresp.CodeNotFound, err.Error(), nil, apiresp.RequestID(r.Context()))
 	default:
-		writeError(w, http.StatusBadRequest, err)
+		apiresp.WriteError(w, http.StatusBadRequest, apiresp.CodeValidation, err.Error(), nil, apiresp.RequestID(r.Context()))
 	}
 }
 
-func writeDBStoreError(w http.ResponseWriter, err error) {
+func writeDBStoreError(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
 	case errors.Is(err, store.ErrDBProxyNotFound) || errors.Is(err, store.ErrDBAccountNotFound) || errors.Is(err, store.ErrDBInstanceNotFound):
-		writeError(w, http.StatusNotFound, err)
+		apiresp.WriteError(w, http.StatusNotFound, apiresp.CodeNotFound, err.Error(), nil, apiresp.RequestID(r.Context()))
 	default:
-		writeError(w, http.StatusBadRequest, err)
+		apiresp.WriteError(w, http.StatusBadRequest, apiresp.CodeValidation, err.Error(), nil, apiresp.RequestID(r.Context()))
 	}
 }
 
-func writeTargetStoreError(w http.ResponseWriter, err error) {
+func writeTargetStoreError(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
 	case errors.Is(err, store.ErrTargetNotFound):
-		writeError(w, http.StatusNotFound, err)
+		apiresp.WriteError(w, http.StatusNotFound, apiresp.CodeNotFound, err.Error(), nil, apiresp.RequestID(r.Context()))
 	default:
-		writeError(w, http.StatusBadRequest, err)
+		apiresp.WriteError(w, http.StatusBadRequest, apiresp.CodeValidation, err.Error(), nil, apiresp.RequestID(r.Context()))
 	}
 }
 
@@ -177,11 +177,11 @@ func appPathParts(path string) (id, child string, ok bool) {
 	return "", "", false
 }
 
-func writeApplicationStoreError(w http.ResponseWriter, err error) {
+func writeApplicationStoreError(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
 	case errors.Is(err, store.ErrApplicationNotFound):
-		writeError(w, http.StatusNotFound, err)
+		apiresp.WriteError(w, http.StatusNotFound, apiresp.CodeNotFound, err.Error(), nil, apiresp.RequestID(r.Context()))
 	default:
-		writeError(w, http.StatusBadRequest, err)
+		apiresp.WriteError(w, http.StatusBadRequest, apiresp.CodeValidation, err.Error(), nil, apiresp.RequestID(r.Context()))
 	}
 }

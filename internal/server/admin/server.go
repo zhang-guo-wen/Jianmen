@@ -10,6 +10,7 @@ import (
 	"jianmen/internal/config"
 	"jianmen/internal/frontend"
 	"jianmen/internal/model"
+	"jianmen/internal/pkg/apiresp"
 	"jianmen/internal/rbac"
 	"jianmen/internal/server/appproxy"
 	"jianmen/internal/store"
@@ -117,56 +118,61 @@ func New(cfg *config.Config, store store.Store, logger *slog.Logger, dataDir str
 	return &Server{cfg: cfg, store: store, db: db, rbacChecker: checker, logger: logger, dataDir: dataDir, superAdminIDs: superAdminIDs, loginLimiter: newDefaultLoginLimiter(), appProxy: appProxy}
 }
 
+// muxHandle 注册路由并包裹 requestIDMiddleware
+func (s *Server) muxHandle(mux *http.ServeMux, pattern string, handler http.HandlerFunc) {
+	mux.HandleFunc(pattern, requestIDMiddleware(handler))
+}
+
 func (s *Server) ListenAndServe(ctx context.Context) error {
 	mux := http.NewServeMux()
 	frontendHandler, err := frontend.Handler()
 	if err != nil || s.cfg.Admin.Dev {
-		mux.HandleFunc("/", s.handleIndex)
+		s.muxHandle(mux, "/", s.handleIndex)
 	} else {
 		mux.Handle("/", frontendHandler)
 	}
-	mux.HandleFunc("/api/init/status", s.handleInitStatus)
-	mux.HandleFunc("/api/init/setup", s.handleInitSetup)
-	mux.HandleFunc("/api/init/encryption-key", s.withAuthAndUser(s.handleInitEncryptionKey))
-	mux.HandleFunc("/api/login", s.handleLogin)
-	mux.HandleFunc("/api/health", s.withAuthAndUser(s.handleHealth))
-	mux.HandleFunc("/api/users", s.withAuthAndUser(s.handleUsers))
-	mux.HandleFunc("/api/users/", s.withAuthAndUser(s.handleUser))
-	mux.HandleFunc("/api/hosts", s.withAuthAndUser(s.handleHosts))
-	mux.HandleFunc("/api/hosts/", s.withAuthAndUser(s.handleHost))
-	mux.HandleFunc("/api/targets", s.withAuthAndUser(s.handleTargets))
-	mux.HandleFunc("/api/targets/test-connection", s.withAuthAndUser(s.handleTestConnection))
-	mux.HandleFunc("/api/targets/", s.withAuthAndUser(s.handleTarget))
-	mux.HandleFunc(webTerminalPath, s.handleWebTerminal)
-	mux.HandleFunc("/api/sessions", s.withAuthAndUser(s.handleSessions))
-	mux.HandleFunc("/api/sessions/", s.withAuthAndUser(s.handleSessionArtifact))
-	mux.HandleFunc("/api/user-sessions", s.withAuthAndUser(s.handleUserSessions))
-	mux.HandleFunc("/api/db/gateway", s.withAuthAndUser(s.handleDBGateway))
-	mux.HandleFunc("/api/db/instances", s.withAuthAndUser(s.handleDBInstances))
-	mux.HandleFunc("/api/db/instances/", s.withAuthAndUser(s.handleDBInstance))
-	mux.HandleFunc("/api/db/accounts/test", s.withAuthAndUser(s.handleTestDBConnection))
-	mux.HandleFunc("/api/db/accounts/test/", s.withAuthAndUser(s.handleTestDBConnection))
-	mux.HandleFunc("/api/db/accounts/", s.withAuthAndUser(s.handleDBAccount))
-	mux.HandleFunc("/api/db/connections", s.withAuthAndUser(s.handleDBConnections))
-	mux.HandleFunc("/api/db/connections/", s.withAuthAndUser(s.handleDBConnectionArtifact))
-	mux.HandleFunc("/api/rbac/roles", s.withAuthAndUser(s.handleRBACRoles))
-	mux.HandleFunc("/api/rbac/roles/", s.withAuthAndUser(s.handleRBACRole))
-	mux.HandleFunc("/api/rbac/permissions", s.withAuthAndUser(s.handleRBACPermissions))
-	mux.HandleFunc("/api/rbac/permissions/", s.withAuthAndUser(s.handleRBACPermission))
-	mux.HandleFunc("/api/rbac/user-roles", s.withAuthAndUser(s.handleRBACUserRoles))
-	mux.HandleFunc("/api/rbac/user-roles/", s.withAuthAndUser(s.handleRBACUserRole))
-	mux.HandleFunc("/api/rbac/role-permissions", s.withAuthAndUser(s.handleRBACRolePermissions))
-	mux.HandleFunc("/api/rbac/role-permissions/", s.withAuthAndUser(s.handleRBACRolePermission))
-	mux.HandleFunc("/api/rbac/effective", s.withAuthAndUser(s.handleRBACEffective))
+	s.muxHandle(mux, "/api/init/status", s.handleInitStatus)
+	s.muxHandle(mux, "/api/init/setup", s.handleInitSetup)
+	s.muxHandle(mux, "/api/init/encryption-key", s.withAuthAndUser(s.handleInitEncryptionKey))
+	s.muxHandle(mux, "/api/login", s.handleLogin)
+	s.muxHandle(mux, "/api/health", s.withAuthAndUser(s.handleHealth))
+	s.muxHandle(mux, "/api/users", s.withAuthAndUser(s.handleUsers))
+	s.muxHandle(mux, "/api/users/", s.withAuthAndUser(s.handleUser))
+	s.muxHandle(mux, "/api/hosts", s.withAuthAndUser(s.handleHosts))
+	s.muxHandle(mux, "/api/hosts/", s.withAuthAndUser(s.handleHost))
+	s.muxHandle(mux, "/api/targets", s.withAuthAndUser(s.handleTargets))
+	s.muxHandle(mux, "/api/targets/test-connection", s.withAuthAndUser(s.handleTestConnection))
+	s.muxHandle(mux, "/api/targets/", s.withAuthAndUser(s.handleTarget))
+	s.muxHandle(mux, webTerminalPath, s.handleWebTerminal)
+	s.muxHandle(mux, "/api/sessions", s.withAuthAndUser(s.handleSessions))
+	s.muxHandle(mux, "/api/sessions/", s.withAuthAndUser(s.handleSessionArtifact))
+	s.muxHandle(mux, "/api/user-sessions", s.withAuthAndUser(s.handleUserSessions))
+	s.muxHandle(mux, "/api/db/gateway", s.withAuthAndUser(s.handleDBGateway))
+	s.muxHandle(mux, "/api/db/instances", s.withAuthAndUser(s.handleDBInstances))
+	s.muxHandle(mux, "/api/db/instances/", s.withAuthAndUser(s.handleDBInstance))
+	s.muxHandle(mux, "/api/db/accounts/test", s.withAuthAndUser(s.handleTestDBConnection))
+	s.muxHandle(mux, "/api/db/accounts/test/", s.withAuthAndUser(s.handleTestDBConnection))
+	s.muxHandle(mux, "/api/db/accounts/", s.withAuthAndUser(s.handleDBAccount))
+	s.muxHandle(mux, "/api/db/connections", s.withAuthAndUser(s.handleDBConnections))
+	s.muxHandle(mux, "/api/db/connections/", s.withAuthAndUser(s.handleDBConnectionArtifact))
+	s.muxHandle(mux, "/api/rbac/roles", s.withAuthAndUser(s.handleRBACRoles))
+	s.muxHandle(mux, "/api/rbac/roles/", s.withAuthAndUser(s.handleRBACRole))
+	s.muxHandle(mux, "/api/rbac/permissions", s.withAuthAndUser(s.handleRBACPermissions))
+	s.muxHandle(mux, "/api/rbac/permissions/", s.withAuthAndUser(s.handleRBACPermission))
+	s.muxHandle(mux, "/api/rbac/user-roles", s.withAuthAndUser(s.handleRBACUserRoles))
+	s.muxHandle(mux, "/api/rbac/user-roles/", s.withAuthAndUser(s.handleRBACUserRole))
+	s.muxHandle(mux, "/api/rbac/role-permissions", s.withAuthAndUser(s.handleRBACRolePermissions))
+	s.muxHandle(mux, "/api/rbac/role-permissions/", s.withAuthAndUser(s.handleRBACRolePermission))
+	s.muxHandle(mux, "/api/rbac/effective", s.withAuthAndUser(s.handleRBACEffective))
 	// 新版审计 API（替代旧的 sessions / db/connections）
-	mux.HandleFunc("/api/audit/ssh", s.withAuthAndUser(s.handleAuditSSH))
-	mux.HandleFunc("/api/audit/db", s.withAuthAndUser(s.handleAuditDB))
-	mux.HandleFunc("/api/audit/", s.withAuthAndUser(s.handleAuditArtifact))
-	mux.HandleFunc("/api/me", s.withAuthAndUser(s.handleMe))
-	mux.HandleFunc("/api/me/permissions", s.withAuthAndUser(s.handleMePermissions))
-	mux.HandleFunc("/api/applications", s.withAuthAndUser(s.handleApplications))
-	mux.HandleFunc("/api/applications/", s.withAuthAndUser(s.handleApplication))
-	mux.HandleFunc("/api/me/menus", s.withAuthAndUser(s.handleMeMenus))
+	s.muxHandle(mux, "/api/audit/ssh", s.withAuthAndUser(s.handleAuditSSH))
+	s.muxHandle(mux, "/api/audit/db", s.withAuthAndUser(s.handleAuditDB))
+	s.muxHandle(mux, "/api/audit/", s.withAuthAndUser(s.handleAuditArtifact))
+	s.muxHandle(mux, "/api/me", s.withAuthAndUser(s.handleMe))
+	s.muxHandle(mux, "/api/me/permissions", s.withAuthAndUser(s.handleMePermissions))
+	s.muxHandle(mux, "/api/applications", s.withAuthAndUser(s.handleApplications))
+	s.muxHandle(mux, "/api/applications/", s.withAuthAndUser(s.handleApplication))
+	s.muxHandle(mux, "/api/me/menus", s.withAuthAndUser(s.handleMeMenus))
 
 	server := &http.Server{
 		Addr:              s.cfg.Admin.ListenAddr,
@@ -191,18 +197,18 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 
 func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path != "/" {
-		writeErrorText(w, http.StatusNotFound, "not found")
+		s.writeErrorText(w, r, http.StatusNotFound, "not found")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{
+	s.writeJSON(w, r, http.StatusOK, map[string]string{
 		"status":   "api-only",
 		"message":  "legacy HTML admin console is disabled; use the API or Vue frontend",
 		"frontend": "http://127.0.0.1:47101",
 	})
 }
 
-func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{
+func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
+	s.writeJSON(w, r, http.StatusOK, map[string]any{
 		"status": "ok",
 		"time":   time.Now().UTC().Format(time.RFC3339Nano),
 	})
@@ -211,15 +217,15 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		w.Header().Set("Allow", http.MethodGet)
-		writeErrorText(w, http.StatusMethodNotAllowed, "method not allowed")
+		s.writeErrorText(w, r, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
 	userID := userIDFromRequest(r)
 	if userID == "" {
-		writeErrorText(w, http.StatusNotFound, "user not found")
+		s.writeErrorText(w, r, http.StatusNotFound, "user not found")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{
+	s.writeJSON(w, r, http.StatusOK, map[string]string{
 		"user_id":  userID,
 		"username": usernameFromRequest(r),
 	})
@@ -228,21 +234,21 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleMePermissions(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		w.Header().Set("Allow", http.MethodGet)
-		writeErrorText(w, http.StatusMethodNotAllowed, "method not allowed")
+		s.writeErrorText(w, r, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
 	userID := userIDFromRequest(r)
 	if userID == "" {
-		writeErrorText(w, http.StatusNotFound, "user not found")
+		s.writeErrorText(w, r, http.StatusNotFound, "user not found")
 		return
 	}
 	// 超级管理员拥有全部权限
 	if s.isSuperAdmin(userID) {
-		writeJSON(w, http.StatusOK, map[string]any{"actions": []string{"*"}})
+		s.writeJSON(w, r, http.StatusOK, map[string]any{"actions": []string{"*"}})
 		return
 	}
 	if s.db == nil || s.rbacChecker == nil {
-		writeJSON(w, http.StatusOK, map[string]any{"actions": []string{}})
+		s.writeJSON(w, r, http.StatusOK, map[string]any{"actions": []string{}})
 		return
 	}
 	var rawPerms []model.Permission
@@ -258,7 +264,7 @@ func (s *Server) handleMePermissions(w http.ResponseWriter, r *http.Request) {
 		Where("permissions.action != ''").
 		Group("permissions.action").
 		Find(&rawPerms).Error; err != nil {
-		writeError(w, http.StatusInternalServerError, err)
+		s.writeError(w, r, http.StatusInternalServerError, apiresp.CodeInternal, err.Error(), nil)
 		return
 	}
 	actions := make([]string, 0, len(rawPerms))
@@ -269,18 +275,18 @@ func (s *Server) handleMePermissions(w http.ResponseWriter, r *http.Request) {
 			actions = append(actions, p.Action)
 		}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"actions": actions})
+	s.writeJSON(w, r, http.StatusOK, map[string]any{"actions": actions})
 }
 
 func (s *Server) handleMeMenus(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		w.Header().Set("Allow", http.MethodGet)
-		writeErrorText(w, http.StatusMethodNotAllowed, "method not allowed")
+		s.writeErrorText(w, r, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
 	userID := userIDFromRequest(r)
 	if userID == "" {
-		writeErrorText(w, http.StatusNotFound, "user not found")
+		s.writeErrorText(w, r, http.StatusNotFound, "user not found")
 		return
 	}
 	// 超级管理员看到全部菜单
@@ -289,7 +295,7 @@ func (s *Server) handleMeMenus(w http.ResponseWriter, r *http.Request) {
 		for _, entry := range menuOrder {
 			all = append(all, entry.key)
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"menus": all})
+		s.writeJSON(w, r, http.StatusOK, map[string]any{"menus": all})
 		return
 	}
 	if s.db == nil || s.rbacChecker == nil {
@@ -298,7 +304,7 @@ func (s *Server) handleMeMenus(w http.ResponseWriter, r *http.Request) {
 		for _, entry := range menuOrder {
 			all = append(all, entry.key)
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"menus": all})
+		s.writeJSON(w, r, http.StatusOK, map[string]any{"menus": all})
 		return
 	}
 	var rawPerms []model.Permission
@@ -314,7 +320,7 @@ func (s *Server) handleMeMenus(w http.ResponseWriter, r *http.Request) {
 		Where("permissions.action != ''").
 		Group("permissions.action").
 		Find(&rawPerms).Error; err != nil {
-		writeError(w, http.StatusInternalServerError, err)
+		s.writeError(w, r, http.StatusInternalServerError, apiresp.CodeInternal, err.Error(), nil)
 		return
 	}
 	actionSet := make(map[string]struct{}, len(rawPerms))
@@ -329,7 +335,7 @@ func (s *Server) handleMeMenus(w http.ResponseWriter, r *http.Request) {
 		for _, entry := range menuOrder {
 			all = append(all, entry.key)
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"menus": all})
+		s.writeJSON(w, r, http.StatusOK, map[string]any{"menus": all})
 		return
 	}
 	// Build menu list from actions in deterministic order
@@ -347,5 +353,5 @@ func (s *Server) handleMeMenus(w http.ResponseWriter, r *http.Request) {
 	if _, ok := seen["dashboard"]; !ok {
 		menus = append([]string{"dashboard"}, menus...)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"menus": menus})
+	s.writeJSON(w, r, http.StatusOK, map[string]any{"menus": menus})
 }

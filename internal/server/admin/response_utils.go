@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"jianmen/internal/pkg/apiresp"
 )
 
 func safeReplayDir(root, id string) (string, bool) {
@@ -19,42 +21,42 @@ func safeReplayDir(root, id string) (string, bool) {
 	return filepath.Join(root, id), true
 }
 
-func writeJSONFile(w http.ResponseWriter, path string) {
+func (s *Server) writeJSONFile(w http.ResponseWriter, r *http.Request, path string) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			writeErrorText(w, http.StatusNotFound, "not found")
+			s.writeErrorText(w, r, http.StatusNotFound, "not found")
 			return
 		}
-		writeError(w, http.StatusInternalServerError, err)
+		s.writeError(w, r, http.StatusInternalServerError, apiresp.CodeInternal, err.Error(), nil)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	_, _ = w.Write(raw)
 }
 
-func writeTextFile(w http.ResponseWriter, path, contentType string) {
+func (s *Server) writeTextFile(w http.ResponseWriter, r *http.Request, path, contentType string) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			writeErrorText(w, http.StatusNotFound, "not found")
+			s.writeErrorText(w, r, http.StatusNotFound, "not found")
 			return
 		}
-		writeError(w, http.StatusInternalServerError, err)
+		s.writeError(w, r, http.StatusInternalServerError, apiresp.CodeInternal, err.Error(), nil)
 		return
 	}
 	w.Header().Set("Content-Type", contentType)
 	_, _ = w.Write(raw)
 }
 
-func writeJSONLines(w http.ResponseWriter, path string, limit int) {
+func (s *Server) writeJSONLines(w http.ResponseWriter, r *http.Request, path string, limit int) {
 	file, err := os.Open(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			writeJSON(w, http.StatusOK, []any{})
+			s.writeJSON(w, r, http.StatusOK, []any{})
 			return
 		}
-		writeError(w, http.StatusInternalServerError, err)
+		s.writeError(w, r, http.StatusInternalServerError, apiresp.CodeInternal, err.Error(), nil)
 		return
 	}
 	defer file.Close()
@@ -72,10 +74,10 @@ func writeJSONLines(w http.ResponseWriter, path string, limit int) {
 		}
 	}
 	if err := scanner.Err(); err != nil {
-		writeError(w, http.StatusInternalServerError, err)
+		s.writeError(w, r, http.StatusInternalServerError, apiresp.CodeInternal, err.Error(), nil)
 		return
 	}
-	writeJSON(w, http.StatusOK, items)
+	s.writeJSON(w, r, http.StatusOK, items)
 }
 
 func readJSON(path string, dst any) error {
@@ -86,18 +88,48 @@ func readJSON(path string, dst any) error {
 	return json.Unmarshal(raw, dst)
 }
 
-func writeJSON(w http.ResponseWriter, status int, value any) {
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(value)
+// writeJSON 写统一格式成功响应
+func (s *Server) writeJSON(w http.ResponseWriter, r *http.Request, status int, value any) {
+	reqID := apiresp.RequestID(r.Context())
+	apiresp.Write(w, status, value, reqID)
 }
 
-func writeError(w http.ResponseWriter, status int, err error) {
-	writeErrorText(w, status, err.Error())
+// writeError 写统一格式错误响应
+func (s *Server) writeError(w http.ResponseWriter, r *http.Request, status int, errCode string, message string, details any) {
+	reqID := apiresp.RequestID(r.Context())
+	apiresp.WriteError(w, status, errCode, message, details, reqID)
 }
 
-func writeErrorText(w http.ResponseWriter, status int, message string) {
-	writeJSON(w, status, map[string]string{"error": message})
+// writeErrorText 便捷方法：根据 HTTP 状态码自动映射 errCode
+func (s *Server) writeErrorText(w http.ResponseWriter, r *http.Request, status int, message string) {
+	var errCode string
+	switch status {
+	case http.StatusBadRequest:
+		errCode = apiresp.CodeValidation
+	case http.StatusUnauthorized:
+		errCode = apiresp.CodeUnauthorized
+	case http.StatusForbidden:
+		errCode = apiresp.CodeForbidden
+	case http.StatusNotFound:
+		errCode = apiresp.CodeNotFound
+	case http.StatusMethodNotAllowed:
+		errCode = apiresp.CodeMethodNotAllowed
+	case http.StatusConflict:
+		errCode = apiresp.CodeConflict
+	case http.StatusInternalServerError:
+		errCode = apiresp.CodeInternal
+	case http.StatusServiceUnavailable:
+		errCode = apiresp.CodeServiceUnavailable
+	case http.StatusTooManyRequests:
+		errCode = apiresp.CodeTooManyRequests
+	case http.StatusPreconditionFailed:
+		errCode = apiresp.CodePreconditionFailed
+	case http.StatusBadGateway:
+		errCode = apiresp.CodeBadGateway
+	default:
+		errCode = apiresp.CodeInternal
+	}
+	s.writeError(w, r, status, errCode, message, nil)
 }
 
 func firstNonEmpty(values ...string) string {

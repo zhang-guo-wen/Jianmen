@@ -11,6 +11,7 @@ import (
 	"jianmen/internal/frontend"
 	"jianmen/internal/model"
 	"jianmen/internal/rbac"
+	"jianmen/internal/server/appproxy"
 	"jianmen/internal/store"
 
 	"gorm.io/gorm"
@@ -25,6 +26,7 @@ type Server struct {
 	dataDir       string
 	superAdminIDs map[string]bool // 超级管理员用户 ID 集合，直接拥有全部权限
 	loginLimiter  *loginLimiter
+	appProxy      *appproxy.Server
 }
 
 type sessionListItem struct {
@@ -100,7 +102,7 @@ type updateUserRequest struct {
 	Status      *string `json:"status,omitempty"`
 }
 
-func New(cfg *config.Config, store store.Store, logger *slog.Logger, dataDir string, dbs ...*gorm.DB) *Server {
+func New(cfg *config.Config, store store.Store, logger *slog.Logger, dataDir string, appProxy *appproxy.Server, dbs ...*gorm.DB) *Server {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -112,7 +114,7 @@ func New(cfg *config.Config, store store.Store, logger *slog.Logger, dataDir str
 	}
 	// 收集所有超级管理员用户 ID
 	superAdminIDs := LoadSuperAdminIDs(cfg, dataDir)
-	return &Server{cfg: cfg, store: store, db: db, rbacChecker: checker, logger: logger, dataDir: dataDir, superAdminIDs: superAdminIDs, loginLimiter: newDefaultLoginLimiter()}
+	return &Server{cfg: cfg, store: store, db: db, rbacChecker: checker, logger: logger, dataDir: dataDir, superAdminIDs: superAdminIDs, loginLimiter: newDefaultLoginLimiter(), appProxy: appProxy}
 }
 
 func (s *Server) ListenAndServe(ctx context.Context) error {

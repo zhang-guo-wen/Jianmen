@@ -2,6 +2,7 @@ package admin
 
 import (
 	"encoding/json"
+	"jianmen/internal/model"
 	"jianmen/internal/rbac"
 	"jianmen/internal/store"
 	"net/http"
@@ -56,7 +57,19 @@ func (s *Server) handleCreateApplication(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	// TODO: Task 8 — notify app proxy server to start listening
+	if s.appProxy != nil && view.Status == "active" {
+		if err := s.appProxy.AddProxy(model.Application{
+			ID:             view.ID,
+			Name:           view.Name,
+			ListenPort:     view.ListenPort,
+			InternalScheme: view.InternalScheme,
+			InternalHost:   view.InternalHost,
+			InternalPort:   view.InternalPort,
+			Status:         view.Status,
+		}); err != nil {
+			s.logger.Warn("failed to start app proxy", "name", view.Name, "error", err)
+		}
+	}
 	writeJSON(w, http.StatusCreated, view)
 }
 
@@ -94,11 +107,18 @@ func (s *Server) handleApplication(w http.ResponseWriter, r *http.Request) {
 			s.forbidden(w)
 			return
 		}
+		view, err := s.store.Application(id)
+		if err != nil {
+			writeApplicationStoreError(w, err)
+			return
+		}
 		if err := s.store.DeleteApplication(id); err != nil {
 			writeApplicationStoreError(w, err)
 			return
 		}
-		// TODO: Task 8 — notify app proxy server to stop listening
+		if s.appProxy != nil {
+			s.appProxy.RemoveProxy(view.ListenPort)
+		}
 		w.WriteHeader(http.StatusNoContent)
 	default:
 		w.Header().Set("Allow", "GET, PUT, DELETE")
@@ -128,6 +148,22 @@ func (s *Server) handleUpdateApplication(w http.ResponseWriter, r *http.Request,
 		writeApplicationStoreError(w, err)
 		return
 	}
-	// TODO: Task 8 — notify app proxy server to update listener
+	if s.appProxy != nil {
+		if view.Status == "active" {
+			if err := s.appProxy.UpdateProxy(model.Application{
+				ID:             view.ID,
+				Name:           view.Name,
+				ListenPort:     view.ListenPort,
+				InternalScheme: view.InternalScheme,
+				InternalHost:   view.InternalHost,
+				InternalPort:   view.InternalPort,
+				Status:         view.Status,
+			}); err != nil {
+				s.logger.Warn("failed to update app proxy", "name", view.Name, "error", err)
+			}
+		} else {
+			s.appProxy.RemoveProxy(view.ListenPort)
+		}
+	}
 	writeJSON(w, http.StatusOK, view)
 }

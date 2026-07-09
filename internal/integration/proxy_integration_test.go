@@ -307,6 +307,7 @@ func startDatabaseGateway(t *testing.T, fixture metadataFixture) string {
 		testLogger(),
 		fixture.db,
 		map[string]bool{integrationUserID: true},
+		nil,
 	)
 	ctx, cancel := context.WithCancel(context.Background())
 	errCh := make(chan error, 1)

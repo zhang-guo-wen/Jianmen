@@ -204,6 +204,7 @@ func (s *Server) newWebTerminalRecorder(r *http.Request, target store.TargetConf
 		s.cfg.Recording.RecordInput,
 		s.cfg.Recording.RecordCommands,
 		s.logger,
+		nil,
 	)
 	if err != nil {
 		s.logger.Warn("failed to initialize web terminal recorder", "target", target.ID, "error", err)

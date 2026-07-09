@@ -28,6 +28,11 @@ const (
 	ActionRBACManage        = "rbac:manage"
 	ActionSessionView       = "session:view"
 	ActionDashboardView     = "dashboard:view"
+	ActionAppCreate         = "application:create"
+	ActionAppUpdate         = "application:update"
+	ActionAppDelete         = "application:delete"
+	ActionAppView           = "application:view"
+	ActionAppConnect        = "app:connect"
 )
 
 func DatabaseAccountResourceID(uniqueName string) string {

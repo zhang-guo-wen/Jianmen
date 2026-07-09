@@ -75,6 +75,7 @@ var menuOrder = []struct {
 	{"users", "rbac:manage"},
 	{"roles", "rbac:manage"},
 	{"audit", "audit:view"},
+	{"applications", "application:view"},
 	{"quickConnect", "session:connect"},
 }
 
@@ -157,6 +158,8 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 	mux.HandleFunc("/api/rbac/effective", s.withAuthAndUser(s.handleRBACEffective))
 	mux.HandleFunc("/api/me", s.withAuthAndUser(s.handleMe))
 	mux.HandleFunc("/api/me/permissions", s.withAuthAndUser(s.handleMePermissions))
+	mux.HandleFunc("/api/applications", s.withAuthAndUser(s.handleApplications))
+	mux.HandleFunc("/api/applications/", s.withAuthAndUser(s.handleApplication))
 	mux.HandleFunc("/api/me/menus", s.withAuthAndUser(s.handleMeMenus))
 
 	server := &http.Server{

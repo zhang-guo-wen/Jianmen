@@ -745,8 +745,7 @@ async function testSavedAccountConnection(row: api.DBAccountRecord) {
   savedCredentialTestResult.value = null
   try {
     const result = await api.apiClient.testDBConnection(String(id))
-    const data = (result as any).data ?? result
-    savedCredentialTestResult.value = { ok: data.ok, latency_ms: data.latency_ms, error: data.ok ? undefined : (data.error || '连接失败') }
+    savedCredentialTestResult.value = { ok: result.ok, latency_ms: result.latency_ms, error: result.ok ? undefined : (result.error || '连接失败') }
   } catch (err) {
     savedCredentialTestResult.value = { ok: false, error: err instanceof Error ? err.message : '连接失败' }
   } finally {
@@ -776,8 +775,7 @@ async function testAccountFormConnection() {
       username: accountForm.username.trim(),
       password: accountForm.password,
     })
-    const data = (result as any).data ?? result
-    accountFormTestResult.value = { ok: data.ok, latency_ms: data.latency_ms, error: data.ok ? undefined : (data.error || '连接失败') }
+    accountFormTestResult.value = { ok: result.ok, latency_ms: result.latency_ms, error: result.ok ? undefined : (result.error || '连接失败') }
   } catch (err) {
     accountFormTestResult.value = { ok: false, error: err instanceof Error ? err.message : '连接失败' }
   } finally {
@@ -879,8 +877,7 @@ async function testDBConnectionForTarget() {
     const id = connectTarget.value.id || connectTarget.value.resource_id || ''
     if (!id) return
     const result = await api.apiClient.testDBConnection(String(id))
-    const data = (result as any).data ?? result
-    connectionTestResult.value = { ok: data.ok, latency_ms: data.latency_ms, error: data.ok ? undefined : (data.error || '连接失败') }
+    connectionTestResult.value = { ok: result.ok, latency_ms: result.latency_ms, error: result.ok ? undefined : (result.error || '连接失败') }
   } catch (err) {
     connectionTestResult.value = { ok: false, error: err instanceof Error ? err.message : '连接失败' }
   } finally {
@@ -924,7 +921,7 @@ async function openAutoProvision() {
   const instId = selectedInstance.value.id!
   try {
     const res = await api.apiClient.getDBAccounts(instId, { page_size: 200 })
-    const items = (res as any).items || (Array.isArray(res) ? res : [])
+    const items = res.items ?? []
     adminAccounts.value = items.filter((a: any) => a.status === 'active')
   } catch {
     adminAccounts.value = []
@@ -947,7 +944,7 @@ async function goProvisionStep2() {
   loadingDatabases.value = true
   try {
     const res = await api.apiClient.listDBDatabases(selectedInstance.value.id!, provision.adminAccountId)
-    const dbs: string[] = (res as any).databases || []
+    const dbs: string[] = res.databases ?? []
     dbGrants.value = dbs.map(db => ({ database: db, privilege: '' as const }))
     provisionStep.value = 2
   } catch (e: any) {
@@ -975,7 +972,7 @@ async function doProvision() {
       host: provision.host || '%',
       grants,
     })
-    provisionResult.value = (res as any)
+    provisionResult.value = res
     provisionStep.value = 3
   } catch (e: any) {
     provisionError.value = e.message || String(e)

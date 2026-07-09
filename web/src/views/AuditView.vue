@@ -300,7 +300,6 @@ import { ElMessage } from 'element-plus';
 import DataTableCard from '@/components/DataTableCard.vue';
 import {
   apiClient,
-  type ApiEnvelope,
   type DBConnectionMetaRecord,
   type DBConnectionRecord,
   type DBQueryEventRecord,
@@ -476,14 +475,6 @@ const replayTerminalMessage = computed(() => {
 });
 
 // ── Helpers ──
-
-function unwrapArray<T>(payload: ApiEnvelope<T[]> | T[]): T[] {
-  return Array.isArray(payload) ? payload : payload.data ?? [];
-}
-
-function unwrapObject<T>(payload: ApiEnvelope<T> | T): T {
-  return (payload as ApiEnvelope<T>).data ?? (payload as T);
-}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -721,17 +712,17 @@ async function loadSessionArtifact(session: SessionRecord, kind: Exclude<DetailK
 
   try {
     if (kind === 'meta') {
-      setDetail(`${t('audit.scope.ssh')} ${id}`, kind, unwrapObject(await apiClient.getSessionMeta(id)));
+      setDetail(`${t('audit.scope.ssh')} ${id}`, kind, await apiClient.getSessionMeta(id));
     } else if (kind === 'replay') {
       setDetail(`${t('audit.action.replay')} ${id}`, kind, parseReplayCast(await apiClient.getSessionReplay(id)));
       await nextTick();
       playReplay();
     } else if (kind === 'commands') {
-      setDetail(`${t('audit.action.commands')} ${id}`, kind, unwrapArray(await apiClient.getSessionCommands(id)));
+      setDetail(`${t('audit.action.commands')} ${id}`, kind, await apiClient.getSessionCommands(id));
     } else if (kind === 'files') {
-      setDetail(`${t('audit.action.files')} ${id}`, kind, unwrapArray(await apiClient.getSessionFiles(id)));
+      setDetail(`${t('audit.action.files')} ${id}`, kind, await apiClient.getSessionFiles(id));
     } else {
-      setDetail(`${t('audit.action.summary')} ${id}`, kind, unwrapObject(await apiClient.getSessionFileSummary(id)));
+      setDetail(`${t('audit.action.summary')} ${id}`, kind, await apiClient.getSessionFileSummary(id));
     }
   } catch (err) {
     detailError.value = err instanceof Error ? err.message : t('audit.error.loadArtifact');
@@ -1029,9 +1020,9 @@ async function loadDBArtifact(connection: DBConnectionRecord, kind: 'meta' | 'qu
 
   try {
     if (kind === 'meta') {
-      setDetail(`${t('audit.scope.db')} ${id}`, kind, unwrapObject(await apiClient.getDBConnectionMeta(id)));
+      setDetail(`${t('audit.scope.db')} ${id}`, kind, await apiClient.getDBConnectionMeta(id));
     } else {
-      setDetail(`${t('audit.action.queries')} ${id}`, kind, unwrapArray(await apiClient.getDBConnectionQueries(id)));
+      setDetail(`${t('audit.action.queries')} ${id}`, kind, await apiClient.getDBConnectionQueries(id));
     }
   } catch (err) {
     detailError.value = err instanceof Error ? err.message : t('audit.error.loadArtifact');

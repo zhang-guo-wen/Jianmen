@@ -85,7 +85,7 @@ async function submit() {
   loginError.value = '';
   try {
     const resp = await apiClient.login(form.username.trim(), form.password);
-    const token = (resp as any).token ?? (resp as any).data?.token;
+    const token = resp.token;
     if (!token) {
       loginError.value = '登录失败：未获取到凭证';
       return;

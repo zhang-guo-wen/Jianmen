@@ -285,14 +285,14 @@ async function removeRole(userRole: api.RBACUserRoleRecord) {
 async function loadUserRoles() {
   try {
     const res = await api.apiClient.getRBACUserRoles();
-    userRoles.value = (res as api.PageResponse<api.RBACUserRoleRecord>).items ?? [];
+    userRoles.value = res.items ?? [];
   } catch { /* non-critical */ }
 }
 
 async function loadRoles() {
   try {
     const res = await api.apiClient.getRBACRoles();
-    roles.value = (res as api.PageResponse<api.RBACRoleRecord>).items ?? [];
+    roles.value = res.items ?? [];
   } catch { /* non-critical */ }
 }
 

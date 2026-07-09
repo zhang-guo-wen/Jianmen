@@ -171,6 +171,14 @@ func (s *DBStore) ListAuditDBQueries(sessionID string, opts PageOpts) ([]model.A
 	return queries, total, nil
 }
 
+func (s *DBStore) ListAuditDBQueryEvents(sessionID string) ([]model.AuditDBQuery, error) {
+	var queries []model.AuditDBQuery
+	if err := s.db.Where("audit_session_id = ?", sessionID).Order("timestamp ASC").Find(&queries).Error; err != nil {
+		return nil, err
+	}
+	return queries, nil
+}
+
 // -- user session lookup --
 
 func (s *DBStore) FindUserSessionByCompactUsername(username string) (*model.UserSession, error) {

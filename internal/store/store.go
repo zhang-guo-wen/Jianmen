@@ -256,6 +256,7 @@ type Store interface {
 
 	CreateAuditDBQuery(query *model.AuditDBQuery) error
 	ListAuditDBQueries(sessionID string, opts PageOpts) ([]model.AuditDBQuery, int64, error)
+	ListAuditDBQueryEvents(sessionID string) ([]model.AuditDBQuery, error)
 
 	FindUserSessionByCompactUsername(username string) (*model.UserSession, error)
 }

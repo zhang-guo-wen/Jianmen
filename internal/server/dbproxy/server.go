@@ -193,7 +193,10 @@ func (g *Gateway) handleConn(ctx context.Context, client net.Conn) {
 		g.audit.CreateAuditSession(auditSession)
 	}
 
-	recorder, _ := g.newRecorder(conn, auditSession.ID)
+	recorder, recErr := g.newRecorder(conn, auditSession.ID)
+	if recErr != nil {
+		g.logger.Warn("db gateway recorder init failed, audit db queries may be incomplete", "error", recErr)
+	}
 	if recorder != nil {
 		defer func() {
 			recorder.Close()
@@ -1053,10 +1056,6 @@ type connectionRecorder struct {
 
 func (g *Gateway) newRecorder(conn *gatewayConn, auditSessionID string) (*connectionRecorder, error) {
 	id := model.NewID()
-	dir := filepath.Join(g.replayDir, "db", id)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return nil, err
-	}
 	startedAt := time.Now().UTC()
 	// 查找操作者用户名
 	authUser := conn.userID
@@ -1066,6 +1065,10 @@ func (g *Gateway) newRecorder(conn *gatewayConn, auditSessionID string) (*connec
 			authUser = u.Username
 		}
 	}
+
+	// 文件录制是可选的：即使文件创建失败，DB 审计仍然需要工作。
+	var file *os.File
+	var metaPath string
 	meta := DBConnectionMeta{
 		ID:           id,
 		Name:         conn.accountName,
@@ -1077,23 +1080,33 @@ func (g *Gateway) newRecorder(conn *gatewayConn, auditSessionID string) (*connec
 		InstanceName: conn.instanceName,
 		AuthUser:     authUser,
 	}
-	file, err := os.OpenFile(filepath.Join(dir, "queries.jsonl"), os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
-	if err != nil {
-		return nil, err
+
+	dir := filepath.Join(g.replayDir, "db", id)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		g.logger.Warn("db gateway cannot create replay directory, queries file will be skipped", "dir", dir, "error", err)
+	} else {
+		metaPath = filepath.Join(dir, "meta.json")
+		f, err := os.OpenFile(filepath.Join(dir, "queries.jsonl"), os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
+		if err != nil {
+			g.logger.Warn("db gateway cannot create queries file, queries file will be skipped", "path", filepath.Join(dir, "queries.jsonl"), "error", err)
+		} else {
+			file = f
+		}
 	}
+
 	recorder := &connectionRecorder{
 		id:             id,
 		protocol:       conn.protocol,
-		metaPath:       filepath.Join(dir, "meta.json"),
+		metaPath:       metaPath,
 		meta:           meta,
 		file:           file,
 		startedAt:      startedAt,
 		audit:          g.audit,
 		auditSessionID: auditSessionID,
 	}
+	// 元数据写入失败不影响审计，仅记录日志
 	if err := recorder.writeMetaLocked(); err != nil {
-		file.Close()
-		return nil, err
+		g.logger.Warn("db gateway cannot write meta file", "path", metaPath, "error", err)
 	}
 	return recorder, nil
 }
@@ -1171,13 +1184,16 @@ func (r *connectionRecorder) writeFinishLocked(record queryRecord, finish queryF
 		Rows:         finish.Rows,
 	})
 	if r.audit != nil && r.auditSessionID != "" {
-		r.audit.CreateAuditDBQuery(&model.AuditDBQuery{
+		if err := r.audit.CreateAuditDBQuery(&model.AuditDBQuery{
 			AuditSessionID: r.auditSessionID,
 			Timestamp:      completedAt,
 			SQLText:        record.sql,
 			QueryKind:      record.queryKind,
 			DurationMs:     completedAt.Sub(record.startedAt).Milliseconds(),
-		})
+		}); err != nil {
+			// 审计记录写入失败不应中断业务，但需要记录日志便于排查
+			slog.Warn("db gateway failed to write audit db query", "session_id", r.auditSessionID, "error", err)
+		}
 	}
 }
 

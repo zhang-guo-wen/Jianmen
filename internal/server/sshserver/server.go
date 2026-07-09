@@ -6,8 +6,10 @@ import (
 	"io"
 	"log/slog"
 	"net"
+	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"golang.org/x/crypto/ssh"
 	"gorm.io/gorm"
@@ -27,6 +29,31 @@ type Server struct {
 	rbacChecker   *rbac.Checker
 	logger        *slog.Logger
 	superAdminIDs map[string]bool
+}
+
+// auditStore adapts store.Store to recording.AuditSink.
+type auditStore struct {
+	store     store.Store
+	sessionID string
+}
+
+func (a *auditStore) WriteCommand(sessionID string, timestamp time.Time, command string) error {
+	return a.store.CreateAuditSSHCommand(&model.AuditSSHCommand{
+		AuditSessionID: sessionID,
+		Timestamp:      timestamp,
+		Command:        command,
+	})
+}
+
+func (a *auditStore) WriteFileEvent(sessionID string, timestamp time.Time, action, path string, size int64, result string) error {
+	return a.store.CreateAuditSFTPEvent(&model.AuditSFTPEvent{
+		AuditSessionID: sessionID,
+		Timestamp:      timestamp,
+		Action:         action,
+		Path:           path,
+		Size:           size,
+		Result:         result,
+	})
 }
 
 func New(cfg *config.Config, s store.Store, logger *slog.Logger, dataDir string, dbs ...*gorm.DB) *Server {
@@ -167,6 +194,30 @@ func (s *Server) handleConn(ctx context.Context, rawConn net.Conn, serverConfig 
 
 	session := model.NewSession(user, target.ID, target.Name, remoteIP(rawConn.RemoteAddr()))
 	session.AccountUsername = target.Username
+
+	// Look up UserSession from compact username to link the audit record.
+	userSession, _ := s.store.FindUserSessionByCompactUsername(serverConn.User())
+
+	auditSession := model.AuditSession{
+		UserID:     user.ID,
+		Username:   user.Username,
+		Protocol:   "ssh",
+		TargetName: target.Name,
+		ClientIP:   session.ClientIP,
+		StartedAt:  time.Now().UTC(),
+		State:      "started",
+		ReplayDir:  filepath.Join(s.cfg.ReplayDir, "ssh", session.ID),
+	}
+	if userSession != nil {
+		auditSession.UserSessionID = userSession.ID
+	}
+	auditSession.BeforeCreate(nil)
+	s.store.CreateAuditSession(&auditSession)
+
+	defer func() {
+		s.store.EndAuditSession(auditSession.ID)
+	}()
+
 	var recorder *recording.SessionRecorder
 	if s.cfg.Recording.Enabled {
 		recorder, err = recording.NewSessionRecorder(
@@ -175,6 +226,7 @@ func (s *Server) handleConn(ctx context.Context, rawConn net.Conn, serverConfig 
 			s.cfg.Recording.RecordInput,
 			s.cfg.Recording.RecordCommands,
 			s.logger,
+			&auditStore{store: s.store, sessionID: session.ID},
 		)
 		if err != nil {
 			s.logger.Warn("failed to initialize recorder", "session", session.ID, "error", err)

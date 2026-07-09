@@ -493,7 +493,6 @@ import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'elem
 
 import {
   apiClient,
-  type ApiEnvelope,
   type DBAccountRecord,
   type DatabaseInstanceView,
   type PageResponse,
@@ -985,7 +984,7 @@ async function loadResources() {
     if (targetsResult.status === 'fulfilled') {
       targets.value = Array.isArray(targetsResult.value)
         ? targetsResult.value
-        : (targetsResult.value as ApiEnvelope<TargetRecord[]>).data ?? [];
+        : (targetsResult.value as { data?: TargetRecord[] }).data ?? [];
     } else {
       messages.push(
         targetsResult.reason instanceof Error ? targetsResult.reason.message : t('quickConnect.error.loadTargets')
@@ -995,7 +994,7 @@ async function loadResources() {
     if (dbInstancesResult.status === 'fulfilled') {
       dbInstances.value = Array.isArray(dbInstancesResult.value)
         ? dbInstancesResult.value
-        : (dbInstancesResult.value as ApiEnvelope<DatabaseInstanceView[]>).data ?? [];
+        : (dbInstancesResult.value as { data?: DatabaseInstanceView[] }).data ?? [];
       // Load accounts for all instances
       const accountResults = await Promise.allSettled(
         dbInstances.value.map((inst) =>
@@ -1006,7 +1005,7 @@ async function loadResources() {
       for (const result of accountResults) {
         if (result.status === 'fulfilled') {
           allAccounts.push(
-            ...(Array.isArray(result.value) ? result.value : (result.value as ApiEnvelope<DBAccountRecord[]>).data ?? [])
+            ...(Array.isArray(result.value) ? result.value : (result.value as { data?: DBAccountRecord[] }).data ?? [])
           );
         }
       }
@@ -1282,7 +1281,7 @@ async function submitEffectiveCheck() {
   effectiveResult.value = null;
   try {
     const result = await apiClient.checkRBACEffective(buildEffectivePayload());
-    effectiveResult.value = ((result as ApiEnvelope<RBACEffectiveCheckResult>).data ?? result) as RBACEffectiveCheckResult;
+    effectiveResult.value = ((result as { data?: RBACEffectiveCheckResult }).data ?? result) as RBACEffectiveCheckResult;
   } catch (err) {
     errors.effective = err instanceof Error ? err.message : t('rbac.error.checkEffective');
   } finally {

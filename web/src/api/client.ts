@@ -1,10 +1,43 @@
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? '').replace(/\/$/, '');
 const TOKEN_KEY = 'jianmen_token';
 
-export interface ApiEnvelope<T> {
-  data?: T;
-  error?: string;
-  message?: string;
+// ── 统一响应格式 ──────────────────────────────────────────────────
+
+export interface ApiEnvelope<T = unknown> {
+  code: number;        // 0 = 成功
+  data: T;
+  message: string;
+  request_id: string;
+  timestamp: string;
+}
+
+export interface ApiErrorBody {
+  code: string;
+  message: string;
+  details?: unknown;
+}
+
+export interface ApiErrorEnvelope {
+  code: number;        // HTTP 状态码
+  error: ApiErrorBody;
+  request_id: string;
+  timestamp: string;
+}
+
+export class ApiError extends Error {
+  code: string;
+  statusCode: number;
+  requestId: string;
+  details?: unknown;
+
+  constructor(statusCode: number, errorCode: string, message: string, requestId: string, details?: unknown) {
+    super(message);
+    this.name = 'ApiError';
+    this.statusCode = statusCode;
+    this.code = errorCode;
+    this.requestId = requestId;
+    this.details = details;
+  }
 }
 
 export interface PageResponse<T> {
@@ -472,31 +505,58 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     headers
   });
 
-  const contentType = response.headers.get('content-type') ?? '';
-  const payload =
-    response.status === 204
-      ? undefined
-      : contentType.includes('application/json')
-        ? await response.json()
-        : await response.text();
-
-  if (!response.ok) {
-    // 401 表示 token 过期或无效，清除 token 并跳转登录
-    if (response.status === 401) {
-      clearToken();
-      if (window.location.pathname !== '/login') {
-        window.location.href = '/login';
-      }
-    }
-    const message =
-      typeof payload === 'object' && payload !== null && 'error' in payload
-        ? String(payload.error)
-        : typeof payload === 'object' && payload !== null && 'message' in payload
-        ? String(payload.message)
-        : response.statusText;
-    throw new Error(message || `Request failed with ${response.status}`);
+  // 204 No Content
+  if (response.status === 204) {
+    return undefined as T;
   }
 
+  const contentType = response.headers.get('content-type') ?? '';
+  if (!contentType.includes('application/json')) {
+    // 非 JSON 响应（如 asciicast replay 文件）
+    if (!response.ok) {
+      throw new ApiError(response.status, 'UNKNOWN', response.statusText, '');
+    }
+    return (await response.text()) as unknown as T;
+  }
+
+  const payload = await response.json();
+
+  // 401 表示 token 过期或无效，清除 token 并跳转登录
+  if (response.status === 401) {
+    clearToken();
+    if (window.location.pathname !== '/login') {
+      window.location.href = '/login';
+    }
+    const errBody = (payload?.error as ApiErrorBody | undefined);
+    throw new ApiError(
+      response.status,
+      errBody?.code || 'UNAUTHORIZED',
+      errBody?.message || 'Unauthorized',
+      payload?.request_id || ''
+    );
+  }
+
+  if (!response.ok) {
+    // 新格式：{code, error: {code, message, details}, request_id, timestamp}
+    if (payload && typeof payload === 'object' && 'error' in payload) {
+      const errBody = payload.error as ApiErrorBody;
+      throw new ApiError(
+        response.status,
+        errBody.code || 'UNKNOWN',
+        errBody.message || response.statusText,
+        payload.request_id || '',
+        errBody.details
+      );
+    }
+    throw new ApiError(response.status, 'UNKNOWN', response.statusText, '');
+  }
+
+  // 成功：从统一响应格式 {code: 0, data: ..., message: "ok", request_id: "...", timestamp: "..."} 中提取 data
+  if (payload && typeof payload === 'object' && 'code' in payload && payload.code === 0) {
+    return payload.data as T;
+  }
+
+  // 兼容旧格式：直接用原始 payload（逐步淘汰）
   return payload as T;
 }
 
@@ -510,17 +570,17 @@ export const apiClient = {
   getUsers: (params?: { page?: number; page_size?: number; q?: string }) =>
     request<PageResponse<UserRecord>>(`/api/users${buildQS(params as Record<string, string | number | undefined>)}`),
   createUser: (payload: UserPayload) =>
-    request<ApiEnvelope<{ user: UserRecord; token: string }> | { user: UserRecord; token: string }>('/api/users', {
+    request<{ user: UserRecord; token: string }>('/api/users', {
       method: 'POST',
       body: JSON.stringify(payload),
     }),
   updateUser: (id: string | number, payload: UserPayload) =>
-    request<ApiEnvelope<UserRecord> | UserRecord>(`/api/users/${encodeURIComponent(String(id))}`, {
+    request<UserRecord>(`/api/users/${encodeURIComponent(String(id))}`, {
       method: 'PUT',
       body: JSON.stringify(payload),
     }),
   deleteUser: (id: string | number) =>
-    request<ApiEnvelope<unknown> | unknown>(`/api/users/${encodeURIComponent(String(id))}`, {
+    request<void>(`/api/users/${encodeURIComponent(String(id))}`, {
       method: 'DELETE',
     }),
 
@@ -534,17 +594,17 @@ export const apiClient = {
   getHosts: (params?: { page?: number; page_size?: number; q?: string }) =>
     request<PageResponse<HostView>>(`/api/hosts${buildQS(params as Record<string, string | number | undefined>)}`),
   createHost: (payload: HostPayload) =>
-    request<ApiEnvelope<HostView> | HostView>('/api/hosts', {
+    request<HostView>('/api/hosts', {
       method: 'POST',
       body: JSON.stringify(payload)
     }),
   updateHost: (id: string | number, payload: HostPayload) =>
-    request<ApiEnvelope<HostView> | HostView>(`/api/hosts/${encodeURIComponent(String(id))}`, {
+    request<HostView>(`/api/hosts/${encodeURIComponent(String(id))}`, {
       method: 'PUT',
       body: JSON.stringify(payload)
     }),
   deleteHost: (id: string | number) =>
-    request<ApiEnvelope<unknown> | unknown>(`/api/hosts/${encodeURIComponent(String(id))}`, {
+    request<void>(`/api/hosts/${encodeURIComponent(String(id))}`, {
       method: 'DELETE'
     }),
 
@@ -556,19 +616,19 @@ export const apiClient = {
   getTargets: (params?: { page?: number; page_size?: number; q?: string }) =>
     request<PageResponse<TargetRecord>>(`/api/targets${buildQS(params as Record<string, string | number | undefined>)}`),
   getTarget: (id: string | number) =>
-    request<ApiEnvelope<TargetRecord> | TargetRecord>(`/api/targets/${encodeURIComponent(String(id))}`),
+    request<TargetRecord>(`/api/targets/${encodeURIComponent(String(id))}`),
   createTarget: (payload: TargetPayload) =>
-    request<ApiEnvelope<TargetRecord> | TargetRecord>('/api/targets', {
+    request<TargetRecord>('/api/targets', {
       method: 'POST',
       body: JSON.stringify(payload)
     }),
   updateTarget: (id: string | number, payload: TargetPayload) =>
-    request<ApiEnvelope<TargetRecord> | TargetRecord>(`/api/targets/${encodeURIComponent(String(id))}`, {
+    request<TargetRecord>(`/api/targets/${encodeURIComponent(String(id))}`, {
       method: 'PUT',
       body: JSON.stringify(payload)
     }),
   deleteTarget: (id: string | number) =>
-    request<ApiEnvelope<unknown> | unknown>(`/api/targets/${encodeURIComponent(String(id))}`, {
+    request<void>(`/api/targets/${encodeURIComponent(String(id))}`, {
       method: 'DELETE'
     }),
   testTargetConnection: (payload: TargetPayload) =>
@@ -586,19 +646,19 @@ export const apiClient = {
   getSessions: (params?: { page?: number; page_size?: number; q?: string }) =>
     request<PageResponse<SessionRecord>>(`/api/audit/ssh${buildQS(params as Record<string, string | number | undefined>)}`),
   getSessionMeta: (id: string | number) =>
-    request<ApiEnvelope<SessionMetaRecord> | SessionMetaRecord>(
+    request<SessionMetaRecord>(
       `/api/audit/ssh/${encodeURIComponent(String(id))}`
     ),
   getSessionCommands: (id: string | number) =>
-    request<ApiEnvelope<SessionCommandRecord[]> | SessionCommandRecord[]>(
+    request<SessionCommandRecord[]>(
       `/api/audit/ssh/${encodeURIComponent(String(id))}/commands`
     ),
   getSessionFiles: (id: string | number) =>
-    request<ApiEnvelope<SessionFileEventRecord[]> | SessionFileEventRecord[]>(
+    request<SessionFileEventRecord[]>(
       `/api/audit/ssh/${encodeURIComponent(String(id))}/files`
     ),
   getSessionFileSummary: (id: string | number) =>
-    request<ApiEnvelope<Record<string, unknown>> | Record<string, unknown>>(
+    request<Record<string, unknown>>(
       `/api/audit/ssh/${encodeURIComponent(String(id))}/files`
     ),
   getSessionReplay: (id: string | number) =>
@@ -610,17 +670,17 @@ export const apiClient = {
   getDBInstances: (params?: { page?: number; page_size?: number; q?: string }) =>
     request<PageResponse<DatabaseInstanceView>>(`/api/db/instances${buildQS(params as Record<string, string | number | undefined>)}`),
   createDBInstance: (payload: DBInstancePayload) =>
-    request<ApiEnvelope<DatabaseInstanceView> | DatabaseInstanceView>('/api/db/instances', {
+    request<DatabaseInstanceView>('/api/db/instances', {
       method: 'POST',
       body: JSON.stringify(payload)
     }),
   updateDBInstance: (id: string, payload: DBInstancePayload & { status?: string }) =>
-    request<ApiEnvelope<DatabaseInstanceView> | DatabaseInstanceView>(`/api/db/instances/${encodeURIComponent(id)}`, {
+    request<DatabaseInstanceView>(`/api/db/instances/${encodeURIComponent(id)}`, {
       method: 'PUT',
       body: JSON.stringify(payload)
     }),
   deleteDBInstance: (id: string) =>
-    request<ApiEnvelope<unknown> | unknown>(`/api/db/instances/${encodeURIComponent(id)}`, {
+    request<void>(`/api/db/instances/${encodeURIComponent(id)}`, {
       method: 'DELETE'
     }),
 
@@ -628,7 +688,7 @@ export const apiClient = {
   getDBAccounts: (instanceID: string, params?: { page?: number; page_size?: number; q?: string }) =>
     request<PageResponse<DBAccountRecord>>(`/api/db/instances/${encodeURIComponent(instanceID)}/accounts${buildQS(params as Record<string, string | number | undefined>)}`),
   createDBAccount: (instanceID: string, payload: DBAccountPayload) =>
-    request<ApiEnvelope<DBAccountRecord> | DBAccountRecord>(
+    request<DBAccountRecord>(
       `/api/db/instances/${encodeURIComponent(instanceID)}/accounts`,
       {
         method: 'POST',
@@ -636,23 +696,23 @@ export const apiClient = {
       }
     ),
   getDBAccount: (id: string) =>
-    request<ApiEnvelope<DBAccountRecord> | DBAccountRecord>(`/api/db/accounts/${encodeURIComponent(id)}`),
+    request<DBAccountRecord>(`/api/db/accounts/${encodeURIComponent(id)}`),
   updateDBAccount: (id: string, payload: DBAccountUpdatePayload) =>
-    request<ApiEnvelope<DBAccountRecord> | DBAccountRecord>(`/api/db/accounts/${encodeURIComponent(id)}`, {
+    request<DBAccountRecord>(`/api/db/accounts/${encodeURIComponent(id)}`, {
       method: 'PUT',
       body: JSON.stringify(payload)
     }),
   deleteDBAccount: (id: string) =>
-    request<ApiEnvelope<unknown> | unknown>(`/api/db/accounts/${encodeURIComponent(id)}`, {
+    request<void>(`/api/db/accounts/${encodeURIComponent(id)}`, {
       method: 'DELETE'
     }),
   testDBConnection: (id: string) =>
-    request<ApiEnvelope<{ ok: boolean; error?: string; latency_ms: number }>>(
+    request<{ ok: boolean; error?: string; latency_ms: number }>(
       `/api/db/accounts/test/${encodeURIComponent(id)}`,
       { method: 'POST' }
     ),
   testDBConnectionPayload: (payload: DBAccountTestPayload) =>
-    request<ApiEnvelope<{ ok: boolean; error?: string; latency_ms: number }>>('/api/db/accounts/test', {
+    request<{ ok: boolean; error?: string; latency_ms: number }>('/api/db/accounts/test', {
       method: 'POST',
       body: JSON.stringify(payload)
     }),
@@ -683,11 +743,11 @@ export const apiClient = {
   getDBConnections: (params?: { page?: number; page_size?: number; q?: string }) =>
     request<PageResponse<DBConnectionRecord>>(`/api/audit/db${buildQS(params as Record<string, string | number | undefined>)}`),
   getDBConnectionMeta: (id: string | number) =>
-    request<ApiEnvelope<DBConnectionMetaRecord> | DBConnectionMetaRecord>(
+    request<DBConnectionMetaRecord>(
       `/api/audit/db/${encodeURIComponent(String(id))}`
     ),
   getDBConnectionQueries: (id: string | number) =>
-    request<ApiEnvelope<DBQueryEventRecord[]> | DBQueryEventRecord[]>(
+    request<DBQueryEventRecord[]>(
       `/api/audit/db/${encodeURIComponent(String(id))}/queries`
     ),
 
@@ -695,17 +755,17 @@ export const apiClient = {
   getApplications: (params?: { page?: number; page_size?: number; q?: string }) =>
     request<PageResponse<ApplicationView>>(`/api/applications${buildQS(params as Record<string, string | number | undefined>)}`),
   createApplication: (payload: ApplicationPayload) =>
-    request<ApiEnvelope<ApplicationView> | ApplicationView>('/api/applications', {
+    request<ApplicationView>('/api/applications', {
       method: 'POST',
       body: JSON.stringify(payload)
     }),
   updateApplication: (id: string, payload: ApplicationPayload & { status?: string }) =>
-    request<ApiEnvelope<ApplicationView> | ApplicationView>(`/api/applications/${encodeURIComponent(id)}`, {
+    request<ApplicationView>(`/api/applications/${encodeURIComponent(id)}`, {
       method: 'PUT',
       body: JSON.stringify(payload)
     }),
   deleteApplication: (id: string) =>
-    request<ApiEnvelope<unknown> | unknown>(`/api/applications/${encodeURIComponent(id)}`, {
+    request<void>(`/api/applications/${encodeURIComponent(id)}`, {
       method: 'DELETE'
     }),
 
@@ -713,29 +773,29 @@ export const apiClient = {
   getRBACRoles: (params?: { page?: number; page_size?: number; q?: string }) =>
     request<PageResponse<RBACRoleRecord>>(`/api/rbac/roles${buildQS(params as Record<string, string | number | undefined>)}`),
   createRBACRole: (payload: RBACRolePayload) =>
-    request<ApiEnvelope<RBACRoleRecord> | RBACRoleRecord>('/api/rbac/roles', {
+    request<RBACRoleRecord>('/api/rbac/roles', {
       method: 'POST',
       body: JSON.stringify(payload)
     }),
   updateRBACRole: (id: string | number, payload: RBACRolePayload) =>
-    request<ApiEnvelope<RBACRoleRecord> | RBACRoleRecord>(`/api/rbac/roles/${encodeURIComponent(String(id))}`, {
+    request<RBACRoleRecord>(`/api/rbac/roles/${encodeURIComponent(String(id))}`, {
       method: 'PUT',
       body: JSON.stringify(payload)
     }),
   deleteRBACRole: (id: string | number) =>
-    request<ApiEnvelope<unknown> | unknown>(`/api/rbac/roles/${encodeURIComponent(String(id))}`, {
+    request<void>(`/api/rbac/roles/${encodeURIComponent(String(id))}`, {
       method: 'DELETE'
     }),
 
   getRBACPermissions: (params?: { page?: number; page_size?: number; q?: string }) =>
     request<PageResponse<RBACPermissionRecord>>(`/api/rbac/permissions${buildQS(params as Record<string, string | number | undefined>)}`),
   createRBACPermission: (payload: RBACPermissionPayload) =>
-    request<ApiEnvelope<RBACPermissionRecord> | RBACPermissionRecord>('/api/rbac/permissions', {
+    request<RBACPermissionRecord>('/api/rbac/permissions', {
       method: 'POST',
       body: JSON.stringify(payload)
     }),
   deleteRBACPermission: (id: string | number) =>
-    request<ApiEnvelope<unknown> | unknown>(
+    request<void>(
       `/api/rbac/permissions/${encodeURIComponent(String(id))}`,
       {
         method: 'DELETE'
@@ -745,19 +805,19 @@ export const apiClient = {
   getRBACUserRoles: (params?: { page?: number; page_size?: number; q?: string }) =>
     request<PageResponse<RBACUserRoleRecord>>(`/api/rbac/user-roles${buildQS(params as Record<string, string | number | undefined>)}`),
   createRBACUserRole: (payload: RBACUserRolePayload) =>
-    request<ApiEnvelope<RBACUserRoleRecord> | RBACUserRoleRecord>('/api/rbac/user-roles', {
+    request<RBACUserRoleRecord>('/api/rbac/user-roles', {
       method: 'POST',
       body: JSON.stringify(payload)
     }),
   deleteRBACUserRole: (id: string | number) =>
-    request<ApiEnvelope<unknown> | unknown>(`/api/rbac/user-roles/${encodeURIComponent(String(id))}`, {
+    request<void>(`/api/rbac/user-roles/${encodeURIComponent(String(id))}`, {
       method: 'DELETE'
     }),
 
   getRBACRolePermissions: (params?: { page?: number; page_size?: number; q?: string }) =>
     request<PageResponse<RBACRolePermissionRecord>>(`/api/rbac/role-permissions${buildQS(params as Record<string, string | number | undefined>)}`),
   createRBACRolePermission: (payload: RBACRolePermissionPayload) =>
-    request<ApiEnvelope<RBACRolePermissionRecord> | RBACRolePermissionRecord>(
+    request<RBACRolePermissionRecord>(
       '/api/rbac/role-permissions',
       {
         method: 'POST',
@@ -765,7 +825,7 @@ export const apiClient = {
       }
     ),
   deleteRBACRolePermission: (id: string | number) =>
-    request<ApiEnvelope<unknown> | unknown>(
+    request<void>(
       `/api/rbac/role-permissions/${encodeURIComponent(String(id))}`,
       {
         method: 'DELETE'
@@ -782,7 +842,7 @@ export const apiClient = {
     if (payload.resource_id) {
       params.set('resource_id', payload.resource_id);
     }
-    return request<ApiEnvelope<RBACEffectiveCheckResult> | RBACEffectiveCheckResult>(
+    return request<RBACEffectiveCheckResult>(
       `/api/rbac/effective?${params.toString()}`
     );
   },

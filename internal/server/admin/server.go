@@ -155,6 +155,10 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 	mux.HandleFunc("/api/rbac/role-permissions", s.withAuthAndUser(s.handleRBACRolePermissions))
 	mux.HandleFunc("/api/rbac/role-permissions/", s.withAuthAndUser(s.handleRBACRolePermission))
 	mux.HandleFunc("/api/rbac/effective", s.withAuthAndUser(s.handleRBACEffective))
+	// 新版审计 API（替代旧的 sessions / db/connections）
+	mux.HandleFunc("/api/audit/ssh", s.withAuthAndUser(s.handleAuditSSH))
+	mux.HandleFunc("/api/audit/db", s.withAuthAndUser(s.handleAuditDB))
+	mux.HandleFunc("/api/audit/", s.withAuthAndUser(s.handleAuditArtifact))
 	mux.HandleFunc("/api/me", s.withAuthAndUser(s.handleMe))
 	mux.HandleFunc("/api/me/permissions", s.withAuthAndUser(s.handleMePermissions))
 	mux.HandleFunc("/api/me/menus", s.withAuthAndUser(s.handleMeMenus))

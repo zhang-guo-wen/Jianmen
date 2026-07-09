@@ -82,9 +82,9 @@ func readMySQLAuthResult(conn net.Conn, hs *dbproxy.MySQLHandshake, password str
 		conn.Close()
 		return nil, fmt.Errorf("auth denied: %s", dbproxy.ParseMySQLErrorMessage(buf[4:4+payloadLen]))
 	}
-	// AuthSwitchRequest (0xfe)
-	if len(buf) >= 4+payloadLen && buf[4] == 0xfe {
-		payload := buf[5 : 4+payloadLen]
+	// AuthSwitchRequest (0xfe) — payload[1:] contains plugin name + auth data
+	if len(authPkt.payload) > 1 && authPkt.payload[0] == 0xfe {
+		payload := authPkt.payload[1:]
 		nullPos := 0
 		for nullPos < len(payload) && payload[nullPos] != 0 {
 			nullPos++

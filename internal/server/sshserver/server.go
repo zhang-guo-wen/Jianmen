@@ -39,7 +39,7 @@ type auditStore struct {
 
 func (a *auditStore) WriteCommand(sessionID string, timestamp time.Time, command string) error {
 	return a.store.CreateAuditSSHCommand(&model.AuditSSHCommand{
-		AuditSessionID: sessionID,
+		AuditSessionID: a.sessionID,
 		Timestamp:      timestamp,
 		Command:        command,
 	})
@@ -47,7 +47,7 @@ func (a *auditStore) WriteCommand(sessionID string, timestamp time.Time, command
 
 func (a *auditStore) WriteFileEvent(sessionID string, timestamp time.Time, action, path string, size int64, result string) error {
 	return a.store.CreateAuditSFTPEvent(&model.AuditSFTPEvent{
-		AuditSessionID: sessionID,
+		AuditSessionID: a.sessionID,
 		Timestamp:      timestamp,
 		Action:         action,
 		Path:           path,

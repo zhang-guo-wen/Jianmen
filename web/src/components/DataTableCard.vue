@@ -1,21 +1,23 @@
 <template>
-  <div class="page-card">
+  <div class="page-card data-table-card">
     <div class="page-card__toolbar" v-if="showSearch || $slots['toolbar-extra']">
-      <el-input
-        v-if="showSearch"
-        v-model="searchText"
-        :placeholder="searchPlaceholder"
-        clearable
-        style="width: 280px"
-        @keyup.enter="emit('search', searchText)"
-        @clear="emit('search', '')"
-      >
-        <template #prefix>
-          <el-icon><Search /></el-icon>
-        </template>
-      </el-input>
-      <div style="flex: 1" v-if="showSearch"></div>
-      <slot name="toolbar-extra"></slot>
+      <div class="page-card__search" v-if="showSearch">
+        <el-input
+          v-model="searchText"
+          :placeholder="searchPlaceholder"
+          clearable
+          @keyup.enter="emit('search', searchText)"
+          @clear="emit('search', '')"
+        >
+          <template #prefix>
+            <el-icon><Search /></el-icon>
+          </template>
+        </el-input>
+      </div>
+      <div class="page-card__spacer" v-if="showSearch"></div>
+      <div class="page-card__actions">
+        <slot name="toolbar-extra"></slot>
+      </div>
     </div>
     <div class="page-card__body">
       <el-table
@@ -23,7 +25,6 @@
         :row-key="rowKey"
         v-loading="loading"
         size="small"
-        stripe
         highlight-current-row
         @row-click="(row: any) => emit('row-click', row)"
         style="width: 100%"

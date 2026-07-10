@@ -2,20 +2,20 @@
   <el-config-provider :locale="elementLocale">
     <router-view v-if="isLoginRoute" />
     <el-container v-else class="app-shell">
-      <el-aside class="app-sidebar" width="236px">
+      <el-aside class="app-sidebar" width="260px">
         <div class="brand">
-          <div class="brand-mark">GB</div>
-          <div>
+          <div class="brand-mark">JM</div>
+          <div class="brand-copy">
             <strong>Jianmen</strong>
             <span>{{ t('app.subtitle') }}</span>
           </div>
         </div>
+        <div class="sidebar-section-label">Workspace</div>
         <el-menu
           :default-active="activePath"
-          background-color="#101828"
           class="nav-menu"
           router
-          text-color="#d0d5dd"
+          text-color="#cbd5e1"
           active-text-color="#ffffff"
         >
           <el-menu-item v-for="item in navItems" :key="item.path" :index="item.path">
@@ -25,9 +25,13 @@
         </el-menu>
       </el-aside>
 
-      <el-container>
+      <el-container class="app-content">
         <el-header class="app-header">
-          <div>
+          <div class="page-heading">
+            <div class="breadcrumb-pill">
+              <el-icon><Location /></el-icon>
+              <span>{{ t('app.subtitle') }}</span>
+            </div>
             <h1>{{ pageTitle }}</h1>
             <p>{{ pageDescription }}</p>
           </div>
@@ -45,10 +49,22 @@
                 :value="option.value"
               />
             </el-select>
-            <el-button type="primary" plain @click="logout">{{ t('common.logout') }}</el-button>
+            <el-button class="logout-button" type="primary" plain @click="logout">
+              <el-icon><SwitchButton /></el-icon>
+              {{ t('common.logout') }}
+            </el-button>
           </div>
         </el-header>
         <el-main class="app-main">
+          <div class="overview-strip" aria-label="Jianmen capability overview">
+            <div class="overview-card" v-for="item in overviewItems" :key="item.label">
+              <el-icon><component :is="item.icon" /></el-icon>
+              <div>
+                <strong>{{ item.value }}</strong>
+                <span>{{ item.label }}</span>
+              </div>
+            </div>
+          </div>
           <div v-if="permission.error" class="permission-banner" role="status">
             <span>{{ permission.error }}</span>
             <el-button link type="primary" :loading="permission.loading" @click="retryPermissions">重试</el-button>
@@ -62,10 +78,14 @@
 
 <script setup lang="ts">
 import {
+  Connection,
   DataAnalysis,
   DocumentChecked,
   Link,
+  Location,
+  Lock,
   Monitor,
+  SwitchButton,
   UserFilled
 } from '@element-plus/icons-vue';
 import { computed, onMounted, watchEffect, type Component } from 'vue';
@@ -91,9 +111,16 @@ const ALL_NAV_ITEMS: Array<{ path: string; icon: Component; labelKey: Translatio
   { path: '/databases', icon: DataAnalysis, labelKey: 'nav.databases', menuKey: 'databases' },
   { path: '/applications', icon: Monitor, labelKey: 'nav.applications', menuKey: 'applications' },
   { path: '/users', icon: UserFilled, labelKey: 'nav.users', menuKey: 'users' },
-  { path: '/roles', icon: UserFilled, labelKey: 'nav.roles', menuKey: 'roles' },
+  { path: '/roles', icon: Lock, labelKey: 'nav.roles', menuKey: 'roles' },
   { path: '/audit', icon: DocumentChecked, labelKey: 'nav.audit', menuKey: 'audit' },
   { path: '/quick-connect', icon: Link, labelKey: 'nav.quickConnect', menuKey: 'quickConnect' },
+];
+
+const overviewItems = [
+  { label: '统一资产入口', value: 'Assets', icon: Monitor },
+  { label: '细粒度权限', value: 'RBAC', icon: Lock },
+  { label: '审计可追溯', value: 'Audit', icon: DocumentChecked },
+  { label: '快速安全连接', value: 'Proxy', icon: Connection },
 ];
 
 const permission = usePermissionStore();
@@ -130,37 +157,3 @@ async function retryPermissions() {
   await permission.fetch({ force: true });
 }
 </script>
-
-<style scoped>
-.app-header-actions {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.language-select {
-  width: 128px;
-}
-
-.permission-banner {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 12px;
-  padding: 10px 12px;
-  border: 1px solid #fed7aa;
-  border-radius: 8px;
-  background: #fff7ed;
-  color: #9a3412;
-  font-size: 13px;
-  line-height: 1.4;
-}
-
-@media (max-width: 780px) {
-  .app-header-actions {
-    width: 100%;
-    justify-content: flex-end;
-  }
-}
-</style>

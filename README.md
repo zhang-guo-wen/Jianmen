@@ -6,7 +6,7 @@
 
 ## 功能特性
 
-- **SSH Shell 代理** — 密码、公钥、keyboard-interactive 认证；支持 PTY、窗口 resize、signal 转发
+- **SSH Shell 代理** — 密码、公钥、keyboard-interactive 认证；支持 PTY、窗口 Resize、Signal 转发
 - **SFTP 文件代理** — 语义层代理，兼容 Xftp、WinSCP、FileZilla 等主流客户端
 - **数据库代理** — MySQL/PostgreSQL TCP 透明转发 + 明文 SQL 观察
 - **终端录像** — asciinema v2 兼容格式，支持回放
@@ -14,7 +14,6 @@
 - **文件审计** — SFTP 文件操作记录，按 handle 统计读写字节
 - **Web 管理界面** — Vue 3 + Element Plus，主机/账号/会话/审计管理
 - **REST API** — Bearer token 认证，支持 CLI 和第三方集成
-- **bastionctl** — 命令行管理客户端
 - **RBAC** — 角色/权限/资源绑定模型
 
 ## 快速开始
@@ -34,7 +33,6 @@ cd jianmen
 
 # 编译
 go build -o bin/bastion-core.exe ./cmd/bastion-core
-go build -o bin/bastionctl.exe ./cmd/bastionctl
 
 # 准备配置
 cp config.example.json config.local.json
@@ -106,28 +104,17 @@ SSH / SFTP / DB 客户端
 ```
 jianmen/
 ├── cmd/
-│   ├── bastion-core/    # 主服务入口
-│   └── bastionctl/      # CLI 管理客户端
+│   └── bastion-core/    # 主服务入口
 ├── internal/
 │   ├── server/          # SSH/Admin/DB 服务
 │   ├── proxy/           # SSH/SFTP/DB 协议代理
-│   ├── audit/           # 审计事件与录像
-│   ├── access/          # 认证与授权
+│   ├── recording/       # 终端录像与命令记录
+│   ├── rbac/            # 授权检查与资源定义
 │   ├── store/           # 数据存储接口与实现
 │   └── model/           # 数据模型
 ├── web/                 # Vue 3 前端
-├── docs/                # 设计文档与开发指南
 └── config.example.json  # 配置示例
 ```
-
-## 文档
-
-- [docs/current-progress.md](docs/current-progress.md) — 当前实现进展
-- [docs/phase2-roadmap.md](docs/phase2-roadmap.md) — 后续开发计划
-- [docs/development.md](docs/development.md) — 本地开发与调试
-- [docs/design.md](docs/design.md) — 架构设计
-- [docs/competitive-analysis.md](docs/competitive-analysis.md) — 竞品调研
-- [docs/compatibility-matrix.md](docs/compatibility-matrix.md) — 客户端兼容性验证
 
 ## 许可证
 

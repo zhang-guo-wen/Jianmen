@@ -33,11 +33,25 @@
         </template>
       </el-table-column>
       <el-table-column prop="remark" label="备注" min-width="120" show-overflow-tooltip />
-      <el-table-column label="操作" width="220">
+      <el-table-column label="操作" width="210" align="right" fixed="right">
         <template #default="{ row }">
-          <el-button link type="primary" size="small" @click="editInstance(row)">编辑</el-button>
-          <el-button link type="primary" size="small" @click="openCreateAccountForInstance(row)">新建账号</el-button>
-          <el-button link type="danger" size="small" @click="deleteInstance(row)">删除</el-button>
+          <div class="table-actions">
+            <el-button link type="success" size="small" @click="handleDBConnect(row)">连接</el-button>
+            <el-button link type="primary" size="small" @click="editInstance(row)">编辑</el-button>
+            <el-dropdown trigger="click" teleported>
+              <el-button link type="primary" size="small"
+                >更多<el-icon class="el-icon--right"><ArrowDown /></el-icon></el-button
+              >
+              <template #dropdown>
+                <el-dropdown-menu>
+                  <el-dropdown-item @click="handleDBAuditLog(row)">审计日志</el-dropdown-item>
+                  <el-dropdown-item @click="handleDBSessions(row)">在线会话</el-dropdown-item>
+                  <el-dropdown-item @click="handleDBPermissions(row)">权限管理</el-dropdown-item>
+                  <el-dropdown-item class="danger-dropdown-item" @click="deleteInstance(row)">删除</el-dropdown-item>
+                </el-dropdown-menu>
+              </template>
+            </el-dropdown>
+          </div>
         </template>
       </el-table-column>
     </DataTableCard>
@@ -379,9 +393,9 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, watch, computed, onMounted, nextTick } from 'vue'
+import { ref, reactive, watch, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Loading } from '@element-plus/icons-vue'
+import { ArrowDown, Loading } from '@element-plus/icons-vue'
 import DataTableCard from '@/components/DataTableCard.vue'
 import FormDialog from '@/components/FormDialog.vue'
 import StatusSwitch from '@/components/StatusSwitch.vue'
@@ -602,11 +616,6 @@ function onInstanceSearch(keyword: string) {
   loadInstances()
 }
 
-async function openCreateAccountForInstance(inst: api.DatabaseInstanceView) {
-  showAccounts(inst)
-  await nextTick()
-  openCreateAccount()
-}
 
 function openCreateInstance() {
   editingInstance.value = null
@@ -878,6 +887,38 @@ async function deleteAccount(account: api.DBAccountRecord) {
   loadInstances()
 }
 
+// ── Instance-level connect ──
+/** 从实例直接打开连接，单账号时直接弹连接窗，多账号时打开账号管理 */
+async function handleDBConnect(inst: api.DatabaseInstanceView) {
+  selectedInstance.value = inst;
+  accountPage.value = 1;
+  await loadSelectedInstanceAccounts();
+  const count = accounts.value.length;
+  if (count === 0) {
+    ElMessage.warning('该实例下无可用账号，请先新增账号');
+  } else if (count === 1) {
+    openConnectDialog(accounts.value[0]);
+  } else {
+    accountsDialogVisible.value = true;
+    ElMessage.info('请从账号列表中选择要连接的账号');
+  }
+}
+
+/** 更多操作 - 审计日志（占位） */
+function handleDBAuditLog(_inst: api.DatabaseInstanceView) {
+  ElMessage.info('审计日志功能开发中');
+}
+
+/** 更多操作 - 在线会话（占位） */
+function handleDBSessions(_inst: api.DatabaseInstanceView) {
+  ElMessage.info('在线会话功能开发中');
+}
+
+/** 更多操作 - 权限管理（占位） */
+function handleDBPermissions(_inst: api.DatabaseInstanceView) {
+  ElMessage.info('权限管理功能开发中');
+}
+
 // ── Connect dialog ──
 async function openConnectDialog(acc: api.DBAccountRecord) {
   connectTarget.value = acc
@@ -1118,6 +1159,21 @@ function closeProvisionAndRefresh() {
 .account-mgmt-btn {
   font-size: 12px;
   padding: 0 2px;
+}
+
+/* Table actions */
+.table-actions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  width: 100%;
+}
+.table-actions :deep(.el-button) {
+  margin-left: 0;
+}
+.danger-dropdown-item {
+  color: var(--el-color-danger);
 }
 
 @media (max-width: 720px) {

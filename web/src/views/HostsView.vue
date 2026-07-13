@@ -43,14 +43,14 @@
         <el-table-column label="备注" min-width="120" show-overflow-tooltip>
           <template #default="{ row }">{{ row.remark || "-" }}</template>
         </el-table-column>
-        <el-table-column label="操作" width="190" align="right" fixed="right">
+        <el-table-column label="操作" width="210" align="right" fixed="right">
           <template #default="{ row }">
             <div class="table-actions">
               <el-button
                 link
                 type="success"
                 size="small"
-                @click="openConnectionForHost(row)"
+                @click="handleHostConnect(row)"
                 >连接</el-button
               >
               <el-button
@@ -60,17 +60,19 @@
                 @click="openEditHostDialog(row)"
                 >编辑</el-button
               >
-              <el-dropdown trigger="click">
-                <el-button link type="primary" size="small">更多</el-button>
+              <el-dropdown trigger="click" teleported>
+                <el-button link type="primary" size="small"
+                  >更多<el-icon class="el-icon--right"><ArrowDown /></el-icon></el-button
+                >
                 <template #dropdown>
                   <el-dropdown-menu>
-                    <el-dropdown-item @click="openCreateAccountForHost(row)"
-                      >新增账号</el-dropdown-item
-                    >
+                    <el-dropdown-item @click="handleHostAuditLog(row)">审计日志</el-dropdown-item>
+                    <el-dropdown-item @click="handleHostSessions(row)">在线会话</el-dropdown-item>
+                    <el-dropdown-item @click="handleHostPermissions(row)">权限管理</el-dropdown-item>
                     <el-dropdown-item
                       class="danger-dropdown-item"
                       @click="confirmDeleteHost(row)"
-                      >删除主机</el-dropdown-item
+                      >删除</el-dropdown-item
                     >
                   </el-dropdown-menu>
                 </template>
@@ -617,7 +619,7 @@ import {
   type FormInstance,
   type FormRules,
 } from "element-plus";
-import { Loading } from "@element-plus/icons-vue";
+import { ArrowDown, Loading } from "@element-plus/icons-vue";
 import DataTableCard from "@/components/DataTableCard.vue";
 import FormDialog from "@/components/FormDialog.vue";
 import StatusSwitch from "@/components/StatusSwitch.vue";
@@ -1407,11 +1409,6 @@ function setSelectedHost(host: HostView) {
   selectedHost.value = host;
 }
 
-async function openCreateAccountForHost(host: HostView) {
-  await openAccountsDialog(host);
-  openCreateAccountDialog(host);
-}
-
 async function openCreateHostDialog() {
   editingHostId.value = null;
   hostNameTouched.value = false;
@@ -1724,13 +1721,35 @@ async function testHostConnection() {
   }
 }
 
-/** 从主机直接打开连接（主机级别连接需要选择一个账号） */
-async function openConnectionForHost(host: HostView) {
+/** 从主机直接打开连接，单账号时直接弹连接窗，多账号时打开账号管理 */
+async function handleHostConnect(host: HostView) {
   setSelectedHost(host);
   accountPage.value = 1;
-  accountsDialogVisible.value = true;
   await loadSelectedHostAccounts();
-  ElMessage.info('请从账号列表点击"连接"按钮选择要连接的账号');
+  const count = accounts.value.length;
+  if (count === 0) {
+    ElMessage.warning('该主机下无可用账号，请先新增账号');
+  } else if (count === 1) {
+    openConnectionDialog(accounts.value[0]);
+  } else {
+    accountsDialogVisible.value = true;
+    ElMessage.info('请从账号列表中选择要连接的账号');
+  }
+}
+
+/** 更多操作 - 审计日志（占位） */
+function handleHostAuditLog(_host: HostView) {
+  ElMessage.info('审计日志功能开发中');
+}
+
+/** 更多操作 - 在线会话（占位） */
+function handleHostSessions(_host: HostView) {
+  ElMessage.info('在线会话功能开发中');
+}
+
+/** 更多操作 - 权限管理（占位） */
+function handleHostPermissions(_host: HostView) {
+  ElMessage.info('权限管理功能开发中');
 }
 
 async function copyText(value: string) {

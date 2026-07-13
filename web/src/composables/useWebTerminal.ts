@@ -146,7 +146,7 @@ export function useWebTerminal(opts: UseWebTerminalOptions): UseWebTerminalRetur
       resizeObserver.observe(container);
     } catch (e) {
       // If status wasn't already set by onclose, mark as error
-      if (status.value !== 'error') {
+      if ((status.value as TerminalStatus) !== 'error') {
         error.value = e instanceof Error ? e.message : '连接失败';
         status.value = 'error';
       }

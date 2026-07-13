@@ -90,6 +90,10 @@ var migrations = []Migration{
 			if err := tx.AutoMigrate(&model.ResourceGroup{}); err != nil {
 				return err
 			}
+			// 修正旧数据：已有 group_type 为空的设为 "resource"
+			tx.Model(&model.ResourceGroup{}).Where("group_type = ''").Update("group_type", model.ResourceGroupTypeResource)
+
+			// 从 hosts 收集资源分组名
 			var hostGroups []string
 			if err := tx.Model(&model.Host{}).
 				Where("group_name IS NOT NULL AND group_name <> ''").
@@ -97,6 +101,19 @@ var migrations = []Migration{
 				Pluck("group_name", &hostGroups).Error; err != nil {
 				return err
 			}
+			for _, name := range hostGroups {
+				var count int64
+				if err := tx.Model(&model.ResourceGroup{}).Where("name = ? AND group_type = ?", name, model.ResourceGroupTypeResource).Count(&count).Error; err != nil {
+					return err
+				}
+				if count == 0 {
+					if err := tx.Create(&model.ResourceGroup{Name: name, GroupType: model.ResourceGroupTypeResource}).Error; err != nil {
+						return err
+					}
+				}
+			}
+
+			// 从 database_instances 收集资源分组名
 			var dbGroups []string
 			if err := tx.Model(&model.DatabaseInstance{}).
 				Where("group_name IS NOT NULL AND group_name <> ''").
@@ -104,24 +121,58 @@ var migrations = []Migration{
 				Pluck("group_name", &dbGroups).Error; err != nil {
 				return err
 			}
-			all := make(map[string]bool)
-			for _, g := range hostGroups {
-				all[g] = true
-			}
-			for _, g := range dbGroups {
-				all[g] = true
-			}
-			for name := range all {
+			for _, name := range dbGroups {
 				var count int64
-				if err := tx.Model(&model.ResourceGroup{}).Where("name = ?", name).Count(&count).Error; err != nil {
+				if err := tx.Model(&model.ResourceGroup{}).Where("name = ? AND group_type = ?", name, model.ResourceGroupTypeResource).Count(&count).Error; err != nil {
 					return err
 				}
 				if count == 0 {
-					if err := tx.Create(&model.ResourceGroup{Name: name}).Error; err != nil {
+					if err := tx.Create(&model.ResourceGroup{Name: name, GroupType: model.ResourceGroupTypeResource}).Error; err != nil {
 						return err
 					}
 				}
 			}
+
+			// 从 host_accounts 收集账号分组名
+			var haGroups []string
+			if err := tx.Model(&model.HostAccount{}).
+				Where("group_name IS NOT NULL AND group_name <> ''").
+				Distinct("group_name").
+				Pluck("group_name", &haGroups).Error; err != nil {
+				return err
+			}
+			for _, name := range haGroups {
+				var count int64
+				if err := tx.Model(&model.ResourceGroup{}).Where("name = ? AND group_type = ?", name, model.ResourceGroupTypeAccount).Count(&count).Error; err != nil {
+					return err
+				}
+				if count == 0 {
+					if err := tx.Create(&model.ResourceGroup{Name: name, GroupType: model.ResourceGroupTypeAccount}).Error; err != nil {
+						return err
+					}
+				}
+			}
+
+			// 从 database_accounts 收集账号分组名
+			var daGroups []string
+			if err := tx.Model(&model.DatabaseAccount{}).
+				Where("group_name IS NOT NULL AND group_name <> ''").
+				Distinct("group_name").
+				Pluck("group_name", &daGroups).Error; err != nil {
+				return err
+			}
+			for _, name := range daGroups {
+				var count int64
+				if err := tx.Model(&model.ResourceGroup{}).Where("name = ? AND group_type = ?", name, model.ResourceGroupTypeAccount).Count(&count).Error; err != nil {
+					return err
+				}
+				if count == 0 {
+					if err := tx.Create(&model.ResourceGroup{Name: name, GroupType: model.ResourceGroupTypeAccount}).Error; err != nil {
+						return err
+					}
+				}
+			}
+
 			return nil
 		},
 	},

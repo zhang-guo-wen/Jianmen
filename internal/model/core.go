@@ -84,8 +84,8 @@ type Resource struct {
 
 type ResourceGroup struct {
 	ID          string    `gorm:"primaryKey;size:64" json:"id"`
-	Name        string    `gorm:"uniqueIndex;size:128;not null" json:"name"`
-	GroupType   string    `gorm:"index;size:32;not null;default:resource" json:"group_type"` // "resource" 或 "account"
+	Name        string    `gorm:"uniqueIndex:idx_resource_groups_name_type;size:128;not null" json:"name"`
+	GroupType   string    `gorm:"uniqueIndex:idx_resource_groups_name_type;index;size:32;not null;default:resource" json:"group_type"` // "resource" 或 "account"
 	Description string    `gorm:"type:text" json:"description,omitempty"`
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`

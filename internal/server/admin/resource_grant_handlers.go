@@ -90,7 +90,10 @@ func (s *Server) listResourceGrants(w http.ResponseWriter, r *http.Request) {
 
 		// 搜索匹配的资源（主机账号、数据库账号、资源分组）
 		var resourceHostAccountIDs []string
-		s.db.Model(&model.HostAccount{}).Where("username LIKE ? OR host LIKE ?", like, like).Pluck("id", &resourceHostAccountIDs)
+		s.db.Model(&model.HostAccount{}).
+				Joins("JOIN hosts ON hosts.id = host_accounts.host_id").
+				Where("host_accounts.username LIKE ? OR hosts.address LIKE ?", like, like).
+				Pluck("host_accounts.id", &resourceHostAccountIDs)
 		var resourceDBAccountIDs []string
 		s.db.Model(&model.DatabaseAccount{}).Where("unique_name LIKE ?", like).Pluck("id", &resourceDBAccountIDs)
 		var resourceGroupIDs []string

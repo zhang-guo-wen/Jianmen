@@ -101,13 +101,20 @@ const loadGroups = async () => {
   }
 }
 
+const searching = ref(false)
+
 const onSearch = (q: string) => {
   keyword.value = q
+  searching.value = true
   page.value = 1
   loadGroups()
 }
 
-watch([page, pageSize], () => loadGroups())
+// 分页变化时重新加载（搜索时跳过，避免 onSearch 中已调用 loadGroups 导致双重加载）
+watch([page, pageSize], () => {
+  if (searching.value) { searching.value = false; return }
+  loadGroups()
+})
 
 const showCreateDialog = () => {
   editingGroup.value = null

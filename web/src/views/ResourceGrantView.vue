@@ -543,9 +543,13 @@ const saveGrant = async () => {
   }
 }
 
+const searching = ref(false)
+
 const onSearch = (q: string) => {
   keyword.value = q
-  page.value = 1  // watch([page, pageSize]) 会自动触发 loadGrants()
+  searching.value = true
+  page.value = 1
+  loadGrants()
 }
 
 const deleteGrant = async (grant: ResourceGrantRecord) => {
@@ -566,8 +570,11 @@ const deleteGrant = async (grant: ResourceGrantRecord) => {
 }
 
 // Watch principal type change to reset selection
-// 分页变化时重新加载
-watch([page, pageSize], () => loadGrants())
+// 分页变化时重新加载（搜索时跳过，避免 onSearch 中已调用 loadGrants 导致双重加载）
+watch([page, pageSize], () => {
+  if (searching.value) { searching.value = false; return }
+  loadGrants()
+})
 
 watch(() => grantForm.principal_type, () => {
   grantForm.principal_id = ''

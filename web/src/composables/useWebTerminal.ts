@@ -88,23 +88,28 @@ export function useWebTerminal(opts: UseWebTerminalOptions): UseWebTerminalRetur
     try {
       await new Promise<void>((resolve, reject) => {
         const url = buildWsUrl(opts.targetId.value, cols, rows);
+        console.debug('[WebTerminal] connecting to', url.replace(/token=[^&]+/, 'token=***'));
         ws = new WebSocket(url);
         ws.binaryType = 'arraybuffer';
 
         ws.onopen = () => {
+          console.debug('[WebTerminal] connected');
           status.value = 'connected';
           resolve();
         };
 
-        ws.onerror = () => {
-          // onclose will fire after this, reject there if still connecting
+        ws.onerror = (event) => {
+          console.debug('[WebTerminal] onerror', event);
         };
 
         ws.onclose = (event) => {
+          console.debug('[WebTerminal] onclose', { code: event.code, reason: event.reason, wasClean: event.wasClean, readyState: ws?.readyState, status: status.value });
           if (status.value === 'connecting') {
             const msg = event.code === 4001
               ? '认证失败，请重新登录'
-              : `WebSocket 连接关闭 (code: ${event.code})`;
+              : event.code === 1006
+                ? '连接异常关闭，请检查目标主机是否可达'
+                : `WebSocket 连接关闭 (code: ${event.code}${event.reason ? `, ${event.reason}` : ''})`;
             error.value = msg;
             status.value = 'error';
             reject(new Error(msg));
@@ -112,6 +117,7 @@ export function useWebTerminal(opts: UseWebTerminalOptions): UseWebTerminalRetur
             status.value = 'disconnected';
             if (terminal.value) {
               terminal.value.options.disableStdin = true;
+              terminal.value.write('\r\n\x1b[33m[连接已断开]\x1b[0m\r\n');
             }
           }
         };

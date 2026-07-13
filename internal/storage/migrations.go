@@ -83,6 +83,48 @@ var migrations = []Migration{
 			return tx.AutoMigrate(&model.UserGroup{}, &model.UserGroupMember{}, &model.ResourceGrant{})
 		},
 	},
+	{
+		Version: "202607130002",
+		Name:    "backfill resource groups from existing hosts and databases",
+		Run: func(tx *gorm.DB) error {
+			if err := tx.AutoMigrate(&model.ResourceGroup{}); err != nil {
+				return err
+			}
+			var hostGroups []string
+			if err := tx.Model(&model.Host{}).
+				Where("group_name IS NOT NULL AND group_name <> ''").
+				Distinct("group_name").
+				Pluck("group_name", &hostGroups).Error; err != nil {
+				return err
+			}
+			var dbGroups []string
+			if err := tx.Model(&model.DatabaseInstance{}).
+				Where("group_name IS NOT NULL AND group_name <> ''").
+				Distinct("group_name").
+				Pluck("group_name", &dbGroups).Error; err != nil {
+				return err
+			}
+			all := make(map[string]bool)
+			for _, g := range hostGroups {
+				all[g] = true
+			}
+			for _, g := range dbGroups {
+				all[g] = true
+			}
+			for name := range all {
+				var count int64
+				if err := tx.Model(&model.ResourceGroup{}).Where("name = ?", name).Count(&count).Error; err != nil {
+					return err
+				}
+				if count == 0 {
+					if err := tx.Create(&model.ResourceGroup{Name: name}).Error; err != nil {
+						return err
+					}
+				}
+			}
+			return nil
+		},
+	},
 }
 
 func Migrate(db *gorm.DB) error {

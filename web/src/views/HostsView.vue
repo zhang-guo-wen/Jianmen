@@ -752,18 +752,19 @@ const privateKeyPEMPlaceholder = computed(() =>
     ? t("hosts.placeholder.keepSecret")
     : "选择本地私钥文件自动读取，或粘贴 -----BEGIN OPENSSH PRIVATE KEY----- 开头的内容",
 );
-const hostGroupOptions = computed(() =>
-  uniqueTextValues([
-    ...hosts.value.map((h) => stringFrom(h.group)),
-    hostForm.group,
-  ]),
-);
-const accountGroupOptions = computed(() =>
-  uniqueTextValues([
-    ...accounts.value.map((a) => stringFrom(a.group)),
-    accountForm.group,
-  ]),
-);
+const hostGroupOptions = ref<string[]>([]);
+const accountGroupOptions = ref<string[]>([]);
+
+async function loadGroupOptions() {
+  try {
+    const groups = await apiClient.getResourceGroups();
+    const names = groups.map(g => g.name).filter(Boolean);
+    hostGroupOptions.value = names;
+    accountGroupOptions.value = names;
+  } catch {
+    // 加载失败时保持空列表
+  }
+}
 const accountExpiryText = computed(() => {
   if (!accountForm.expires_at) return "永久有效";
   return formatDateTime(accountForm.expires_at);
@@ -1796,6 +1797,7 @@ watch([accountPage, accountPageSize], () => {
 
 onMounted(() => {
   fetchHosts();
+  loadGroupOptions();
 });
 </script>
 

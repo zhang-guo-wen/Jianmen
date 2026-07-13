@@ -1,40 +1,42 @@
 <template>
   <div class="view-stack">
     <div class="page-container">
-      <div class="page-card">
-        <div class="page-card__toolbar">
-          <div class="page-card__spacer"></div>
-          <div class="page-card__actions">
-            <el-button type="primary" @click="showGroupDialog()">
-              <el-icon><Plus /></el-icon>
-              {{ t('resourceGrant.addGroup') }}
+      <DataTableCard
+        :data="groups"
+        :loading="loading"
+        :total="total"
+        v-model:page="page"
+        v-model:page-size="pageSize"
+        search-placeholder="搜索用户组名称、描述..."
+        @search="onSearch"
+      >
+        <template #toolbar-extra>
+          <el-button type="primary" @click="showGroupDialog()">
+            <el-icon><Plus /></el-icon>
+            {{ t('resourceGrant.addGroup') }}
+          </el-button>
+        </template>
+
+        <el-table-column :label="t('resourceGrant.groupName')" prop="name" min-width="150" />
+        <el-table-column :label="t('resourceGrant.groupDescription')" prop="description" min-width="200" />
+        <el-table-column :label="t('resourceGrant.memberCount')" width="120">
+          <template #default="{ row }">
+            <el-button link type="primary" @click="showMembers(row)">
+              {{ getMemberCount(row.id) }} {{ t('resourceGrant.members') }}
             </el-button>
-          </div>
-        </div>
-        <div class="page-card__body">
-          <el-table :data="groups" v-loading="loading" stripe>
-            <el-table-column :label="t('resourceGrant.groupName')" prop="name" min-width="150" />
-            <el-table-column :label="t('resourceGrant.groupDescription')" prop="description" min-width="200" />
-            <el-table-column :label="t('resourceGrant.memberCount')" width="120">
-              <template #default="{ row }">
-                <el-button link type="primary" @click="showMembers(row)">
-                  {{ getMemberCount(row.id) }} {{ t('resourceGrant.members') }}
-                </el-button>
-              </template>
-            </el-table-column>
-            <el-table-column :label="t('common.actions')" width="150" fixed="right">
-              <template #default="{ row }">
-                <el-button type="primary" link size="small" @click="showGroupDialog(row)">
-                  {{ t('common.edit') }}
-                </el-button>
-                <el-button type="danger" link size="small" @click="deleteGroup(row)">
-                  {{ t('common.delete') }}
-                </el-button>
-              </template>
-            </el-table-column>
-          </el-table>
-        </div>
-      </div>
+          </template>
+        </el-table-column>
+        <el-table-column :label="t('common.actions')" width="150" fixed="right">
+          <template #default="{ row }">
+            <el-button type="primary" link size="small" @click="showGroupDialog(row)">
+              {{ t('common.edit') }}
+            </el-button>
+            <el-button type="danger" link size="small" @click="deleteGroup(row)">
+              {{ t('common.delete') }}
+            </el-button>
+          </template>
+        </el-table-column>
+      </DataTableCard>
 
       <!-- 创建/编辑用户组对话框 -->
       <el-dialog
@@ -103,10 +105,11 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, onMounted, watch } from 'vue'
 import { useI18n } from '@/i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
+import DataTableCard from '@/components/DataTableCard.vue'
 import {
   apiClient,
   type UserGroupRecord,
@@ -121,6 +124,12 @@ const groupMembers = ref<Record<string, UserGroupMemberRecord[]>>({})
 const allUsers = ref<UserRecord[]>([])
 const loading = ref(false)
 const saving = ref(false)
+
+// 分页与搜索状态
+const page = ref(1)
+const pageSize = ref(20)
+const total = ref(0)
+const keyword = ref('')
 
 const groupDialogVisible = ref(false)
 const editingGroup = ref<UserGroupRecord | null>(null)
@@ -148,7 +157,13 @@ const getUsernameById = (userId: string) => {
 const loadGroups = async () => {
   loading.value = true
   try {
-    groups.value = await apiClient.getUserGroups()
+    const res = await apiClient.getUserGroups({
+      page: page.value,
+      page_size: pageSize.value,
+      q: keyword.value || undefined,
+    })
+    groups.value = res.items ?? []
+    total.value = res.total ?? 0
     for (const group of groups.value) {
       try {
         const members = await apiClient.getUserGroupMembers(group.id)
@@ -172,6 +187,14 @@ const loadUsers = async () => {
     allUsers.value = []
   }
 }
+
+const onSearch = (q: string) => {
+  keyword.value = q
+  page.value = 1
+  loadGroups()
+}
+
+watch([page, pageSize], () => loadGroups())
 
 const showGroupDialog = (group?: UserGroupRecord) => {
   editingGroup.value = group || null

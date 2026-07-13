@@ -21,3 +21,4 @@ coverage.out
 .vite/
 .claude/worktrees/
 /.superpowers/
+/.worktrees/v1-backend/

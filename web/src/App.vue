@@ -7,10 +7,9 @@
           <div class="brand-mark">JM</div>
           <div class="brand-copy">
             <strong>Jianmen</strong>
-            <span>{{ t('app.subtitle') }}</span>
+            <span>{{ t("app.subtitle") }}</span>
           </div>
         </div>
-        <div class="sidebar-section-label">Workspace</div>
         <el-menu
           :default-active="activePath"
           class="nav-menu"
@@ -18,7 +17,11 @@
           text-color="#cbd5e1"
           active-text-color="#ffffff"
         >
-          <el-menu-item v-for="item in navItems" :key="item.path" :index="item.path">
+          <el-menu-item
+            v-for="item in navItems"
+            :key="item.path"
+            :index="item.path"
+          >
             <el-icon><component :is="item.icon" /></el-icon>
             <span>{{ t(item.labelKey) }}</span>
           </el-menu-item>
@@ -28,10 +31,6 @@
       <el-container class="app-content">
         <el-header class="app-header">
           <div class="page-heading">
-            <div class="breadcrumb-pill">
-              <el-icon><Location /></el-icon>
-              <span>{{ t('app.subtitle') }}</span>
-            </div>
             <h1>{{ pageTitle }}</h1>
             <p>{{ pageDescription }}</p>
           </div>
@@ -49,25 +48,27 @@
                 :value="option.value"
               />
             </el-select>
-            <el-button class="logout-button" type="primary" plain @click="logout">
+            <el-button
+              class="logout-button"
+              type="primary"
+              plain
+              @click="logout"
+            >
               <el-icon><SwitchButton /></el-icon>
-              {{ t('common.logout') }}
+              {{ t("common.logout") }}
             </el-button>
           </div>
         </el-header>
         <el-main class="app-main">
-          <div class="overview-strip" aria-label="Jianmen capability overview">
-            <div class="overview-card" v-for="item in overviewItems" :key="item.label">
-              <el-icon><component :is="item.icon" /></el-icon>
-              <div>
-                <strong>{{ item.value }}</strong>
-                <span>{{ item.label }}</span>
-              </div>
-            </div>
-          </div>
           <div v-if="permission.error" class="permission-banner" role="status">
             <span>{{ permission.error }}</span>
-            <el-button link type="primary" :loading="permission.loading" @click="retryPermissions">重试</el-button>
+            <el-button
+              link
+              type="primary"
+              :loading="permission.loading"
+              @click="retryPermissions"
+              >重试</el-button
+            >
           </div>
           <router-view />
         </el-main>
@@ -78,54 +79,77 @@
 
 <script setup lang="ts">
 import {
-  Connection,
   DataAnalysis,
   DocumentChecked,
   Link,
-  Location,
   Lock,
   Monitor,
   SwitchButton,
-  UserFilled
-} from '@element-plus/icons-vue';
-import { computed, onMounted, watchEffect, type Component } from 'vue';
-import { useRoute, useRouter } from 'vue-router';
+  UserFilled,
+} from "@element-plus/icons-vue";
+import { computed, onMounted, watchEffect, type Component } from "vue";
+import { useRoute, useRouter } from "vue-router";
 
-import { clearToken, getToken } from '@/api/client';
-import { usePermissionStore } from '@/stores/permission';
-import { isTranslationKey, useI18n, type Locale, type TranslationKey } from '@/i18n';
+import { clearToken, getToken } from "@/api/client";
+import { usePermissionStore } from "@/stores/permission";
+import {
+  isTranslationKey,
+  useI18n,
+  type Locale,
+  type TranslationKey,
+} from "@/i18n";
 
 const route = useRoute();
 const router = useRouter();
 const { elementLocale, locale, localeOptions, setLocale, t } = useI18n();
 
-const isLoginRoute = computed(() => route.name === 'login' || route.name === 'setup');
+const isLoginRoute = computed(
+  () => route.name === "login" || route.name === "setup",
+);
 const activePath = computed(() => route.path);
 const selectedLocale = computed<Locale>({
   get: () => locale.value,
-  set: (nextLocale) => setLocale(nextLocale)
+  set: (nextLocale) => setLocale(nextLocale),
 });
 
-const ALL_NAV_ITEMS: Array<{ path: string; icon: Component; labelKey: TranslationKey; menuKey: string }> = [
-  { path: '/hosts', icon: Monitor, labelKey: 'nav.hosts', menuKey: 'hosts' },
-  { path: '/databases', icon: DataAnalysis, labelKey: 'nav.databases', menuKey: 'databases' },
-  { path: '/applications', icon: Monitor, labelKey: 'nav.applications', menuKey: 'applications' },
-  { path: '/users', icon: UserFilled, labelKey: 'nav.users', menuKey: 'users' },
-  { path: '/roles', icon: Lock, labelKey: 'nav.roles', menuKey: 'roles' },
-  { path: '/audit', icon: DocumentChecked, labelKey: 'nav.audit', menuKey: 'audit' },
-  { path: '/quick-connect', icon: Link, labelKey: 'nav.quickConnect', menuKey: 'quickConnect' },
-];
-
-const overviewItems = [
-  { label: '统一资产入口', value: 'Assets', icon: Monitor },
-  { label: '细粒度权限', value: 'RBAC', icon: Lock },
-  { label: '审计可追溯', value: 'Audit', icon: DocumentChecked },
-  { label: '快速安全连接', value: 'Proxy', icon: Connection },
+const ALL_NAV_ITEMS: Array<{
+  path: string;
+  icon: Component;
+  labelKey: TranslationKey;
+  menuKey: string;
+}> = [
+  { path: "/hosts", icon: Monitor, labelKey: "nav.hosts", menuKey: "hosts" },
+  {
+    path: "/databases",
+    icon: DataAnalysis,
+    labelKey: "nav.databases",
+    menuKey: "databases",
+  },
+  {
+    path: "/applications",
+    icon: Monitor,
+    labelKey: "nav.applications",
+    menuKey: "applications",
+  },
+  { path: "/users", icon: UserFilled, labelKey: "nav.users", menuKey: "users" },
+  { path: "/roles", icon: Lock, labelKey: "nav.roles", menuKey: "roles" },
+  {
+    path: "/audit",
+    icon: DocumentChecked,
+    labelKey: "nav.audit",
+    menuKey: "audit",
+  },
+  {
+    path: "/quick-connect",
+    icon: Link,
+    labelKey: "nav.quickConnect",
+    menuKey: "quickConnect",
+  },
 ];
 
 const permission = usePermissionStore();
 const navItems = computed(() =>
-  ALL_NAV_ITEMS.filter(item => permission.canAccessMenu(item.menuKey))
+  ALL_NAV_ITEMS.filter((item) => permission.canAccessMenu(item.menuKey)),
 );
 
 onMounted(async () => {
@@ -138,9 +162,11 @@ function metaText(value: unknown, fallbackKey: TranslationKey): string {
   return t(isTranslationKey(value) ? value : fallbackKey);
 }
 
-const pageTitle = computed(() => metaText(route.meta.titleKey, 'route.quickConnect.title'));
+const pageTitle = computed(() =>
+  metaText(route.meta.titleKey, "route.quickConnect.title"),
+);
 const pageDescription = computed(() =>
-  metaText(route.meta.descriptionKey, 'route.quickConnect.description')
+  metaText(route.meta.descriptionKey, "route.quickConnect.description"),
 );
 
 watchEffect(() => {
@@ -150,7 +176,7 @@ watchEffect(() => {
 function logout() {
   permission.reset();
   clearToken();
-  router.push({ name: 'login' });
+  router.push({ name: "login" });
 }
 
 async function retryPermissions() {

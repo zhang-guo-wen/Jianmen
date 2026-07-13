@@ -75,6 +75,7 @@ var menuOrder = []struct {
 }{
 	{"hosts", "host:view"},
 	{"databases", "dbproxy:view"},
+	{"platformAccounts", "platform_account:view"},
 	{"users", "rbac:manage"},
 	{"roles", "rbac:manage"},
 	{"audit", "audit:view"},
@@ -172,6 +173,8 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 	s.muxHandle(mux, "/api/me/permissions", s.withAuthAndUser(s.handleMePermissions))
 	s.muxHandle(mux, "/api/applications", s.withAuthAndUser(s.handleApplications))
 	s.muxHandle(mux, "/api/applications/", s.withAuthAndUser(s.handleApplication))
+	s.muxHandle(mux, "/api/platform-accounts", s.withAuthAndUser(s.handlePlatformAccounts))
+	s.muxHandle(mux, "/api/platform-accounts/", s.withAuthAndUser(s.handlePlatformAccount))
 	s.muxHandle(mux, "/api/me/menus", s.withAuthAndUser(s.handleMeMenus))
 
 	server := &http.Server{

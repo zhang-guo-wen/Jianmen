@@ -245,3 +245,34 @@ handler 包按资源拆分文件，每个文件包含该资源全套 handler 方
 - 后端改资源模型或代理逻辑后必须跑：
   - `go test ./... -count=1`
 
+## 新增页面/功能的检查清单
+
+日期：2026-07-13
+
+新增一个带导航菜单的功能页面时，必须同时修改以下位置，缺一不可：
+
+### 前端必改文件
+
+| 文件 | 改什么 | 漏改后果 |
+|------|--------|----------|
+| `web/src/App.vue` | `ALL_NAV_ITEMS` 数组中添加菜单项（path、icon、labelKey、menuKey） | 侧边栏看不到菜单入口 |
+| `web/src/App.vue` | 顶部 `import` 中添加图标（如 `Key`、`Folder` 等） | 编译报错 |
+| `web/src/router/index.ts` | `routeMenuMap` 中添加路径→菜单键映射 | 路由守卫误判无权限，跳转到 quickConnect |
+| `web/src/router/index.ts` | 添加路由定义（path、name、component、meta） | 访问 404 |
+| `web/src/i18n/index.ts` | zhCN 和 enUS 中都添加 `nav.xxx` 和 `route.xxx.title/description` 翻译 | typecheck 报错或菜单显示原始 key |
+
+### 后端必改文件
+
+| 文件 | 改什么 | 漏改后果 |
+|------|--------|----------|
+| `internal/server/admin/server.go` | `menuOrder` 中添加 `{key, action}` | `/api/me/menus` 不返回该菜单，前端看不到 |
+| `internal/server/admin/server.go` | `ListenAndServe()` 中注册路由 `s.muxHandle(mux, "/api/xxx", ...)` | API 404 |
+| `internal/rbac/resources.go` | 添加 `ActionXxxCreate/Update/Delete/View` 常量 | 权限检查失效 |
+
+### 本项目的 i18n 注意事项
+
+- `@/i18n` 导出的 `useI18n().t()` **只接受一个参数**（翻译 key），不支持 vue-i18n 的插值和 fallback。
+- 需要插值时用 `t('key').replace('{name}', value)` 手动替换。
+- `TranslationKey` 是 `zhCN` 的 keyof，**enUS 必须包含完全相同的 key**，否则 typecheck 报错。
+- 路由 meta 中的 `titleKey` / `descriptionKey` 也必须是有效的 TranslationKey。
+

@@ -26,6 +26,31 @@
             <span>{{ t(item.labelKey) }}</span>
           </el-menu-item>
         </el-menu>
+        <div class="sidebar-footer">
+          <el-select
+            v-model="selectedLocale"
+            class="sidebar-locale"
+            size="small"
+            :aria-label="t('app.language')"
+          >
+            <el-option
+              v-for="option in localeOptions"
+              :key="option.value"
+              :label="option.label"
+              :value="option.value"
+            />
+          </el-select>
+          <el-button
+            class="sidebar-logout"
+            size="small"
+            type="primary"
+            plain
+            @click="logout"
+          >
+            <el-icon><SwitchButton /></el-icon>
+            {{ t("common.logout") }}
+          </el-button>
+        </div>
       </el-aside>
 
       <el-container class="app-content">
@@ -33,30 +58,6 @@
           <div class="page-heading">
             <h1>{{ pageTitle }}</h1>
             <p>{{ pageDescription }}</p>
-          </div>
-          <div class="app-header-actions">
-            <el-select
-              v-model="selectedLocale"
-              class="language-select"
-              size="small"
-              :aria-label="t('app.language')"
-            >
-              <el-option
-                v-for="option in localeOptions"
-                :key="option.value"
-                :label="option.label"
-                :value="option.value"
-              />
-            </el-select>
-            <el-button
-              class="logout-button"
-              type="primary"
-              plain
-              @click="logout"
-            >
-              <el-icon><SwitchButton /></el-icon>
-              {{ t("common.logout") }}
-            </el-button>
           </div>
         </el-header>
         <el-main class="app-main">

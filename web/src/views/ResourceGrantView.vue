@@ -110,6 +110,7 @@
                 <el-tab-pane :label="t('resourceGrant.hostAccounts')" name="host_account" />
                 <el-tab-pane :label="t('resourceGrant.databaseAccounts')" name="database_account" />
                 <el-tab-pane :label="t('resourceGrant.resourceGroups')" name="resource_group" />
+                <el-tab-pane :label="t('resourceGrant.accountGroups')" name="account_group" />
               </el-tabs>
 
               <el-input
@@ -133,6 +134,24 @@
                 class="resource-table"
               >
                 <el-table-column type="selection" width="50" />
+                <template v-if="resourceTabType === 'resource_group' || resourceTabType === 'account_group'">
+                  <el-table-column :label="t('resourceGrant.groupName')" min-width="160">
+                    <template #default="{ row }">
+                      {{ row.name }}
+                    </template>
+                  </el-table-column>
+                  <el-table-column :label="t('resourceGrant.memberCountLabel')" width="100">
+                    <template #default="{ row }">
+                      {{ row.member_count || 0 }}
+                    </template>
+                  </el-table-column>
+                  <el-table-column :label="t('resourceGrant.description')" min-width="150" show-overflow-tooltip>
+                    <template #default="{ row }">
+                      {{ row.description || '' }}
+                    </template>
+                  </el-table-column>
+                </template>
+                <template v-else>
                 <el-table-column :label="t('resourceGrant.accountName')" min-width="130">
                   <template #default="{ row }">
                     {{ row.username || row.unique_name || row.name }}
@@ -148,6 +167,7 @@
                     {{ row.host_address || '' }}
                   </template>
                 </el-table-column>
+              </template>
               </el-table>
 
               <div v-if="selectedResources.length > 0" class="selected-resource-display">
@@ -232,7 +252,8 @@ const resourceSearchQuery = ref('')
 const loadingResources = ref(false)
 const hostAccounts = ref<Array<{ id: string; username: string; host_name: string; host_address: string }>>([])
 const dbAccounts = ref<Array<{ id: string; unique_name: string; instance_name: string }>>([])
-const resourceGroups = ref<Array<{ id: string; name: string; description: string }>>([])
+const resourceGroups = ref<Array<{ id: string; name: string; description: string; group_type: string; member_count: number }>>([])
+const accountGroups = ref<Array<{ id: string; name: string; description: string; member_count: number }>>([])
 const selectedResources = ref<Array<{ id: string; name: string; type: string }>>([])
 
 const allUsers = ref<UserRecord[]>([])
@@ -274,9 +295,15 @@ const filteredResources = computed(() => {
       (a.unique_name || '').toLowerCase().includes(query) ||
       (a.instance_name || '').toLowerCase().includes(query)
     )
-  } else {
+  } else if (resourceTabType.value === 'resource_group') {
     if (!query) return resourceGroups.value
     return resourceGroups.value.filter(g =>
+      (g.name || '').toLowerCase().includes(query) ||
+      (g.description || '').toLowerCase().includes(query)
+    )
+  } else {
+    if (!query) return accountGroups.value
+    return accountGroups.value.filter(g =>
       (g.name || '').toLowerCase().includes(query) ||
       (g.description || '').toLowerCase().includes(query)
     )
@@ -294,6 +321,7 @@ const resourceTypeLabel = (type: string) => {
     case 'host_account': return t('resourceGrant.hostAccounts')
     case 'database_account': return t('resourceGrant.databaseAccounts')
     case 'resource_group': return t('resourceGrant.resourceGroups')
+    case 'account_group': return t('resourceGrant.accountGroups')
     default: return type
   }
 }
@@ -390,6 +418,8 @@ const loadResources = async () => {
       await loadDbAccounts()
     } else if (resourceTabType.value === 'resource_group') {
       await loadResourceGroups()
+    } else if (resourceTabType.value === 'account_group') {
+      await loadAccountGroups()
     }
   } catch (e) {
     console.error('Failed to load resources:', e)
@@ -400,14 +430,32 @@ const loadResources = async () => {
 
 const loadResourceGroups = async () => {
   try {
-    const groups = await apiClient.getResourceGroups()
-    resourceGroups.value = groups.map(g => ({
+    const all = await apiClient.getResourceGroups()
+    const list = all.filter(g => g.group_type !== 'account')
+    resourceGroups.value = list.map(g => ({
       id: g.id,
       name: g.name,
-      description: g.description || ''
+      description: g.description || '',
+      group_type: g.group_type || 'resource',
+      member_count: (g.host_count || 0) + (g.database_count || 0)
     }))
   } catch {
     resourceGroups.value = []
+  }
+}
+
+const loadAccountGroups = async () => {
+  try {
+    const all = await apiClient.getResourceGroups()
+    const list = all.filter(g => g.group_type === 'account')
+    accountGroups.value = list.map(g => ({
+      id: g.id,
+      name: g.name,
+      description: g.description || '',
+      member_count: g.account_count || 0
+    }))
+  } catch {
+    accountGroups.value = []
   }
 }
 

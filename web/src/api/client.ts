@@ -1005,8 +1005,8 @@ export const apiClient = {
   },
 
   // ── User Groups ─────────────────────────────────────────────────────
-  getUserGroups: () =>
-    request<UserGroupRecord[]>('/api/user-groups'),
+  getUserGroups: (params?: { q?: string; page?: number; page_size?: number }) =>
+    request<{ items: UserGroupRecord[]; total: number }>(`/api/user-groups${buildQS(params as Record<string, string | number | undefined>)}`),
   createUserGroup: (payload: UserGroupPayload) =>
     request<UserGroupRecord>('/api/user-groups', {
       method: 'POST',
@@ -1034,8 +1034,8 @@ export const apiClient = {
     }),
 
   // ── Resource Grants ─────────────────────────────────────────────────
-  getResourceGrants: (params?: { principal_type?: string; principal_id?: string; resource_type?: string; resource_id?: string }) =>
-    request<ResourceGrantRecord[]>(`/api/resource-grants${buildQS(params as Record<string, string | number | undefined>)}`),
+  getResourceGrants: (params?: { q?: string; page?: number; page_size?: number }) =>
+    request<{ items: ResourceGrantRecord[]; total: number }>(`/api/resource-grants${buildQS(params as Record<string, string | number | undefined>)}`),
   createResourceGrant: (payload: ResourceGrantPayload) =>
     request<ResourceGrantRecord>('/api/resource-grants', {
       method: 'POST',
@@ -1049,8 +1049,8 @@ export const apiClient = {
     request<{ allowed: boolean }>(`/api/resource-grants/check?user_id=${encodeURIComponent(userId)}&resource_type=${encodeURIComponent(resourceType)}&resource_id=${encodeURIComponent(resourceId)}`),
 
   // ── Resource Groups ────────────────────────────────────────────────
-  getResourceGroups: (params?: { group_type?: string }) =>
-    request<ResourceGroupRecord[]>(`/api/resource-groups${buildQS(params as Record<string, string | number | undefined>)}`),
+  getResourceGroups: (params?: { group_type?: string; q?: string; page?: number; page_size?: number }) =>
+    request<{ items: ResourceGroupRecord[]; total: number }>(`/api/resource-groups${buildQS(params as Record<string, string | number | undefined>)}`),
   createResourceGroup: (payload: ResourceGroupPayload) =>
     request<ResourceGroupRecord>('/api/resource-groups', {
       method: 'POST',

@@ -1,167 +1,70 @@
 <template>
   <div class="resource-grant-page">
-    <el-tabs v-model="activeTab" @tab-change="handleTabChange">
-      <!-- 资源授权列表 -->
-      <el-tab-pane :label="t('resourceGrant.grants')" name="grants">
-        <div class="tab-header">
-          <div class="filters">
-            <el-select v-model="filters.principal_type" :placeholder="t('resourceGrant.principalType')" clearable style="width: 140px">
-              <el-option :label="t('resourceGrant.user')" value="user" />
-              <el-option :label="t('resourceGrant.userGroup')" value="user_group" />
-            </el-select>
-            <el-select v-model="filters.resource_type" :placeholder="t('resourceGrant.resourceType')" clearable style="width: 140px">
-              <el-option label="Host Account" value="host_account" />
-              <el-option label="Database Account" value="database_account" />
-              <el-option label="Resource Group" value="resource_group" />
-            </el-select>
-            <el-button type="primary" @click="loadGrants">
-              <el-icon><Search /></el-icon>
-              {{ t('common.search') }}
-            </el-button>
-          </div>
-          <el-button type="primary" @click="showGrantDialog()">
-            <el-icon><Plus /></el-icon>
-            {{ t('resourceGrant.addGrant') }}
-          </el-button>
-        </div>
-
-        <el-table :data="grants" v-loading="loading" stripe>
-          <el-table-column :label="t('resourceGrant.principalType')" prop="principal_type" width="120">
-            <template #default="{ row }">
-              <el-tag :type="row.principal_type === 'user' ? 'primary' : 'success'" size="small">
-                {{ row.principal_type === 'user' ? t('resourceGrant.user') : t('resourceGrant.userGroup') }}
-              </el-tag>
-            </template>
-          </el-table-column>
-          <el-table-column :label="t('resourceGrant.principalName')" min-width="150">
-            <template #default="{ row }">
-              {{ getPrincipalName(row) }}
-            </template>
-          </el-table-column>
-          <el-table-column :label="t('resourceGrant.resourceType')" prop="resource_type" width="140" />
-          <el-table-column :label="t('resourceGrant.resourceName')" min-width="150">
-            <template #default="{ row }">
-              {{ getResourceName(row) }}
-            </template>
-          </el-table-column>
-          <el-table-column :label="t('resourceGrant.effect')" prop="effect" width="100">
-            <template #default="{ row }">
-              <el-tag :type="row.effect === 'allow' ? 'success' : 'danger'" size="small">
-                {{ row.effect }}
-              </el-tag>
-            </template>
-          </el-table-column>
-          <el-table-column :label="t('resourceGrant.expiresAt')" prop="expires_at" width="180">
-            <template #default="{ row }">
-              {{ row.expires_at ? formatTime(row.expires_at) : t('resourceGrant.never') }}
-            </template>
-          </el-table-column>
-          <el-table-column :label="t('common.actions')" width="100" fixed="right">
-            <template #default="{ row }">
-              <el-button type="danger" link size="small" @click="deleteGrant(row)">
-                {{ t('common.delete') }}
-              </el-button>
-            </template>
-          </el-table-column>
-        </el-table>
-      </el-tab-pane>
-
-      <!-- 用户组管理 -->
-      <el-tab-pane :label="t('resourceGrant.userGroups')" name="groups">
-        <div class="tab-header">
-          <span />
-          <el-button type="primary" @click="showGroupDialog()">
-            <el-icon><Plus /></el-icon>
-            {{ t('resourceGrant.addGroup') }}
-          </el-button>
-        </div>
-
-        <el-table :data="groups" v-loading="loading" stripe>
-          <el-table-column :label="t('resourceGrant.groupName')" prop="name" min-width="150" />
-          <el-table-column :label="t('resourceGrant.groupDescription')" prop="description" min-width="200" />
-          <el-table-column :label="t('resourceGrant.memberCount')" width="120">
-            <template #default="{ row }">
-              <el-button link type="primary" @click="showMembers(row)">
-                {{ getMemberCount(row.id) }} {{ t('resourceGrant.members') }}
-              </el-button>
-            </template>
-          </el-table-column>
-          <el-table-column :label="t('common.actions')" width="150" fixed="right">
-            <template #default="{ row }">
-              <el-button type="primary" link size="small" @click="showGroupDialog(row)">
-                {{ t('common.edit') }}
-              </el-button>
-              <el-button type="danger" link size="small" @click="deleteGroup(row)">
-                {{ t('common.delete') }}
-              </el-button>
-            </template>
-          </el-table-column>
-        </el-table>
-      </el-tab-pane>
-    </el-tabs>
-
-    <!-- 创建/编辑用户组对话框 -->
-    <el-dialog
-      v-model="groupDialogVisible"
-      :title="editingGroup ? t('resourceGrant.editGroup') : t('resourceGrant.addGroup')"
-      width="500px"
-    >
-      <el-form :model="groupForm" label-width="100px">
-        <el-form-item :label="t('resourceGrant.groupName')" required>
-          <el-input v-model="groupForm.name" :placeholder="t('resourceGrant.groupNamePlaceholder')" />
-        </el-form-item>
-        <el-form-item :label="t('resourceGrant.groupDescription')">
-          <el-input v-model="groupForm.description" type="textarea" :rows="3" :placeholder="t('resourceGrant.groupDescriptionPlaceholder')" />
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="groupDialogVisible = false">{{ t('common.cancel') }}</el-button>
-        <el-button type="primary" @click="saveGroup" :loading="saving">{{ t('common.save') }}</el-button>
-      </template>
-    </el-dialog>
-
-    <!-- 用户组成员管理对话框 -->
-    <el-dialog
-      v-model="membersDialogVisible"
-      :title="t('resourceGrant.manageMembers')"
-      width="600px"
-    >
-      <div class="members-header">
-        <el-select
-          v-model="newMemberId"
-          filterable
-          remote
-          :remote-method="searchUsers"
-          :placeholder="t('resourceGrant.searchUser')"
-          style="width: 300px"
-        >
-          <el-option
-            v-for="user in availableUsers"
-            :key="user.id"
-            :label="user.username"
-            :value="user.id"
-          />
+    <div class="tab-header">
+      <div class="filters">
+        <el-select v-model="filters.principal_type" :placeholder="t('resourceGrant.principalType')" clearable style="width: 140px">
+          <el-option :label="t('resourceGrant.user')" value="user" />
+          <el-option :label="t('resourceGrant.userGroup')" value="user_group" />
         </el-select>
-        <el-button type="primary" @click="addMember" :disabled="!newMemberId">
-          {{ t('resourceGrant.addMember') }}
+        <el-select v-model="filters.resource_type" :placeholder="t('resourceGrant.resourceType')" clearable style="width: 140px">
+          <el-option label="Host Account" value="host_account" />
+          <el-option label="Database Account" value="database_account" />
+          <el-option label="Resource Group" value="resource_group" />
+        </el-select>
+        <el-button type="primary" @click="loadGrants">
+          <el-icon><Search /></el-icon>
+          {{ t('common.search') }}
         </el-button>
       </div>
+      <el-button type="primary" @click="showGrantDialog()">
+        <el-icon><Plus /></el-icon>
+        {{ t('resourceGrant.addGrant') }}
+      </el-button>
+    </div>
 
-      <el-table :data="currentMembers" v-loading="loadingMembers" stripe style="margin-top: 16px">
-        <el-table-column :label="t('resourceGrant.username')" prop="user_id" min-width="200">
-          <template #default="{ row }">
-            {{ getUsernameById(row.user_id) }}
-          </template>
-        </el-table-column>
-        <el-table-column :label="t('common.actions')" width="100" fixed="right">
-          <template #default="{ row }">
-            <el-button type="danger" link size="small" @click="removeMember(row)">
-              {{ t('common.remove') }}
-            </el-button>
-          </template>
-        </el-table-column>
-      </el-table>
-    </el-dialog>
+    <el-table :data="grants" v-loading="loading" stripe>
+      <el-table-column :label="t('resourceGrant.principalType')" prop="principal_type" width="100">
+        <template #default="{ row }">
+          <el-tag :type="row.principal_type === 'user' ? 'primary' : 'success'" size="small">
+            {{ row.principal_type === 'user' ? t('resourceGrant.user') : t('resourceGrant.userGroup') }}
+          </el-tag>
+        </template>
+      </el-table-column>
+      <el-table-column :label="t('resourceGrant.principalName')" min-width="120">
+        <template #default="{ row }">
+          {{ getPrincipalName(row) }}
+        </template>
+      </el-table-column>
+      <el-table-column :label="t('resourceGrant.resourceType')" width="120">
+        <template #default="{ row }">
+          <el-tag size="small">{{ resourceTypeLabel(row.resource_type) }}</el-tag>
+        </template>
+      </el-table-column>
+      <el-table-column :label="t('resourceGrant.resourceName')" min-width="150">
+        <template #default="{ row }">
+          {{ getResourceName(row) }}
+        </template>
+      </el-table-column>
+      <el-table-column :label="t('resourceGrant.effect')" width="80">
+        <template #default="{ row }">
+          <el-tag :type="row.effect === 'allow' ? 'success' : 'danger'" size="small">
+            {{ row.effect === 'allow' ? t('resourceGrant.allow') : t('resourceGrant.deny') }}
+          </el-tag>
+        </template>
+      </el-table-column>
+      <el-table-column :label="t('resourceGrant.expiresAt')" width="180">
+        <template #default="{ row }">
+          {{ row.expires_at ? formatTime(row.expires_at) : t('resourceGrant.never') }}
+        </template>
+      </el-table-column>
+      <el-table-column :label="t('common.actions')" width="80" fixed="right">
+        <template #default="{ row }">
+          <el-button type="danger" link size="small" @click="deleteGrant(row)">
+            {{ t('common.delete') }}
+          </el-button>
+        </template>
+      </el-table-column>
+    </el-table>
 
     <!-- 创建资源授权对话框 -->
     <el-dialog
@@ -195,14 +98,12 @@
 
         <el-form-item :label="t('resourceGrant.selectResource')" required>
           <div class="resource-select-inline">
-            <!-- 资源类型切换 -->
             <el-tabs v-model="resourceTabType" @tab-change="handleResourceTabChange" class="resource-tabs">
               <el-tab-pane :label="t('resourceGrant.hostAccounts')" name="host_account" />
               <el-tab-pane :label="t('resourceGrant.databaseAccounts')" name="database_account" />
               <el-tab-pane :label="t('resourceGrant.resourceGroups')" name="resource_group" />
             </el-tabs>
 
-            <!-- 搜索框 -->
             <el-input
               v-model="resourceSearchQuery"
               :placeholder="t('resourceGrant.searchResource')"
@@ -214,37 +115,42 @@
               </template>
             </el-input>
 
-            <!-- 资源列表 -->
             <el-table
+              ref="resourceTableRef"
               :data="filteredResources"
               v-loading="loadingResources"
               height="250"
               stripe
-              highlight-current-row
-              @current-change="handleResourceCurrentChange"
+              @selection-change="handleResourceSelectionChange"
               class="resource-table"
             >
-              <el-table-column :label="t('resourceGrant.accountName')" min-width="150">
+              <el-table-column type="selection" width="50" />
+              <el-table-column :label="t('resourceGrant.accountName')" min-width="130">
                 <template #default="{ row }">
                   {{ row.username || row.unique_name || row.name }}
                 </template>
               </el-table-column>
-              <el-table-column :label="t('resourceGrant.hostName')" min-width="150">
+              <el-table-column :label="t('resourceGrant.hostName')" min-width="130">
                 <template #default="{ row }">
                   {{ row.host_name || row.instance_name || '' }}
                 </template>
               </el-table-column>
-              <el-table-column :label="t('resourceGrant.hostAddress')" min-width="150">
+              <el-table-column :label="t('resourceGrant.hostAddress')" min-width="130">
                 <template #default="{ row }">
                   {{ row.host_address || '' }}
                 </template>
               </el-table-column>
             </el-table>
 
-            <!-- 已选资源回显 -->
-            <div v-if="selectedResourceInfo" class="selected-resource-display">
-              <el-tag type="success" closable @close="clearResourceSelection">
-                {{ selectedResourceInfo.name }}
+            <div v-if="selectedResources.length > 0" class="selected-resource-display">
+              <el-tag
+                v-for="(r, i) in selectedResources"
+                :key="r.id"
+                type="success"
+                closable
+                @close="removeResourceSelection(i)"
+              >
+                {{ r.name }}
               </el-tag>
             </div>
           </div>
@@ -291,8 +197,6 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Search } from '@element-plus/icons-vue'
 import {
   apiClient,
-  type UserGroupRecord,
-  type UserGroupMemberRecord,
   type ResourceGrantRecord,
   type UserRecord
 } from '@/api/client'
@@ -300,7 +204,6 @@ import {
 const { t } = useI18n()
 
 // State
-const activeTab = ref('grants')
 const loading = ref(false)
 const saving = ref(false)
 
@@ -311,13 +214,7 @@ const filters = reactive({
   resource_type: ''
 })
 
-// Groups state
-const groups = ref<UserGroupRecord[]>([])
-const groupMembers = ref<Record<string, UserGroupMemberRecord[]>>({})
-
 // Dialogs
-const groupDialogVisible = ref(false)
-const membersDialogVisible = ref(false)
 const grantDialogVisible = ref(false)
 
 // Resource selection state
@@ -327,22 +224,10 @@ const loadingResources = ref(false)
 const hostAccounts = ref<Array<{ id: string; username: string; host_name: string; host_address: string }>>([])
 const dbAccounts = ref<Array<{ id: string; unique_name: string; instance_name: string }>>([])
 const resourceGroups = ref<Array<{ id: string; name: string; description: string }>>([])
-const selectedResourceInfo = ref<{ id: string; name: string; type: string } | null>(null)
+const selectedResources = ref<Array<{ id: string; name: string; type: string }>>([])
 
-// Group form
-const editingGroup = ref<UserGroupRecord | null>(null)
-const groupForm = reactive({
-  name: '',
-  description: ''
-})
-
-// Members
-const currentGroupId = ref('')
-const currentMembers = ref<UserGroupMemberRecord[]>([])
-const loadingMembers = ref(false)
-const newMemberId = ref('')
-const availableUsers = ref<UserRecord[]>([])
 const allUsers = ref<UserRecord[]>([])
+const userGroups = ref<{ id: string; name: string }[]>([])
 
 // Grant form
 const grantForm = reactive({
@@ -350,6 +235,7 @@ const grantForm = reactive({
   principal_id: '',
   resource_type: 'host_account',
   resource_id: '',
+  resource_ids: [] as string[],
   effect: 'allow' as 'allow' | 'deny'
 })
 const expiresOption = ref('never')
@@ -360,7 +246,7 @@ const principalOptions = computed(() => {
   if (grantForm.principal_type === 'user') {
     return allUsers.value.map(u => ({ id: u.id, name: u.username || '' }))
   }
-  return groups.value.map(g => ({ id: g.id, name: g.name }))
+  return userGroups.value.map(g => ({ id: g.id, name: g.name }))
 })
 
 // Filtered resources based on tab type and search query
@@ -394,17 +280,26 @@ const formatTime = (time: string) => {
   return new Date(time).toLocaleString()
 }
 
+const resourceTypeLabel = (type: string) => {
+  switch (type) {
+    case 'host_account': return t('resourceGrant.hostAccounts')
+    case 'database_account': return t('resourceGrant.databaseAccounts')
+    case 'resource_group': return t('resourceGrant.resourceGroups')
+    default: return type
+  }
+}
+
 const getPrincipalName = (grant: ResourceGrantRecord) => {
   if (grant.principal_type === 'user') {
     const user = allUsers.value.find(u => u.id === grant.principal_id)
     return user?.username || grant.principal_id
   }
-  const group = groups.value.find(g => g.id === grant.principal_id)
+  const group = userGroups.value.find(g => g.id === grant.principal_id)
   return group?.name || grant.principal_id
 }
 
 const getResourceName = (grant: ResourceGrantRecord) => {
-  // Search in all resource types
+  // 先尝试查找本地缓存的资源名
   const host = hostAccounts.value.find(a => a.id === grant.resource_id)
   if (host) return `${host.username}@${host.host_name || host.host_address || ''}`
   const db = dbAccounts.value.find(a => a.id === grant.resource_id)
@@ -414,15 +309,6 @@ const getResourceName = (grant: ResourceGrantRecord) => {
   return grant.resource_id
 }
 
-const getMemberCount = (groupId: string) => {
-  return groupMembers.value[groupId]?.length || 0
-}
-
-const getUsernameById = (userId: string) => {
-  const user = allUsers.value.find(u => u.id === userId)
-  return user?.username || userId
-}
-
 const loadGrants = async () => {
   loading.value = true
   try {
@@ -430,6 +316,8 @@ const loadGrants = async () => {
     if (filters.principal_type) params.principal_type = filters.principal_type
     if (filters.resource_type) params.resource_type = filters.resource_type
     grants.value = await apiClient.getResourceGrants(params)
+    // 加载时预拉资源数据用于名称显示
+    await ensureResourcesLoaded()
   } catch (e: any) {
     ElMessage.error(e.message || 'Failed to load grants')
   } finally {
@@ -437,24 +325,12 @@ const loadGrants = async () => {
   }
 }
 
-const loadGroups = async () => {
-  loading.value = true
-  try {
-    groups.value = await apiClient.getUserGroups()
-    // Load member counts
-    for (const group of groups.value) {
-      try {
-        const members = await apiClient.getUserGroupMembers(group.id)
-        groupMembers.value[group.id] = members
-      } catch {
-        groupMembers.value[group.id] = []
-      }
-    }
-  } catch (e: any) {
-    ElMessage.error(e.message || 'Failed to load groups')
-  } finally {
-    loading.value = false
-  }
+const ensureResourcesLoaded = async () => {
+  // 根据 grants 中的 resource_type 按需加载对应资源缓存
+  const needHost = grants.value.some(g => g.resource_type === 'host_account')
+  const needDb = grants.value.some(g => g.resource_type === 'database_account')
+  if (needHost && hostAccounts.value.length === 0) await loadHostAccounts()
+  if (needDb && dbAccounts.value.length === 0) await loadDbAccounts()
 }
 
 const loadUsers = async () => {
@@ -466,105 +342,12 @@ const loadUsers = async () => {
   }
 }
 
-const showGroupDialog = (group?: UserGroupRecord) => {
-  editingGroup.value = group || null
-  groupForm.name = group?.name || ''
-  groupForm.description = group?.description || ''
-  groupDialogVisible.value = true
-}
-
-const saveGroup = async () => {
-  if (!groupForm.name) {
-    ElMessage.warning(t('resourceGrant.groupNameRequired'))
-    return
-  }
-  saving.value = true
+const loadUserGroups = async () => {
   try {
-    if (editingGroup.value) {
-      await apiClient.updateUserGroup(editingGroup.value.id, groupForm)
-      ElMessage.success(t('common.saved'))
-    } else {
-      await apiClient.createUserGroup(groupForm)
-      ElMessage.success(t('common.created'))
-    }
-    groupDialogVisible.value = false
-    await loadGroups()
-  } catch (e: any) {
-    ElMessage.error(e.message || 'Failed to save group')
-  } finally {
-    saving.value = false
-  }
-}
-
-const deleteGroup = async (group: UserGroupRecord) => {
-  try {
-    await ElMessageBox.confirm(
-      t('resourceGrant.confirmDeleteGroup').replace('{name}', group.name),
-      t('common.delete'),
-      { confirmButtonText: t('common.delete'), cancelButtonText: t('common.cancel'), type: 'warning' }
-    )
-    await apiClient.deleteUserGroup(group.id)
-    ElMessage.success(t('common.deleted'))
-    await loadGroups()
-  } catch (e: any) {
-    if (e !== 'cancel') {
-      ElMessage.error(e.message || 'Failed to delete group')
-    }
-  }
-}
-
-const showMembers = async (group: UserGroupRecord) => {
-  currentGroupId.value = group.id
-  membersDialogVisible.value = true
-  loadingMembers.value = true
-  try {
-    currentMembers.value = await apiClient.getUserGroupMembers(group.id)
-  } catch (e: any) {
-    ElMessage.error(e.message || 'Failed to load members')
-  } finally {
-    loadingMembers.value = false
-  }
-}
-
-const searchUsers = (query: string) => {
-  if (!query) {
-    availableUsers.value = allUsers.value
-    return
-  }
-  availableUsers.value = allUsers.value.filter(u =>
-    (u.username || '').toLowerCase().includes(query.toLowerCase())
-  )
-}
-
-const addMember = async () => {
-  if (!newMemberId.value) return
-  try {
-    await apiClient.addUserGroupMember(currentGroupId.value, newMemberId.value)
-    ElMessage.success(t('common.added'))
-    newMemberId.value = ''
-    currentMembers.value = await apiClient.getUserGroupMembers(currentGroupId.value)
-    // Update member count
-    groupMembers.value[currentGroupId.value] = currentMembers.value
-  } catch (e: any) {
-    ElMessage.error(e.message || 'Failed to add member')
-  }
-}
-
-const removeMember = async (member: UserGroupMemberRecord) => {
-  try {
-    await ElMessageBox.confirm(
-      t('resourceGrant.confirmRemoveMember'),
-      t('common.remove'),
-      { confirmButtonText: t('common.remove'), cancelButtonText: t('common.cancel'), type: 'warning' }
-    )
-    await apiClient.removeUserGroupMember(currentGroupId.value, member.user_id)
-    ElMessage.success(t('common.removed'))
-    currentMembers.value = await apiClient.getUserGroupMembers(currentGroupId.value)
-    groupMembers.value[currentGroupId.value] = currentMembers.value
-  } catch (e: any) {
-    if (e !== 'cancel') {
-      ElMessage.error(e.message || 'Failed to remove member')
-    }
+    const gs = await apiClient.getUserGroups()
+    userGroups.value = gs || []
+  } catch {
+    userGroups.value = []
   }
 }
 
@@ -573,10 +356,11 @@ const showGrantDialog = () => {
   grantForm.principal_id = ''
   grantForm.resource_type = 'host_account'
   grantForm.resource_id = ''
+  grantForm.resource_ids = []
   grantForm.effect = 'allow'
   expiresOption.value = 'never'
   customExpiresAt.value = null
-  selectedResourceInfo.value = null
+  selectedResources.value = []
   resourceTabType.value = 'host_account'
   resourceSearchQuery.value = ''
   grantDialogVisible.value = true
@@ -592,38 +376,10 @@ const loadResources = async () => {
   loadingResources.value = true
   try {
     if (resourceTabType.value === 'host_account') {
-      if (hostAccounts.value.length === 0) {
-        const resp = await apiClient.getTargets({ page: 1, page_size: 1000 })
-        hostAccounts.value = (resp.items || []).map((t: any) => ({
-          id: t.id,
-          username: t.username || '',
-          host_name: t.host_name || t.host?.name || '',
-          host_address: t.host_address || t.host?.address || ''
-        }))
-      }
+      await loadHostAccounts()
     } else if (resourceTabType.value === 'database_account') {
-      if (dbAccounts.value.length === 0) {
-        const instances = await apiClient.getDBInstances({ page: 1, page_size: 100 })
-        const allAccounts: Array<{ id: string; unique_name: string; instance_name: string }> = []
-        for (const inst of (instances.items || [])) {
-          if (!inst.id) continue
-          try {
-            const resp = await apiClient.getDBAccounts(inst.id, { page: 1, page_size: 1000 })
-            for (const a of (resp.items || [])) {
-              if (a.id) {
-                allAccounts.push({
-                  id: a.id,
-                  unique_name: a.unique_name || a.username || '',
-                  instance_name: inst.name || ''
-                })
-              }
-            }
-          } catch { /* ignore */ }
-        }
-        dbAccounts.value = allAccounts
-      }
+      await loadDbAccounts()
     } else if (resourceTabType.value === 'resource_group') {
-      // TODO: load resource groups
       resourceGroups.value = []
     }
   } catch (e) {
@@ -633,24 +389,51 @@ const loadResources = async () => {
   }
 }
 
-const handleResourceCurrentChange = (row: any) => {
-  if (row) {
+const loadHostAccounts = async () => {
+  const resp = await apiClient.getTargets({ page: 1, page_size: 1000 })
+  hostAccounts.value = (resp.items || []).map((t: any) => ({
+    id: String(t.id ?? ''),
+    username: t.username || '',
+    host_name: t.name || t.host || '',
+    host_address: `${t.host || ''}:${t.port || ''}`
+  }))
+}
+
+const loadDbAccounts = async () => {
+  const instances = await apiClient.getDBInstances({ page: 1, page_size: 100 })
+  const allAccounts: Array<{ id: string; unique_name: string; instance_name: string }> = []
+  for (const inst of (instances.items || [])) {
+    if (!inst.id) continue
+    try {
+      const resp = await apiClient.getDBAccounts(inst.id, { page: 1, page_size: 1000 })
+      for (const a of (resp.items || [])) {
+        if (a.id) {
+          allAccounts.push({
+            id: a.id,
+            unique_name: a.unique_name || a.username || '',
+            instance_name: inst.name || ''
+          })
+        }
+      }
+    } catch { /* ignore */ }
+  }
+  dbAccounts.value = allAccounts
+}
+
+const handleResourceSelectionChange = (rows: any[]) => {
+  selectedResources.value = rows.map(row => {
     const name = row.username ? `${row.username}@${row.host_name || row.host_address || ''}` :
                  row.unique_name ? `${row.unique_name} (${row.instance_name || ''})` :
                  row.name || ''
-    grantForm.resource_id = row.id
-    grantForm.resource_type = resourceTabType.value
-    selectedResourceInfo.value = {
-      id: row.id,
-      name: name,
-      type: resourceTabType.value
-    }
-  }
+    return { id: row.id, name, type: resourceTabType.value }
+  })
+  grantForm.resource_ids = selectedResources.value.map(r => r.id)
+  grantForm.resource_type = resourceTabType.value
 }
 
-const clearResourceSelection = () => {
-  grantForm.resource_id = ''
-  selectedResourceInfo.value = null
+const removeResourceSelection = (index: number) => {
+  selectedResources.value.splice(index, 1)
+  grantForm.resource_ids = selectedResources.value.map(r => r.id)
 }
 
 const handleExpiresOptionChange = (val: string) => {
@@ -660,7 +443,11 @@ const handleExpiresOptionChange = (val: string) => {
 }
 
 const saveGrant = async () => {
-  if (!grantForm.principal_id || !grantForm.resource_id) {
+  const resourceIds = grantForm.resource_ids && grantForm.resource_ids.length > 0
+    ? grantForm.resource_ids
+    : grantForm.resource_id ? [grantForm.resource_id] : []
+
+  if (!grantForm.principal_id || resourceIds.length === 0) {
     ElMessage.warning(t('resourceGrant.fillRequired'))
     return
   }
@@ -678,10 +465,16 @@ const saveGrant = async () => {
 
   saving.value = true
   try {
-    await apiClient.createResourceGrant({
-      ...grantForm,
-      expires_at: expiresAt
-    })
+    for (const rid of resourceIds) {
+      await apiClient.createResourceGrant({
+        principal_type: grantForm.principal_type,
+        principal_id: grantForm.principal_id,
+        resource_type: grantForm.resource_type,
+        resource_id: rid,
+        effect: grantForm.effect,
+        expires_at: expiresAt
+      })
+    }
     ElMessage.success(t('common.created'))
     grantDialogVisible.value = false
     await loadGrants()
@@ -709,14 +502,6 @@ const deleteGrant = async (grant: ResourceGrantRecord) => {
   }
 }
 
-const handleTabChange = (tab: string) => {
-  if (tab === 'grants') {
-    loadGrants()
-  } else if (tab === 'groups') {
-    loadGroups()
-  }
-}
-
 // Watch principal type change to reset selection
 watch(() => grantForm.principal_type, () => {
   grantForm.principal_id = ''
@@ -725,6 +510,7 @@ watch(() => grantForm.principal_type, () => {
 // Init
 onMounted(async () => {
   await loadUsers()
+  await loadUserGroups()
   await loadGrants()
 })
 </script>

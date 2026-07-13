@@ -467,6 +467,7 @@ const zhCN = {
 
   'nav.users': '用户管理',
   'nav.roles': '角色管理',
+  'nav.userGroups': '用户组',
   'perm.deselectAll': '取消全选',
   'perm.dialogTitle': '分配权限 — {name}',
   'perm.saved': '权限已更新（{count} 项）',
@@ -1099,6 +1100,7 @@ const enUS = {
 
   'nav.users': 'User Management',
   'nav.roles': 'Role Management',
+  'nav.userGroups': 'User Groups',
   'perm.deselectAll': 'Deselect All',
   'perm.dialogTitle': 'Assign Permissions — {name}',
   'perm.saved': 'Permissions updated ({count} items)',

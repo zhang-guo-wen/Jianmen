@@ -11,6 +11,11 @@
         <RolesView v-if="activeTab === 'roles'" />
       </el-tab-pane>
 
+      <!-- 用户组 Tab -->
+      <el-tab-pane :label="t('nav.userGroups')" name="userGroups">
+        <UserGroupsView v-if="activeTab === 'userGroups'" />
+      </el-tab-pane>
+
       <!-- 资源授权 Tab -->
       <el-tab-pane :label="t('nav.resourceGrant')" name="resourceGrant">
         <ResourceGrantView v-if="activeTab === 'resourceGrant'" />
@@ -24,6 +29,7 @@ import { ref } from 'vue'
 import { useI18n } from '@/i18n'
 import UsersView from '@/views/UsersView.vue'
 import RolesView from '@/views/RolesView.vue'
+import UserGroupsView from '@/views/UserGroupsView.vue'
 import ResourceGrantView from '@/views/ResourceGrantView.vue'
 
 const { t } = useI18n()

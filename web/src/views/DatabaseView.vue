@@ -16,9 +16,9 @@
       <el-table-column label="地址" min-width="180" show-overflow-tooltip>
         <template #default="{ row }">{{ instanceEndpoint(row) }}</template>
       </el-table-column>
-      <el-table-column label="协议" width="80" align="center">
+      <el-table-column label="协议" width="100" align="center">
         <template #default="{ row }">
-          <el-tag size="small" :type="row.protocol === 'mysql' ? 'success' : row.protocol === 'redis' ? 'danger' : 'primary'" effect="plain">{{ row.protocol === 'mysql' ? 'MySQL' : row.protocol === 'redis' ? 'Redis' : 'PG' }}</el-tag>
+          <el-tag class="protocol-tag" size="small" :type="row.protocol === 'mysql' ? 'success' : row.protocol === 'redis' ? 'danger' : 'primary'" effect="light">{{ row.protocol === 'mysql' ? 'MySQL' : row.protocol === 'redis' ? 'Redis' : 'PostgreSQL' }}</el-tag>
         </template>
       </el-table-column>
       <el-table-column label="账号管理" min-width="110" align="center">
@@ -1106,6 +1106,12 @@ function closeProvisionAndRefresh() {
   line-height: 1.5;
   margin-top: 6px;
   width: 100%;
+}
+
+/* 协议标签统一宽度 */
+.protocol-tag {
+  width: 80px;
+  justify-content: center;
 }
 
 /* 账号管理按钮 */

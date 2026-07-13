@@ -559,6 +559,23 @@ export interface ResourceGrantPayload {
   expires_at?: string;
 }
 
+// ── Resource Group types ────────────────────────────────────────────
+
+export interface ResourceGroupRecord {
+  id: string;
+  name: string;
+  description?: string;
+  host_count: number;
+  database_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ResourceGroupPayload {
+  name: string;
+  description?: string;
+}
+
 export interface TestConnectionResult {
   ok: boolean;
   message: string;
@@ -1027,6 +1044,26 @@ export const apiClient = {
     }),
   checkResourceGrant: (userId: string, resourceType: string, resourceId: string) =>
     request<{ allowed: boolean }>(`/api/resource-grants/check?user_id=${encodeURIComponent(userId)}&resource_type=${encodeURIComponent(resourceType)}&resource_id=${encodeURIComponent(resourceId)}`),
+
+  // ── Resource Groups ────────────────────────────────────────────────
+  getResourceGroups: () =>
+    request<ResourceGroupRecord[]>('/api/resource-groups'),
+  createResourceGroup: (payload: ResourceGroupPayload) =>
+    request<ResourceGroupRecord>('/api/resource-groups', {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    }),
+  getResourceGroup: (id: string) =>
+    request<ResourceGroupRecord>(`/api/resource-groups/${encodeURIComponent(id)}`),
+  updateResourceGroup: (id: string, payload: ResourceGroupPayload) =>
+    request<ResourceGroupRecord>(`/api/resource-groups/${encodeURIComponent(id)}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload)
+    }),
+  deleteResourceGroup: (id: string) =>
+    request<void>(`/api/resource-groups/${encodeURIComponent(id)}`, {
+      method: 'DELETE'
+    }),
 
   // auth & init
   login: (username: string, password: string) =>

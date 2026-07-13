@@ -645,17 +645,10 @@ const zhCN = {
   'resourceGroups.name': '分组名称',
   'resourceGroups.namePlaceholder': '请输入分组名称',
   'resourceGroups.nameRequired': '请输入分组名称',
-  'resourceGroups.resourceType': '资源类型',
-  'resourceGroups.hostAccount': '主机账号',
-  'resourceGroups.databaseAccount': '数据库账号',
   'resourceGroups.description': '描述',
-  'resourceGroups.memberCount': '成员数',
-  'resourceGroups.manageMembers': '管理成员',
-  'resourceGroups.selectResource': '选择资源',
-  'resourceGroups.addMember': '添加成员',
-  'resourceGroups.resourceName': '资源名称',
-  'resourceGroups.confirmDelete': '确认删除分组 "{name}"？',
-  'resourceGroups.confirmRemoveMember': '确认移除该成员？',
+  'resourceGroups.hostCount': '主机数',
+  'resourceGroups.databaseCount': '数据库实例数',
+  'resourceGroups.confirmDelete': '确认删除分组 "{name}"？删除后关联的主机和数据库分组将被清空。',
 } satisfies Record<string, string>;
 
 export type TranslationKey = keyof typeof zhCN;
@@ -1297,17 +1290,10 @@ const enUS = {
   'resourceGroups.name': 'Group Name',
   'resourceGroups.namePlaceholder': 'Enter group name',
   'resourceGroups.nameRequired': 'Group name is required',
-  'resourceGroups.resourceType': 'Resource Type',
-  'resourceGroups.hostAccount': 'Host Account',
-  'resourceGroups.databaseAccount': 'Database Account',
   'resourceGroups.description': 'Description',
-  'resourceGroups.memberCount': 'Members',
-  'resourceGroups.manageMembers': 'Manage Members',
-  'resourceGroups.selectResource': 'Select Resource',
-  'resourceGroups.addMember': 'Add Member',
-  'resourceGroups.resourceName': 'Resource Name',
-  'resourceGroups.confirmDelete': 'Delete group "{name}"?',
-  'resourceGroups.confirmRemoveMember': 'Remove this member?',
+  'resourceGroups.hostCount': 'Hosts',
+  'resourceGroups.databaseCount': 'DB Instances',
+  'resourceGroups.confirmDelete': 'Delete group "{name}"? Hosts and databases in this group will be ungrouped.',
 } satisfies Record<TranslationKey, string>;
 
 const dictionaries: Record<Locale, Record<TranslationKey, string>> = {

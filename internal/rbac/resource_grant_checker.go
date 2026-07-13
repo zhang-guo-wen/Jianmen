@@ -111,12 +111,42 @@ func (c *ResourceGrantChecker) matchesGrant(grant model.ResourceGrant, resourceT
 }
 
 // groupContainsResource 检查资源组是否包含指定资源
+// 通过 hosts.group_name / database_instances.group_name 查找（一对多关系）
 func (c *ResourceGrantChecker) groupContainsResource(groupID, resourceType, resourceID string) bool {
-	var count int64
-	err := c.db.Model(&model.ResourceGroupMember{}).
-		Where("group_id = ?", groupID).
-		Where("resource_type = ? OR resource_type = ?", resourceType, "*").
-		Where("resource_id = ? OR resource_id = ?", resourceID, "*").
-		Count(&count).Error
-	return err == nil && count > 0
+	var group model.ResourceGroup
+	if err := c.db.First(&group, "id = ?", groupID).Error; err != nil {
+		return false
+	}
+	groupName := group.Name
+
+	switch {
+	case resourceType == model.ResourceTypeHostAccount:
+		var count int64
+		c.db.Model(&model.HostAccount{}).
+			Joins("JOIN hosts ON hosts.id = host_accounts.host_id").
+			Where("hosts.group_name = ? AND host_accounts.id = ?", groupName, resourceID).
+			Count(&count)
+		return count > 0
+	case resourceType == model.ResourceTypeDatabaseAccount:
+		var count int64
+		c.db.Model(&model.DatabaseAccount{}).
+			Joins("JOIN database_instances ON database_instances.id = database_accounts.instance_id").
+			Where("database_instances.group_name = ? AND database_accounts.id = ?", groupName, resourceID).
+			Count(&count)
+		return count > 0
+	case resourceType == model.ResourceTypeHost:
+		var count int64
+		c.db.Model(&model.Host{}).
+			Where("group_name = ? AND id = ?", groupName, resourceID).
+			Count(&count)
+		return count > 0
+	case resourceType == model.ResourceTypeDatabaseInstance:
+		var count int64
+		c.db.Model(&model.DatabaseInstance{}).
+			Where("group_name = ? AND id = ?", groupName, resourceID).
+			Count(&count)
+		return count > 0
+	default:
+		return false
+	}
 }

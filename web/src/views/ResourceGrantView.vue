@@ -193,30 +193,23 @@
           </el-select>
         </el-form-item>
 
-        <el-form-item :label="t('resourceGrant.resourceType')" required>
-          <el-select v-model="grantForm.resource_type" style="width: 100%">
-            <el-option label="Host Account" value="host_account" />
-            <el-option label="Database Account" value="database_account" />
-            <el-option :label="t('resourceGrant.resourceGroup')" value="resource_group" />
-          </el-select>
-        </el-form-item>
-
         <el-form-item :label="t('resourceGrant.selectResource')" required>
-          <el-select
-            v-model="grantForm.resource_id"
-            filterable
-            remote
-            :remote-method="searchResources"
-            :placeholder="t('resourceGrant.searchResource')"
-            style="width: 100%"
-          >
-            <el-option
-              v-for="item in resourceOptions"
-              :key="item.id"
-              :label="item.name"
-              :value="item.id"
-            />
-          </el-select>
+          <div class="resource-select-wrapper">
+            <el-input
+              v-model="resourceDisplay"
+              :placeholder="t('resourceGrant.clickToSelect')"
+              readonly
+              @click="showResourceSelector"
+              style="width: 100%"
+            >
+              <template #suffix>
+                <el-icon><Search /></el-icon>
+              </template>
+            </el-input>
+            <el-button type="primary" @click="showResourceSelector" style="margin-left: 8px">
+              {{ t('resourceGrant.select') }}
+            </el-button>
+          </div>
         </el-form-item>
 
         <el-form-item :label="t('resourceGrant.effect')">
@@ -250,6 +243,13 @@
         <el-button type="primary" @click="saveGrant" :loading="saving">{{ t('common.save') }}</el-button>
       </template>
     </el-dialog>
+
+    <!-- 资源选择器 -->
+    <ResourceSelector
+      v-model="resourceSelectorVisible"
+      :resource-type="grantForm.resource_type"
+      @confirm="handleResourceSelect"
+    />
   </div>
 </template>
 
@@ -265,6 +265,7 @@ import {
   type ResourceGrantRecord,
   type UserRecord
 } from '@/api/client'
+import ResourceSelector from '@/components/ResourceSelector.vue'
 
 const { t } = useI18n()
 
@@ -315,6 +316,11 @@ const grantForm = reactive({
 const expiresOption = ref('never')
 const customExpiresAt = ref<Date | null>(null)
 const resourceOptions = ref<Array<{ id: string; name: string }>>([])
+
+// Resource selector
+const resourceSelectorVisible = ref(false)
+const resourceDisplay = ref('')
+const selectedResourceInfo = ref<{ id: string; name: string; type: string } | null>(null)
 
 // Computed
 const principalOptions = computed(() => {
@@ -506,53 +512,28 @@ const showGrantDialog = () => {
   grantForm.effect = 'allow'
   expiresOption.value = 'never'
   customExpiresAt.value = null
+  resourceDisplay.value = ''
+  selectedResourceInfo.value = null
   grantDialogVisible.value = true
+}
+
+const showResourceSelector = () => {
+  resourceSelectorVisible.value = true
+}
+
+const handleResourceSelect = (resources: Array<{ id: string; name: string; type: string }>) => {
+  if (resources.length > 0) {
+    const resource = resources[0]
+    grantForm.resource_id = resource.id
+    grantForm.resource_type = resource.type
+    resourceDisplay.value = resource.name
+    selectedResourceInfo.value = resource
+  }
 }
 
 const handleExpiresOptionChange = (val: string) => {
   if (val !== 'custom') {
     customExpiresAt.value = null
-  }
-}
-
-const searchResources = async (query: string) => {
-  if (!query) {
-    resourceOptions.value = []
-    return
-  }
-  // Search based on resource type
-  try {
-    if (grantForm.resource_type === 'host_account') {
-      const resp = await apiClient.getTargets({ q: query, page: 1, page_size: 50 })
-      resourceOptions.value = (resp.items || []).map((t: any) => ({
-        id: t.id,
-        name: `${t.username || ''}@${t.host_name || t.host_address || ''}`
-      }))
-    } else if (grantForm.resource_type === 'database_account') {
-      // Search all database accounts (need to get instances first)
-      const instances = await apiClient.getDBInstances({ page: 1, page_size: 100 })
-      const allAccounts: Array<{ id: string; name: string }> = []
-      for (const inst of (instances.items || [])) {
-        if (!inst.id) continue
-        try {
-          const resp = await apiClient.getDBAccounts(inst.id, { q: query, page: 1, page_size: 20 })
-          for (const a of (resp.items || [])) {
-            if (a.id) {
-              allAccounts.push({
-                id: a.id,
-                name: `${a.unique_name || a.username || ''} (${inst.name || ''})`
-              })
-            }
-          }
-        } catch { /* ignore */ }
-      }
-      resourceOptions.value = allAccounts
-    } else if (grantForm.resource_type === 'resource_group') {
-      // TODO: implement resource group search
-      resourceOptions.value = []
-    }
-  } catch {
-    resourceOptions.value = []
   }
 }
 

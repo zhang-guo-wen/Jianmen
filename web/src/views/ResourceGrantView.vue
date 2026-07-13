@@ -167,7 +167,7 @@
     <el-dialog
       v-model="grantDialogVisible"
       :title="t('resourceGrant.addGrant')"
-      width="600px"
+      width="800px"
     >
       <el-form :model="grantForm" label-width="120px">
         <el-form-item :label="t('resourceGrant.principalType')" required>
@@ -194,21 +194,59 @@
         </el-form-item>
 
         <el-form-item :label="t('resourceGrant.selectResource')" required>
-          <div class="resource-select-wrapper">
+          <div class="resource-select-inline">
+            <!-- 资源类型切换 -->
+            <el-tabs v-model="resourceTabType" @tab-change="handleResourceTabChange" class="resource-tabs">
+              <el-tab-pane :label="t('resourceGrant.hostAccounts')" name="host_account" />
+              <el-tab-pane :label="t('resourceGrant.databaseAccounts')" name="database_account" />
+              <el-tab-pane :label="t('resourceGrant.resourceGroups')" name="resource_group" />
+            </el-tabs>
+
+            <!-- 搜索框 -->
             <el-input
-              v-model="resourceDisplay"
-              :placeholder="t('resourceGrant.clickToSelect')"
-              readonly
-              @click="showResourceSelector"
-              style="width: 100%"
+              v-model="resourceSearchQuery"
+              :placeholder="t('resourceGrant.searchResource')"
+              clearable
+              class="resource-search"
             >
-              <template #suffix>
+              <template #prefix>
                 <el-icon><Search /></el-icon>
               </template>
             </el-input>
-            <el-button type="primary" @click="showResourceSelector" style="margin-left: 8px">
-              {{ t('resourceGrant.select') }}
-            </el-button>
+
+            <!-- 资源列表 -->
+            <el-table
+              :data="filteredResources"
+              v-loading="loadingResources"
+              height="250"
+              stripe
+              highlight-current-row
+              @current-change="handleResourceCurrentChange"
+              class="resource-table"
+            >
+              <el-table-column :label="t('resourceGrant.accountName')" min-width="150">
+                <template #default="{ row }">
+                  {{ row.username || row.unique_name || row.name }}
+                </template>
+              </el-table-column>
+              <el-table-column :label="t('resourceGrant.hostName')" min-width="150">
+                <template #default="{ row }">
+                  {{ row.host_name || row.instance_name || '' }}
+                </template>
+              </el-table-column>
+              <el-table-column :label="t('resourceGrant.hostAddress')" min-width="150">
+                <template #default="{ row }">
+                  {{ row.host_address || '' }}
+                </template>
+              </el-table-column>
+            </el-table>
+
+            <!-- 已选资源回显 -->
+            <div v-if="selectedResourceInfo" class="selected-resource-display">
+              <el-tag type="success" closable @close="clearResourceSelection">
+                {{ selectedResourceInfo.name }}
+              </el-tag>
+            </div>
           </div>
         </el-form-item>
 
@@ -243,13 +281,6 @@
         <el-button type="primary" @click="saveGrant" :loading="saving">{{ t('common.save') }}</el-button>
       </template>
     </el-dialog>
-
-    <!-- 资源选择器 -->
-    <ResourceSelector
-      v-model="resourceSelectorVisible"
-      :resource-type="grantForm.resource_type"
-      @confirm="handleResourceSelect"
-    />
   </div>
 </template>
 
@@ -265,7 +296,6 @@ import {
   type ResourceGrantRecord,
   type UserRecord
 } from '@/api/client'
-import ResourceSelector from '@/components/ResourceSelector.vue'
 
 const { t } = useI18n()
 
@@ -289,6 +319,15 @@ const groupMembers = ref<Record<string, UserGroupMemberRecord[]>>({})
 const groupDialogVisible = ref(false)
 const membersDialogVisible = ref(false)
 const grantDialogVisible = ref(false)
+
+// Resource selection state
+const resourceTabType = ref('host_account')
+const resourceSearchQuery = ref('')
+const loadingResources = ref(false)
+const hostAccounts = ref<Array<{ id: string; username: string; host_name: string; host_address: string }>>([])
+const dbAccounts = ref<Array<{ id: string; unique_name: string; instance_name: string }>>([])
+const resourceGroups = ref<Array<{ id: string; name: string; description: string }>>([])
+const selectedResourceInfo = ref<{ id: string; name: string; type: string } | null>(null)
 
 // Group form
 const editingGroup = ref<UserGroupRecord | null>(null)
@@ -315,19 +354,38 @@ const grantForm = reactive({
 })
 const expiresOption = ref('never')
 const customExpiresAt = ref<Date | null>(null)
-const resourceOptions = ref<Array<{ id: string; name: string }>>([])
-
-// Resource selector
-const resourceSelectorVisible = ref(false)
-const resourceDisplay = ref('')
-const selectedResourceInfo = ref<{ id: string; name: string; type: string } | null>(null)
 
 // Computed
 const principalOptions = computed(() => {
   if (grantForm.principal_type === 'user') {
-    return allUsers.value.map(u => ({ id: u.id, name: u.username }))
+    return allUsers.value.map(u => ({ id: u.id, name: u.username || '' }))
   }
   return groups.value.map(g => ({ id: g.id, name: g.name }))
+})
+
+// Filtered resources based on tab type and search query
+const filteredResources = computed(() => {
+  const query = resourceSearchQuery.value.toLowerCase()
+  if (resourceTabType.value === 'host_account') {
+    if (!query) return hostAccounts.value
+    return hostAccounts.value.filter(a =>
+      (a.username || '').toLowerCase().includes(query) ||
+      (a.host_name || '').toLowerCase().includes(query) ||
+      (a.host_address || '').toLowerCase().includes(query)
+    )
+  } else if (resourceTabType.value === 'database_account') {
+    if (!query) return dbAccounts.value
+    return dbAccounts.value.filter(a =>
+      (a.unique_name || '').toLowerCase().includes(query) ||
+      (a.instance_name || '').toLowerCase().includes(query)
+    )
+  } else {
+    if (!query) return resourceGroups.value
+    return resourceGroups.value.filter(g =>
+      (g.name || '').toLowerCase().includes(query) ||
+      (g.description || '').toLowerCase().includes(query)
+    )
+  }
 })
 
 // Methods
@@ -346,8 +404,14 @@ const getPrincipalName = (grant: ResourceGrantRecord) => {
 }
 
 const getResourceName = (grant: ResourceGrantRecord) => {
-  const opt = resourceOptions.value.find(o => o.id === grant.resource_id)
-  return opt?.name || grant.resource_id
+  // Search in all resource types
+  const host = hostAccounts.value.find(a => a.id === grant.resource_id)
+  if (host) return `${host.username}@${host.host_name || host.host_address || ''}`
+  const db = dbAccounts.value.find(a => a.id === grant.resource_id)
+  if (db) return `${db.unique_name} (${db.instance_name || ''})`
+  const group = resourceGroups.value.find(g => g.id === grant.resource_id)
+  if (group) return group.name
+  return grant.resource_id
 }
 
 const getMemberCount = (groupId: string) => {
@@ -512,23 +576,81 @@ const showGrantDialog = () => {
   grantForm.effect = 'allow'
   expiresOption.value = 'never'
   customExpiresAt.value = null
-  resourceDisplay.value = ''
   selectedResourceInfo.value = null
+  resourceTabType.value = 'host_account'
+  resourceSearchQuery.value = ''
   grantDialogVisible.value = true
+  loadResources()
 }
 
-const showResourceSelector = () => {
-  resourceSelectorVisible.value = true
+const handleResourceTabChange = () => {
+  resourceSearchQuery.value = ''
+  loadResources()
 }
 
-const handleResourceSelect = (resources: Array<{ id: string; name: string; type: string }>) => {
-  if (resources.length > 0) {
-    const resource = resources[0]
-    grantForm.resource_id = resource.id
-    grantForm.resource_type = resource.type
-    resourceDisplay.value = resource.name
-    selectedResourceInfo.value = resource
+const loadResources = async () => {
+  loadingResources.value = true
+  try {
+    if (resourceTabType.value === 'host_account') {
+      if (hostAccounts.value.length === 0) {
+        const resp = await apiClient.getTargets({ page: 1, page_size: 1000 })
+        hostAccounts.value = (resp.items || []).map((t: any) => ({
+          id: t.id,
+          username: t.username || '',
+          host_name: t.host_name || t.host?.name || '',
+          host_address: t.host_address || t.host?.address || ''
+        }))
+      }
+    } else if (resourceTabType.value === 'database_account') {
+      if (dbAccounts.value.length === 0) {
+        const instances = await apiClient.getDBInstances({ page: 1, page_size: 100 })
+        const allAccounts: Array<{ id: string; unique_name: string; instance_name: string }> = []
+        for (const inst of (instances.items || [])) {
+          if (!inst.id) continue
+          try {
+            const resp = await apiClient.getDBAccounts(inst.id, { page: 1, page_size: 1000 })
+            for (const a of (resp.items || [])) {
+              if (a.id) {
+                allAccounts.push({
+                  id: a.id,
+                  unique_name: a.unique_name || a.username || '',
+                  instance_name: inst.name || ''
+                })
+              }
+            }
+          } catch { /* ignore */ }
+        }
+        dbAccounts.value = allAccounts
+      }
+    } else if (resourceTabType.value === 'resource_group') {
+      // TODO: load resource groups
+      resourceGroups.value = []
+    }
+  } catch (e) {
+    console.error('Failed to load resources:', e)
+  } finally {
+    loadingResources.value = false
   }
+}
+
+const handleResourceCurrentChange = (row: any) => {
+  if (row) {
+    const name = row.username ? `${row.username}@${row.host_name || row.host_address || ''}` :
+                 row.unique_name ? `${row.unique_name} (${row.instance_name || ''})` :
+                 row.name || ''
+    grantForm.resource_id = row.id
+    grantForm.resource_type = resourceTabType.value
+    selectedResourceInfo.value = {
+      id: row.id,
+      name: name,
+      type: resourceTabType.value
+    }
+  }
+}
+
+const clearResourceSelection = () => {
+  grantForm.resource_id = ''
+  selectedResourceInfo.value = null
 }
 
 const handleExpiresOptionChange = (val: string) => {
@@ -600,12 +722,6 @@ watch(() => grantForm.principal_type, () => {
   grantForm.principal_id = ''
 })
 
-// Watch resource type change to reset selection
-watch(() => grantForm.resource_type, () => {
-  grantForm.resource_id = ''
-  resourceOptions.value = []
-})
-
 // Init
 onMounted(async () => {
   await loadUsers()
@@ -623,6 +739,31 @@ onMounted(async () => {
   justify-content: space-between;
   align-items: center;
   margin-bottom: 16px;
+}
+
+.resource-select-inline {
+  width: 100%;
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 4px;
+  padding: 12px;
+}
+
+.resource-tabs {
+  margin-bottom: 12px;
+}
+
+.resource-search {
+  margin-bottom: 12px;
+}
+
+.resource-table {
+  width: 100%;
+}
+
+.selected-resource-display {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--el-border-color-lighter);
 }
 
 .filters {

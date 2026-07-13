@@ -1,192 +1,201 @@
 <template>
-  <div class="resource-grant-page">
-    <div class="tab-header">
-      <div class="filters">
-        <el-select v-model="filters.principal_type" :placeholder="t('resourceGrant.principalType')" clearable style="width: 140px">
-          <el-option :label="t('resourceGrant.user')" value="user" />
-          <el-option :label="t('resourceGrant.userGroup')" value="user_group" />
-        </el-select>
-        <el-select v-model="filters.resource_type" :placeholder="t('resourceGrant.resourceType')" clearable style="width: 140px">
-          <el-option label="Host Account" value="host_account" />
-          <el-option label="Database Account" value="database_account" />
-          <el-option label="Resource Group" value="resource_group" />
-        </el-select>
-        <el-button type="primary" @click="loadGrants">
-          <el-icon><Search /></el-icon>
-          {{ t('common.search') }}
-        </el-button>
-      </div>
-      <el-button type="primary" @click="showGrantDialog()">
-        <el-icon><Plus /></el-icon>
-        {{ t('resourceGrant.addGrant') }}
-      </el-button>
-    </div>
-
-    <el-table :data="grants" v-loading="loading" stripe>
-      <el-table-column :label="t('resourceGrant.principalType')" prop="principal_type" width="100">
-        <template #default="{ row }">
-          <el-tag :type="row.principal_type === 'user' ? 'primary' : 'success'" size="small">
-            {{ row.principal_type === 'user' ? t('resourceGrant.user') : t('resourceGrant.userGroup') }}
-          </el-tag>
-        </template>
-      </el-table-column>
-      <el-table-column :label="t('resourceGrant.principalName')" min-width="120">
-        <template #default="{ row }">
-          {{ getPrincipalName(row) }}
-        </template>
-      </el-table-column>
-      <el-table-column :label="t('resourceGrant.resourceType')" width="120">
-        <template #default="{ row }">
-          <el-tag size="small">{{ resourceTypeLabel(row.resource_type) }}</el-tag>
-        </template>
-      </el-table-column>
-      <el-table-column :label="t('resourceGrant.resourceName')" min-width="150">
-        <template #default="{ row }">
-          {{ getResourceName(row) }}
-        </template>
-      </el-table-column>
-      <el-table-column :label="t('resourceGrant.effect')" width="80">
-        <template #default="{ row }">
-          <el-tag :type="row.effect === 'allow' ? 'success' : 'danger'" size="small">
-            {{ row.effect === 'allow' ? t('resourceGrant.allow') : t('resourceGrant.deny') }}
-          </el-tag>
-        </template>
-      </el-table-column>
-      <el-table-column :label="t('resourceGrant.expiresAt')" width="180">
-        <template #default="{ row }">
-          {{ row.expires_at ? formatTime(row.expires_at) : t('resourceGrant.never') }}
-        </template>
-      </el-table-column>
-      <el-table-column :label="t('common.actions')" width="80" fixed="right">
-        <template #default="{ row }">
-          <el-button type="danger" link size="small" @click="deleteGrant(row)">
-            {{ t('common.delete') }}
-          </el-button>
-        </template>
-      </el-table-column>
-    </el-table>
-
-    <!-- 创建资源授权对话框 -->
-    <el-dialog
-      v-model="grantDialogVisible"
-      :title="t('resourceGrant.addGrant')"
-      width="800px"
-    >
-      <el-form :model="grantForm" label-width="120px">
-        <el-form-item :label="t('resourceGrant.principalType')" required>
-          <el-radio-group v-model="grantForm.principal_type">
-            <el-radio value="user">{{ t('resourceGrant.user') }}</el-radio>
-            <el-radio value="user_group">{{ t('resourceGrant.userGroup') }}</el-radio>
-          </el-radio-group>
-        </el-form-item>
-
-        <el-form-item :label="grantForm.principal_type === 'user' ? t('resourceGrant.selectUser') : t('resourceGrant.selectGroup')" required>
-          <el-select
-            v-model="grantForm.principal_id"
-            filterable
-            :placeholder="grantForm.principal_type === 'user' ? t('resourceGrant.searchUser') : t('resourceGrant.searchGroup')"
-            style="width: 100%"
-          >
-            <el-option
-              v-for="item in principalOptions"
-              :key="item.id"
-              :label="item.name"
-              :value="item.id"
-            />
-          </el-select>
-        </el-form-item>
-
-        <el-form-item :label="t('resourceGrant.selectResource')" required>
-          <div class="resource-select-inline">
-            <el-tabs v-model="resourceTabType" @tab-change="handleResourceTabChange" class="resource-tabs">
-              <el-tab-pane :label="t('resourceGrant.hostAccounts')" name="host_account" />
-              <el-tab-pane :label="t('resourceGrant.databaseAccounts')" name="database_account" />
-              <el-tab-pane :label="t('resourceGrant.resourceGroups')" name="resource_group" />
-            </el-tabs>
-
-            <el-input
-              v-model="resourceSearchQuery"
-              :placeholder="t('resourceGrant.searchResource')"
-              clearable
-              class="resource-search"
-            >
-              <template #prefix>
+  <div class="view-stack">
+    <div class="page-container">
+      <div class="page-card">
+        <div class="page-card__toolbar">
+          <div class="page-card__actions" style="flex:1; justify-content:space-between;">
+            <div class="filters">
+              <el-select v-model="filters.principal_type" :placeholder="t('resourceGrant.principalType')" clearable style="width: 140px">
+                <el-option :label="t('resourceGrant.user')" value="user" />
+                <el-option :label="t('resourceGrant.userGroup')" value="user_group" />
+              </el-select>
+              <el-select v-model="filters.resource_type" :placeholder="t('resourceGrant.resourceType')" clearable style="width: 140px">
+                <el-option label="Host Account" value="host_account" />
+                <el-option label="Database Account" value="database_account" />
+                <el-option label="Resource Group" value="resource_group" />
+              </el-select>
+              <el-button type="primary" @click="loadGrants">
                 <el-icon><Search /></el-icon>
-              </template>
-            </el-input>
-
-            <el-table
-              ref="resourceTableRef"
-              :data="filteredResources"
-              v-loading="loadingResources"
-              height="250"
-              stripe
-              @selection-change="handleResourceSelectionChange"
-              class="resource-table"
-            >
-              <el-table-column type="selection" width="50" />
-              <el-table-column :label="t('resourceGrant.accountName')" min-width="130">
-                <template #default="{ row }">
-                  {{ row.username || row.unique_name || row.name }}
-                </template>
-              </el-table-column>
-              <el-table-column :label="t('resourceGrant.hostName')" min-width="130">
-                <template #default="{ row }">
-                  {{ row.host_name || row.instance_name || '' }}
-                </template>
-              </el-table-column>
-              <el-table-column :label="t('resourceGrant.hostAddress')" min-width="130">
-                <template #default="{ row }">
-                  {{ row.host_address || '' }}
-                </template>
-              </el-table-column>
-            </el-table>
-
-            <div v-if="selectedResources.length > 0" class="selected-resource-display">
-              <el-tag
-                v-for="(r, i) in selectedResources"
-                :key="r.id"
-                type="success"
-                closable
-                @close="removeResourceSelection(i)"
-              >
-                {{ r.name }}
-              </el-tag>
+                {{ t('common.search') }}
+              </el-button>
+            </div>
+            <div>
+              <el-button type="primary" @click="showGrantDialog()">
+                <el-icon><Plus /></el-icon>
+                {{ t('resourceGrant.addGrant') }}
+              </el-button>
             </div>
           </div>
-        </el-form-item>
+        </div>
+        <div class="page-card__body">
+          <el-table :data="grants" v-loading="loading" stripe>
+            <el-table-column :label="t('resourceGrant.principalType')" prop="principal_type" width="100">
+              <template #default="{ row }">
+                <el-tag :type="row.principal_type === 'user' ? 'primary' : 'success'" size="small">
+                  {{ row.principal_type === 'user' ? t('resourceGrant.user') : t('resourceGrant.userGroup') }}
+                </el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column :label="t('resourceGrant.principalName')" min-width="120">
+              <template #default="{ row }">
+                {{ getPrincipalName(row) }}
+              </template>
+            </el-table-column>
+            <el-table-column :label="t('resourceGrant.resourceType')" width="120">
+              <template #default="{ row }">
+                <el-tag size="small">{{ resourceTypeLabel(row.resource_type) }}</el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column :label="t('resourceGrant.resourceName')" min-width="150">
+              <template #default="{ row }">
+                {{ getResourceName(row) }}
+              </template>
+            </el-table-column>
+            <el-table-column :label="t('resourceGrant.effect')" width="80">
+              <template #default="{ row }">
+                <el-tag :type="row.effect === 'allow' ? 'success' : 'danger'" size="small">
+                  {{ row.effect === 'allow' ? t('resourceGrant.allow') : t('resourceGrant.deny') }}
+                </el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column :label="t('resourceGrant.expiresAt')" width="180">
+              <template #default="{ row }">
+                {{ row.expires_at ? formatTime(row.expires_at) : t('resourceGrant.never') }}
+              </template>
+            </el-table-column>
+            <el-table-column :label="t('common.actions')" width="80" fixed="right">
+              <template #default="{ row }">
+                <el-button type="danger" link size="small" @click="deleteGrant(row)">
+                  {{ t('common.delete') }}
+                </el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+        </div>
+      </div>
 
-        <el-form-item :label="t('resourceGrant.effect')">
-          <el-radio-group v-model="grantForm.effect">
-            <el-radio value="allow">{{ t('resourceGrant.allow') }}</el-radio>
-            <el-radio value="deny">{{ t('resourceGrant.deny') }}</el-radio>
-          </el-radio-group>
-        </el-form-item>
-
-        <el-form-item :label="t('resourceGrant.expiresAt')">
-          <div class="expires-options">
-            <el-radio-group v-model="expiresOption" @change="handleExpiresOptionChange">
-              <el-radio value="never">{{ t('resourceGrant.never') }}</el-radio>
-              <el-radio value="8h">8 {{ t('resourceGrant.hours') }}</el-radio>
-              <el-radio value="7d">7 {{ t('resourceGrant.days') }}</el-radio>
-              <el-radio value="1y">1 {{ t('resourceGrant.year') }}</el-radio>
-              <el-radio value="custom">{{ t('resourceGrant.custom') }}</el-radio>
+      <!-- 创建资源授权对话框 -->
+      <el-dialog
+        v-model="grantDialogVisible"
+        :title="t('resourceGrant.addGrant')"
+        width="800px"
+      >
+        <el-form :model="grantForm" label-width="120px">
+          <el-form-item :label="t('resourceGrant.principalType')" required>
+            <el-radio-group v-model="grantForm.principal_type">
+              <el-radio value="user">{{ t('resourceGrant.user') }}</el-radio>
+              <el-radio value="user_group">{{ t('resourceGrant.userGroup') }}</el-radio>
             </el-radio-group>
-            <el-date-picker
-              v-if="expiresOption === 'custom'"
-              v-model="customExpiresAt"
-              type="datetime"
-              :placeholder="t('resourceGrant.selectDateTime')"
-              style="margin-top: 8px; width: 100%"
-            />
-          </div>
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="grantDialogVisible = false">{{ t('common.cancel') }}</el-button>
-        <el-button type="primary" @click="saveGrant" :loading="saving">{{ t('common.save') }}</el-button>
-      </template>
-    </el-dialog>
+          </el-form-item>
+
+          <el-form-item :label="grantForm.principal_type === 'user' ? t('resourceGrant.selectUser') : t('resourceGrant.selectGroup')" required>
+            <el-select
+              v-model="grantForm.principal_id"
+              filterable
+              :placeholder="grantForm.principal_type === 'user' ? t('resourceGrant.searchUser') : t('resourceGrant.searchGroup')"
+              style="width: 100%"
+            >
+              <el-option
+                v-for="item in principalOptions"
+                :key="item.id"
+                :label="item.name"
+                :value="item.id"
+              />
+            </el-select>
+          </el-form-item>
+
+          <el-form-item :label="t('resourceGrant.selectResource')" required>
+            <div class="resource-select-inline">
+              <el-tabs v-model="resourceTabType" @tab-change="handleResourceTabChange" class="resource-tabs">
+                <el-tab-pane :label="t('resourceGrant.hostAccounts')" name="host_account" />
+                <el-tab-pane :label="t('resourceGrant.databaseAccounts')" name="database_account" />
+                <el-tab-pane :label="t('resourceGrant.resourceGroups')" name="resource_group" />
+              </el-tabs>
+
+              <el-input
+                v-model="resourceSearchQuery"
+                :placeholder="t('resourceGrant.searchResource')"
+                clearable
+                class="resource-search"
+              >
+                <template #prefix>
+                  <el-icon><Search /></el-icon>
+                </template>
+              </el-input>
+
+              <el-table
+                ref="resourceTableRef"
+                :data="filteredResources"
+                v-loading="loadingResources"
+                height="250"
+                stripe
+                @selection-change="handleResourceSelectionChange"
+                class="resource-table"
+              >
+                <el-table-column type="selection" width="50" />
+                <el-table-column :label="t('resourceGrant.accountName')" min-width="130">
+                  <template #default="{ row }">
+                    {{ row.username || row.unique_name || row.name }}
+                  </template>
+                </el-table-column>
+                <el-table-column :label="t('resourceGrant.hostName')" min-width="130">
+                  <template #default="{ row }">
+                    {{ row.host_name || row.instance_name || '' }}
+                  </template>
+                </el-table-column>
+                <el-table-column :label="t('resourceGrant.hostAddress')" min-width="130">
+                  <template #default="{ row }">
+                    {{ row.host_address || '' }}
+                  </template>
+                </el-table-column>
+              </el-table>
+
+              <div v-if="selectedResources.length > 0" class="selected-resource-display">
+                <el-tag
+                  v-for="(r, i) in selectedResources"
+                  :key="r.id"
+                  type="success"
+                  closable
+                  @close="removeResourceSelection(i)"
+                >
+                  {{ r.name }}
+                </el-tag>
+              </div>
+            </div>
+          </el-form-item>
+
+          <el-form-item :label="t('resourceGrant.effect')">
+            <el-radio-group v-model="grantForm.effect">
+              <el-radio value="allow">{{ t('resourceGrant.allow') }}</el-radio>
+              <el-radio value="deny">{{ t('resourceGrant.deny') }}</el-radio>
+            </el-radio-group>
+          </el-form-item>
+
+          <el-form-item :label="t('resourceGrant.expiresAt')">
+            <div class="expires-options">
+              <el-radio-group v-model="expiresOption" @change="handleExpiresOptionChange">
+                <el-radio value="never">{{ t('resourceGrant.never') }}</el-radio>
+                <el-radio value="8h">8 {{ t('resourceGrant.hours') }}</el-radio>
+                <el-radio value="7d">7 {{ t('resourceGrant.days') }}</el-radio>
+                <el-radio value="1y">1 {{ t('resourceGrant.year') }}</el-radio>
+                <el-radio value="custom">{{ t('resourceGrant.custom') }}</el-radio>
+              </el-radio-group>
+              <el-date-picker
+                v-if="expiresOption === 'custom'"
+                v-model="customExpiresAt"
+                type="datetime"
+                :placeholder="t('resourceGrant.selectDateTime')"
+                style="margin-top: 8px; width: 100%"
+              />
+            </div>
+          </el-form-item>
+        </el-form>
+        <template #footer>
+          <el-button @click="grantDialogVisible = false">{{ t('common.cancel') }}</el-button>
+          <el-button type="primary" @click="saveGrant" :loading="saving">{{ t('common.save') }}</el-button>
+        </template>
+      </el-dialog>
+    </div>
   </div>
 </template>
 
@@ -516,17 +525,6 @@ onMounted(async () => {
 </script>
 
 <style scoped>
-.resource-grant-page {
-  padding: 20px;
-}
-
-.tab-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 16px;
-}
-
 .resource-select-inline {
   width: 100%;
   border: 1px solid var(--el-border-color-lighter);
@@ -553,12 +551,6 @@ onMounted(async () => {
 }
 
 .filters {
-  display: flex;
-  gap: 12px;
-  align-items: center;
-}
-
-.members-header {
   display: flex;
   gap: 12px;
   align-items: center;

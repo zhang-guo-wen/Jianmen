@@ -1,100 +1,104 @@
 <template>
   <div class="view-stack">
-    <div class="page-card">
-      <div class="page-card__toolbar">
-        <div class="page-card__spacer"></div>
-        <div class="page-card__actions">
-          <el-button type="primary" @click="showGroupDialog()">
-            <el-icon><Plus /></el-icon>
-            {{ t('resourceGrant.addGroup') }}
-          </el-button>
+    <div class="page-container">
+      <div class="page-card">
+        <div class="page-card__toolbar">
+          <div class="page-card__spacer"></div>
+          <div class="page-card__actions">
+            <el-button type="primary" @click="showGroupDialog()">
+              <el-icon><Plus /></el-icon>
+              {{ t('resourceGrant.addGroup') }}
+            </el-button>
+          </div>
+        </div>
+        <div class="page-card__body">
+          <el-table :data="groups" v-loading="loading" stripe>
+            <el-table-column :label="t('resourceGrant.groupName')" prop="name" min-width="150" />
+            <el-table-column :label="t('resourceGrant.groupDescription')" prop="description" min-width="200" />
+            <el-table-column :label="t('resourceGrant.memberCount')" width="120">
+              <template #default="{ row }">
+                <el-button link type="primary" @click="showMembers(row)">
+                  {{ getMemberCount(row.id) }} {{ t('resourceGrant.members') }}
+                </el-button>
+              </template>
+            </el-table-column>
+            <el-table-column :label="t('common.actions')" width="150" fixed="right">
+              <template #default="{ row }">
+                <el-button type="primary" link size="small" @click="showGroupDialog(row)">
+                  {{ t('common.edit') }}
+                </el-button>
+                <el-button type="danger" link size="small" @click="deleteGroup(row)">
+                  {{ t('common.delete') }}
+                </el-button>
+              </template>
+            </el-table-column>
+          </el-table>
         </div>
       </div>
-      <div class="page-card__body">
-        <el-table :data="groups" v-loading="loading" stripe>
-      <el-table-column :label="t('resourceGrant.groupName')" prop="name" min-width="150" />
-      <el-table-column :label="t('resourceGrant.groupDescription')" prop="description" min-width="200" />
-      <el-table-column :label="t('resourceGrant.memberCount')" width="120">
-        <template #default="{ row }">
-          <el-button link type="primary" @click="showMembers(row)">
-            {{ getMemberCount(row.id) }} {{ t('resourceGrant.members') }}
-          </el-button>
+
+      <!-- 创建/编辑用户组对话框 -->
+      <el-dialog
+        v-model="groupDialogVisible"
+        :title="editingGroup ? t('resourceGrant.editGroup') : t('resourceGrant.addGroup')"
+        width="500px"
+      >
+        <el-form :model="groupForm" label-width="100px">
+          <el-form-item :label="t('resourceGrant.groupName')" required>
+            <el-input v-model="groupForm.name" :placeholder="t('resourceGrant.groupNamePlaceholder')" />
+          </el-form-item>
+          <el-form-item :label="t('resourceGrant.groupDescription')">
+            <el-input v-model="groupForm.description" type="textarea" :rows="3" :placeholder="t('resourceGrant.groupDescriptionPlaceholder')" />
+          </el-form-item>
+        </el-form>
+        <template #footer>
+          <el-button @click="groupDialogVisible = false">{{ t('common.cancel') }}</el-button>
+          <el-button type="primary" @click="saveGroup" :loading="saving">{{ t('common.save') }}</el-button>
         </template>
-      </el-table-column>
-      <el-table-column :label="t('common.actions')" width="150" fixed="right">
-        <template #default="{ row }">
-          <el-button type="primary" link size="small" @click="showGroupDialog(row)">
-            {{ t('common.edit') }}
+      </el-dialog>
+
+      <!-- 用户组成员管理对话框 -->
+      <el-dialog
+        v-model="membersDialogVisible"
+        :title="t('resourceGrant.manageMembers')"
+        width="600px"
+      >
+        <div class="members-header">
+          <el-select
+            v-model="newMemberId"
+            filterable
+            remote
+            :remote-method="searchUsers"
+            :placeholder="t('resourceGrant.searchUser')"
+            style="width: 300px"
+          >
+            <el-option
+              v-for="user in availableUsers"
+              :key="user.id"
+              :label="user.username"
+              :value="user.id"
+            />
+          </el-select>
+          <el-button type="primary" @click="addMember" :disabled="!newMemberId">
+            {{ t('resourceGrant.addMember') }}
           </el-button>
-          <el-button type="danger" link size="small" @click="deleteGroup(row)">
-            {{ t('common.delete') }}
-          </el-button>
-        </template>
-      </el-table-column>
-    </el-table>
+        </div>
 
-    <!-- 创建/编辑用户组对话框 -->
-    <el-dialog
-      v-model="groupDialogVisible"
-      :title="editingGroup ? t('resourceGrant.editGroup') : t('resourceGrant.addGroup')"
-      width="500px"
-    >
-      <el-form :model="groupForm" label-width="100px">
-        <el-form-item :label="t('resourceGrant.groupName')" required>
-          <el-input v-model="groupForm.name" :placeholder="t('resourceGrant.groupNamePlaceholder')" />
-        </el-form-item>
-        <el-form-item :label="t('resourceGrant.groupDescription')">
-          <el-input v-model="groupForm.description" type="textarea" :rows="3" :placeholder="t('resourceGrant.groupDescriptionPlaceholder')" />
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="groupDialogVisible = false">{{ t('common.cancel') }}</el-button>
-        <el-button type="primary" @click="saveGroup" :loading="saving">{{ t('common.save') }}</el-button>
-      </template>
-    </el-dialog>
-
-    <!-- 用户组成员管理对话框 -->
-    <el-dialog
-      v-model="membersDialogVisible"
-      :title="t('resourceGrant.manageMembers')"
-      width="600px"
-    >
-      <div class="members-header">
-        <el-select
-          v-model="newMemberId"
-          filterable
-          remote
-          :remote-method="searchUsers"
-          :placeholder="t('resourceGrant.searchUser')"
-          style="width: 300px"
-        >
-          <el-option
-            v-for="user in availableUsers"
-            :key="user.id"
-            :label="user.username"
-            :value="user.id"
-          />
-        </el-select>
-        <el-button type="primary" @click="addMember" :disabled="!newMemberId">
-          {{ t('resourceGrant.addMember') }}
-        </el-button>
-      </div>
-
-      <el-table :data="currentMembers" v-loading="loadingMembers" stripe style="margin-top: 16px">
-        <el-table-column :label="t('resourceGrant.username')" prop="user_id" min-width="200">
-          <template #default="{ row }">
-            {{ getUsernameById(row.user_id) }}
-          </template>
-        </el-table-column>
-        <el-table-column :label="t('common.actions')" width="100" fixed="right">
-          <template #default="{ row }">
-            <el-button type="danger" link size="small" @click="removeMember(row)">
-              {{ t('common.remove') }}
-            </el-button>
-          </template>
-        </el-table-column>
-      </el-table>
-    </el-dialog>
+        <el-table :data="currentMembers" v-loading="loadingMembers" stripe style="margin-top: 16px">
+          <el-table-column :label="t('resourceGrant.username')" prop="user_id" min-width="200">
+            <template #default="{ row }">
+              {{ getUsernameById(row.user_id) }}
+            </template>
+          </el-table-column>
+          <el-table-column :label="t('common.actions')" width="100" fixed="right">
+            <template #default="{ row }">
+              <el-button type="danger" link size="small" @click="removeMember(row)">
+                {{ t('common.remove') }}
+              </el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+      </el-dialog>
+    </div>
   </div>
 </template>
 
@@ -277,17 +281,6 @@ onMounted(async () => {
 </script>
 
 <style scoped>
-.user-groups-view {
-  padding: 0;
-}
-
-.tab-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 16px;
-}
-
 .members-header {
   display: flex;
   gap: 12px;

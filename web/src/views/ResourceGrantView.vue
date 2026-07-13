@@ -1,78 +1,64 @@
 <template>
   <div class="view-stack">
     <div class="page-container">
-      <div class="page-card">
-        <div class="page-card__toolbar">
-          <div class="page-card__actions" style="flex:1; justify-content:space-between;">
-            <div class="filters">
-              <el-select v-model="filters.principal_type" :placeholder="t('resourceGrant.principalType')" clearable style="width: 140px">
-                <el-option :label="t('resourceGrant.user')" value="user" />
-                <el-option :label="t('resourceGrant.userGroup')" value="user_group" />
-              </el-select>
-              <el-select v-model="filters.resource_type" :placeholder="t('resourceGrant.resourceType')" clearable style="width: 140px">
-                <el-option label="Host Account" value="host_account" />
-                <el-option label="Database Account" value="database_account" />
-                <el-option label="Resource Group" value="resource_group" />
-              </el-select>
-              <el-button type="primary" @click="loadGrants">
-                <el-icon><Search /></el-icon>
-                {{ t('common.search') }}
-              </el-button>
-            </div>
-            <div>
-              <el-button type="primary" @click="showGrantDialog()">
-                <el-icon><Plus /></el-icon>
-                {{ t('resourceGrant.addGrant') }}
-              </el-button>
-            </div>
-          </div>
-        </div>
-        <div class="page-card__body">
-          <el-table :data="grants" v-loading="loading" stripe>
-            <el-table-column :label="t('resourceGrant.principalType')" prop="principal_type" width="100">
-              <template #default="{ row }">
-                <el-tag :type="row.principal_type === 'user' ? 'primary' : 'success'" size="small">
-                  {{ row.principal_type === 'user' ? t('resourceGrant.user') : t('resourceGrant.userGroup') }}
-                </el-tag>
-              </template>
-            </el-table-column>
-            <el-table-column :label="t('resourceGrant.principalName')" min-width="120">
-              <template #default="{ row }">
-                {{ getPrincipalName(row) }}
-              </template>
-            </el-table-column>
-            <el-table-column :label="t('resourceGrant.resourceType')" width="120">
-              <template #default="{ row }">
-                <el-tag size="small">{{ resourceTypeLabel(row.resource_type) }}</el-tag>
-              </template>
-            </el-table-column>
-            <el-table-column :label="t('resourceGrant.resourceName')" min-width="150">
-              <template #default="{ row }">
-                {{ getResourceName(row) }}
-              </template>
-            </el-table-column>
-            <el-table-column :label="t('resourceGrant.effect')" width="80">
-              <template #default="{ row }">
-                <el-tag :type="row.effect === 'allow' ? 'success' : 'danger'" size="small">
-                  {{ row.effect === 'allow' ? t('resourceGrant.allow') : t('resourceGrant.deny') }}
-                </el-tag>
-              </template>
-            </el-table-column>
-            <el-table-column :label="t('resourceGrant.expiresAt')" width="180">
-              <template #default="{ row }">
-                {{ row.expires_at ? formatTime(row.expires_at) : t('resourceGrant.never') }}
-              </template>
-            </el-table-column>
-            <el-table-column :label="t('common.actions')" width="80" fixed="right">
-              <template #default="{ row }">
-                <el-button type="danger" link size="small" @click="deleteGrant(row)">
-                  {{ t('common.delete') }}
-                </el-button>
-              </template>
-            </el-table-column>
-          </el-table>
-        </div>
-      </div>
+      <DataTableCard
+        :data="grants"
+        :loading="loading"
+        :total="total"
+        v-model:page="page"
+        v-model:page-size="pageSize"
+        search-placeholder="搜索主体名称、资源名称..."
+        @search="onSearch"
+      >
+        <template #toolbar-extra>
+          <el-button type="primary" @click="showGrantDialog()">
+            <el-icon><Plus /></el-icon>
+            {{ t('resourceGrant.addGrant') }}
+          </el-button>
+        </template>
+
+        <el-table-column :label="t('resourceGrant.principalType')" prop="principal_type" width="100">
+          <template #default="{ row }">
+            <el-tag :type="row.principal_type === 'user' ? 'primary' : 'success'" size="small">
+              {{ row.principal_type === 'user' ? t('resourceGrant.user') : t('resourceGrant.userGroup') }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column :label="t('resourceGrant.principalName')" min-width="120">
+          <template #default="{ row }">
+            {{ getPrincipalName(row) }}
+          </template>
+        </el-table-column>
+        <el-table-column :label="t('resourceGrant.resourceType')" width="120">
+          <template #default="{ row }">
+            <el-tag size="small">{{ resourceTypeLabel(row.resource_type) }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column :label="t('resourceGrant.resourceName')" min-width="150">
+          <template #default="{ row }">
+            {{ getResourceName(row) }}
+          </template>
+        </el-table-column>
+        <el-table-column :label="t('resourceGrant.effect')" width="80">
+          <template #default="{ row }">
+            <el-tag :type="row.effect === 'allow' ? 'success' : 'danger'" size="small">
+              {{ row.effect === 'allow' ? t('resourceGrant.allow') : t('resourceGrant.deny') }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column :label="t('resourceGrant.expiresAt')" width="180">
+          <template #default="{ row }">
+            {{ row.expires_at ? formatTime(row.expires_at) : t('resourceGrant.never') }}
+          </template>
+        </el-table-column>
+        <el-table-column :label="t('common.actions')" width="80" fixed="right">
+          <template #default="{ row }">
+            <el-button type="danger" link size="small" @click="deleteGrant(row)">
+              {{ t('common.delete') }}
+            </el-button>
+          </template>
+        </el-table-column>
+      </DataTableCard>
 
       <!-- 创建资源授权对话框 -->
       <el-dialog
@@ -224,6 +210,7 @@ import { ref, reactive, computed, onMounted, watch } from 'vue'
 import { useI18n } from '@/i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Search } from '@element-plus/icons-vue'
+import DataTableCard from '@/components/DataTableCard.vue'
 import {
   apiClient,
   type ResourceGrantRecord,
@@ -238,10 +225,10 @@ const saving = ref(false)
 
 // Grants state
 const grants = ref<ResourceGrantRecord[]>([])
-const filters = reactive({
-  principal_type: '',
-  resource_type: ''
-})
+const page = ref(1)
+const pageSize = ref(20)
+const total = ref(0)
+const keyword = ref('')
 
 // Dialogs
 const grantDialogVisible = ref(false)
@@ -349,12 +336,15 @@ const getResourceName = (grant: ResourceGrantRecord) => {
 const loadGrants = async () => {
   loading.value = true
   try {
-    const params: Record<string, string> = {}
-    if (filters.principal_type) params.principal_type = filters.principal_type
-    if (filters.resource_type) params.resource_type = filters.resource_type
-    grants.value = await apiClient.getResourceGrants(params)
-    // 加载时预拉资源数据用于名称显示
-    await ensureResourcesLoaded()
+    const res = await apiClient.getResourceGrants({
+      page: page.value,
+      page_size: pageSize.value,
+      q: keyword.value || undefined,
+    })
+    grants.value = res.items ?? []
+    total.value = res.total ?? 0
+    // 预加载用户和用户组用于名称显示
+    await ensureNamesLoaded()
   } catch (e: any) {
     ElMessage.error(e.message || 'Failed to load grants')
   } finally {
@@ -362,12 +352,10 @@ const loadGrants = async () => {
   }
 }
 
-const ensureResourcesLoaded = async () => {
-  // 根据 grants 中的 resource_type 按需加载对应资源缓存
-  const needHost = grants.value.some(g => g.resource_type === 'host_account')
-  const needDb = grants.value.some(g => g.resource_type === 'database_account')
-  if (needHost && hostAccounts.value.length === 0) await loadHostAccounts()
-  if (needDb && dbAccounts.value.length === 0) await loadDbAccounts()
+const ensureNamesLoaded = async () => {
+  // 预加载用户和用户组用于表格中的名称显示
+  if (allUsers.value.length === 0) await loadUsers()
+  if (userGroups.value.length === 0) await loadUserGroups()
 }
 
 const loadUsers = async () => {
@@ -382,7 +370,7 @@ const loadUsers = async () => {
 const loadUserGroups = async () => {
   try {
     const gs = await apiClient.getUserGroups()
-    userGroups.value = gs || []
+    userGroups.value = gs?.items || []
   } catch {
     userGroups.value = []
   }
@@ -431,7 +419,7 @@ const loadResources = async () => {
 const loadResourceGroups = async () => {
   try {
     const all = await apiClient.getResourceGroups()
-    const list = all.filter(g => g.group_type !== 'account')
+    const list = (all.items || []).filter(g => g.group_type !== 'account')
     resourceGroups.value = list.map(g => ({
       id: g.id,
       name: g.name,
@@ -447,7 +435,7 @@ const loadResourceGroups = async () => {
 const loadAccountGroups = async () => {
   try {
     const all = await apiClient.getResourceGroups()
-    const list = all.filter(g => g.group_type === 'account')
+    const list = (all.items || []).filter(g => g.group_type === 'account')
     accountGroups.value = list.map(g => ({
       id: g.id,
       name: g.name,
@@ -555,6 +543,12 @@ const saveGrant = async () => {
   }
 }
 
+const onSearch = (q: string) => {
+  keyword.value = q
+  page.value = 1
+  loadGrants()
+}
+
 const deleteGrant = async (grant: ResourceGrantRecord) => {
   try {
     await ElMessageBox.confirm(
@@ -573,6 +567,9 @@ const deleteGrant = async (grant: ResourceGrantRecord) => {
 }
 
 // Watch principal type change to reset selection
+// 分页变化时重新加载
+watch([page, pageSize], () => loadGrants())
+
 watch(() => grantForm.principal_type, () => {
   grantForm.principal_id = ''
 })
@@ -609,12 +606,6 @@ onMounted(async () => {
   margin-top: 12px;
   padding-top: 12px;
   border-top: 1px solid var(--el-border-color-lighter);
-}
-
-.filters {
-  display: flex;
-  gap: 12px;
-  align-items: center;
 }
 
 .expires-options {

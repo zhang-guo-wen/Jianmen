@@ -76,6 +76,13 @@ var migrations = []Migration{
 			return tx.AutoMigrate(model.AllModels()...)
 		},
 	},
+	{
+		Version: "202607130001",
+		Name:    "user groups and resource grants",
+		Run: func(tx *gorm.DB) error {
+			return tx.AutoMigrate(&model.UserGroup{}, &model.UserGroupMember{}, &model.ResourceGrant{})
+		},
+	},
 }
 
 func Migrate(db *gorm.DB) error {

@@ -24,11 +24,12 @@ import (
 )
 
 type Server struct {
-	cfg           *config.Config
-	store         store.Store
-	rbacChecker   *rbac.Checker
-	logger        *slog.Logger
-	superAdminIDs map[string]bool
+	cfg                    *config.Config
+	store                  store.Store
+	rbacChecker            *rbac.Checker
+	resourceGrantChecker   *rbac.ResourceGrantChecker
+	logger                 *slog.Logger
+	superAdminIDs          map[string]bool
 }
 
 // auditStore adapts store.Store to recording.AuditSink.
@@ -65,15 +66,18 @@ func New(cfg *config.Config, s store.Store, logger *slog.Logger, dataDir string,
 		logger = slog.Default()
 	}
 	var checker *rbac.Checker
+	var resourceGrantChecker *rbac.ResourceGrantChecker
 	if len(dbs) > 0 && dbs[0] != nil {
 		checker = rbac.NewChecker(dbs[0])
+		resourceGrantChecker = rbac.NewResourceGrantChecker(dbs[0])
 	}
 	return &Server{
-		cfg:           cfg,
-		store:         s,
-		rbacChecker:   checker,
-		logger:        logger,
-		superAdminIDs: admin.LoadSuperAdminIDs(cfg, dataDir),
+		cfg:                  cfg,
+		store:                s,
+		rbacChecker:          checker,
+		resourceGrantChecker: resourceGrantChecker,
+		logger:               logger,
+		superAdminIDs:        admin.LoadSuperAdminIDs(cfg, dataDir),
 	}
 }
 
@@ -172,15 +176,31 @@ func (s *Server) handleConn(ctx context.Context, rawConn net.Conn, serverConfig 
 		return
 	}
 
-	if s.rbacChecker != nil && !s.superAdminIDs[user.ID] {
-		allowed, err := s.rbacChecker.HasPermission(user.ID, rbac.ActionSessionConnect, model.ResourceTypeHostAccount, target.ID)
-		if err != nil {
-			s.logger.Warn("rbac check failed", "user", user.Username, "target", target.ID, "error", err)
-			return
+	if !s.superAdminIDs[user.ID] {
+		// 检查菜单权限：session:connect
+		if s.rbacChecker != nil {
+			allowed, err := s.rbacChecker.HasPermission(user.ID, rbac.ActionSessionConnect, "", "")
+			if err != nil {
+				s.logger.Warn("rbac check failed", "user", user.Username, "target", target.ID, "error", err)
+				return
+			}
+			if !allowed {
+				s.logger.Warn("rbac denied session:connect permission", "user", user.Username, "target", target.ID)
+				return
+			}
 		}
-		if !allowed {
-			s.logger.Warn("rbac denied session", "user", user.Username, "target", target.ID)
-			return
+
+		// 检查资源授权：对目标主机账户的连接权限
+		if s.resourceGrantChecker != nil {
+			allowed, err := s.resourceGrantChecker.HasGrant(user.ID, model.ResourceTypeHostAccount, target.ID)
+			if err != nil {
+				s.logger.Warn("resource grant check failed", "user", user.Username, "target", target.ID, "error", err)
+				return
+			}
+			if !allowed {
+				s.logger.Warn("resource grant denied", "user", user.Username, "target", target.ID)
+				return
+			}
 		}
 	}
 

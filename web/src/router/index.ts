@@ -20,6 +20,7 @@ const routeMenuMap: Record<string, string> = {
   '/audit': 'audit',
   '/users': 'users',
   '/roles': 'roles',
+  '/resource-grant': 'resourceGrant',
 };
 
 const ApplicationsView = () => import('@/views/ApplicationsView.vue');
@@ -30,6 +31,7 @@ const LoginView = () => import('@/views/LoginView.vue');
 const PlatformAccountsView = () => import('@/views/PlatformAccountsView.vue');
 const QuickConnectView = () => import('@/views/QuickConnectView.vue');
 const RBACView = () => import('@/views/RBACView.vue');
+const ResourceGrantView = () => import('@/views/ResourceGrantView.vue');
 const RolesView = () => import('@/views/RolesView.vue');
 const SetupView = () => import('@/views/SetupView.vue');
 const UsersView = () => import('@/views/UsersView.vue');
@@ -141,6 +143,15 @@ const routes: RouteRecordRaw[] = [
     meta: {
       titleKey: 'route.audit.title',
       descriptionKey: 'route.audit.description'
+    } satisfies AppRouteMeta
+  },
+  {
+    path: '/resource-grant',
+    name: 'resource-grant',
+    component: ResourceGrantView,
+    meta: {
+      titleKey: 'route.resourceGrant.title',
+      descriptionKey: 'route.resourceGrant.description'
     } satisfies AppRouteMeta
   },
 

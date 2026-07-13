@@ -514,6 +514,51 @@ export interface RBACEffectiveCheckResult {
   [key: string]: unknown;
 }
 
+// ── User Group types ────────────────────────────────────────────────
+
+export interface UserGroupRecord {
+  id: string;
+  name: string;
+  description?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface UserGroupMemberRecord {
+  id: string;
+  group_id: string;
+  user_id: string;
+  created_at: string;
+}
+
+export interface UserGroupPayload {
+  name: string;
+  description?: string;
+}
+
+// ── Resource Grant types ────────────────────────────────────────────
+
+export interface ResourceGrantRecord {
+  id: string;
+  principal_type: 'user' | 'user_group';
+  principal_id: string;
+  resource_type: string;
+  resource_id: string;
+  effect: 'allow' | 'deny';
+  expires_at?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ResourceGrantPayload {
+  principal_type: 'user' | 'user_group';
+  principal_id: string;
+  resource_type: string;
+  resource_id: string;
+  effect?: 'allow' | 'deny';
+  expires_at?: string;
+}
+
 export interface TestConnectionResult {
   ok: boolean;
   message: string;
@@ -938,6 +983,50 @@ export const apiClient = {
       `/api/rbac/effective?${params.toString()}`
     );
   },
+
+  // ── User Groups ─────────────────────────────────────────────────────
+  getUserGroups: () =>
+    request<UserGroupRecord[]>('/api/user-groups'),
+  createUserGroup: (payload: UserGroupPayload) =>
+    request<UserGroupRecord>('/api/user-groups', {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    }),
+  updateUserGroup: (id: string, payload: UserGroupPayload) =>
+    request<UserGroupRecord>(`/api/user-groups/${encodeURIComponent(id)}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload)
+    }),
+  deleteUserGroup: (id: string) =>
+    request<void>(`/api/user-groups/${encodeURIComponent(id)}`, {
+      method: 'DELETE'
+    }),
+  getUserGroupMembers: (groupId: string) =>
+    request<UserGroupMemberRecord[]>(`/api/user-groups/${encodeURIComponent(groupId)}/members`),
+  addUserGroupMember: (groupId: string, userId: string) =>
+    request<UserGroupMemberRecord>(`/api/user-groups/${encodeURIComponent(groupId)}/members`, {
+      method: 'POST',
+      body: JSON.stringify({ user_id: userId })
+    }),
+  removeUserGroupMember: (groupId: string, userId: string) =>
+    request<void>(`/api/user-groups/${encodeURIComponent(groupId)}/members/${encodeURIComponent(userId)}`, {
+      method: 'DELETE'
+    }),
+
+  // ── Resource Grants ─────────────────────────────────────────────────
+  getResourceGrants: (params?: { principal_type?: string; principal_id?: string; resource_type?: string; resource_id?: string }) =>
+    request<ResourceGrantRecord[]>(`/api/resource-grants${buildQS(params as Record<string, string | number | undefined>)}`),
+  createResourceGrant: (payload: ResourceGrantPayload) =>
+    request<ResourceGrantRecord>('/api/resource-grants', {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    }),
+  deleteResourceGrant: (id: string) =>
+    request<void>(`/api/resource-grants/${encodeURIComponent(id)}`, {
+      method: 'DELETE'
+    }),
+  checkResourceGrant: (userId: string, resourceType: string, resourceId: string) =>
+    request<{ allowed: boolean }>(`/api/resource-grants/check?user_id=${encodeURIComponent(userId)}&resource_type=${encodeURIComponent(resourceType)}&resource_id=${encodeURIComponent(resourceId)}`),
 
   // auth & init
   login: (username: string, password: string) =>

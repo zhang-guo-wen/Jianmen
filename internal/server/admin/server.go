@@ -78,6 +78,7 @@ var menuOrder = []struct {
 	{"platformAccounts", "platform_account:view"},
 	{"users", "rbac:manage"},
 	{"roles", "rbac:manage"},
+	{"resourceGrant", "rbac:manage"},
 	{"audit", "audit:view"},
 	{"applications", "application:view"},
 	{"quickConnect", "session:connect"},
@@ -176,6 +177,13 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 	s.muxHandle(mux, "/api/platform-accounts", s.withAuthAndUser(s.handlePlatformAccounts))
 	s.muxHandle(mux, "/api/platform-accounts/", s.withAuthAndUser(s.handlePlatformAccount))
 	s.muxHandle(mux, "/api/me/menus", s.withAuthAndUser(s.handleMeMenus))
+	// 用户组管理
+	s.muxHandle(mux, "/api/user-groups", s.withAuthAndUser(s.handleUserGroups))
+	s.muxHandle(mux, "/api/user-groups/", s.withAuthAndUser(s.handleUserGroupOrMembers))
+	// 资源授权管理
+	s.muxHandle(mux, "/api/resource-grants", s.withAuthAndUser(s.handleResourceGrants))
+	s.muxHandle(mux, "/api/resource-grants/check", s.withAuthAndUser(s.handleResourceGrantCheck))
+	s.muxHandle(mux, "/api/resource-grants/", s.withAuthAndUser(s.handleResourceGrant))
 
 	server := &http.Server{
 		Addr:              s.cfg.Admin.ListenAddr,

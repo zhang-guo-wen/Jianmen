@@ -30,7 +30,6 @@
           <el-select
             v-model="selectedLocale"
             class="sidebar-locale"
-            size="small"
             :aria-label="t('app.language')"
           >
             <el-option
@@ -42,7 +41,6 @@
           </el-select>
           <el-button
             class="sidebar-logout"
-            size="small"
             type="primary"
             plain
             @click="logout"

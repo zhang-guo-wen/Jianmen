@@ -81,6 +81,7 @@
 import {
   DataAnalysis,
   DocumentChecked,
+  Key,
   Link,
   Lock,
   Monitor,
@@ -124,6 +125,12 @@ const ALL_NAV_ITEMS: Array<{
     icon: DataAnalysis,
     labelKey: "nav.databases",
     menuKey: "databases",
+  },
+  {
+    path: "/platform-accounts",
+    icon: Key,
+    labelKey: "nav.platformAccounts",
+    menuKey: "platformAccounts",
   },
   {
     path: "/applications",

@@ -20,6 +20,16 @@
       <el-tab-pane :label="t('nav.resourceGrant')" name="resourceGrant">
         <ResourceGrantView v-if="activeTab === 'resourceGrant'" />
       </el-tab-pane>
+
+      <!-- 资源分组 Tab -->
+      <el-tab-pane :label="t('nav.resourceGroups')" name="resourceGroups">
+        <ResourceGroupsContent v-if="activeTab === 'resourceGroups'" />
+      </el-tab-pane>
+
+      <!-- 账号分组 Tab -->
+      <el-tab-pane :label="t('nav.accountGroups')" name="accountGroups">
+        <AccountGroupsContent v-if="activeTab === 'accountGroups'" />
+      </el-tab-pane>
     </el-tabs>
   </div>
 </template>
@@ -31,6 +41,8 @@ import UsersView from '@/views/UsersView.vue'
 import RolesView from '@/views/RolesView.vue'
 import UserGroupsView from '@/views/UserGroupsView.vue'
 import ResourceGrantView from '@/views/ResourceGrantView.vue'
+import ResourceGroupsContent from '@/components/ResourceGroupsContent.vue'
+import AccountGroupsContent from '@/components/AccountGroupsContent.vue'
 
 const { t } = useI18n()
 

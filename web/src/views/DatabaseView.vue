@@ -13,8 +13,9 @@
         <el-button type="primary" @click="openCreateInstance">新增实例</el-button>
       </template>
       <el-table-column prop="name" label="名称" min-width="130" show-overflow-tooltip />
-      <el-table-column prop="address" label="地址" min-width="130" show-overflow-tooltip />
-      <el-table-column prop="port" label="端口" width="70" />
+      <el-table-column label="地址" min-width="180" show-overflow-tooltip>
+        <template #default="{ row }">{{ instanceEndpoint(row) }}</template>
+      </el-table-column>
       <el-table-column label="协议" width="80" align="center">
         <template #default="{ row }">
           <el-tag size="small" :type="row.protocol === 'mysql' ? 'success' : row.protocol === 'redis' ? 'danger' : 'primary'" effect="plain">{{ row.protocol === 'mysql' ? 'MySQL' : row.protocol === 'redis' ? 'Redis' : 'PG' }}</el-tag>
@@ -524,6 +525,13 @@ const connectCommand = computed(() => {
 })
 
 // ── Helpers ──
+function instanceEndpoint(inst: api.DatabaseInstanceView): string {
+  const address = (inst.address || '').trim()
+  const port = inst.port
+  if (!address) return '-'
+  return port ? `${address}:${port}` : address
+}
+
 function formatTime(value: unknown): string {
   let d: Date | null = null
   if (typeof value === 'number' && Number.isFinite(value)) {

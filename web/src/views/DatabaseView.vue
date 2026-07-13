@@ -21,9 +21,9 @@
           <el-tag size="small" :type="row.protocol === 'mysql' ? 'success' : row.protocol === 'redis' ? 'danger' : 'primary'" effect="plain">{{ row.protocol === 'mysql' ? 'MySQL' : row.protocol === 'redis' ? 'Redis' : 'PG' }}</el-tag>
         </template>
       </el-table-column>
-      <el-table-column label="账号数" width="80" align="center">
+      <el-table-column label="账号管理" min-width="110" align="center">
         <template #default="{ row }">
-          <el-button link type="primary" @click="showAccounts(row)">{{ row.account_count ?? 0 }}</el-button>
+          <el-button link type="primary" size="small" class="account-mgmt-btn" @click="showAccounts(row)">账号管理({{ row.account_count ?? 0 }})</el-button>
         </template>
       </el-table-column>
       <el-table-column prop="group" label="分组" width="100" show-overflow-tooltip />
@@ -1106,6 +1106,12 @@ function closeProvisionAndRefresh() {
   line-height: 1.5;
   margin-top: 6px;
   width: 100%;
+}
+
+/* 账号管理按钮 */
+.account-mgmt-btn {
+  font-size: 12px;
+  padding: 0 2px;
 }
 
 @media (max-width: 720px) {

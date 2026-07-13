@@ -21,10 +21,10 @@
         <el-table-column label="地址" min-width="180" show-overflow-tooltip>
           <template #default="{ row }">{{ hostEndpoint(row) }}</template>
         </el-table-column>
-        <el-table-column label="账号数" width="80" align="center">
+        <el-table-column label="账号管理" min-width="110" align="center">
           <template #default="{ row }">
-            <el-button link type="primary" @click="openAccountsDialog(row)">
-              {{ numberFrom(row.account_count, 0) }}
+            <el-button link type="primary" size="small" class="account-mgmt-btn" @click="openAccountsDialog(row)">
+              账号管理({{ numberFrom(row.account_count, 0) }})
             </el-button>
           </template>
         </el-table-column>
@@ -1810,6 +1810,12 @@ onMounted(() => {
 }
 .danger-dropdown-item {
   color: var(--el-color-danger);
+}
+
+/* 账号管理按钮 */
+.account-mgmt-btn {
+  font-size: 12px;
+  padding: 0 2px;
 }
 
 /* Form layout */

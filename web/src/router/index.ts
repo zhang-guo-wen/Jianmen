@@ -15,6 +15,7 @@ const routeMenuMap: Record<string, string> = {
   '/applications': 'applications',
   '/hosts': 'hosts',
   '/databases': 'databases',
+  '/platform-accounts': 'platformAccounts',
   '/quick-connect': 'quickConnect',
   '/audit': 'audit',
   '/users': 'users',
@@ -26,6 +27,7 @@ const AuditView = () => import('@/views/AuditView.vue');
 const DatabaseView = () => import('@/views/DatabaseView.vue');
 const HostsView = () => import('@/views/HostsView.vue');
 const LoginView = () => import('@/views/LoginView.vue');
+const PlatformAccountsView = () => import('@/views/PlatformAccountsView.vue');
 const QuickConnectView = () => import('@/views/QuickConnectView.vue');
 const RBACView = () => import('@/views/RBACView.vue');
 const RolesView = () => import('@/views/RolesView.vue');
@@ -75,6 +77,15 @@ const routes: RouteRecordRaw[] = [
     meta: {
       titleKey: 'route.databases.title',
       descriptionKey: 'route.databases.description'
+    } satisfies AppRouteMeta
+  },
+  {
+    path: '/platform-accounts',
+    name: 'platform-accounts',
+    component: PlatformAccountsView,
+    meta: {
+      titleKey: 'route.platformAccounts.title',
+      descriptionKey: 'route.platformAccounts.description'
     } satisfies AppRouteMeta
   },
   {

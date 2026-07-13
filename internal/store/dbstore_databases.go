@@ -297,7 +297,10 @@ func (s *DBStore) AddDatabaseAccount(instanceID, username, password, group, rema
 		if err := tx.Create(&acct).Error; err != nil {
 			return err
 		}
-		return s.syncResourceTx(tx, model.ResourceTypeDatabaseAccount, acct.ID, databaseAccountResourceName(acct), acct.InstanceID)
+			if err := ensureAccountGroup(tx, strings.TrimSpace(group)); err != nil {
+				return err
+			}
+			return s.syncResourceTx(tx, model.ResourceTypeDatabaseAccount, acct.ID, databaseAccountResourceName(acct), acct.InstanceID)
 	}); err != nil {
 		return DatabaseAccountView{}, err
 	}
@@ -331,7 +334,10 @@ func (s *DBStore) UpdateDatabaseAccount(id, username, password, group, remark st
 		if err := tx.Save(&acct).Error; err != nil {
 			return err
 		}
-		return s.syncResourceTx(tx, model.ResourceTypeDatabaseAccount, acct.ID, databaseAccountResourceName(acct), acct.InstanceID)
+			if err := ensureAccountGroup(tx, strings.TrimSpace(group)); err != nil {
+				return err
+			}
+			return s.syncResourceTx(tx, model.ResourceTypeDatabaseAccount, acct.ID, databaseAccountResourceName(acct), acct.InstanceID)
 	}); err != nil {
 		return DatabaseAccountView{}, err
 	}

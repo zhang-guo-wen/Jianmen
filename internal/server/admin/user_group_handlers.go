@@ -98,13 +98,29 @@ func (s *Server) listUserGroups(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	q := strings.TrimSpace(r.URL.Query().Get("q"))
+	tx := s.db.Model(&model.UserGroup{})
+	if q != "" {
+		like := "%" + q + "%"
+		tx = tx.Where("name LIKE ? OR description LIKE ?", like, like)
+	}
+
+	var total int64
+	tx.Count(&total)
+
+	page := positiveIntRequestQuery(r, "page", 1)
+	pageSize := positiveIntRequestQuery(r, "page_size", 20)
+	if pageSize > 200 {
+		pageSize = 200
+	}
+
 	var groups []model.UserGroup
-	if err := s.db.Order("name").Find(&groups).Error; err != nil {
+	if err := tx.Order("created_at DESC").Offset((page - 1) * pageSize).Limit(pageSize).Find(&groups).Error; err != nil {
 		s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
 		return
 	}
 
-	s.writeJSON(w, r, http.StatusOK, groups)
+	s.writeJSON(w, r, http.StatusOK, pageResponse{Items: groups, Total: int(total), Page: page, PageSize: pageSize})
 }
 
 func (s *Server) createUserGroup(w http.ResponseWriter, r *http.Request) {

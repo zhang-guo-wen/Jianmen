@@ -31,6 +31,7 @@ const RBACView = () => import('@/views/RBACView.vue');
 const RolesView = () => import('@/views/RolesView.vue');
 const SetupView = () => import('@/views/SetupView.vue');
 const UsersView = () => import('@/views/UsersView.vue');
+const WebTerminalView = () => import('@/views/WebTerminalView.vue');
 
 const routes: RouteRecordRaw[] = [
   {
@@ -129,6 +130,16 @@ const routes: RouteRecordRaw[] = [
     meta: {
       titleKey: 'route.audit.title',
       descriptionKey: 'route.audit.description'
+    } satisfies AppRouteMeta
+  },
+
+  {
+    path: '/web-terminal',
+    name: 'web-terminal',
+    component: WebTerminalView,
+    meta: {
+      titleKey: 'route.webTerminal.title',
+      descriptionKey: 'route.webTerminal.description',
     } satisfies AppRouteMeta
   },
 

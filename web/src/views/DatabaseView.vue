@@ -63,7 +63,21 @@
         <el-collapse>
           <el-collapse-item title="更多设置">
             <el-form-item label="分组">
-              <el-input v-model="instanceForm.group" />
+              <el-select
+                v-model="instanceForm.group"
+                allow-create
+                clearable
+                default-first-option
+                filterable
+                placeholder="选择或输入分组"
+              >
+                <el-option
+                  v-for="g in groupOptions"
+                  :key="g"
+                  :label="g"
+                  :value="g"
+                />
+              </el-select>
             </el-form-item>
             <el-form-item label="备注">
               <el-input v-model="instanceForm.remark" type="textarea" />
@@ -191,7 +205,21 @@
         <el-collapse>
           <el-collapse-item title="更多设置">
             <el-form-item label="分组">
-              <el-input v-model="accountForm.group" placeholder="输入或选择分组" />
+              <el-select
+                v-model="accountForm.group"
+                allow-create
+                clearable
+                default-first-option
+                filterable
+                placeholder="选择或输入分组"
+              >
+                <el-option
+                  v-for="g in groupOptions"
+                  :key="g"
+                  :label="g"
+                  :value="g"
+                />
+              </el-select>
             </el-form-item>
             <el-form-item label="备注">
               <el-input v-model="accountForm.remark" type="textarea" placeholder="备注信息" />
@@ -385,6 +413,7 @@ const instanceSearchKeyword = ref('')
 const showInstanceDialog = ref(false)
 const submitting = ref(false)
 const editingInstance = ref<api.DatabaseInstanceView | null>(null)
+const groupOptions = ref<string[]>([])
 const instanceForm = reactive<InstanceForm>({
   name: '',
   protocol: 'mysql',
@@ -893,7 +922,17 @@ watch([accountPage, accountPageSize], () => {
 onMounted(() => {
   loadGatewayConfig()
   loadInstances()
+  loadGroupOptions()
 })
+
+async function loadGroupOptions() {
+  try {
+    const groups = await api.apiClient.getResourceGroups()
+    groupOptions.value = groups.map(g => g.name).filter(Boolean)
+  } catch {
+    // ignore
+  }
+}
 
 // ── 自动创建 ──
 interface DBGrantRow {

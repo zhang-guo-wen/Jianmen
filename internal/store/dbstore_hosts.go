@@ -107,6 +107,9 @@ func (s *DBStore) AddHost(host HostRecord) (HostView, error) {
 		if err := tx.Create(&m).Error; err != nil {
 			return err
 		}
+		if err := ensureResourceGroup(tx, normalized.Group); err != nil {
+			return err
+		}
 		return s.syncResourceTx(tx, model.ResourceTypeHost, m.ID, hostResourceName(m), "")
 	}); err != nil {
 		return HostView{}, fmt.Errorf("create host: %w", err)
@@ -131,6 +134,9 @@ func (s *DBStore) UpdateHost(id string, host HostRecord) (HostView, error) {
 	}
 	if err := s.db.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Save(&m).Error; err != nil {
+			return err
+		}
+		if err := ensureResourceGroup(tx, normalized.Group); err != nil {
 			return err
 		}
 		return s.syncResourceTx(tx, model.ResourceTypeHost, m.ID, hostResourceName(m), "")

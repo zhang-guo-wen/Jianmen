@@ -351,6 +351,7 @@
         </template>
       </div>
       <template #footer>
+        <el-button type="primary" @click="openTerminalFromDialog">在浏览器中打开</el-button>
         <el-button @click="connectionDialogVisible = false">关闭</el-button>
       </template>
     </el-dialog>
@@ -360,6 +361,7 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
 import { Loading } from '@element-plus/icons-vue'
 import DataTableCard from '@/components/DataTableCard.vue'
@@ -430,6 +432,7 @@ const hostDialogVisible = ref(false)
 const accountFormVisible = ref(false)
 const accountsDialogVisible = ref(false)
 const connectionDialogVisible = ref(false)
+const router = useRouter()
 
 // ── Editing state ──
 const editingHostId = ref<string | null>(null)
@@ -1347,6 +1350,18 @@ async function copyText(value: string) {
   } catch {
     ElMessage.warning('复制失败，请手动选择文本复制')
   }
+}
+
+function openTerminalFromDialog() {
+  const target = selectedConnectionTarget.value
+  if (!target) return
+  const tid = String(target.id || target.resource_id || '')
+  if (!tid) {
+    ElMessage.warning('无法获取目标资源ID')
+    return
+  }
+  connectionDialogVisible.value = false
+  router.push({ path: '/web-terminal', query: { target_id: tid } })
 }
 
 // ════════════════════════════════════════════════════════════════

@@ -76,35 +76,63 @@ func (s *Server) listResourceGrants(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	query := s.db.Model(&model.ResourceGrant{})
+	q := strings.TrimSpace(r.URL.Query().Get("q"))
+	tx := s.db.Model(&model.ResourceGrant{})
 
-	// Filter by principal type
-	if principalType := r.URL.Query().Get("principal_type"); principalType != "" {
-		query = query.Where("principal_type = ?", principalType)
+	if q != "" {
+		like := "%" + q + "%"
+		// 搜索匹配的主体（用户名/用户组名）
+		var principalUserIDs []string
+		s.db.Model(&model.User{}).Where("username LIKE ?", like).Pluck("id", &principalUserIDs)
+		var principalGroupIDs []string
+		s.db.Model(&model.UserGroup{}).Where("name LIKE ?", like).Pluck("id", &principalGroupIDs)
+		principalIDs := append(principalUserIDs, principalGroupIDs...)
+
+		// 搜索匹配的资源（主机账号、数据库账号、资源分组）
+		var resourceHostAccountIDs []string
+		s.db.Model(&model.HostAccount{}).Where("username LIKE ? OR host LIKE ?", like, like).Pluck("id", &resourceHostAccountIDs)
+		var resourceDBAccountIDs []string
+		s.db.Model(&model.DatabaseAccount{}).Where("unique_name LIKE ?", like).Pluck("id", &resourceDBAccountIDs)
+		var resourceGroupIDs []string
+		s.db.Model(&model.ResourceGroup{}).Where("name LIKE ?", like).Pluck("id", &resourceGroupIDs)
+		resourceIDs := append(resourceHostAccountIDs, resourceDBAccountIDs...)
+		resourceIDs = append(resourceIDs, resourceGroupIDs...)
+
+		// 组合搜索条件
+		conditions := make([]string, 0)
+		args := make([]interface{}, 0)
+		if len(principalIDs) > 0 {
+			conditions = append(conditions, "principal_id IN ?")
+			args = append(args, principalIDs)
+		}
+		if len(resourceIDs) > 0 {
+			conditions = append(conditions, "resource_id IN ?")
+			args = append(args, resourceIDs)
+		}
+		if len(conditions) > 0 {
+			tx = tx.Where(strings.Join(conditions, " OR "), args...)
+		} else {
+			// 没有匹配项时返回空结果
+			tx = tx.Where("1 = 0")
+		}
 	}
 
-	// Filter by principal ID
-	if principalID := r.URL.Query().Get("principal_id"); principalID != "" {
-		query = query.Where("principal_id = ?", principalID)
-	}
+	var total int64
+	tx.Count(&total)
 
-	// Filter by resource type
-	if resourceType := r.URL.Query().Get("resource_type"); resourceType != "" {
-		query = query.Where("resource_type = ?", resourceType)
-	}
-
-	// Filter by resource ID
-	if resourceID := r.URL.Query().Get("resource_id"); resourceID != "" {
-		query = query.Where("resource_id = ?", resourceID)
+	page := positiveIntRequestQuery(r, "page", 1)
+	pageSize := positiveIntRequestQuery(r, "page_size", 20)
+	if pageSize > 200 {
+		pageSize = 200
 	}
 
 	var grants []model.ResourceGrant
-	if err := query.Order("created_at DESC").Find(&grants).Error; err != nil {
+	if err := tx.Order("created_at DESC").Offset((page - 1) * pageSize).Limit(pageSize).Find(&grants).Error; err != nil {
 		s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
 		return
 	}
 
-	s.writeJSON(w, r, http.StatusOK, grants)
+	s.writeJSON(w, r, http.StatusOK, pageResponse{Items: grants, Total: int(total), Page: page, PageSize: pageSize})
 }
 
 func (s *Server) createResourceGrant(w http.ResponseWriter, r *http.Request) {

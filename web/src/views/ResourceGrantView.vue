@@ -545,8 +545,7 @@ const saveGrant = async () => {
 
 const onSearch = (q: string) => {
   keyword.value = q
-  page.value = 1
-  loadGrants()
+  page.value = 1  // watch([page, pageSize]) 会自动触发 loadGrants()
 }
 
 const deleteGrant = async (grant: ResourceGrantRecord) => {

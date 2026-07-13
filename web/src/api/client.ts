@@ -564,15 +564,18 @@ export interface ResourceGrantPayload {
 export interface ResourceGroupRecord {
   id: string;
   name: string;
+  group_type: string;
   description?: string;
   host_count: number;
   database_count: number;
+  account_count: number;
   created_at: string;
   updated_at: string;
 }
 
 export interface ResourceGroupPayload {
   name: string;
+  group_type?: string;
   description?: string;
 }
 

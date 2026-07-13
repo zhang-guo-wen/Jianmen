@@ -3,8 +3,11 @@
     <div class="page-container">
       <div class="page-card">
         <div class="page-card__toolbar">
-          <div class="page-card__spacer"></div>
-          <div class="page-card__actions">
+          <div class="page-card__actions" style="display:flex;justify-content:space-between;width:100%">
+            <el-radio-group v-model="filterType" @change="loadGroups">
+              <el-radio-button value="resource">{{ t('resourceGroups.resourceTypeTab') }}</el-radio-button>
+              <el-radio-button value="account">{{ t('resourceGroups.accountTypeTab') }}</el-radio-button>
+            </el-radio-group>
             <el-button type="primary" @click="showCreateDialog">
               <el-icon><Plus /></el-icon>
               {{ t('resourceGroups.create') }}
@@ -14,15 +17,27 @@
         <div class="page-card__body">
           <el-table :data="groups" v-loading="loading" stripe>
             <el-table-column :label="t('resourceGroups.name')" prop="name" min-width="150" />
+            <el-table-column :label="t('resourceGroups.type')" width="100">
+              <template #default="{ row }">
+                <el-tag size="small" :type="row.group_type === 'account' ? 'warning' : 'primary'">
+                  {{ row.group_type === 'account' ? t('resourceGroups.typeAccount') : t('resourceGroups.typeResource') }}
+                </el-tag>
+              </template>
+            </el-table-column>
             <el-table-column :label="t('resourceGroups.description')" prop="description" min-width="200" show-overflow-tooltip />
-            <el-table-column :label="t('resourceGroups.hostCount')" width="100">
+            <el-table-column v-if="filterType === 'resource'" :label="t('resourceGroups.hostCount')" width="80">
               <template #default="{ row }">
                 {{ row.host_count || 0 }}
               </template>
             </el-table-column>
-            <el-table-column :label="t('resourceGroups.databaseCount')" width="120">
+            <el-table-column v-if="filterType === 'resource'" :label="t('resourceGroups.databaseCount')" width="110">
               <template #default="{ row }">
                 {{ row.database_count || 0 }}
+              </template>
+            </el-table-column>
+            <el-table-column v-if="filterType === 'account'" :label="t('resourceGroups.accountCount')" width="80">
+              <template #default="{ row }">
+                {{ row.account_count || 0 }}
               </template>
             </el-table-column>
             <el-table-column :label="t('common.actions')" width="150" fixed="right">
@@ -39,13 +54,18 @@
         </div>
       </div>
 
-      <!-- 创建/编辑对话框 -->
       <el-dialog
         v-model="dialogVisible"
         :title="editingGroup ? t('resourceGroups.edit') : t('resourceGroups.create')"
         width="500px"
       >
         <el-form :model="form" label-width="100px">
+          <el-form-item :label="t('resourceGroups.type')" required v-if="!editingGroup">
+            <el-radio-group v-model="form.group_type">
+              <el-radio value="resource">{{ t('resourceGroups.typeResource') }}</el-radio>
+              <el-radio value="account">{{ t('resourceGroups.typeAccount') }}</el-radio>
+            </el-radio-group>
+          </el-form-item>
           <el-form-item :label="t('resourceGroups.name')" required>
             <el-input v-model="form.name" :placeholder="t('resourceGroups.namePlaceholder')" />
           </el-form-item>
@@ -71,6 +91,7 @@ import { apiClient, type ResourceGroupRecord } from '@/api/client'
 
 const { t } = useI18n()
 
+const filterType = ref('resource')
 const groups = ref<ResourceGroupRecord[]>([])
 const loading = ref(false)
 const saving = ref(false)
@@ -79,13 +100,15 @@ const dialogVisible = ref(false)
 const editingGroup = ref<ResourceGroupRecord | null>(null)
 const form = reactive({
   name: '',
+  group_type: 'resource' as string,
   description: ''
 })
 
 const loadGroups = async () => {
   loading.value = true
   try {
-    groups.value = await apiClient.getResourceGroups()
+    const all = await apiClient.getResourceGroups()
+    groups.value = all.filter(g => g.group_type === filterType.value)
   } catch (e: any) {
     ElMessage.error(e.message || 'Failed to load groups')
   } finally {
@@ -96,6 +119,7 @@ const loadGroups = async () => {
 const showCreateDialog = () => {
   editingGroup.value = null
   form.name = ''
+  form.group_type = filterType.value
   form.description = ''
   dialogVisible.value = true
 }
@@ -103,6 +127,7 @@ const showCreateDialog = () => {
 const showEditDialog = (group: ResourceGroupRecord) => {
   editingGroup.value = group
   form.name = group.name
+  form.group_type = group.group_type || 'resource'
   form.description = group.description || ''
   dialogVisible.value = true
 }
@@ -122,6 +147,7 @@ const saveGroup = async () => {
     } else {
       await apiClient.createResourceGroup({
         name: form.name,
+        group_type: form.group_type,
         description: form.description || undefined,
       })
     }

@@ -48,23 +48,36 @@ func (s *Server) listResourceGroups(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	groupType := r.URL.Query().Get("group_type")
+
+	query := s.db
+	if groupType != "" {
+		query = query.Where("group_type = ?", groupType)
+	}
+
 	var groups []model.ResourceGroup
-	if err := s.db.Order("name").Find(&groups).Error; err != nil {
+	if err := query.Order("group_type, name").Find(&groups).Error; err != nil {
 		s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
 		return
 	}
 
 	type groupWithCount struct {
 		model.ResourceGroup
-		HostCount           int64 `json:"host_count"`
-		DatabaseCount       int64 `json:"database_count"`
+		HostCount     int64 `json:"host_count"`
+		DatabaseCount int64 `json:"database_count"`
+		AccountCount  int64 `json:"account_count"`
 	}
 
 	result := make([]groupWithCount, 0, len(groups))
 	for _, g := range groups {
 		gwc := groupWithCount{ResourceGroup: g}
-		s.db.Model(&model.Host{}).Where("group_name = ?", g.Name).Count(&gwc.HostCount)
-		s.db.Model(&model.DatabaseInstance{}).Where("group_name = ?", g.Name).Count(&gwc.DatabaseCount)
+		if g.GroupType == model.ResourceGroupTypeResource {
+			s.db.Model(&model.Host{}).Where("group_name = ?", g.Name).Count(&gwc.HostCount)
+			s.db.Model(&model.DatabaseInstance{}).Where("group_name = ?", g.Name).Count(&gwc.DatabaseCount)
+		} else {
+			s.db.Model(&model.HostAccount{}).Where("group_name = ?", g.Name).Count(&gwc.AccountCount)
+			s.db.Model(&model.DatabaseAccount{}).Where("group_name = ?", g.Name).Count(&gwc.AccountCount)
+		}
 		result = append(result, gwc)
 	}
 
@@ -132,10 +145,13 @@ func (s *Server) updateResourceGroup(w http.ResponseWriter, r *http.Request, id 
 	if strings.TrimSpace(update.Name) != "" {
 		oldName := group.Name
 		group.Name = update.Name
-		// 同步更新引用该分组的 Host
-		s.db.Model(&model.Host{}).Where("group_name = ?", oldName).Update("group_name", group.Name)
-		// 同步更新引用该分组的 DatabaseInstance
-		s.db.Model(&model.DatabaseInstance{}).Where("group_name = ?", oldName).Update("group_name", group.Name)
+		if group.GroupType == model.ResourceGroupTypeResource {
+			s.db.Model(&model.Host{}).Where("group_name = ?", oldName).Update("group_name", group.Name)
+			s.db.Model(&model.DatabaseInstance{}).Where("group_name = ?", oldName).Update("group_name", group.Name)
+		} else {
+			s.db.Model(&model.HostAccount{}).Where("group_name = ?", oldName).Update("group_name", group.Name)
+			s.db.Model(&model.DatabaseAccount{}).Where("group_name = ?", oldName).Update("group_name", group.Name)
+		}
 	}
 	if update.Description != "" {
 		group.Description = update.Description
@@ -161,9 +177,14 @@ func (s *Server) deleteResourceGroup(w http.ResponseWriter, r *http.Request, id 
 		return
 	}
 
-	// 删除分组时，将引用该分组的 Host/DB 的 group_name 清空
-	s.db.Model(&model.Host{}).Where("group_name = ?", group.Name).Update("group_name", "")
-	s.db.Model(&model.DatabaseInstance{}).Where("group_name = ?", group.Name).Update("group_name", "")
+	// 按分组类型清空对应资源的 group_name
+	if group.GroupType == model.ResourceGroupTypeResource {
+		s.db.Model(&model.Host{}).Where("group_name = ?", group.Name).Update("group_name", "")
+		s.db.Model(&model.DatabaseInstance{}).Where("group_name = ?", group.Name).Update("group_name", "")
+	} else {
+		s.db.Model(&model.HostAccount{}).Where("group_name = ?", group.Name).Update("group_name", "")
+		s.db.Model(&model.DatabaseAccount{}).Where("group_name = ?", group.Name).Update("group_name", "")
+	}
 
 	if err := s.db.Delete(&group).Error; err != nil {
 		s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())

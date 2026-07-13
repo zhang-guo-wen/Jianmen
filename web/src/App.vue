@@ -79,6 +79,7 @@
 
 <script setup lang="ts">
 import {
+  Connection,
   DataAnalysis,
   DocumentChecked,
   Key,
@@ -140,6 +141,12 @@ const ALL_NAV_ITEMS: Array<{
   },
   { path: "/users", icon: UserFilled, labelKey: "nav.users", menuKey: "users" },
   { path: "/roles", icon: Lock, labelKey: "nav.roles", menuKey: "roles" },
+  {
+    path: "/resource-grant",
+    icon: Connection,
+    labelKey: "nav.resourceGrant",
+    menuKey: "resourceGrant",
+  },
   {
     path: "/audit",
     icon: DocumentChecked,

@@ -1049,8 +1049,8 @@ export const apiClient = {
     request<{ allowed: boolean }>(`/api/resource-grants/check?user_id=${encodeURIComponent(userId)}&resource_type=${encodeURIComponent(resourceType)}&resource_id=${encodeURIComponent(resourceId)}`),
 
   // ── Resource Groups ────────────────────────────────────────────────
-  getResourceGroups: () =>
-    request<ResourceGroupRecord[]>('/api/resource-groups'),
+  getResourceGroups: (params?: { group_type?: string }) =>
+    request<ResourceGroupRecord[]>(`/api/resource-groups${buildQS(params as Record<string, string | number | undefined>)}`),
   createResourceGroup: (payload: ResourceGroupPayload) =>
     request<ResourceGroupRecord>('/api/resource-groups', {
       method: 'POST',

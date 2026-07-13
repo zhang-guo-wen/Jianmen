@@ -757,10 +757,10 @@ const accountGroupOptions = ref<string[]>([]);
 
 async function loadGroupOptions() {
   try {
-    const groups = await apiClient.getResourceGroups();
-    const names = groups.map(g => g.name).filter(Boolean);
-    hostGroupOptions.value = names;
-    accountGroupOptions.value = names;
+    const resourceGroups = await apiClient.getResourceGroups({ group_type: 'resource' });
+    const accountGroups = await apiClient.getResourceGroups({ group_type: 'account' });
+    hostGroupOptions.value = resourceGroups.map(g => g.name).filter(Boolean);
+    accountGroupOptions.value = accountGroups.map(g => g.name).filter(Boolean);
   } catch {
     // 加载失败时保持空列表
   }
@@ -834,11 +834,6 @@ function hasValue(value: unknown): boolean {
   return String(value ?? "").trim().length > 0;
 }
 
-function uniqueTextValues(values: string[]): string[] {
-  return Array.from(new Set(values.map((v) => v.trim()).filter(Boolean))).sort(
-    (a, b) => a.localeCompare(b),
-  );
-}
 
 function hostId(host: HostView): string {
   return stringFrom(host.id);

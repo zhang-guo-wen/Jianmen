@@ -72,7 +72,7 @@
                 placeholder="选择或输入分组"
               >
                 <el-option
-                  v-for="g in groupOptions"
+                  v-for="g in instanceGroupOptions"
                   :key="g"
                   :label="g"
                   :value="g"
@@ -214,7 +214,7 @@
                 placeholder="选择或输入分组"
               >
                 <el-option
-                  v-for="g in groupOptions"
+                  v-for="g in accountGroupOptions"
                   :key="g"
                   :label="g"
                   :value="g"
@@ -413,7 +413,8 @@ const instanceSearchKeyword = ref('')
 const showInstanceDialog = ref(false)
 const submitting = ref(false)
 const editingInstance = ref<api.DatabaseInstanceView | null>(null)
-const groupOptions = ref<string[]>([])
+const instanceGroupOptions = ref<string[]>([])
+const accountGroupOptions = ref<string[]>([])
 const instanceForm = reactive<InstanceForm>({
   name: '',
   protocol: 'mysql',
@@ -927,8 +928,10 @@ onMounted(() => {
 
 async function loadGroupOptions() {
   try {
-    const groups = await api.apiClient.getResourceGroups()
-    groupOptions.value = groups.map(g => g.name).filter(Boolean)
+    const resourceGroups = await api.apiClient.getResourceGroups({ group_type: 'resource' })
+    const accountGroups = await api.apiClient.getResourceGroups({ group_type: 'account' })
+    instanceGroupOptions.value = resourceGroups.map(g => g.name).filter(Boolean)
+    accountGroupOptions.value = accountGroups.map(g => g.name).filter(Boolean)
   } catch {
     // ignore
   }

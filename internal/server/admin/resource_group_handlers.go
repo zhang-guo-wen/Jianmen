@@ -76,7 +76,9 @@ func (s *Server) listResourceGroups(w http.ResponseWriter, r *http.Request) {
 			s.db.Model(&model.DatabaseInstance{}).Where("group_name = ?", g.Name).Count(&gwc.DatabaseCount)
 		} else {
 			s.db.Model(&model.HostAccount{}).Where("group_name = ?", g.Name).Count(&gwc.AccountCount)
-			s.db.Model(&model.DatabaseAccount{}).Where("group_name = ?", g.Name).Count(&gwc.AccountCount)
+			var dbCount int64
+			s.db.Model(&model.DatabaseAccount{}).Where("group_name = ?", g.Name).Count(&dbCount)
+			gwc.AccountCount += dbCount
 		}
 		result = append(result, gwc)
 	}

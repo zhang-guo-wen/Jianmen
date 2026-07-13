@@ -83,22 +83,18 @@ type Resource struct {
 }
 
 type ResourceGroup struct {
-	ID           string    `gorm:"primaryKey;size:64" json:"id"`
-	Name         string    `gorm:"uniqueIndex;size:128;not null" json:"name"`
-	ResourceType string    `gorm:"index;size:64" json:"resource_type,omitempty"`
-	Description  string    `gorm:"type:text" json:"description,omitempty"`
-	CreatedAt    time.Time `json:"created_at"`
-	UpdatedAt    time.Time `json:"updated_at"`
+	ID          string    `gorm:"primaryKey;size:64" json:"id"`
+	Name        string    `gorm:"uniqueIndex:idx_resource_groups_name_type;size:128;not null" json:"name"`
+	GroupType   string    `gorm:"uniqueIndex:idx_resource_groups_name_type;index;size:32;not null;default:resource" json:"group_type"` // "resource" 或 "account"
+	Description string    `gorm:"type:text" json:"description,omitempty"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
 }
 
-type ResourceGroupMember struct {
-	ID           string        `gorm:"primaryKey;size:64" json:"id"`
-	GroupID      string        `gorm:"uniqueIndex:idx_resource_group_members_pair;size:64;not null" json:"group_id"`
-	ResourceType string        `gorm:"uniqueIndex:idx_resource_group_members_pair;index:idx_resource_group_members_resource,priority:1;size:64;not null" json:"resource_type"`
-	ResourceID   string        `gorm:"uniqueIndex:idx_resource_group_members_pair;index:idx_resource_group_members_resource,priority:2;size:64;not null" json:"resource_id"`
-	CreatedAt    time.Time     `json:"created_at"`
-	Group        ResourceGroup `gorm:"constraint:OnUpdate:CASCADE,OnDelete:CASCADE;" json:"-"`
-}
+const (
+	ResourceGroupTypeResource = "resource" // 资源分组（主机、数据库实例）
+	ResourceGroupTypeAccount  = "account"  // 账号分组（主机账号、数据库账号）
+)
 
 type Host struct {
 	ID        string    `gorm:"primaryKey;size:64" json:"id"`
@@ -230,7 +226,6 @@ func AllModels() []any {
 		&Resource{},
 		&ResourceSequence{},
 		&ResourceGroup{},
-		&ResourceGroupMember{},
 		&UserGroup{},
 		&UserGroupMember{},
 		&ResourceGrant{},
@@ -268,7 +263,6 @@ func (m *RolePermission) BeforeCreate(_ *gorm.DB) error      { return ensureID(&
 func (m *UserRole) BeforeCreate(_ *gorm.DB) error            { return ensureID(&m.ID) }
 func (m *Resource) BeforeCreate(_ *gorm.DB) error            { return ensureID(&m.ID) }
 func (m *ResourceGroup) BeforeCreate(_ *gorm.DB) error       { return ensureID(&m.ID) }
-func (m *ResourceGroupMember) BeforeCreate(_ *gorm.DB) error { return ensureID(&m.ID) }
 func (m *Host) BeforeCreate(_ *gorm.DB) error                { return ensureID(&m.ID) }
 func (m *HostAccount) BeforeCreate(_ *gorm.DB) error         { return ensureID(&m.ID) }
 func (m *DatabaseInstance) BeforeCreate(_ *gorm.DB) error    { return ensureID(&m.ID) }

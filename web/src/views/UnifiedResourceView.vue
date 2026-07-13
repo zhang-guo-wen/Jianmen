@@ -10,11 +10,6 @@
       <el-tab-pane :label="t('nav.databases')" name="databases">
         <DatabaseView v-if="activeTab === 'databases'" />
       </el-tab-pane>
-
-      <!-- 资源分组 Tab -->
-      <el-tab-pane :label="t('nav.resourceGroups')" name="resourceGroups">
-        <ResourceGroupsContent v-if="activeTab === 'resourceGroups'" />
-      </el-tab-pane>
     </el-tabs>
   </div>
 </template>
@@ -24,7 +19,6 @@ import { ref } from 'vue'
 import { useI18n } from '@/i18n'
 import HostsView from '@/views/HostsView.vue'
 import DatabaseView from '@/views/DatabaseView.vue'
-import ResourceGroupsContent from '@/components/ResourceGroupsContent.vue'
 
 const { t } = useI18n()
 

@@ -80,6 +80,9 @@ func (s *DBStore) AddDatabaseInstance(name, protocol, address string, port int, 
 		if err := tx.Create(&inst).Error; err != nil {
 			return err
 		}
+		if err := ensureResourceGroup(tx, strings.TrimSpace(group)); err != nil {
+			return err
+		}
 		return s.syncResourceTx(tx, model.ResourceTypeDatabaseInstance, inst.ID, databaseInstanceResourceName(inst), "")
 	}); err != nil {
 		return DatabaseInstanceView{}, err
@@ -126,6 +129,9 @@ func (s *DBStore) UpdateDatabaseInstance(id, name, protocol, address string, por
 	}
 	if err := s.db.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Save(&inst).Error; err != nil {
+			return err
+		}
+		if err := ensureResourceGroup(tx, strings.TrimSpace(group)); err != nil {
 			return err
 		}
 		return s.syncResourceTx(tx, model.ResourceTypeDatabaseInstance, inst.ID, databaseInstanceResourceName(inst), "")
@@ -291,7 +297,10 @@ func (s *DBStore) AddDatabaseAccount(instanceID, username, password, group, rema
 		if err := tx.Create(&acct).Error; err != nil {
 			return err
 		}
-		return s.syncResourceTx(tx, model.ResourceTypeDatabaseAccount, acct.ID, databaseAccountResourceName(acct), acct.InstanceID)
+			if err := ensureAccountGroup(tx, strings.TrimSpace(group)); err != nil {
+				return err
+			}
+			return s.syncResourceTx(tx, model.ResourceTypeDatabaseAccount, acct.ID, databaseAccountResourceName(acct), acct.InstanceID)
 	}); err != nil {
 		return DatabaseAccountView{}, err
 	}
@@ -325,7 +334,10 @@ func (s *DBStore) UpdateDatabaseAccount(id, username, password, group, remark st
 		if err := tx.Save(&acct).Error; err != nil {
 			return err
 		}
-		return s.syncResourceTx(tx, model.ResourceTypeDatabaseAccount, acct.ID, databaseAccountResourceName(acct), acct.InstanceID)
+			if err := ensureAccountGroup(tx, strings.TrimSpace(group)); err != nil {
+				return err
+			}
+			return s.syncResourceTx(tx, model.ResourceTypeDatabaseAccount, acct.ID, databaseAccountResourceName(acct), acct.InstanceID)
 	}); err != nil {
 		return DatabaseAccountView{}, err
 	}

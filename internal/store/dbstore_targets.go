@@ -251,6 +251,9 @@ func (s *DBStore) UpdateTarget(id string, target config.Target) (TargetView, err
 	if err := s.db.Save(&a).Error; err != nil {
 		return TargetView{}, fmt.Errorf("update target: %w", err)
 	}
+	if err := ensureAccountGroup(s.db, target.Group); err != nil {
+		return TargetView{}, fmt.Errorf("update target: %w", err)
+	}
 
 	hostID := target.HostID
 	if hostID == "" {

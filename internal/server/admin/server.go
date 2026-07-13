@@ -178,6 +178,9 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 	// 用户组管理
 	s.muxHandle(mux, "/api/user-groups", s.withAuthAndUser(s.handleUserGroups))
 	s.muxHandle(mux, "/api/user-groups/", s.withAuthAndUser(s.handleUserGroupOrMembers))
+	// 资源组管理
+	s.muxHandle(mux, "/api/resource-groups", s.withAuthAndUser(s.handleResourceGroups))
+	s.muxHandle(mux, "/api/resource-groups/", s.withAuthAndUser(s.handleResourceGroups))
 	// 资源授权管理
 	s.muxHandle(mux, "/api/resource-grants", s.withAuthAndUser(s.handleResourceGrants))
 	s.muxHandle(mux, "/api/resource-grants/check", s.withAuthAndUser(s.handleResourceGrantCheck))

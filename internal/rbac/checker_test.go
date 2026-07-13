@@ -32,16 +32,17 @@ func TestHasPermissionSupportsResourceGroupGrant(t *testing.T) {
 		{ID: "p-connect", Action: "session:connect", Effect: model.PermissionEffectAllow},
 		{ID: "p-group", ResourceType: model.ResourceTypeGroup, ResourceID: "g1", Effect: model.PermissionEffectAllow},
 	})
-	if err := db.Create(&model.ResourceGroup{ID: "g1", Name: "prod", ResourceType: "host_account"}).Error; err != nil {
+	// 创建资源组
+	if err := db.Create(&model.ResourceGroup{ID: "g1", Name: "prod"}).Error; err != nil {
 		t.Fatalf("create group: %v", err)
 	}
-	if err := db.Create(&model.ResourceGroupMember{
-		ID:           "gm1",
-		GroupID:      "g1",
-		ResourceType: "host_account",
-		ResourceID:   "target-ubuntu",
-	}).Error; err != nil {
-		t.Fatalf("create group member: %v", err)
+	// 创建主机（分组名匹配资源组名）
+	if err := db.Create(&model.Host{ID: "h1", Name: "server1", Address: "10.0.0.1", Port: 22, GroupName: "prod"}).Error; err != nil {
+		t.Fatalf("create host: %v", err)
+	}
+	// 创建主机账号（属于该主机）
+	if err := db.Create(&model.HostAccount{ID: "target-ubuntu", HostID: "h1", Username: "ubuntu", Status: "active"}).Error; err != nil {
+		t.Fatalf("create host account: %v", err)
 	}
 
 	checker := NewChecker(db)
@@ -49,27 +50,36 @@ func TestHasPermissionSupportsResourceGroupGrant(t *testing.T) {
 	assertPermission(t, checker, "u1", "session:connect", "host_account", "target-missing", false)
 }
 
-func TestHasPermissionSupportsWildcardResourceGroupMember(t *testing.T) {
+func TestHasPermissionSupportsGroupForHostAndDatabaseInstance(t *testing.T) {
 	db := newTestDB(t)
 	seedRBAC(t, db, "u1", []model.Permission{
 		{ID: "p-connect", Action: "session:connect", Effect: model.PermissionEffectAllow},
 		{ID: "p-group", ResourceType: model.ResourceTypeGroup, ResourceID: "g1", Effect: model.PermissionEffectAllow},
 	})
-	if err := db.Create(&model.ResourceGroup{ID: "g1", Name: "all-accounts", ResourceType: "*"}).Error; err != nil {
+	// 创建资源组
+	if err := db.Create(&model.ResourceGroup{ID: "g1", Name: "prod"}).Error; err != nil {
 		t.Fatalf("create group: %v", err)
 	}
-	if err := db.Create(&model.ResourceGroupMember{
-		ID:           "gm1",
-		GroupID:      "g1",
-		ResourceType: "*",
-		ResourceID:   "*",
-	}).Error; err != nil {
-		t.Fatalf("create group member: %v", err)
+	// 创建主机（分组名匹配）
+	if err := db.Create(&model.Host{ID: "h1", Name: "server1", Address: "10.0.0.1", GroupName: "prod"}).Error; err != nil {
+		t.Fatalf("create host: %v", err)
+	}
+	// 创建数据库实例（分组名匹配）
+	if err := db.Create(&model.DatabaseInstance{ID: "db1", Name: "mysql-main", Protocol: "mysql", Address: "10.0.0.2", Port: 3306, GroupName: "prod"}).Error; err != nil {
+		t.Fatalf("create db instance: %v", err)
+	}
+	// 创建数据库账号（属于该实例）
+	if err := db.Create(&model.DatabaseAccount{ID: "dbacct1", InstanceID: "db1", UniqueName: "app_user", Username: "app", Status: "active"}).Error; err != nil {
+		t.Fatalf("create db account: %v", err)
 	}
 
 	checker := NewChecker(db)
-	assertPermission(t, checker, "u1", "session:connect", model.ResourceTypeHostAccount, "target-root", true)
-	assertPermission(t, checker, "u1", "session:connect", model.ResourceTypeDatabaseAccount, "dbacct-mysql-app", true)
+	// host 本身在 prod 组内
+	assertPermission(t, checker, "u1", "session:connect", model.ResourceTypeHost, "h1", true)
+	// database_instance 本身在 prod 组内
+	assertPermission(t, checker, "u1", "session:connect", model.ResourceTypeDatabaseInstance, "db1", true)
+	// database_account 所属实例在 prod 组内
+	assertPermission(t, checker, "u1", "session:connect", model.ResourceTypeDatabaseAccount, "dbacct1", true)
 }
 
 func TestHasPermissionDenyOverridesAllow(t *testing.T) {

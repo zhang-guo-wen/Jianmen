@@ -60,8 +60,7 @@ func (s *DBStore) deleteResourceTx(tx *gorm.DB, resourceType, resourceID string)
 		Delete(&model.Resource{}).Error; err != nil {
 		return err
 	}
-	return tx.Where("resource_type = ? AND resource_id = ?", resourceType, resourceID).
-		Delete(&model.ResourceGroupMember{}).Error
+	return nil
 }
 
 func hostResourceName(host model.Host) string {

@@ -13,16 +13,17 @@
         <el-button type="primary" @click="openCreateInstance">新增实例</el-button>
       </template>
       <el-table-column prop="name" label="名称" min-width="130" show-overflow-tooltip />
-      <el-table-column prop="address" label="地址" min-width="130" show-overflow-tooltip />
-      <el-table-column prop="port" label="端口" width="70" />
-      <el-table-column label="协议" width="80" align="center">
+      <el-table-column label="地址" min-width="180" show-overflow-tooltip>
+        <template #default="{ row }">{{ instanceEndpoint(row) }}</template>
+      </el-table-column>
+      <el-table-column label="协议" width="100" align="center">
         <template #default="{ row }">
-          <el-tag size="small" :type="row.protocol === 'mysql' ? 'success' : row.protocol === 'redis' ? 'danger' : 'primary'" effect="plain">{{ row.protocol === 'mysql' ? 'MySQL' : row.protocol === 'redis' ? 'Redis' : 'PG' }}</el-tag>
+          <el-tag class="protocol-tag" size="small" :type="row.protocol === 'mysql' ? 'success' : row.protocol === 'redis' ? 'danger' : 'primary'" effect="light">{{ row.protocol === 'mysql' ? 'MySQL' : row.protocol === 'redis' ? 'Redis' : 'PostgreSQL' }}</el-tag>
         </template>
       </el-table-column>
-      <el-table-column label="账号数" width="80" align="center">
+      <el-table-column label="账号管理" min-width="110" align="center">
         <template #default="{ row }">
-          <el-button link type="primary" @click="showAccounts(row)">{{ row.account_count ?? 0 }}</el-button>
+          <el-button link type="primary" size="small" class="account-mgmt-btn" @click="showAccounts(row)">账号管理({{ row.account_count ?? 0 }})</el-button>
         </template>
       </el-table-column>
       <el-table-column prop="group" label="分组" width="100" show-overflow-tooltip />
@@ -63,7 +64,21 @@
         <el-collapse>
           <el-collapse-item title="更多设置">
             <el-form-item label="分组">
-              <el-input v-model="instanceForm.group" />
+              <el-select
+                v-model="instanceForm.group"
+                allow-create
+                clearable
+                default-first-option
+                filterable
+                placeholder="选择或输入分组"
+              >
+                <el-option
+                  v-for="g in instanceGroupOptions"
+                  :key="g"
+                  :label="g"
+                  :value="g"
+                />
+              </el-select>
             </el-form-item>
             <el-form-item label="备注">
               <el-input v-model="instanceForm.remark" type="textarea" />
@@ -191,7 +206,21 @@
         <el-collapse>
           <el-collapse-item title="更多设置">
             <el-form-item label="分组">
-              <el-input v-model="accountForm.group" placeholder="输入或选择分组" />
+              <el-select
+                v-model="accountForm.group"
+                allow-create
+                clearable
+                default-first-option
+                filterable
+                placeholder="选择或输入分组"
+              >
+                <el-option
+                  v-for="g in accountGroupOptions"
+                  :key="g"
+                  :label="g"
+                  :value="g"
+                />
+              </el-select>
             </el-form-item>
             <el-form-item label="备注">
               <el-input v-model="accountForm.remark" type="textarea" placeholder="备注信息" />
@@ -385,6 +414,8 @@ const instanceSearchKeyword = ref('')
 const showInstanceDialog = ref(false)
 const submitting = ref(false)
 const editingInstance = ref<api.DatabaseInstanceView | null>(null)
+const instanceGroupOptions = ref<string[]>([])
+const accountGroupOptions = ref<string[]>([])
 const instanceForm = reactive<InstanceForm>({
   name: '',
   protocol: 'mysql',
@@ -494,6 +525,13 @@ const connectCommand = computed(() => {
 })
 
 // ── Helpers ──
+function instanceEndpoint(inst: api.DatabaseInstanceView): string {
+  const address = (inst.address || '').trim()
+  const port = inst.port
+  if (!address) return '-'
+  return port ? `${address}:${port}` : address
+}
+
 function formatTime(value: unknown): string {
   let d: Date | null = null
   if (typeof value === 'number' && Number.isFinite(value)) {
@@ -893,7 +931,19 @@ watch([accountPage, accountPageSize], () => {
 onMounted(() => {
   loadGatewayConfig()
   loadInstances()
+  loadGroupOptions()
 })
+
+async function loadGroupOptions() {
+  try {
+    const resourceGroups = await api.apiClient.getResourceGroups({ group_type: 'resource' })
+    const accountGroups = await api.apiClient.getResourceGroups({ group_type: 'account' })
+    instanceGroupOptions.value = resourceGroups.map(g => g.name).filter(Boolean)
+    accountGroupOptions.value = accountGroups.map(g => g.name).filter(Boolean)
+  } catch {
+    // ignore
+  }
+}
 
 // ── 自动创建 ──
 interface DBGrantRow {
@@ -1056,6 +1106,18 @@ function closeProvisionAndRefresh() {
   line-height: 1.5;
   margin-top: 6px;
   width: 100%;
+}
+
+/* 协议标签统一宽度 */
+.protocol-tag {
+  width: 80px;
+  justify-content: center;
+}
+
+/* 账号管理按钮 */
+.account-mgmt-btn {
+  font-size: 12px;
+  padding: 0 2px;
 }
 
 @media (max-width: 720px) {

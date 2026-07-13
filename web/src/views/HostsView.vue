@@ -21,10 +21,10 @@
         <el-table-column label="地址" min-width="180" show-overflow-tooltip>
           <template #default="{ row }">{{ hostEndpoint(row) }}</template>
         </el-table-column>
-        <el-table-column label="账号数" width="80" align="center">
+        <el-table-column label="账号管理" min-width="110" align="center">
           <template #default="{ row }">
-            <el-button link type="primary" @click="openAccountsDialog(row)">
-              {{ numberFrom(row.account_count, 0) }}
+            <el-button link type="primary" size="small" class="account-mgmt-btn" @click="openAccountsDialog(row)">
+              账号管理({{ numberFrom(row.account_count, 0) }})
             </el-button>
           </template>
         </el-table-column>
@@ -752,18 +752,19 @@ const privateKeyPEMPlaceholder = computed(() =>
     ? t("hosts.placeholder.keepSecret")
     : "选择本地私钥文件自动读取，或粘贴 -----BEGIN OPENSSH PRIVATE KEY----- 开头的内容",
 );
-const hostGroupOptions = computed(() =>
-  uniqueTextValues([
-    ...hosts.value.map((h) => stringFrom(h.group)),
-    hostForm.group,
-  ]),
-);
-const accountGroupOptions = computed(() =>
-  uniqueTextValues([
-    ...accounts.value.map((a) => stringFrom(a.group)),
-    accountForm.group,
-  ]),
-);
+const hostGroupOptions = ref<string[]>([]);
+const accountGroupOptions = ref<string[]>([]);
+
+async function loadGroupOptions() {
+  try {
+    const resourceGroups = await apiClient.getResourceGroups({ group_type: 'resource' });
+    const accountGroups = await apiClient.getResourceGroups({ group_type: 'account' });
+    hostGroupOptions.value = resourceGroups.map(g => g.name).filter(Boolean);
+    accountGroupOptions.value = accountGroups.map(g => g.name).filter(Boolean);
+  } catch {
+    // 加载失败时保持空列表
+  }
+}
 const accountExpiryText = computed(() => {
   if (!accountForm.expires_at) return "永久有效";
   return formatDateTime(accountForm.expires_at);
@@ -833,11 +834,6 @@ function hasValue(value: unknown): boolean {
   return String(value ?? "").trim().length > 0;
 }
 
-function uniqueTextValues(values: string[]): string[] {
-  return Array.from(new Set(values.map((v) => v.trim()).filter(Boolean))).sort(
-    (a, b) => a.localeCompare(b),
-  );
-}
 
 function hostId(host: HostView): string {
   return stringFrom(host.id);
@@ -1796,6 +1792,7 @@ watch([accountPage, accountPageSize], () => {
 
 onMounted(() => {
   fetchHosts();
+  loadGroupOptions();
 });
 </script>
 
@@ -1813,6 +1810,12 @@ onMounted(() => {
 }
 .danger-dropdown-item {
   color: var(--el-color-danger);
+}
+
+/* 账号管理按钮 */
+.account-mgmt-btn {
+  font-size: 12px;
+  padding: 0 2px;
 }
 
 /* Form layout */

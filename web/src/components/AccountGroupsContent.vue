@@ -15,14 +15,9 @@
           <el-table :data="groups" v-loading="loading" stripe>
             <el-table-column :label="t('resourceGroups.name')" prop="name" min-width="150" />
             <el-table-column :label="t('resourceGroups.description')" prop="description" min-width="200" show-overflow-tooltip />
-            <el-table-column :label="t('resourceGroups.hostCount')" width="80">
+            <el-table-column :label="t('resourceGroups.accountCount')" width="80">
               <template #default="{ row }">
-                {{ row.host_count || 0 }}
-              </template>
-            </el-table-column>
-            <el-table-column :label="t('resourceGroups.databaseCount')" width="110">
-              <template #default="{ row }">
-                {{ row.database_count || 0 }}
+                {{ row.account_count || 0 }}
               </template>
             </el-table-column>
             <el-table-column :label="t('common.actions')" width="150" fixed="right">
@@ -85,7 +80,7 @@ const loadGroups = async () => {
   loading.value = true
   try {
     const all = await apiClient.getResourceGroups()
-    groups.value = all.filter(g => g.group_type !== 'account')
+    groups.value = all.filter(g => g.group_type === 'account')
   } catch (e: any) {
     ElMessage.error(e.message || 'Failed to load groups')
   } finally {
@@ -122,7 +117,7 @@ const saveGroup = async () => {
     } else {
       await apiClient.createResourceGroup({
         name: form.name,
-        group_type: 'resource',
+        group_type: 'account',
         description: form.description || undefined,
       })
     }

@@ -62,6 +62,8 @@ body {
 }
 
 .app-sidebar {
+  display: flex;
+  flex-direction: column;
   position: relative;
   color: #fff;
   background: linear-gradient(180deg, #0f172a 0%, #111827 54%, #020617 100%);
@@ -110,6 +112,8 @@ body {
 .nav-menu {
   --el-menu-bg-color: transparent;
   --el-menu-hover-bg-color: rgb(255 255 255 / 9%);
+  flex: 1;
+  overflow-y: auto;
   border-right: 0;
   padding: 0 14px;
   background: transparent;
@@ -124,6 +128,30 @@ body {
 .nav-menu .el-menu-item.is-active {
   background: linear-gradient(135deg, #2563eb, #4f46e5);
   box-shadow: 0 8px 18px rgb(37 99 235 / 22%);
+}
+
+/* 侧边栏底部操作区 */
+.sidebar-footer {
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  gap: 12px;
+  padding: 16px 24px 20px;
+  border-top: 1px solid rgb(255 255 255 / 8%);
+}
+
+.sidebar-locale {
+  width: 100%;
+}
+
+.sidebar-logout {
+  width: 100%;
+  --el-button-bg-color: rgb(255 255 255 / 6%);
+  --el-button-border-color: rgb(255 255 255 / 12%);
+  --el-button-text-color: #cbd5e1;
+  --el-button-hover-bg-color: rgb(255 255 255 / 12%);
+  --el-button-hover-border-color: rgb(255 255 255 / 20%);
+  --el-button-hover-text-color: #fff;
 }
 
 .app-content {
@@ -157,16 +185,6 @@ body {
   margin: 6px 0 0;
   color: var(--color-text-secondary);
   font-size: 14px;
-}
-
-.app-header-actions {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.language-select {
-  width: 128px;
 }
 
 .app-main {
@@ -366,11 +384,15 @@ body {
   .nav-menu {
     display: flex;
     gap: 6px;
-    padding: 0 12px 12px;
+    padding: 0 12px;
     overflow-x: auto;
   }
   .nav-menu .el-menu-item {
     flex: 0 0 auto;
+  }
+  .sidebar-footer {
+    padding: 8px 12px 12px;
+    border-top: 0;
   }
   .app-header {
     height: auto;
@@ -379,10 +401,6 @@ body {
     align-items: flex-start;
     gap: 14px;
     padding: 18px;
-  }
-  .app-header-actions {
-    width: 100%;
-    justify-content: flex-end;
   }
   .app-main {
     height: auto;

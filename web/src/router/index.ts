@@ -18,9 +18,7 @@ const routeMenuMap: Record<string, string> = {
   '/platform-accounts': 'platformAccounts',
   '/quick-connect': 'quickConnect',
   '/audit': 'audit',
-  '/users': 'users',
-  '/roles': 'roles',
-  '/resource-grant': 'resourceGrant',
+  '/rbac': 'rbac',
 };
 
 const ApplicationsView = () => import('@/views/ApplicationsView.vue');
@@ -30,11 +28,8 @@ const HostsView = () => import('@/views/HostsView.vue');
 const LoginView = () => import('@/views/LoginView.vue');
 const PlatformAccountsView = () => import('@/views/PlatformAccountsView.vue');
 const QuickConnectView = () => import('@/views/QuickConnectView.vue');
-const RBACView = () => import('@/views/RBACView.vue');
-const ResourceGrantView = () => import('@/views/ResourceGrantView.vue');
-const RolesView = () => import('@/views/RolesView.vue');
+const UnifiedRBACView = () => import('@/views/UnifiedRBACView.vue');
 const SetupView = () => import('@/views/SetupView.vue');
-const UsersView = () => import('@/views/UsersView.vue');
 const WebTerminalView = () => import('@/views/WebTerminalView.vue');
 
 const routes: RouteRecordRaw[] = [
@@ -112,29 +107,11 @@ const routes: RouteRecordRaw[] = [
   {
     path: '/rbac',
     name: 'rbac',
-    component: RBACView,
+    component: UnifiedRBACView,
     meta: {
       titleKey: 'route.rbac.title',
       descriptionKey: 'route.rbac.description'
     } satisfies AppRouteMeta
-  },
-  {
-    path: '/users',
-    name: 'users',
-    component: UsersView,
-    meta: {
-      titleKey: 'route.users.title',
-      descriptionKey: 'route.users.description',
-    } satisfies AppRouteMeta,
-  },
-  {
-    path: '/roles',
-    name: 'roles',
-    component: RolesView,
-    meta: {
-      titleKey: 'route.roles.title',
-      descriptionKey: 'route.roles.description',
-    } satisfies AppRouteMeta,
   },
   {
     path: '/audit',
@@ -143,15 +120,6 @@ const routes: RouteRecordRaw[] = [
     meta: {
       titleKey: 'route.audit.title',
       descriptionKey: 'route.audit.description'
-    } satisfies AppRouteMeta
-  },
-  {
-    path: '/resource-grant',
-    name: 'resource-grant',
-    component: ResourceGrantView,
-    meta: {
-      titleKey: 'route.resourceGrant.title',
-      descriptionKey: 'route.resourceGrant.description'
     } satisfies AppRouteMeta
   },
 

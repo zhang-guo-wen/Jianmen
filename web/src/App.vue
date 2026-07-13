@@ -79,7 +79,6 @@
 
 <script setup lang="ts">
 import {
-  Connection,
   DataAnalysis,
   DocumentChecked,
   Key,
@@ -87,7 +86,6 @@ import {
   Lock,
   Monitor,
   SwitchButton,
-  UserFilled,
 } from "@element-plus/icons-vue";
 import { computed, onMounted, watchEffect, type Component } from "vue";
 import { useRoute, useRouter } from "vue-router";
@@ -139,13 +137,11 @@ const ALL_NAV_ITEMS: Array<{
     labelKey: "nav.applications",
     menuKey: "applications",
   },
-  { path: "/users", icon: UserFilled, labelKey: "nav.users", menuKey: "users" },
-  { path: "/roles", icon: Lock, labelKey: "nav.roles", menuKey: "roles" },
   {
-    path: "/resource-grant",
-    icon: Connection,
-    labelKey: "nav.resourceGrant",
-    menuKey: "resourceGrant",
+    path: "/rbac",
+    icon: Lock,
+    labelKey: "nav.rbac",
+    menuKey: "rbac",
   },
   {
     path: "/audit",

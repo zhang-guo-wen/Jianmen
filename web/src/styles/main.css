@@ -133,15 +133,15 @@ body {
 /* 侧边栏底部操作区 */
 .sidebar-footer {
   display: flex;
+  flex-direction: column;
   flex-shrink: 0;
-  align-items: center;
   gap: 10px;
   padding: 12px 24px;
   border-top: 1px solid rgb(255 255 255 / 8%);
 }
 
 .sidebar-locale {
-  width: 120px;
+  width: 100%;
 }
 
 .sidebar-logout {
@@ -390,8 +390,6 @@ body {
     flex: 0 0 auto;
   }
   .sidebar-footer {
-    flex-direction: row;
-    justify-content: flex-end;
     padding: 8px 12px 12px;
     border-top: 0;
   }

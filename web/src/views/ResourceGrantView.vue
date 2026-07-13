@@ -389,12 +389,25 @@ const loadResources = async () => {
     } else if (resourceTabType.value === 'database_account') {
       await loadDbAccounts()
     } else if (resourceTabType.value === 'resource_group') {
-      resourceGroups.value = []
+      await loadResourceGroups()
     }
   } catch (e) {
     console.error('Failed to load resources:', e)
   } finally {
     loadingResources.value = false
+  }
+}
+
+const loadResourceGroups = async () => {
+  try {
+    const groups = await apiClient.getResourceGroups()
+    resourceGroups.value = groups.map(g => ({
+      id: g.id,
+      name: g.name,
+      description: g.description || ''
+    }))
+  } catch {
+    resourceGroups.value = []
   }
 }
 

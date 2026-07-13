@@ -938,8 +938,8 @@ async function loadGroupOptions() {
   try {
     const resourceGroups = await api.apiClient.getResourceGroups({ group_type: 'resource' })
     const accountGroups = await api.apiClient.getResourceGroups({ group_type: 'account' })
-    instanceGroupOptions.value = resourceGroups.map(g => g.name).filter(Boolean)
-    accountGroupOptions.value = accountGroups.map(g => g.name).filter(Boolean)
+    instanceGroupOptions.value = (resourceGroups.items ?? []).map(g => g.name).filter(Boolean)
+    accountGroupOptions.value = (accountGroups.items ?? []).map(g => g.name).filter(Boolean)
   } catch {
     // ignore
   }

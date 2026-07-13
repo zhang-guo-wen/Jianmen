@@ -14,7 +14,8 @@ const (
 	ResourceTypeHostAccount      = "host_account"
 	ResourceTypeDatabaseAccount  = "database_account"
 	ResourceTypeDatabaseInstance = "database_instance"
-	ResourceTypeApplication     = "application"
+	ResourceTypeApplication      = "application"
+	ResourceTypePlatformAccount  = "platform_account"
 )
 
 type UserPublicKey struct {
@@ -240,6 +241,9 @@ func AllModels() []any {
 		&TemporaryAccount{},
 		&TemporaryCredential{},
 		&TemporaryAccountGrant{},
+		&PlatformAccount{},
+		&PlatformAccountShare{},
+		&AuditEvent{},
 		&AuditSession{},
 		&AuditSSHCommand{},
 		&AuditDBQuery{},
@@ -273,7 +277,10 @@ func (m *TemporaryCredential) BeforeCreate(_ *gorm.DB) error { return ensureID(&
 func (m *TemporaryAccountGrant) BeforeCreate(_ *gorm.DB) error {
 	return ensureID(&m.ID)
 }
-func (m *AuditSession) BeforeCreate(_ *gorm.DB) error    { return ensureID(&m.ID) }
-func (m *AuditSSHCommand) BeforeCreate(_ *gorm.DB) error { return ensureID(&m.ID) }
-func (m *AuditDBQuery) BeforeCreate(_ *gorm.DB) error    { return ensureID(&m.ID) }
-func (m *AuditSFTPEvent) BeforeCreate(_ *gorm.DB) error  { return ensureID(&m.ID) }
+func (m *PlatformAccount) BeforeCreate(_ *gorm.DB) error      { return ensureID(&m.ID) }
+func (m *PlatformAccountShare) BeforeCreate(_ *gorm.DB) error { return ensureID(&m.ID) }
+func (m *AuditEvent) BeforeCreate(_ *gorm.DB) error           { return ensureID(&m.ID) }
+func (m *AuditSession) BeforeCreate(_ *gorm.DB) error         { return ensureID(&m.ID) }
+func (m *AuditSSHCommand) BeforeCreate(_ *gorm.DB) error      { return ensureID(&m.ID) }
+func (m *AuditDBQuery) BeforeCreate(_ *gorm.DB) error         { return ensureID(&m.ID) }
+func (m *AuditSFTPEvent) BeforeCreate(_ *gorm.DB) error       { return ensureID(&m.ID) }

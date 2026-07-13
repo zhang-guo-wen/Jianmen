@@ -130,6 +130,38 @@ type ApplicationView struct {
 	UpdatedAt      string `json:"updated_at"`
 }
 
+type PlatformAccountView struct {
+	ID           string     `json:"id"`
+	Name         string     `json:"name"`
+	PlatformName string     `json:"platform_name"`
+	URL          string     `json:"url,omitempty"`
+	Category     string     `json:"category,omitempty"`
+	Group        string     `json:"group,omitempty"`
+	Username     string     `json:"username"`
+	HasPassword  bool       `json:"has_password"`
+	HasTOTP      bool       `json:"has_totp"`
+	Remark       string     `json:"remark,omitempty"`
+	OwnerID      string     `json:"owner_id"`
+	OwnerName    string     `json:"owner_name,omitempty"`
+	Visibility   string     `json:"visibility"`
+	Status       string     `json:"status"`
+	ExpiresAt    *time.Time `json:"expires_at,omitempty"`
+	CreatedAt    string     `json:"created_at"`
+	UpdatedAt    string     `json:"updated_at"`
+}
+
+type PlatformAccountShareView struct {
+	ID                string     `json:"id"`
+	PlatformAccountID string     `json:"platform_account_id"`
+	UserID            string     `json:"user_id,omitempty"`
+	Username          string     `json:"username,omitempty"`
+	RoleID            string     `json:"role_id,omitempty"`
+	RoleName          string     `json:"role_name,omitempty"`
+	AccessLevel       string     `json:"access_level"`
+	ExpiresAt         *time.Time `json:"expires_at,omitempty"`
+	CreatedAt         string     `json:"created_at"`
+}
+
 type SessionView struct {
 	ID         string     `json:"id"`
 	UserID     string     `json:"user_id"`
@@ -144,13 +176,15 @@ type SessionView struct {
 }
 
 var (
-	ErrTargetNotFound     = errSentinel("target not found")
-	ErrHostNotFound       = errSentinel("host not found")
-	ErrDBProxyNotFound    = errSentinel("database proxy not found")
-	ErrDBAccountNotFound  = errSentinel("database account not found")
-	ErrDBInstanceNotFound = errSentinel("database instance not found")
-	ErrApplicationNotFound = errSentinel("application not found")
-	ErrTargetUnavailable  = errSentinel("target unavailable")
+	ErrTargetNotFound            = errSentinel("target not found")
+	ErrHostNotFound              = errSentinel("host not found")
+	ErrDBProxyNotFound           = errSentinel("database proxy not found")
+	ErrDBAccountNotFound         = errSentinel("database account not found")
+	ErrDBInstanceNotFound        = errSentinel("database instance not found")
+	ErrApplicationNotFound       = errSentinel("application not found")
+	ErrPlatformAccountNotFound   = errSentinel("platform account not found")
+	ErrPlatformShareNotFound     = errSentinel("platform account share not found")
+	ErrTargetUnavailable         = errSentinel("target unavailable")
 )
 
 type sentinelError struct{ msg string }
@@ -187,6 +221,20 @@ type AuditSessionView struct {
 type PageOpts struct {
 	Limit  int
 	Offset int
+}
+
+// PlatformAccountListParams 平台账号列表查询参数。
+type PlatformAccountListParams struct {
+	Search     string // 模糊搜索名称、平台、用户名
+	OwnerID    string // 按所有者过滤
+	Visibility string // private / shared
+	Platform   string // 按平台名称过滤
+	Category   string // 按分类过滤
+	Page       int
+	PageSize   int
+	UserID     string // 当前用户 ID（用于可见性过滤）
+	RoleIDs    []string // 当前用户角色 ID 列表
+	IsAdmin    bool   // 是否管理员（可看全域）
 }
 
 // Store abstracts runtime data access. Implementations may back with
@@ -228,6 +276,20 @@ type Store interface {
 	AddApplication(name, scheme, host string, port, listenPort int, group, remark string) (ApplicationView, error)
 	UpdateApplication(id, name, scheme, host string, port, listenPort int, group, remark, status string) (ApplicationView, error)
 	DeleteApplication(id string) error
+
+	// PlatformAccount CRUD
+	PlatformAccounts(params PlatformAccountListParams) ([]PlatformAccountView, int64, error)
+	PlatformAccount(id string) (PlatformAccountView, error)
+	AddPlatformAccount(acc model.PlatformAccount) (PlatformAccountView, error)
+	UpdatePlatformAccount(id string, acc model.PlatformAccount) (PlatformAccountView, error)
+	DeletePlatformAccount(id string) error
+	GetPlatformAccountPassword(id string) (string, error)
+
+	// PlatformAccountShare
+	PlatformAccountShares(accountID string) ([]PlatformAccountShareView, error)
+	AddPlatformAccountShare(share model.PlatformAccountShare) (PlatformAccountShareView, error)
+	DeletePlatformAccountShare(accountID, shareID string) error
+	GetPlatformAccountSharesForUser(userID string, roleIDs []string) ([]PlatformAccountShareView, error)
 
 	DatabaseAccountByUniqueName(uniqueName string) (*model.DatabaseAccount, error)
 	AuthenticateDirect(ctx context.Context, username, password string) (model.User, error)

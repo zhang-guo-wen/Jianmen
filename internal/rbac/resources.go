@@ -33,6 +33,12 @@ const (
 	ActionAppDelete         = "application:delete"
 	ActionAppView           = "application:view"
 	ActionAppConnect        = "app:connect"
+
+	ActionPlatformAccountCreate = "platform_account:create"
+	ActionPlatformAccountUpdate = "platform_account:update"
+	ActionPlatformAccountDelete = "platform_account:delete"
+	ActionPlatformAccountView   = "platform_account:view"
+	ActionPlatformAccountUse    = "platform_account:use"
 )
 
 func DatabaseAccountResourceID(uniqueName string) string {

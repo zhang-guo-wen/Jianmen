@@ -98,6 +98,12 @@
             <el-descriptions-item label="密码">堡垒机登录密码</el-descriptions-item>
           </el-descriptions>
 
+          <div v-if="connectInfo?.compactUser" style="margin-top: 12px; text-align: right">
+            <el-button type="primary" @click="openInBrowser">
+              在浏览器中打开
+            </el-button>
+          </div>
+
           <div style="margin-top: 12px">
             <el-input :model-value="connectInfo.command" readonly size="small">
               <template #append>
@@ -113,6 +119,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue';
+import { useRouter } from 'vue-router';
 import { Refresh } from '@element-plus/icons-vue';
 import { ElMessage } from 'element-plus';
 import DataTableCard from '@/components/DataTableCard.vue';
@@ -120,7 +127,9 @@ import { apiClient, type PageResponse, type TargetRecord, type DBAccountRecord }
 import { useI18n } from '@/i18n';
 
 const { t } = useI18n();
+const router = useRouter();
 const activeTab = ref('ssh');
+const webTerminalTargetId = ref('');
 
 // ── SSH state ──
 const sshKeyword = ref('');
@@ -185,6 +194,7 @@ async function openSSHConfig(target: TargetRecord) {
   sessionError.value = ''; creatingSession.value = true; configVisible.value = true;
   try {
     const tid = String(target.id || target.resource_id || '');
+    webTerminalTargetId.value = tid;
     const s = await apiClient.createUserSession(tid);
     const cu = s?.compact_username || '';
     connectInfo.value = {
@@ -274,6 +284,12 @@ async function copyValue(value: string) {
     await navigator.clipboard.writeText(value);
     ElMessage.success(t('quickConnect.message.copied'));
   } catch { ElMessage.error(t('quickConnect.error.copy')); }
+}
+
+function openInBrowser() {
+  if (!webTerminalTargetId.value) return;
+  configVisible.value = false;
+  router.push({ path: '/web-terminal', query: { target_id: webTerminalTargetId.value } });
 }
 
 // ── Watchers ──

@@ -49,6 +49,34 @@ func TestAuthorizeConnectionRequiresActionAndResourceGrant(t *testing.T) {
 	}
 }
 
+func TestAuthorizeAnyConnectionAcceptsXFTPAction(t *testing.T) {
+	server, db := newAdminDBTestServer(t)
+	seedConnectionAction(t, db, "xftp-user", rbac.ActionSFTPConnect)
+	grant := model.ResourceGrant{
+		PrincipalType: "user",
+		PrincipalID:   "xftp-user",
+		ResourceType:  model.ResourceTypeHostAccount,
+		ResourceID:    "account-1",
+		Effect:        model.PermissionEffectAllow,
+	}
+	if err := db.Create(&grant).Error; err != nil {
+		t.Fatalf("create resource grant: %v", err)
+	}
+
+	allowed, err := server.authorizeAnyConnection(
+		"xftp-user",
+		[]string{rbac.ActionSessionConnect, rbac.ActionSFTPConnect},
+		model.ResourceTypeHostAccount,
+		"account-1",
+	)
+	if err != nil {
+		t.Fatalf("authorize XFTP connection: %v", err)
+	}
+	if !allowed {
+		t.Fatal("XFTP action plus resource grant was denied")
+	}
+}
+
 func TestAuthorizeConnectionSuperAdminBypassesChecks(t *testing.T) {
 	server, _ := newAdminDBTestServer(t)
 	server.superAdminIDs["super"] = true

@@ -167,7 +167,12 @@ func (s *Server) handleUpdateHost(w http.ResponseWriter, r *http.Request, id str
 func (s *Server) handleTargets(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
-		if !s.requirePermission(r, rbac.ActionTargetView) {
+		if connectableOnly(r) {
+			if !s.requireAnyPermission(r, rbac.ActionSessionConnect, rbac.ActionSFTPConnect) {
+				s.forbidden(w, r)
+				return
+			}
+		} else if !s.requirePermission(r, rbac.ActionTargetView) {
 			s.forbidden(w, r)
 			return
 		}

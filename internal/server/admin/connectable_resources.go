@@ -21,7 +21,7 @@ func (s *Server) connectableTargets(r *http.Request, targets []store.TargetView)
 	userID := userIDFromRequest(r)
 	result := make([]store.TargetView, 0, len(targets))
 	for _, target := range targets {
-		allowed, err := s.authorizeConnection(userID, rbac.ActionSessionConnect, model.ResourceTypeHostAccount, target.ID)
+		allowed, err := s.authorizeAnyConnection(userID, []string{rbac.ActionSessionConnect, rbac.ActionSFTPConnect}, model.ResourceTypeHostAccount, target.ID)
 		if err != nil {
 			return nil, fmt.Errorf("authorize host account %q: %w", target.ID, err)
 		}

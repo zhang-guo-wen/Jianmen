@@ -7,7 +7,7 @@ import (
 
 func TestPermissionCatalogContainsEveryAction(t *testing.T) {
 	expected := []string{
-		ActionDBConnect, ActionSessionConnect, ActionSFTPRead, ActionSFTPWrite,
+		ActionDBConnect, ActionSessionConnect, ActionSFTPConnect,
 		ActionAuditView, ActionDBAuditView,
 		ActionHostCreate, ActionHostUpdate, ActionHostDelete, ActionHostView,
 		ActionTargetCreate, ActionTargetUpdate, ActionTargetDelete, ActionTargetView,
@@ -60,6 +60,17 @@ func TestValidateAssignableActionsAddsDependencies(t *testing.T) {
 	}
 	if _, err := ValidateAssignableActions([]string{"missing:action"}); err == nil {
 		t.Fatal("unknown action was accepted")
+	}
+}
+
+func TestSFTPConnectDoesNotGrantSSHConnect(t *testing.T) {
+	got, err := ValidateAssignableActions([]string{ActionSFTPConnect})
+	if err != nil {
+		t.Fatalf("ValidateAssignableActions() error = %v", err)
+	}
+	want := []string{ActionSFTPConnect}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("actions = %#v, want %#v", got, want)
 	}
 }
 

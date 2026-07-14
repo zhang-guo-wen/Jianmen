@@ -1,7 +1,7 @@
 ﻿<template>
   <div class="view-stack">
     <el-tabs v-model="activeTab" class="page-tabs">
-      <el-tab-pane v-if="permission.canDo('session:connect')" label="SSH" name="ssh">
+      <el-tab-pane v-if="canConnectHost" label="主机" name="ssh">
         <DataTableCard
           :data="targets"
           :loading="sshLoading"
@@ -124,20 +124,27 @@
             />
           </div>
 
-          <div style="margin-top: 12px">
+          <div v-if="permission.canDo('session:connect')" style="margin-top: 12px">
             <el-input :model-value="sshCommandText" readonly size="small">
               <template #append>
-                <el-button @click="copyValue(sshCommandText)">复制{{ connectType === 'ssh' ? ' SSH ' : ' ' }}命令</el-button>
+                <el-button @click="copyValue(sshCommandText)">复制 SSH 命令</el-button>
+              </template>
+            </el-input>
+          </div>
+          <div v-if="permission.canDo('sftp:connect')" style="margin-top: 12px">
+            <el-input :model-value="sftpCommandText" readonly size="small">
+              <template #append>
+                <el-button @click="copyValue(sftpCommandText)">复制 XFTP/SFTP 命令</el-button>
               </template>
             </el-input>
           </div>
         </template>
       </div>
       <template #footer>
-        <el-button v-if="connectType === 'ssh'" type="primary" :loading="preferences.loading" @click="openPreferredSSHClient">
+        <el-button v-if="connectType === 'ssh' && permission.canDo('session:connect')" type="primary" :loading="preferences.loading" @click="openPreferredSSHClient">
           本地 SSH 客户端打开
         </el-button>
-        <el-button v-if="connectType === 'ssh'" type="primary" @click="openInBrowser">在浏览器中打开</el-button>
+        <el-button v-if="connectType === 'ssh' && permission.canDo('session:connect')" type="primary" @click="openInBrowser">在浏览器中打开</el-button>
         <el-button style="margin-left:8px" @click="configVisible = false">关闭</el-button>
       </template>
     </el-dialog>
@@ -254,7 +261,8 @@ const { t } = useI18n();
 const router = useRouter();
 const permission = usePermissionStore();
 const preferences = usePreferencesStore();
-const activeTab = ref(permission.canDo('session:connect') ? 'ssh' : 'db');
+const canConnectHost = computed(() => permission.canDo('session:connect') || permission.canDo('sftp:connect'));
+const activeTab = ref(canConnectHost.value ? 'ssh' : 'db');
 const webTerminalTargetId = ref('');
 
 // ── SSH state ──
@@ -288,7 +296,7 @@ const connectionTestResult = ref<{ ok: boolean; error?: string; latency_ms?: num
 const bastionPassword = ref('');
 const temporaryPasswordExpiresAt = ref('');
 
-const dialogTitle = computed(() => connectType.value === 'ssh' ? 'SSH 连接' : '数据库连接');
+const dialogTitle = computed(() => connectType.value === 'ssh' ? '主机连接' : '数据库连接');
 
 /** 对密码做 URL 编码，特殊字符需要转义 */
 function encodePassword(pwd: string): string {
@@ -316,6 +324,12 @@ const sshCommandText = computed(() => {
     return `ssh ${info.compactUser}@${info.host} -p ${info.port}`;
   }
   return `ssh ${info.compactUser}@${info.host} -p ${info.port}`;
+});
+
+const sftpCommandText = computed(() => {
+  const info = connectInfo.value;
+  if (!info || !info.compactUser) return '';
+  return `sftp -P ${info.port} ${info.compactUser}@${info.host}`;
 });
 
 /** 点击协议链接时：浏览器触发 ssh:// 协议打开本地客户端，同时复制命令行到剪贴板 */
@@ -544,7 +558,7 @@ watch(activeTab, (tab) => {
 });
 
 onMounted(() => {
-  if (permission.canDo('session:connect')) loadTargets();
+  if (canConnectHost.value) loadTargets();
   else if (permission.canDo('db:connect')) loadDBAccounts();
 });
 </script>

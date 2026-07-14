@@ -107,11 +107,16 @@
       :props="{ children: 'children', label: 'label' }"
       @check="handlePermissionCheck"
     >
-      <template #default="{ data }">
-        <div :class="['permission-node', `permission-node--${data.type}`]">
-          <span class="permission-node__label">{{ data.label }}</span>
-          <code v-if="data.action" class="permission-node__action">{{ data.action }}</code>
-          <span v-if="data.description" class="permission-node__description">{{ data.description }}</span>
+      <template #default="scope">
+        <div
+          v-if="scope?.data"
+          :class="['permission-node', `permission-node--${scope.data.type}`]"
+        >
+          <span class="permission-node__label">{{ scope.data.label }}</span>
+          <code v-if="scope.data.action" class="permission-node__action">{{ scope.data.action }}</code>
+          <span v-if="scope.data.description" class="permission-node__description">
+            {{ scope.data.description }}
+          </span>
         </div>
       </template>
     </el-tree>

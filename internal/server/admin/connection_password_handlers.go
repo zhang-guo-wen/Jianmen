@@ -42,7 +42,7 @@ func (s *Server) handleConnectionPasswords(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	resourceType, action, err := s.connectionPasswordTarget(request.TargetID)
+	resourceType, actions, err := s.connectionPasswordTarget(request.TargetID)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			s.writeErrorText(w, r, http.StatusNotFound, "target account not found or disabled")
@@ -51,7 +51,7 @@ func (s *Server) handleConnectionPasswords(w http.ResponseWriter, r *http.Reques
 		s.writeErrorText(w, r, http.StatusInternalServerError, "failed to look up target")
 		return
 	}
-	allowed, err := s.authorizeConnection(userID, action, resourceType, request.TargetID)
+	allowed, err := s.authorizeAnyConnection(userID, actions, resourceType, request.TargetID)
 	if err != nil || !allowed {
 		s.forbidden(w, r)
 		return
@@ -83,23 +83,23 @@ func (s *Server) handleConnectionPasswords(w http.ResponseWriter, r *http.Reques
 	})
 }
 
-func (s *Server) connectionPasswordTarget(targetID string) (string, string, error) {
+func (s *Server) connectionPasswordTarget(targetID string) (string, []string, error) {
 	var hostAccount model.HostAccount
 	if err := s.db.Preload("Host").Where("id = ? AND status = ?", targetID, "active").First(&hostAccount).Error; err == nil {
 		if hostAccount.Host.Status == "disabled" {
-			return "", "", gorm.ErrRecordNotFound
+			return "", nil, gorm.ErrRecordNotFound
 		}
-		return model.ResourceTypeHostAccount, rbac.ActionSessionConnect, nil
+		return model.ResourceTypeHostAccount, []string{rbac.ActionSessionConnect, rbac.ActionSFTPConnect}, nil
 	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
-		return "", "", err
+		return "", nil, err
 	}
 
 	var databaseAccount model.DatabaseAccount
 	if err := s.db.Preload("Instance").Where("id = ? AND status = ?", targetID, "active").First(&databaseAccount).Error; err != nil {
-		return "", "", err
+		return "", nil, err
 	}
 	if databaseAccount.Instance.Status == "disabled" {
-		return "", "", gorm.ErrRecordNotFound
+		return "", nil, gorm.ErrRecordNotFound
 	}
-	return model.ResourceTypeDatabaseAccount, rbac.ActionDBConnect, nil
+	return model.ResourceTypeDatabaseAccount, []string{rbac.ActionDBConnect}, nil
 }

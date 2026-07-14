@@ -36,8 +36,7 @@ type PageAccess struct {
 var permissionPages = []PermissionPageDefinition{
 	page("quickConnect", "快速连接", "/quick-connect", 10,
 		action(ActionSessionConnect, "SSH 连接", "通过堡垒机建立 SSH 会话", model.ResourceTypeHostAccount),
-		action(ActionSFTPRead, "SFTP 读取", "通过 SFTP 读取文件", model.ResourceTypeHostAccount),
-		action(ActionSFTPWrite, "SFTP 写入", "通过 SFTP 修改文件", model.ResourceTypeHostAccount),
+		action(ActionSFTPConnect, "XFTP 连接", "通过 SFTP/XFTP 连接主机账号", model.ResourceTypeHostAccount),
 		action(ActionDBConnect, "数据库连接", "通过数据库代理连接指定账号", model.ResourceTypeDatabaseAccount),
 		action(ActionAppConnect, "访问应用", "通过应用代理访问指定应用", model.ResourceTypeApplication),
 	),
@@ -81,8 +80,6 @@ var permissionPages = []PermissionPageDefinition{
 }
 
 var actionDependencies = map[string][]string{
-	ActionSFTPRead:              {ActionSessionConnect},
-	ActionSFTPWrite:             {ActionSessionConnect},
 	ActionHostCreate:            {ActionHostView},
 	ActionHostUpdate:            {ActionHostView},
 	ActionHostDelete:            {ActionHostView},
@@ -103,7 +100,7 @@ var actionDependencies = map[string][]string{
 }
 
 var pageVisibilityActions = map[string][]string{
-	"quickConnect":     {ActionSessionConnect, ActionSFTPRead, ActionSFTPWrite, ActionDBConnect, ActionAppConnect},
+	"quickConnect":     {ActionSessionConnect, ActionSFTPConnect, ActionDBConnect, ActionAppConnect},
 	"hosts":            {ActionHostView},
 	"databases":        {ActionDBProxyView},
 	"platformAccounts": {ActionPlatformAccountView},

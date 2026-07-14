@@ -9,8 +9,7 @@ import (
 const (
 	ActionDBConnect      = "db:connect"
 	ActionSessionConnect = "session:connect"
-	ActionSFTPRead       = "sftp:read"
-	ActionSFTPWrite      = "sftp:write"
+	ActionSFTPConnect    = "sftp:connect"
 	ActionAuditView      = "audit:view"
 	ActionDBAuditView    = "db:audit:view"
 	ActionHostCreate     = "host:create"

@@ -23,10 +23,6 @@ func (s *Server) handleUserSessions(w http.ResponseWriter, r *http.Request) {
 		s.writeErrorText(w, r, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
-	if !s.requirePermission(r, rbac.ActionSessionConnect) {
-		s.forbidden(w, r)
-		return
-	}
 	userID := userIDFromRequest(r)
 	if userID == "" {
 		s.writeErrorText(w, r, http.StatusUnauthorized, "user not authenticated")
@@ -52,7 +48,7 @@ func (s *Server) handleUserSessions(w http.ResponseWriter, r *http.Request) {
 	var resourceID string
 
 	var hostAccount model.HostAccount
-	connectionAction := rbac.ActionSessionConnect
+	connectionActions := []string{rbac.ActionSessionConnect, rbac.ActionSFTPConnect}
 	if err := s.db.Where("id = ? AND status = ?", req.TargetID, "active").First(&hostAccount).Error; err == nil {
 		// 主机账号
 		var host model.Host
@@ -72,7 +68,7 @@ func (s *Server) handleUserSessions(w http.ResponseWriter, r *http.Request) {
 			}
 			compactPrefix = util.PrefixDatabase
 			resourceType = "database_account"
-			connectionAction = rbac.ActionDBConnect
+			connectionActions = []string{rbac.ActionDBConnect}
 			resourceID = dbAccount.ResourceID
 			// Redis 实例使用 R 前缀
 			if dbAccount.Instance.Protocol == "redis" {
@@ -89,7 +85,7 @@ func (s *Server) handleUserSessions(w http.ResponseWriter, r *http.Request) {
 		s.writeErrorText(w, r, http.StatusInternalServerError, "failed to look up target")
 		return
 	}
-	allowed, err := s.authorizeConnection(userID, connectionAction, resourceType, req.TargetID)
+	allowed, err := s.authorizeAnyConnection(userID, connectionActions, resourceType, req.TargetID)
 	if err != nil {
 		s.logger.Warn("connection configuration authorization failed", "user_id", userID, "resource_type", resourceType, "resource_id", req.TargetID, "error", err)
 		s.forbidden(w, r)

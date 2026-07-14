@@ -176,15 +176,9 @@
         <el-form-item label="程序路径">
           <div style="display:flex;gap:8px;width:100%">
             <el-input v-model="initClientPath" :placeholder="initClientPlaceholder" style="flex:1" />
-            <input
-              ref="filePickerRef"
-              type="file"
-              style="display:none"
-              accept=".exe"
-              @change="onClientFilePicked"
-            />
-            <el-button @click="pickClientFile">选择...</el-button>
+            <el-button @click="pickClientFile">浏览...</el-button>
           </div>
+          <div v-if="initClientPathHint" style="font-size:11px;color:#909399;margin-top:4px">{{ initClientPathHint }}</div>
         </el-form-item>
       </el-form>
       <div v-if="initRegCommand" style="margin-top:12px">
@@ -232,8 +226,8 @@ const CLIENT_INIT_OPTIONS: ClientInitOption[] = [
 const initClientVisible = ref(false);
 const initClientType = ref('xshell');
 const initClientPath = ref('');
+const initClientPathHint = ref('');
 const initRegCommand = ref('');
-const filePickerRef = ref<HTMLInputElement | null>(null);
 
 const initClientPlaceholder = computed(() => {
   const opt = CLIENT_INIT_OPTIONS.find(o => o.command === initClientType.value);
@@ -267,17 +261,25 @@ async function copyInitCommand() {
 }
 
 function pickClientFile() {
-  filePickerRef.value?.click();
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = '.exe';
+  input.onchange = (e) => {
+    const file = (e.target as HTMLInputElement).files?.[0];
+    if (file) {
+      const path = (file as any).path || file.name;
+      initClientPath.value = path;
+      if ((file as any).path) {
+        initClientPathHint.value = '';
+      } else {
+        initClientPathHint.value = '浏览器不支持获取完整路径，请手动输入或复制路径';
+      }
+    }
+  };
+  input.click();
 }
 
-function onClientFilePicked(e: Event) {
-  const input = e.target as HTMLInputElement;
-  const file = input.files?.[0];
-  if (file) {
-    initClientPath.value = (file as any).path || file.name;
-  }
-  input.value = '';
-}
+// 删除了 onClientFilePicked 和 filePickerRef
 
 const { t } = useI18n();
 const router = useRouter();

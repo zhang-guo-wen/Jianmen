@@ -43,7 +43,7 @@
         <el-table-column label="备注" min-width="120" show-overflow-tooltip>
           <template #default="{ row }">{{ row.remark || "-" }}</template>
         </el-table-column>
-        <el-table-column label="操作" width="210" align="right" fixed="right">
+        <el-table-column label="操作" width="210" align="right">
           <template #default="{ row }">
             <div class="table-actions">
               <el-button
@@ -60,26 +60,23 @@
                 @click="openEditHostDialog(row)"
                 >编辑</el-button
               >
-              <el-popover
-                trigger="click"
-                placement="bottom-end"
-                :width="140"
-                :offset="4"
-                teleported
-                popper-class="more-menu-popover"
-              >
-                <template #reference>
-                  <el-button link type="primary" size="small" @click.stop
-                    >更多<el-icon class="el-icon--right"><ArrowDown /></el-icon></el-button
-                  >
+              <el-dropdown trigger="click" teleported>
+                <el-button link type="primary" size="small"
+                  >更多<el-icon class="el-icon--right"><ArrowDown /></el-icon></el-button
+                >
+                <template #dropdown>
+                  <el-dropdown-menu>
+                    <el-dropdown-item @click="handleHostAuditLog(row)">审计日志</el-dropdown-item>
+                    <el-dropdown-item @click="handleHostSessions(row)">在线会话</el-dropdown-item>
+                    <el-dropdown-item @click="handleHostPermissions(row)">权限管理</el-dropdown-item>
+                    <el-dropdown-item
+                      class="danger-dropdown-item"
+                      @click="confirmDeleteHost(row)"
+                      >删除</el-dropdown-item
+                    >
+                  </el-dropdown-menu>
                 </template>
-                <div class="more-menu-list">
-                  <div class="more-menu-item" @click.stop="handleHostAuditLog(row)">审计日志</div>
-                  <div class="more-menu-item" @click.stop="handleHostSessions(row)">在线会话</div>
-                  <div class="more-menu-item" @click.stop="handleHostPermissions(row)">权限管理</div>
-                  <div class="more-menu-item danger-menu-item" @click.stop="confirmDeleteHost(row)">删除</div>
-                </div>
-              </el-popover>
+              </el-dropdown>
             </div>
           </template>
         </el-table-column>
@@ -1830,26 +1827,8 @@ onMounted(() => {
 .table-actions :deep(.el-button) {
   margin-left: 0;
 }
-/* 更多弹出菜单 */
-.more-menu-list {
-  display: flex;
-  flex-direction: column;
-  padding: 4px 0;
-}
-.more-menu-item {
-  padding: 6px 14px;
-  font-size: 13px;
-  cursor: pointer;
-  transition: background-color 0.2s;
-}
-.more-menu-item:hover {
-  background-color: var(--el-fill-color-light);
-}
-.danger-menu-item {
+.danger-dropdown-item {
   color: var(--el-color-danger);
-}
-.danger-menu-item:hover {
-  background-color: var(--el-color-danger-light-9);
 }
 
 /* 账号管理按钮 */
@@ -1983,13 +1962,5 @@ onMounted(() => {
 /* FormDialog body min-height for account edit */
 :deep(.form-dialog-body) {
   min-height: 280px;
-}
-</style>
-
-<style>
-/* 更多弹出菜单 - 全局样式（popover teleported 到 body，scoped 不生效） */
-.more-menu-popover {
-  padding: 0 !important;
-  min-width: 130px !important;
 }
 </style>

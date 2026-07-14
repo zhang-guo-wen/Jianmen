@@ -330,6 +330,8 @@ const getResourceName = (grant: ResourceGrantRecord) => {
   if (db) return `${db.unique_name} (${db.instance_name || ''})`
   const group = resourceGroups.value.find(g => g.id === grant.resource_id)
   if (group) return group.name
+  const accGroup = accountGroups.value.find(g => g.id === grant.resource_id)
+  if (accGroup) return accGroup.name
   return grant.resource_id
 }
 
@@ -353,9 +355,18 @@ const loadGrants = async () => {
 }
 
 const ensureNamesLoaded = async () => {
-  // 预加载用户和用户组用于表格中的名称显示
+  // 预加载所有关联数据用于表格中的名称显示
+  const needHost = grants.value.some(g => g.resource_type === 'host_account')
+  const needDb = grants.value.some(g => g.resource_type === 'database_account')
+  const needResGroup = grants.value.some(g => g.resource_type === 'resource_group')
+  const needAccGroup = grants.value.some(g => g.resource_type === 'account_group')
+
   if (allUsers.value.length === 0) await loadUsers()
   if (userGroups.value.length === 0) await loadUserGroups()
+  if (needHost && hostAccounts.value.length === 0) await loadHostAccounts()
+  if (needDb && dbAccounts.value.length === 0) await loadDbAccounts()
+  if (needResGroup && resourceGroups.value.length === 0) await loadResourceGroups()
+  if (needAccGroup && accountGroups.value.length === 0) await loadAccountGroups()
 }
 
 const loadUsers = async () => {

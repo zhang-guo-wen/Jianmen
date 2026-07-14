@@ -176,25 +176,30 @@ func (s *Server) handleConn(ctx context.Context, rawConn net.Conn, serverConfig 
 		return
 	}
 
+	access := sshproxy.Access{SSH: true, SFTP: true}
 	if !s.superAdminIDs[user.ID] {
-		// 检查菜单权限：session:connect
 		if s.rbacChecker != nil {
-			allowed, err := s.rbacChecker.HasPermission(user.ID, rbac.ActionSessionConnect, "", "")
-			if err != nil {
-				s.logger.Warn("rbac check failed", "user", user.Username, "target", target.ID, "error", err)
+			sshAllowed, checkErr := s.rbacChecker.HasPermission(user.ID, rbac.ActionSessionConnect, "", "")
+			if checkErr != nil {
+				s.logger.Warn("SSH permission check failed", "user", user.Username, "target", target.ID, "error", checkErr)
 				return
 			}
-			if !allowed {
-				s.logger.Warn("rbac denied session:connect permission", "user", user.Username, "target", target.ID)
+			sftpAllowed, checkErr := s.rbacChecker.HasPermission(user.ID, rbac.ActionSFTPConnect, "", "")
+			if checkErr != nil {
+				s.logger.Warn("XFTP permission check failed", "user", user.Username, "target", target.ID, "error", checkErr)
 				return
 			}
+			access = sshproxy.Access{SSH: sshAllowed, SFTP: sftpAllowed}
+		}
+		if !access.SSH && !access.SFTP {
+			s.logger.Warn("RBAC denied SSH and XFTP connection permissions", "user", user.Username, "target", target.ID)
+			return
 		}
 
-		// 检查资源授权：对目标主机账户的连接权限
 		if s.resourceGrantChecker != nil {
-			allowed, err := s.resourceGrantChecker.HasGrant(user.ID, model.ResourceTypeHostAccount, target.ID)
-			if err != nil {
-				s.logger.Warn("resource grant check failed", "user", user.Username, "target", target.ID, "error", err)
+			allowed, grantErr := s.resourceGrantChecker.HasGrant(user.ID, model.ResourceTypeHostAccount, target.ID)
+			if grantErr != nil {
+				s.logger.Warn("resource grant check failed", "user", user.Username, "target", target.ID, "error", grantErr)
 				return
 			}
 			if !allowed {
@@ -278,7 +283,7 @@ func (s *Server) handleConn(ctx context.Context, rawConn net.Conn, serverConfig 
 			s.logger.Warn("failed to accept channel", "session", session.ID, "error", err)
 			continue
 		}
-		proxy := sshproxy.NewSession(targetClient, channel, requests, recorder, s.logger)
+		proxy := sshproxy.NewSession(targetClient, channel, requests, recorder, access, s.logger)
 		go proxy.Serve(ctx)
 	}
 }

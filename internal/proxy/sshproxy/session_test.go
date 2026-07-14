@@ -31,6 +31,18 @@ type testExitSignalMsg struct {
 	Lang       string
 }
 
+func TestAccessSeparatesSSHAndXFTPRequests(t *testing.T) {
+	sshOnly := Access{SSH: true}
+	if !sshOnly.allows("exec", "") || sshOnly.allows("subsystem", "sftp") {
+		t.Fatal("SSH-only access did not separate exec and SFTP")
+	}
+
+	sftpOnly := Access{SFTP: true}
+	if !sftpOnly.allows("subsystem", "sftp") || sftpOnly.allows("shell", "") {
+		t.Fatal("XFTP-only access did not separate SFTP and shell")
+	}
+}
+
 func TestSessionForwardsExecExitStatusAndStderr(t *testing.T) {
 	target := newTargetClient(t, func(t *testing.T, ch ssh.Channel, command string) {
 		t.Helper()
@@ -199,7 +211,7 @@ func newProxyClient(t *testing.T, target *ssh.Client) *ssh.Client {
 			t.Errorf("accept proxy channel: %v", err)
 			return
 		}
-		NewSession(target, ch, reqs, nil, logger).Serve(context.Background())
+		NewSession(target, ch, reqs, nil, Access{SSH: true, SFTP: true}, logger).Serve(context.Background())
 	})
 }
 

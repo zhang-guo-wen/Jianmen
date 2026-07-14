@@ -14,15 +14,14 @@ func TestHasPermissionRequiresActionAndResourceGrant(t *testing.T) {
 	seedRBAC(t, db, "u1", []model.Permission{
 		{ID: "p-connect", Action: "session:connect", Effect: model.PermissionEffectAllow},
 		{ID: "p-target-root", ResourceType: "host_account", ResourceID: "target-root", Effect: model.PermissionEffectAllow},
-		{ID: "p-read-target-root", Action: "sftp:read", ResourceType: "host_account", ResourceID: "target-root", Effect: model.PermissionEffectAllow},
+		{ID: "p-sftp-target-root", Action: "sftp:connect", ResourceType: "host_account", ResourceID: "target-root", Effect: model.PermissionEffectAllow},
 	})
 
 	checker := NewChecker(db)
 	assertPermission(t, checker, "u1", "session:connect", "", "", true)
 	assertPermission(t, checker, "u1", "session:connect", "host_account", "target-root", true)
 	assertPermission(t, checker, "u1", "session:connect", "host_account", "target-ubuntu", false)
-	assertPermission(t, checker, "u1", "sftp:write", "host_account", "target-root", false)
-	assertPermission(t, checker, "u1", "sftp:read", "host_account", "target-root", true)
+	assertPermission(t, checker, "u1", "sftp:connect", "host_account", "target-root", true)
 	assertPermission(t, checker, "missing", "session:connect", "", "", false)
 }
 

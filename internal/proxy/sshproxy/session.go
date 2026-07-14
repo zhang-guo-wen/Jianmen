@@ -12,12 +12,32 @@ import (
 	"jianmen/internal/recording"
 )
 
+type Access struct {
+	SSH  bool
+	SFTP bool
+}
+
+func (a Access) allows(requestType, subsystem string) bool {
+	switch requestType {
+	case "pty-req", "window-change", "shell", "exec", "env", "signal":
+		return a.SSH
+	case "subsystem":
+		if subsystem == "sftp" {
+			return a.SFTP
+		}
+		return a.SSH
+	default:
+		return true
+	}
+}
+
 type Session struct {
 	targetClient *ssh.Client
 	client       ssh.Channel
 	requests     <-chan *ssh.Request
 	recorder     *recording.SessionRecorder
 	logger       *slog.Logger
+	access       Access
 
 	target       ssh.Channel
 	targetReqs   <-chan *ssh.Request
@@ -27,7 +47,7 @@ type Session struct {
 	closeOnce    sync.Once
 }
 
-func NewSession(targetClient *ssh.Client, client ssh.Channel, requests <-chan *ssh.Request, recorder *recording.SessionRecorder, logger *slog.Logger) *Session {
+func NewSession(targetClient *ssh.Client, client ssh.Channel, requests <-chan *ssh.Request, recorder *recording.SessionRecorder, access Access, logger *slog.Logger) *Session {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -37,6 +57,7 @@ func NewSession(targetClient *ssh.Client, client ssh.Channel, requests <-chan *s
 		requests:     requests,
 		recorder:     recorder,
 		logger:       logger,
+		access:       access,
 		proxyDone:    make(chan struct{}),
 	}
 }
@@ -62,6 +83,18 @@ func (s *Session) Serve(ctx context.Context) {
 }
 
 func (s *Session) handleRequest(ctx context.Context, req *ssh.Request) bool {
+	subsystem := ""
+	if req.Type == "subsystem" {
+		subsystem = parseSubsystemName(req.Payload)
+	}
+	if !s.access.allows(req.Type, subsystem) {
+		s.logger.Warn("SSH channel request denied by protocol permission", "type", req.Type, "subsystem", subsystem)
+		if req.WantReply {
+			_ = req.Reply(false, nil)
+		}
+		return true
+	}
+
 	switch req.Type {
 	case "pty-req":
 		ok := s.forwardRequest(req, true)
@@ -86,9 +119,9 @@ func (s *Session) handleRequest(ctx context.Context, req *ssh.Request) bool {
 	case "subsystem":
 		name := parseSubsystemName(req.Payload)
 		if name == "sftp" {
-				if s.recorder != nil {
-					s.recorder.SetProtocolSubtype("sftp")
-				}
+			if s.recorder != nil {
+				s.recorder.SetProtocolSubtype("sftp")
+			}
 			if req.WantReply {
 				_ = req.Reply(true, nil)
 			}

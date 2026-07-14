@@ -69,6 +69,15 @@ func (s *Server) requirePermission(r *http.Request, action string) bool {
 	return allowed
 }
 
+func (s *Server) requireAnyPermission(r *http.Request, actions ...string) bool {
+	for _, action := range actions {
+		if s.requirePermission(r, action) {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *Server) withPermission(action string, next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if !s.requirePermission(r, action) {

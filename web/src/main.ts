@@ -46,6 +46,7 @@ import {
   ElTabs,
   ElTag,
   ElTooltip,
+  ElTree,
 } from 'element-plus';
 import 'element-plus/dist/index.css';
 
@@ -104,6 +105,7 @@ const elementComponents = [
   ElTabs,
   ElTag,
   ElTooltip,
+  ElTree,
 ];
 
 app.use(i18n);

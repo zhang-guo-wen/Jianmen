@@ -6,10 +6,15 @@ import (
 	"strings"
 
 	"jianmen/internal/model"
+	"jianmen/internal/rbac"
 )
 
 // handleResourceGroups handles resource group CRUD operations
 func (s *Server) handleResourceGroups(w http.ResponseWriter, r *http.Request) {
+	if !s.requirePermission(r, rbac.ActionRBACManage) {
+		s.forbidden(w, r)
+		return
+	}
 	path := strings.TrimPrefix(r.URL.Path, "/api/resource-groups")
 	if path == "" || path == "/" {
 		switch r.Method {

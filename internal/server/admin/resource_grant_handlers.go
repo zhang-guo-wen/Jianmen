@@ -11,6 +11,10 @@ import (
 
 // handleResourceGrants handles resource grant CRUD operations
 func (s *Server) handleResourceGrants(w http.ResponseWriter, r *http.Request) {
+	if !s.requirePermission(r, rbac.ActionRBACManage) {
+		s.forbidden(w, r)
+		return
+	}
 	switch r.Method {
 	case http.MethodGet:
 		s.listResourceGrants(w, r)
@@ -23,6 +27,10 @@ func (s *Server) handleResourceGrants(w http.ResponseWriter, r *http.Request) {
 
 // handleResourceGrant handles single resource grant operations
 func (s *Server) handleResourceGrant(w http.ResponseWriter, r *http.Request) {
+	if !s.requirePermission(r, rbac.ActionRBACManage) {
+		s.forbidden(w, r)
+		return
+	}
 	id := strings.TrimPrefix(r.URL.Path, "/api/resource-grants/")
 	if id == "" {
 		s.writeErrorText(w, r, http.StatusBadRequest, "id is required")
@@ -41,6 +49,10 @@ func (s *Server) handleResourceGrant(w http.ResponseWriter, r *http.Request) {
 
 // handleResourceGrantCheck handles resource grant check requests
 func (s *Server) handleResourceGrantCheck(w http.ResponseWriter, r *http.Request) {
+	if !s.requirePermission(r, rbac.ActionRBACManage) {
+		s.forbidden(w, r)
+		return
+	}
 	if r.Method != http.MethodGet {
 		s.writeErrorText(w, r, http.StatusMethodNotAllowed, "method not allowed")
 		return
@@ -91,9 +103,9 @@ func (s *Server) listResourceGrants(w http.ResponseWriter, r *http.Request) {
 		// 搜索匹配的资源（主机账号、数据库账号、资源分组）
 		var resourceHostAccountIDs []string
 		s.db.Model(&model.HostAccount{}).
-				Joins("JOIN hosts ON hosts.id = host_accounts.host_id").
-				Where("host_accounts.username LIKE ? OR hosts.address LIKE ?", like, like).
-				Pluck("host_accounts.id", &resourceHostAccountIDs)
+			Joins("JOIN hosts ON hosts.id = host_accounts.host_id").
+			Where("host_accounts.username LIKE ? OR hosts.address LIKE ?", like, like).
+			Pluck("host_accounts.id", &resourceHostAccountIDs)
 		var resourceDBAccountIDs []string
 		s.db.Model(&model.DatabaseAccount{}).Where("unique_name LIKE ?", like).Pluck("id", &resourceDBAccountIDs)
 		var resourceGroupIDs []string
@@ -149,6 +161,11 @@ func (s *Server) createResourceGrant(w http.ResponseWriter, r *http.Request) {
 		s.writeErrorText(w, r, http.StatusBadRequest, "invalid JSON")
 		return
 	}
+	grant.PrincipalType = strings.TrimSpace(grant.PrincipalType)
+	grant.PrincipalID = strings.TrimSpace(grant.PrincipalID)
+	grant.ResourceType = strings.TrimSpace(grant.ResourceType)
+	grant.ResourceID = strings.TrimSpace(grant.ResourceID)
+	grant.Effect = strings.ToLower(strings.TrimSpace(grant.Effect))
 
 	// Validate required fields
 	if grant.PrincipalType == "" || grant.PrincipalID == "" {
@@ -163,6 +180,10 @@ func (s *Server) createResourceGrant(w http.ResponseWriter, r *http.Request) {
 	// Validate principal type
 	if grant.PrincipalType != "user" && grant.PrincipalType != "user_group" {
 		s.writeErrorText(w, r, http.StatusBadRequest, "principal_type must be 'user' or 'user_group'")
+		return
+	}
+	if message := s.validateResourceGrantReferences(grant); message != "" {
+		s.writeErrorText(w, r, http.StatusBadRequest, message)
 		return
 	}
 
@@ -183,6 +204,43 @@ func (s *Server) createResourceGrant(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.writeJSON(w, r, http.StatusCreated, grant)
+}
+
+func (s *Server) validateResourceGrantReferences(grant model.ResourceGrant) string {
+	var count int64
+	switch grant.PrincipalType {
+	case "user":
+		s.db.Model(&model.User{}).Where("id = ?", grant.PrincipalID).Count(&count)
+	case "user_group":
+		s.db.Model(&model.UserGroup{}).Where("id = ?", grant.PrincipalID).Count(&count)
+	}
+	if count == 0 {
+		return "principal not found"
+	}
+
+	count = 0
+	switch grant.ResourceType {
+	case model.ResourceTypeHostAccount:
+		s.db.Model(&model.HostAccount{}).Where("id = ?", grant.ResourceID).Count(&count)
+	case model.ResourceTypeDatabaseAccount:
+		s.db.Model(&model.DatabaseAccount{}).Where("id = ?", grant.ResourceID).Count(&count)
+	case model.ResourceTypeApplication:
+		s.db.Model(&model.Application{}).Where("id = ?", grant.ResourceID).Count(&count)
+	case model.ResourceTypeGroup:
+		s.db.Model(&model.ResourceGroup{}).
+			Where("id = ? AND group_type = ?", grant.ResourceID, model.ResourceGroupTypeResource).
+			Count(&count)
+	case model.ResourceTypeAccountGroup:
+		s.db.Model(&model.ResourceGroup{}).
+			Where("id = ? AND group_type = ?", grant.ResourceID, model.ResourceGroupTypeAccount).
+			Count(&count)
+	default:
+		return "unsupported resource_type"
+	}
+	if count == 0 {
+		return "resource not found or resource_type mismatch"
+	}
+	return ""
 }
 
 func (s *Server) getResourceGrant(w http.ResponseWriter, r *http.Request, id string) {

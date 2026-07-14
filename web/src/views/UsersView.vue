@@ -51,7 +51,7 @@
               class="role-tag"
               @close="removeRole(ur)"
             >
-              {{ ur.role?.name || ur.role_id }}
+              {{ roleName(ur) }}
             </el-tag>
           </div>
           <span v-else class="text-muted">{{ t('users.noRoles') }}</span>
@@ -93,7 +93,7 @@
                 class="role-tag"
                 @close="removeRole(ur)"
               >
-                {{ ur.role?.name || ur.role_id }}
+                {{ roleName(ur) }}
               </el-tag>
             </template>
             <span v-else class="text-muted">{{ t('users.noRoles') }}</span>
@@ -168,7 +168,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue';
+import { computed, onMounted, reactive, ref, watch } from 'vue';
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus';
 
 import DataTableCard from '@/components/DataTableCard.vue';
@@ -233,6 +233,12 @@ function userAssignedRoles(userId: string | number | undefined): api.RBACUserRol
   return userRoles.value.filter(ur => String(ur.user_id) === String(userId));
 }
 
+function roleName(userRole: api.RBACUserRoleRecord): string {
+  if (userRole.role?.name) return userRole.role.name;
+  return roles.value.find(role => String(role.id ?? '') === String(userRole.role_id ?? ''))?.name
+    || String(userRole.role_id ?? '—');
+}
+
 const roleDialogTitle = computed(() =>
   roleDialogUser.value ? `分配角色 — ${roleDialogUser.value.username}` : '分配角色'
 );
@@ -284,16 +290,36 @@ async function removeRole(userRole: api.RBACUserRoleRecord) {
 
 async function loadUserRoles() {
   try {
-    const res = await api.apiClient.getRBACUserRoles();
-    userRoles.value = res.items ?? [];
-  } catch { /* non-critical */ }
+    const items: api.RBACUserRoleRecord[] = [];
+    let currentPage = 1;
+    while (true) {
+      const response = await api.apiClient.getRBACUserRoles({ page: currentPage, page_size: 200 });
+      const pageItems = response.items ?? [];
+      items.push(...pageItems);
+      if (items.length >= (response.total ?? 0) || pageItems.length === 0) break;
+      currentPage += 1;
+    }
+    userRoles.value = items;
+  } catch (err) {
+    ElMessage.error(err instanceof Error ? err.message : '加载用户角色失败');
+  }
 }
 
 async function loadRoles() {
   try {
-    const res = await api.apiClient.getRBACRoles();
-    roles.value = res.items ?? [];
-  } catch { /* non-critical */ }
+    const items: api.RBACRoleRecord[] = [];
+    let currentPage = 1;
+    while (true) {
+      const response = await api.apiClient.getRBACRoles({ page: currentPage, page_size: 200 });
+      const pageItems = response.items ?? [];
+      items.push(...pageItems);
+      if (items.length >= (response.total ?? 0) || pageItems.length === 0) break;
+      currentPage += 1;
+    }
+    roles.value = items;
+  } catch (err) {
+    ElMessage.error(err instanceof Error ? err.message : '加载角色失败');
+  }
 }
 
 async function loadUsers() {
@@ -415,6 +441,8 @@ function onSearch(q: string) {
   page.value = 1;
   loadUsers();
 }
+
+watch([page, pageSize], () => loadUsers());
 
 onMounted(async () => {
   await Promise.all([

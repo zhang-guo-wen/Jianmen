@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"jianmen/internal/model"
+	"jianmen/internal/rbac"
 	"jianmen/internal/server/dbproxy"
 )
 
@@ -26,6 +27,10 @@ func (s *Server) handleTestDBConnection(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if strings.TrimSuffix(r.URL.Path, "/") == "/api/db/accounts/test" {
+		if !s.requirePermission(r, rbac.ActionDBProxyCreate) {
+			s.forbidden(w, r)
+			return
+		}
 		s.handleTestDBConnectionPayload(w, r)
 		return
 	}
@@ -38,6 +43,16 @@ func (s *Server) handleTestDBConnection(w http.ResponseWriter, r *http.Request) 
 	var acct model.DatabaseAccount
 	if err := s.db.Preload("Instance").First(&acct, "id = ?", id).Error; err != nil {
 		s.writeErrorText(w, r, http.StatusNotFound, "account not found")
+		return
+	}
+	allowed, err := s.authorizeConnection(userIDFromRequest(r), rbac.ActionDBConnect, model.ResourceTypeDatabaseAccount, acct.ID)
+	if err != nil {
+		s.logger.Warn("database account test authorization failed", "account", acct.ID, "error", err)
+		s.forbidden(w, r)
+		return
+	}
+	if !allowed {
+		s.forbidden(w, r)
 		return
 	}
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -23,12 +24,21 @@ import (
 type Server struct {
 	cfg           config.ApplicationGatewayConfig
 	db            *gorm.DB
-	checker       *rbaccheck.Checker
+	checker       permissionChecker
+	resourceGrant resourceGrantChecker
 	superAdminIDs map[string]bool
 	logger        *slog.Logger
 
 	mu      sync.Mutex
 	proxies map[int]*proxyEntry
+}
+
+type permissionChecker interface {
+	HasPermission(userID, action, resourceType, resourceID string) (bool, error)
+}
+
+type resourceGrantChecker interface {
+	HasGrant(userID, resourceType, resourceID string) (bool, error)
 }
 
 type proxyEntry struct {
@@ -45,6 +55,7 @@ func New(cfg config.ApplicationGatewayConfig, db *gorm.DB, superAdminIDs map[str
 		cfg:           cfg,
 		db:            db,
 		checker:       rbaccheck.NewChecker(db),
+		resourceGrant: rbaccheck.NewResourceGrantChecker(db),
 		superAdminIDs: superAdminIDs,
 		logger:        logger,
 		proxies:       make(map[int]*proxyEntry),
@@ -156,17 +167,36 @@ func (s *Server) rbacMiddleware(app model.Application, next http.Handler) http.H
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
-		if s.superAdminIDs[userID] {
-			next.ServeHTTP(w, r)
-			return
-		}
-		allowed, err := s.checker.HasPermission(userID, rbaccheck.ActionAppConnect, model.ResourceTypeApplication, app.ID)
-		if err != nil || !allowed {
+		if err := s.authorizeApp(userID, app.ID); err != nil {
 			http.Error(w, "forbidden", http.StatusForbidden)
 			return
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+func (s *Server) authorizeApp(userID, appID string) error {
+	if s.superAdminIDs[userID] {
+		return nil
+	}
+	if s.checker == nil || s.resourceGrant == nil {
+		return errors.New("application authorization unavailable")
+	}
+	allowed, err := s.checker.HasPermission(userID, rbaccheck.ActionAppConnect, "", "")
+	if err != nil {
+		return fmt.Errorf("check application action: %w", err)
+	}
+	if !allowed {
+		return errors.New("application action denied")
+	}
+	granted, err := s.resourceGrant.HasGrant(userID, model.ResourceTypeApplication, appID)
+	if err != nil {
+		return fmt.Errorf("check application resource grant: %w", err)
+	}
+	if !granted {
+		return errors.New("application resource denied")
+	}
+	return nil
 }
 
 func (s *Server) validateToken(token string) bool {

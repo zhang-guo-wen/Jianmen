@@ -471,6 +471,26 @@ export interface RBACRolePermissionRecord {
   [key: string]: unknown;
 }
 
+export interface RBACPermissionDefinition {
+  action: string;
+  module: string;
+  module_label: string;
+  label: string;
+  description: string;
+  menu_key?: string;
+  resource_types?: string[];
+  assignable: boolean;
+}
+
+export interface RBACCatalogResponse {
+  items: RBACPermissionDefinition[];
+}
+
+export interface RBACRoleActionsResponse {
+  role_id: string;
+  actions: string[];
+}
+
 export interface RBACRolePayload {
   id?: string;
   name: string;
@@ -588,7 +608,7 @@ export interface TestConnectionResult {
 
 // ── helpers ────────────────────────────────────────────────────────────
 
-function buildQS(params?: Record<string, string | number | undefined>): string {
+function buildQS(params?: Record<string, string | number | boolean | undefined>): string {
   if (!params) return '';
   const qs = new URLSearchParams();
   for (const [k, v] of Object.entries(params)) {
@@ -737,8 +757,8 @@ export const apiClient = {
     request<PageResponse<TargetRecord>>(`/api/hosts/${encodeURIComponent(String(id))}/accounts${buildQS(params as Record<string, string | number | undefined>)}`),
 
   // targets
-  getTargets: (params?: { page?: number; page_size?: number; q?: string }) =>
-    request<PageResponse<TargetRecord>>(`/api/targets${buildQS(params as Record<string, string | number | undefined>)}`),
+  getTargets: (params?: { page?: number; page_size?: number; q?: string; connectable?: boolean }) =>
+    request<PageResponse<TargetRecord>>(`/api/targets${buildQS(params)}`),
   getTarget: (id: string | number) =>
     request<TargetRecord>(`/api/targets/${encodeURIComponent(String(id))}`),
   createTarget: (payload: TargetPayload) =>
@@ -809,8 +829,8 @@ export const apiClient = {
     }),
 
   // database accounts
-  getDBAccounts: (instanceID: string, params?: { page?: number; page_size?: number; q?: string }) =>
-    request<PageResponse<DBAccountRecord>>(`/api/db/instances/${encodeURIComponent(instanceID)}/accounts${buildQS(params as Record<string, string | number | undefined>)}`),
+  getDBAccounts: (instanceID: string, params?: { page?: number; page_size?: number; q?: string; connectable?: boolean }) =>
+    request<PageResponse<DBAccountRecord>>(`/api/db/instances/${encodeURIComponent(instanceID)}/accounts${buildQS(params)}`),
   createDBAccount: (instanceID: string, payload: DBAccountPayload) =>
     request<DBAccountRecord>(
       `/api/db/instances/${encodeURIComponent(instanceID)}/accounts`,
@@ -929,6 +949,8 @@ export const apiClient = {
     }),
 
   // rbac
+  getRBACCatalog: () =>
+    request<RBACCatalogResponse>('/api/rbac/catalog'),
   getRBACRoles: (params?: { page?: number; page_size?: number; q?: string }) =>
     request<PageResponse<RBACRoleRecord>>(`/api/rbac/roles${buildQS(params as Record<string, string | number | undefined>)}`),
   createRBACRole: (payload: RBACRolePayload) =>
@@ -945,6 +967,18 @@ export const apiClient = {
     request<void>(`/api/rbac/roles/${encodeURIComponent(String(id))}`, {
       method: 'DELETE'
     }),
+  getRBACRoleActions: (id: string | number) =>
+    request<RBACRoleActionsResponse>(
+      `/api/rbac/roles/${encodeURIComponent(String(id))}/actions`
+    ),
+  replaceRBACRoleActions: (id: string | number, actions: string[]) =>
+    request<RBACRoleActionsResponse>(
+      `/api/rbac/roles/${encodeURIComponent(String(id))}/actions`,
+      {
+        method: 'PUT',
+        body: JSON.stringify({ actions })
+      }
+    ),
 
   getRBACPermissions: (params?: { page?: number; page_size?: number; q?: string }) =>
     request<PageResponse<RBACPermissionRecord>>(`/api/rbac/permissions${buildQS(params as Record<string, string | number | undefined>)}`),

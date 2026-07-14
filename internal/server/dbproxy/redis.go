@@ -172,7 +172,7 @@ func (g *Gateway) handleRedis(ctx context.Context, client net.Conn, firstByte by
 	userID := resolved.user.ID
 
 	// RBAC check
-	resourceID := dbAccountResourceID(acct)
+	resourceID := acct.ID
 	if err := g.authorizeConnect(userID, resolved.rawName, resourceID); err != nil {
 		g.logger.Warn("redis gateway rbac denied", "user", userID, "resource", resourceID, "error", err)
 		writeRESPError(client, "NOPERM this user has no permissions to run the command")

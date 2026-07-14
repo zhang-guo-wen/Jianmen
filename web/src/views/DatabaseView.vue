@@ -38,19 +38,26 @@
           <div class="table-actions">
             <el-button link type="success" size="small" @click="handleDBConnect(row)">连接</el-button>
             <el-button link type="primary" size="small" @click="editInstance(row)">编辑</el-button>
-            <el-dropdown trigger="click" teleported>
-              <el-button link type="primary" size="small"
-                >更多<el-icon class="el-icon--right"><ArrowDown /></el-icon></el-button
-              >
-              <template #dropdown>
-                <el-dropdown-menu>
-                  <el-dropdown-item @click="handleDBAuditLog(row)">审计日志</el-dropdown-item>
-                  <el-dropdown-item @click="handleDBSessions(row)">在线会话</el-dropdown-item>
-                  <el-dropdown-item @click="handleDBPermissions(row)">权限管理</el-dropdown-item>
-                  <el-dropdown-item class="danger-dropdown-item" @click="deleteInstance(row)">删除</el-dropdown-item>
-                </el-dropdown-menu>
+            <el-popover
+              trigger="click"
+              placement="bottom-end"
+              :width="140"
+              :offset="4"
+              teleported
+              popper-class="more-menu-popover"
+            >
+              <template #reference>
+                <el-button link type="primary" size="small" @click.stop
+                  >更多<el-icon class="el-icon--right"><ArrowDown /></el-icon></el-button
+                >
               </template>
-            </el-dropdown>
+              <div class="more-menu-list">
+                <div class="more-menu-item" @click.stop="handleDBAuditLog(row)">审计日志</div>
+                <div class="more-menu-item" @click.stop="handleDBSessions(row)">在线会话</div>
+                <div class="more-menu-item" @click.stop="handleDBPermissions(row)">权限管理</div>
+                <div class="more-menu-item danger-menu-item" @click.stop="deleteInstance(row)">删除</div>
+              </div>
+            </el-popover>
           </div>
         </template>
       </el-table-column>
@@ -1172,13 +1179,39 @@ function closeProvisionAndRefresh() {
 .table-actions :deep(.el-button) {
   margin-left: 0;
 }
-.danger-dropdown-item {
+/* 更多弹出菜单 */
+.more-menu-list {
+  display: flex;
+  flex-direction: column;
+  padding: 4px 0;
+}
+.more-menu-item {
+  padding: 6px 14px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+.more-menu-item:hover {
+  background-color: var(--el-fill-color-light);
+}
+.danger-menu-item {
   color: var(--el-color-danger);
+}
+.danger-menu-item:hover {
+  background-color: var(--el-color-danger-light-9);
 }
 
 @media (max-width: 720px) {
   .config-row {
     grid-template-columns: 1fr;
   }
+}
+</style>
+
+<style>
+/* 更多弹出菜单 - 全局样式（popover teleported 到 body，scoped 不生效） */
+.more-menu-popover {
+  padding: 0 !important;
+  min-width: 130px !important;
 }
 </style>

@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <div class="view-stack">
     <div class="page-container">
       <DataTableCard

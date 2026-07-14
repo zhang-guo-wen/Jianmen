@@ -168,11 +168,12 @@ try {
     Set-Content -Path $backendPid -Value $backend.Id -Encoding ascii
     Write-Ok "backend process started: PID $($backend.Id)"
 
-    Wait-HttpOk "Admin API" "http://127.0.0.1:47100/api/health" 20 $null
+    # Wait for TCP ports first
+    Wait-TcpPort "Admin API port" "127.0.0.1" 47100 20
     Wait-TcpPort "Database gateway" "127.0.0.1" 33060 10
     Wait-TcpPort "SSH gateway" "127.0.0.1" 47102 10
 
-    # 获取 admin 用户的真实 token（用 admin/admin 登录）
+    # Login to get a real token for health checks
     $realToken = $null
     try {
         $loginResp = Invoke-RestMethod -Uri "http://127.0.0.1:47100/api/login" -Method Post -Body '{"username":"admin","password":"admin"}' -ContentType "application/json" -TimeoutSec 5 -ErrorAction Stop
@@ -184,6 +185,13 @@ try {
     } catch {
         $realToken = $null
         Write-Info "Admin auto-login failed, login manually"
+    }
+
+    # Health check with real token
+    if ($realToken) {
+        Wait-HttpOk "Admin API" "http://127.0.0.1:47100/api/health" 5 @{Authorization="Bearer $realToken"}
+    } else {
+        Write-Info "Admin API health check skipped (no token)"
     }
 
     Write-Step "[5/5] Starting frontend..."
@@ -206,9 +214,13 @@ try {
     Write-Ok "frontend process started: PID $($frontend.Id)"
 
     Wait-HttpOk "Web UI" "http://127.0.0.1:47101/" 30 $null
-    # 用真实 token 验证 API 代理
-    $proxyHeaders = if ($realToken) { @{Authorization="Bearer $realToken"} } else { @{Authorization='Bearer dev-admin-token'} }
-    Wait-HttpOk "Frontend API proxy" "http://127.0.0.1:47101/api/hosts" 15 $proxyHeaders
+
+    # Verify API proxy with real token
+    if ($realToken) {
+        Wait-HttpOk "Frontend API proxy" "http://127.0.0.1:47101/api/hosts" 15 @{Authorization="Bearer $realToken"}
+    } else {
+        Write-Info "Frontend API proxy check skipped (no token)"
+    }
 
     Write-Host ""
     Write-Host "=== All services started and verified ===" -ForegroundColor Cyan

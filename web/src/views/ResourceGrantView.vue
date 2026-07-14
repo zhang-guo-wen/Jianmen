@@ -137,20 +137,37 @@
                     </template>
                   </el-table-column>
                 </template>
-                <template v-else>
-                <el-table-column :label="t('resourceGrant.accountName')" min-width="130">
+                <template v-else-if="resourceTabType === 'host_account'">
+                <el-table-column :label="t('resourceGrant.accountName')" min-width="120" show-overflow-tooltip>
                   <template #default="{ row }">
-                    {{ row.username || row.unique_name || row.name }}
+                    {{ row.username }}
                   </template>
                 </el-table-column>
-                <el-table-column :label="t('resourceGrant.hostName')" min-width="130">
+                <el-table-column :label="t('resourceGrant.hostName')" min-width="120" show-overflow-tooltip>
                   <template #default="{ row }">
-                    {{ row.host_name || row.instance_name || '' }}
+                    {{ row.host_name || '' }}
                   </template>
                 </el-table-column>
-                <el-table-column :label="t('resourceGrant.hostAddress')" min-width="130">
+                <el-table-column :label="t('resourceGrant.hostAddress')" min-width="130" show-overflow-tooltip>
                   <template #default="{ row }">
                     {{ row.host_address || '' }}
+                  </template>
+                </el-table-column>
+              </template>
+              <template v-else-if="resourceTabType === 'database_account'">
+                <el-table-column :label="t('resourceGrant.accountName')" min-width="120" show-overflow-tooltip>
+                  <template #default="{ row }">
+                    {{ row.username || row.unique_name }}
+                  </template>
+                </el-table-column>
+                <el-table-column :label="t('resourceGrant.instanceName')" min-width="120" show-overflow-tooltip>
+                  <template #default="{ row }">
+                    {{ row.instance_name || '' }}
+                  </template>
+                </el-table-column>
+                <el-table-column :label="t('resourceGrant.hostAddress')" min-width="130" show-overflow-tooltip>
+                  <template #default="{ row }">
+                    {{ row.instance_address || '' }}
                   </template>
                 </el-table-column>
               </template>
@@ -238,7 +255,7 @@ const resourceTabType = ref('host_account')
 const resourceSearchQuery = ref('')
 const loadingResources = ref(false)
 const hostAccounts = ref<Array<{ id: string; username: string; host_name: string; host_address: string }>>([])
-const dbAccounts = ref<Array<{ id: string; unique_name: string; username: string; instance_name: string }>>([])
+const dbAccounts = ref<Array<{ id: string; unique_name: string; username: string; instance_name: string; instance_address: string }>>([])
 const resourceGroups = ref<Array<{ id: string; name: string; description: string; group_type: string; member_count: number }>>([])
 const accountGroups = ref<Array<{ id: string; name: string; description: string; member_count: number }>>([])
 const selectedResources = ref<Array<{ id: string; name: string; type: string }>>([])
@@ -280,7 +297,8 @@ const filteredResources = computed(() => {
     if (!query) return dbAccounts.value
     return dbAccounts.value.filter(a =>
       (a.unique_name || '').toLowerCase().includes(query) ||
-      (a.instance_name || '').toLowerCase().includes(query)
+      (a.instance_name || '').toLowerCase().includes(query) ||
+      (a.instance_address || '').toLowerCase().includes(query)
     )
   } else if (resourceTabType.value === 'resource_group') {
     if (!query) return resourceGroups.value
@@ -470,7 +488,7 @@ const loadHostAccounts = async () => {
 
 const loadDbAccounts = async () => {
   const instances = await apiClient.getDBInstances({ page: 1, page_size: 100 })
-  const allAccounts: Array<{ id: string; unique_name: string; username: string; instance_name: string }> = []
+  const allAccounts: Array<{ id: string; unique_name: string; username: string; instance_name: string; instance_address: string }> = []
   for (const inst of (instances.items || [])) {
     if (!inst.id) continue
     try {
@@ -481,7 +499,8 @@ const loadDbAccounts = async () => {
             id: a.id,
             unique_name: a.unique_name || '',
             username: a.username || '',
-            instance_name: inst.name || ''
+            instance_name: inst.name || '',
+            instance_address: [inst.address, inst.port].filter(Boolean).join(':') || ''
           })
         }
       }

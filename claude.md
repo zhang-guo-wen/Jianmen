@@ -1,4 +1,4 @@
-每次回答，请用中文回答我。
+每次回答，请用中文回答我。注释使用中文，提交代码使用中文
 
 开发新功能的时候，要使用gitworktree 不要直接改项目
 
@@ -276,3 +276,47 @@ handler 包按资源拆分文件，每个文件包含该资源全套 handler 方
 - `TranslationKey` 是 `zhCN` 的 keyof，**enUS 必须包含完全相同的 key**，否则 typecheck 报错。
 - 路由 meta 中的 `titleKey` / `descriptionKey` 也必须是有效的 TranslationKey。
 
+## Element Plus 组件按需注册
+
+日期：2026-07-14
+
+本项目 `main.ts` 中 Element Plus 采用按需注册（逐一 import + `app.use()`），不是全局全量注册。
+**使用任何之前未用过的 Element Plus 组件时，必须先检查 `main.ts` 是否已注册该组件。**
+
+### 排查方式
+
+在 `main.ts` 的 import 列表和 `elementComponents` 数组中搜索组件名。如果找不到，说明该组件未注册，
+模板中的 `<el-xxx>` 会被 Vue 当成普通 HTML 元素渲染，不会有任何交互行为。
+
+### 本次教训
+
+`el-dropdown` / `el-dropdown-menu` / `el-dropdown-item` 在页面模板中使用但不响应点击，
+排查方向先后误判为：
+1. `el-table` 的 `fixed="right"` 列克隆 DOM 导致事件丢失
+2. `el-popover` 替代方案
+3. `el-button` 组件边界导致下拉事件绑定失败
+4. 手动实现 popup 菜单
+
+最终发现根因仅仅是 `ElDropdown` / `ElDropdownMenu` / `ElDropdownItem` 未在 `main.ts` 注册。
+加入注册后，`el-dropdown` + `el-button link` 在 `el-table` 列中完全正常工作。
+
+### 正确做法
+
+当需要新增 Element Plus 组件时：
+1. 搜索 `main.ts` 确认组件是否已注册
+2. 如未注册，在 import 和 `elementComponents` 数组中各添加一行
+3. **不要**因为组件不工作就开始怀疑框架/布局/事件传播 — 先检查注册
+
+### 已注册的组件（截至 2026-07-14）
+
+```
+ElAlert ElAside ElButton ElCard ElCheckbox ElCheckboxGroup
+ElCollapse ElCollapseItem ElConfigProvider ElContainer
+ElDatePicker ElDescriptions ElDescriptionsItem ElDialog
+ElDivider ElDrawer ElDropdown ElDropdownItem ElDropdownMenu
+ElEmpty ElForm ElFormItem ElHeader ElIcon ElInput
+ElInputNumber ElLoading ElMain ElMenu ElMenuItem
+ElOption ElOptionGroup ElPagination ElRadio ElRadioButton
+ElRadioGroup ElSegmented ElSelect ElSlider ElSwitch
+ElTable ElTableColumn ElTabPane ElTabs ElTag ElTooltip
+```

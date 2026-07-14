@@ -246,7 +246,7 @@ watch([initClientType, initClientPath], () => {
   const exePath = initClientPath.value || opt?.defaultPath || '';
   if (!exePath) { initRegCommand.value = ''; return; }
   const escaped = exePath.replace(/\\/g, '\\\\');
-  initRegCommand.value = `reg add "HKCR\\ssh" /ve /d "URL:SSH Protocol" /f && reg add "HKCR\\ssh" /v "URL Protocol" /d "" /f && reg add "HKCR\\ssh\\shell\\open\\command" /ve /d "\\"${escaped}\\" -url \\"%r\\"" /f`;
+  initRegCommand.value = `reg add "HKCR\\ssh" /ve /d "URL:SSH Protocol" /f && reg add "HKCR\\ssh" /v "URL Protocol" /d "" /f && reg add "HKCR\\ssh\\shell\\open\\command" /ve /d "\\"${escaped}\\" -url \\"%1\\"" /f`;
 });
 
 async function copyInitCommand() {

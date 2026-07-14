@@ -1,7 +1,7 @@
 <template>
   <div class="view-stack audit-view">
     <el-tabs v-model="auditScope" class="page-tabs">
-      <el-tab-pane :label="t('audit.scope.ssh')" name="ssh">
+      <el-tab-pane v-if="permission.canDo('audit:view')" :label="t('audit.scope.ssh')" name="ssh">
         <el-alert v-if="sessionError" :title="sessionError" type="error" show-icon style="margin-bottom: 12px" />
         <div class="page-container">
           <DataTableCard
@@ -59,7 +59,7 @@
           </DataTableCard>
         </div>
       </el-tab-pane>
-      <el-tab-pane :label="t('audit.scope.db')" name="db">
+      <el-tab-pane v-if="permission.canDo('db:audit:view')" :label="t('audit.scope.db')" name="db">
         <el-alert v-if="dbError" :title="dbError" type="warning" show-icon style="margin-bottom: 12px" />
         <div class="page-container">
           <DataTableCard
@@ -309,6 +309,7 @@ import {
   type SessionRecord
 } from '@/api/client';
 import { useI18n } from '@/i18n';
+import { usePermissionStore } from '@/stores/permission';
 
 type AuditScope = 'ssh' | 'db';
 type DetailKind = '' | 'meta' | 'commands' | 'files' | 'file-summary' | 'queries' | 'replay';
@@ -324,7 +325,8 @@ type ReplayData = {
 };
 
 const { t } = useI18n();
-const auditScope = ref<AuditScope>('ssh');
+const permission = usePermissionStore();
+const auditScope = ref<AuditScope>(permission.canDo('audit:view') ? 'ssh' : 'db');
 
 // ── SSH session list state ──
 const sessions = ref<SessionRecord[]>([]);
@@ -1027,7 +1029,8 @@ async function loadDBArtifact(connection: DBConnectionRecord, kind: 'meta' | 'qu
 // ── Lifecycle & watchers ──
 
 onMounted(() => {
-  void Promise.all([loadSessions(), loadDBConnections()]);
+  if (permission.canDo('audit:view')) void loadSessions();
+  if (permission.canDo('db:audit:view')) void loadDBConnections();
 });
 
 watch(isReplay, async (value) => {

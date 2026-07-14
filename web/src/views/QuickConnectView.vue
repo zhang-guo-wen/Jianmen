@@ -1,7 +1,7 @@
 <template>
   <div class="view-stack">
     <el-tabs v-model="activeTab" class="page-tabs">
-      <el-tab-pane label="SSH" name="ssh">
+      <el-tab-pane v-if="permission.canDo('session:connect')" label="SSH" name="ssh">
         <DataTableCard
           :data="targets"
           :loading="sshLoading"
@@ -32,7 +32,7 @@
           </el-table-column>
         </DataTableCard>
       </el-tab-pane>
-      <el-tab-pane label="数据库" name="db">
+      <el-tab-pane v-if="permission.canDo('db:connect')" label="数据库" name="db">
         <DataTableCard
           :data="displayedDBAccounts"
           :loading="dbLoading"
@@ -212,6 +212,7 @@ import { ElMessage } from 'element-plus';
 import DataTableCard from '@/components/DataTableCard.vue';
 import { apiClient, type PageResponse, type TargetRecord, type DBAccountRecord } from '@/api/client';
 import { useI18n } from '@/i18n';
+import { usePermissionStore } from '@/stores/permission';
 
 const SSH_CLIENT_LIST = [
   { command: 'default', label: '系统默认 (ssh://)' },
@@ -290,7 +291,8 @@ function pickClientFile() {
 
 const { t } = useI18n();
 const router = useRouter();
-const activeTab = ref('ssh');
+const permission = usePermissionStore();
+const activeTab = ref(permission.canDo('session:connect') ? 'ssh' : 'db');
 const webTerminalTargetId = ref('');
 
 // ── SSH state ──
@@ -561,12 +563,15 @@ function openInBrowser() {
 watch([targetPage, targetPageSize], () => loadTargets());
 
 watch(activeTab, (tab) => {
-  if (tab === 'db' && dbAccounts.value.length === 0) {
+  if (tab === 'db' && permission.canDo('db:connect') && dbAccounts.value.length === 0) {
     loadDBAccounts();
   }
 });
 
-onMounted(() => { loadTargets(); });
+onMounted(() => {
+  if (permission.canDo('session:connect')) loadTargets();
+  else if (permission.canDo('db:connect')) loadDBAccounts();
+});
 </script>
 
 <style scoped>

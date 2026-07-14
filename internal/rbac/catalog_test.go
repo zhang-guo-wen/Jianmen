@@ -12,7 +12,7 @@ func TestPermissionCatalogContainsEveryAction(t *testing.T) {
 		ActionHostCreate, ActionHostUpdate, ActionHostDelete, ActionHostView,
 		ActionTargetCreate, ActionTargetUpdate, ActionTargetDelete, ActionTargetView,
 		ActionDBProxyCreate, ActionDBProxyUpdate, ActionDBProxyDelete, ActionDBProxyView,
-		ActionRBACManage, ActionSessionView, ActionDashboardView,
+		ActionRBACManage, ActionSessionView,
 		ActionAppCreate, ActionAppUpdate, ActionAppDelete, ActionAppView, ActionAppConnect,
 		ActionPlatformAccountCreate, ActionPlatformAccountUpdate, ActionPlatformAccountDelete,
 		ActionPlatformAccountView, ActionPlatformAccountUse,
@@ -38,21 +38,41 @@ func TestPermissionCatalogReturnsDefensiveCopies(t *testing.T) {
 	if len(items[0].ResourceTypes) > 0 {
 		items[0].ResourceTypes[0] = "changed"
 	}
+	pages := PermissionPages()
+	pages[0].Key = "changed"
+	pages[0].Actions[0].Action = "changed"
 	if _, ok := FindPermissionDefinition("changed"); ok {
 		t.Fatal("caller mutated catalog index")
 	}
+	if PermissionPages()[0].Key == "changed" {
+		t.Fatal("caller mutated page catalog")
+	}
 }
 
-func TestValidateAssignableActions(t *testing.T) {
-	got, err := ValidateAssignableActions([]string{ActionHostView, " " + ActionAppView + " ", ActionHostView})
+func TestValidateAssignableActionsAddsDependencies(t *testing.T) {
+	got, err := ValidateAssignableActions([]string{ActionTargetDelete, ActionAppCreate, ActionTargetDelete})
 	if err != nil {
 		t.Fatalf("ValidateAssignableActions() error = %v", err)
 	}
-	want := []string{ActionAppView, ActionHostView}
+	want := []string{ActionAppCreate, ActionAppView, ActionHostView, ActionTargetDelete, ActionTargetView}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("actions = %#v, want %#v", got, want)
 	}
 	if _, err := ValidateAssignableActions([]string{"missing:action"}); err == nil {
 		t.Fatal("unknown action was accepted")
+	}
+}
+
+func TestAccessiblePagesUsesAnyChildAction(t *testing.T) {
+	got := AccessiblePages([]string{ActionDBConnect, ActionDBAuditView})
+	want := []PageAccess{
+		{Key: "quickConnect", Path: "/quick-connect", Order: 10},
+		{Key: "audit", Path: "/audit", Order: 60},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("pages = %#v, want %#v", got, want)
+	}
+	if all := AccessiblePages([]string{"*"}); len(all) != len(PermissionPages()) {
+		t.Fatalf("wildcard pages = %d, want %d", len(all), len(PermissionPages()))
 	}
 }

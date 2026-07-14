@@ -1,15 +1,17 @@
 import { defineStore } from 'pinia';
-import { ref } from 'vue';
+import { computed, ref } from 'vue';
 
-import { apiClient } from '@/api/client';
+import { apiClient, type AccessPage } from '@/api/client';
 
 export const usePermissionStore = defineStore('permission', () => {
-  const menus = ref<string[]>([]);
+  const pages = ref<AccessPage[]>([]);
   const actions = ref<string[]>([]);
   const loaded = ref(false);
   const loading = ref(false);
   const error = ref('');
   let inFlight: Promise<boolean> | null = null;
+
+  const menus = computed(() => pages.value.map(page => page.key));
 
   async function fetch(options: { force?: boolean } = {}): Promise<boolean> {
     if (loaded.value && !options.force && !error.value) return true;
@@ -17,26 +19,20 @@ export const usePermissionStore = defineStore('permission', () => {
 
     loading.value = true;
     error.value = '';
-    const hadLoadedData = loaded.value;
 
-    inFlight = Promise.all([
-      apiClient.getMyMenus(),
-      apiClient.getMyPermissions(),
-    ])
-      .then(([menuRes, permRes]) => {
-        menus.value = menuRes?.menus ?? [];
-        actions.value = permRes?.actions ?? [];
+    inFlight = apiClient.getMyAccessContext()
+      .then((access) => {
+        pages.value = [...(access.pages ?? [])].sort((left, right) => left.order - right.order);
+        actions.value = access.actions ?? [];
         loaded.value = true;
         return true;
       })
       .catch((err: unknown) => {
+        pages.value = [];
+        actions.value = [];
+        loaded.value = false;
         error.value = err instanceof Error ? err.message : '权限信息加载失败，请检查网络后重试';
-        if (!hadLoadedData) {
-          menus.value = ['quickConnect'];
-          actions.value = [];
-          loaded.value = true;
-        }
-        return hadLoadedData;
+        return false;
       })
       .finally(() => {
         loading.value = false;
@@ -47,15 +43,19 @@ export const usePermissionStore = defineStore('permission', () => {
   }
 
   function canAccessMenu(menuKey: string): boolean {
-    return menus.value.includes(menuKey);
+    return pages.value.some(page => page.key === menuKey);
   }
 
   function canDo(action: string): boolean {
     return actions.value.includes('*') || actions.value.includes(action);
   }
 
+  function firstAccessiblePath(): string {
+    return pages.value[0]?.path ?? '';
+  }
+
   function reset() {
-    menus.value = [];
+    pages.value = [];
     actions.value = [];
     loaded.value = false;
     loading.value = false;
@@ -63,5 +63,17 @@ export const usePermissionStore = defineStore('permission', () => {
     inFlight = null;
   }
 
-  return { menus, actions, loaded, loading, error, fetch, canAccessMenu, canDo, reset };
+  return {
+    pages,
+    menus,
+    actions,
+    loaded,
+    loading,
+    error,
+    fetch,
+    canAccessMenu,
+    canDo,
+    firstAccessiblePath,
+    reset,
+  };
 });

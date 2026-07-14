@@ -77,19 +77,12 @@
 </template>
 
 <script setup lang="ts">
-import {
-  DataAnalysis,
-  DocumentChecked,
-  Key,
-  Link,
-  Lock,
-  Monitor,
-  SwitchButton,
-} from "@element-plus/icons-vue";
-import { computed, onMounted, watchEffect, type Component } from "vue";
+import { SwitchButton } from "@element-plus/icons-vue";
+import { computed, onMounted, watchEffect } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
 import { clearToken, getToken } from "@/api/client";
+import { APP_NAV_ITEMS } from "@/navigation";
 import { usePermissionStore } from "@/stores/permission";
 import {
   isTranslationKey,
@@ -111,54 +104,9 @@ const selectedLocale = computed<Locale>({
   set: (nextLocale) => setLocale(nextLocale),
 });
 
-const ALL_NAV_ITEMS: Array<{
-  path: string;
-  icon: Component;
-  labelKey: TranslationKey;
-  menuKey: string;
-}> = [
-  {
-    path: "/quick-connect",
-    icon: Link,
-    labelKey: "nav.quickConnect",
-    menuKey: "quickConnect",
-  },
-  { path: "/hosts", icon: Monitor, labelKey: "nav.hosts", menuKey: "hosts" },
-  {
-    path: "/databases",
-    icon: DataAnalysis,
-    labelKey: "nav.databases",
-    menuKey: "databases",
-  },
-  {
-    path: "/platform-accounts",
-    icon: Key,
-    labelKey: "nav.platformAccounts",
-    menuKey: "platformAccounts",
-  },
-  {
-    path: "/applications",
-    icon: Monitor,
-    labelKey: "nav.applications",
-    menuKey: "applications",
-  },
-  {
-    path: "/rbac",
-    icon: Lock,
-    labelKey: "nav.rbac",
-    menuKey: "rbac",
-  },
-  {
-    path: "/audit",
-    icon: DocumentChecked,
-    labelKey: "nav.audit",
-    menuKey: "audit",
-  },
-];
-
 const permission = usePermissionStore();
 const navItems = computed(() =>
-  ALL_NAV_ITEMS.filter((item) => permission.canAccessMenu(item.menuKey)),
+  APP_NAV_ITEMS.filter((item) => permission.canAccessMenu(item.key)),
 );
 
 onMounted(async () => {

@@ -11,7 +11,7 @@
       @search="onSearch"
     >
       <template #toolbar-extra>
-        <el-button type="primary" @click="openCreate">{{ t('application.create') }}</el-button>
+        <el-button v-if="permission.canDo('application:create')" type="primary" @click="openCreate">{{ t('application.create') }}</el-button>
       </template>
 
       <el-table-column prop="name" :label="t('application.column.name')" min-width="130" show-overflow-tooltip />
@@ -33,9 +33,9 @@
       </el-table-column>
       <el-table-column :label="t('application.column.actions')" width="160" fixed="right">
         <template #default="{ row }">
-          <el-button link type="success" size="small" @click="visitApp(row)">{{ t('application.action.visit') }}</el-button>
-          <el-button link type="primary" size="small" @click="openEdit(row)">{{ t('common.edit') }}</el-button>
-          <el-button link type="danger" size="small" @click="deleteApp(row)">{{ t('common.delete') }}</el-button>
+          <el-button v-if="permission.canDo('app:connect')" link type="success" size="small" @click="visitApp(row)">{{ t('application.action.visit') }}</el-button>
+          <el-button v-if="permission.canDo('application:update')" link type="primary" size="small" @click="openEdit(row)">{{ t('common.edit') }}</el-button>
+          <el-button v-if="permission.canDo('application:delete')" link type="danger" size="small" @click="deleteApp(row)">{{ t('common.delete') }}</el-button>
         </template>
       </el-table-column>
     </DataTableCard>
@@ -102,8 +102,10 @@ import DataTableCard from '@/components/DataTableCard.vue'
 import FormDialog from '@/components/FormDialog.vue'
 import { apiClient, type ApplicationView, type ApplicationPayload } from '@/api/client'
 import { useI18n } from '@/i18n'
+import { usePermissionStore } from '@/stores/permission'
 
 const { t } = useI18n()
+const permission = usePermissionStore()
 
 const PORT_START = 47110
 const PORT_END = 47199

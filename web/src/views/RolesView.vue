@@ -95,37 +95,32 @@
   >
     <div class="perm-dialog-header">
       <span class="perm-count-label">{{ selectedCountText }}</span>
+      <span class="perm-help">勾选页面可选择全部操作，半选表示仅授权部分操作</span>
     </div>
-    <div class="perm-groups">
-      <div v-for="group in permGroups" :key="group.module" class="perm-group">
-        <div class="perm-group-title">
-          {{ group.moduleLabel }}
+    <el-tree
+      ref="permissionTreeRef"
+      class="permission-tree"
+      :data="permissionTree"
+      node-key="key"
+      show-checkbox
+      default-expand-all
+      :props="{ children: 'children', label: 'label' }"
+      @check="handlePermissionCheck"
+    >
+      <template #default="{ data }">
+        <div :class="['permission-node', `permission-node--${data.type}`]">
+          <span class="permission-node__label">{{ data.label }}</span>
+          <code v-if="data.action" class="permission-node__action">{{ data.action }}</code>
+          <span v-if="data.description" class="permission-node__description">{{ data.description }}</span>
         </div>
-        <div class="perm-group-actions">
-          <el-button link size="small" @click="toggleGroup(group, true)">全选</el-button>
-          <el-button link size="small" @click="toggleGroup(group, false)">取消全选</el-button>
-        </div>
-        <el-checkbox-group v-model="selectedPerms" class="perm-check-grid">
-          <el-checkbox
-            v-for="perm in group.permissions"
-            :key="perm.action"
-            :label="perm.action"
-            :value="perm.action"
-            class="perm-check-item"
-          >
-            <span class="perm-label">{{ perm.label }}</span>
-            <span class="perm-action-label">{{ perm.action }}</span>
-            <span class="perm-action-desc">{{ perm.desc }}</span>
-          </el-checkbox>
-        </el-checkbox-group>
-      </div>
-    </div>
+      </template>
+    </el-tree>
   </FormDialog>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue';
+import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue';
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus';
 
 import DataTableCard from '@/components/DataTableCard.vue';
@@ -139,10 +134,21 @@ const { apiClient } = api;
 
 type RBACRoleRecord = api.RBACRoleRecord;
 type RBACRolePayload = api.RBACRolePayload;
-type RBACPermissionDefinition = api.RBACPermissionDefinition;
+type RBACPermissionPageDefinition = api.RBACPermissionPageDefinition;
 
-interface PermItem extends RBACPermissionDefinition { desc: string; }
-interface PermGroup { module: string; moduleLabel: string; permissions: PermItem[]; }
+interface PermissionTreeNode {
+  key: string;
+  label: string;
+  type: 'page' | 'action';
+  action?: string;
+  description?: string;
+  children?: PermissionTreeNode[];
+}
+
+interface PermissionTreeRef {
+  setCheckedKeys(keys: string[]): void;
+  getCheckedKeys(leafOnly?: boolean): Array<string | number>;
+}
 
 const roles = ref<RBACRoleRecord[]>([]);
 const loading = ref(false);
@@ -171,34 +177,34 @@ const permDialogVisible = ref(false);
 const savingPerms = ref(false);
 const currentPermRole = ref<RBACRoleRecord | null>(null);
 const selectedPerms = ref<string[]>([]);
-const catalog = ref<RBACPermissionDefinition[]>([]);
+const permissionTreeRef = ref<PermissionTreeRef>();
+const catalogPages = ref<RBACPermissionPageDefinition[]>([]);
 const rolePermCountMap = ref<Record<string, number>>({});
 
-const permGroups = computed<PermGroup[]>(() => {
-  const groups = new Map<string, PermGroup>();
-  for (const permission of catalog.value) {
-    if (!permission.assignable) continue;
-    let group = groups.get(permission.module);
-    if (!group) {
-      group = {
-        module: permission.module,
-        moduleLabel: permission.module_label || permission.module,
-        permissions: [],
-      };
-      groups.set(permission.module, group);
-    }
-    group.permissions.push({ ...permission, desc: permission.description });
-  }
-  return Array.from(groups.values());
-});
+const permissionTree = computed<PermissionTreeNode[]>(() =>
+  [...catalogPages.value]
+    .sort((left, right) => left.order - right.order)
+    .map(page => ({
+      key: `page:${page.key}`,
+      label: page.label,
+      type: 'page' as const,
+      children: page.actions
+        .filter(action => action.assignable)
+        .map(action => ({
+          key: action.action,
+          label: action.label,
+          type: 'action' as const,
+          action: action.action,
+          description: action.description,
+        })),
+    })),
+);
 
 const permDialogTitle = computed(() =>
   currentPermRole.value ? `分配权限 — ${currentPermRole.value.name}` : '分配权限',
 );
 
-const selectedCountText = computed(() =>
-  `${selectedPerms.value.length} 项已选`,
-);
+const selectedCountText = computed(() => `${selectedPerms.value.length} 项操作已选择`);
 
 function rolePermCount(roleId: string | number | undefined): number {
   if (!roleId) return 0;
@@ -326,6 +332,8 @@ async function openPermDialog(role: RBACRoleRecord) {
     const response = await apiClient.getRBACRoleActions(roleId);
     selectedPerms.value = response.actions ?? [];
     permDialogVisible.value = true;
+    await nextTick();
+    permissionTreeRef.value?.setCheckedKeys(selectedPerms.value);
   } catch (err) {
     currentPermRole.value = null;
     ElMessage.error(err instanceof Error ? err.message : '加载角色权限失败');
@@ -339,15 +347,9 @@ watch(permDialogVisible, (val) => {
   }
 });
 
-function toggleGroup(group: PermGroup, select: boolean) {
-  const actions = group.permissions.map(p => p.action);
-  if (select) {
-    for (const a of actions) {
-      if (!selectedPerms.value.includes(a)) selectedPerms.value.push(a);
-    }
-  } else {
-    selectedPerms.value = selectedPerms.value.filter(a => !actions.includes(a));
-  }
+function handlePermissionCheck() {
+  const checkedKeys = permissionTreeRef.value?.getCheckedKeys(true) ?? [];
+  selectedPerms.value = checkedKeys.map(String);
 }
 
 async function savePermissions() {
@@ -376,7 +378,7 @@ onMounted(async () => {
   await loadRoles();
   try {
     const response = await apiClient.getRBACCatalog();
-    catalog.value = response.items ?? [];
+    catalogPages.value = response.pages ?? [];
   } catch (err) {
     error.value = err instanceof Error ? err.message : '加载权限目录失败';
   }
@@ -387,19 +389,17 @@ onMounted(async () => {
 .perm-count { font-weight: 600; color: var(--el-color-primary); }
 .builtin-hint { font-size: 12px; color: #94a3b8; cursor: default; }
 
-.perm-dialog-header { margin-bottom: 14px; }
-.perm-count-label { font-size: 13px; color: #64748b; font-weight: 500; }
-
-.perm-groups { max-height: 55vh; overflow-y: auto; }
-.perm-group { margin-bottom: 16px; padding-bottom: 12px; border-bottom: 1px solid #eef2f7; }
-.perm-group:last-child { border-bottom: none; margin-bottom: 0; }
-.perm-group-title { font-size: 13px; font-weight: 600; color: #1e293b; margin-bottom: 4px; display: flex; align-items: center; gap: 6px; }
-.perm-group-actions { margin-bottom: 4px; padding-left: 22px; }
-.perm-check-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 2px 8px; padding-left: 22px; }
-.perm-check-item { margin-right: 0; }
-.perm-label { font-size: 12px; color: #334155; font-weight: 600; margin-right: 6px; }
-.perm-action-label { font-family: "SF Mono", "Cascadia Code", "Consolas", monospace; font-size: 12px; color: #334155; }
-.perm-action-desc { font-size: 11px; color: #94a3b8; margin-left: 6px; }
+.perm-dialog-header { margin-bottom: 14px; display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.perm-count-label { font-size: 13px; color: #475569; font-weight: 600; }
+.perm-help { font-size: 12px; color: #94a3b8; }
+.permission-tree { max-height: 56vh; overflow-y: auto; padding: 8px 4px; }
+.permission-tree :deep(.el-tree-node__content) { min-height: 38px; height: auto; padding: 5px 8px; border-radius: 8px; }
+.permission-tree :deep(.el-tree-node__content:hover) { background: #f1f5f9; }
+.permission-node { min-width: 0; display: flex; align-items: center; gap: 10px; }
+.permission-node--page .permission-node__label { font-weight: 700; color: #0f172a; }
+.permission-node__label { color: #334155; font-size: 13px; white-space: nowrap; }
+.permission-node__action { color: #0369a1; background: #e0f2fe; border-radius: 5px; padding: 2px 6px; font-size: 11px; }
+.permission-node__description { color: #94a3b8; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .more-collapse { border-top: 1px solid #eef2f7; border-bottom: 0; }
 .more-collapse :deep(.el-collapse-item__header) { color: #374151; font-size: 13px; font-weight: 700; }

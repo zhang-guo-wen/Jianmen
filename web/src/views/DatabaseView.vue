@@ -10,7 +10,7 @@
       @search="onInstanceSearch"
     >
       <template #toolbar-extra>
-        <el-button type="primary" @click="openCreateInstance">新增实例</el-button>
+        <el-button v-if="permission.canDo('dbproxy:create')" type="primary" @click="openCreateInstance">新增实例</el-button>
       </template>
       <el-table-column prop="name" label="名称" min-width="130" show-overflow-tooltip />
       <el-table-column label="地址" min-width="180" show-overflow-tooltip>
@@ -29,25 +29,25 @@
       <el-table-column prop="group" label="分组" width="100" show-overflow-tooltip />
       <el-table-column label="状态" width="70" align="center">
         <template #default="{ row }">
-          <StatusSwitch :model-value="row.status === 'active'" @update:model-value="toggleInstance(row)" />
+          <StatusSwitch v-if="permission.canDo('dbproxy:update')" :model-value="row.status === 'active'" @update:model-value="toggleInstance(row)" />
         </template>
       </el-table-column>
       <el-table-column prop="remark" label="备注" min-width="120" show-overflow-tooltip />
       <el-table-column label="操作" width="210" align="right">
         <template #default="{ row }">
           <div class="table-actions">
-            <el-button link type="success" size="small" @click="handleDBConnect(row)">连接</el-button>
-            <el-button link type="primary" size="small" @click="editInstance(row)">编辑</el-button>
-            <el-dropdown trigger="click" teleported>
+            <el-button v-if="permission.canDo('db:connect')" link type="success" size="small" @click="handleDBConnect(row)">连接</el-button>
+            <el-button v-if="permission.canDo('dbproxy:update')" link type="primary" size="small" @click="editInstance(row)">编辑</el-button>
+            <el-dropdown v-if="permission.canDo('db:audit:view') || permission.canDo('session:view') || permission.canDo('rbac:manage') || permission.canDo('dbproxy:delete')" trigger="click" teleported>
               <el-button link type="primary" size="small"
                 >更多<el-icon class="el-icon--right"><ArrowDown /></el-icon></el-button
               >
               <template #dropdown>
                 <el-dropdown-menu>
-                  <el-dropdown-item @click="handleDBAuditLog(row)">审计日志</el-dropdown-item>
-                  <el-dropdown-item @click="handleDBSessions(row)">在线会话</el-dropdown-item>
-                  <el-dropdown-item @click="handleDBPermissions(row)">权限管理</el-dropdown-item>
-                  <el-dropdown-item class="danger-dropdown-item" @click="deleteInstance(row)">删除</el-dropdown-item>
+                  <el-dropdown-item v-if="permission.canDo('db:audit:view')" @click="handleDBAuditLog(row)">审计日志</el-dropdown-item>
+                  <el-dropdown-item v-if="permission.canDo('session:view')" @click="handleDBSessions(row)">在线会话</el-dropdown-item>
+                  <el-dropdown-item v-if="permission.canDo('rbac:manage')" @click="handleDBPermissions(row)">权限管理</el-dropdown-item>
+                  <el-dropdown-item v-if="permission.canDo('dbproxy:delete')" class="danger-dropdown-item" @click="deleteInstance(row)">删除</el-dropdown-item>
                 </el-dropdown-menu>
               </template>
             </el-dropdown>
@@ -120,10 +120,10 @@
       >
         <template #toolbar-extra>
           <el-button :loading="accountsLoading" @click="loadSelectedInstanceAccounts">刷新</el-button>
-          <el-button type="primary" :disabled="!selectedInstance" @click="openCreateAccount">
+          <el-button v-if="permission.canDo('dbproxy:create')" type="primary" :disabled="!selectedInstance" @click="openCreateAccount">
             新增账号
           </el-button>
-          <el-button type="success" :disabled="!selectedInstance || selectedInstance.protocol !== 'mysql'" @click="openAutoProvision">
+          <el-button v-if="permission.canDo('dbproxy:create')" type="success" :disabled="!selectedInstance || selectedInstance.protocol !== 'mysql'" @click="openAutoProvision">
             自动创建
           </el-button>
         </template>
@@ -136,6 +136,7 @@
         <el-table-column label="状态" width="80" align="center">
           <template #default="{ row }">
             <StatusSwitch
+              v-if="permission.canDo('dbproxy:update')"
               :model-value="row.status === 'active'"
               :loading="statusUpdatingId === row.id"
               @update:model-value="(val: boolean) => toggleAccountStatus(row, val)"
@@ -150,9 +151,9 @@
         </el-table-column>
         <el-table-column label="操作" width="200" fixed="right">
           <template #default="{ row }">
-            <el-button link type="success" size="small" @click="openConnectDialog(row)">连接</el-button>
-            <el-button link type="primary" size="small" @click="editAccount(row)">编辑</el-button>
-            <el-button link type="danger" size="small" @click="deleteAccount(row)">删除</el-button>
+            <el-button v-if="permission.canDo('db:connect')" link type="success" size="small" @click="openConnectDialog(row)">连接</el-button>
+            <el-button v-if="permission.canDo('dbproxy:update')" link type="primary" size="small" @click="editAccount(row)">编辑</el-button>
+            <el-button v-if="permission.canDo('dbproxy:delete')" link type="danger" size="small" @click="deleteAccount(row)">删除</el-button>
           </template>
         </el-table-column>
       </DataTableCard>
@@ -400,6 +401,7 @@ import DataTableCard from '@/components/DataTableCard.vue'
 import FormDialog from '@/components/FormDialog.vue'
 import StatusSwitch from '@/components/StatusSwitch.vue'
 import * as api from '@/api/client'
+import { usePermissionStore } from '@/stores/permission'
 
 interface InstanceForm {
   name: string
@@ -419,6 +421,8 @@ interface AccountFormState {
 }
 
 // ── Instance state ──
+const permission = usePermissionStore()
+
 const instances = ref<api.DatabaseInstanceView[]>([])
 const instancesLoading = ref(false)
 const instancePage = ref(1)

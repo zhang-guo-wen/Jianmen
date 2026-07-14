@@ -86,8 +86,15 @@ export interface UserPayload {
   status?: string;
 }
 
-export interface MyMenusResponse {
-  menus: string[];
+export interface AccessPage {
+  key: string;
+  path: string;
+  order: number;
+}
+
+export interface MyAccessContextResponse {
+  actions: string[];
+  pages: AccessPage[];
 }
 
 // ── Target / HostAccount ──────────────────────────────────────────────
@@ -473,17 +480,22 @@ export interface RBACRolePermissionRecord {
 
 export interface RBACPermissionDefinition {
   action: string;
-  module: string;
-  module_label: string;
   label: string;
   description: string;
-  menu_key?: string;
   resource_types?: string[];
   assignable: boolean;
 }
 
+export interface RBACPermissionPageDefinition {
+  key: string;
+  label: string;
+  path: string;
+  order: number;
+  actions: RBACPermissionDefinition[];
+}
+
 export interface RBACCatalogResponse {
-  items: RBACPermissionDefinition[];
+  pages: RBACPermissionPageDefinition[];
 }
 
 export interface RBACRoleActionsResponse {
@@ -729,10 +741,8 @@ export const apiClient = {
     }),
 
   // me
-  getMyMenus: () =>
-    request<MyMenusResponse>('/api/me/menus'),
-  getMyPermissions: () =>
-    request<{ actions: string[] }>('/api/me/permissions'),
+  getMyAccessContext: () =>
+    request<MyAccessContextResponse>('/api/me/access-context'),
 
   // hosts
   getHosts: (params?: { page?: number; page_size?: number; q?: string }) =>

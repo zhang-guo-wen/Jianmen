@@ -11,7 +11,7 @@
         @search="onHostSearch"
       >
         <template #toolbar-extra>
-          <el-button type="primary" @click="openCreateHostDialog"
+          <el-button v-if="permission.canDo('host:create')" type="primary" @click="openCreateHostDialog"
             >新增主机</el-button
           >
         </template>
@@ -23,7 +23,7 @@
         </el-table-column>
         <el-table-column label="账号管理" min-width="110" align="center">
           <template #default="{ row }">
-            <el-button link type="primary" size="small" class="account-mgmt-btn" @click="openAccountsDialog(row)">
+            <el-button v-if="permission.canDo('target:view')" link type="primary" size="small" class="account-mgmt-btn" @click="openAccountsDialog(row)">
               账号管理({{ numberFrom(row.account_count, 0) }})
             </el-button>
           </template>
@@ -34,6 +34,7 @@
         <el-table-column label="状态" width="70" align="center">
           <template #default="{ row }">
             <StatusSwitch
+              v-if="permission.canDo('host:update')"
               :model-value="row.status === 'active'"
               :loading="statusUpdatingId === hostStatusKey(row)"
               @update:model-value="(val: boolean) => toggleHostStatus(row, val)"
@@ -46,30 +47,30 @@
         <el-table-column label="操作" width="210" align="right">
           <template #default="{ row }">
             <div class="table-actions">
-              <el-button
+              <el-button v-if="permission.canDo('session:connect')"
                 link
                 type="success"
                 size="small"
                 @click="handleHostConnect(row)"
                 >连接</el-button
               >
-              <el-button
+              <el-button v-if="permission.canDo('host:update')"
                 link
                 type="primary"
                 size="small"
                 @click="openEditHostDialog(row)"
                 >编辑</el-button
               >
-              <el-dropdown trigger="click" teleported>
+              <el-dropdown v-if="permission.canDo('audit:view') || permission.canDo('session:view') || permission.canDo('rbac:manage') || permission.canDo('host:delete')" trigger="click" teleported>
                 <el-button link type="primary" size="small"
                   >更多<el-icon class="el-icon--right"><ArrowDown /></el-icon></el-button
                 >
                 <template #dropdown>
                   <el-dropdown-menu>
-                    <el-dropdown-item @click="handleHostAuditLog(row)">审计日志</el-dropdown-item>
-                    <el-dropdown-item @click="handleHostSessions(row)">在线会话</el-dropdown-item>
-                    <el-dropdown-item @click="handleHostPermissions(row)">权限管理</el-dropdown-item>
-                    <el-dropdown-item
+                    <el-dropdown-item v-if="permission.canDo('audit:view')" @click="handleHostAuditLog(row)">审计日志</el-dropdown-item>
+                    <el-dropdown-item v-if="permission.canDo('session:view')" @click="handleHostSessions(row)">在线会话</el-dropdown-item>
+                    <el-dropdown-item v-if="permission.canDo('rbac:manage')" @click="handleHostPermissions(row)">权限管理</el-dropdown-item>
+                    <el-dropdown-item v-if="permission.canDo('host:delete')"
                       class="danger-dropdown-item"
                       @click="confirmDeleteHost(row)"
                       >删除</el-dropdown-item
@@ -173,7 +174,7 @@
               @click="loadSelectedHostAccounts"
               >刷新</el-button
             >
-            <el-button
+            <el-button v-if="permission.canDo('target:create')"
               type="primary"
               :disabled="!selectedHost"
               @click="selectedHost && openCreateAccountDialog(selectedHost)"
@@ -209,6 +210,7 @@
           <el-table-column label="启用状态" width="80" align="center">
             <template #default="{ row }">
               <StatusSwitch
+                v-if="permission.canDo('target:update')"
                 :model-value="!row.disabled"
                 :loading="statusUpdatingId === accountStatusKey(row)"
                 @update:model-value="
@@ -247,21 +249,21 @@
           </el-table-column>
           <el-table-column label="操作" width="200" fixed="right">
             <template #default="{ row }">
-              <el-button
+              <el-button v-if="permission.canDo('session:connect')"
                 link
                 type="success"
                 size="small"
                 @click="openConnectionDialog(row)"
                 >连接</el-button
               >
-              <el-button
+              <el-button v-if="permission.canDo('target:update')"
                 link
                 type="primary"
                 size="small"
                 @click="openEditAccountDialog(row)"
                 >编辑</el-button
               >
-              <el-button
+              <el-button v-if="permission.canDo('target:delete')"
                 link
                 type="danger"
                 size="small"
@@ -672,6 +674,7 @@ import {
   type TargetRecord,
 } from "@/api/client";
 import { useI18n } from "@/i18n";
+import { usePermissionStore } from "@/stores/permission";
 
 type AuthMethod = "password" | "private_key";
 type HostKeyMode = "ignore" | "fingerprint" | "known_hosts";
@@ -704,6 +707,7 @@ interface AccountForm {
 }
 
 const { t } = useI18n();
+const permission = usePermissionStore();
 
 // ── Host list state ──
 const hosts = ref<HostView[]>([]);

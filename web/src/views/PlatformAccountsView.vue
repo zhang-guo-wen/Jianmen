@@ -11,7 +11,7 @@
       @search="onSearch"
     >
       <template #toolbar-extra>
-        <el-button type="primary" @click="openCreateDialog">{{ t('platformAccounts.action.new') }}</el-button>
+        <el-button v-if="permission.canDo('platform_account:create')" type="primary" @click="openCreateDialog">{{ t('platformAccounts.action.new') }}</el-button>
       </template>
       <el-table-column :label="t('platformAccounts.column.platform')" width="120" show-overflow-tooltip>
         <template #default="{ row }">
@@ -41,6 +41,7 @@
       <el-table-column :label="t('platformAccounts.column.status')" width="70" align="center">
         <template #default="{ row }">
           <StatusSwitch
+            v-if="permission.canDo('platform_account:update')"
             :model-value="row.status === 'active'"
             :loading="statusUpdatingId === row.id"
             @update:model-value="(val: boolean) => toggleStatus(row, val)"
@@ -49,10 +50,10 @@
       </el-table-column>
       <el-table-column label="操作" width="240">
         <template #default="{ row }">
-          <el-button link type="primary" size="small" @click="openPasswordDialog(row)">{{ t('platformAccounts.action.viewPassword') }}</el-button>
-          <el-button link type="primary" size="small" @click="openEditDialog(row)">{{ t('platformAccounts.action.edit') }}</el-button>
-          <el-button link type="primary" size="small" @click="openShareDialog(row)">{{ t('platformAccounts.action.share') }}</el-button>
-          <el-button link type="danger" size="small" @click="confirmDelete(row)">{{ t('platformAccounts.action.delete') }}</el-button>
+          <el-button v-if="permission.canDo('platform_account:use')" link type="primary" size="small" @click="openPasswordDialog(row)">{{ t('platformAccounts.action.viewPassword') }}</el-button>
+          <el-button v-if="permission.canDo('platform_account:update')" link type="primary" size="small" @click="openEditDialog(row)">{{ t('platformAccounts.action.edit') }}</el-button>
+          <el-button v-if="permission.canDo('platform_account:update')" link type="primary" size="small" @click="openShareDialog(row)">{{ t('platformAccounts.action.share') }}</el-button>
+          <el-button v-if="permission.canDo('platform_account:delete')" link type="danger" size="small" @click="confirmDelete(row)">{{ t('platformAccounts.action.delete') }}</el-button>
         </template>
       </el-table-column>
     </DataTableCard>
@@ -173,8 +174,10 @@ import type { PlatformAccountView, PlatformAccountShareView } from '@/api/client
 import DataTableCard from '@/components/DataTableCard.vue';
 import FormDialog from '@/components/FormDialog.vue';
 import StatusSwitch from '@/components/StatusSwitch.vue';
+import { usePermissionStore } from '@/stores/permission';
 
 const { t } = useI18n();
+const permission = usePermissionStore();
 
 // List state
 const accounts = ref<PlatformAccountView[]>([]);

@@ -63,7 +63,7 @@ function Wait-HttpOk($Name, $Url, $TimeoutSeconds, $Headers) {
             } else {
                 $response = Invoke-WebRequest $Url -UseBasicParsing -TimeoutSec 2
             }
-            if ($response.StatusCode -ge 200 -and $response.StatusCode -lt 500) {
+            if ($response.StatusCode -ge 200 -and $response.StatusCode -lt 300) {
                 Write-Ok "$Name ready: $Url ($($response.StatusCode))"
                 return
             }
@@ -71,7 +71,7 @@ function Wait-HttpOk($Name, $Url, $TimeoutSeconds, $Headers) {
             $lastError = $_.Exception.Message
             if ($_.Exception.Response -and $_.Exception.Response.StatusCode) {
                 $statusCode = [int]$_.Exception.Response.StatusCode
-                if ($statusCode -ge 200 -and $statusCode -lt 500) {
+                if ($statusCode -ge 200 -and $statusCode -lt 300) {
                     Write-Ok "$Name ready: $Url ($statusCode)"
                     return
                 }
@@ -176,7 +176,10 @@ try {
     $realToken = $null
     try {
         $loginResp = Invoke-RestMethod -Uri "http://127.0.0.1:47100/api/login" -Method Post -Body '{"username":"admin","password":"admin"}' -ContentType "application/json" -TimeoutSec 5 -ErrorAction Stop
-        $realToken = $loginResp.token
+        $realToken = $loginResp.data.token
+        if (-not $realToken) {
+            throw "Login response did not include data.token"
+        }
         Write-Ok "Admin login OK, token: $($realToken.Substring(0,16))..."
     } catch {
         $realToken = $null

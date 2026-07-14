@@ -12,7 +12,7 @@ import (
 )
 
 type rbacCatalogResponse struct {
-	Items []rbac.PermissionDefinition `json:"items"`
+	Pages []rbac.PermissionPageDefinition `json:"pages"`
 }
 
 type rbacRoleActionsRequest struct {
@@ -34,7 +34,7 @@ func (s *Server) handleRBACCatalog(w http.ResponseWriter, r *http.Request) {
 		s.writeErrorText(w, r, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
-	s.writeJSON(w, r, http.StatusOK, rbacCatalogResponse{Items: rbac.PermissionCatalog()})
+	s.writeJSON(w, r, http.StatusOK, rbacCatalogResponse{Pages: rbac.PermissionPages()})
 }
 
 func (s *Server) handleRBACRoleActions(w http.ResponseWriter, r *http.Request, roleID string) {

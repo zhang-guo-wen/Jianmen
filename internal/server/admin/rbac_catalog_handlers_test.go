@@ -23,8 +23,8 @@ func TestRBACCatalogReturnsCompleteCatalog(t *testing.T) {
 	}
 	var response rbacCatalogResponse
 	decodeRBACResponse(t, rec, &response)
-	if !reflect.DeepEqual(response.Items, rbac.PermissionCatalog()) {
-		t.Fatalf("catalog response does not match rbac catalog")
+	if !reflect.DeepEqual(response.Pages, rbac.PermissionPages()) {
+		t.Fatalf("catalog response does not match permission pages")
 	}
 }
 

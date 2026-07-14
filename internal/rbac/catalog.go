@@ -11,144 +11,273 @@ import (
 // PermissionDefinition describes an action that can be assigned to a role.
 type PermissionDefinition struct {
 	Action        string   `json:"action"`
-	Module        string   `json:"module"`
-	ModuleLabel   string   `json:"module_label"`
 	Label         string   `json:"label"`
 	Description   string   `json:"description"`
-	MenuKey       string   `json:"menu_key,omitempty"`
 	ResourceTypes []string `json:"resource_types,omitempty"`
 	Assignable    bool     `json:"assignable"`
 }
 
-var permissionCatalog = []PermissionDefinition{
-	definition(ActionDashboardView, "dashboard", "工作台", "查看工作台", "查看工作台概览", "dashboard"),
-	definition(ActionHostView, "hosts", "主机管理", "查看主机", "浏览主机列表与详情", "hosts"),
-	definition(ActionHostCreate, "hosts", "主机管理", "新增主机", "创建主机资源", ""),
-	definition(ActionHostUpdate, "hosts", "主机管理", "编辑主机", "修改主机资源", ""),
-	definition(ActionHostDelete, "hosts", "主机管理", "删除主机", "删除主机资源", ""),
-	definition(ActionTargetView, "host_accounts", "主机账号", "查看主机账号", "浏览主机账号列表与详情", ""),
-	definition(ActionTargetCreate, "host_accounts", "主机账号", "新增主机账号", "创建主机账号资源", ""),
-	definition(ActionTargetUpdate, "host_accounts", "主机账号", "编辑主机账号", "修改主机账号资源", ""),
-	definition(ActionTargetDelete, "host_accounts", "主机账号", "删除主机账号", "删除主机账号资源", ""),
-	definition(ActionSessionConnect, "connections", "连接与传输", "连接 SSH", "通过堡垒机建立 SSH 会话", "quickConnect", model.ResourceTypeHostAccount),
-	definition(ActionSFTPRead, "connections", "连接与传输", "SFTP 读取", "通过 SFTP 读取文件", "", model.ResourceTypeHostAccount),
-	definition(ActionSFTPWrite, "connections", "连接与传输", "SFTP 写入", "通过 SFTP 修改文件", "", model.ResourceTypeHostAccount),
-	definition(ActionSessionView, "sessions", "会话管理", "查看会话", "查看在线及历史会话", ""),
-	definition(ActionDBProxyView, "databases", "数据库管理", "查看数据库", "浏览数据库实例与账号", "databases"),
-	definition(ActionDBProxyCreate, "databases", "数据库管理", "新增数据库", "创建数据库实例与账号", ""),
-	definition(ActionDBProxyUpdate, "databases", "数据库管理", "编辑数据库", "修改数据库实例与账号", ""),
-	definition(ActionDBProxyDelete, "databases", "数据库管理", "删除数据库", "删除数据库实例与账号", ""),
-	definition(ActionDBConnect, "database_connections", "数据库连接", "连接数据库", "通过数据库代理连接指定账号", "", model.ResourceTypeDatabaseAccount),
-	definition(ActionAuditView, "audit", "审计中心", "查看 SSH 审计", "查看 SSH 会话、命令与文件审计", "audit"),
-	definition(ActionDBAuditView, "audit", "审计中心", "查看数据库审计", "查看数据库连接与 SQL 审计", ""),
-	definition(ActionRBACManage, "rbac", "权限管理", "管理权限", "管理用户、角色、动作与资源授权", "rbac"),
-	definition(ActionAppView, "applications", "应用发布", "查看应用", "浏览应用代理列表", "applications"),
-	definition(ActionAppCreate, "applications", "应用发布", "新增应用", "创建应用代理", ""),
-	definition(ActionAppUpdate, "applications", "应用发布", "编辑应用", "修改应用代理", ""),
-	definition(ActionAppDelete, "applications", "应用发布", "删除应用", "删除应用代理", ""),
-	definition(ActionAppConnect, "applications", "应用发布", "访问应用", "通过应用代理访问指定应用", "", model.ResourceTypeApplication),
-	definition(ActionPlatformAccountView, "platform_accounts", "平台账号", "查看平台账号", "浏览平台账号列表与详情", "platformAccounts"),
-	definition(ActionPlatformAccountCreate, "platform_accounts", "平台账号", "新增平台账号", "创建平台账号", ""),
-	definition(ActionPlatformAccountUpdate, "platform_accounts", "平台账号", "编辑平台账号", "修改平台账号", ""),
-	definition(ActionPlatformAccountDelete, "platform_accounts", "平台账号", "删除平台账号", "删除平台账号", ""),
-	definition(ActionPlatformAccountUse, "platform_accounts", "平台账号", "使用平台账号", "使用指定平台账号访问外部平台", "", model.ResourceTypePlatformAccount),
+// PermissionPageDefinition groups button/API actions under one visible page.
+type PermissionPageDefinition struct {
+	Key     string                 `json:"key"`
+	Label   string                 `json:"label"`
+	Path    string                 `json:"path"`
+	Order   int                    `json:"order"`
+	Actions []PermissionDefinition `json:"actions"`
 }
 
-var permissionCatalogByAction = buildPermissionCatalogIndex(permissionCatalog)
-var permissionCatalogByMenuKey = buildPermissionMenuIndex(permissionCatalog)
+// PageAccess is the page portion returned for the current user.
+type PageAccess struct {
+	Key   string `json:"key"`
+	Path  string `json:"path"`
+	Order int    `json:"order"`
+}
 
-func definition(action, module, moduleLabel, label, description, menuKey string, resourceTypes ...string) PermissionDefinition {
+var permissionPages = []PermissionPageDefinition{
+	page("quickConnect", "快速连接", "/quick-connect", 10,
+		action(ActionSessionConnect, "SSH 连接", "通过堡垒机建立 SSH 会话", model.ResourceTypeHostAccount),
+		action(ActionSFTPRead, "SFTP 读取", "通过 SFTP 读取文件", model.ResourceTypeHostAccount),
+		action(ActionSFTPWrite, "SFTP 写入", "通过 SFTP 修改文件", model.ResourceTypeHostAccount),
+		action(ActionDBConnect, "数据库连接", "通过数据库代理连接指定账号", model.ResourceTypeDatabaseAccount),
+		action(ActionAppConnect, "访问应用", "通过应用代理访问指定应用", model.ResourceTypeApplication),
+	),
+	page("hosts", "主机管理", "/hosts", 20,
+		action(ActionHostView, "查看主机", "浏览主机列表与详情"),
+		action(ActionHostCreate, "新增主机", "创建主机资源"),
+		action(ActionHostUpdate, "编辑主机", "修改主机资源"),
+		action(ActionHostDelete, "删除主机", "删除主机资源"),
+		action(ActionTargetView, "查看主机账号", "浏览主机账号列表与详情"),
+		action(ActionTargetCreate, "新增主机账号", "创建主机账号资源"),
+		action(ActionTargetUpdate, "编辑主机账号", "修改主机账号资源"),
+		action(ActionTargetDelete, "删除主机账号", "删除主机账号资源"),
+	),
+	page("databases", "数据库管理", "/databases", 30,
+		action(ActionDBProxyView, "查看数据库", "浏览数据库实例与账号"),
+		action(ActionDBProxyCreate, "新增数据库", "创建数据库实例与账号"),
+		action(ActionDBProxyUpdate, "编辑数据库", "修改数据库实例与账号"),
+		action(ActionDBProxyDelete, "删除数据库", "删除数据库实例与账号"),
+	),
+	page("platformAccounts", "平台账号", "/platform-accounts", 40,
+		action(ActionPlatformAccountView, "查看平台账号", "浏览平台账号列表与详情"),
+		action(ActionPlatformAccountCreate, "新增平台账号", "创建平台账号"),
+		action(ActionPlatformAccountUpdate, "编辑平台账号", "修改平台账号"),
+		action(ActionPlatformAccountDelete, "删除平台账号", "删除平台账号"),
+		action(ActionPlatformAccountUse, "使用平台账号", "使用指定平台账号访问外部平台", model.ResourceTypePlatformAccount),
+	),
+	page("applications", "应用发布", "/applications", 50,
+		action(ActionAppView, "查看应用", "浏览应用代理列表"),
+		action(ActionAppCreate, "新增应用", "创建应用代理"),
+		action(ActionAppUpdate, "编辑应用", "修改应用代理"),
+		action(ActionAppDelete, "删除应用", "删除应用代理"),
+	),
+	page("audit", "审计中心", "/audit", 60,
+		action(ActionAuditView, "查看 SSH 审计", "查看 SSH 会话、命令与文件审计"),
+		action(ActionDBAuditView, "查看数据库审计", "查看数据库连接与 SQL 审计"),
+		action(ActionSessionView, "查看会话", "查看在线及历史会话"),
+	),
+	page("rbac", "权限管理", "/rbac", 70,
+		action(ActionRBACManage, "管理权限", "管理用户、角色、操作与资源授权"),
+	),
+}
+
+var actionDependencies = map[string][]string{
+	ActionSFTPRead:              {ActionSessionConnect},
+	ActionSFTPWrite:             {ActionSessionConnect},
+	ActionHostCreate:            {ActionHostView},
+	ActionHostUpdate:            {ActionHostView},
+	ActionHostDelete:            {ActionHostView},
+	ActionTargetView:            {ActionHostView},
+	ActionTargetCreate:          {ActionHostView, ActionTargetView},
+	ActionTargetUpdate:          {ActionHostView, ActionTargetView},
+	ActionTargetDelete:          {ActionHostView, ActionTargetView},
+	ActionDBProxyCreate:         {ActionDBProxyView},
+	ActionDBProxyUpdate:         {ActionDBProxyView},
+	ActionDBProxyDelete:         {ActionDBProxyView},
+	ActionAppCreate:             {ActionAppView},
+	ActionAppUpdate:             {ActionAppView},
+	ActionAppDelete:             {ActionAppView},
+	ActionPlatformAccountCreate: {ActionPlatformAccountView},
+	ActionPlatformAccountUpdate: {ActionPlatformAccountView},
+	ActionPlatformAccountDelete: {ActionPlatformAccountView},
+	ActionPlatformAccountUse:    {ActionPlatformAccountView},
+}
+
+var pageVisibilityActions = map[string][]string{
+	"quickConnect":     {ActionSessionConnect, ActionSFTPRead, ActionSFTPWrite, ActionDBConnect, ActionAppConnect},
+	"hosts":            {ActionHostView},
+	"databases":        {ActionDBProxyView},
+	"platformAccounts": {ActionPlatformAccountView},
+	"applications":     {ActionAppView},
+	"audit":            {ActionAuditView, ActionDBAuditView},
+	"rbac":             {ActionRBACManage},
+}
+
+var permissionCatalog = flattenPermissionPages(permissionPages)
+var permissionCatalogByAction = buildPermissionCatalogIndex(permissionCatalog)
+
+func page(key, label, path string, order int, actions ...PermissionDefinition) PermissionPageDefinition {
+	return PermissionPageDefinition{Key: key, Label: label, Path: path, Order: order, Actions: actions}
+}
+
+func action(actionKey, label, description string, resourceTypes ...string) PermissionDefinition {
 	return PermissionDefinition{
-		Action: action, Module: module, ModuleLabel: moduleLabel, Label: label,
-		Description: description, MenuKey: menuKey, ResourceTypes: resourceTypes, Assignable: true,
+		Action: actionKey, Label: label, Description: description,
+		ResourceTypes: resourceTypes, Assignable: true,
 	}
+}
+
+func flattenPermissionPages(pages []PermissionPageDefinition) []PermissionDefinition {
+	items := make([]PermissionDefinition, 0)
+	for _, page := range pages {
+		items = append(items, page.Actions...)
+	}
+	return items
 }
 
 func buildPermissionCatalogIndex(items []PermissionDefinition) map[string]PermissionDefinition {
 	index := make(map[string]PermissionDefinition, len(items))
 	for _, item := range items {
-		index[item.Action] = item
+		index[item.Action] = clonePermissionDefinition(item)
 	}
 	return index
 }
 
-func buildPermissionMenuIndex(items []PermissionDefinition) map[string]PermissionDefinition {
-	index := make(map[string]PermissionDefinition)
-	for _, item := range items {
-		if item.MenuKey != "" {
-			index[item.MenuKey] = item
-		}
-	}
-	return index
+func clonePermissionDefinition(item PermissionDefinition) PermissionDefinition {
+	item.ResourceTypes = append([]string(nil), item.ResourceTypes...)
+	return item
 }
 
-// PermissionCatalog returns a copy of the complete permission catalog.
+func clonePermissionPage(page PermissionPageDefinition) PermissionPageDefinition {
+	page.Actions = append([]PermissionDefinition(nil), page.Actions...)
+	for i := range page.Actions {
+		page.Actions[i] = clonePermissionDefinition(page.Actions[i])
+	}
+	return page
+}
+
+// PermissionCatalog returns a copy of the complete action catalog.
 func PermissionCatalog() []PermissionDefinition {
 	items := make([]PermissionDefinition, len(permissionCatalog))
 	for i, item := range permissionCatalog {
-		items[i] = item
-		items[i].ResourceTypes = append([]string(nil), item.ResourceTypes...)
+		items[i] = clonePermissionDefinition(item)
 	}
 	return items
 }
 
-// FindPermissionDefinition looks up an action in the catalog.
-func FindPermissionDefinition(action string) (PermissionDefinition, bool) {
-	item, ok := permissionCatalogByAction[strings.TrimSpace(action)]
-	if ok {
-		item.ResourceTypes = append([]string(nil), item.ResourceTypes...)
+// PermissionPages returns the page/action permission tree.
+func PermissionPages() []PermissionPageDefinition {
+	pages := make([]PermissionPageDefinition, len(permissionPages))
+	for i, page := range permissionPages {
+		pages[i] = clonePermissionPage(page)
 	}
-	return item, ok
+	return pages
 }
 
-// FindMenuPermissionDefinition returns the catalog action controlling a menu.
-func FindMenuPermissionDefinition(menuKey string) (PermissionDefinition, bool) {
-	item, ok := permissionCatalogByMenuKey[strings.TrimSpace(menuKey)]
-	if ok {
-		item.ResourceTypes = append([]string(nil), item.ResourceTypes...)
-	}
-	return item, ok
+// FindPermissionDefinition returns catalog metadata for one action.
+func FindPermissionDefinition(actionKey string) (PermissionDefinition, bool) {
+	item, ok := permissionCatalogByAction[strings.TrimSpace(actionKey)]
+	return clonePermissionDefinition(item), ok
 }
 
-// ValidateAssignableActions validates, trims and de-duplicates role actions.
+// ValidateAssignableActions validates role actions and adds required page-view dependencies.
 func ValidateAssignableActions(actions []string) ([]string, error) {
 	unique := make(map[string]struct{}, len(actions))
-	for _, raw := range actions {
-		action := strings.TrimSpace(raw)
-		item, ok := FindPermissionDefinition(action)
-		if !ok {
-			return nil, fmt.Errorf("unknown action %q", action)
+	pending := append([]string(nil), actions...)
+	for len(pending) > 0 {
+		actionKey := strings.TrimSpace(pending[0])
+		pending = pending[1:]
+		if actionKey == "" {
+			continue
 		}
-		if !item.Assignable {
-			return nil, fmt.Errorf("action %q is not assignable", action)
+		item, ok := permissionCatalogByAction[actionKey]
+		if !ok || !item.Assignable {
+			return nil, fmt.Errorf("action %q is not assignable", actionKey)
 		}
-		unique[action] = struct{}{}
+		if _, exists := unique[actionKey]; exists {
+			continue
+		}
+		unique[actionKey] = struct{}{}
+		pending = append(pending, actionDependencies[actionKey]...)
 	}
 	result := make([]string, 0, len(unique))
-	for action := range unique {
-		result = append(result, action)
+	for actionKey := range unique {
+		result = append(result, actionKey)
 	}
 	sort.Strings(result)
 	return result, nil
 }
 
-// ValidatePermissionCatalog checks catalog uniqueness and required metadata.
+// AccessiblePages derives visible pages from effective actions.
+func AccessiblePages(actions []string) []PageAccess {
+	actionSet := make(map[string]struct{}, len(actions))
+	for _, actionKey := range actions {
+		actionSet[actionKey] = struct{}{}
+	}
+	_, wildcard := actionSet["*"]
+	pages := make([]PageAccess, 0, len(permissionPages))
+	for _, page := range permissionPages {
+		allowed := wildcard
+		if !allowed {
+			for _, actionKey := range pageVisibilityActions[page.Key] {
+				if _, ok := actionSet[actionKey]; ok {
+					allowed = true
+					break
+				}
+			}
+		}
+		if allowed {
+			pages = append(pages, PageAccess{Key: page.Key, Path: page.Path, Order: page.Order})
+		}
+	}
+	return pages
+}
+
+// ValidatePermissionCatalog checks page and action uniqueness and required metadata.
 func ValidatePermissionCatalog() error {
 	actions := make(map[string]struct{}, len(permissionCatalog))
-	menuKeys := make(map[string]string)
-	for i, item := range permissionCatalog {
-		if item.Action == "" || item.Module == "" || item.ModuleLabel == "" || item.Label == "" || item.Description == "" {
-			return fmt.Errorf("catalog item %d has incomplete metadata", i)
+	pageKeys := make(map[string]struct{}, len(permissionPages))
+	paths := make(map[string]struct{}, len(permissionPages))
+	for pageIndex, page := range permissionPages {
+		if page.Key == "" || page.Label == "" || page.Path == "" || page.Order <= 0 || len(page.Actions) == 0 {
+			return fmt.Errorf("permission page %d has incomplete metadata", pageIndex)
 		}
-		if _, exists := actions[item.Action]; exists {
-			return fmt.Errorf("duplicate action %q", item.Action)
+		if _, exists := pageKeys[page.Key]; exists {
+			return fmt.Errorf("duplicate page key %q", page.Key)
 		}
-		actions[item.Action] = struct{}{}
-		if previous, exists := menuKeys[item.MenuKey]; item.MenuKey != "" && exists {
-			return fmt.Errorf("menu key %q is used by %q and %q", item.MenuKey, previous, item.Action)
+		if _, exists := paths[page.Path]; exists {
+			return fmt.Errorf("duplicate page path %q", page.Path)
 		}
-		if item.MenuKey != "" {
-			menuKeys[item.MenuKey] = item.Action
+		pageKeys[page.Key] = struct{}{}
+		paths[page.Path] = struct{}{}
+		for actionIndex, item := range page.Actions {
+			if item.Action == "" || item.Label == "" || item.Description == "" {
+				return fmt.Errorf("permission page %q action %d has incomplete metadata", page.Key, actionIndex)
+			}
+			if _, exists := actions[item.Action]; exists {
+				return fmt.Errorf("duplicate action %q", item.Action)
+			}
+			actions[item.Action] = struct{}{}
+		}
+	}
+	for _, page := range permissionPages {
+		visibleActions, ok := pageVisibilityActions[page.Key]
+		if !ok || len(visibleActions) == 0 {
+			return fmt.Errorf("permission page %q has no visibility actions", page.Key)
+		}
+		for _, actionKey := range visibleActions {
+			if _, ok := actions[actionKey]; !ok {
+				return fmt.Errorf("page visibility action %q is missing", actionKey)
+			}
+		}
+	}
+	for actionKey, dependencies := range actionDependencies {
+		if _, ok := actions[actionKey]; !ok {
+			return fmt.Errorf("dependency source action %q is missing", actionKey)
+		}
+		for _, dependency := range dependencies {
+			if _, ok := actions[dependency]; !ok {
+				return fmt.Errorf("dependency action %q is missing", dependency)
+			}
 		}
 	}
 	return nil

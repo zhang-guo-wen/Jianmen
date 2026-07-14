@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <div class="web-terminal-page">
     <!-- 顶部工具栏 -->
     <div class="terminal-toolbar">
@@ -15,6 +15,7 @@
         </span>
       </div>
       <div class="toolbar-right">
+        <span class="completion-hint">Tab 补全 · 连按两次查看候选</span>
         <span class="status-badge" :class="status">
           <span class="status-dot"></span>
           {{ statusLabel }}
@@ -167,6 +168,12 @@ onUnmounted(() => {
 .toolbar-right {
   display: flex;
   align-items: center;
+  gap: 14px;
+}
+
+.completion-hint {
+  color: #6c7086;
+  font-size: 12px;
 }
 
 .status-badge {

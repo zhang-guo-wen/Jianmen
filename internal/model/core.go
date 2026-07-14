@@ -228,6 +228,8 @@ func AllModels() []any {
 		&ResourceGroup{},
 		&UserGroup{},
 		&UserGroupMember{},
+		&UserPreference{},
+		&ConnectionPassword{},
 		&ResourceGrant{},
 		&Host{},
 		&HostAccount{},
@@ -267,7 +269,7 @@ func (m *Host) BeforeCreate(_ *gorm.DB) error                { return ensureID(&
 func (m *HostAccount) BeforeCreate(_ *gorm.DB) error         { return ensureID(&m.ID) }
 func (m *DatabaseInstance) BeforeCreate(_ *gorm.DB) error    { return ensureID(&m.ID) }
 func (m *DatabaseAccount) BeforeCreate(_ *gorm.DB) error     { return ensureID(&m.ID) }
-func (m *Application) BeforeCreate(_ *gorm.DB) error        { return ensureID(&m.ID) }
+func (m *Application) BeforeCreate(_ *gorm.DB) error         { return ensureID(&m.ID) }
 func (m *UserSession) BeforeCreate(_ *gorm.DB) error         { return ensureID(&m.ID) }
 func (m *TemporaryAccount) BeforeCreate(_ *gorm.DB) error    { return ensureID(&m.ID) }
 func (m *TemporaryCredential) BeforeCreate(_ *gorm.DB) error { return ensureID(&m.ID) }

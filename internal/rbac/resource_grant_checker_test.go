@@ -60,3 +60,47 @@ func TestResourceGrantCheckerDenyOverridesGroupAllow(t *testing.T) {
 		t.Fatal("HasGrant = true, want deny to override group allow")
 	}
 }
+
+func TestResourceGrantCheckerContainerGrantIncludesFutureAccounts(t *testing.T) {
+	db := newTestDB(t)
+	models := []any{
+		&model.User{ID: "u1", Username: "user", Status: "active"},
+		&model.Host{ID: "h1", Name: "host", Address: "127.0.0.1", Port: 22},
+		&model.DatabaseInstance{ID: "db1", Name: "database", Protocol: "mysql", Address: "127.0.0.1", Port: 3306},
+		&model.ResourceGrant{ID: "grant-host", PrincipalType: "user", PrincipalID: "u1", ResourceType: model.ResourceTypeHost, ResourceID: "h1", Effect: model.PermissionEffectAllow},
+		&model.ResourceGrant{ID: "grant-db", PrincipalType: "user", PrincipalID: "u1", ResourceType: model.ResourceTypeDatabaseInstance, ResourceID: "db1", Effect: model.PermissionEffectAllow},
+	}
+	for _, item := range models {
+		if err := db.Create(item).Error; err != nil {
+			t.Fatalf("create %T: %v", item, err)
+		}
+	}
+
+	// Accounts are created after the container grants; inheritance must remain dynamic.
+	if err := db.Create(&model.HostAccount{ID: "ha1", HostID: "h1", Username: "root", Status: "active", ResourceID: "0001"}).Error; err != nil {
+		t.Fatalf("create host account: %v", err)
+	}
+	if err := db.Create(&model.DatabaseAccount{ID: "dba1", InstanceID: "db1", UniqueName: "db-user", Username: "app", Status: "active", ResourceID: "0002"}).Error; err != nil {
+		t.Fatalf("create database account: %v", err)
+	}
+
+	checker := NewResourceGrantChecker(db)
+	checks := []struct {
+		resourceType string
+		resourceID   string
+	}{
+		{model.ResourceTypeHost, "h1"},
+		{model.ResourceTypeHostAccount, "ha1"},
+		{model.ResourceTypeDatabaseInstance, "db1"},
+		{model.ResourceTypeDatabaseAccount, "dba1"},
+	}
+	for _, check := range checks {
+		allowed, err := checker.HasGrant("u1", check.resourceType, check.resourceID)
+		if err != nil {
+			t.Fatalf("HasGrant(%s, %s): %v", check.resourceType, check.resourceID, err)
+		}
+		if !allowed {
+			t.Fatalf("HasGrant(%s, %s) = false, want true", check.resourceType, check.resourceID)
+		}
+	}
+}

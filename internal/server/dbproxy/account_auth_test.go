@@ -48,7 +48,8 @@ func TestFakeMySQLHandshakeAdvertisesCompleteAuthPluginName(t *testing.T) {
 
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- sendFakeMySQLHandshake(server)
+		_, err := sendFakeMySQLHandshake(server)
+		errCh <- err
 	}()
 
 	packet, err := readMySQLPacket(client)

@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <div class="view-stack">
     <div class="page-container">
       <DataTableCard
@@ -623,27 +623,7 @@
           </template>
         </div>
         <template #footer>
-          <el-dropdown trigger="click" style="margin-right:8px">
-            <el-button type="primary">
-              本地 SSH 客户端打开<el-icon class="el-icon--right"><ArrowDown /></el-icon>
-            </el-button>
-            <template #dropdown>
-              <el-dropdown-menu @click.prevent.stop>
-                <a
-                  v-for="item in SSH_CLIENT_LIST"
-                  :key="item.command"
-                  :href="hostSSHClientUrl"
-                  target="_self"
-                  style="display:block;padding:5px 16px;color:#303133;text-decoration:none;font-size:13px"
-                  @mouseenter="(e: MouseEvent) => (e.target as HTMLElement).style.backgroundColor = '#f5f7fa'"
-                  @mouseleave="(e: MouseEvent) => (e.target as HTMLElement).style.backgroundColor = ''"
-                  @click.stop="onHostSSHClientClick"
-                >
-                  {{ item.label }}
-                </a>
-              </el-dropdown-menu>
-            </template>
-          </el-dropdown>
+          <el-button type="primary" :loading="preferences.loading" @click="openHostSSHClient">本地 SSH 客户端打开</el-button>
           <el-button type="primary" @click="openTerminalFromDialog">在浏览器中打开</el-button>
           <el-button style="margin-left:8px" @click="connectionDialogVisible = false">关闭</el-button>
         </template>
@@ -675,6 +655,7 @@ import {
 } from "@/api/client";
 import { useI18n } from "@/i18n";
 import { usePermissionStore } from "@/stores/permission";
+import { usePreferencesStore } from "@/stores/preferences";
 
 type AuthMethod = "password" | "private_key";
 type HostKeyMode = "ignore" | "fingerprint" | "known_hosts";
@@ -708,6 +689,7 @@ interface AccountForm {
 
 const { t } = useI18n();
 const permission = usePermissionStore();
+const preferences = usePreferencesStore();
 
 // ── Host list state ──
 const hosts = ref<HostView[]>([]);
@@ -1837,14 +1819,6 @@ function openTerminalFromDialog() {
 }
 
 // ── 本地 SSH 客户端协议 ──
-const SSH_CLIENT_LIST = [
-  { command: 'default', label: '系统默认 (ssh://)' },
-  { command: 'xshell', label: 'Xshell' },
-  { command: 'putty', label: 'PuTTY' },
-  { command: 'securecrt', label: 'SecureCRT' },
-  { command: 'mobaxterm', label: 'MobaXterm' },
-  { command: 'winterm', label: 'Windows Terminal' },
-] as const;
 
 /** 对密码做 URL 编码 */
 function encodePassword(pwd: string): string {
@@ -1865,18 +1839,17 @@ const hostSSHClientUrl = computed(() => {
 })
 
 /** 点击协议链接时：浏览器触发协议 + 复制命令行到剪贴板 */
-function onHostSSHClientClick() {
-  const user = connectionCompactUser.value
-  const host = bastionHost.value
-  const port = bastionPort.value || 47102
-  if (!user || !host) return
-  const pwd = connectionPassword.value
-  const command = pwd
-    ? `sshpass -p '${pwd}' ssh ${user}@${host} -p ${port}`
-    : `ssh ${user}@${host} -p ${port}`
-  navigator.clipboard?.writeText(command)
-    .then(() => ElMessage.success('已复制'))
-    .catch(() => {})
+async function openHostSSHClient() {
+  if (!preferences.loaded) {
+    try { await preferences.fetch() } catch { /* redirect below */ }
+  }
+  if (!preferences.hasSSHClient) {
+    connectionDialogVisible.value = false
+    ElMessage.info('请先在配置管理中选择本地 SSH 客户端')
+    router.push('/settings')
+    return
+  }
+  window.location.href = hostSSHClientUrl.value
 }
 
 // ════════════════════════════════════════════════════════════════

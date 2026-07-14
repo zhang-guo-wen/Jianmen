@@ -93,6 +93,8 @@
           <el-form-item :label="t('resourceGrant.selectResource')" required>
             <div class="resource-select-inline">
               <el-tabs v-model="resourceTabType" @tab-change="handleResourceTabChange" class="resource-tabs">
+                <el-tab-pane label="主机" name="host" />
+                <el-tab-pane label="数据库" name="database_instance" />
                 <el-tab-pane :label="t('resourceGrant.hostAccounts')" name="host_account" />
                 <el-tab-pane :label="t('resourceGrant.databaseAccounts')" name="database_account" />
                 <el-tab-pane label="应用" name="application" />
@@ -136,6 +138,20 @@
                     <template #default="{ row }">
                       {{ row.description || '' }}
                     </template>
+                  </el-table-column>
+                </template>
+                <template v-else-if="resourceTabType === 'host'">
+                  <el-table-column label="主机名称" min-width="150" show-overflow-tooltip prop="name" />
+                  <el-table-column :label="t('resourceGrant.hostAddress')" min-width="150" show-overflow-tooltip>
+                    <template #default="{ row }">{{ `${row.address || ''}:${row.port || 22}` }}</template>
+                  </el-table-column>
+                  <el-table-column label="账号数量" width="100" prop="account_count" />
+                </template>
+                <template v-else-if="resourceTabType === 'database_instance'">
+                  <el-table-column :label="t('resourceGrant.instanceName')" min-width="150" show-overflow-tooltip prop="name" />
+                  <el-table-column label="协议" width="90" prop="protocol" />
+                  <el-table-column :label="t('resourceGrant.hostAddress')" min-width="150" show-overflow-tooltip>
+                    <template #default="{ row }">{{ `${row.address || ''}:${row.port || ''}` }}</template>
                   </el-table-column>
                 </template>
                 <template v-else-if="resourceTabType === 'host_account'">
@@ -263,9 +279,11 @@ const keyword = ref('')
 const grantDialogVisible = ref(false)
 
 // Resource selection state
-const resourceTabType = ref('host_account')
+const resourceTabType = ref('host')
 const resourceSearchQuery = ref('')
 const loadingResources = ref(false)
+const hosts = ref<Array<{ id: string; name: string; address: string; port: number; account_count: number }>>([])
+const databaseInstances = ref<Array<{ id: string; name: string; protocol: string; address: string; port: number }>>([])
 const hostAccounts = ref<Array<{ id: string; username: string; host_name: string; host_address: string }>>([])
 const dbAccounts = ref<Array<{ id: string; unique_name: string; username: string; instance_name: string; instance_address: string }>>([])
 const applications = ref<Array<{ id: string; name: string; group: string; listen_port: number }>>([])
@@ -280,7 +298,7 @@ const userGroups = ref<{ id: string; name: string }[]>([])
 const grantForm = reactive({
   principal_type: 'user' as 'user' | 'user_group',
   principal_id: '',
-  resource_type: 'host_account',
+  resource_type: 'host',
   resource_id: '',
   resource_ids: [] as string[],
   effect: 'allow' as 'allow' | 'deny'
@@ -299,7 +317,20 @@ const principalOptions = computed(() => {
 // Filtered resources based on tab type and search query
 const filteredResources = computed(() => {
   const query = resourceSearchQuery.value.toLowerCase()
-  if (resourceTabType.value === 'host_account') {
+  if (resourceTabType.value === 'host') {
+    if (!query) return hosts.value
+    return hosts.value.filter(host =>
+      (host.name || '').toLowerCase().includes(query) ||
+      (host.address || '').toLowerCase().includes(query)
+    )
+  } else if (resourceTabType.value === 'database_instance') {
+    if (!query) return databaseInstances.value
+    return databaseInstances.value.filter(instance =>
+      (instance.name || '').toLowerCase().includes(query) ||
+      (instance.address || '').toLowerCase().includes(query) ||
+      (instance.protocol || '').toLowerCase().includes(query)
+    )
+  } else if (resourceTabType.value === 'host_account') {
     if (!query) return hostAccounts.value
     return hostAccounts.value.filter(a =>
       (a.username || '').toLowerCase().includes(query) ||
@@ -342,6 +373,8 @@ const formatTime = (time: string) => {
 
 const resourceTypeLabel = (type: string) => {
   switch (type) {
+    case 'host': return '主机'
+    case 'database_instance': return '数据库'
     case 'host_account': return t('resourceGrant.hostAccounts')
     case 'database_account': return t('resourceGrant.databaseAccounts')
     case 'application': return '应用'
@@ -362,6 +395,10 @@ const getPrincipalName = (grant: ResourceGrantRecord) => {
 
 const getResourceName = (grant: ResourceGrantRecord) => {
   // 先尝试查找本地缓存的资源名
+  const hostContainer = hosts.value.find(item => item.id === grant.resource_id)
+  if (hostContainer) return `${hostContainer.name} (${hostContainer.address}:${hostContainer.port})`
+  const databaseContainer = databaseInstances.value.find(item => item.id === grant.resource_id)
+  if (databaseContainer) return `${databaseContainer.name} (${databaseContainer.address}:${databaseContainer.port})`
   const host = hostAccounts.value.find(a => a.id === grant.resource_id)
   if (host) return `${host.username}@${host.host_name || host.host_address || ''}`
   const db = dbAccounts.value.find(a => a.id === grant.resource_id)
@@ -396,6 +433,8 @@ const loadGrants = async () => {
 
 const ensureNamesLoaded = async () => {
   // 预加载所有关联数据用于表格中的名称显示
+  const needHostContainer = grants.value.some(g => g.resource_type === 'host')
+  const needDatabaseContainer = grants.value.some(g => g.resource_type === 'database_instance')
   const needHost = grants.value.some(g => g.resource_type === 'host_account')
   const needDb = grants.value.some(g => g.resource_type === 'database_account')
   const needApplication = grants.value.some(g => g.resource_type === 'application')
@@ -404,6 +443,8 @@ const ensureNamesLoaded = async () => {
 
   if (allUsers.value.length === 0) await loadUsers()
   if (userGroups.value.length === 0) await loadUserGroups()
+  if (needHostContainer && hosts.value.length === 0) await loadHosts()
+  if (needDatabaseContainer && databaseInstances.value.length === 0) await loadDatabaseInstances()
   if (needHost && hostAccounts.value.length === 0) await loadHostAccounts()
   if (needDb && dbAccounts.value.length === 0) await loadDbAccounts()
   if (needApplication && applications.value.length === 0) await loadApplications()
@@ -432,14 +473,14 @@ const loadUserGroups = async () => {
 const showGrantDialog = () => {
   grantForm.principal_type = 'user'
   grantForm.principal_id = ''
-  grantForm.resource_type = 'host_account'
+  grantForm.resource_type = 'host'
   grantForm.resource_id = ''
   grantForm.resource_ids = []
   grantForm.effect = 'allow'
   expiresOption.value = 'never'
   customExpiresAt.value = null
   selectedResources.value = []
-  resourceTabType.value = 'host_account'
+  resourceTabType.value = 'host'
   resourceSearchQuery.value = ''
   grantDialogVisible.value = true
   loadResources()
@@ -453,7 +494,11 @@ const handleResourceTabChange = () => {
 const loadResources = async () => {
   loadingResources.value = true
   try {
-    if (resourceTabType.value === 'host_account') {
+    if (resourceTabType.value === 'host') {
+      await loadHosts()
+    } else if (resourceTabType.value === 'database_instance') {
+      await loadDatabaseInstances()
+    } else if (resourceTabType.value === 'host_account') {
       await loadHostAccounts()
     } else if (resourceTabType.value === 'database_account') {
       await loadDbAccounts()
@@ -502,6 +547,28 @@ const loadAccountGroups = async () => {
   }
 }
 
+const loadHosts = async () => {
+  const resp = await apiClient.getHosts({ page: 1, page_size: 1000 })
+  hosts.value = (resp.items || []).map(host => ({
+    id: String(host.id ?? ''),
+    name: host.name || '',
+    address: host.address || '',
+    port: Number(host.port) || 22,
+    account_count: Number(host.account_count) || 0
+  }))
+}
+
+const loadDatabaseInstances = async () => {
+  const resp = await apiClient.getDBInstances({ page: 1, page_size: 1000 })
+  databaseInstances.value = (resp.items || []).map(instance => ({
+    id: String(instance.id ?? ''),
+    name: instance.name || '',
+    protocol: instance.protocol || '',
+    address: instance.address || '',
+    port: Number(instance.port) || 0
+  }))
+}
+
 const loadHostAccounts = async () => {
   const resp = await apiClient.getTargets({ page: 1, page_size: 1000 })
   hostAccounts.value = (resp.items || []).map((t: any) => ({
@@ -547,9 +614,9 @@ const loadApplications = async () => {
 
 const handleResourceSelectionChange = (rows: any[]) => {
   selectedResources.value = rows.map(row => {
-    const name = row.username ? `${row.username}@${row.host_name || row.host_address || ''}` :
-                 row.unique_name ? `${row.unique_name} (${row.instance_name || ''})` :
-                 row.name || ''
+    const name = row.username ? `${row.username}@${row.host_name || row.instance_name || row.host_address || ''}` :
+                 row.name ? `${row.name}${row.address ? ` (${row.address}:${row.port || ''})` : ''}` :
+                 row.unique_name || ''
     return { id: row.id, name, type: resourceTabType.value }
   })
   grantForm.resource_ids = selectedResources.value.map(r => r.id)

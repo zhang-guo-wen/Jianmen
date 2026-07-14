@@ -1,4 +1,4 @@
-import { ref, type Ref } from 'vue';
+﻿import { ref, type Ref } from 'vue';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
@@ -33,10 +33,13 @@ function buildWsUrl(targetId: string, cols: number, rows: number): string {
 }
 
 function defaultTerminalOptions(cols: number, rows: number) {
+  const rootStyle = getComputedStyle(document.documentElement);
+  const configuredSize = Number.parseInt(rootStyle.getPropertyValue('--terminal-font-size'), 10);
+  const configuredFamily = rootStyle.getPropertyValue('--terminal-font-family').trim();
   return {
     cursorBlink: true,
-    fontSize: 14,
-    fontFamily: '"SFMono-Regular", Consolas, "Liberation Mono", monospace',
+    fontSize: Number.isFinite(configuredSize) ? configuredSize : 14,
+    fontFamily: configuredFamily || '"SFMono-Regular", Consolas, "Liberation Mono", monospace',
     theme: {
       background: '#1e1e2e',
       foreground: '#cdd6f4',
@@ -82,6 +85,14 @@ export function useWebTerminal(opts: UseWebTerminalOptions): UseWebTerminalRetur
     term.loadAddon(new WebLinksAddon());
 
     term.open(container);
+    term.attachCustomKeyEventHandler(event => {
+      if (event.key !== 'Tab') return true;
+      event.preventDefault();
+      if (event.type === 'keydown' && ws?.readyState === WebSocket.OPEN) {
+        ws.send(event.shiftKey ? '\u001b[Z' : '\t');
+      }
+      return false;
+    });
     fitAddon.fit();
     terminal.value = term;
 

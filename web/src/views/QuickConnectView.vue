@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <div class="view-stack">
     <el-tabs v-model="activeTab" class="page-tabs">
       <el-tab-pane v-if="permission.canDo('session:connect')" label="SSH" name="ssh">
@@ -134,36 +134,9 @@
         </template>
       </div>
       <template #footer>
-        <el-dropdown v-if="connectType === 'ssh'" trigger="click" style="margin-right:8px">
-          <el-button type="primary">
-            本地 SSH 客户端打开<el-icon class="el-icon--right"><ArrowDown /></el-icon>
-          </el-button>
-          <template #dropdown>
-            <el-dropdown-menu v-if="connectInfo" @click.prevent.stop>
-              <a
-                v-for="item in SSH_CLIENT_LIST"
-                :key="item.command"
-                :href="sshClientUrl"
-                target="_self"
-                style="display:block;padding:5px 16px;color:#303133;text-decoration:none;font-size:13px"
-                @mouseenter="(e: MouseEvent) => (e.target as HTMLElement).style.backgroundColor = '#f5f7fa'"
-                @mouseleave="(e: MouseEvent) => (e.target as HTMLElement).style.backgroundColor = ''"
-                @click.stop="onSSHClientClick"
-              >
-                {{ item.label }}
-              </a>
-              <div style="height:1px;background:#e4e7ed;margin:4px 0"></div>
-              <span
-                style="display:block;padding:5px 16px;color:#409eff;text-decoration:none;font-size:13px;cursor:pointer"
-                @mouseenter="(e: MouseEvent) => (e.target as HTMLElement).style.backgroundColor = '#f5f7fa'"
-                @mouseleave="(e: MouseEvent) => (e.target as HTMLElement).style.backgroundColor = ''"
-                @click="openInitClientDialog"
-              >
-                初始化客户端...
-              </span>
-            </el-dropdown-menu>
-          </template>
-        </el-dropdown>
+        <el-button v-if="connectType === 'ssh'" type="primary" :loading="preferences.loading" @click="openPreferredSSHClient">
+          本地 SSH 客户端打开
+        </el-button>
         <el-button v-if="connectType === 'ssh'" type="primary" @click="openInBrowser">在浏览器中打开</el-button>
         <el-button style="margin-left:8px" @click="configVisible = false">关闭</el-button>
       </template>
@@ -175,7 +148,7 @@
         <el-form-item label="客户端">
           <el-select v-model="initClientType" style="width:100%">
             <el-option
-              v-for="item in CLIENT_INIT_OPTIONS"
+              v-for="item in SSH_CLIENT_OPTIONS"
               :key="item.command"
               :label="item.label"
               :value="item.command"
@@ -207,32 +180,17 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
-import { ArrowDown, Refresh } from '@element-plus/icons-vue';
+import { Refresh } from '@element-plus/icons-vue';
 import { ElMessage } from 'element-plus';
 import DataTableCard from '@/components/DataTableCard.vue';
 import { apiClient, type PageResponse, type TargetRecord, type DBAccountRecord } from '@/api/client';
 import { useI18n } from '@/i18n';
 import { usePermissionStore } from '@/stores/permission';
-
-const SSH_CLIENT_LIST = [
-  { command: 'default', label: '系统默认 (ssh://)' },
-  { command: 'xshell', label: 'Xshell' },
-  { command: 'putty', label: 'PuTTY' },
-  { command: 'securecrt', label: 'SecureCRT' },
-  { command: 'mobaxterm', label: 'MobaXterm' },
-  { command: 'winterm', label: 'Windows Terminal' },
-] as const;
+import { usePreferencesStore } from '@/stores/preferences';
+import { buildSSHProtocolRegistrationCommand, SSH_CLIENT_OPTIONS, sshClientOption } from '@/config/sshClients';
 
 // ── 初始化客户端弹窗 ──
-interface ClientInitOption { command: string; label: string; defaultPath: string }
-const CLIENT_INIT_OPTIONS: ClientInitOption[] = [
-  { command: 'xshell', label: 'Xshell', defaultPath: 'C:\\Program Files (x86)\\NetSarang\\Xshell 7\\Xshell.exe' },
-  { command: 'putty', label: 'PuTTY', defaultPath: 'C:\\Program Files\\PuTTY\\putty.exe' },
-  { command: 'securecrt', label: 'SecureCRT', defaultPath: 'C:\\Program Files\\VanDyke Software\\SecureCRT\\SecureCRT.exe' },
-  { command: 'mobaxterm', label: 'MobaXterm', defaultPath: 'C:\\Program Files (x86)\\Mobatek\\MobaXterm\\MobaXterm.exe' },
-  { command: 'winterm', label: 'Windows Terminal', defaultPath: 'wt.exe' },
-  { command: 'system', label: '系统 SSH (ssh.exe)', defaultPath: 'ssh.exe' },
-];
+
 const initClientVisible = ref(false);
 const initClientType = ref('xshell');
 const initClientPath = ref('');
@@ -240,33 +198,36 @@ const initClientPathHint = ref('');
 const initRegCommand = ref('');
 
 const initClientPlaceholder = computed(() => {
-  const opt = CLIENT_INIT_OPTIONS.find(o => o.command === initClientType.value);
-  return opt ? `默认: ${opt.defaultPath}` : '';
+  const option = sshClientOption(initClientType.value);
+  return option?.defaultPath ? `默认: ${option.defaultPath}` : '';
 });
 
 function openInitClientDialog() {
-  initClientType.value = 'xshell';
-  initClientPath.value = '';
-  initRegCommand.value = '';
+  initClientType.value = preferences.value.ssh_client || 'xshell';
+  initClientPath.value = preferences.value.ssh_client_path || '';
   initClientVisible.value = true;
 }
 
 watch([initClientType, initClientPath], () => {
-  const opt = CLIENT_INIT_OPTIONS.find(o => o.command === initClientType.value);
-  const exePath = initClientPath.value || opt?.defaultPath || '';
-  if (!exePath) { initRegCommand.value = ''; return; }
-  const escaped = exePath.replace(/\\/g, '\\\\');
-  initRegCommand.value = `reg add "HKCR\\ssh" /ve /d "URL:SSH Protocol" /f && reg add "HKCR\\ssh" /v "URL Protocol" /d "" /f && reg add "HKCR\\ssh\\shell\\open\\command" /ve /d "\\"${escaped}\\" -url \\"%1\\"" /f`;
+  initRegCommand.value = buildSSHProtocolRegistrationCommand(initClientType.value, initClientPath.value);
 });
 
 async function copyInitCommand() {
-  const cmd = initRegCommand.value;
-  if (!cmd) { ElMessage.warning('请先选择客户端'); return; }
   try {
-    await navigator.clipboard.writeText(cmd);
-    ElMessage.success('命令已复制，请在管理员 cmd 中粘贴执行');
+    await preferences.update({
+      ssh_client: initClientType.value,
+      ssh_client_path: initClientPath.value,
+    });
+    const command = initRegCommand.value;
+    if (command) {
+      await navigator.clipboard.writeText(command);
+      ElMessage.success('配置已保存，注册命令已复制，请在管理员 CMD 中执行一次');
+    } else {
+      ElMessage.success('默认客户端配置已保存');
+    }
+    initClientVisible.value = false;
   } catch {
-    ElMessage.warning('复制失败，请手动复制');
+    ElMessage.error(preferences.error || '客户端配置保存失败');
   }
 }
 
@@ -292,6 +253,7 @@ function pickClientFile() {
 const { t } = useI18n();
 const router = useRouter();
 const permission = usePermissionStore();
+const preferences = usePreferencesStore();
 const activeTab = ref(permission.canDo('session:connect') ? 'ssh' : 'db');
 const webTerminalTargetId = ref('');
 
@@ -324,6 +286,7 @@ const connectType = ref<'ssh' | 'db'>('ssh');
 const connectionTesting = ref(false);
 const connectionTestResult = ref<{ ok: boolean; error?: string; latency_ms?: number } | null>(null);
 const bastionPassword = ref('');
+const temporaryPasswordExpiresAt = ref('');
 
 const dialogTitle = computed(() => connectType.value === 'ssh' ? 'SSH 连接' : '数据库连接');
 
@@ -356,18 +319,16 @@ const sshCommandText = computed(() => {
 });
 
 /** 点击协议链接时：浏览器触发 ssh:// 协议打开本地客户端，同时复制命令行到剪贴板 */
-function onSSHClientClick() {
-  const info = connectInfo.value;
-  if (!info) return;
-  const pwd = bastionPassword.value;
-  const command = pwd
-    ? `sshpass -p '${pwd}' ssh ${info.compactUser}@${info.host} -p ${info.port}`
-    : `ssh ${info.compactUser}@${info.host} -p ${info.port}`;
-  if (navigator.clipboard?.writeText) {
-    navigator.clipboard.writeText(command).then(() => {
-      ElMessage.success(t('quickConnect.message.copied'));
-    }).catch(() => {});
+async function openPreferredSSHClient() {
+  if (!connectInfo.value) return;
+  if (!preferences.loaded) {
+    try { await preferences.fetch(); } catch { /* prompt below */ }
   }
+  if (!preferences.hasSSHClient) {
+    openInitClientDialog();
+    return;
+  }
+  window.location.href = sshClientUrl.value;
 }
 
 // ── SSH ──
@@ -404,12 +365,18 @@ async function openSSHConfig(target: TargetRecord) {
   connectType.value = 'ssh';
   sessionError.value = ''; connectionTestResult.value = null;
   bastionPassword.value = '';
+  temporaryPasswordExpiresAt.value = '';
   creatingSession.value = true; configVisible.value = true;
   testSSHConnection(target);
   try {
     const tid = String(target.id || target.resource_id || '');
     webTerminalTargetId.value = tid;
-    const s = await apiClient.createUserSession(tid);
+    const [s, credential] = await Promise.all([
+      apiClient.createUserSession(tid),
+      apiClient.createConnectionPassword(tid),
+    ]);
+    bastionPassword.value = credential.password;
+    temporaryPasswordExpiresAt.value = credential.expires_at;
     const cu = s?.compact_username || '';
     connectInfo.value = {
       host: bastionHost.value || window.location.hostname,
@@ -508,10 +475,18 @@ function onDBSearch(q: string) {
 async function openDBConfig(acc: any) {
   connectType.value = 'db';
   sessionError.value = ''; connectionTestResult.value = null;
+  bastionPassword.value = '';
+  temporaryPasswordExpiresAt.value = '';
   creatingSession.value = true; configVisible.value = true;
   testDBConnection(acc);
   try {
-    const s = await apiClient.createUserSession(String(acc.id));
+    const targetId = String(acc.id);
+    const [s, credential] = await Promise.all([
+      apiClient.createUserSession(targetId),
+      apiClient.createConnectionPassword(targetId),
+    ]);
+    bastionPassword.value = credential.password;
+    temporaryPasswordExpiresAt.value = credential.expires_at;
     const cu = s?.compact_username || '';
     const proto = acc._protocol || 'mysql';
     const host = bastionHost.value || window.location.hostname;

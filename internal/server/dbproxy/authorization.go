@@ -1,13 +1,12 @@
 package dbproxy
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"gorm.io/gorm"
 	"strings"
 	"time"
-
-	"golang.org/x/crypto/bcrypt"
-	"gorm.io/gorm"
 
 	"jianmen/internal/model"
 	rbaccheck "jianmen/internal/rbac"
@@ -119,8 +118,11 @@ func (g *Gateway) resolveCompactAccount(username string) (*resolvedDBAccount, er
 }
 
 // validateUserPassword 验证堡垒机用户密码（仅 compact username 路径使用）
-func (g *Gateway) validateUserPassword(user *model.User, password []byte) error {
-	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), password); err != nil {
+func (g *Gateway) validateUserPassword(user *model.User, accountID, password string) error {
+	if g.store == nil {
+		return errors.New("authentication unavailable")
+	}
+	if err := g.store.AuthenticateConnectionPassword(context.Background(), user.ID, model.ResourceTypeDatabaseAccount, accountID, password); err != nil {
 		return errors.New("authentication failed")
 	}
 	return nil

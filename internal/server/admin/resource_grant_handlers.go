@@ -100,17 +100,27 @@ func (s *Server) listResourceGrants(w http.ResponseWriter, r *http.Request) {
 		s.db.Model(&model.UserGroup{}).Where("name LIKE ?", like).Pluck("id", &principalGroupIDs)
 		principalIDs := append(principalUserIDs, principalGroupIDs...)
 
-		// 搜索匹配的资源（主机账号、数据库账号、资源分组）
+		// 搜索匹配的资源（主机、账号、数据库实例、资源分组）
+		var resourceHostIDs []string
+		s.db.Model(&model.Host{}).
+			Where("name LIKE ? OR address LIKE ?", like, like).
+			Pluck("id", &resourceHostIDs)
 		var resourceHostAccountIDs []string
 		s.db.Model(&model.HostAccount{}).
 			Joins("JOIN hosts ON hosts.id = host_accounts.host_id").
 			Where("host_accounts.username LIKE ? OR hosts.address LIKE ?", like, like).
 			Pluck("host_accounts.id", &resourceHostAccountIDs)
+		var resourceDBInstanceIDs []string
+		s.db.Model(&model.DatabaseInstance{}).
+			Where("name LIKE ? OR address LIKE ?", like, like).
+			Pluck("id", &resourceDBInstanceIDs)
 		var resourceDBAccountIDs []string
-		s.db.Model(&model.DatabaseAccount{}).Where("unique_name LIKE ?", like).Pluck("id", &resourceDBAccountIDs)
+		s.db.Model(&model.DatabaseAccount{}).Where("unique_name LIKE ? OR username LIKE ?", like, like).Pluck("id", &resourceDBAccountIDs)
 		var resourceGroupIDs []string
 		s.db.Model(&model.ResourceGroup{}).Where("name LIKE ?", like).Pluck("id", &resourceGroupIDs)
-		resourceIDs := append(resourceHostAccountIDs, resourceDBAccountIDs...)
+		resourceIDs := append(resourceHostIDs, resourceHostAccountIDs...)
+		resourceIDs = append(resourceIDs, resourceDBInstanceIDs...)
+		resourceIDs = append(resourceIDs, resourceDBAccountIDs...)
 		resourceIDs = append(resourceIDs, resourceGroupIDs...)
 
 		// 组合搜索条件
@@ -132,22 +142,37 @@ func (s *Server) listResourceGrants(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	var total int64
-	tx.Count(&total)
+	var grants []model.ResourceGrant
+	if err := tx.Order("created_at DESC").Find(&grants).Error; err != nil {
+		s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
+		return
+	}
+	visible := make([]model.ResourceGrant, 0, len(grants))
+	for _, grant := range grants {
+		allowed, err := s.hasResourceGrant(r, grant.ResourceType, grant.ResourceID)
+		if err != nil {
+			s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
+			return
+		}
+		if allowed {
+			visible = append(visible, grant)
+		}
+	}
 
 	page := positiveIntRequestQuery(r, "page", 1)
 	pageSize := positiveIntRequestQuery(r, "page_size", 20)
 	if pageSize > 200 {
 		pageSize = 200
 	}
-
-	var grants []model.ResourceGrant
-	if err := tx.Order("created_at DESC").Offset((page - 1) * pageSize).Limit(pageSize).Find(&grants).Error; err != nil {
-		s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
-		return
+	start := (page - 1) * pageSize
+	if start > len(visible) {
+		start = len(visible)
 	}
-
-	s.writeJSON(w, r, http.StatusOK, pageResponse{Items: grants, Total: int(total), Page: page, PageSize: pageSize})
+	end := start + pageSize
+	if end > len(visible) {
+		end = len(visible)
+	}
+	s.writeJSON(w, r, http.StatusOK, pageResponse{Items: visible[start:end], Total: len(visible), Page: page, PageSize: pageSize})
 }
 
 func (s *Server) createResourceGrant(w http.ResponseWriter, r *http.Request) {
@@ -186,6 +211,9 @@ func (s *Server) createResourceGrant(w http.ResponseWriter, r *http.Request) {
 		s.writeErrorText(w, r, http.StatusBadRequest, message)
 		return
 	}
+	if !s.requireResourceGrant(w, r, grant.ResourceType, grant.ResourceID) {
+		return
+	}
 
 	// Set default effect
 	if grant.Effect == "" {
@@ -220,8 +248,12 @@ func (s *Server) validateResourceGrantReferences(grant model.ResourceGrant) stri
 
 	count = 0
 	switch grant.ResourceType {
+	case model.ResourceTypeHost:
+		s.db.Model(&model.Host{}).Where("id = ?", grant.ResourceID).Count(&count)
 	case model.ResourceTypeHostAccount:
 		s.db.Model(&model.HostAccount{}).Where("id = ?", grant.ResourceID).Count(&count)
+	case model.ResourceTypeDatabaseInstance:
+		s.db.Model(&model.DatabaseInstance{}).Where("id = ?", grant.ResourceID).Count(&count)
 	case model.ResourceTypeDatabaseAccount:
 		s.db.Model(&model.DatabaseAccount{}).Where("id = ?", grant.ResourceID).Count(&count)
 	case model.ResourceTypeApplication:
@@ -254,6 +286,9 @@ func (s *Server) getResourceGrant(w http.ResponseWriter, r *http.Request, id str
 		s.writeErrorText(w, r, http.StatusNotFound, "resource grant not found")
 		return
 	}
+	if !s.requireResourceGrant(w, r, grant.ResourceType, grant.ResourceID) {
+		return
+	}
 
 	s.writeJSON(w, r, http.StatusOK, grant)
 }
@@ -264,7 +299,15 @@ func (s *Server) deleteResourceGrant(w http.ResponseWriter, r *http.Request, id 
 		return
 	}
 
-	if err := s.db.Delete(&model.ResourceGrant{}, "id = ?", id).Error; err != nil {
+	var grant model.ResourceGrant
+	if err := s.db.First(&grant, "id = ?", id).Error; err != nil {
+		s.writeErrorText(w, r, http.StatusNotFound, "resource grant not found")
+		return
+	}
+	if !s.requireResourceGrant(w, r, grant.ResourceType, grant.ResourceID) {
+		return
+	}
+	if err := s.db.Delete(&grant).Error; err != nil {
 		s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
 		return
 	}

@@ -1,4 +1,4 @@
-:root {
+﻿:root {
   --gap-xs: 4px;
   --gap-sm: 8px;
   --gap-md: 16px;
@@ -418,4 +418,30 @@ body {
   .page-card__actions {
     justify-content: flex-start;
   }
+}
+
+:root[data-theme="dark"] {
+  --color-bg: #07111f;
+  --color-card: #0f1b2d;
+  --color-surface: #0f1b2d;
+  --color-surface-muted: #142238;
+  --color-border: #26374f;
+  --color-border-strong: #38506e;
+  --color-text: #e5edf8;
+  --color-text-secondary: #91a4bd;
+  --color-primary-bg: #102b4f;
+  --color-primary-border: #1d4f85;
+  --shadow-card: 0 16px 34px rgb(0 0 0 / 24%);
+  --shadow-elevated: 0 22px 52px rgb(0 0 0 / 34%);
+  color-scheme: dark;
+}
+
+:root[data-theme="dark"] .app-header {
+  background: rgb(15 27 45 / 86%);
+  border-bottom-color: rgb(38 55 79 / 88%);
+}
+
+:root[data-theme="dark"] .app-shell,
+:root[data-theme="dark"] body {
+  background: radial-gradient(circle at 82% 12%, rgb(14 116 144 / 15%), transparent 30%), var(--color-bg);
 }

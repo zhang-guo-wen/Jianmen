@@ -3,6 +3,7 @@ package admin
 import (
 	"encoding/json"
 	"jianmen/internal/config"
+	"jianmen/internal/model"
 	"jianmen/internal/rbac"
 	"jianmen/internal/store"
 	"net/http"
@@ -19,7 +20,12 @@ func (s *Server) handleHosts(w http.ResponseWriter, r *http.Request) {
 			s.forbidden(w, r)
 			return
 		}
-		s.writeJSON(w, r, http.StatusOK, paginateHosts(s.store.Hosts(), r))
+		hosts, err := s.visibleHosts(r, s.store.Hosts())
+		if err != nil {
+			s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
+			return
+		}
+		s.writeJSON(w, r, http.StatusOK, paginateHosts(hosts, r))
 	case http.MethodPost:
 		if !s.requirePermission(r, rbac.ActionHostCreate) {
 			s.forbidden(w, r)
@@ -43,6 +49,11 @@ func (s *Server) handleCreateHost(w http.ResponseWriter, r *http.Request) {
 	view, err := s.store.AddHost(host)
 	if err != nil {
 		s.writeErrorText(w, r, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := s.grantCreatedResource(r, model.ResourceTypeHost, view.ID); err != nil {
+		_ = s.store.DeleteHost(view.ID)
+		s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
 		return
 	}
 	s.writeJSON(w, r, http.StatusCreated, view)
@@ -69,6 +80,11 @@ func (s *Server) handleHost(w http.ResponseWriter, r *http.Request) {
 			writeHostStoreError(w, r, err)
 			return
 		}
+		accounts, err = s.visibleTargets(r, accounts)
+		if err != nil {
+			s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
+			return
+		}
 		resp := paginateSlice(accounts, r, func(v store.TargetView, q string) bool {
 			return strings.Contains(strings.ToLower(v.Username), q) ||
 				strings.Contains(strings.ToLower(v.Name), q) ||
@@ -89,6 +105,15 @@ func (s *Server) handleHost(w http.ResponseWriter, r *http.Request) {
 			s.forbidden(w, r)
 			return
 		}
+		visible, err := s.hostVisible(r, id)
+		if err != nil {
+			s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
+			return
+		}
+		if !visible {
+			s.forbidden(w, r)
+			return
+		}
 		view, err := s.store.Host(id)
 		if err != nil {
 			writeHostStoreError(w, r, err)
@@ -100,10 +125,16 @@ func (s *Server) handleHost(w http.ResponseWriter, r *http.Request) {
 			s.forbidden(w, r)
 			return
 		}
+		if !s.requireResourceGrant(w, r, model.ResourceTypeHost, id) {
+			return
+		}
 		s.handleUpdateHost(w, r, id)
 	case http.MethodDelete:
 		if !s.requirePermission(r, rbac.ActionHostDelete) {
 			s.forbidden(w, r)
+			return
+		}
+		if !s.requireResourceGrant(w, r, model.ResourceTypeHost, id) {
 			return
 		}
 		if err := s.store.DeleteHost(id); err != nil {
@@ -140,7 +171,10 @@ func (s *Server) handleTargets(w http.ResponseWriter, r *http.Request) {
 			s.forbidden(w, r)
 			return
 		}
-		targets, err := s.connectableTargets(r, s.store.Targets())
+		targets, err := s.visibleTargets(r, s.store.Targets())
+		if err == nil {
+			targets, err = s.connectableTargets(r, targets)
+		}
 		if err != nil {
 			s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
 			return
@@ -171,6 +205,14 @@ func (s *Server) handleCreateTarget(w http.ResponseWriter, r *http.Request) {
 	var target config.Target
 	if err := json.NewDecoder(r.Body).Decode(&target); err != nil {
 		s.writeErrorText(w, r, http.StatusBadRequest, err.Error())
+		return
+	}
+	if strings.TrimSpace(target.HostID) == "" {
+		if !s.isSuperAdmin(userIDFromRequest(r)) {
+			s.writeErrorText(w, r, http.StatusBadRequest, "host_id is required")
+			return
+		}
+	} else if !s.requireResourceGrant(w, r, model.ResourceTypeHost, target.HostID) {
 		return
 	}
 	view, err := s.store.AddTarget(target)
@@ -205,6 +247,13 @@ func (s *Server) handleTestConnection(w http.ResponseWriter, r *http.Request) {
 	var target config.Target
 	if err := json.Unmarshal(encoded, &target); err != nil {
 		s.writeErrorText(w, r, http.StatusBadRequest, err.Error())
+		return
+	}
+	if target.ID != "" {
+		if !s.requireResourceGrant(w, r, model.ResourceTypeHostAccount, target.ID) {
+			return
+		}
+	} else if target.HostID != "" && !s.requireResourceGrant(w, r, model.ResourceTypeHost, target.HostID) {
 		return
 	}
 	hostKeyConfigProvided := target.InsecureIgnoreHostKey || target.HostKeyFingerprint != "" || target.KnownHostsPath != ""
@@ -293,6 +342,9 @@ func (s *Server) handleTarget(w http.ResponseWriter, r *http.Request) {
 			s.forbidden(w, r)
 			return
 		}
+		if !s.requireResourceGrant(w, r, model.ResourceTypeHostAccount, id) {
+			return
+		}
 		view, err := s.store.Target(id)
 		if err != nil {
 			writeTargetStoreError(w, r, err)
@@ -304,10 +356,16 @@ func (s *Server) handleTarget(w http.ResponseWriter, r *http.Request) {
 			s.forbidden(w, r)
 			return
 		}
+		if !s.requireResourceGrant(w, r, model.ResourceTypeHostAccount, id) {
+			return
+		}
 		s.handleUpdateTarget(w, r, id)
 	case http.MethodDelete:
 		if !s.requirePermission(r, rbac.ActionTargetDelete) {
 			s.forbidden(w, r)
+			return
+		}
+		if !s.requireResourceGrant(w, r, model.ResourceTypeHostAccount, id) {
 			return
 		}
 		if err := s.store.DeleteTarget(id); err != nil {

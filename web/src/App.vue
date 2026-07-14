@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <el-config-provider :locale="elementLocale">
     <router-view v-if="isLoginRoute" />
     <el-container v-else class="app-shell">
@@ -84,6 +84,7 @@ import { useRoute, useRouter } from "vue-router";
 import { clearToken, getToken } from "@/api/client";
 import { APP_NAV_ITEMS } from "@/navigation";
 import { usePermissionStore } from "@/stores/permission";
+import { usePreferencesStore } from "@/stores/preferences";
 import {
   isTranslationKey,
   useI18n,
@@ -105,13 +106,14 @@ const selectedLocale = computed<Locale>({
 });
 
 const permission = usePermissionStore();
+const preferences = usePreferencesStore();
 const navItems = computed(() =>
   APP_NAV_ITEMS.filter((item) => permission.canAccessMenu(item.key)),
 );
 
 onMounted(async () => {
   if (!isLoginRoute.value && getToken()) {
-    await permission.fetch();
+    await Promise.all([permission.fetch(), preferences.fetch().catch(() => undefined)]);
   }
 });
 
@@ -132,6 +134,7 @@ watchEffect(() => {
 
 function logout() {
   permission.reset();
+  preferences.reset();
   clearToken();
   router.push({ name: "login" });
 }

@@ -1,10 +1,11 @@
-import {
+﻿import {
   DataAnalysis,
   DocumentChecked,
   Key,
   Link,
   Lock,
   Monitor,
+  Setting,
 } from '@element-plus/icons-vue';
 import type { Component } from 'vue';
 import type { RouteRecordRaw } from 'vue-router';
@@ -92,5 +93,15 @@ export const APP_NAV_ITEMS: AppNavigationItem[] = [
     titleKey: 'route.rbac.title',
     descriptionKey: 'route.rbac.description',
     component: () => import('@/views/UnifiedRBACView.vue'),
+  },
+  {
+    key: 'settings',
+    path: '/settings',
+    name: 'settings',
+    icon: Setting,
+    labelKey: 'nav.settings',
+    titleKey: 'route.settings.title',
+    descriptionKey: 'route.settings.description',
+    component: () => import('@/views/SettingsView.vue'),
   },
 ];

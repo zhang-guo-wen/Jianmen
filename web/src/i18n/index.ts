@@ -1,4 +1,4 @@
-import elementEn from 'element-plus/es/locale/lang/en';
+﻿import elementEn from 'element-plus/es/locale/lang/en';
 import elementZhCn from 'element-plus/es/locale/lang/zh-cn';
 import { computed, inject, ref, type App, type InjectionKey } from 'vue';
 
@@ -120,6 +120,7 @@ const zhCN = {
   'nav.hosts': '主机管理',
   'nav.quickConnect': '快速连接',
   'nav.rbac': '权限管理',
+  'nav.settings': '配置管理',
 
   'route.audit.description': '安全事件与合规审计轨迹',
   'route.audit.title': '审计日志',
@@ -138,6 +139,8 @@ const zhCN = {
   'route.quickConnect.title': '快速连接',
   'route.rbac.description': '用户、角色与访问策略',
   'route.rbac.title': '权限管理',
+  'route.settings.description': '主题、终端与本地 SSH 客户端偏好',
+  'route.settings.title': '配置管理',
 
   'database.action.accounts': '账号',
   'database.action.connectionConfig': '连接配置',
@@ -779,6 +782,7 @@ const enUS = {
   'nav.hosts': 'Host Management',
   'nav.quickConnect': 'Quick Connect',
   'nav.rbac': 'RBAC',
+  'nav.settings': 'Settings',
 
   'route.audit.description': 'Security events and compliance trail',
   'route.audit.title': 'Audit Log',
@@ -797,6 +801,8 @@ const enUS = {
   'route.quickConnect.title': 'Quick Connect',
   'route.rbac.description': 'Users, roles, and access policy',
   'route.rbac.title': 'RBAC',
+  'route.settings.description': 'Theme, terminal, and local SSH client preferences',
+  'route.settings.title': 'Settings',
 
   'database.action.accounts': 'Accounts',
   'database.action.connectionConfig': 'Connection Config',

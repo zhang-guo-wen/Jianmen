@@ -20,11 +20,11 @@ import (
 
 // sendFakeMySQLHandshake 向客户端发送一个伪装 MySQL 8.0 握手包，
 // 让客户端先发送 login 包（包含用户名），以便网关解析账号。
-func sendFakeMySQLHandshake(conn net.Conn) error {
+func sendFakeMySQLHandshake(conn net.Conn) ([]byte, error) {
 	// 生成 20 字节随机 salt
 	salt := make([]byte, 20)
 	if _, err := rand.Read(salt); err != nil {
-		return err
+		return nil, err
 	}
 	capFlags := uint32(mysqlClientProtocol41 | mysqlClientSecureConnection | mysqlClientPluginAuth)
 	serverVersion := "8.0.28"
@@ -65,7 +65,7 @@ func sendFakeMySQLHandshake(conn net.Conn) error {
 	copy(pkt[4:], p)
 
 	_, err := conn.Write(pkt)
-	return err
+	return salt, err
 }
 
 // handleMySQL implements MySQL proxy authentication:
@@ -85,7 +85,8 @@ func sendFakeMySQLHandshake(conn net.Conn) error {
 // 13. Return gatewayConn for data relay
 func (g *Gateway) handleMySQL(ctx context.Context, client net.Conn) *gatewayConn {
 	// 发送伪装 handshake，让 MySQL 客户端先发 login 包
-	if err := sendFakeMySQLHandshake(client); err != nil {
+	fakeSalt, err := sendFakeMySQLHandshake(client)
+	if err != nil {
 		g.logger.Warn("mysql gateway failed to send fake handshake", "error", err)
 		return nil
 	}
@@ -114,6 +115,11 @@ func (g *Gateway) handleMySQL(ctx context.Context, client net.Conn) *gatewayConn
 		g.logger.Warn("mysql gateway empty username in login")
 		return nil
 	}
+	authResponse, err := mysqlLoginAuthResponse(clientLoginPkt.payload)
+	if err != nil {
+		g.logger.Warn("mysql gateway failed to parse authentication response", "error", err)
+		return nil
+	}
 
 	resolved, err := g.resolveAccount(obs.User)
 	if err != nil {
@@ -121,6 +127,10 @@ func (g *Gateway) handleMySQL(ctx context.Context, client net.Conn) *gatewayConn
 		return nil
 	}
 	acct := resolved.account
+	if g.store == nil || g.store.AuthenticateMySQLConnectionPassword(ctx, resolved.user.ID, acct.ID, fakeSalt, authResponse) != nil {
+		g.logger.Warn("mysql gateway auth failed", "user", resolved.rawName)
+		return nil
+	}
 
 	// RBAC check
 	rbacUserID := resolved.user.ID

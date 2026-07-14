@@ -279,8 +279,6 @@ function pickClientFile() {
   input.click();
 }
 
-// 删除了 onClientFilePicked 和 filePickerRef
-
 const { t } = useI18n();
 const router = useRouter();
 const activeTab = ref('ssh');

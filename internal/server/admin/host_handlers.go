@@ -245,19 +245,22 @@ func (s *Server) handleTestConnection(w http.ResponseWriter, r *http.Request) {
 
 	clientConfig, err := store.ClientConfigForTarget(targetCfg)
 	if err != nil {
-		s.writeJSON(w, r, http.StatusOK, map[string]any{"ok": false, "message": "配置错误: " + err.Error()})
+		s.writeJSON(w, r, http.StatusOK, map[string]any{"ok": false, "error": "配置错误: " + err.Error()})
 		return
 	}
 
 	clientConfig.Timeout = 10 * time.Second
 
+	start := time.Now()
 	conn, err := ssh.Dial("tcp", addr, clientConfig)
+	elapsed := time.Since(start)
+	latencyMs := elapsed.Milliseconds()
 	if err != nil {
-		s.writeJSON(w, r, http.StatusOK, map[string]any{"ok": false, "message": "连接失败: " + friendlySSHError(err)})
+		s.writeJSON(w, r, http.StatusOK, map[string]any{"ok": false, "latency_ms": latencyMs, "error": "连接失败: " + friendlySSHError(err)})
 		return
 	}
 	conn.Close()
-	s.writeJSON(w, r, http.StatusOK, map[string]any{"ok": true, "message": "连接成功 (" + addr + ")"})
+	s.writeJSON(w, r, http.StatusOK, map[string]any{"ok": true, "latency_ms": latencyMs, "message": "连接成功 (" + addr + ")"})
 }
 
 func (s *Server) handleTarget(w http.ResponseWriter, r *http.Request) {

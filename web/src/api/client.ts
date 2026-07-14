@@ -581,7 +581,9 @@ export interface ResourceGroupPayload {
 
 export interface TestConnectionResult {
   ok: boolean;
-  message: string;
+  message?: string;
+  latency_ms?: number;
+  error?: string;
 }
 
 // ── helpers ────────────────────────────────────────────────────────────

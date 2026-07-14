@@ -386,6 +386,23 @@
             </el-form-item>
           </div>
 
+          <el-form-item label="连接测试">
+            <div class="test-connection-row">
+              <el-button :loading="testingConnection" @click="testConnection">测试连接</el-button>
+              <template v-if="accountTestResult">
+                <el-tag :type="accountTestResult.ok ? 'success' : 'danger'" size="small">
+                  {{ accountTestResult.ok ? '可达' : '不可达' }}
+                </el-tag>
+                <span v-if="accountTestResult.latency_ms !== undefined" class="test-connection-meta">
+                  延迟 {{ accountTestResult.latency_ms }}ms
+                </span>
+                <span v-if="accountTestResult.error" class="test-connection-error">
+                  {{ accountTestResult.error }}
+                </span>
+              </template>
+            </div>
+          </el-form-item>
+
           <el-collapse v-model="accountMorePanels" class="more-collapse">
             <el-collapse-item title="更多设置" name="more">
               <el-form-item label="账号名称">
@@ -466,11 +483,6 @@
             </el-collapse-item>
           </el-collapse>
         </el-form>
-        <template #footer-extra>
-          <el-button :loading="testingConnection" @click="testConnection"
-            >测试连接</el-button
-          >
-        </template>
       </FormDialog>
 
       <!-- 连接弹窗 -->
@@ -696,6 +708,11 @@ const editingAccountId = ref<string | null>(null);
 const submittingHost = ref(false);
 const submittingAccount = ref(false);
 const testingConnection = ref(false);
+const accountTestResult = ref<{
+  ok: boolean;
+  error?: string;
+  latency_ms?: number;
+} | null>(null);
 const deletingId = ref("");
 const statusUpdatingId = ref("");
 const hostNameTouched = ref(false);
@@ -1519,6 +1536,7 @@ async function openCreateAccountDialog(host: HostView) {
   editingAccountId.value = null;
   accountNameTouched.value = false;
   accountMorePanels.value = [];
+  accountTestResult.value = null;
   resetAccountForm();
   accountFormVisible.value = true;
   await nextTick();
@@ -1534,6 +1552,7 @@ async function openEditAccountDialog(target: TargetRecord) {
   editingAccountId.value = id;
   accountNameTouched.value = true;
   accountMorePanels.value = [];
+  accountTestResult.value = null;
   resetAccountForm(recordToAccountForm(target));
   accountFormVisible.value = true;
   accountDetailLoading.value = true;
@@ -1603,15 +1622,19 @@ async function testConnection() {
     return;
   }
   testingConnection.value = true;
+  accountTestResult.value = null;
   try {
     const result = await apiClient.testTargetConnection(buildAccountPayload());
-    if (result.ok) {
-      ElMessage.success(result.message || "连接成功");
-    } else {
-      ElMessage.error(result.message || "连接失败");
-    }
+    accountTestResult.value = {
+      ok: result.ok,
+      latency_ms: result.latency_ms,
+      error: result.ok ? undefined : (result.error || result.message || "连接失败"),
+    };
   } catch (err) {
-    ElMessage.error(err instanceof Error ? err.message : "连接测试失败");
+    accountTestResult.value = {
+      ok: false,
+      error: err instanceof Error ? err.message : "连接测试失败",
+    };
   } finally {
     testingConnection.value = false;
   }
@@ -1865,6 +1888,22 @@ onMounted(() => {
 }
 .more-collapse :deep(.el-collapse-item__wrap) {
   border-bottom: 0;
+}
+
+/* Test connection */
+.test-connection-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.test-connection-meta {
+  color: #667085;
+  font-size: 12px;
+}
+.test-connection-error {
+  color: var(--el-color-danger);
+  font-size: 12px;
 }
 
 /* Auth method radio */

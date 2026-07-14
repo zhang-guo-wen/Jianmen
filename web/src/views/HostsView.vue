@@ -619,7 +619,7 @@
               本地 SSH 客户端打开<el-icon class="el-icon--right"><ArrowDown /></el-icon>
             </el-button>
             <template #dropdown>
-              <el-dropdown-menu @click.prevent>
+              <el-dropdown-menu @click.prevent.stop>
                 <a
                   v-for="item in SSH_CLIENT_LIST"
                   :key="item.command"
@@ -628,7 +628,7 @@
                   style="display:block;padding:5px 16px;color:#303133;text-decoration:none;font-size:13px"
                   @mouseenter="(e: MouseEvent) => (e.target as HTMLElement).style.backgroundColor = '#f5f7fa'"
                   @mouseleave="(e: MouseEvent) => (e.target as HTMLElement).style.backgroundColor = ''"
-                  @click="onHostSSHClientClick"
+                  @click.stop="onHostSSHClientClick"
                 >
                   {{ item.label }}
                 </a>

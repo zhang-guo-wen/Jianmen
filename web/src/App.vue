@@ -2,7 +2,7 @@
   <el-config-provider :locale="elementLocale">
     <router-view v-if="isLoginRoute" />
     <el-container v-else class="app-shell">
-      <el-aside class="app-sidebar" width="260px">
+      <el-aside class="app-sidebar" width="174px">
         <div class="brand">
           <div class="brand-mark">JM</div>
           <div class="brand-copy">
@@ -117,6 +117,12 @@ const ALL_NAV_ITEMS: Array<{
   labelKey: TranslationKey;
   menuKey: string;
 }> = [
+  {
+    path: "/quick-connect",
+    icon: Link,
+    labelKey: "nav.quickConnect",
+    menuKey: "quickConnect",
+  },
   { path: "/hosts", icon: Monitor, labelKey: "nav.hosts", menuKey: "hosts" },
   {
     path: "/databases",
@@ -147,12 +153,6 @@ const ALL_NAV_ITEMS: Array<{
     icon: DocumentChecked,
     labelKey: "nav.audit",
     menuKey: "audit",
-  },
-  {
-    path: "/quick-connect",
-    icon: Link,
-    labelKey: "nav.quickConnect",
-    menuKey: "quickConnect",
   },
 ];
 

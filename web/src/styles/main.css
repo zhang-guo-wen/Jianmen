@@ -23,7 +23,7 @@
   --color-warning-border: #fed7aa;
   --shadow-card: 0 12px 30px rgb(15 23 42 / 6%);
   --shadow-elevated: 0 18px 46px rgb(15 23 42 / 10%);
-  --sidebar-width: 260px;
+  --sidebar-width: 174px;
   --header-height: 96px;
 
   color: var(--color-text);

@@ -1,6 +1,7 @@
 <template>
-  <div class="applications-page">
-    <DataTableCard
+  <div class="view-stack">
+    <div class="page-container">
+      <DataTableCard
       :data="apps"
       :loading="loading"
       :total="total"
@@ -90,6 +91,7 @@
         </el-collapse>
       </el-form>
     </FormDialog>
+    </div>
   </div>
 </template>
 
@@ -232,7 +234,4 @@ async function deleteApp(app: ApplicationView) {
 </script>
 
 <style scoped>
-.applications-page {
-  height: 100%;
-}
 </style>

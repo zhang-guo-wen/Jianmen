@@ -238,7 +238,7 @@ const resourceTabType = ref('host_account')
 const resourceSearchQuery = ref('')
 const loadingResources = ref(false)
 const hostAccounts = ref<Array<{ id: string; username: string; host_name: string; host_address: string }>>([])
-const dbAccounts = ref<Array<{ id: string; unique_name: string; instance_name: string }>>([])
+const dbAccounts = ref<Array<{ id: string; unique_name: string; username: string; instance_name: string }>>([])
 const resourceGroups = ref<Array<{ id: string; name: string; description: string; group_type: string; member_count: number }>>([])
 const accountGroups = ref<Array<{ id: string; name: string; description: string; member_count: number }>>([])
 const selectedResources = ref<Array<{ id: string; name: string; type: string }>>([])
@@ -327,7 +327,7 @@ const getResourceName = (grant: ResourceGrantRecord) => {
   const host = hostAccounts.value.find(a => a.id === grant.resource_id)
   if (host) return `${host.username}@${host.host_name || host.host_address || ''}`
   const db = dbAccounts.value.find(a => a.id === grant.resource_id)
-  if (db) return `${db.unique_name} (${db.instance_name || ''})`
+  if (db) return `${db.username || db.unique_name} (${db.instance_name || ''})`
   const group = resourceGroups.value.find(g => g.id === grant.resource_id)
   if (group) return group.name
   const accGroup = accountGroups.value.find(g => g.id === grant.resource_id)
@@ -470,7 +470,7 @@ const loadHostAccounts = async () => {
 
 const loadDbAccounts = async () => {
   const instances = await apiClient.getDBInstances({ page: 1, page_size: 100 })
-  const allAccounts: Array<{ id: string; unique_name: string; instance_name: string }> = []
+  const allAccounts: Array<{ id: string; unique_name: string; username: string; instance_name: string }> = []
   for (const inst of (instances.items || [])) {
     if (!inst.id) continue
     try {
@@ -479,7 +479,8 @@ const loadDbAccounts = async () => {
         if (a.id) {
           allAccounts.push({
             id: a.id,
-            unique_name: a.unique_name || a.username || '',
+            unique_name: a.unique_name || '',
+            username: a.username || '',
             instance_name: inst.name || ''
           })
         }

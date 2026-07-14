@@ -761,8 +761,8 @@ async function loadGroupOptions() {
   try {
     const resourceGroups = await apiClient.getResourceGroups({ group_type: 'resource' });
     const accountGroups = await apiClient.getResourceGroups({ group_type: 'account' });
-    hostGroupOptions.value = resourceGroups.map(g => g.name).filter(Boolean);
-    accountGroupOptions.value = accountGroups.map(g => g.name).filter(Boolean);
+    hostGroupOptions.value = (resourceGroups.items ?? []).map(g => g.name).filter(Boolean);
+    accountGroupOptions.value = (accountGroups.items ?? []).map(g => g.name).filter(Boolean);
   } catch {
     // 加载失败时保持空列表
   }

@@ -49,14 +49,28 @@ func (s *Server) listResourceGroups(w http.ResponseWriter, r *http.Request) {
 	}
 
 	groupType := r.URL.Query().Get("group_type")
+	q := strings.TrimSpace(r.URL.Query().Get("q"))
 
-	query := s.db
+	tx := s.db.Model(&model.ResourceGroup{})
 	if groupType != "" {
-		query = query.Where("group_type = ?", groupType)
+		tx = tx.Where("group_type = ?", groupType)
+	}
+	if q != "" {
+		like := "%" + q + "%"
+		tx = tx.Where("name LIKE ? OR description LIKE ?", like, like)
+	}
+
+	var total int64
+	tx.Count(&total)
+
+	page := positiveIntRequestQuery(r, "page", 1)
+	pageSize := positiveIntRequestQuery(r, "page_size", 20)
+	if pageSize > 200 {
+		pageSize = 200
 	}
 
 	var groups []model.ResourceGroup
-	if err := query.Order("group_type, name").Find(&groups).Error; err != nil {
+	if err := tx.Order("group_type, name").Offset((page - 1) * pageSize).Limit(pageSize).Find(&groups).Error; err != nil {
 		s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -83,7 +97,7 @@ func (s *Server) listResourceGroups(w http.ResponseWriter, r *http.Request) {
 		result = append(result, gwc)
 	}
 
-	s.writeJSON(w, r, http.StatusOK, result)
+	s.writeJSON(w, r, http.StatusOK, pageResponse{Items: result, Total: int(total), Page: page, PageSize: pageSize})
 }
 
 func (s *Server) createResourceGroup(w http.ResponseWriter, r *http.Request) {

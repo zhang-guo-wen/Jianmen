@@ -1,44 +1,47 @@
 <template>
   <div class="view-stack">
     <div class="page-container">
-      <div class="page-card">
-        <div class="page-card__toolbar">
-          <div class="page-card__spacer"></div>
-          <div class="page-card__actions">
-            <el-button type="primary" @click="showCreateDialog">
-              <el-icon><Plus /></el-icon>
-              {{ t('resourceGroups.create') }}
-            </el-button>
-          </div>
-        </div>
-        <div class="page-card__body">
-          <el-table :data="groups" v-loading="loading" stripe>
-            <el-table-column :label="t('resourceGroups.name')" prop="name" min-width="150" />
-            <el-table-column :label="t('resourceGroups.description')" prop="description" min-width="200" show-overflow-tooltip />
-            <el-table-column :label="t('resourceGroups.hostCount')" width="80">
-              <template #default="{ row }">
-                {{ row.host_count || 0 }}
-              </template>
-            </el-table-column>
-            <el-table-column :label="t('resourceGroups.databaseCount')" width="110">
-              <template #default="{ row }">
-                {{ row.database_count || 0 }}
-              </template>
-            </el-table-column>
-            <el-table-column :label="t('common.actions')" width="150" fixed="right">
-              <template #default="{ row }">
-                <el-button link type="primary" size="small" @click="showEditDialog(row)">
-                  {{ t('common.edit') }}
-                </el-button>
-                <el-button link type="danger" size="small" @click="deleteGroup(row)">
-                  {{ t('common.delete') }}
-                </el-button>
-              </template>
-            </el-table-column>
-          </el-table>
-        </div>
-      </div>
+      <DataTableCard
+        :data="groups"
+        :loading="loading"
+        :total="total"
+        v-model:page="page"
+        v-model:page-size="pageSize"
+        search-placeholder="搜索分组名称、描述..."
+        @search="onSearch"
+      >
+        <template #toolbar-extra>
+          <el-button type="primary" @click="showCreateDialog">
+            <el-icon><Plus /></el-icon>
+            {{ t('resourceGroups.create') }}
+          </el-button>
+        </template>
 
+        <el-table-column :label="t('resourceGroups.name')" prop="name" min-width="150" />
+        <el-table-column :label="t('resourceGroups.description')" prop="description" min-width="200" show-overflow-tooltip />
+        <el-table-column :label="t('resourceGroups.hostCount')" width="80">
+          <template #default="{ row }">
+            {{ row.host_count || 0 }}
+          </template>
+        </el-table-column>
+        <el-table-column :label="t('resourceGroups.databaseCount')" width="110">
+          <template #default="{ row }">
+            {{ row.database_count || 0 }}
+          </template>
+        </el-table-column>
+        <el-table-column :label="t('common.actions')" width="150" fixed="right">
+          <template #default="{ row }">
+            <el-button link type="primary" size="small" @click="showEditDialog(row)">
+              {{ t('common.edit') }}
+            </el-button>
+            <el-button link type="danger" size="small" @click="deleteGroup(row)">
+              {{ t('common.delete') }}
+            </el-button>
+          </template>
+        </el-table-column>
+      </DataTableCard>
+
+      <!-- 创建/编辑对话框 -->
       <el-dialog
         v-model="dialogVisible"
         :title="editingGroup ? t('resourceGroups.edit') : t('resourceGroups.create')"
@@ -62,17 +65,22 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, watch, onMounted } from 'vue'
 import { useI18n } from '@/i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
 import { apiClient, type ResourceGroupRecord } from '@/api/client'
+import DataTableCard from '@/components/DataTableCard.vue'
 
 const { t } = useI18n()
 
 const groups = ref<ResourceGroupRecord[]>([])
 const loading = ref(false)
 const saving = ref(false)
+const page = ref(1)
+const pageSize = ref(20)
+const total = ref(0)
+const keyword = ref('')
 
 const dialogVisible = ref(false)
 const editingGroup = ref<ResourceGroupRecord | null>(null)
@@ -84,13 +92,28 @@ const form = reactive({
 const loadGroups = async () => {
   loading.value = true
   try {
-    const all = await apiClient.getResourceGroups()
-    groups.value = all.filter(g => g.group_type !== 'account')
+    const res = await apiClient.getResourceGroups({
+      group_type: 'resource',
+      page: page.value,
+      page_size: pageSize.value,
+      q: keyword.value || undefined,
+    })
+    groups.value = res.items ?? []
+    total.value = res.total ?? 0
   } catch (e: any) {
     ElMessage.error(e.message || 'Failed to load groups')
   } finally {
     loading.value = false
   }
+}
+
+const searching = ref(false)
+
+const onSearch = (q: string) => {
+  keyword.value = q
+  searching.value = true
+  page.value = 1
+  loadGroups()
 }
 
 const showCreateDialog = () => {
@@ -152,6 +175,12 @@ const deleteGroup = async (group: ResourceGroupRecord) => {
     }
   }
 }
+
+// 分页变化时重新加载（搜索时跳过，避免 onSearch 中已调用 loadGroups 导致双重加载）
+watch([page, pageSize], () => {
+  if (searching.value) { searching.value = false; return }
+  loadGroups()
+})
 
 onMounted(() => {
   loadGroups()

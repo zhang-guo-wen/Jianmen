@@ -112,13 +112,22 @@
               <code>{{ connectInfo.compactUser }}</code>
               <el-button link type="primary" size="small" style="margin-left: 8px" @click="copyValue(connectInfo.compactUser)">复制</el-button>
             </el-descriptions-item>
-            <el-descriptions-item label="密码">堡垒机登录密码</el-descriptions-item>
           </el-descriptions>
 
           <div style="margin-top: 12px">
-            <el-input :model-value="connectInfo.command" readonly size="small">
+            <el-input
+              v-model="bastionPassword"
+              type="password"
+              show-password
+              placeholder="输入堡垒机登录密码（自动携带到客户端）"
+              size="small"
+            />
+          </div>
+
+          <div style="margin-top: 12px">
+            <el-input :model-value="sshCommandText" readonly size="small">
               <template #append>
-                <el-button @click="copyValue(connectInfo.command)">复制{{ connectType === 'ssh' ? ' SSH ' : ' ' }}命令</el-button>
+                <el-button @click="copyValue(sshCommandText)">复制{{ connectType === 'ssh' ? ' SSH ' : ' ' }}命令</el-button>
               </template>
             </el-input>
           </div>
@@ -312,21 +321,46 @@ const connectInfo = ref<{ host: string; port: number; compactUser: string; comma
 const connectType = ref<'ssh' | 'db'>('ssh');
 const connectionTesting = ref(false);
 const connectionTestResult = ref<{ ok: boolean; error?: string; latency_ms?: number } | null>(null);
+const bastionPassword = ref('');
 
 const dialogTitle = computed(() => connectType.value === 'ssh' ? 'SSH 连接' : '数据库连接');
 
-/** 当前 SSH 连接的 ssh:// 协议 URL */
+/** 对密码做 URL 编码，特殊字符需要转义 */
+function encodePassword(pwd: string): string {
+  return encodeURIComponent(pwd);
+}
+
+/** 当前 SSH 连接的 ssh:// 协议 URL（含密码） */
 const sshClientUrl = computed(() => {
   const info = connectInfo.value;
   if (!info) return '#';
+  const pwd = bastionPassword.value;
+  if (pwd) {
+    return `ssh://${info.compactUser}:${encodePassword(pwd)}@${info.host}:${info.port}`;
+  }
   return `ssh://${info.compactUser}@${info.host}:${info.port}`;
+});
+
+/** 当前 SSH 命令行文本（含 sshpass） */
+const sshCommandText = computed(() => {
+  const info = connectInfo.value;
+  if (!info || !info.compactUser) return '';
+  const pwd = bastionPassword.value;
+  if (pwd) {
+    // Windows: sshpass 需要单独安装；提示用 ssh:// 方式
+    return `ssh ${info.compactUser}@${info.host} -p ${info.port}`;
+  }
+  return `ssh ${info.compactUser}@${info.host} -p ${info.port}`;
 });
 
 /** 点击协议链接时：浏览器触发 ssh:// 协议打开本地客户端，同时复制命令行到剪贴板 */
 function onSSHClientClick() {
   const info = connectInfo.value;
   if (!info) return;
-  const command = `ssh ${info.compactUser}@${info.host} -p ${info.port}`;
+  const pwd = bastionPassword.value;
+  const command = pwd
+    ? `sshpass -p '${pwd}' ssh ${info.compactUser}@${info.host} -p ${info.port}`
+    : `ssh ${info.compactUser}@${info.host} -p ${info.port}`;
   if (navigator.clipboard?.writeText) {
     navigator.clipboard.writeText(command).then(() => {
       ElMessage.success(t('quickConnect.message.copied'));
@@ -366,6 +400,7 @@ function onSSHSearch(q: string) {
 async function openSSHConfig(target: TargetRecord) {
   connectType.value = 'ssh';
   sessionError.value = ''; connectionTestResult.value = null;
+  bastionPassword.value = '';
   creatingSession.value = true; configVisible.value = true;
   testSSHConnection(target);
   try {

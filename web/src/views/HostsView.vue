@@ -588,10 +588,17 @@
                   >复制</el-button
                 >
               </el-descriptions-item>
-              <el-descriptions-item label="密码"
-                >堡垒机登录密码</el-descriptions-item
-              >
             </el-descriptions>
+
+            <div style="margin-top: 12px">
+              <el-input
+                v-model="connectionPassword"
+                type="password"
+                show-password
+                placeholder="输入堡垒机登录密码（自动携带到客户端）"
+                size="small"
+              />
+            </div>
 
             <div style="margin-top: 12px">
               <el-input
@@ -749,6 +756,7 @@ const bastionPort = ref(47102);
 const userSessionId = ref("");
 const creatingSession = ref(false);
 const connectionError = ref("");
+const connectionPassword = ref("");
 const connectionTesting = ref(false);
 const connectionTestResult = ref<{
   ok: boolean;
@@ -1721,6 +1729,7 @@ async function openConnectionDialog(target: TargetRecord) {
   selectedConnectionTarget.value = target;
   userSessionId.value = "";
   connectionError.value = "";
+  connectionPassword.value = "";
   connectionTestResult.value = null;
   creatingSession.value = true;
   connectionDialogVisible.value = true;
@@ -1833,12 +1842,21 @@ const SSH_CLIENT_LIST = [
   { command: 'winterm', label: 'Windows Terminal' },
 ] as const;
 
-/** 当前连接的 ssh:// 协议 URL */
+/** 对密码做 URL 编码 */
+function encodePassword(pwd: string): string {
+  return encodeURIComponent(pwd);
+}
+
+/** 当前连接的 ssh:// 协议 URL（含密码） */
 const hostSSHClientUrl = computed(() => {
   const user = connectionCompactUser.value
   const host = bastionHost.value
   const port = bastionPort.value || 47102
   if (!user || !host) return '#'
+  const pwd = connectionPassword.value
+  if (pwd) {
+    return `ssh://${user}:${encodePassword(pwd)}@${host}:${port}`
+  }
   return `ssh://${user}@${host}:${port}`
 })
 
@@ -1848,7 +1866,11 @@ function onHostSSHClientClick() {
   const host = bastionHost.value
   const port = bastionPort.value || 47102
   if (!user || !host) return
-  navigator.clipboard?.writeText(`ssh ${user}@${host} -p ${port}`)
+  const pwd = connectionPassword.value
+  const command = pwd
+    ? `sshpass -p '${pwd}' ssh ${user}@${host} -p ${port}`
+    : `ssh ${user}@${host} -p ${port}`
+  navigator.clipboard?.writeText(command)
     .then(() => ElMessage.success('已复制'))
     .catch(() => {})
 }

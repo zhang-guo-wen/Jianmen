@@ -194,7 +194,7 @@
         <el-input v-model="initRegCommand" readonly type="textarea" :rows="3" style="font-family:monospace;font-size:12px" />
       </div>
       <template #footer>
-        <el-button type="primary" @click="copyInitCommand">复制命令</el-button>
+        <el-button type="primary" @click="copyInitCommand">复制注册命令</el-button>
         <el-button @click="initClientVisible = false">关闭</el-button>
       </template>
     </el-dialog>

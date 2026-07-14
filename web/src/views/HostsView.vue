@@ -1054,7 +1054,7 @@ function emptyAccountForm(): AccountForm {
     password: "",
     private_key_pem: "",
     passphrase: "",
-    host_key_mode: "fingerprint",
+    host_key_mode: "ignore",
     insecure_ignore_host_key: false,
     host_key_fingerprint: "",
     known_hosts_path: "",

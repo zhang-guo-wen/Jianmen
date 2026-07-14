@@ -69,6 +69,16 @@ func (s *Server) requirePermission(r *http.Request, action string) bool {
 	return allowed
 }
 
+func (s *Server) withPermission(action string, next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if !s.requirePermission(r, action) {
+			s.forbidden(w, r)
+			return
+		}
+		next(w, r)
+	}
+}
+
 // isSuperAdmin 判断用户是否为超级管理员（配置文件中定义的用户 或 setup 向导创建的管理员）。
 func (s *Server) isSuperAdmin(userID string) bool {
 	if s.superAdminIDs == nil {

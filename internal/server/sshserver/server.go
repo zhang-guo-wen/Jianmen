@@ -24,12 +24,12 @@ import (
 )
 
 type Server struct {
-	cfg                    *config.Config
-	store                  store.Store
-	rbacChecker            *rbac.Checker
-	resourceGrantChecker   *rbac.ResourceGrantChecker
-	logger                 *slog.Logger
-	superAdminIDs          map[string]bool
+	cfg                  *config.Config
+	store                store.Store
+	rbacChecker          *rbac.Checker
+	resourceGrantChecker *rbac.ResourceGrantChecker
+	logger               *slog.Logger
+	superAdminIDs        map[string]bool
 }
 
 // auditStore adapts store.Store to recording.AuditSink.
@@ -171,8 +171,8 @@ func (s *Server) handleConn(ctx context.Context, rawConn net.Conn, serverConfig 
 		return
 	}
 
-	if target.Disabled {
-		s.logger.Warn("target is disabled", "user", user.Username, "target", target.ID)
+	if reason := targetUnavailableReason(target, time.Now().UTC()); reason != "" {
+		s.logger.Warn("target is unavailable", "user", user.Username, "target", target.ID, "reason", reason, "expires_at", target.ExpiresAt)
 		return
 	}
 
@@ -281,6 +281,16 @@ func (s *Server) handleConn(ctx context.Context, rawConn net.Conn, serverConfig 
 		proxy := sshproxy.NewSession(targetClient, channel, requests, recorder, s.logger)
 		go proxy.Serve(ctx)
 	}
+}
+
+func targetUnavailableReason(target store.TargetConfig, now time.Time) string {
+	if target.Disabled {
+		return "disabled"
+	}
+	if target.Expired(now) {
+		return "expired"
+	}
+	return ""
 }
 
 func permissionsForUser(user model.User) *ssh.Permissions {

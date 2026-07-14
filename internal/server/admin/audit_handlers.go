@@ -13,7 +13,7 @@ import (
 )
 
 func (s *Server) handleAuditSSH(w http.ResponseWriter, r *http.Request) {
-	if !s.requirePermission(r, rbac.ActionSessionView) {
+	if !s.requirePermission(r, rbac.ActionAuditView) {
 		s.forbidden(w, r)
 		return
 	}
@@ -37,6 +37,10 @@ func (s *Server) handleAuditSSH(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAuditDB(w http.ResponseWriter, r *http.Request) {
+	if !s.requirePermission(r, rbac.ActionDBAuditView) {
+		s.forbidden(w, r)
+		return
+	}
 	params := store.AuditListParams{
 		Protocol: "mysql,postgres,redis",
 		Search:   strings.ToLower(r.URL.Query().Get("search")),
@@ -77,6 +81,15 @@ func (s *Server) handleAuditArtifact(w http.ResponseWriter, r *http.Request) {
 	session, err := s.store.GetAuditSession(sessionID)
 	if err != nil {
 		s.writeErrorText(w, r, http.StatusNotFound, "audit session not found")
+		return
+	}
+	action := rbac.ActionAuditView
+	switch strings.ToLower(session.Protocol) {
+	case "mysql", "postgres", "postgresql", "redis", "db", "database":
+		action = rbac.ActionDBAuditView
+	}
+	if !s.requirePermission(r, action) {
+		s.forbidden(w, r)
 		return
 	}
 

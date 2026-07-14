@@ -95,6 +95,7 @@
               <el-tabs v-model="resourceTabType" @tab-change="handleResourceTabChange" class="resource-tabs">
                 <el-tab-pane :label="t('resourceGrant.hostAccounts')" name="host_account" />
                 <el-tab-pane :label="t('resourceGrant.databaseAccounts')" name="database_account" />
+                <el-tab-pane label="应用" name="application" />
                 <el-tab-pane :label="t('resourceGrant.resourceGroups')" name="resource_group" />
                 <el-tab-pane :label="t('resourceGrant.accountGroups')" name="account_group" />
               </el-tabs>
@@ -169,6 +170,17 @@
                   <template #default="{ row }">
                     {{ row.instance_address || '' }}
                   </template>
+                </el-table-column>
+              </template>
+              <template v-else-if="resourceTabType === 'application'">
+                <el-table-column label="应用名称" min-width="160" show-overflow-tooltip>
+                  <template #default="{ row }">{{ row.name }}</template>
+                </el-table-column>
+                <el-table-column label="分组" min-width="120" show-overflow-tooltip>
+                  <template #default="{ row }">{{ row.group || '' }}</template>
+                </el-table-column>
+                <el-table-column label="代理端口" width="100">
+                  <template #default="{ row }">{{ row.listen_port }}</template>
                 </el-table-column>
               </template>
               </el-table>
@@ -256,6 +268,7 @@ const resourceSearchQuery = ref('')
 const loadingResources = ref(false)
 const hostAccounts = ref<Array<{ id: string; username: string; host_name: string; host_address: string }>>([])
 const dbAccounts = ref<Array<{ id: string; unique_name: string; username: string; instance_name: string; instance_address: string }>>([])
+const applications = ref<Array<{ id: string; name: string; group: string; listen_port: number }>>([])
 const resourceGroups = ref<Array<{ id: string; name: string; description: string; group_type: string; member_count: number }>>([])
 const accountGroups = ref<Array<{ id: string; name: string; description: string; member_count: number }>>([])
 const selectedResources = ref<Array<{ id: string; name: string; type: string }>>([])
@@ -306,11 +319,17 @@ const filteredResources = computed(() => {
       (g.name || '').toLowerCase().includes(query) ||
       (g.description || '').toLowerCase().includes(query)
     )
-  } else {
+  } else if (resourceTabType.value === 'account_group') {
     if (!query) return accountGroups.value
     return accountGroups.value.filter(g =>
       (g.name || '').toLowerCase().includes(query) ||
       (g.description || '').toLowerCase().includes(query)
+    )
+  } else {
+    if (!query) return applications.value
+    return applications.value.filter(app =>
+      (app.name || '').toLowerCase().includes(query) ||
+      (app.group || '').toLowerCase().includes(query)
     )
   }
 })
@@ -325,6 +344,7 @@ const resourceTypeLabel = (type: string) => {
   switch (type) {
     case 'host_account': return t('resourceGrant.hostAccounts')
     case 'database_account': return t('resourceGrant.databaseAccounts')
+    case 'application': return '应用'
     case 'resource_group': return t('resourceGrant.resourceGroups')
     case 'account_group': return t('resourceGrant.accountGroups')
     default: return type
@@ -346,6 +366,8 @@ const getResourceName = (grant: ResourceGrantRecord) => {
   if (host) return `${host.username}@${host.host_name || host.host_address || ''}`
   const db = dbAccounts.value.find(a => a.id === grant.resource_id)
   if (db) return `${db.username || db.unique_name} (${db.instance_name || ''})`
+  const app = applications.value.find(a => a.id === grant.resource_id)
+  if (app) return app.name
   const group = resourceGroups.value.find(g => g.id === grant.resource_id)
   if (group) return group.name
   const accGroup = accountGroups.value.find(g => g.id === grant.resource_id)
@@ -376,6 +398,7 @@ const ensureNamesLoaded = async () => {
   // 预加载所有关联数据用于表格中的名称显示
   const needHost = grants.value.some(g => g.resource_type === 'host_account')
   const needDb = grants.value.some(g => g.resource_type === 'database_account')
+  const needApplication = grants.value.some(g => g.resource_type === 'application')
   const needResGroup = grants.value.some(g => g.resource_type === 'resource_group')
   const needAccGroup = grants.value.some(g => g.resource_type === 'account_group')
 
@@ -383,6 +406,7 @@ const ensureNamesLoaded = async () => {
   if (userGroups.value.length === 0) await loadUserGroups()
   if (needHost && hostAccounts.value.length === 0) await loadHostAccounts()
   if (needDb && dbAccounts.value.length === 0) await loadDbAccounts()
+  if (needApplication && applications.value.length === 0) await loadApplications()
   if (needResGroup && resourceGroups.value.length === 0) await loadResourceGroups()
   if (needAccGroup && accountGroups.value.length === 0) await loadAccountGroups()
 }
@@ -433,6 +457,8 @@ const loadResources = async () => {
       await loadHostAccounts()
     } else if (resourceTabType.value === 'database_account') {
       await loadDbAccounts()
+    } else if (resourceTabType.value === 'application') {
+      await loadApplications()
     } else if (resourceTabType.value === 'resource_group') {
       await loadResourceGroups()
     } else if (resourceTabType.value === 'account_group') {
@@ -507,6 +533,16 @@ const loadDbAccounts = async () => {
     } catch { /* ignore */ }
   }
   dbAccounts.value = allAccounts
+}
+
+const loadApplications = async () => {
+  const first = await apiClient.getApplications({ page: 1, page_size: 200 })
+  applications.value = (first.items || []).map(app => ({
+    id: String(app.id ?? ''),
+    name: app.name || '',
+    group: app.group || '',
+    listen_port: Number(app.listen_port) || 0
+  }))
 }
 
 const handleResourceSelectionChange = (rows: any[]) => {

@@ -2,8 +2,6 @@ package admin
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -21,6 +19,7 @@ import (
 	"golang.org/x/crypto/ssh"
 
 	"jianmen/internal/model"
+	"jianmen/internal/rbac"
 	"jianmen/internal/recording"
 	"jianmen/internal/store"
 )
@@ -55,7 +54,8 @@ func (s *Server) handleWebTerminal(w http.ResponseWriter, r *http.Request) {
 		s.writeErrorText(w, r, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
-	if !s.authenticateWebTerminal(r) {
+	user, ok := s.authenticateWebTerminal(r)
+	if !ok {
 		s.writeErrorText(w, r, http.StatusUnauthorized, "missing or invalid bearer token")
 		return
 	}
@@ -65,13 +65,27 @@ func (s *Server) handleWebTerminal(w http.ResponseWriter, r *http.Request) {
 		s.writeErrorText(w, r, http.StatusBadRequest, err.Error())
 		return
 	}
-	target, err := s.resolveWebTerminalTarget(r.Context(), opts.TargetID)
+	target, err := s.resolveWebTerminalTarget(r.Context(), user, opts.TargetID)
 	if err != nil {
 		s.writeErrorText(w, r, http.StatusNotFound, err.Error())
 		return
 	}
 	if target.Disabled {
 		s.writeErrorText(w, r, http.StatusForbidden, "target is disabled or unavailable")
+		return
+	}
+	if target.Expired(time.Now().UTC()) {
+		s.writeErrorText(w, r, http.StatusForbidden, "target account has expired")
+		return
+	}
+	allowed, err := s.authorizeConnection(user.ID, rbac.ActionSessionConnect, model.ResourceTypeHostAccount, target.ID)
+	if err != nil {
+		s.logger.Warn("web terminal authorization failed", "user", user.Username, "target", target.ID, "error", err)
+		s.writeErrorText(w, r, http.StatusForbidden, "connection is not authorized")
+		return
+	}
+	if !allowed {
+		s.writeErrorText(w, r, http.StatusForbidden, "connection is not authorized")
 		return
 	}
 	targetClient, err := dialWebTerminalTarget(target)
@@ -88,7 +102,7 @@ func (s *Server) handleWebTerminal(w http.ResponseWriter, r *http.Request) {
 	}
 	defer conn.Close()
 
-	recorder := s.newWebTerminalRecorder(r, target)
+	recorder := s.newWebTerminalRecorder(r, user, target)
 	if recorder != nil {
 		defer recorder.Close()
 	}
@@ -99,7 +113,7 @@ func (s *Server) handleWebTerminal(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (s *Server) authenticateWebTerminal(r *http.Request) bool {
+func (s *Server) authenticateWebTerminal(r *http.Request) (model.User, bool) {
 	// WebTerminal 使用与 Admin API 相同的 per-user token 认证
 	auth := r.Header.Get("Authorization")
 	token := strings.TrimPrefix(auth, "Bearer ")
@@ -112,22 +126,20 @@ func (s *Server) authenticateWebTerminal(r *http.Request) bool {
 		}
 	}
 	if token == "" {
-		return false
+		return model.User{}, false
 	}
 	if s.db == nil {
-		return true // 无 DB 时允许通过
+		return model.User{}, false
 	}
-	hash := sha256.Sum256([]byte(token))
-	hashStr := hex.EncodeToString(hash[:])
 	var user model.User
-	return s.db.Where("token_hash = ? AND status = ?", hashStr, "active").First(&user).Error == nil
+	if err := s.db.Where("token_hash = ? AND status = ?", hashToken(token), "active").First(&user).Error; err != nil {
+		return model.User{}, false
+	}
+	return user, true
 }
 
-func (s *Server) resolveWebTerminalTarget(ctx context.Context, targetID string) (store.TargetConfig, error) {
-	user := model.User{
-		Username:          "admin-web-terminal",
-		RequestedTargetID: targetID,
-	}
+func (s *Server) resolveWebTerminalTarget(ctx context.Context, user model.User, targetID string) (store.TargetConfig, error) {
+	user.RequestedTargetID = targetID
 	target, err := s.store.DefaultTarget(ctx, user)
 	if err != nil {
 		return store.TargetConfig{}, err
@@ -180,14 +192,11 @@ func dialWebTerminalTarget(target store.TargetConfig) (*ssh.Client, error) {
 	return ssh.Dial("tcp", target.Addr(), clientConfig)
 }
 
-func (s *Server) newWebTerminalRecorder(r *http.Request, target store.TargetConfig) *recording.SessionRecorder {
+func (s *Server) newWebTerminalRecorder(r *http.Request, user model.User, target store.TargetConfig) *recording.SessionRecorder {
 	if s == nil || s.cfg == nil || !s.cfg.Recording.Enabled {
 		return nil
 	}
-	user := model.User{
-		Username:          "admin-web-terminal",
-		RequestedTargetID: target.ID,
-	}
+	user.RequestedTargetID = target.ID
 	session := model.NewSession(user, target.ID, firstNonEmpty(target.Name, target.ID, target.Addr()), webTerminalClientIP(r))
 	session.Protocol = "ssh"
 	session.ProtocolSubtype = "web-terminal"

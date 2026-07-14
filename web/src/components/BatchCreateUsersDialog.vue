@@ -63,6 +63,11 @@
             <template #default="{ row }">
               <el-tag v-if="row.status === 'success'" type="success" size="small">已创建</el-tag>
               <el-tag v-else-if="row.status === 'creating'" type="warning" size="small">创建中</el-tag>
+              <el-tag v-else-if="row.status === 'partial'" type="warning" size="small" class="fail-tag">
+                <el-tooltip :content="row.error" placement="top">
+                  <span>部分成功</span>
+                </el-tooltip>
+              </el-tag>
               <el-tag v-else-if="row.status === 'fail'" type="danger" size="small" class="fail-tag">
                 <el-tooltip :content="row.error" placement="top">
                   <span>失败</span>
@@ -125,11 +130,21 @@ watch(() => props.visible, async (v) => {
     tableRows.value = []
     saving.value = false
     defaultRoleId.value = ''
-    // 加载角色列表
+    roles.value = []
     try {
-      const res = await api.apiClient.getRBACRoles()
-      roles.value = res.items ?? []
-    } catch { /* 非关键 */ }
+      const items: api.RBACRoleRecord[] = []
+      let currentPage = 1
+      while (true) {
+        const response = await api.apiClient.getRBACRoles({ page: currentPage, page_size: 200 })
+        const pageItems = response.items ?? []
+        items.push(...pageItems)
+        if (items.length >= (response.total ?? 0) || pageItems.length === 0) break
+        currentPage += 1
+      }
+      roles.value = items
+    } catch (err) {
+      ElMessage.error(err instanceof Error ? err.message : '加载角色失败')
+    }
   }
 })
 
@@ -142,7 +157,8 @@ interface BatchRow {
   username: string
   password: string
   roleId: string
-  status: 'pending' | 'creating' | 'success' | 'fail'
+  userId: string
+  status: 'pending' | 'creating' | 'success' | 'partial' | 'fail'
   error: string
 }
 
@@ -150,7 +166,7 @@ const tableRows = ref<BatchRow[]>([])
 const saving = ref(false)
 
 const allDone = computed(() =>
-  tableRows.value.length > 0 && tableRows.value.every(r => r.status !== 'pending')
+  tableRows.value.length > 0 && tableRows.value.every(r => r.status === 'success')
 )
 
 function toPinyin(name: string): string {
@@ -188,6 +204,7 @@ function formatRows() {
     username: toPinyin(name),
     password: genPassword(),
     roleId: defaultRoleId.value,
+    userId: '',
     status: 'pending' as const,
     error: '',
   }))
@@ -224,35 +241,48 @@ async function saveAll() {
     if (row.status === 'success') continue
     row.status = 'creating'
     row.error = ''
-    let userId = ''
-    try {
-      const res = await api.apiClient.createUser({
-        username: row.username.trim(),
-        password: row.password,
-        display_name: row.displayName.trim(),
-      })
-      // 获取新用户 ID
-      const created = res?.user
-      userId = String(created?.id ?? '')
-      row.status = 'success'
-    } catch (err) {
-      row.status = 'fail'
-      row.error = err instanceof Error ? err.message : '创建失败'
-      continue
+    if (!row.userId) {
+      try {
+        const res = await api.apiClient.createUser({
+          username: row.username.trim(),
+          password: row.password,
+          display_name: row.displayName.trim(),
+        })
+        const created = res?.user
+        row.userId = String(created?.id ?? '')
+        if (!row.userId) throw new Error('用户已创建，但响应中缺少用户 ID')
+      } catch (err) {
+        row.status = 'fail'
+        row.error = err instanceof Error ? err.message : '创建失败'
+        continue
+      }
     }
-    // 分配角色
-    if (userId && row.roleId) {
+
+    if (row.roleId) {
       try {
         await api.apiClient.createRBACUserRole({
-          user_id: userId,
+          user_id: row.userId,
           role_id: row.roleId,
         })
-      } catch { /* 角色分配失败不影响创建成功 */ }
+      } catch (err) {
+        row.status = 'partial'
+        row.error = `用户已创建，但角色分配失败：${err instanceof Error ? err.message : '未知错误'}`
+        continue
+      }
     }
+    row.status = 'success'
   }
   saving.value = false
-  if (tableRows.value.some(r => r.status === 'success')) {
+  const successCount = tableRows.value.filter(row => row.status === 'success').length
+  const partialCount = tableRows.value.filter(row => row.status === 'partial').length
+  const failCount = tableRows.value.filter(row => row.status === 'fail').length
+  if (tableRows.value.some(row => row.userId)) {
     emit('created')
+  }
+  if (partialCount || failCount) {
+    ElMessage.warning(`批量创建完成：成功 ${successCount}，部分成功 ${partialCount}，失败 ${failCount}`)
+  } else if (successCount) {
+    ElMessage.success(`成功创建 ${successCount} 个用户`)
   }
 }
 </script>

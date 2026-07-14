@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"golang.org/x/crypto/ssh"
@@ -85,6 +86,15 @@ type TargetConfig struct {
 
 func (t TargetConfig) Addr() string {
 	return formatHostAddress(t.Host, t.Port)
+}
+
+// Expired reports whether the target account has passed its configured expiry.
+func (t TargetConfig) Expired(now time.Time) bool {
+	if strings.TrimSpace(t.ExpiresAt) == "" {
+		return false
+	}
+	expiresAt, err := time.Parse(time.RFC3339Nano, t.ExpiresAt)
+	return err == nil && !now.Before(expiresAt)
 }
 
 type DatabaseInstanceView struct {
@@ -176,15 +186,15 @@ type SessionView struct {
 }
 
 var (
-	ErrTargetNotFound            = errSentinel("target not found")
-	ErrHostNotFound              = errSentinel("host not found")
-	ErrDBProxyNotFound           = errSentinel("database proxy not found")
-	ErrDBAccountNotFound         = errSentinel("database account not found")
-	ErrDBInstanceNotFound        = errSentinel("database instance not found")
-	ErrApplicationNotFound       = errSentinel("application not found")
-	ErrPlatformAccountNotFound   = errSentinel("platform account not found")
-	ErrPlatformShareNotFound     = errSentinel("platform account share not found")
-	ErrTargetUnavailable         = errSentinel("target unavailable")
+	ErrTargetNotFound          = errSentinel("target not found")
+	ErrHostNotFound            = errSentinel("host not found")
+	ErrDBProxyNotFound         = errSentinel("database proxy not found")
+	ErrDBAccountNotFound       = errSentinel("database account not found")
+	ErrDBInstanceNotFound      = errSentinel("database instance not found")
+	ErrApplicationNotFound     = errSentinel("application not found")
+	ErrPlatformAccountNotFound = errSentinel("platform account not found")
+	ErrPlatformShareNotFound   = errSentinel("platform account share not found")
+	ErrTargetUnavailable       = errSentinel("target unavailable")
 )
 
 type sentinelError struct{ msg string }
@@ -204,17 +214,17 @@ type AuditListParams struct {
 
 // AuditSessionView 审计列表视图。
 type AuditSessionView struct {
-	ID             string `json:"id"`
-	Username       string `json:"username"`
-	Protocol       string `json:"protocol"`
+	ID              string `json:"id"`
+	Username        string `json:"username"`
+	Protocol        string `json:"protocol"`
 	ProtocolSubtype string `json:"protocol_subtype,omitempty"`
-	TargetName     string `json:"target_name"`
-	AccountName    string `json:"account_name,omitempty"`
-	ClientIP       string `json:"client_ip"`
-	StartedAt      string `json:"started_at"`
-	EndedAt        string `json:"ended_at,omitempty"`
-	State          string `json:"state"`
-	ReplayDir      string `json:"replay_dir,omitempty"`
+	TargetName      string `json:"target_name"`
+	AccountName     string `json:"account_name,omitempty"`
+	ClientIP        string `json:"client_ip"`
+	StartedAt       string `json:"started_at"`
+	EndedAt         string `json:"ended_at,omitempty"`
+	State           string `json:"state"`
+	ReplayDir       string `json:"replay_dir,omitempty"`
 }
 
 // PageOpts 分页参数。
@@ -232,9 +242,9 @@ type PlatformAccountListParams struct {
 	Category   string // 按分类过滤
 	Page       int
 	PageSize   int
-	UserID     string // 当前用户 ID（用于可见性过滤）
+	UserID     string   // 当前用户 ID（用于可见性过滤）
 	RoleIDs    []string // 当前用户角色 ID 列表
-	IsAdmin    bool   // 是否管理员（可看全域）
+	IsAdmin    bool     // 是否管理员（可看全域）
 }
 
 // Store abstracts runtime data access. Implementations may back with

@@ -619,3 +619,17 @@ npm.cmd run typecheck
 均通过；`internal/server/appproxy` 当前没有测试文件。
 
 现有 `internal/server/admin/rbac_test.go` 主要直接调用 handler，没有经过 `withAuthAndUser` 路由链，也没有验证 `rbac:manage`，因此无法发现管理接口只验证登录、不验证授权的问题。
+
+## 整改实施记录
+
+2026-07-14 已按本报告的统一模型完成第一轮整改：
+
+- 后端建立唯一权限 Catalog，角色页面改为动态读取；以后新增菜单时在 Catalog 注册对应动作，即可进入“分配权限”。
+- 角色动作保存改为事务化替换，并拒绝 Catalog 外动作；资源级授权仍由 ResourceGrant 独立维护。
+- RBAC、资源授权、用户组、资源组、资产写操作及审计接口补充动作鉴权。
+- SSH、SFTP、Web Terminal、数据库代理和应用代理统一执行“动作允许 + 资源授权允许 + 无 deny”；Web Terminal 使用真实登录用户写入审计。
+- 主机账号有效期进入最终连接判断；快速连接仅查询当前用户可连接的账号资源。
+- `/api/me/permissions` 仅返回有效的全局动作，避免将资源级 allow 错当作全局权限。
+- 角色、用户角色和批量创建流程补齐全量分页及部分失败反馈。
+
+本轮仍保留两个清晰边界：菜单可见不代表资源可见；管理列表默认仍可用于资产管理，连接选择器使用 `connectable=true` 返回授权子集。最终连接路径始终重新鉴权，不能依赖前端隐藏。

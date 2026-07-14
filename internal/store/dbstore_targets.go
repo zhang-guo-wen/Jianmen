@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"gorm.io/gorm"
 
@@ -90,6 +91,10 @@ func (s *DBStore) targetConfig(a model.HostAccount) TargetConfig {
 		port = 22
 	}
 	disabled := a.Status == "disabled" || a.Host.Status == "disabled"
+	expiresAt := ""
+	if a.ExpiresAt != nil {
+		expiresAt = a.ExpiresAt.UTC().Format(time.RFC3339Nano)
+	}
 	return TargetConfig{
 		ID: a.ID, Username: a.Username,
 		Name:                  a.Username + "@" + formatHostAddress(host, port),
@@ -103,6 +108,7 @@ func (s *DBStore) targetConfig(a model.HostAccount) TargetConfig {
 		KnownHostsPath:        a.KnownHostsPath,
 		HostID:                a.HostID,
 		Disabled:              disabled,
+		ExpiresAt:             expiresAt,
 	}
 }
 
@@ -308,9 +314,13 @@ func (s *DBStore) DeleteTarget(id string) error {
 }
 
 func (s *DBStore) DefaultTarget(_ context.Context, user model.User) (TargetConfig, error) {
+	now := time.Now().UTC()
 	if user.RequestedTargetID != "" {
 		var a model.HostAccount
-		if err := s.db.Preload("Host").Where("id = ? AND status = ?", user.RequestedTargetID, "active").First(&a).Error; err != nil {
+		if err := s.db.Preload("Host").
+			Where("id = ? AND status = ?", user.RequestedTargetID, "active").
+			Where("expires_at IS NULL OR expires_at > ?", now).
+			First(&a).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return TargetConfig{}, fmt.Errorf("%w: target %q is not available", ErrTargetUnavailable, user.RequestedTargetID)
 			}
@@ -326,6 +336,7 @@ func (s *DBStore) DefaultTarget(_ context.Context, user model.User) (TargetConfi
 	if err := s.db.Preload("Host").
 		Joins("JOIN hosts ON hosts.id = host_accounts.host_id").
 		Where("host_accounts.status = ?", "active").
+		Where("host_accounts.expires_at IS NULL OR host_accounts.expires_at > ?", now).
 		Where("hosts.status IS NULL OR hosts.status <> ?", "disabled").
 		Order("host_accounts.created_at ASC").
 		First(&account).Error; err != nil {

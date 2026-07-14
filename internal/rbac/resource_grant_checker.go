@@ -93,31 +93,44 @@ func (c *ResourceGrantChecker) groupGrantsForUser(userID string) ([]model.Resour
 
 // matchesGrant 检查授权是否匹配资源
 func (c *ResourceGrantChecker) matchesGrant(grant model.ResourceGrant, resourceType, resourceID string) bool {
-	// 检查资源类型
-	if !resourceTypeMatches(grant.ResourceType, resourceType) {
-		return false
+	switch grant.ResourceType {
+	case model.ResourceTypeGroup:
+		return c.groupContainsResource(grant.ResourceID, resourceType, resourceID, model.ResourceGroupTypeResource)
+	case model.ResourceTypeAccountGroup:
+		return c.groupContainsResource(grant.ResourceID, resourceType, resourceID, model.ResourceGroupTypeAccount)
+	default:
+		return resourceTypeMatches(grant.ResourceType, resourceType) &&
+			resourceIDMatches(grant.ResourceID, resourceID)
 	}
-
-	// 检查资源ID
-	if !resourceIDMatches(grant.ResourceID, resourceID) {
-		// 如果是资源组，检查资源是否在组内
-		if grant.ResourceType == model.ResourceTypeGroup {
-			return c.groupContainsResource(grant.ResourceID, resourceType, resourceID)
-		}
-		return false
-	}
-
-	return true
 }
 
 // groupContainsResource 检查资源组是否包含指定资源
 // 通过 hosts.group_name / database_instances.group_name 查找（一对多关系）
-func (c *ResourceGrantChecker) groupContainsResource(groupID, resourceType, resourceID string) bool {
+func (c *ResourceGrantChecker) groupContainsResource(groupID, resourceType, resourceID, groupType string) bool {
 	var group model.ResourceGroup
-	if err := c.db.First(&group, "id = ?", groupID).Error; err != nil {
+	if err := c.db.First(&group, "id = ? AND group_type = ?", groupID, groupType).Error; err != nil {
 		return false
 	}
 	groupName := group.Name
+
+	if groupType == model.ResourceGroupTypeAccount {
+		switch resourceType {
+		case model.ResourceTypeHostAccount:
+			var count int64
+			c.db.Model(&model.HostAccount{}).
+				Where("group_name = ? AND id = ?", groupName, resourceID).
+				Count(&count)
+			return count > 0
+		case model.ResourceTypeDatabaseAccount:
+			var count int64
+			c.db.Model(&model.DatabaseAccount{}).
+				Where("group_name = ? AND id = ?", groupName, resourceID).
+				Count(&count)
+			return count > 0
+		default:
+			return false
+		}
+	}
 
 	switch {
 	case resourceType == model.ResourceTypeHostAccount:

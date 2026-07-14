@@ -17,6 +17,10 @@ func (s *Server) handleDBGateway(w http.ResponseWriter, r *http.Request) {
 		s.writeErrorText(w, r, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
+	if !s.requirePermission(r, rbac.ActionDBProxyView) {
+		s.forbidden(w, r)
+		return
+	}
 	cfg := s.cfg.DatabaseGateway
 	host, port := parseListenAddr(cfg.ListenAddr)
 	s.writeJSON(w, r, http.StatusOK, map[string]any{
@@ -126,9 +130,18 @@ func (s *Server) handleDBInstance(w http.ResponseWriter, r *http.Request) {
 	if child == "accounts" {
 		switch r.Method {
 		case http.MethodGet:
+			if !s.requirePermission(r, rbac.ActionDBProxyView) {
+				s.forbidden(w, r)
+				return
+			}
 			accounts, err := s.store.InstanceAccounts(id)
 			if err != nil {
 				writeDBStoreError(w, r, err)
+				return
+			}
+			accounts, err = s.connectableDatabaseAccounts(r, accounts)
+			if err != nil {
+				s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
 				return
 			}
 
@@ -140,6 +153,10 @@ func (s *Server) handleDBInstance(w http.ResponseWriter, r *http.Request) {
 			})
 			s.writeJSON(w, r, http.StatusOK, resp)
 		case http.MethodPost:
+			if !s.requirePermission(r, rbac.ActionDBProxyCreate) {
+				s.forbidden(w, r)
+				return
+			}
 			s.handleCreateDBAccount(w, r, id)
 		default:
 			w.Header().Set("Allow", "GET, POST")
@@ -183,8 +200,16 @@ func (s *Server) handleDBInstance(w http.ResponseWriter, r *http.Request) {
 		}
 		s.writeJSON(w, r, http.StatusOK, view)
 	case http.MethodPut:
+		if !s.requirePermission(r, rbac.ActionDBProxyUpdate) {
+			s.forbidden(w, r)
+			return
+		}
 		s.handleUpdateDBInstance(w, r, id)
 	case http.MethodDelete:
+		if !s.requirePermission(r, rbac.ActionDBProxyDelete) {
+			s.forbidden(w, r)
+			return
+		}
 		if err := s.store.DeleteDatabaseInstance(id); err != nil {
 			writeDBStoreError(w, r, err)
 			return
@@ -267,8 +292,16 @@ func (s *Server) handleDBAccount(w http.ResponseWriter, r *http.Request) {
 		}
 		s.writeJSON(w, r, http.StatusOK, view)
 	case http.MethodPut:
+		if !s.requirePermission(r, rbac.ActionDBProxyUpdate) {
+			s.forbidden(w, r)
+			return
+		}
 		s.handleUpdateDBAccount(w, r, id)
 	case http.MethodDelete:
+		if !s.requirePermission(r, rbac.ActionDBProxyDelete) {
+			s.forbidden(w, r)
+			return
+		}
 		if err := s.store.DeleteDatabaseAccount(id); err != nil {
 			writeDBStoreError(w, r, err)
 			return

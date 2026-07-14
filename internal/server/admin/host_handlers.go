@@ -60,6 +60,10 @@ func (s *Server) handleHost(w http.ResponseWriter, r *http.Request) {
 			s.writeErrorText(w, r, http.StatusMethodNotAllowed, "method not allowed")
 			return
 		}
+		if !s.requirePermission(r, rbac.ActionTargetView) {
+			s.forbidden(w, r)
+			return
+		}
 		accounts, err := s.store.HostAccounts(id)
 		if err != nil {
 			writeHostStoreError(w, r, err)
@@ -92,8 +96,16 @@ func (s *Server) handleHost(w http.ResponseWriter, r *http.Request) {
 		}
 		s.writeJSON(w, r, http.StatusOK, view)
 	case http.MethodPut:
+		if !s.requirePermission(r, rbac.ActionHostUpdate) {
+			s.forbidden(w, r)
+			return
+		}
 		s.handleUpdateHost(w, r, id)
 	case http.MethodDelete:
+		if !s.requirePermission(r, rbac.ActionHostDelete) {
+			s.forbidden(w, r)
+			return
+		}
 		if err := s.store.DeleteHost(id); err != nil {
 			writeHostStoreError(w, r, err)
 			return
@@ -128,7 +140,12 @@ func (s *Server) handleTargets(w http.ResponseWriter, r *http.Request) {
 			s.forbidden(w, r)
 			return
 		}
-		resp := paginateSlice(s.store.Targets(), r, func(v store.TargetView, q string) bool {
+		targets, err := s.connectableTargets(r, s.store.Targets())
+		if err != nil {
+			s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
+			return
+		}
+		resp := paginateSlice(targets, r, func(v store.TargetView, q string) bool {
 			return strings.Contains(strings.ToLower(v.Name), q) ||
 				strings.Contains(strings.ToLower(v.Username), q) ||
 				strings.Contains(strings.ToLower(v.Host), q) ||
@@ -283,8 +300,16 @@ func (s *Server) handleTarget(w http.ResponseWriter, r *http.Request) {
 		}
 		s.writeJSON(w, r, http.StatusOK, view)
 	case http.MethodPut:
+		if !s.requirePermission(r, rbac.ActionTargetUpdate) {
+			s.forbidden(w, r)
+			return
+		}
 		s.handleUpdateTarget(w, r, id)
 	case http.MethodDelete:
+		if !s.requirePermission(r, rbac.ActionTargetDelete) {
+			s.forbidden(w, r)
+			return
+		}
 		if err := s.store.DeleteTarget(id); err != nil {
 			writeTargetStoreError(w, r, err)
 			return

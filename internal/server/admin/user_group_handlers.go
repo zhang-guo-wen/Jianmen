@@ -6,10 +6,15 @@ import (
 	"strings"
 
 	"jianmen/internal/model"
+	"jianmen/internal/rbac"
 )
 
 // handleUserGroups handles user group CRUD operations
 func (s *Server) handleUserGroups(w http.ResponseWriter, r *http.Request) {
+	if !s.requirePermission(r, rbac.ActionRBACManage) {
+		s.forbidden(w, r)
+		return
+	}
 	switch r.Method {
 	case http.MethodGet:
 		s.listUserGroups(w, r)
@@ -22,6 +27,10 @@ func (s *Server) handleUserGroups(w http.ResponseWriter, r *http.Request) {
 
 // handleUserGroupOrMembers handles user group and member operations
 func (s *Server) handleUserGroupOrMembers(w http.ResponseWriter, r *http.Request) {
+	if !s.requirePermission(r, rbac.ActionRBACManage) {
+		s.forbidden(w, r)
+		return
+	}
 	path := strings.TrimPrefix(r.URL.Path, "/api/user-groups/")
 
 	// Check if this is a member operation: /api/user-groups/{id}/members/...

@@ -380,6 +380,7 @@ async function loadTargets() {
       page: targetPage.value,
       page_size: targetPageSize.value,
       q: sshKeyword.value.trim() || undefined,
+      connectable: true,
     });
     targets.value = res.items ?? [];
     targetTotal.value = res.total ?? 0;
@@ -460,7 +461,7 @@ async function loadDBAccounts() {
     const all: any[] = [];
     for (const inst of insts) {
       if (inst.status === 'disabled') continue;
-      const accRes = await apiClient.getDBAccounts(String(inst.id), { page: 1, page_size: 999 });
+      const accRes = await apiClient.getDBAccounts(String(inst.id), { page: 1, page_size: 999, connectable: true });
       const items = accRes.items ?? [];
       for (const a of items) {
         a._instance_name = inst.name;

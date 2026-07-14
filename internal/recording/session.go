@@ -114,6 +114,7 @@ func NewSessionRecorder(root string, session model.Session, recordInput, recordC
 	}
 	meta := map[string]any{
 		"session_id":       session.ID,
+		"user_id":          session.UserID,
 		"user":             session.User.Username,
 		"target":           session.Target,
 		"account_username": session.AccountUsername,
@@ -254,9 +255,9 @@ func (r *SessionRecorder) RecordFileEvent(event FileEvent) {
 	event.Seq = r.fileSeq
 	event.SessionID = r.session.ID
 	r.updateFileSummaryLocked(event)
-		if r.auditSink != nil {
-			_ = r.auditSink.WriteFileEvent(r.session.ID, time.UnixMilli(event.StartedAt), event.Action, event.Path, event.Size, event.Result)
-		}
+	if r.auditSink != nil {
+		_ = r.auditSink.WriteFileEvent(r.session.ID, time.UnixMilli(event.StartedAt), event.Action, event.Path, event.Size, event.Result)
+	}
 
 	raw, err := json.Marshal(event)
 	if err != nil {

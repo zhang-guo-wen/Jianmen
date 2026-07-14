@@ -52,6 +52,7 @@ func (s *Server) handleUserSessions(w http.ResponseWriter, r *http.Request) {
 	var resourceID string
 
 	var hostAccount model.HostAccount
+	connectionAction := rbac.ActionSessionConnect
 	if err := s.db.Where("id = ? AND status = ?", req.TargetID, "active").First(&hostAccount).Error; err == nil {
 		// 主机账号
 		var host model.Host
@@ -71,6 +72,7 @@ func (s *Server) handleUserSessions(w http.ResponseWriter, r *http.Request) {
 			}
 			compactPrefix = util.PrefixDatabase
 			resourceType = "database_account"
+			connectionAction = rbac.ActionDBConnect
 			resourceID = dbAccount.ResourceID
 			// Redis 实例使用 R 前缀
 			if dbAccount.Instance.Protocol == "redis" {
@@ -85,6 +87,16 @@ func (s *Server) handleUserSessions(w http.ResponseWriter, r *http.Request) {
 		}
 	} else {
 		s.writeErrorText(w, r, http.StatusInternalServerError, "failed to look up target")
+		return
+	}
+	allowed, err := s.authorizeConnection(userID, connectionAction, resourceType, req.TargetID)
+	if err != nil {
+		s.logger.Warn("connection configuration authorization failed", "user_id", userID, "resource_type", resourceType, "resource_id", req.TargetID, "error", err)
+		s.forbidden(w, r)
+		return
+	}
+	if !allowed {
+		s.forbidden(w, r)
 		return
 	}
 

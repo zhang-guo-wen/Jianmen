@@ -97,10 +97,9 @@
       <span class="perm-count-label">{{ selectedCountText }}</span>
     </div>
     <div class="perm-groups">
-      <div v-for="group in permGroups" :key="group.resource" class="perm-group">
+      <div v-for="group in permGroups" :key="group.module" class="perm-group">
         <div class="perm-group-title">
-          <span class="perm-resource-icon">{{ group.icon }}</span>
-          {{ group.resource }}
+          {{ group.moduleLabel }}
         </div>
         <div class="perm-group-actions">
           <el-button link size="small" @click="toggleGroup(group, true)">全选</el-button>
@@ -114,6 +113,7 @@
             :value="perm.action"
             class="perm-check-item"
           >
+            <span class="perm-label">{{ perm.label }}</span>
             <span class="perm-action-label">{{ perm.action }}</span>
             <span class="perm-action-desc">{{ perm.desc }}</span>
           </el-checkbox>
@@ -139,54 +139,10 @@ const { apiClient } = api;
 
 type RBACRoleRecord = api.RBACRoleRecord;
 type RBACRolePayload = api.RBACRolePayload;
-type RBACPermissionRecord = api.RBACPermissionRecord;
-type RBACRolePermissionRecord = api.RBACRolePermissionRecord;
+type RBACPermissionDefinition = api.RBACPermissionDefinition;
 
-interface PermItem { action: string; label: string; desc: string; }
-interface PermGroup { resource: string; icon: string; permissions: PermItem[]; }
-
-const PERM_GROUPS: PermGroup[] = [
-  {
-    resource: '主机管理', icon: '🖥️', permissions: [
-      { action: 'host:view',   label: '查看主机',   desc: '浏览主机列表与详情' },
-      { action: 'host:create', label: '创建主机',   desc: '新增纳管主机' },
-      { action: 'host:update', label: '编辑主机',   desc: '修改主机配置' },
-      { action: 'host:delete', label: '删除主机',   desc: '移除纳管主机' },
-      { action: 'target:view',   label: '查看目标', desc: '浏览目标资产' },
-      { action: 'target:create', label: '创建目标', desc: '新增目标资产' },
-      { action: 'target:update', label: '编辑目标', desc: '修改目标配置' },
-      { action: 'target:delete', label: '删除目标', desc: '移除目标资产' },
-    ],
-  },
-  {
-    resource: '数据库管理', icon: '🗄️', permissions: [
-      { action: 'dbproxy:view',   label: '查看实例',      desc: '浏览数据库实例列表' },
-      { action: 'dbproxy:create', label: '创建实例',      desc: '新增数据库代理实例' },
-      { action: 'dbproxy:update', label: '编辑实例',      desc: '修改数据库代理配置' },
-      { action: 'dbproxy:delete', label: '删除实例',      desc: '删除数据库代理实例' },
-      { action: 'db:connect',     label: '连接数据库',     desc: '通过代理连接数据库' },
-      { action: 'db:audit:view',  label: '查看数据库审计', desc: '浏览数据库审计记录' },
-    ],
-  },
-  {
-    resource: '用户与角色', icon: '👥', permissions: [
-      { action: 'rbac:manage', label: '管理用户与角色', desc: '创建用户、角色并分配权限' },
-    ],
-  },
-  {
-    resource: '会话与传输', icon: '📡', permissions: [
-      { action: 'session:connect', label: '连接会话', desc: '建立 SSH 连接' },
-      { action: 'session:view',    label: '查看会话', desc: '浏览会话记录' },
-      { action: 'sftp:read',       label: 'SFTP 读取', desc: '通过 SFTP 下载文件' },
-      { action: 'sftp:write',      label: 'SFTP 写入', desc: '通过 SFTP 上传文件' },
-    ],
-  },
-  {
-    resource: '审计日志', icon: '📋', permissions: [
-      { action: 'audit:view', label: '查看审计', desc: '浏览操作审计日志' },
-    ],
-  },
-];
+interface PermItem extends RBACPermissionDefinition { desc: string; }
+interface PermGroup { module: string; moduleLabel: string; permissions: PermItem[]; }
 
 const roles = ref<RBACRoleRecord[]>([]);
 const loading = ref(false);
@@ -215,10 +171,26 @@ const permDialogVisible = ref(false);
 const savingPerms = ref(false);
 const currentPermRole = ref<RBACRoleRecord | null>(null);
 const selectedPerms = ref<string[]>([]);
-const existingBindings = ref<RBACRolePermissionRecord[]>([]);
-const allPermissions = ref<RBACPermissionRecord[]>([]);
+const catalog = ref<RBACPermissionDefinition[]>([]);
+const rolePermCountMap = ref<Record<string, number>>({});
 
-const permGroups = PERM_GROUPS;
+const permGroups = computed<PermGroup[]>(() => {
+  const groups = new Map<string, PermGroup>();
+  for (const permission of catalog.value) {
+    if (!permission.assignable) continue;
+    let group = groups.get(permission.module);
+    if (!group) {
+      group = {
+        module: permission.module,
+        moduleLabel: permission.module_label || permission.module,
+        permissions: [],
+      };
+      groups.set(permission.module, group);
+    }
+    group.permissions.push({ ...permission, desc: permission.description });
+  }
+  return Array.from(groups.values());
+});
 
 const permDialogTitle = computed(() =>
   currentPermRole.value ? `分配权限 — ${currentPermRole.value.name}` : '分配权限',
@@ -228,18 +200,25 @@ const selectedCountText = computed(() =>
   `${selectedPerms.value.length} 项已选`,
 );
 
-const rolePermCountMap = computed(() => {
-  const map: Record<string, number> = {};
-  for (const b of existingBindings.value) {
-    const rid = String(b.role_id ?? '');
-    map[rid] = (map[rid] || 0) + 1;
-  }
-  return map;
-});
-
 function rolePermCount(roleId: string | number | undefined): number {
   if (!roleId) return 0;
   return rolePermCountMap.value[String(roleId)] || 0;
+}
+
+async function loadRoleActionCounts() {
+  const entries = await Promise.all(
+    roles.value.map(async role => {
+      const roleId = String(role.id ?? '');
+      if (!roleId) return [roleId, 0] as const;
+      try {
+        const response = await apiClient.getRBACRoleActions(roleId);
+        return [roleId, response.actions?.length ?? 0] as const;
+      } catch {
+        return [roleId, 0] as const;
+      }
+    }),
+  );
+  rolePermCountMap.value = Object.fromEntries(entries);
 }
 
 async function loadRoles() {
@@ -253,9 +232,7 @@ async function loadRoles() {
     });
     roles.value = res.items ?? [];
     total.value = res.total ?? 0;
-    // Load all role-permission bindings
-    const bindingsRes = await apiClient.getRBACRolePermissions();
-    existingBindings.value = bindingsRes.items ?? [];
+    await loadRoleActionCounts();
   } catch (err) {
     error.value = err instanceof Error ? err.message : t('roles.error.load');
   } finally {
@@ -344,15 +321,15 @@ async function deleteRole(role: RBACRoleRecord) {
 // ── Permission dialog ──
 async function openPermDialog(role: RBACRoleRecord) {
   currentPermRole.value = role;
-  // Load current bindings for this role
   const roleId = String(role.id ?? '');
-  const rolePerms = existingBindings.value.filter(b => String(b.role_id) === roleId);
-  selectedPerms.value = rolePerms.map(b => {
-    const permId = String(b.permission_id);
-    const perm = allPermissions.value.find(p => String(p.id) === permId);
-    return perm?.action ?? '';
-  }).filter(Boolean);
-  permDialogVisible.value = true;
+  try {
+    const response = await apiClient.getRBACRoleActions(roleId);
+    selectedPerms.value = response.actions ?? [];
+    permDialogVisible.value = true;
+  } catch (err) {
+    currentPermRole.value = null;
+    ElMessage.error(err instanceof Error ? err.message : '加载角色权限失败');
+  }
 }
 
 watch(permDialogVisible, (val) => {
@@ -379,52 +356,12 @@ async function savePermissions() {
 
   savingPerms.value = true;
   try {
-    // Ensure all selected actions have Permission records
-    await ensurePermissionsExist(selectedPerms.value);
-
-    // Reload permissions
-    const permsRes = await apiClient.getRBACPermissions();
-    allPermissions.value = permsRes.items ?? [];
-
-    // Build action → permission_id map
-    const actionToPermId = new Map<string, string>();
-    for (const p of allPermissions.value) {
-      if (p.action) actionToPermId.set(p.action, String(p.id ?? ''));
-    }
-
-    // Get current bindings
-    const current = existingBindings.value.filter(b => String(b.role_id) === roleId);
-
-    const currentActions = new Set(
-      current.map(b => {
-        const perm = allPermissions.value.find(p => String(p.id) === String(b.permission_id));
-        return perm?.action ?? '';
-      }).filter(Boolean),
-    );
-
-    const desiredActions = new Set(selectedPerms.value);
-
-    // Add new bindings
-    for (const action of desiredActions) {
-      if (!currentActions.has(action)) {
-        const permId = actionToPermId.get(action);
-        if (permId) {
-          await apiClient.createRBACRolePermission({ role_id: roleId, permission_id: permId });
-        }
-      }
-    }
-
-    // Remove deselected bindings
-    for (const binding of current) {
-      const perm = allPermissions.value.find(p => String(p.id) === String(binding.permission_id));
-      if (perm?.action && !desiredActions.has(perm.action)) {
-        await apiClient.deleteRBACRolePermission(String(binding.id ?? ''));
-      }
-    }
-
-    // Reload bindings
-    const bindingsRes = await apiClient.getRBACRolePermissions();
-    existingBindings.value = bindingsRes.items ?? [];
+    const response = await apiClient.replaceRBACRoleActions(roleId, selectedPerms.value);
+    selectedPerms.value = response.actions ?? [];
+    rolePermCountMap.value = {
+      ...rolePermCountMap.value,
+      [roleId]: selectedPerms.value.length,
+    };
 
     ElMessage.success(`权限已更新（${selectedPerms.value.length} 项）`);
     permDialogVisible.value = false;
@@ -435,23 +372,14 @@ async function savePermissions() {
   }
 }
 
-async function ensurePermissionsExist(actions: string[]) {
-  const existing = new Set(allPermissions.value.map(p => p.action).filter(Boolean) as string[]);
-  for (const action of actions) {
-    if (!existing.has(action)) {
-      await apiClient.createRBACPermission({ action, effect: 'allow' });
-      existing.add(action);
-    }
-  }
-}
-
 onMounted(async () => {
   await loadRoles();
-  // Also load all permissions once for the dialog mapping
   try {
-    const res = await apiClient.getRBACPermissions();
-    allPermissions.value = res.items ?? [];
-  } catch { /* non-critical */ }
+    const response = await apiClient.getRBACCatalog();
+    catalog.value = response.items ?? [];
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : '加载权限目录失败';
+  }
 });
 </script>
 
@@ -469,6 +397,7 @@ onMounted(async () => {
 .perm-group-actions { margin-bottom: 4px; padding-left: 22px; }
 .perm-check-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 2px 8px; padding-left: 22px; }
 .perm-check-item { margin-right: 0; }
+.perm-label { font-size: 12px; color: #334155; font-weight: 600; margin-right: 6px; }
 .perm-action-label { font-family: "SF Mono", "Cascadia Code", "Consolas", monospace; font-size: 12px; color: #334155; }
 .perm-action-desc { font-size: 11px; color: #94a3b8; margin-left: 6px; }
 

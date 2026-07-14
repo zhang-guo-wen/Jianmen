@@ -557,6 +557,7 @@ func TestEncryptionKeyRequiresSuperAdminToken(t *testing.T) {
 
 func TestHandleTestDBConnectionPayloadRequiresCredentials(t *testing.T) {
 	server, _ := newAdminDBTestServer(t)
+	server.superAdminIDs["u-admin"] = true
 	req := httptest.NewRequest(http.MethodPost, "/api/db/accounts/test", strings.NewReader(`{"instance_id":"","username":"","password":""}`))
 	req = asTestSuperAdmin(req)
 	rec := httptest.NewRecorder()
@@ -570,6 +571,7 @@ func TestHandleTestDBConnectionPayloadRequiresCredentials(t *testing.T) {
 
 func TestHandleTestDBConnectionPayloadDoesNotCreateAccount(t *testing.T) {
 	server, db := newAdminDBTestServer(t)
+	server.superAdminIDs["u-admin"] = true
 	inst := model.DatabaseInstance{Name: "temp-test", Protocol: "mysql", Address: "127.0.0.1", Port: 1, Status: "active"}
 	if err := db.Create(&inst).Error; err != nil {
 		t.Fatalf("create instance: %v", err)

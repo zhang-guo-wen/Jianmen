@@ -320,3 +320,81 @@ ElOption ElOptionGroup ElPagination ElRadio ElRadioButton
 ElRadioGroup ElSegmented ElSelect ElSlider ElSwitch
 ElTable ElTableColumn ElTabPane ElTabs ElTag ElTooltip
 ```
+
+## 系统化调试教训
+
+日期：2026-07-14
+
+本次"更多按钮点不了"的排查经历了 5 轮错误尝试后才找到根因。关键教训：
+
+### 排查路径回顾
+
+| 轮次 | 假设 | 方案 | 结果 |
+|------|------|------|------|
+| 1 | `fixed="right"` 列克隆 DOM 阻断事件 | `el-dropdown` + `teleported` | ❌ |
+| 2 | `el-dropdown` 本身在 fixed 列不兼容 | 换 `el-popover` | ❌（内容直接内联展开） |
+| 3 | `fixed="right"` 是罪魁祸首 | 去掉 `fixed="right"`，恢复 `el-dropdown` | ❌ |
+| 4 | `el-button` 作为触发器事件传播异常 | 换 `<span>` 做触发器 | ❌ |
+| 5 | Element Plus 弹出组件全都不兼容 | 手写 popup（`Teleport` + 坐标计算） | ✅（但浪费） |
+| **根因** | **`ElDropdown` 根本没注册** | `main.ts` 加注册 | ✅ |
+
+### 核心教训
+
+1. **组件不响应 → 先查注册，再查 DOM。** 按需注册的项目里，模板中未注册的组件会被当成普通 HTML 元素静默渲染，不报错、不警告、不工作。
+2. **3 次修复失败后必须质疑根本假设。** 第 4 次失败时就应该问"这个组件真的存在吗？"而不是继续在 DOM/事件层面深挖。
+3. **手写实现虽然是可靠的兜底方案，但在用它之前应该先排除配置/注册问题。**
+4. **不要看到一个可能的原因就跳进去修。** `fixed="right"` 确实在某些场景下有问题，但它不是本次的根因，"看起来像"不代表"真的是"。
+
+### 排查清单
+
+遇到 Element Plus 组件不工作时，按此顺序排查：
+1. 组件是否在 `main.ts` 中注册？（5 秒，搜索一下）
+2. 浏览器控制台有没有 Vue 警告？（"Failed to resolve component"）
+3. 浏览器 DevTools Elements 面板中组件是否渲染为 `<el-xxx>` 原始标签？
+4. 然后再考虑 DOM 结构、事件传播、CSS 等问题
+
+## 操作列按钮设计准则
+
+日期：2026-07-14
+
+### 主机管理和数据库管理的操作列
+
+统一为三按钮布局：`连接` | `编辑` | `更多 ▼`
+
+| 按钮 | 行为 |
+|------|------|
+| 连接 | 先查账号数：1 个 → 直接弹连接窗；0 个 → 提示无账号；多个 → 打开账号管理弹窗 |
+| 编辑 | 打开编辑弹窗（主机/实例） |
+| 更多 ▼ | 下拉菜单：审计日志 / 在线会话 / 权限管理 / 删除（红色） |
+
+### 连接按钮智能行为实现要点
+
+- 必须先 `setSelectedHost/Instance` + 加载账号列表，再判断 `accounts.value.length`
+- 单账号直接调 `openConnectionDialog(accounts.value[0])`
+- 多账号打开 `accountsDialogVisible = true` + `ElMessage.info('请从账号列表中选择要连接的账号')`
+- 服务器端分页时 `accountPageSize` 可能不足以判断真实账号数，此时应信任 `account_count` 字段（需要后端返回），或者设 `pageSize=1` 快速试探
+
+### 删除函数清理
+
+移除"新增账号"下拉项后，`openCreateAccountForHost()` 和 `openCreateAccountForInstance()` 变为未使用函数，需要一并删除。移除后还要检查相关 import（如 `nextTick`）是否仍有其他引用。
+
+## Worktree 开发注意事项
+
+日期：2026-07-14
+
+### 合并冲突
+
+本次在合并 worktree 分支回 dev 时，`DatabaseView.vue` 的 CSS 区域产生冲突：
+- dev 分支有人添加了 `.protocol-tag` 和 `.account-mgmt-btn` 样式
+- worktree 分支添加了 `.table-actions` 和 `.danger-dropdown-item` 样式
+- 解决方式：保留两边所有样式，按顺序排列
+
+### worktree 中 npm 依赖
+
+worktree 创建后不包含 `node_modules/`，需要先 `cd web && npm install`。
+`npm run typecheck` 报 `vue-tsc not found` 时就是依赖没装。
+
+### 提交路径
+
+从 worktree 目录中提交时，路径相对于 worktree 根目录。退出 worktree 回到主目录后合并。
+注意 `web/` 目录是自己的 git 工作区，在主目录中 `src/views/HostsView.vue` 的路径是相对于 `web/`。

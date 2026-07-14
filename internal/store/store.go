@@ -253,6 +253,11 @@ type Store interface {
 	Authenticate(ctx context.Context, username, password string) (model.User, error)
 	AuthenticatePublicKey(ctx context.Context, username string, key ssh.PublicKey) (model.User, error)
 	Users() []UserView
+	UserPreference(ctx context.Context, userID string) (model.UserPreference, error)
+	SaveUserPreference(ctx context.Context, preference model.UserPreference) (model.UserPreference, error)
+	CreateConnectionPassword(ctx context.Context, credential model.ConnectionPassword) error
+	AuthenticateConnectionPassword(ctx context.Context, userID, resourceType, resourceID, password string) error
+	AuthenticateMySQLConnectionPassword(ctx context.Context, userID, resourceID string, salt, response []byte) error
 
 	Hosts() []HostView
 	Host(id string) (HostView, error)

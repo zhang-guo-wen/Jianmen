@@ -2,6 +2,7 @@ package admin
 
 import (
 	"encoding/json"
+	"jianmen/internal/model"
 	"jianmen/internal/rbac"
 	"jianmen/internal/store"
 	"net"
@@ -77,7 +78,11 @@ func (s *Server) handleDBInstances(w http.ResponseWriter, r *http.Request) {
 			s.forbidden(w, r)
 			return
 		}
-		instances := s.store.DatabaseInstances()
+		instances, err := s.visibleDatabaseInstances(r, s.store.DatabaseInstances())
+		if err != nil {
+			s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
+			return
+		}
 		resp := paginateSlice(instances, r, func(v store.DatabaseInstanceView, q string) bool {
 			return strings.Contains(strings.ToLower(v.Name), q) ||
 				strings.Contains(strings.ToLower(v.Address), q) ||
@@ -118,6 +123,11 @@ func (s *Server) handleCreateDBInstance(w http.ResponseWriter, r *http.Request) 
 		s.writeErrorText(w, r, http.StatusBadRequest, err.Error())
 		return
 	}
+	if err := s.grantCreatedResource(r, model.ResourceTypeDatabaseInstance, view.ID); err != nil {
+		_ = s.store.DeleteDatabaseInstance(view.ID)
+		s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
+		return
+	}
 	s.writeJSON(w, r, http.StatusCreated, view)
 }
 
@@ -139,7 +149,10 @@ func (s *Server) handleDBInstance(w http.ResponseWriter, r *http.Request) {
 				writeDBStoreError(w, r, err)
 				return
 			}
-			accounts, err = s.connectableDatabaseAccounts(r, accounts)
+			accounts, err = s.visibleDatabaseAccounts(r, accounts)
+			if err == nil {
+				accounts, err = s.connectableDatabaseAccounts(r, accounts)
+			}
 			if err != nil {
 				s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
 				return
@@ -155,6 +168,9 @@ func (s *Server) handleDBInstance(w http.ResponseWriter, r *http.Request) {
 		case http.MethodPost:
 			if !s.requirePermission(r, rbac.ActionDBProxyCreate) {
 				s.forbidden(w, r)
+				return
+			}
+			if !s.requireResourceGrant(w, r, model.ResourceTypeDatabaseInstance, id) {
 				return
 			}
 			s.handleCreateDBAccount(w, r, id)
@@ -193,6 +209,15 @@ func (s *Server) handleDBInstance(w http.ResponseWriter, r *http.Request) {
 			s.forbidden(w, r)
 			return
 		}
+		visible, err := s.databaseInstanceVisible(r, id)
+		if err != nil {
+			s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
+			return
+		}
+		if !visible {
+			s.forbidden(w, r)
+			return
+		}
 		view, err := s.store.DatabaseInstance(id)
 		if err != nil {
 			writeDBStoreError(w, r, err)
@@ -204,10 +229,16 @@ func (s *Server) handleDBInstance(w http.ResponseWriter, r *http.Request) {
 			s.forbidden(w, r)
 			return
 		}
+		if !s.requireResourceGrant(w, r, model.ResourceTypeDatabaseInstance, id) {
+			return
+		}
 		s.handleUpdateDBInstance(w, r, id)
 	case http.MethodDelete:
 		if !s.requirePermission(r, rbac.ActionDBProxyDelete) {
 			s.forbidden(w, r)
+			return
+		}
+		if !s.requireResourceGrant(w, r, model.ResourceTypeDatabaseInstance, id) {
 			return
 		}
 		if err := s.store.DeleteDatabaseInstance(id); err != nil {
@@ -285,6 +316,9 @@ func (s *Server) handleDBAccount(w http.ResponseWriter, r *http.Request) {
 			s.forbidden(w, r)
 			return
 		}
+		if !s.requireResourceGrant(w, r, model.ResourceTypeDatabaseAccount, id) {
+			return
+		}
 		view, err := s.store.DatabaseAccount(id)
 		if err != nil {
 			writeDBStoreError(w, r, err)
@@ -296,10 +330,16 @@ func (s *Server) handleDBAccount(w http.ResponseWriter, r *http.Request) {
 			s.forbidden(w, r)
 			return
 		}
+		if !s.requireResourceGrant(w, r, model.ResourceTypeDatabaseAccount, id) {
+			return
+		}
 		s.handleUpdateDBAccount(w, r, id)
 	case http.MethodDelete:
 		if !s.requirePermission(r, rbac.ActionDBProxyDelete) {
 			s.forbidden(w, r)
+			return
+		}
+		if !s.requireResourceGrant(w, r, model.ResourceTypeDatabaseAccount, id) {
 			return
 		}
 		if err := s.store.DeleteDatabaseAccount(id); err != nil {

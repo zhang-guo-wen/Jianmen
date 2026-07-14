@@ -59,15 +59,20 @@ func (s *DBStore) authenticateCompact(login LoginName, password string) (model.U
 		}
 		return model.User{}, err
 	}
-	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(password)); err != nil {
+	if login.ResourceID == "" {
+		if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(password)); err != nil {
+			return model.User{}, errors.New("authentication failed")
+		}
+		return user, nil
+	}
+	var account model.HostAccount
+	if err := s.db.Where("resource_id = ? AND status = ?", login.ResourceID, "active").First(&account).Error; err != nil {
 		return model.User{}, errors.New("authentication failed")
 	}
-	if login.ResourceID != "" {
-		var account model.HostAccount
-		if err := s.db.Where("resource_id = ?", login.ResourceID).First(&account).Error; err == nil {
-			user.RequestedTargetID = account.ID
-		}
+	if err := s.AuthenticateConnectionPassword(context.Background(), user.ID, model.ResourceTypeHostAccount, account.ID, password); err != nil {
+		return model.User{}, errors.New("authentication failed")
 	}
+	user.RequestedTargetID = account.ID
 	return user, nil
 }
 

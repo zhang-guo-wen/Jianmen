@@ -93,15 +93,37 @@ func (c *ResourceGrantChecker) groupGrantsForUser(userID string) ([]model.Resour
 
 // matchesGrant 检查授权是否匹配资源
 func (c *ResourceGrantChecker) matchesGrant(grant model.ResourceGrant, resourceType, resourceID string) bool {
+	if resourceTypeMatches(grant.ResourceType, resourceType) && resourceIDMatches(grant.ResourceID, resourceID) {
+		return true
+	}
 	switch grant.ResourceType {
+	case model.ResourceTypeHost:
+		return resourceType == model.ResourceTypeHostAccount && c.hostContainsAccount(grant.ResourceID, resourceID)
+	case model.ResourceTypeDatabaseInstance:
+		return resourceType == model.ResourceTypeDatabaseAccount && c.databaseContainsAccount(grant.ResourceID, resourceID)
 	case model.ResourceTypeGroup:
 		return c.groupContainsResource(grant.ResourceID, resourceType, resourceID, model.ResourceGroupTypeResource)
 	case model.ResourceTypeAccountGroup:
 		return c.groupContainsResource(grant.ResourceID, resourceType, resourceID, model.ResourceGroupTypeAccount)
 	default:
-		return resourceTypeMatches(grant.ResourceType, resourceType) &&
-			resourceIDMatches(grant.ResourceID, resourceID)
+		return false
 	}
+}
+
+func (c *ResourceGrantChecker) hostContainsAccount(hostID, accountID string) bool {
+	var count int64
+	c.db.Model(&model.HostAccount{}).
+		Where("host_id = ? AND id = ?", hostID, accountID).
+		Count(&count)
+	return count > 0
+}
+
+func (c *ResourceGrantChecker) databaseContainsAccount(instanceID, accountID string) bool {
+	var count int64
+	c.db.Model(&model.DatabaseAccount{}).
+		Where("instance_id = ? AND id = ?", instanceID, accountID).
+		Count(&count)
+	return count > 0
 }
 
 // groupContainsResource 检查资源组是否包含指定资源

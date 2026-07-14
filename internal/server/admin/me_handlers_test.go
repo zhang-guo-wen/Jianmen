@@ -25,8 +25,9 @@ func TestMeAccessContextDefaultsToNoAccess(t *testing.T) {
 	if err := decodeTestData(t, rec.Body.Bytes(), &response); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if len(response.Actions) != 0 || len(response.Pages) != 0 {
-		t.Fatalf("access = %#v, want empty access", response)
+	wantPages := []rbac.PageAccess{{Key: "settings", Path: "/settings", Order: 90}}
+	if len(response.Actions) != 0 || !reflect.DeepEqual(response.Pages, wantPages) {
+		t.Fatalf("access = %#v, want settings-only access", response)
 	}
 }
 
@@ -47,7 +48,7 @@ func TestMeAccessContextReturnsAllPagesForSuperAdmin(t *testing.T) {
 	if !reflect.DeepEqual(response.Actions, []string{"*"}) {
 		t.Fatalf("actions = %#v, want wildcard", response.Actions)
 	}
-	if !reflect.DeepEqual(response.Pages, rbac.AccessiblePages([]string{"*"})) {
+	if !reflect.DeepEqual(response.Pages, appendSettingsPage(rbac.AccessiblePages([]string{"*"}))) {
 		t.Fatalf("pages = %#v, want complete page catalog", response.Pages)
 	}
 }

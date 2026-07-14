@@ -80,15 +80,19 @@ func (s *Server) currentUserAccessContext(w http.ResponseWriter, r *http.Request
 	}
 	if s.isSuperAdmin(userID) {
 		actions := []string{"*"}
-		return meAccessContextResponse{Actions: actions, Pages: rbac.AccessiblePages(actions)}, true
+		return meAccessContextResponse{Actions: actions, Pages: appendSettingsPage(rbac.AccessiblePages(actions))}, true
 	}
 	if s.db == nil || s.rbacChecker == nil {
-		return meAccessContextResponse{Actions: []string{}, Pages: []rbac.PageAccess{}}, true
+		return meAccessContextResponse{Actions: []string{}, Pages: appendSettingsPage(nil)}, true
 	}
 	actions, err := s.effectiveGlobalActions(userID)
 	if err != nil {
 		s.writeError(w, r, http.StatusInternalServerError, apiresp.CodeInternal, err.Error(), nil)
 		return meAccessContextResponse{}, false
 	}
-	return meAccessContextResponse{Actions: actions, Pages: rbac.AccessiblePages(actions)}, true
+	return meAccessContextResponse{Actions: actions, Pages: appendSettingsPage(rbac.AccessiblePages(actions))}, true
+}
+
+func appendSettingsPage(pages []rbac.PageAccess) []rbac.PageAccess {
+	return append(pages, rbac.PageAccess{Key: "settings", Path: "/settings", Order: 90})
 }

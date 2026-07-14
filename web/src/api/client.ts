@@ -1,4 +1,4 @@
-const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? '').replace(/\/$/, '');
+﻿const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? '').replace(/\/$/, '');
 const TOKEN_KEY = 'jianmen_token';
 
 // ── 统一响应格式 ──────────────────────────────────────────────────
@@ -97,6 +97,16 @@ export interface MyAccessContextResponse {
   pages: AccessPage[];
 }
 
+export interface UserPreferences {
+  theme: 'system' | 'light' | 'dark';
+  ssh_client: string;
+  ssh_client_path: string;
+  terminal_font_family: string;
+  terminal_font_size: number;
+}
+
+export type UserPreferencesUpdate = Partial<UserPreferences>;
+
 // ── Target / HostAccount ──────────────────────────────────────────────
 
 export interface TargetRecord {
@@ -150,6 +160,10 @@ export interface HostView {
   address: string;
   port: number;
   remark?: string;
+  status?: string;
+  account_count?: number;
+  created_at?: string;
+  updated_at?: string;
 }
 
 export interface HostPayload {
@@ -159,6 +173,10 @@ export interface HostPayload {
   address: string;
   port: number;
   remark?: string;
+  status?: string;
+  account_count?: number;
+  created_at?: string;
+  updated_at?: string;
 }
 
 // ── Sessions ───────────────────────────────────────────────────────────
@@ -181,6 +199,13 @@ export interface SessionRecord {
   protocol_subtype?: string;
   replay_dir?: string;
   [key: string]: unknown;
+}
+
+export interface ConnectionPasswordRecord {
+  password: string;
+  expires_at: string;
+  expires_in_seconds: number;
+  one_time: boolean;
 }
 
 export interface UserSessionRecord {
@@ -743,6 +768,12 @@ export const apiClient = {
   // me
   getMyAccessContext: () =>
     request<MyAccessContextResponse>('/api/me/access-context'),
+  getMyPreferences: () => request<UserPreferences>('/api/me/preferences'),
+  updateMyPreferences: (payload: UserPreferencesUpdate) =>
+    request<UserPreferences>('/api/me/preferences', {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    }),
 
   // hosts
   getHosts: (params?: { page?: number; page_size?: number; q?: string }) =>
@@ -794,6 +825,11 @@ export const apiClient = {
   // sessions
   createUserSession: (targetId: string) =>
     request<UserSessionRecord>('/api/user-sessions', {
+      method: 'POST',
+      body: JSON.stringify({ target_id: targetId })
+    }),
+  createConnectionPassword: (targetId: string) =>
+    request<ConnectionPasswordRecord>('/api/connection-passwords', {
       method: 'POST',
       body: JSON.stringify({ target_id: targetId })
     }),

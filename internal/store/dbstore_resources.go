@@ -56,6 +56,10 @@ func (s *DBStore) deleteResourceTx(tx *gorm.DB, resourceType, resourceID string)
 	if resourceType == "" || resourceID == "" {
 		return nil
 	}
+	if err := tx.Where("resource_type = ? AND resource_id = ?", resourceType, resourceID).
+		Delete(&model.ResourceGrant{}).Error; err != nil {
+		return err
+	}
 	if err := tx.Where("type = ? AND resource_id = ?", resourceType, resourceID).
 		Delete(&model.Resource{}).Error; err != nil {
 		return err

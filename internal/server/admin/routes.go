@@ -37,6 +37,7 @@ func (s *Server) routes() http.Handler {
 	s.muxHandle(mux, "/api/sessions", s.withAuthAndUser(s.handleSessions))
 	s.muxHandle(mux, "/api/sessions/", s.withAuthAndUser(s.handleSessionArtifact))
 	s.muxHandle(mux, "/api/user-sessions", s.withAuthAndUser(s.handleUserSessions))
+	s.muxHandle(mux, "/api/connection-passwords", s.withAuthAndUser(s.handleConnectionPasswords))
 
 	s.muxHandle(mux, "/api/db/gateway", s.withAuthAndUser(s.handleDBGateway))
 	s.muxHandle(mux, "/api/db/instances", s.withAuthAndUser(s.handleDBInstances))
@@ -63,6 +64,7 @@ func (s *Server) routes() http.Handler {
 	s.muxHandle(mux, "/api/audit/", s.withAuthAndUser(s.handleAuditArtifact))
 	s.muxHandle(mux, "/api/me", s.withAuthAndUser(s.handleMe))
 	s.muxHandle(mux, "/api/me/access-context", s.withAuthAndUser(s.handleMeAccessContext))
+	s.muxHandle(mux, "/api/me/preferences", s.withAuthAndUser(s.handleMePreferences))
 	s.muxHandle(mux, "/api/me/permissions", s.withAuthAndUser(s.handleMePermissions))
 	s.muxHandle(mux, "/api/me/menus", s.withAuthAndUser(s.handleMeMenus))
 	s.muxHandle(mux, "/api/applications", s.withAuthAndUser(s.handleApplications))

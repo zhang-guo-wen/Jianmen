@@ -164,7 +164,7 @@ func (g *Gateway) handleRedis(ctx context.Context, client net.Conn, firstByte by
 	acct := resolved.account
 
 	// Validate bastion user password
-	if err := g.validateUserPassword(resolved.user, []byte(bastionPassword)); err != nil {
+	if err := g.validateUserPassword(resolved.user, resolved.account.ID, bastionPassword); err != nil {
 		g.logger.Warn("redis gateway auth failed", "user", resolved.rawName, "error", err)
 		writeRESPError(client, "WRONGPASS invalid username-password pair or user is disabled.")
 		return nil

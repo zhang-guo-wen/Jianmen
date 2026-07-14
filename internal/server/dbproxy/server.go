@@ -33,7 +33,8 @@ type Gateway struct {
 }
 
 type databaseAccountResolver interface {
-	// 仅保留以满足 store.Store 接口；网关不再使用
+	AuthenticateConnectionPassword(ctx context.Context, userID, resourceType, resourceID, password string) error
+	AuthenticateMySQLConnectionPassword(ctx context.Context, userID, resourceID string, salt, response []byte) error
 }
 
 type auditWriter interface {
@@ -333,7 +334,7 @@ func (g *Gateway) handlePG(ctx context.Context, client net.Conn, firstByte byte)
 	password := strings.TrimRight(string(pwdBuf[5:5+pwdLen]), "\x00")
 
 	// 验证堡垒机用户密码
-	if err := g.validateUserPassword(resolved.user, []byte(password)); err != nil {
+	if err := g.validateUserPassword(resolved.user, resolved.account.ID, password); err != nil {
 		g.logger.Warn("db gateway auth failed", "user", resolved.rawName, "error", err)
 		return nil
 	}

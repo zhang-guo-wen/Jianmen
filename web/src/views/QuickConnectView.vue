@@ -68,15 +68,38 @@
       </el-tab-pane>
     </el-tabs>
 
-    <!-- Connect Dialog -->
-    <el-dialog v-model="configVisible" :title="dialogTitle" class="form-dialog" destroy-on-close width="480px">
-      <div v-if="connectInfo" class="config-dialog">
-        <el-alert v-if="sessionError" show-icon type="error" :closable="false" :title="sessionError" />
-        <el-alert v-else show-icon type="info" :closable="false" title="输入堡垒机的登录密码，不是目标主机的密码" />
+    <!-- SSH 连接弹窗 -->
+    <el-dialog v-model="configVisible" :title="dialogTitle" class="form-dialog" destroy-on-close width="min(720px, calc(100vw - 32px))">
+      <div v-if="connectInfo" class="connection-dialog">
+        <el-alert
+          v-if="sessionError"
+          show-icon type="error" :closable="false" :title="sessionError"
+        />
+        <el-alert
+          v-else
+          show-icon type="info" :closable="false"
+          :title="connectType === 'ssh' ? '输入堡垒机的登录密码，不是目标主机的密码' : '输入堡垒机的登录密码，不是目标数据库的密码'"
+        />
+
+        <div v-if="!sessionError" style="margin-bottom: 8px; display: flex; align-items: center; gap: 8px;">
+          <span style="font-size: 13px; color: #667085;">连通性：</span>
+          <el-tag v-if="connectionTesting" type="info" size="small">测试中...</el-tag>
+          <template v-else-if="connectionTestResult !== null">
+            <el-tag :type="connectionTestResult.ok ? 'success' : 'danger'" size="small">
+              {{ connectionTestResult.ok ? '可达' : '不可达' }}
+            </el-tag>
+            <span v-if="connectionTestResult.latency_ms !== undefined" style="font-size: 12px; color: #667085;">
+              延迟 {{ connectionTestResult.latency_ms }}ms
+            </span>
+            <span v-if="connectionTestResult.error" style="font-size: 12px; color: var(--el-color-danger);">
+              {{ connectionTestResult.error }}
+            </span>
+          </template>
+        </div>
 
         <div v-if="creatingSession" style="text-align: center; padding: 30px 0;">
           <el-icon class="is-loading" :size="28"><Loading /></el-icon>
-          <p style="margin-top: 10px; color: #667085;">{{ t('quickConnect.label.creatingSession') }}</p>
+          <p style="margin-top: 10px; color: #667085;">正在创建连接会话...</p>
         </div>
 
         <template v-else-if="!sessionError && connectInfo.compactUser">
@@ -92,21 +115,19 @@
             <el-descriptions-item label="密码">堡垒机登录密码</el-descriptions-item>
           </el-descriptions>
 
-          <div v-if="connectInfo?.compactUser" style="margin-top: 12px; text-align: right">
-            <el-button type="primary" @click="openInBrowser">
-              在浏览器中打开
-            </el-button>
-          </div>
-
           <div style="margin-top: 12px">
             <el-input :model-value="connectInfo.command" readonly size="small">
               <template #append>
-                <el-button @click="copyValue(connectInfo.command)">复制</el-button>
+                <el-button @click="copyValue(connectInfo.command)">复制{{ connectType === 'ssh' ? ' SSH ' : ' ' }}命令</el-button>
               </template>
             </el-input>
           </div>
         </template>
       </div>
+      <template #footer>
+        <el-button v-if="connectType === 'ssh'" type="primary" @click="openInBrowser">在浏览器中打开</el-button>
+        <el-button @click="configVisible = false">关闭</el-button>
+      </template>
     </el-dialog>
   </div>
 </template>
@@ -151,6 +172,8 @@ const creatingSession = ref(false);
 const sessionError = ref('');
 const connectInfo = ref<{ host: string; port: number; compactUser: string; command: string } | null>(null);
 const connectType = ref<'ssh' | 'db'>('ssh');
+const connectionTesting = ref(false);
+const connectionTestResult = ref<{ ok: boolean; error?: string; latency_ms?: number } | null>(null);
 
 const dialogTitle = computed(() => connectType.value === 'ssh' ? 'SSH 连接' : '数据库连接');
 
@@ -185,7 +208,9 @@ function onSSHSearch(q: string) {
 
 async function openSSHConfig(target: TargetRecord) {
   connectType.value = 'ssh';
-  sessionError.value = ''; creatingSession.value = true; configVisible.value = true;
+  sessionError.value = ''; connectionTestResult.value = null;
+  creatingSession.value = true; configVisible.value = true;
+  testSSHConnection(target);
   try {
     const tid = String(target.id || target.resource_id || '');
     webTerminalTargetId.value = tid;
@@ -199,6 +224,37 @@ async function openSSHConfig(target: TargetRecord) {
     };
   } catch (e: any) { sessionError.value = e.message; }
   finally { creatingSession.value = false; }
+}
+
+async function testSSHConnection(target: TargetRecord) {
+  connectionTesting.value = true;
+  connectionTestResult.value = null;
+  try {
+    const username = target.username || 'unknown';
+    const result = await apiClient.testTargetConnection({
+      id: String(target.id || target.resource_id || username),
+      name: target.name || username,
+      username,
+      password: '',
+      private_key_path: '',
+      private_key_pem: '',
+      passphrase: '',
+      address: String(target.host || target.address || ''),
+      port: Number(target.port) || 22,
+      insecure_ignore_host_key: true,
+      host_key_fingerprint: '',
+      known_hosts_path: '',
+    });
+    connectionTestResult.value = {
+      ok: result.ok,
+      latency_ms: result.latency_ms,
+      error: result.ok ? undefined : (result.error || result.message || '连接失败'),
+    };
+  } catch (err) {
+    connectionTestResult.value = { ok: false, error: err instanceof Error ? err.message : '连接失败' };
+  } finally {
+    connectionTesting.value = false;
+  }
 }
 
 // ── DB ──
@@ -257,7 +313,9 @@ function onDBSearch(q: string) {
 
 async function openDBConfig(acc: any) {
   connectType.value = 'db';
-  sessionError.value = ''; creatingSession.value = true; configVisible.value = true;
+  sessionError.value = ''; connectionTestResult.value = null;
+  creatingSession.value = true; configVisible.value = true;
+  testDBConnection(acc);
   try {
     const s = await apiClient.createUserSession(String(acc.id));
     const cu = s?.compact_username || '';
@@ -266,10 +324,31 @@ async function openDBConfig(acc: any) {
     const port = gatewayPort.value || 33060;
     const cmd = proto === 'mysql'
       ? `mysql --protocol=tcp -h ${host} -P ${port} -u ${cu} -p`
-      : `psql -h ${host} -p ${port} -U ${cu}`;
+      : proto === 'redis'
+        ? `redis-cli -h ${host} -p ${port} -a ${cu}`
+        : `psql -h ${host} -p ${port} -U ${cu}`;
     connectInfo.value = { host, port, compactUser: cu, command: cmd };
   } catch (e: any) { sessionError.value = e.message; }
   finally { creatingSession.value = false; }
+}
+
+async function testDBConnection(acc: any) {
+  connectionTesting.value = true;
+  connectionTestResult.value = null;
+  try {
+    const id = String(acc.id || acc.resource_id || '');
+    if (!id) return;
+    const result = await apiClient.testDBConnection(id);
+    connectionTestResult.value = {
+      ok: result.ok,
+      latency_ms: result.latency_ms,
+      error: result.ok ? undefined : (result.error || '连接失败'),
+    };
+  } catch (err) {
+    connectionTestResult.value = { ok: false, error: err instanceof Error ? err.message : '连接失败' };
+  } finally {
+    connectionTesting.value = false;
+  }
 }
 
 // ── Common ──
@@ -306,5 +385,9 @@ onMounted(() => { loadTargets(); });
   padding: 0;
 }
 
-.config-dialog { min-height: 100px; }
+.connection-dialog {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
 </style>

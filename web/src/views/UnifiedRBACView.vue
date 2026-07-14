@@ -1,5 +1,5 @@
 <template>
-  <div class="unified-rbac-page">
+  <div class="view-stack">
     <el-tabs v-model="activeTab" @tab-change="handleTabChange">
       <!-- 用户管理 Tab -->
       <el-tab-pane :label="t('nav.users')" name="users">
@@ -54,7 +54,4 @@ const handleTabChange = (_tab: string) => {
 </script>
 
 <style scoped>
-.unified-rbac-page {
-  padding: 20px;
-}
 </style>

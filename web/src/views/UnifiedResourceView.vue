@@ -1,5 +1,5 @@
 <template>
-  <div class="unified-resource-page">
+  <div class="view-stack">
     <el-tabs v-model="activeTab" @tab-change="handleTabChange">
       <!-- 主机管理 Tab -->
       <el-tab-pane :label="t('nav.hosts')" name="hosts">
@@ -30,7 +30,4 @@ const handleTabChange = (_tab: string) => {
 </script>
 
 <style scoped>
-.unified-resource-page {
-  padding: 20px;
-}
 </style>

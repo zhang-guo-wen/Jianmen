@@ -1,78 +1,72 @@
 <template>
   <div class="view-stack">
     <el-tabs v-model="activeTab">
-      <el-tab-pane label="SSH" name="ssh" />
-      <el-tab-pane label="数据库" name="db" />
+      <el-tab-pane label="SSH" name="ssh">
+        <DataTableCard
+          :data="targets"
+          :loading="sshLoading"
+          :total="targetTotal"
+          v-model:page="targetPage"
+          v-model:page-size="targetPageSize"
+          search-placeholder="搜索主机、账号..."
+          @search="onSSHSearch"
+        >
+          <template #toolbar-extra>
+            <el-button :loading="sshLoading" :icon="Refresh" @click="loadTargets">{{ t('common.refresh') }}</el-button>
+          </template>
+          <el-table-column :label="t('quickConnect.column.host')" min-width="190">
+            <template #default="{ row }">{{ targetHost(row) || '-' }}:{{ targetPort(row) }}</template>
+          </el-table-column>
+          <el-table-column :label="t('quickConnect.column.account')" min-width="150">
+            <template #default="{ row }">{{ accountName(row) || '-' }}</template>
+          </el-table-column>
+          <el-table-column :label="t('common.status')" width="90">
+            <template #default="{ row }">
+              <el-tag :type="row.status === 'disabled' ? 'info' : 'success'" size="small">{{ row.status === 'disabled' ? t('common.disabled') : t('common.enabled') }}</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column :label="t('common.actions')" fixed="right" width="100">
+            <template #default="{ row }">
+              <el-button link type="primary" @click="openSSHConfig(row)">{{ t('quickConnect.action.connect') }}</el-button>
+            </template>
+          </el-table-column>
+        </DataTableCard>
+      </el-tab-pane>
+      <el-tab-pane label="数据库" name="db">
+        <DataTableCard
+          :data="displayedDBAccounts"
+          :loading="dbLoading"
+          :total="dbTotal"
+          v-model:page="dbPage"
+          v-model:page-size="dbPageSize"
+          search-placeholder="搜索实例、账号..."
+          @search="onDBSearch"
+        >
+          <template #toolbar-extra>
+            <el-button :loading="dbLoading" :icon="Refresh" @click="loadDBAccounts">{{ t('common.refresh') }}</el-button>
+          </template>
+          <el-table-column :label="t('audit.column.instance')" min-width="160" show-overflow-tooltip>
+            <template #default="{ row }">{{ row._instance_name || '-' }}</template>
+          </el-table-column>
+          <el-table-column :label="t('audit.column.account')" min-width="130" show-overflow-tooltip>
+            <template #default="{ row }">{{ row.username || '-' }}</template>
+          </el-table-column>
+          <el-table-column :label="t('audit.column.protocol')" width="100">
+            <template #default="{ row }">{{ row._protocol || 'mysql' }}</template>
+          </el-table-column>
+          <el-table-column :label="t('common.status')" width="90">
+            <template #default="{ row }">
+              <el-tag :type="row.status === 'disabled' ? 'info' : 'success'" size="small">{{ row.status === 'disabled' ? t('common.disabled') : t('common.enabled') }}</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column :label="t('common.actions')" fixed="right" width="100">
+            <template #default="{ row }">
+              <el-button link type="primary" @click="openDBConfig(row)">{{ t('quickConnect.action.connect') }}</el-button>
+            </template>
+          </el-table-column>
+        </DataTableCard>
+      </el-tab-pane>
     </el-tabs>
-
-    <!-- SSH Tab -->
-    <template v-if="activeTab === 'ssh'">
-      <DataTableCard
-        :data="targets"
-        :loading="sshLoading"
-        :total="targetTotal"
-        v-model:page="targetPage"
-        v-model:page-size="targetPageSize"
-        search-placeholder="搜索主机、账号..."
-        @search="onSSHSearch"
-      >
-        <template #toolbar-extra>
-          <el-button :loading="sshLoading" :icon="Refresh" @click="loadTargets">{{ t('common.refresh') }}</el-button>
-        </template>
-        <el-table-column :label="t('quickConnect.column.host')" min-width="190">
-          <template #default="{ row }">{{ targetHost(row) || '-' }}:{{ targetPort(row) }}</template>
-        </el-table-column>
-        <el-table-column :label="t('quickConnect.column.account')" min-width="150">
-          <template #default="{ row }">{{ accountName(row) || '-' }}</template>
-        </el-table-column>
-        <el-table-column :label="t('common.status')" width="90">
-          <template #default="{ row }">
-            <el-tag :type="row.status === 'disabled' ? 'info' : 'success'" size="small">{{ row.status === 'disabled' ? t('common.disabled') : t('common.enabled') }}</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column :label="t('common.actions')" fixed="right" width="100">
-          <template #default="{ row }">
-            <el-button link type="primary" @click="openSSHConfig(row)">{{ t('quickConnect.action.connect') }}</el-button>
-          </template>
-        </el-table-column>
-      </DataTableCard>
-    </template>
-
-    <!-- Database Tab -->
-    <template v-if="activeTab === 'db'">
-      <DataTableCard
-        :data="displayedDBAccounts"
-        :loading="dbLoading"
-        :total="dbTotal"
-        v-model:page="dbPage"
-        v-model:page-size="dbPageSize"
-        search-placeholder="搜索实例、账号..."
-        @search="onDBSearch"
-      >
-        <template #toolbar-extra>
-          <el-button :loading="dbLoading" :icon="Refresh" @click="loadDBAccounts">{{ t('common.refresh') }}</el-button>
-        </template>
-        <el-table-column :label="t('audit.column.instance')" min-width="160" show-overflow-tooltip>
-          <template #default="{ row }">{{ row._instance_name || '-' }}</template>
-        </el-table-column>
-        <el-table-column :label="t('audit.column.account')" min-width="130" show-overflow-tooltip>
-          <template #default="{ row }">{{ row.username || '-' }}</template>
-        </el-table-column>
-        <el-table-column :label="t('audit.column.protocol')" width="100">
-          <template #default="{ row }">{{ row._protocol || 'mysql' }}</template>
-        </el-table-column>
-        <el-table-column :label="t('common.status')" width="90">
-          <template #default="{ row }">
-            <el-tag :type="row.status === 'disabled' ? 'info' : 'success'" size="small">{{ row.status === 'disabled' ? t('common.disabled') : t('common.enabled') }}</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column :label="t('common.actions')" fixed="right" width="100">
-          <template #default="{ row }">
-            <el-button link type="primary" @click="openDBConfig(row)">{{ t('quickConnect.action.connect') }}</el-button>
-          </template>
-        </el-table-column>
-      </DataTableCard>
-    </template>
 
     <!-- Connect Dialog -->
     <el-dialog v-model="configVisible" :title="dialogTitle" class="form-dialog" destroy-on-close width="480px">

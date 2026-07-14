@@ -1,113 +1,113 @@
 <template>
   <div class="view-stack audit-view">
-    <div class="toolbar">
-      <el-segmented v-model="auditScope" :options="scopeOptions" />
-      <el-button :loading="currentLoading" type="primary" @click="refreshCurrent">
-        {{ t('common.refresh') }}
-      </el-button>
-    </div>
-
-    <template v-if="auditScope === 'ssh'">
-      <el-alert v-if="sessionError" :title="sessionError" type="error" show-icon style="margin-bottom: 12px" />
-      <div class="page-container">
-        <DataTableCard
-          :data="sessions"
-          :loading="sessionsLoading"
-          :total="sessionTotal"
-          v-model:page="sessionPage"
-          v-model:page-size="sessionPageSize"
-          search-placeholder="搜索会话..."
-          @search="onSessionSearch"
-        >
-          <el-table-column :label="t('audit.column.instance')" min-width="150" show-overflow-tooltip>
-            <template #default="{ row }">
-              {{ row.target_name || row.target_id || t('common.none') }}
+    <el-tabs v-model="auditScope">
+      <el-tab-pane :label="t('audit.scope.ssh')" name="ssh">
+        <el-alert v-if="sessionError" :title="sessionError" type="error" show-icon style="margin-bottom: 12px" />
+        <div class="page-container">
+          <DataTableCard
+            :data="sessions"
+            :loading="sessionsLoading"
+            :total="sessionTotal"
+            v-model:page="sessionPage"
+            v-model:page-size="sessionPageSize"
+            search-placeholder="搜索会话..."
+            @search="onSessionSearch"
+          >
+            <template #toolbar-extra>
+              <el-button :loading="sessionsLoading" :icon="Refresh" @click="loadSessions">{{ t('common.refresh') }}</el-button>
             </template>
-          </el-table-column>
-          <el-table-column :label="t('audit.column.account')" min-width="120" show-overflow-tooltip>
-            <template #default="{ row }">
-              {{ row.account_username || '-' }}
+            <el-table-column :label="t('audit.column.instance')" min-width="150" show-overflow-tooltip>
+              <template #default="{ row }">
+                {{ row.target_name || row.target_id || t('common.none') }}
+              </template>
+            </el-table-column>
+            <el-table-column :label="t('audit.column.account')" min-width="120" show-overflow-tooltip>
+              <template #default="{ row }">
+                {{ row.account_username || '-' }}
+              </template>
+            </el-table-column>
+            <el-table-column :label="t('audit.column.operator')" min-width="120">
+              <template #default="{ row }">
+                {{ sessionUser(row) }}
+              </template>
+            </el-table-column>
+            <el-table-column :label="t('audit.column.protocol')" width="90">
+              <template #default="{ row }">
+                <el-tag :type="sessionProtocolTag(row)" size="small" effect="plain">{{ sessionProtocol(row) }}</el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column :label="t('sessions.column.started')" width="170" show-overflow-tooltip class-name="col-time">
+              <template #default="{ row }">
+                {{ formatTime(row.started_at ?? row.startedAt) }}
+              </template>
+            </el-table-column>
+            <el-table-column :label="t('audit.column.duration')" width="90">
+              <template #default="{ row }">
+                {{ formatDurationSeconds(computeDuration(row.started_at, row.ended_at)) }}
+              </template>
+            </el-table-column>
+            <el-table-column :label="t('common.actions')" fixed="right" width="180">
+              <template #default="{ row }">
+                <el-button :disabled="!hasReplay(row)" link type="success" @click="loadSessionArtifact(row, 'replay')">
+                  {{ t('audit.action.replay') }}
+                </el-button>
+                <el-button link type="primary" @click="loadSessionLog(row)">
+                  {{ t('audit.action.log') }}
+                </el-button>
+              </template>
+            </el-table-column>
+          </DataTableCard>
+        </div>
+      </el-tab-pane>
+      <el-tab-pane :label="t('audit.scope.db')" name="db">
+        <el-alert v-if="dbError" :title="dbError" type="warning" show-icon style="margin-bottom: 12px" />
+        <div class="page-container">
+          <DataTableCard
+            :data="dbConnections"
+            :loading="dbLoading"
+            :total="dbTotal"
+            v-model:page="dbPage"
+            v-model:page-size="dbPageSize"
+            search-placeholder="搜索数据库连接..."
+            @search="onDBSearch"
+          >
+            <template #toolbar-extra>
+              <el-button :loading="dbLoading" :icon="Refresh" @click="loadDBConnections">{{ t('common.refresh') }}</el-button>
             </template>
-          </el-table-column>
-          <el-table-column :label="t('audit.column.operator')" min-width="120">
-            <template #default="{ row }">
-              {{ sessionUser(row) }}
-            </template>
-          </el-table-column>
-          <el-table-column :label="t('audit.column.protocol')" width="90">
-            <template #default="{ row }">
-              <el-tag :type="sessionProtocolTag(row)" size="small" effect="plain">{{ sessionProtocol(row) }}</el-tag>
-            </template>
-          </el-table-column>
-          <el-table-column :label="t('sessions.column.started')" width="170" show-overflow-tooltip class-name="col-time">
-            <template #default="{ row }">
-              {{ formatTime(row.started_at ?? row.startedAt) }}
-            </template>
-          </el-table-column>
-          <el-table-column :label="t('audit.column.duration')" width="90">
-            <template #default="{ row }">
-              {{ formatDurationSeconds(computeDuration(row.started_at, row.ended_at)) }}
-            </template>
-          </el-table-column>
-          <el-table-column :label="t('common.actions')" fixed="right" width="180">
-            <template #default="{ row }">
-              <el-button :disabled="!hasReplay(row)" link type="success" @click="loadSessionArtifact(row, 'replay')">
-                {{ t('audit.action.replay') }}
-              </el-button>
-              <el-button link type="primary" @click="loadSessionLog(row)">
-                {{ t('audit.action.log') }}
-              </el-button>
-            </template>
-          </el-table-column>
-        </DataTableCard>
-      </div>
-    </template>
-
-    <template v-if="auditScope === 'db'">
-      <el-alert v-if="dbError" :title="dbError" type="warning" show-icon style="margin-bottom: 12px" />
-      <div class="page-container">
-        <DataTableCard
-          :data="dbConnections"
-          :loading="dbLoading"
-          :total="dbTotal"
-          v-model:page="dbPage"
-          v-model:page-size="dbPageSize"
-          search-placeholder="搜索数据库连接..."
-          @search="onDBSearch"
-        >
-          <el-table-column :label="t('audit.column.instance')" min-width="150" show-overflow-tooltip>
-            <template #default="{ row }">{{ row.target_name || row.upstream_addr || '-' }}</template>
-          </el-table-column>
-          <el-table-column :label="t('audit.column.account')" min-width="120" show-overflow-tooltip>
-            <template #default="{ row }">{{ row.account_name || '-' }}</template>
-          </el-table-column>
-          <el-table-column :label="t('audit.column.operator')" min-width="120" show-overflow-tooltip>
-            <template #default="{ row }">{{ row.username || row.name || '-' }}</template>
-          </el-table-column>
-          <el-table-column prop="protocol" :label="t('audit.column.protocol')" width="90" />
-          <el-table-column :label="t('sessions.column.started')" min-width="170" show-overflow-tooltip class-name="col-time">
-            <template #default="{ row }">
-              {{ formatTime(row.started_at) }}
-            </template>
-          </el-table-column>
-          <el-table-column :label="t('audit.column.duration')" width="100">
-            <template #default="{ row }">
-              {{ formatDuration(row.duration_ms ?? computeDurationMs(row.started_at, row.ended_at)) }}
-            </template>
-          </el-table-column>
-          <el-table-column :label="t('common.actions')" fixed="right" width="170">
-            <template #default="{ row }">
-              <el-button link type="primary" @click="loadDBArtifact(row, 'meta')">
-                {{ t('audit.action.meta') }}
-              </el-button>
-              <el-button link type="primary" @click="loadDBArtifact(row, 'queries')">
-                {{ t('audit.action.queries') }}
-              </el-button>
-            </template>
-          </el-table-column>
-        </DataTableCard>
-      </div>
-    </template>
+            <el-table-column :label="t('audit.column.instance')" min-width="150" show-overflow-tooltip>
+              <template #default="{ row }">{{ row.target_name || row.upstream_addr || '-' }}</template>
+            </el-table-column>
+            <el-table-column :label="t('audit.column.account')" min-width="120" show-overflow-tooltip>
+              <template #default="{ row }">{{ row.account_name || '-' }}</template>
+            </el-table-column>
+            <el-table-column :label="t('audit.column.operator')" min-width="120" show-overflow-tooltip>
+              <template #default="{ row }">{{ row.username || row.name || '-' }}</template>
+            </el-table-column>
+            <el-table-column prop="protocol" :label="t('audit.column.protocol')" width="90" />
+            <el-table-column :label="t('sessions.column.started')" min-width="170" show-overflow-tooltip class-name="col-time">
+              <template #default="{ row }">
+                {{ formatTime(row.started_at) }}
+              </template>
+            </el-table-column>
+            <el-table-column :label="t('audit.column.duration')" width="100">
+              <template #default="{ row }">
+                {{ formatDuration(row.duration_ms ?? computeDurationMs(row.started_at, row.ended_at)) }}
+              </template>
+            </el-table-column>
+            <el-table-column :label="t('common.actions')" fixed="right" width="170">
+              <template #default="{ row }">
+                <el-button link type="primary" @click="loadDBArtifact(row, 'meta')">
+                  {{ t('audit.action.meta') }}
+                </el-button>
+                <el-button link type="primary" @click="loadDBArtifact(row, 'queries')">
+                  {{ t('audit.action.queries') }}
+                </el-button>
+              </template>
+            </el-table-column>
+          </DataTableCard>
+        </div>
+      </el-tab-pane>
+    </el-tabs>
 
     <el-drawer
       v-model="drawerVisible"
@@ -295,6 +295,7 @@
 import { Terminal } from '@xterm/xterm';
 import '@xterm/xterm/css/xterm.css';
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { Refresh } from '@element-plus/icons-vue';
 import { ElMessage } from 'element-plus';
 
 import DataTableCard from '@/components/DataTableCard.vue';
@@ -369,13 +370,6 @@ let replayStartOffset = 0;
 let replayFrameIndex = 0;
 
 // ── Computed ──
-const scopeOptions = computed(() => [
-  { label: t('audit.scope.ssh'), value: 'ssh' },
-  { label: t('audit.scope.db'), value: 'db' }
-]);
-const currentLoading = computed(() =>
-  auditScope.value === 'ssh' ? sessionsLoading.value : dbLoading.value
-);
 const isDBMeta = computed(() => detailKind.value === 'meta' && isRecord(detailData.value) && 'protocol' in detailData.value);
 function hasItems(data: unknown): boolean {
   if (Array.isArray(data)) return true;
@@ -682,15 +676,6 @@ async function loadDBConnections() {
   } finally {
     dbLoading.value = false;
   }
-}
-
-async function refreshCurrent() {
-  if (auditScope.value === 'ssh') {
-    await loadSessions();
-    return;
-  }
-
-  await loadDBConnections();
 }
 
 function onSessionSearch(q: string) {

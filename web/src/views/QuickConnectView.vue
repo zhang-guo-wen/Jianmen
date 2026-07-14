@@ -125,8 +125,29 @@
         </template>
       </div>
       <template #footer>
+        <el-dropdown v-if="connectType === 'ssh'" trigger="click" style="margin-right:8px">
+          <el-button type="primary">
+            本地 SSH 客户端打开<el-icon class="el-icon--right"><ArrowDown /></el-icon>
+          </el-button>
+          <template #dropdown>
+            <el-dropdown-menu v-if="connectInfo" @click.prevent>
+              <a
+                v-for="item in SSH_CLIENT_LIST"
+                :key="item.command"
+                :href="sshClientUrl"
+                target="_self"
+                style="display:block;padding:5px 16px;color:#303133;text-decoration:none;font-size:13px"
+                @mouseenter="(e: MouseEvent) => (e.target as HTMLElement).style.backgroundColor = '#f5f7fa'"
+                @mouseleave="(e: MouseEvent) => (e.target as HTMLElement).style.backgroundColor = ''"
+                @click="onSSHClientClick"
+              >
+                {{ item.label }}
+              </a>
+            </el-dropdown-menu>
+          </template>
+        </el-dropdown>
         <el-button v-if="connectType === 'ssh'" type="primary" @click="openInBrowser">在浏览器中打开</el-button>
-        <el-button @click="configVisible = false">关闭</el-button>
+        <el-button style="margin-left:8px" @click="configVisible = false">关闭</el-button>
       </template>
     </el-dialog>
   </div>
@@ -135,11 +156,20 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
-import { Refresh } from '@element-plus/icons-vue';
+import { ArrowDown, Refresh } from '@element-plus/icons-vue';
 import { ElMessage } from 'element-plus';
 import DataTableCard from '@/components/DataTableCard.vue';
 import { apiClient, type PageResponse, type TargetRecord, type DBAccountRecord } from '@/api/client';
 import { useI18n } from '@/i18n';
+
+const SSH_CLIENT_LIST = [
+  { command: 'default', label: '系统默认 (ssh://)' },
+  { command: 'xshell', label: 'Xshell' },
+  { command: 'putty', label: 'PuTTY' },
+  { command: 'securecrt', label: 'SecureCRT' },
+  { command: 'mobaxterm', label: 'MobaXterm' },
+  { command: 'winterm', label: 'Windows Terminal' },
+] as const;
 
 const { t } = useI18n();
 const router = useRouter();
@@ -176,6 +206,25 @@ const connectionTesting = ref(false);
 const connectionTestResult = ref<{ ok: boolean; error?: string; latency_ms?: number } | null>(null);
 
 const dialogTitle = computed(() => connectType.value === 'ssh' ? 'SSH 连接' : '数据库连接');
+
+/** 当前 SSH 连接的 ssh:// 协议 URL */
+const sshClientUrl = computed(() => {
+  const info = connectInfo.value;
+  if (!info) return '#';
+  return `ssh://${info.compactUser}@${info.host}:${info.port}`;
+});
+
+/** 点击协议链接时：浏览器触发 ssh:// 协议打开本地客户端，同时复制命令行到剪贴板 */
+function onSSHClientClick() {
+  const info = connectInfo.value;
+  if (!info) return;
+  const command = `ssh ${info.compactUser}@${info.host} -p ${info.port}`;
+  if (navigator.clipboard?.writeText) {
+    navigator.clipboard.writeText(command).then(() => {
+      ElMessage.success(t('quickConnect.message.copied'));
+    }).catch(() => {});
+  }
+}
 
 // ── SSH ──
 function targetHost(t: TargetRecord): string { return String(t.host || t.address || ''); }
@@ -278,7 +327,6 @@ async function loadDBAccounts() {
       }
     }
     dbAccounts.value = all;
-    // Load gateway config
     try {
       const gw = await apiClient.getDBGateway();
       if (gw?.port) gatewayPort.value = Number(gw.port);
@@ -368,7 +416,6 @@ function openInBrowser() {
 // ── Watchers ──
 watch([targetPage, targetPageSize], () => loadTargets());
 
-// 切换到 DB tab 时自动加载数据
 watch(activeTab, (tab) => {
   if (tab === 'db' && dbAccounts.value.length === 0) {
     loadDBAccounts();
@@ -379,7 +426,6 @@ onMounted(() => { loadTargets(); });
 </script>
 
 <style scoped>
-/* 保留 tab header 默认间距 (page-tabs 会清零) */
 .page-tabs :deep(.el-tabs__header) {
   margin-bottom: 15px;
   padding: 0;
@@ -389,5 +435,18 @@ onMounted(() => { loadTargets(); });
   display: flex;
   flex-direction: column;
   gap: 18px;
+}
+
+.form-dialog :deep(.el-dialog__footer .el-button + .el-button) {
+  margin-left: 8px;
+}
+.form-dialog :deep(.el-dialog__footer .el-dropdown + .el-button) {
+  margin-left: 8px;
+}
+.form-dialog :deep(.el-dialog__footer .el-button + .el-dropdown) {
+  margin-left: 8px;
+}
+.form-dialog :deep(.el-dialog__footer .el-button:first-child) {
+  margin-left: 0;
 }
 </style>

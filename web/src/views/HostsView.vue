@@ -614,8 +614,29 @@
           </template>
         </div>
         <template #footer>
+          <el-dropdown trigger="click" style="margin-right:8px">
+            <el-button type="primary">
+              本地 SSH 客户端打开<el-icon class="el-icon--right"><ArrowDown /></el-icon>
+            </el-button>
+            <template #dropdown>
+              <el-dropdown-menu @click.prevent>
+                <a
+                  v-for="item in SSH_CLIENT_LIST"
+                  :key="item.command"
+                  :href="hostSSHClientUrl"
+                  target="_self"
+                  style="display:block;padding:5px 16px;color:#303133;text-decoration:none;font-size:13px"
+                  @mouseenter="(e: MouseEvent) => (e.target as HTMLElement).style.backgroundColor = '#f5f7fa'"
+                  @mouseleave="(e: MouseEvent) => (e.target as HTMLElement).style.backgroundColor = ''"
+                  @click="onHostSSHClientClick"
+                >
+                  {{ item.label }}
+                </a>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
           <el-button type="primary" @click="openTerminalFromDialog">在浏览器中打开</el-button>
-          <el-button @click="connectionDialogVisible = false">关闭</el-button>
+          <el-button style="margin-left:8px" @click="connectionDialogVisible = false">关闭</el-button>
         </template>
       </el-dialog>
     </div>
@@ -1802,6 +1823,36 @@ function openTerminalFromDialog() {
   router.push({ path: '/web-terminal', query: { target_id: tid } })
 }
 
+// ── 本地 SSH 客户端协议 ──
+const SSH_CLIENT_LIST = [
+  { command: 'default', label: '系统默认 (ssh://)' },
+  { command: 'xshell', label: 'Xshell' },
+  { command: 'putty', label: 'PuTTY' },
+  { command: 'securecrt', label: 'SecureCRT' },
+  { command: 'mobaxterm', label: 'MobaXterm' },
+  { command: 'winterm', label: 'Windows Terminal' },
+] as const;
+
+/** 当前连接的 ssh:// 协议 URL */
+const hostSSHClientUrl = computed(() => {
+  const user = connectionCompactUser.value
+  const host = bastionHost.value
+  const port = bastionPort.value || 47102
+  if (!user || !host) return '#'
+  return `ssh://${user}@${host}:${port}`
+})
+
+/** 点击协议链接时：浏览器触发协议 + 复制命令行到剪贴板 */
+function onHostSSHClientClick() {
+  const user = connectionCompactUser.value
+  const host = bastionHost.value
+  const port = bastionPort.value || 47102
+  if (!user || !host) return
+  navigator.clipboard?.writeText(`ssh ${user}@${host} -p ${port}`)
+    .then(() => ElMessage.success('已复制'))
+    .catch(() => {})
+}
+
 // ════════════════════════════════════════════════════════════════
 // Watchers & lifecycle
 // ════════════════════════════════════════════════════════════════
@@ -1996,6 +2047,20 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   gap: 18px;
+}
+
+/* 弹窗底部按钮间距 */
+:deep(.el-dialog__footer .el-button + .el-button) {
+  margin-left: 8px;
+}
+:deep(.el-dialog__footer .el-dropdown + .el-button) {
+  margin-left: 8px;
+}
+:deep(.el-dialog__footer .el-button + .el-dropdown) {
+  margin-left: 8px;
+}
+:deep(.el-dialog__footer .el-button:first-child) {
+  margin-left: 0;
 }
 
 /* FormDialog body min-height for account edit */

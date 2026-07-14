@@ -143,11 +143,59 @@
               >
                 {{ item.label }}
               </a>
+              <div style="height:1px;background:#e4e7ed;margin:4px 0"></div>
+              <span
+                style="display:block;padding:5px 16px;color:#409eff;text-decoration:none;font-size:13px;cursor:pointer"
+                @mouseenter="(e: MouseEvent) => (e.target as HTMLElement).style.backgroundColor = '#f5f7fa'"
+                @mouseleave="(e: MouseEvent) => (e.target as HTMLElement).style.backgroundColor = ''"
+                @click="openInitClientDialog"
+              >
+                初始化客户端...
+              </span>
             </el-dropdown-menu>
           </template>
         </el-dropdown>
         <el-button v-if="connectType === 'ssh'" type="primary" @click="openInBrowser">在浏览器中打开</el-button>
         <el-button style="margin-left:8px" @click="configVisible = false">关闭</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 初始化客户端弹窗 -->
+    <el-dialog v-model="initClientVisible" title="初始化本地 SSH 客户端" width="560px" destroy-on-close>
+      <el-form label-width="80px">
+        <el-form-item label="客户端">
+          <el-select v-model="initClientType" style="width:100%">
+            <el-option
+              v-for="item in CLIENT_INIT_OPTIONS"
+              :key="item.command"
+              :label="item.label"
+              :value="item.command"
+            />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="程序路径">
+          <div style="display:flex;gap:8px;width:100%">
+            <el-input v-model="initClientPath" :placeholder="initClientPlaceholder" style="flex:1" />
+            <input
+              ref="filePickerRef"
+              type="file"
+              style="display:none"
+              accept=".exe"
+              @change="onClientFilePicked"
+            />
+            <el-button @click="pickClientFile">选择...</el-button>
+          </div>
+        </el-form-item>
+      </el-form>
+      <div v-if="initRegCommand" style="margin-top:12px">
+        <div style="font-size:12px;color:#909399;margin-bottom:4px">
+          复制以下命令，以<strong>管理员身份</strong>在 cmd 中执行：
+        </div>
+        <el-input v-model="initRegCommand" readonly type="textarea" :rows="3" style="font-family:monospace;font-size:12px" />
+      </div>
+      <template #footer>
+        <el-button type="primary" @click="copyInitCommand">复制命令</el-button>
+        <el-button @click="initClientVisible = false">关闭</el-button>
       </template>
     </el-dialog>
   </div>
@@ -170,6 +218,66 @@ const SSH_CLIENT_LIST = [
   { command: 'mobaxterm', label: 'MobaXterm' },
   { command: 'winterm', label: 'Windows Terminal' },
 ] as const;
+
+// ── 初始化客户端弹窗 ──
+interface ClientInitOption { command: string; label: string; defaultPath: string }
+const CLIENT_INIT_OPTIONS: ClientInitOption[] = [
+  { command: 'xshell', label: 'Xshell', defaultPath: 'C:\\Program Files (x86)\\NetSarang\\Xshell 7\\Xshell.exe' },
+  { command: 'putty', label: 'PuTTY', defaultPath: 'C:\\Program Files\\PuTTY\\putty.exe' },
+  { command: 'securecrt', label: 'SecureCRT', defaultPath: 'C:\\Program Files\\VanDyke Software\\SecureCRT\\SecureCRT.exe' },
+  { command: 'mobaxterm', label: 'MobaXterm', defaultPath: 'C:\\Program Files (x86)\\Mobatek\\MobaXterm\\MobaXterm.exe' },
+  { command: 'winterm', label: 'Windows Terminal', defaultPath: 'wt.exe' },
+  { command: 'system', label: '系统 SSH (ssh.exe)', defaultPath: 'ssh.exe' },
+];
+const initClientVisible = ref(false);
+const initClientType = ref('xshell');
+const initClientPath = ref('');
+const initRegCommand = ref('');
+const filePickerRef = ref<HTMLInputElement | null>(null);
+
+const initClientPlaceholder = computed(() => {
+  const opt = CLIENT_INIT_OPTIONS.find(o => o.command === initClientType.value);
+  return opt ? `默认: ${opt.defaultPath}` : '';
+});
+
+function openInitClientDialog() {
+  initClientType.value = 'xshell';
+  initClientPath.value = '';
+  initRegCommand.value = '';
+  initClientVisible.value = true;
+}
+
+watch([initClientType, initClientPath], () => {
+  const opt = CLIENT_INIT_OPTIONS.find(o => o.command === initClientType.value);
+  const exePath = initClientPath.value || opt?.defaultPath || '';
+  if (!exePath) { initRegCommand.value = ''; return; }
+  const escaped = exePath.replace(/\\/g, '\\\\');
+  initRegCommand.value = `reg add "HKCR\\ssh" /ve /d "URL:SSH Protocol" /f && reg add "HKCR\\ssh" /v "URL Protocol" /d "" /f && reg add "HKCR\\ssh\\shell\\open\\command" /ve /d "\\"${escaped}\\" -url \\"%r\\"" /f`;
+});
+
+async function copyInitCommand() {
+  const cmd = initRegCommand.value;
+  if (!cmd) { ElMessage.warning('请先选择客户端'); return; }
+  try {
+    await navigator.clipboard.writeText(cmd);
+    ElMessage.success('命令已复制，请在管理员 cmd 中粘贴执行');
+  } catch {
+    ElMessage.warning('复制失败，请手动复制');
+  }
+}
+
+function pickClientFile() {
+  filePickerRef.value?.click();
+}
+
+function onClientFilePicked(e: Event) {
+  const input = e.target as HTMLInputElement;
+  const file = input.files?.[0];
+  if (file) {
+    initClientPath.value = (file as any).path || file.name;
+  }
+  input.value = '';
+}
 
 const { t } = useI18n();
 const router = useRouter();

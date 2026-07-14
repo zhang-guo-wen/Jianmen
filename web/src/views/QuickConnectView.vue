@@ -1,6 +1,6 @@
 <template>
   <div class="view-stack">
-    <el-tabs v-model="activeTab">
+    <el-tabs v-model="activeTab" class="page-tabs">
       <el-tab-pane label="SSH" name="ssh">
         <DataTableCard
           :data="targets"
@@ -300,5 +300,11 @@ onMounted(() => { loadTargets(); });
 </script>
 
 <style scoped>
+/* 保留 tab header 默认间距 (page-tabs 会清零) */
+.page-tabs :deep(.el-tabs__header) {
+  margin-bottom: 15px;
+  padding: 0;
+}
+
 .config-dialog { min-height: 100px; }
 </style>

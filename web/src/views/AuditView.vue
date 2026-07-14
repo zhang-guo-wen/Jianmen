@@ -1,6 +1,6 @@
 <template>
   <div class="view-stack audit-view">
-    <el-tabs v-model="auditScope">
+    <el-tabs v-model="auditScope" class="page-tabs">
       <el-tab-pane :label="t('audit.scope.ssh')" name="ssh">
         <el-alert v-if="sessionError" :title="sessionError" type="error" show-icon style="margin-bottom: 12px" />
         <div class="page-container">
@@ -1053,6 +1053,12 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
+/* 保留 tab header 默认间距 (page-tabs 会清零) */
+.page-tabs :deep(.el-tabs__header) {
+  margin-bottom: 15px;
+  padding: 0;
+}
+
 .audit-view {
   display: flex;
   flex-direction: column;

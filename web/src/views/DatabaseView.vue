@@ -39,8 +39,8 @@
             <el-button link type="success" size="small" @click="handleDBConnect(row)">连接</el-button>
             <el-button link type="primary" size="small" @click="editInstance(row)">编辑</el-button>
             <el-dropdown trigger="click" teleported>
-              <el-button link type="primary" size="small"
-                >更多<el-icon class="el-icon--right"><ArrowDown /></el-icon></el-button
+              <span class="more-dropdown-trigger"
+                >更多<el-icon class="el-icon--right"><ArrowDown /></el-icon></span
               >
               <template #dropdown>
                 <el-dropdown-menu>
@@ -1174,6 +1174,18 @@ function closeProvisionAndRefresh() {
 }
 .danger-dropdown-item {
   color: var(--el-color-danger);
+}
+.more-dropdown-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-size: var(--el-font-size-small, 12px);
+  color: var(--el-color-primary);
+  cursor: pointer;
+  user-select: none;
+}
+.more-dropdown-trigger:hover {
+  color: var(--el-color-primary-light-3);
 }
 
 @media (max-width: 720px) {

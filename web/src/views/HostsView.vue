@@ -548,7 +548,7 @@
             >
               <el-descriptions-item label="连接地址">
                 <code
-                  >{{ bastionHost || "127.0.0.1" }}:{{
+                  >{{ bastionHost }}:{{
                     bastionPort || 47102
                   }}</code
                 >
@@ -559,7 +559,7 @@
                   style="margin-left: 8px"
                   @click="
                     copyText(
-                      `${bastionHost || '127.0.0.1'}:${bastionPort || 47102}`,
+                      `${bastionHost}:${bastionPort || 47102}`,
                     )
                   "
                   >复制</el-button
@@ -583,7 +583,7 @@
 
             <div style="margin-top: 12px">
               <el-input
-                :model-value="`ssh ${connectionCompactUser}@${bastionHost || '127.0.0.1'} -p ${bastionPort || 47102}`"
+                :model-value="`ssh ${connectionCompactUser}@${bastionHost} -p ${bastionPort || 47102}`"
                 readonly
                 size="small"
               >
@@ -591,7 +591,7 @@
                   <el-button
                     @click="
                       copyText(
-                        `ssh ${connectionCompactUser}@${bastionHost || '127.0.0.1'} -p ${bastionPort || 47102}`,
+                        `ssh ${connectionCompactUser}@${bastionHost} -p ${bastionPort || 47102}`,
                       )
                     "
                     >复制 SSH 命令</el-button
@@ -706,7 +706,7 @@ const accountDetailLoading = ref(false);
 
 // ── Connection state ──
 const selectedConnectionTarget = ref<TargetRecord | null>(null);
-const bastionHost = ref("127.0.0.1");
+const bastionHost = ref(window.location.hostname);
 const bastionPort = ref(47102);
 const userSessionId = ref("");
 const creatingSession = ref(false);

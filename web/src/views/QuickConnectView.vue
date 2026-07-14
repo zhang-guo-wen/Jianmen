@@ -133,7 +133,7 @@ const targets = ref<TargetRecord[]>([]);
 const targetTotal = ref(0);
 const targetPage = ref(1);
 const targetPageSize = ref(20);
-const bastionHost = ref('127.0.0.1');
+const bastionHost = ref(window.location.hostname);
 const bastionPort = ref(47102);
 
 // ── DB state ──
@@ -192,10 +192,10 @@ async function openSSHConfig(target: TargetRecord) {
     const s = await apiClient.createUserSession(tid);
     const cu = s?.compact_username || '';
     connectInfo.value = {
-      host: bastionHost.value || '127.0.0.1',
+      host: bastionHost.value || window.location.hostname,
       port: bastionPort.value || 47102,
       compactUser: cu,
-      command: `ssh ${cu}@${bastionHost.value || '127.0.0.1'} -p ${bastionPort.value || 47102}`,
+      command: `ssh ${cu}@${bastionHost.value || window.location.hostname} -p ${bastionPort.value || 47102}`,
     };
   } catch (e: any) { sessionError.value = e.message; }
   finally { creatingSession.value = false; }
@@ -262,7 +262,7 @@ async function openDBConfig(acc: any) {
     const s = await apiClient.createUserSession(String(acc.id));
     const cu = s?.compact_username || '';
     const proto = acc._protocol || 'mysql';
-    const host = bastionHost.value || '127.0.0.1';
+    const host = bastionHost.value || window.location.hostname;
     const port = gatewayPort.value || 33060;
     const cmd = proto === 'mysql'
       ? `mysql --protocol=tcp -h ${host} -P ${port} -u ${cu} -p`

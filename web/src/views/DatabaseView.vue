@@ -478,7 +478,7 @@ const userSessionId = ref('')
 
 // ── Gateway config ──
 const gatewayConfig = ref<{ host: string; port: number; enabled: boolean }>({
-  host: '127.0.0.1',
+  host: window.location.hostname,
   port: 33060,
   enabled: false,
 })
@@ -488,7 +488,7 @@ async function loadGatewayConfig() {
     const cfg = await api.apiClient.getDBGateway()
     if (cfg && typeof cfg === 'object') {
       gatewayConfig.value = {
-        host: String(cfg.host || '127.0.0.1'),
+        host: String(cfg.host || window.location.hostname),
         port: Number(cfg.port) || 33060,
         enabled: Boolean(cfg.enabled),
       }

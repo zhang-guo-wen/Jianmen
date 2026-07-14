@@ -60,30 +60,27 @@
                 @click="openEditHostDialog(row)"
                 >编辑</el-button
               >
-              <span
-                class="more-dropdown-trigger"
-                @click.stop="toggleHostMoreMenu(row, $event)"
-                >更多<el-icon class="el-icon--right"><ArrowDown /></el-icon></span
-              >
+              <el-dropdown trigger="click" teleported>
+                <span class="more-dropdown-trigger"
+                  >更多<el-icon class="el-icon--right"><ArrowDown /></el-icon></span
+                >
+                <template #dropdown>
+                  <el-dropdown-menu>
+                    <el-dropdown-item @click="handleHostAuditLog(row)">审计日志</el-dropdown-item>
+                    <el-dropdown-item @click="handleHostSessions(row)">在线会话</el-dropdown-item>
+                    <el-dropdown-item @click="handleHostPermissions(row)">权限管理</el-dropdown-item>
+                    <el-dropdown-item
+                      class="danger-dropdown-item"
+                      @click="confirmDeleteHost(row)"
+                      >删除</el-dropdown-item
+                    >
+                  </el-dropdown-menu>
+                </template>
+              </el-dropdown>
             </div>
           </template>
         </el-table-column>
       </DataTableCard>
-
-      <!-- 更多操作弹出菜单 -->
-      <Teleport to="body">
-        <div
-          v-if="moreMenuHostId"
-          class="more-menu-popup"
-          :style="moreMenuStyle"
-          @click.stop
-        >
-          <div class="more-menu-item" @click="handleHostAuditLog(moreMenuHost!); closeMoreMenu()">审计日志</div>
-          <div class="more-menu-item" @click="handleHostSessions(moreMenuHost!); closeMoreMenu()">在线会话</div>
-          <div class="more-menu-item" @click="handleHostPermissions(moreMenuHost!); closeMoreMenu()">权限管理</div>
-          <div class="more-menu-item danger-menu-item" @click="confirmDeleteHost(moreMenuHost!); closeMoreMenu()">删除</div>
-        </div>
-      </Teleport>
 
       <!-- 创建/编辑主机弹窗 -->
       <FormDialog
@@ -614,7 +611,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
+import { computed, nextTick, onMounted, reactive, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import {
   ElMessage,
@@ -720,55 +717,6 @@ const connectionTestResult = ref<{
   error?: string;
   latency_ms?: number;
 } | null>(null);
-
-// ── More menu state ──
-const moreMenuHostId = ref<string | null>(null);
-const moreMenuPosition = ref({ x: 0, y: 0 });
-const moreMenuHost = computed(() =>
-  moreMenuHostId.value
-    ? hosts.value.find((h) => hostId(h) === moreMenuHostId.value) ?? null
-    : null,
-);
-const moreMenuStyle = computed(() => ({
-  position: "fixed" as const,
-  left: `${moreMenuPosition.value.x}px`,
-  top: `${moreMenuPosition.value.y}px`,
-  zIndex: 3000,
-}));
-
-function toggleHostMoreMenu(host: HostView, event: MouseEvent) {
-  const id = hostId(host);
-  if (moreMenuHostId.value === id) {
-    closeMoreMenu();
-    return;
-  }
-  moreMenuHostId.value = id;
-  const target = event.currentTarget as HTMLElement;
-  const rect = target.getBoundingClientRect();
-  moreMenuPosition.value = { x: rect.left, y: rect.bottom + 4 };
-}
-
-function closeMoreMenu() {
-  moreMenuHostId.value = null;
-}
-
-function onDocumentClick(_e: MouseEvent) {
-  if (moreMenuHostId.value) {
-    closeMoreMenu();
-  }
-}
-
-watch(moreMenuHostId, (val) => {
-  if (val) {
-    setTimeout(() => document.addEventListener("click", onDocumentClick), 0);
-  } else {
-    document.removeEventListener("click", onDocumentClick);
-  }
-});
-
-onBeforeUnmount(() => {
-  document.removeEventListener("click", onDocumentClick);
-});
 
 // ── Refs ──
 const hostFormRef = ref<FormInstance>();
@@ -1891,6 +1839,9 @@ onMounted(() => {
 .more-dropdown-trigger:hover {
   color: var(--el-color-primary-light-3);
 }
+.danger-dropdown-item {
+  color: var(--el-color-danger);
+}
 
 /* 账号管理按钮 */
 .account-mgmt-btn {
@@ -2023,32 +1974,5 @@ onMounted(() => {
 /* FormDialog body min-height for account edit */
 :deep(.form-dialog-body) {
   min-height: 280px;
-}
-</style>
-
-<style>
-/* 更多操作弹出菜单（Teleport 到 body，需要全局样式） */
-.more-menu-popup {
-  background: var(--el-bg-color-overlay);
-  border-radius: var(--el-border-radius-base);
-  box-shadow: var(--el-box-shadow-light);
-  padding: 4px 0;
-  min-width: 130px;
-}
-.more-menu-popup .more-menu-item {
-  padding: 6px 14px;
-  font-size: 13px;
-  cursor: pointer;
-  color: var(--el-text-color-regular);
-  transition: background-color 0.2s;
-}
-.more-menu-popup .more-menu-item:hover {
-  background-color: var(--el-fill-color-light);
-}
-.more-menu-popup .danger-menu-item {
-  color: var(--el-color-danger);
-}
-.more-menu-popup .danger-menu-item:hover {
-  background-color: var(--el-color-danger-light-9);
 }
 </style>

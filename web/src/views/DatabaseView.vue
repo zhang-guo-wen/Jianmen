@@ -38,30 +38,23 @@
           <div class="table-actions">
             <el-button link type="success" size="small" @click="handleDBConnect(row)">连接</el-button>
             <el-button link type="primary" size="small" @click="editInstance(row)">编辑</el-button>
-            <span
-              class="more-dropdown-trigger"
-              @click.stop="toggleDBMoreMenu(row, $event)"
-              >更多<el-icon class="el-icon--right"><ArrowDown /></el-icon></span
-            >
+            <el-dropdown trigger="click" teleported>
+              <span class="more-dropdown-trigger"
+                >更多<el-icon class="el-icon--right"><ArrowDown /></el-icon></span
+              >
+              <template #dropdown>
+                <el-dropdown-menu>
+                  <el-dropdown-item @click="handleDBAuditLog(row)">审计日志</el-dropdown-item>
+                  <el-dropdown-item @click="handleDBSessions(row)">在线会话</el-dropdown-item>
+                  <el-dropdown-item @click="handleDBPermissions(row)">权限管理</el-dropdown-item>
+                  <el-dropdown-item class="danger-dropdown-item" @click="deleteInstance(row)">删除</el-dropdown-item>
+                </el-dropdown-menu>
+              </template>
+            </el-dropdown>
           </div>
         </template>
       </el-table-column>
     </DataTableCard>
-
-    <!-- 更多操作弹出菜单 -->
-    <Teleport to="body">
-      <div
-        v-if="moreMenuInstanceId"
-        class="more-menu-popup"
-        :style="moreMenuStyle"
-        @click.stop
-      >
-        <div class="more-menu-item" @click="handleDBAuditLog(moreMenuInstance!); closeDBMoreMenu()">审计日志</div>
-        <div class="more-menu-item" @click="handleDBSessions(moreMenuInstance!); closeDBMoreMenu()">在线会话</div>
-        <div class="more-menu-item" @click="handleDBPermissions(moreMenuInstance!); closeDBMoreMenu()">权限管理</div>
-        <div class="more-menu-item danger-menu-item" @click="deleteInstance(moreMenuInstance!); closeDBMoreMenu()">删除</div>
-      </div>
-    </Teleport>
 
     <!-- 创建/编辑实例弹窗 -->
     <FormDialog v-model:visible="showInstanceDialog" :title="editingInstance ? '编辑实例' : '新增实例'" width="640px" :loading="submitting" @submit="submitInstance">
@@ -400,7 +393,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, watch, computed, onMounted, onBeforeUnmount } from 'vue'
+import { ref, reactive, watch, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { ArrowDown, Loading } from '@element-plus/icons-vue'
 import DataTableCard from '@/components/DataTableCard.vue'
@@ -445,55 +438,6 @@ const instanceForm = reactive<InstanceForm>({
   group: '',
   remark: ''
 })
-
-// ── More menu state ──
-const moreMenuInstanceId = ref<string | null>(null);
-const moreMenuPosition = ref({ x: 0, y: 0 });
-const moreMenuInstance = computed(() =>
-  moreMenuInstanceId.value
-    ? instances.value.find((i) => i.id === moreMenuInstanceId.value) ?? null
-    : null,
-);
-const moreMenuStyle = computed(() => ({
-  position: "fixed" as const,
-  left: `${moreMenuPosition.value.x}px`,
-  top: `${moreMenuPosition.value.y}px`,
-  zIndex: 3000,
-}));
-
-function toggleDBMoreMenu(inst: api.DatabaseInstanceView, event: MouseEvent) {
-  const id = inst.id ?? null;
-  if (moreMenuInstanceId.value === id) {
-    closeDBMoreMenu();
-    return;
-  }
-  moreMenuInstanceId.value = id;
-  const target = event.currentTarget as HTMLElement;
-  const rect = target.getBoundingClientRect();
-  moreMenuPosition.value = { x: rect.left, y: rect.bottom + 4 };
-}
-
-function closeDBMoreMenu() {
-  moreMenuInstanceId.value = null;
-}
-
-function onDBDocumentClick(_e: MouseEvent) {
-  if (moreMenuInstanceId.value) {
-    closeDBMoreMenu();
-  }
-}
-
-watch(moreMenuInstanceId, (val) => {
-  if (val) {
-    setTimeout(() => document.addEventListener("click", onDBDocumentClick), 0);
-  } else {
-    document.removeEventListener("click", onDBDocumentClick);
-  }
-});
-
-onBeforeUnmount(() => {
-  document.removeEventListener("click", onDBDocumentClick);
-});
 
 // ── Account dialog state ──
 const accountsDialogVisible = ref(false)
@@ -1240,37 +1184,13 @@ function closeProvisionAndRefresh() {
 .more-dropdown-trigger:hover {
   color: var(--el-color-primary-light-3);
 }
+.danger-dropdown-item {
+  color: var(--el-color-danger);
+}
 
 @media (max-width: 720px) {
   .config-row {
     grid-template-columns: 1fr;
   }
-}
-</style>
-
-<style>
-/* 更多操作弹出菜单（Teleport 到 body，需要全局样式） */
-.more-menu-popup {
-  background: var(--el-bg-color-overlay);
-  border-radius: var(--el-border-radius-base);
-  box-shadow: var(--el-box-shadow-light);
-  padding: 4px 0;
-  min-width: 130px;
-}
-.more-menu-popup .more-menu-item {
-  padding: 6px 14px;
-  font-size: 13px;
-  cursor: pointer;
-  color: var(--el-text-color-regular);
-  transition: background-color 0.2s;
-}
-.more-menu-popup .more-menu-item:hover {
-  background-color: var(--el-fill-color-light);
-}
-.more-menu-popup .danger-menu-item {
-  color: var(--el-color-danger);
-}
-.more-menu-popup .danger-menu-item:hover {
-  background-color: var(--el-color-danger-light-9);
 }
 </style>

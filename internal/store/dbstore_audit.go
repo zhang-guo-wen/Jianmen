@@ -50,8 +50,22 @@ func (s *DBStore) ListAuditSessions(params AuditListParams) ([]AuditSessionView,
 	if params.Search != "" {
 		like := "%" + strings.ToLower(params.Search) + "%"
 		q = q.Where(
-			"LOWER(username) LIKE ? OR LOWER(target_name) LIKE ? OR LOWER(target_address) LIKE ? OR LOWER(account_name) LIKE ? OR LOWER(account_username) LIKE ?",
-			like, like, like, like, like,
+			`LOWER(username) LIKE ?
+				OR LOWER(target_name) LIKE ?
+				OR LOWER(target_address) LIKE ?
+				OR LOWER(account_name) LIKE ?
+				OR LOWER(account_username) LIKE ?
+				OR EXISTS (
+					SELECT 1 FROM audit_ssh_commands
+					WHERE audit_ssh_commands.audit_session_id = audit_sessions.id
+						AND LOWER(audit_ssh_commands.command) LIKE ?
+				)
+				OR EXISTS (
+					SELECT 1 FROM audit_db_queries
+					WHERE audit_db_queries.audit_session_id = audit_sessions.id
+						AND LOWER(audit_db_queries.sql_text) LIKE ?
+				)`,
+			like, like, like, like, like, like, like,
 		)
 	}
 	if params.Date != "" {

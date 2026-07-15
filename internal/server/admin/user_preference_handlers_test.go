@@ -25,7 +25,7 @@ func TestMePreferencesDefaultsAndPersists(t *testing.T) {
 	if err := decodeTestData(t, getRecorder.Body.Bytes(), &defaults); err != nil {
 		t.Fatalf("decode defaults: %v", err)
 	}
-	if defaults.Theme != "system" || defaults.TerminalFontSize != 14 {
+	if defaults.Theme != "light" || defaults.TerminalFontSize != 14 {
 		t.Fatalf("unexpected defaults: %#v", defaults)
 	}
 

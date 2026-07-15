@@ -4,7 +4,7 @@
       <template #header><strong>界面与终端</strong></template>
       <el-form label-position="top">
         <el-form-item label="主题">
-          <el-segmented v-model="form.theme" :options="themeOptions" block />
+          <el-segmented v-model="form.theme" :options="themeOptions" class="theme-segmented" block />
         </el-form-item>
         <div class="form-pair">
           <el-form-item label="终端字体">
@@ -130,6 +130,8 @@ async function copyRegistrationCommand() {
 .settings-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(320px, .9fr); gap: 16px; overflow: auto; padding-bottom: 4px; }
 .settings-card { border: 1px solid var(--color-border); border-radius: 18px; background: var(--color-card); }
 .form-pair { display: grid; grid-template-columns: minmax(0, 1fr) 150px; gap: 14px; }
+:deep(.theme-segmented .el-segmented__item) { min-width: 88px; padding: 0 14px; white-space: nowrap; }
+:deep(.theme-segmented .el-segmented__item-label) { overflow: visible; text-overflow: clip; }
 .card-heading { display: flex; align-items: center; justify-content: space-between; }
 .field-help { margin-top: 7px; color: var(--color-text-secondary); font-size: 12px; }
 .command-box { max-height: 92px; margin: 10px 0 4px; padding: 10px; overflow: auto; border-radius: 10px; background: var(--color-surface-muted); }

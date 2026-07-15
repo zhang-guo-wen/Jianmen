@@ -90,17 +90,27 @@ func (s *Server) visibleHosts(r *http.Request, hosts []store.HostView) ([]store.
 			result = append(result, host)
 			continue
 		}
-		visible, err := s.hostVisible(r, host.ID)
-		if err != nil {
-			return nil, err
-		}
-		if !visible {
-			continue
-		}
+		var err error
 		host.CanManage, err = s.hasResourceGrant(r, model.ResourceTypeHost, host.ID)
 		if err != nil {
 			return nil, err
 		}
+		if host.CanManage {
+			result = append(result, host)
+			continue
+		}
+		accounts, err := s.store.HostAccounts(host.ID)
+		if err != nil {
+			return nil, err
+		}
+		accounts, err = s.visibleTargets(r, accounts)
+		if err != nil {
+			return nil, err
+		}
+		if len(accounts) == 0 {
+			continue
+		}
+		host.AccountCount = len(accounts)
 		result = append(result, host)
 	}
 	return result, nil
@@ -158,17 +168,27 @@ func (s *Server) visibleDatabaseInstances(r *http.Request, instances []store.Dat
 			result = append(result, instance)
 			continue
 		}
-		visible, err := s.databaseInstanceVisible(r, instance.ID)
-		if err != nil {
-			return nil, err
-		}
-		if !visible {
-			continue
-		}
+		var err error
 		instance.CanManage, err = s.hasResourceGrant(r, model.ResourceTypeDatabaseInstance, instance.ID)
 		if err != nil {
 			return nil, err
 		}
+		if instance.CanManage {
+			result = append(result, instance)
+			continue
+		}
+		accounts, err := s.store.InstanceAccounts(instance.ID)
+		if err != nil {
+			return nil, err
+		}
+		accounts, err = s.visibleDatabaseAccounts(r, accounts)
+		if err != nil {
+			return nil, err
+		}
+		if len(accounts) == 0 {
+			continue
+		}
+		instance.AccountCount = len(accounts)
 		result = append(result, instance)
 	}
 	return result, nil

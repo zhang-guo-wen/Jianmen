@@ -1,4 +1,4 @@
-﻿# syntax=docker/dockerfile:1
+# syntax=docker/dockerfile:1
 
 FROM --platform=$BUILDPLATFORM node:24-bookworm-slim AS frontend
 
@@ -60,4 +60,3 @@ STOPSIGNAL SIGTERM
 
 ENTRYPOINT ["/app/jianmen"]
 CMD ["-config", "/app/config.json"]
-

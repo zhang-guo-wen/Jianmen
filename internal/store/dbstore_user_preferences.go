@@ -48,7 +48,7 @@ func (s *DBStore) SaveUserPreference(ctx context.Context, preference model.UserP
 func defaultUserPreference(userID string) model.UserPreference {
 	return model.UserPreference{
 		UserID:             userID,
-		Theme:              "system",
+		Theme:              "light",
 		TerminalFontFamily: "Cascadia Mono, Consolas, monospace",
 		TerminalFontSize:   14,
 	}
@@ -61,7 +61,7 @@ func normalizeStoredUserPreference(preference model.UserPreference) model.UserPr
 	preference.SSHClientPath = strings.TrimSpace(preference.SSHClientPath)
 	preference.TerminalFontFamily = strings.TrimSpace(preference.TerminalFontFamily)
 	if preference.Theme == "" {
-		preference.Theme = "system"
+		preference.Theme = "light"
 	}
 	if preference.TerminalFontFamily == "" {
 		preference.TerminalFontFamily = "Cascadia Mono, Consolas, monospace"

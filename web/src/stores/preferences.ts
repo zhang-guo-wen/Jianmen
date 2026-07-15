@@ -7,7 +7,7 @@ import { isAbsoluteExecutablePath } from '@/config/sshClients';
 const APPEARANCE_CACHE_KEY = 'jianmen_user_appearance';
 
 const defaults: UserPreferences = {
-  theme: 'system',
+  theme: 'light',
   ssh_client: '',
   ssh_client_path: '',
   terminal_font_family: 'Cascadia Mono, Consolas, monospace',

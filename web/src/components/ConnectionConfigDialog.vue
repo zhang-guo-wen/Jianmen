@@ -1,10 +1,9 @@
 <template>
-  <el-dialog v-model="visible" destroy-on-close :title="dialogTitle" width="min(760px, calc(100vw - 32px))" class="connection-config-dialog">
+  <el-dialog v-model="visible" destroy-on-close :title="dialogTitle" width="min(700px, calc(100vw - 24px))" class="connection-config-dialog">
     <div v-if="target" class="dialog-content">
       <section class="resource-summary">
         <div class="resource-icon">{{ resourceType === 'host' ? 'SSH' : protocolLabel }}</div>
         <div class="resource-main">
-          <span class="eyebrow">连接目标</span>
           <strong>{{ resourceName || '-' }}</strong>
         </div>
         <div class="source-meta">
@@ -29,16 +28,13 @@
 
       <div v-if="creatingSession" class="loading-state">
         <el-icon class="is-loading" :size="30"><Loading /></el-icon>
-        <p>正在生成长期连接和临时连接配置...</p>
+        <p>正在生成连接配置...</p>
       </div>
 
       <template v-else-if="!connectionError && connectionInfo">
         <section class="connection-panel permanent-panel">
           <header>
-            <div>
-              <span class="section-index">01</span>
-              <div><strong>长期连接</strong><p>使用你的堡垒机登录密码，可重复连接</p></div>
-            </div>
+            <strong>长期连接</strong>
             <el-tag type="primary" effect="plain">长期有效</el-tag>
           </header>
           <div class="detail-grid">
@@ -54,10 +50,7 @@
 
         <section class="connection-panel temporary-panel">
           <header>
-            <div>
-              <span class="section-index">02</span>
-              <div><strong>临时连接</strong><p>使用平台生成的一次性临时密码</p></div>
-            </div>
+            <strong>临时连接</strong>
             <el-tag type="warning" effect="dark">一次性</el-tag>
           </header>
           <div class="detail-grid">
@@ -328,39 +321,34 @@ function formatExpiresAt(value: string): string {
 </script>
 
 <style scoped>
-.dialog-content { display: flex; flex-direction: column; gap: 14px; }
-.resource-summary { display: grid; grid-template-columns: auto minmax(0, 1fr) minmax(260px, auto); gap: 14px; align-items: center; padding: 16px; border: 1px solid var(--el-border-color-light); border-radius: 12px; background: linear-gradient(135deg, var(--el-fill-color-light), transparent); }
-.resource-icon { display: grid; place-items: center; width: 52px; height: 52px; border-radius: 12px; background: var(--el-color-primary); color: white; font-size: 12px; font-weight: 800; letter-spacing: .06em; }
+.dialog-content { display: flex; flex-direction: column; gap: 10px; }
+.resource-summary { display: grid; grid-template-columns: auto minmax(0, 1fr) minmax(260px, auto); gap: 12px; align-items: center; padding: 12px 14px; border: 1px solid var(--el-border-color-light); border-radius: 12px; background: linear-gradient(135deg, var(--el-fill-color-light), transparent); }
+.resource-icon { display: grid; place-items: center; width: 44px; height: 44px; border-radius: 10px; background: var(--el-color-primary); color: white; font-size: 12px; font-weight: 800; letter-spacing: .06em; }
 .resource-main { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
-.resource-main strong { overflow: hidden; font-size: 18px; text-overflow: ellipsis; white-space: nowrap; }
-.eyebrow { color: var(--el-text-color-secondary); font-size: 11px; letter-spacing: .12em; }
+.resource-main strong { overflow: hidden; font-size: 16px; text-overflow: ellipsis; white-space: nowrap; }
 .source-meta { display: grid; gap: 6px; }
 .source-meta > div { display: grid; grid-template-columns: 54px minmax(0, 1fr); gap: 8px; align-items: center; }
 .source-meta span, .detail-item > span { color: var(--el-text-color-secondary); font-size: 12px; }
 .source-meta code { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .connectivity-row { display: flex; align-items: center; gap: 8px; color: var(--el-text-color-secondary); font-size: 13px; }
 .connect-error { color: var(--el-color-danger); }
-.loading-state { padding: 44px 0; text-align: center; }
+.loading-state { padding: 30px 0; text-align: center; }
 .loading-state p { margin: 10px 0 0; color: var(--el-text-color-secondary); }
 .connection-panel { overflow: hidden; border: 1px solid var(--el-border-color-light); border-radius: 12px; }
-.connection-panel header { display: flex; justify-content: space-between; align-items: center; padding: 14px 16px; }
-.connection-panel header > div { display: flex; gap: 10px; align-items: center; }
+.connection-panel header { display: flex; justify-content: space-between; align-items: center; padding: 10px 14px; }
 .connection-panel header strong { font-size: 15px; }
-.connection-panel header p { margin: 2px 0 0; color: var(--el-text-color-secondary); font-size: 12px; }
-.section-index { color: var(--el-color-primary); font-size: 11px; font-weight: 800; }
 .permanent-panel header { background: var(--el-color-primary-light-9); }
 .temporary-panel header { background: var(--el-color-warning-light-9); }
-.temporary-panel .section-index { color: var(--el-color-warning); }
 .detail-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1px; background: var(--el-border-color-lighter); border-top: 1px solid var(--el-border-color-lighter); }
-.detail-item { display: flex; flex-direction: column; gap: 7px; min-width: 0; padding: 12px 16px; background: var(--el-bg-color); }
+.detail-item { display: flex; flex-direction: column; gap: 5px; min-width: 0; padding: 9px 14px; background: var(--el-bg-color); }
 .detail-item code, .detail-item strong { overflow-wrap: anywhere; font-size: 13px; }
 .value-line { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
 .accent-value code { color: var(--el-color-warning-dark-2); font-size: 14px; font-weight: 800; letter-spacing: .04em; }
 .password-tip { grid-column: 1 / -1; }
 .password-tip strong { color: var(--el-color-primary); }
 .expiry-item strong { color: var(--el-color-warning-dark-2); }
-.command-list { display: flex; flex-direction: column; gap: 8px; padding: 12px 16px 14px; border-top: 1px solid var(--el-border-color-lighter); background: var(--el-fill-color-extra-light); }
-.command-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.command-list { display: flex; flex-direction: column; gap: 6px; padding: 9px 14px 10px; border-top: 1px solid var(--el-border-color-lighter); background: var(--el-fill-color-extra-light); }
+.command-row { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
 .command-row > div { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 .command-row span { color: var(--el-text-color-secondary); font-size: 11px; }
 .command-row code { overflow-x: auto; white-space: nowrap; font-size: 12px; }

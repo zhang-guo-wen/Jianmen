@@ -327,6 +327,7 @@ func (s *Server) handleTestConnection(w http.ResponseWriter, r *http.Request) {
 	elapsed := time.Since(start)
 	latencyMs := elapsed.Milliseconds()
 	if err != nil {
+		s.logger.Warn("ssh connection test failed", "target", targetCfg.ID, "address", addr, "error", err)
 		s.writeJSON(w, r, http.StatusOK, map[string]any{"ok": false, "latency_ms": latencyMs, "error": "连接失败: " + friendlySSHError(err)})
 		return
 	}

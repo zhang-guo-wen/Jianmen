@@ -72,7 +72,7 @@
         v-model="hostConfigVisible"
         resource-type="host"
         :target="selectedSSHTarget"
-        :resource-name="String(selectedSSHTarget?.name || selectedSSHTarget?.host || selectedSSHTarget?.address || '')"
+        :resource-name="selectedSSHTarget ? quickHostName(selectedSSHTarget) : ''"
         :source-address="selectedSSHTarget ? `${targetHost(selectedSSHTarget)}:${targetPort(selectedSSHTarget)}` : ''"
         :source-account="String(selectedSSHTarget?.username || '')"
         :allow-ssh="permission.canDo('session:connect')"
@@ -127,6 +127,7 @@ const dbPageSize = ref(20);
 // ── Dialog state ──
 const hostConfigVisible = ref(false);
 const selectedSSHTarget = ref<TargetRecord | null>(null);
+const hostNames = ref<Record<string, string>>({});
 const configVisible = ref(false);
 type QuickDBTarget = DBAccountRecord & { _instance_name?: string; _protocol?: string; _instance_address?: string; _instance_port?: number };
 const selectedDBTarget = ref<QuickDBTarget | null>(null);
@@ -134,6 +135,7 @@ const selectedDBTarget = ref<QuickDBTarget | null>(null);
 function targetHost(t: TargetRecord): string { return String(t.host || t.address || ''); }
 function targetPort(t: TargetRecord): number { return Number(t.port) || 22; }
 function accountName(t: TargetRecord): string { return String(t.username || ''); }
+function quickHostName(t: TargetRecord): string { return hostNames.value[String(t.host_id || '')] || targetHost(t) || '-'; }
 async function loadTargets() {
   sshLoading.value = true;
   sshError.value = '';
@@ -146,6 +148,12 @@ async function loadTargets() {
     });
     targets.value = res.items ?? [];
     targetTotal.value = res.total ?? 0;
+    try {
+      const hostPage = await apiClient.getHosts({ page: 1, page_size: 999 });
+      hostNames.value = Object.fromEntries((hostPage.items ?? []).map(host => [String(host.id || ''), String(host.name || host.address || '')]));
+    } catch {
+      hostNames.value = {};
+    }
   } catch (e: any) {
     sshError.value = e.message;
     ElMessage.error(e.message);

@@ -285,6 +285,7 @@ type Store interface {
 	DeleteDatabaseInstance(id string) error
 
 	InstanceAccounts(instanceID string) ([]DatabaseAccountView, error)
+	DatabaseAccounts() ([]DatabaseAccountView, error)
 	DatabaseAccount(id string) (DatabaseAccountView, error)
 	AddDatabaseAccount(instanceID, username, password, group, remark string, expiresAt *time.Time) (DatabaseAccountView, error)
 	UpdateDatabaseAccount(id, username, password, group, remark string, expiresAt *time.Time, status string) (DatabaseAccountView, error)

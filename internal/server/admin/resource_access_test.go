@@ -73,6 +73,54 @@ func TestVisibleResourcesUseContainerAndAccountGrants(t *testing.T) {
 	}
 }
 
+func TestHandleDBAccountsPaginatesSearchesAndFiltersVisibleResources(t *testing.T) {
+	server, db := newAdminDBTestServer(t)
+	seedResourceAccessTestData(t, db)
+	role := model.Role{ID: "role-db-list", Name: "role-db-list", Status: "active"}
+	permission := model.Permission{ID: "perm-db-list", Action: rbac.ActionDBProxyView, Effect: model.PermissionEffectAllow}
+	for _, value := range []any{&role, &permission, &model.UserRole{ID: "ur-db-list", UserID: "u1", RoleID: role.ID}, &model.RolePermission{ID: "rp-db-list", RoleID: role.ID, PermissionID: permission.ID}} {
+		if err := db.Create(value).Error; err != nil {
+			t.Fatalf("seed database list permission: %v", err)
+		}
+	}
+	server.rbacChecker = rbac.NewChecker(db)
+
+	request := asTestUser(httptest.NewRequest(http.MethodGet, "/api/db/accounts?page=2&page_size=1", nil), "u1", "alice")
+	recorder := httptest.NewRecorder()
+	server.handleDBAccounts(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("list database accounts status = %d, body=%s", recorder.Code, recorder.Body.String())
+	}
+	var page struct {
+		Items    []databaseAccountResourceView `json:"items"`
+		Total    int                           `json:"total"`
+		Page     int                           `json:"page"`
+		PageSize int                           `json:"page_size"`
+	}
+	if err := decodeTestData(t, recorder.Body.Bytes(), &page); err != nil {
+		t.Fatalf("decode database accounts: %v", err)
+	}
+	if page.Total != 2 || page.Page != 2 || page.PageSize != 1 || len(page.Items) != 1 || page.Items[0].ID != "dba-account-only" {
+		t.Fatalf("unexpected paged database accounts: %#v", page)
+	}
+	if page.Items[0].InstanceName != "account-only-db" || page.Items[0].InstanceAddress != "10.0.1.3:3306" {
+		t.Fatalf("missing instance metadata: %#v", page.Items[0])
+	}
+
+	searchRequest := asTestUser(httptest.NewRequest(http.MethodGet, "/api/db/accounts?q=10.0.1.3", nil), "u1", "alice")
+	searchRecorder := httptest.NewRecorder()
+	server.handleDBAccounts(searchRecorder, searchRequest)
+	if searchRecorder.Code != http.StatusOK {
+		t.Fatalf("search database accounts status = %d, body=%s", searchRecorder.Code, searchRecorder.Body.String())
+	}
+	if err := decodeTestData(t, searchRecorder.Body.Bytes(), &page); err != nil {
+		t.Fatalf("decode searched database accounts: %v", err)
+	}
+	if page.Total != 1 || len(page.Items) != 1 || page.Items[0].ID != "dba-account-only" {
+		t.Fatalf("unexpected searched database accounts: %#v", page)
+	}
+}
+
 func TestAccountGrantAllowsViewingButNotContainerManagement(t *testing.T) {
 	server, db := newAdminDBTestServer(t)
 	seedResourceAccessTestData(t, db)

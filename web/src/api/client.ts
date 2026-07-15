@@ -309,6 +309,8 @@ export interface DBAccountRecord {
   resource_seq?: number;
   created_at?: string;
   updated_at?: string;
+  instance_name?: string;
+  instance_address?: string;
   [key: string]: unknown;
   can_manage?: boolean;
 }
@@ -880,6 +882,8 @@ export const apiClient = {
     }),
 
   // database accounts
+  getAllDBAccounts: (params?: { page?: number; page_size?: number; q?: string }) =>
+    request<PageResponse<DBAccountRecord>>(`/api/db/accounts${buildQS(params as Record<string, string | number | undefined>)}`),
   getDBAccounts: (instanceID: string, params?: { page?: number; page_size?: number; q?: string; connectable?: boolean }) =>
     request<PageResponse<DBAccountRecord>>(`/api/db/instances/${encodeURIComponent(instanceID)}/accounts${buildQS(params)}`),
   createDBAccount: (instanceID: string, payload: DBAccountPayload) =>

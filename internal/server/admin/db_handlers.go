@@ -71,6 +71,55 @@ func ensureDBPort(address, protocol string) string {
 
 // -- db instances --
 
+type databaseAccountResourceView struct {
+	store.DatabaseAccountView
+	InstanceName    string `json:"instance_name"`
+	InstanceAddress string `json:"instance_address"`
+}
+
+func (s *Server) handleDBAccounts(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", http.MethodGet)
+		s.writeErrorText(w, r, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	if !s.requirePermission(r, rbac.ActionDBProxyView) {
+		s.forbidden(w, r)
+		return
+	}
+	accounts, err := s.store.DatabaseAccounts()
+	if err != nil {
+		s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
+		return
+	}
+	accounts, err = s.visibleDatabaseAccounts(r, accounts)
+	if err != nil {
+		s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
+		return
+	}
+	instances := make(map[string]store.DatabaseInstanceView)
+	for _, instance := range s.store.DatabaseInstances() {
+		instances[instance.ID] = instance
+	}
+	resources := make([]databaseAccountResourceView, 0, len(accounts))
+	for _, account := range accounts {
+		instance := instances[account.InstanceID]
+		resources = append(resources, databaseAccountResourceView{
+			DatabaseAccountView: account,
+			InstanceName:        instance.Name,
+			InstanceAddress:     net.JoinHostPort(instance.Address, strconv.Itoa(instance.Port)),
+		})
+	}
+	resp := paginateSlice(resources, r, func(v databaseAccountResourceView, q string) bool {
+		return strings.Contains(strings.ToLower(v.UniqueName), q) ||
+			strings.Contains(strings.ToLower(v.Username), q) ||
+			strings.Contains(strings.ToLower(v.Group), q) ||
+			strings.Contains(strings.ToLower(v.InstanceName), q) ||
+			strings.Contains(strings.ToLower(v.InstanceAddress), q)
+	})
+	s.writeJSON(w, r, http.StatusOK, resp)
+}
+
 func (s *Server) handleDBInstances(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:

@@ -177,16 +177,40 @@ func friendlySSHError(err error) string {
 	msg := err.Error()
 	lower := strings.ToLower(msg)
 	switch {
-	case strings.Contains(lower, "unable to authenticate") || strings.Contains(lower, "no supported methods"):
-		return "认证失败，请检查用户名和密码/私钥是否正确"
-	case strings.Contains(lower, "timeout") || strings.Contains(lower, "i/o timeout"):
-		return "连接超时，请检查主机地址和端口是否可达"
-	case strings.Contains(lower, "connection refused"):
-		return "连接被拒绝，请检查主机地址和端口是否正确，以及 SSH 服务是否已启动"
-	case strings.Contains(lower, "no route to host") || strings.Contains(lower, "no such host"):
-		return "无法访问主机，请检查主机地址和网络连接"
+	case strings.Contains(lower, "unable to authenticate"),
+		strings.Contains(lower, "no supported methods"),
+		strings.Contains(lower, "permission denied"),
+		strings.Contains(lower, "authentication failed"),
+		strings.Contains(lower, "too many authentication failures"),
+		strings.Contains(lower, "unexpected message type 51") && strings.Contains(lower, "expected 60"):
+		return "认证失败，请检查登录账号、密码、私钥或私钥口令是否正确"
+	case strings.Contains(lower, "timeout"),
+		strings.Contains(lower, "i/o timeout"),
+		strings.Contains(lower, "deadline exceeded"):
+		return "连接超时，请检查主机地址、端口、防火墙和网络连通性"
+	case strings.Contains(lower, "connection refused"),
+		strings.Contains(lower, "actively refused"):
+		return "连接被拒绝，请检查端口是否正确以及 SSH 服务是否已启动"
+	case strings.Contains(lower, "no route to host"),
+		strings.Contains(lower, "network is unreachable"):
+		return "网络不可达，请检查主机网络、路由和防火墙设置"
+	case strings.Contains(lower, "no such host"),
+		strings.Contains(lower, "server misbehaving"):
+		return "无法解析主机地址，请检查 IP 或域名是否正确"
+	case strings.Contains(lower, "connection reset by peer"),
+		strings.Contains(lower, "forcibly closed"),
+		strings.Contains(lower, "broken pipe"):
+		return "SSH 握手被远端中断，请检查端口是否为 SSH 服务以及服务端是否允许连接"
+	case lower == "eof" || strings.HasSuffix(lower, ": eof"):
+		return "SSH 服务在握手时关闭了连接，请检查端口、SSH 服务状态和协议兼容性"
+	case strings.Contains(lower, "no common algorithm"),
+		strings.Contains(lower, "no matching host key type"),
+		strings.Contains(lower, "algorithm negotiation failed"):
+		return "SSH 算法不兼容，请检查目标服务器的密钥交换、主机密钥或加密算法配置"
 	case strings.Contains(lower, "host key") && strings.Contains(lower, "mismatch"):
 		return "主机密钥不匹配，可能目标主机已变更或存在中间人攻击"
+	case strings.Contains(lower, "unexpected message type"):
+		return "SSH 握手协议异常，请确认连接端口是 SSH 服务，并检查服务端兼容性"
 	default:
 		return msg
 	}

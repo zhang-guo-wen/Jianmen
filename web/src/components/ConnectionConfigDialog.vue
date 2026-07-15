@@ -312,10 +312,18 @@ async function saveClientAndCopyCommand() {
   if (!canSaveClient.value) { ElMessage.warning(initClientPathError.value || '请完善客户端配置'); return; }
   try {
     await preferences.update({ ssh_client: initClientType.value, ssh_client_path: initClientPath.value.trim() });
+  } catch {
+    ElMessage.error(preferences.error || '客户端配置保存失败');
+    return;
+  }
+
+  try {
     await navigator.clipboard.writeText(initRegCommand.value);
     ElMessage.success('配置已保存，注册命令已复制，请在管理员 CMD 中执行一次');
     initClientVisible.value = false;
-  } catch { ElMessage.error(preferences.error || '客户端配置保存失败'); }
+  } catch {
+    ElMessage.warning('配置已保存，但注册命令复制失败，请手动复制');
+  }
 }
 
 function formatExpiresAt(value: string): string {

@@ -39,7 +39,7 @@
           <div class="field-help">程序路径必填，不提供默认值；浏览器无法读取完整路径时，请手动粘贴。</div>
         </el-form-item>
         <el-alert v-if="registrationCommand" type="info" :closable="false" show-icon>
-          <template #title>请使用管理员权限执行下面命令，授权打开本地SSH客户端</template>
+          <template #title>请使用管理员权限在cmd终端执行下面命令，授权打开本地SSH客户端</template>
           <div class="command-box"><code>{{ registrationCommand }}</code></div>
           <el-button link type="primary" @click="copyRegistrationCommand">复制管理员注册命令</el-button>
         </el-alert>

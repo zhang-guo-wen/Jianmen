@@ -510,6 +510,7 @@ import {
   type FormRules,
 } from "element-plus";
 import { ArrowDown } from "@element-plus/icons-vue";
+import { useRouter } from "vue-router";
 import DataTableCard from "@/components/DataTableCard.vue";
 import FormDialog from "@/components/FormDialog.vue";
 import ConnectionConfigDialog from "@/components/ConnectionConfigDialog.vue";
@@ -557,6 +558,7 @@ interface AccountForm {
 
 const { t } = useI18n();
 const permission = usePermissionStore();
+const router = useRouter();
 
 // ── Host list state ──
 const hosts = ref<HostView[]>([]);
@@ -1575,9 +1577,12 @@ async function handleHostConnect(host: HostView) {
   }
 }
 
-/** 更多操作 - 审计日志（占位） */
-function handleHostAuditLog(_host: HostView) {
-  ElMessage.info('审计日志功能开发中');
+/** More action - open filtered audit logs. */
+function handleHostAuditLog(host: HostView) {
+  void router.push({
+    name: "audit",
+    query: { scope: "ssh", q: hostName(host) },
+  });
 }
 
 /** 更多操作 - 在线会话（占位） */

@@ -61,6 +61,7 @@ const props = withDefaults(
     pageSizes?: number[]
     showSearch?: boolean
     searchPlaceholder?: string
+    search?: string
     rowKey?: string
   }>(),
   {
@@ -75,11 +76,19 @@ const props = withDefaults(
 const emit = defineEmits<{
   'update:page': [page: number]
   'update:pageSize': [size: number]
+  'update:search': [keyword: string]
   search: [keyword: string]
   'row-click': [row: any]
 }>()
 
-const searchText = ref('')
+const localSearchText = ref('')
+const searchText = computed({
+  get: () => props.search ?? localSearchText.value,
+  set: (value: string) => {
+    if (props.search === undefined) localSearchText.value = value
+    emit('update:search', value)
+  },
+})
 
 const currentPageModel = computed({
   get: () => props.page,

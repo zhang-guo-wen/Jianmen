@@ -71,6 +71,7 @@ type TargetView struct {
 type TargetConfig struct {
 	ID                    string
 	Name                  string
+	HostName              string
 	Host                  string
 	Port                  int
 	Username              string
@@ -224,7 +225,9 @@ type AuditSessionView struct {
 	Protocol        string `json:"protocol"`
 	ProtocolSubtype string `json:"protocol_subtype,omitempty"`
 	TargetName      string `json:"target_name"`
+	TargetAddress   string `json:"target_address,omitempty"`
 	AccountName     string `json:"account_name,omitempty"`
+	AccountUsername string `json:"account_username,omitempty"`
 	ClientIP        string `json:"client_ip"`
 	StartedAt       string `json:"started_at"`
 	EndedAt         string `json:"ended_at,omitempty"`

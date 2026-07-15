@@ -21,7 +21,7 @@ func TestHandleAuditSSHUsesStandardPaginationAndSearchParams(t *testing.T) {
 	now := time.Now().UTC()
 	sessions := []model.AuditSession{
 		{ID: "audit-alpha-1", UserID: "u1", Username: "alice", Protocol: "ssh", TargetName: "alpha-host", StartedAt: now, State: "ended"},
-		{ID: "audit-alpha-2", UserID: "u2", Username: "bob", Protocol: "ssh", TargetName: "alpha-db", StartedAt: now.Add(-time.Minute), State: "ended"},
+		{ID: "audit-alpha-2", UserID: "u2", Username: "bob", Protocol: "ssh", TargetName: "alpha-db", TargetAddress: "10.0.0.2:22", AccountName: "operations", AccountUsername: "root", StartedAt: now.Add(-time.Minute), State: "ended"},
 		{ID: "audit-beta", UserID: "u3", Username: "carol", Protocol: "ssh", TargetName: "beta-host", StartedAt: now.Add(-2 * time.Minute), State: "ended"},
 	}
 	if err := db.Create(&sessions).Error; err != nil {
@@ -47,8 +47,11 @@ func TestHandleAuditSSHUsesStandardPaginationAndSearchParams(t *testing.T) {
 	if page.Total != 2 || page.Page != 2 || page.PageSize != 1 || len(page.Items) != 1 {
 		t.Fatalf("unexpected audit page: %#v", page)
 	}
-	if page.Items[0].TargetName != "alpha-db" {
-		t.Fatalf("unexpected audit item: %#v", page.Items[0])
+	if page.Items[0].TargetName != "alpha-db" || page.Items[0].TargetAddress != "10.0.0.2:22" {
+		t.Fatalf("unexpected audit target: %#v", page.Items[0])
+	}
+	if page.Items[0].AccountUsername != "root" || page.Items[0].AccountName != "operations" {
+		t.Fatalf("unexpected audit account: %#v", page.Items[0])
 	}
 }
 

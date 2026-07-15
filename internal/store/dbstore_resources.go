@@ -75,7 +75,10 @@ func hostResourceName(host model.Host) string {
 }
 
 func hostAccountResourceName(account model.HostAccount) string {
-	name := strings.TrimSpace(account.Username)
+	name := strings.TrimSpace(account.Name)
+	if name == "" {
+		name = strings.TrimSpace(account.Username)
+	}
 	host, port := account.Host.Address, account.Host.Port
 	if host == "" && account.HostID != "" {
 		host = account.HostID

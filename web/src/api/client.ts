@@ -189,7 +189,9 @@ export interface SessionRecord {
   user_id?: string;
   user_username?: string;
   target_name?: string;
+  target_address?: string;
   target_id?: string;
+  account_name?: string;
   account_username?: string;
   client_ip?: string;
   status?: string;

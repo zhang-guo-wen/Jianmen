@@ -72,94 +72,6 @@ type UserRole struct {
 	Role      Role       `gorm:"constraint:OnUpdate:CASCADE,OnDelete:CASCADE;" json:"-"`
 }
 
-type Resource struct {
-	ID         string    `gorm:"primaryKey;size:64" json:"id"`
-	Type       string    `gorm:"index;uniqueIndex:idx_resources_type_resource_id,priority:1;size:64;not null" json:"type"`
-	ResourceID string    `gorm:"uniqueIndex:idx_resources_type_resource_id,priority:2;size:64" json:"resource_id"`
-	Name       string    `gorm:"size:255" json:"name,omitempty"`
-	ParentID   string    `gorm:"index;size:64" json:"parent_id,omitempty"`
-	CreatedAt  time.Time `json:"created_at"`
-	UpdatedAt  time.Time `json:"updated_at"`
-}
-
-type ResourceGroup struct {
-	ID          string    `gorm:"primaryKey;size:64" json:"id"`
-	Name        string    `gorm:"uniqueIndex:idx_resource_groups_name_type;size:128;not null" json:"name"`
-	GroupType   string    `gorm:"uniqueIndex:idx_resource_groups_name_type;index;size:32;not null;default:resource" json:"group_type"` // "resource" 或 "account"
-	Description string    `gorm:"type:text" json:"description,omitempty"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
-}
-
-const (
-	ResourceGroupTypeResource = "resource" // 资源分组（主机、数据库实例）
-	ResourceGroupTypeAccount  = "account"  // 账号分组（主机账号、数据库账号）
-)
-
-type Host struct {
-	ID        string    `gorm:"primaryKey;size:64" json:"id"`
-	Name      string    `gorm:"size:255;not null" json:"name"`
-	Address   string    `gorm:"index;index:idx_hosts_address_port,priority:1;size:255;not null" json:"address"`
-	Port      int       `gorm:"index:idx_hosts_address_port,priority:2;not null;default:22" json:"port"`
-	GroupName string    `gorm:"size:128" json:"group"`
-	Remark    string    `gorm:"type:text" json:"remark,omitempty"`
-	Status    string    `gorm:"index;size:32;not null;default:active" json:"status"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
-}
-
-type HostAccount struct {
-	ID                    string         `gorm:"primaryKey;size:64" json:"id"`
-	HostID                string         `gorm:"index;index:idx_host_accounts_host_username,priority:1;index:idx_host_accounts_host_status,priority:1;size:64;not null" json:"host_id"`
-	Username              string         `gorm:"index:idx_host_accounts_host_username,priority:2;size:128;not null" json:"username"`
-	AuthType              string         `gorm:"size:32" json:"auth_type,omitempty"`
-	Password              EncryptedField `gorm:"type:text" json:"-"`
-	PrivateKeyPEM         EncryptedField `gorm:"type:text" json:"-"`
-	Passphrase            EncryptedField `gorm:"type:text" json:"-"`
-	InsecureIgnoreHostKey bool           `gorm:"not null;default:false" json:"insecure_ignore_host_key"`
-	HostKeyFingerprint    string         `gorm:"size:128" json:"host_key_fingerprint,omitempty"`
-	KnownHostsPath        string         `gorm:"size:255" json:"known_hosts_path,omitempty"`
-	Status                string         `gorm:"index;index:idx_host_accounts_host_status,priority:2;index:idx_host_accounts_status_expires,priority:1;size:32;not null;default:active" json:"status"`
-	ResourceSeq           int            `gorm:"index;not null;default:0" json:"resource_seq"`
-	ResourceID            string         `gorm:"uniqueIndex;size:4" json:"resource_id"`
-	GroupName             string         `gorm:"size:128" json:"group"`
-	Remark                string         `gorm:"type:text" json:"remark,omitempty"`
-	ExpiresAt             *time.Time     `gorm:"index;index:idx_host_accounts_status_expires,priority:2" json:"expires_at"`
-	CreatedAt             time.Time      `json:"created_at"`
-	UpdatedAt             time.Time      `json:"updated_at"`
-	Host                  Host           `gorm:"constraint:OnUpdate:CASCADE,OnDelete:CASCADE;" json:"-"`
-}
-
-type DatabaseInstance struct {
-	ID        string    `gorm:"primaryKey;size:64" json:"id"`
-	Name      string    `gorm:"uniqueIndex;size:255;not null" json:"name"`
-	Protocol  string    `gorm:"index:idx_database_instances_endpoint,priority:1;size:32;not null;default:mysql" json:"protocol"`
-	Address   string    `gorm:"index:idx_database_instances_endpoint,priority:2;size:255;not null" json:"address"`
-	Port      int       `gorm:"index:idx_database_instances_endpoint,priority:3;not null;default:3306" json:"port"`
-	GroupName string    `gorm:"size:128" json:"group"`
-	Remark    string    `gorm:"type:text" json:"remark,omitempty"`
-	Status    string    `gorm:"index;size:32;not null;default:active" json:"status"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
-}
-
-type DatabaseAccount struct {
-	ID          string           `gorm:"primaryKey;size:64" json:"id"`
-	InstanceID  string           `gorm:"index;index:idx_database_accounts_instance_username,priority:1;index:idx_database_accounts_instance_status,priority:1;size:64;not null" json:"instance_id"`
-	UniqueName  string           `gorm:"uniqueIndex;size:128;not null" json:"unique_name"`
-	Username    string           `gorm:"index:idx_database_accounts_instance_username,priority:2;size:128;not null" json:"username"`
-	Password    EncryptedField   `gorm:"type:text" json:"-"`
-	GroupName   string           `gorm:"size:128" json:"group"`
-	Remark      string           `gorm:"type:text" json:"remark,omitempty"`
-	ExpiresAt   *time.Time       `gorm:"index;index:idx_database_accounts_status_expires,priority:2" json:"expires_at,omitempty"`
-	Status      string           `gorm:"index;index:idx_database_accounts_instance_status,priority:2;index:idx_database_accounts_status_expires,priority:1;size:32;not null;default:active" json:"status"`
-	ResourceSeq int              `gorm:"index;not null;default:0" json:"resource_seq"`
-	ResourceID  string           `gorm:"uniqueIndex;size:4" json:"resource_id"`
-	CreatedAt   time.Time        `json:"created_at"`
-	UpdatedAt   time.Time        `json:"updated_at"`
-	Instance    DatabaseInstance `gorm:"constraint:OnUpdate:CASCADE,OnDelete:CASCADE;" json:"-"`
-}
-
 type Application struct {
 	ID             string    `gorm:"primaryKey;size:64" json:"id"`
 	Name           string    `gorm:"size:255;not null" json:"name"`
@@ -263,12 +175,6 @@ func (m *Role) BeforeCreate(_ *gorm.DB) error                { return ensureID(&
 func (m *Permission) BeforeCreate(_ *gorm.DB) error          { return ensureID(&m.ID) }
 func (m *RolePermission) BeforeCreate(_ *gorm.DB) error      { return ensureID(&m.ID) }
 func (m *UserRole) BeforeCreate(_ *gorm.DB) error            { return ensureID(&m.ID) }
-func (m *Resource) BeforeCreate(_ *gorm.DB) error            { return ensureID(&m.ID) }
-func (m *ResourceGroup) BeforeCreate(_ *gorm.DB) error       { return ensureID(&m.ID) }
-func (m *Host) BeforeCreate(_ *gorm.DB) error                { return ensureID(&m.ID) }
-func (m *HostAccount) BeforeCreate(_ *gorm.DB) error         { return ensureID(&m.ID) }
-func (m *DatabaseInstance) BeforeCreate(_ *gorm.DB) error    { return ensureID(&m.ID) }
-func (m *DatabaseAccount) BeforeCreate(_ *gorm.DB) error     { return ensureID(&m.ID) }
 func (m *Application) BeforeCreate(_ *gorm.DB) error         { return ensureID(&m.ID) }
 func (m *UserSession) BeforeCreate(_ *gorm.DB) error         { return ensureID(&m.ID) }
 func (m *TemporaryAccount) BeforeCreate(_ *gorm.DB) error    { return ensureID(&m.ID) }

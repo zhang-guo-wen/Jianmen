@@ -184,12 +184,18 @@ func TestWebTerminalRecorderUsesAuthenticatedIdentity(t *testing.T) {
 	server, db := newAdminDBTestServer(t)
 	server.cfg = &config.Config{ReplayDir: t.TempDir(), Recording: config.RecordingConfig{Enabled: true}}
 	user := model.User{ID: "real-user-id", Username: "real-user"}
-	target := store.TargetConfig{ID: "target-1", HostID: "host-1", Name: "root@127.0.0.1", Host: "127.0.0.1", Port: 22, Username: "root"}
+	target := store.TargetConfig{ID: "target-1", HostID: "host-1", Name: "operations", HostName: "application-host", Host: "127.0.0.1", Port: 22, Username: "root"}
 	req := httptest.NewRequest(http.MethodGet, webTerminalPath, nil)
 	session := newWebTerminalSession(req, user, target)
-	auditSession := server.startWebTerminalAudit(session)
+	auditSession := server.startWebTerminalAudit(session, target)
 	if auditSession == nil {
 		t.Fatal("web terminal audit session was not created")
+	}
+	if auditSession.TargetAddress != "127.0.0.1:22" || auditSession.TargetName != "application-host" {
+		t.Fatalf("audit target = address:%q name:%q", auditSession.TargetAddress, auditSession.TargetName)
+	}
+	if auditSession.AccountUsername != "root" || auditSession.AccountName != "operations" {
+		t.Fatalf("audit account = username:%q name:%q", auditSession.AccountUsername, auditSession.AccountName)
 	}
 	recorder := server.newWebTerminalRecorder(session, auditSession)
 	if recorder == nil {

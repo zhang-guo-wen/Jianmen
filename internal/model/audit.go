@@ -4,21 +4,23 @@ import "time"
 
 // AuditSession 审计会话元数据，所有协议共用。
 type AuditSession struct {
-	ID            string     `gorm:"primaryKey;size:64" json:"id"`
-	UserSessionID string     `gorm:"index;size:64" json:"user_session_id,omitempty"`
-	UserID        string     `gorm:"index;size:64" json:"user_id"`
-	Username      string     `gorm:"index;size:128" json:"username"`
-	Protocol      string     `gorm:"index:idx_audit_sessions_protocol_started,priority:1;size:32" json:"protocol"`
-	ProtocolSubtype string   `gorm:"size:64" json:"protocol_subtype,omitempty"`
-	TargetName    string     `gorm:"size:255" json:"target_name"`
-	AccountName   string     `gorm:"size:128" json:"account_name"`
-	ClientIP      string     `gorm:"size:128" json:"client_ip"`
-	StartedAt     time.Time  `gorm:"index:idx_audit_sessions_protocol_started,priority:2;index:idx_audit_sessions_user_started,priority:2;index:idx_audit_sessions_session_started,priority:2" json:"started_at"`
-	EndedAt       *time.Time `json:"ended_at,omitempty"`
-	State         string     `gorm:"size:32" json:"state"`
-	ReplayDir     string     `gorm:"size:512" json:"replay_dir,omitempty"`
-	CreatedAt     time.Time  `json:"created_at"`
-	UpdatedAt     time.Time  `json:"updated_at"`
+	ID              string     `gorm:"primaryKey;size:64" json:"id"`
+	UserSessionID   string     `gorm:"index;size:64" json:"user_session_id,omitempty"`
+	UserID          string     `gorm:"index;size:64" json:"user_id"`
+	Username        string     `gorm:"index;size:128" json:"username"`
+	Protocol        string     `gorm:"index:idx_audit_sessions_protocol_started,priority:1;size:32" json:"protocol"`
+	ProtocolSubtype string     `gorm:"size:64" json:"protocol_subtype,omitempty"`
+	TargetName      string     `gorm:"size:255" json:"target_name"`
+	TargetAddress   string     `gorm:"size:255" json:"target_address"`
+	AccountName     string     `gorm:"size:128" json:"account_name"`
+	AccountUsername string     `gorm:"size:128" json:"account_username"`
+	ClientIP        string     `gorm:"size:128" json:"client_ip"`
+	StartedAt       time.Time  `gorm:"index:idx_audit_sessions_protocol_started,priority:2;index:idx_audit_sessions_user_started,priority:2;index:idx_audit_sessions_session_started,priority:2" json:"started_at"`
+	EndedAt         *time.Time `json:"ended_at,omitempty"`
+	State           string     `gorm:"size:32" json:"state"`
+	ReplayDir       string     `gorm:"size:512" json:"replay_dir,omitempty"`
+	CreatedAt       time.Time  `json:"created_at"`
+	UpdatedAt       time.Time  `json:"updated_at"`
 }
 
 func (AuditSession) TableName() string { return "audit_sessions" }

@@ -140,7 +140,7 @@ export interface TargetPayload {
   remark?: string;
   disabled?: boolean;
   expires_at?: string;
-  address: string;
+  host: string;
   port: number;
   username: string;
   password: string;

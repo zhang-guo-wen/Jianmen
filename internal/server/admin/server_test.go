@@ -300,6 +300,51 @@ func TestHandleTestConnectionUsesStoredCredentialsWhenPayloadOmitsSecrets(t *tes
 	}
 }
 
+func TestHandleTestConnectionResolvesHostContainerForNewAccount(t *testing.T) {
+	server := newTargetTestServer(t)
+	sshAddr := startTestPasswordSSHServer(t, "root", "secret")
+	host, portText, err := net.SplitHostPort(sshAddr)
+	if err != nil {
+		t.Fatalf("split ssh addr: %v", err)
+	}
+	port, err := strconv.Atoi(portText)
+	if err != nil {
+		t.Fatalf("parse ssh port: %v", err)
+	}
+	if _, err := server.store.AddHost(store.HostRecord{
+		ID:      "new-account-host",
+		Name:    "new-account-host",
+		Address: host,
+		Port:    port,
+	}); err != nil {
+		t.Fatalf("create host: %v", err)
+	}
+
+	testReq := httptest.NewRequest(http.MethodPost, "/api/targets/test-connection", bytes.NewBufferString(`{
+		"id": "unsaved-account",
+		"host_id": "new-account-host",
+		"username": "root",
+		"password": "secret",
+		"insecure_ignore_host_key": true
+	}`))
+	testReq = asTestSuperAdmin(testReq)
+	testRec := httptest.NewRecorder()
+	server.handleTestConnection(testRec, testReq)
+	if testRec.Code != http.StatusOK {
+		t.Fatalf("test status = %d, want %d; body=%s", testRec.Code, http.StatusOK, testRec.Body.String())
+	}
+	var result struct {
+		OK      bool   `json:"ok"`
+		Message string `json:"message"`
+	}
+	if err := decodeTestData(t, testRec.Body.Bytes(), &result); err != nil {
+		t.Fatalf("unmarshal test response: %v; body=%s", err, testRec.Body.String())
+	}
+	if !result.OK {
+		t.Fatalf("test connection ok = false, want true; message=%q body=%s", result.Message, testRec.Body.String())
+	}
+}
+
 func TestHandleTestConnectionUsesStoredTargetWhenOnlyIDProvided(t *testing.T) {
 	server := newTargetTestServer(t)
 	sshAddr := startTestPasswordSSHServer(t, "root", "secret")

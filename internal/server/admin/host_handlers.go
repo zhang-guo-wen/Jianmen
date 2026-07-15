@@ -303,6 +303,18 @@ func (s *Server) handleTestConnection(w http.ResponseWriter, r *http.Request) {
 		targetCfg = storedTarget
 	}
 
+	if targetCfg.HostID != "" && (targetCfg.Host == "" || targetCfg.Port == 0) {
+		host, err := s.store.Host(targetCfg.HostID)
+		if err != nil {
+			s.writeJSON(w, r, http.StatusOK, map[string]any{"ok": false, "error": "configuration error: " + err.Error()})
+			return
+		}
+		targetCfg.Host = firstNonEmpty(targetCfg.Host, host.Address)
+		if targetCfg.Port == 0 {
+			targetCfg.Port = host.Port
+		}
+	}
+
 	addr := targetCfg.Addr()
 	if addr == "" || targetCfg.Username == "" {
 		s.writeErrorText(w, r, http.StatusBadRequest, "host, port, and username are required")

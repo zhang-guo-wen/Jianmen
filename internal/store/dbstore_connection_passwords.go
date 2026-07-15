@@ -2,8 +2,6 @@ package store
 
 import (
 	"context"
-	"crypto/sha1"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"time"
@@ -11,6 +9,7 @@ import (
 	"golang.org/x/crypto/bcrypt"
 
 	"jianmen/internal/model"
+	"jianmen/internal/util"
 )
 
 func (s *DBStore) CreateConnectionPassword(ctx context.Context, credential model.ConnectionPassword) error {
@@ -50,30 +49,23 @@ func (s *DBStore) AuthenticateConnectionPassword(ctx context.Context, userID, re
 }
 
 func (s *DBStore) AuthenticateMySQLConnectionPassword(ctx context.Context, userID, resourceID string, salt, response []byte) error {
-	if len(salt) == 0 || len(response) != sha1.Size {
+	var user model.User
+	if err := s.db.WithContext(ctx).Where("id = ? AND status = ?", userID, "active").First(&user).Error; err != nil {
 		return errors.New("authentication failed")
 	}
+	if util.VerifyMySQLNativePasswordResponse(user.MySQLNativeHash, salt, response) {
+		return nil
+	}
+
 	now := time.Now().UTC()
 	credentials, err := s.activeConnectionPasswords(ctx, userID, model.ResourceTypeDatabaseAccount, resourceID, now)
 	if err != nil {
 		return err
 	}
 	for _, credential := range credentials {
-		stage2, err := hex.DecodeString(credential.MySQLNativeHash)
-		if err != nil || len(stage2) != sha1.Size {
-			continue
+		if util.VerifyMySQLNativePasswordResponse(credential.MySQLNativeHash, salt, response) {
+			return nil
 		}
-		scrambleInput := append(append(make([]byte, 0, len(salt)+len(stage2)), salt...), stage2...)
-		scramble := sha1.Sum(scrambleInput)
-		stage1 := make([]byte, sha1.Size)
-		for index := range stage1 {
-			stage1[index] = response[index] ^ scramble[index]
-		}
-		candidateStage2 := sha1.Sum(stage1)
-		if !equalBytes(candidateStage2[:], stage2) {
-			continue
-		}
-		return nil
 	}
 	return errors.New("authentication failed")
 }
@@ -89,17 +81,6 @@ func (s *DBStore) activeConnectionPasswords(ctx context.Context, userID, resourc
 		return nil, fmt.Errorf("load connection passwords: %w", err)
 	}
 	return credentials, nil
-}
-
-func equalBytes(left, right []byte) bool {
-	if len(left) != len(right) {
-		return false
-	}
-	var difference byte
-	for index := range left {
-		difference |= left[index] ^ right[index]
-	}
-	return difference == 0
 }
 
 func (s *DBStore) deleteExpiredConnectionPasswords(ctx context.Context, before time.Time) error {

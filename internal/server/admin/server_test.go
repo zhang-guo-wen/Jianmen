@@ -25,6 +25,7 @@ import (
 	"jianmen/internal/model"
 	"jianmen/internal/storage"
 	"jianmen/internal/store"
+	"jianmen/internal/util"
 )
 
 func TestHandleIndexReturnsAPIOnlyInfo(t *testing.T) {
@@ -470,6 +471,12 @@ func TestCreateUserStoresBcryptHashAndLoginWorks(t *testing.T) {
 	if !verifyPassword(stored.PasswordHash, "correct horse battery staple") {
 		t.Fatalf("stored password hash does not verify; hash=%q", stored.PasswordHash)
 	}
+	if stored.MySQLNativeHash != util.MySQLNativePasswordHash("correct horse battery staple") {
+		t.Fatal("stored MySQL password verifier does not match the user password")
+	}
+	if strings.Contains(createRec.Body.String(), stored.PasswordHash) || strings.Contains(createRec.Body.String(), stored.MySQLNativeHash) {
+		t.Fatal("create response exposed a password verifier")
+	}
 
 	loginReq := httptest.NewRequest(http.MethodPost, "/api/login", bytes.NewBufferString(`{
 		"username": "alice",
@@ -479,6 +486,32 @@ func TestCreateUserStoresBcryptHashAndLoginWorks(t *testing.T) {
 	server.handleLogin(loginRec, loginReq)
 	if loginRec.Code != http.StatusOK {
 		t.Fatalf("login status = %d, want %d; body=%s", loginRec.Code, http.StatusOK, loginRec.Body.String())
+	}
+}
+
+func TestLoginBackfillsMissingMySQLPasswordVerifier(t *testing.T) {
+	server, db := newAdminDBTestServer(t)
+	const password = "existing-user-password"
+	passwordHash, err := hashPassword(password)
+	if err != nil {
+		t.Fatalf("hash password: %v", err)
+	}
+	user := model.User{ID: "existing-user", Username: "existing", PasswordHash: passwordHash, Status: "active"}
+	if err := db.Create(&user).Error; err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/login", bytes.NewBufferString(`{"username":"existing","password":"existing-user-password"}`))
+	rec := httptest.NewRecorder()
+	server.handleLogin(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("login status = %d, want %d; body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	if err := db.First(&user, "id = ?", user.ID).Error; err != nil {
+		t.Fatalf("reload user: %v", err)
+	}
+	if user.MySQLNativeHash != util.MySQLNativePasswordHash(password) {
+		t.Fatal("successful login did not backfill MySQL password verifier")
 	}
 }
 

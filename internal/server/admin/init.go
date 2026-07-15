@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"jianmen/internal/model"
+	"jianmen/internal/util"
 
 	"gorm.io/gorm"
 )
@@ -140,6 +141,14 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		s.writeErrorText(w, r, http.StatusUnauthorized, "invalid username or password")
 		return
 	}
+	if user.MySQLNativeHash == "" {
+		mysqlHash := util.MySQLNativePasswordHash(password)
+		if err := s.db.Model(&user).Update("my_sql_native_hash", mysqlHash).Error; err != nil {
+			s.logger.Warn("failed to backfill mysql password verifier", "user", user.ID, "error", err)
+		} else {
+			user.MySQLNativeHash = mysqlHash
+		}
+	}
 
 	token, tokenHashStr, err := newAPIToken()
 	if err != nil {
@@ -227,13 +236,14 @@ func (s *Server) handleInitSetup(w http.ResponseWriter, r *http.Request) {
 		}
 
 		user := model.User{
-			ID:           model.NewID(),
-			Username:     username,
-			PasswordHash: string(passwordHash),
-			DisplayName:  strings.TrimSpace(req.DisplayName),
-			TokenHash:    tokenHashStr,
-			Email:        email,
-			Status:       "active",
+			ID:              model.NewID(),
+			Username:        username,
+			PasswordHash:    string(passwordHash),
+			MySQLNativeHash: util.MySQLNativePasswordHash(password),
+			DisplayName:     strings.TrimSpace(req.DisplayName),
+			TokenHash:       tokenHashStr,
+			Email:           email,
+			Status:          "active",
 		}
 
 		if err := tx.Create(&user).Error; err != nil {
@@ -245,7 +255,7 @@ func (s *Server) handleInitSetup(w http.ResponseWriter, r *http.Request) {
 		return nil
 	})
 	if err != nil {
-		s.writeErrorText(w, r, http.StatusInternalServerError, "failed to create user: " + err.Error())
+		s.writeErrorText(w, r, http.StatusInternalServerError, "failed to create user: "+err.Error())
 		return
 	}
 	if !created {

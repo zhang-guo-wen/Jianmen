@@ -11,6 +11,7 @@ import (
 	"jianmen/internal/model"
 	"jianmen/internal/service"
 	"jianmen/internal/storage"
+	"jianmen/internal/util"
 )
 
 func TestConnectionPasswordIsResourceBoundAndReusable(t *testing.T) {
@@ -102,6 +103,36 @@ func TestConnectionPasswordExpiresAndCompactSSHIsReusable(t *testing.T) {
 	}
 	if _, err := store.Authenticate(context.Background(), "H1234abcde", valid.Plaintext); err != nil {
 		t.Fatalf("compact SSH password was not reusable: %v", err)
+	}
+}
+
+func TestMySQLPermanentPasswordAuthenticatesWithoutTemporaryCredential(t *testing.T) {
+	db, err := storage.Open(storage.Config{Driver: storage.DriverSQLite, DSN: ":memory:"})
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	if err := storage.AutoMigrate(db); err != nil {
+		t.Fatalf("automigrate: %v", err)
+	}
+	const password = "permanent-mysql-password"
+	user := model.User{
+		ID:              "mysql-permanent-user",
+		Username:        "alice",
+		PasswordHash:    "unused",
+		MySQLNativeHash: util.MySQLNativePasswordHash(password),
+		Status:          "active",
+	}
+	if err := db.Create(&user).Error; err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+
+	store := NewDBStore(db)
+	salt := []byte("12345678901234567890")
+	if err := store.AuthenticateMySQLConnectionPassword(context.Background(), user.ID, "database-account", salt, mysqlNativeResponse(password, salt)); err != nil {
+		t.Fatalf("permanent password authentication failed: %v", err)
+	}
+	if err := store.AuthenticateMySQLConnectionPassword(context.Background(), user.ID, "database-account", salt, mysqlNativeResponse("wrong-password", salt)); err == nil {
+		t.Fatal("wrong permanent password authenticated")
 	}
 }
 

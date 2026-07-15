@@ -5,6 +5,7 @@ import (
 
 	"jianmen/internal/config"
 	"jianmen/internal/model"
+	"jianmen/internal/util"
 )
 
 func TestOpenAndAutoMigrateSQLite(t *testing.T) {
@@ -161,7 +162,7 @@ func TestBootstrapMetadataSeedsUsersOnly(t *testing.T) {
 
 	cfg := &config.Config{
 		Users: []config.User{
-			{ID: "u-admin", Username: "admin"},
+			{ID: "u-admin", Username: "admin", Password: "admin-password"},
 			{Username: "operator"},
 		},
 	}
@@ -175,6 +176,11 @@ func TestBootstrapMetadataSeedsUsersOnly(t *testing.T) {
 	}
 	if len(users) != 2 {
 		t.Fatalf("users = %d, want 2: %#v", len(users), users)
+	}
+	for _, user := range users {
+		if user.Username == "admin" && user.MySQLNativeHash != util.MySQLNativePasswordHash("admin-password") {
+			t.Fatal("bootstrap did not store the MySQL password verifier")
+		}
 	}
 
 	// 去掉预置角色后，bootstrap 不应创建任何角色

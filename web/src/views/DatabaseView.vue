@@ -794,9 +794,17 @@ function handleDBAuditLog(inst: api.DatabaseInstanceView) {
   })
 }
 
-/** 更多操作 - 在线会话（占位） */
-function handleDBSessions(_inst: api.DatabaseInstanceView) {
-  ElMessage.info('在线会话功能开发中');
+/** More action - open filtered online sessions. */
+function handleDBSessions(inst: api.DatabaseInstanceView) {
+  void router.push({
+    name: 'audit',
+    query: {
+      scope: 'online',
+      resource_type: 'database_instance',
+      resource_id: String(inst.id ?? ''),
+      q: String(inst.name || instanceEndpoint(inst)),
+    },
+  })
 }
 
 /** 更多操作 - 权限管理（占位） */

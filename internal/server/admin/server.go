@@ -4,6 +4,7 @@ import (
 	"log/slog"
 
 	"jianmen/internal/config"
+	"jianmen/internal/online"
 	"jianmen/internal/rbac"
 	"jianmen/internal/server/appproxy"
 	"jianmen/internal/store"
@@ -12,18 +13,19 @@ import (
 )
 
 type Server struct {
-	cfg           *config.Config
-	store         store.Store
-	db            *gorm.DB
-	rbacChecker   *rbac.Checker
-	logger        *slog.Logger
-	dataDir       string
-	superAdminIDs map[string]bool
-	loginLimiter  *loginLimiter
-	appProxy      *appproxy.Server
+	cfg            *config.Config
+	store          store.Store
+	db             *gorm.DB
+	rbacChecker    *rbac.Checker
+	logger         *slog.Logger
+	dataDir        string
+	superAdminIDs  map[string]bool
+	loginLimiter   *loginLimiter
+	appProxy       *appproxy.Server
+	onlineSessions *online.Registry
 }
 
-func New(cfg *config.Config, store store.Store, logger *slog.Logger, dataDir string, appProxy *appproxy.Server, dbs ...*gorm.DB) *Server {
+func New(cfg *config.Config, store store.Store, logger *slog.Logger, dataDir string, appProxy *appproxy.Server, onlineSessions *online.Registry, dbs ...*gorm.DB) *Server {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -38,5 +40,6 @@ func New(cfg *config.Config, store store.Store, logger *slog.Logger, dataDir str
 		cfg: cfg, store: store, db: db, rbacChecker: checker, logger: logger,
 		dataDir: dataDir, superAdminIDs: superAdminIDs,
 		loginLimiter: newDefaultLoginLimiter(), appProxy: appProxy,
+		onlineSessions: onlineSessions,
 	}
 }

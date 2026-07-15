@@ -16,6 +16,7 @@ import (
 
 	"jianmen/internal/config"
 	"jianmen/internal/model"
+	"jianmen/internal/online"
 	"jianmen/internal/proxy/sshproxy"
 	"jianmen/internal/rbac"
 	"jianmen/internal/recording"
@@ -30,12 +31,14 @@ type Server struct {
 	resourceGrantChecker *rbac.ResourceGrantChecker
 	logger               *slog.Logger
 	superAdminIDs        map[string]bool
+	onlineSessions       *online.Registry
 }
 
 // auditStore adapts store.Store to recording.AuditSink.
 type auditStore struct {
-	store     store.Store
-	sessionID string
+	store          store.Store
+	sessionID      string
+	onlineSessions *online.Registry
 }
 
 func (a *auditStore) WriteCommand(sessionID string, timestamp time.Time, command string) error {
@@ -58,10 +61,11 @@ func (a *auditStore) WriteFileEvent(sessionID string, timestamp time.Time, actio
 }
 
 func (a *auditStore) UpdateProtocol(sessionID string, protocol string) error {
+	a.onlineSessions.UpdateProtocolSubtype(a.sessionID, protocol)
 	return a.store.UpdateAuditProtocol(a.sessionID, protocol)
 }
 
-func New(cfg *config.Config, s store.Store, logger *slog.Logger, dataDir string, dbs ...*gorm.DB) *Server {
+func New(cfg *config.Config, s store.Store, logger *slog.Logger, dataDir string, onlineSessions *online.Registry, dbs ...*gorm.DB) *Server {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -78,6 +82,7 @@ func New(cfg *config.Config, s store.Store, logger *slog.Logger, dataDir string,
 		resourceGrantChecker: resourceGrantChecker,
 		logger:               logger,
 		superAdminIDs:        admin.LoadSuperAdminIDs(cfg, dataDir),
+		onlineSessions:       onlineSessions,
 	}
 }
 
@@ -246,7 +251,7 @@ func (s *Server) handleConn(ctx context.Context, rawConn net.Conn, serverConfig 
 			s.cfg.Recording.RecordInput,
 			s.cfg.Recording.RecordCommands,
 			s.logger,
-			&auditStore{store: s.store, sessionID: auditSession.ID},
+			&auditStore{store: s.store, sessionID: auditSession.ID, onlineSessions: s.onlineSessions},
 		)
 		if err != nil {
 			s.logger.Warn("failed to initialize recorder", "session", session.ID, "error", err)
@@ -254,6 +259,29 @@ func (s *Server) handleConn(ctx context.Context, rawConn net.Conn, serverConfig 
 			defer recorder.Close()
 		}
 	}
+
+	accountName := target.Name
+	if accountName == "" {
+		accountName = target.Username
+	}
+	unregisterOnline := s.onlineSessions.Register(online.Session{
+		ID:             auditSession.ID,
+		AuditSessionID: auditSession.ID,
+		ResourceType:   model.ResourceTypeHost,
+		ResourceID:     target.HostID,
+		AccountID:      target.ID,
+		Instance:       target.HostName,
+		Protocol:       "ssh",
+		Account:        accountName,
+		Operator:       user.Username,
+		StartedAt:      auditSession.StartedAt,
+		HasReplay:      recorder != nil,
+	}, func() {
+		_ = targetClient.Close()
+		_ = serverConn.Close()
+		_ = rawConn.Close()
+	})
+	defer unregisterOnline()
 
 	s.logger.Info("session started",
 		"session", session.ID,

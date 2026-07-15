@@ -73,6 +73,7 @@ var permissionPages = []PermissionPageDefinition{
 		action(ActionAuditView, "查看 SSH 审计", "查看 SSH 会话、命令与文件审计"),
 		action(ActionDBAuditView, "查看数据库审计", "查看数据库连接与 SQL 审计"),
 		action(ActionSessionView, "查看会话", "查看在线及历史会话"),
+		action(ActionSessionDisconnect, "断开会话", "强制中断在线会话"),
 	),
 	page("rbac", "权限管理", "/rbac", 70,
 		action(ActionRBACManage, "管理权限", "管理用户、角色、操作与资源授权"),
@@ -97,6 +98,7 @@ var actionDependencies = map[string][]string{
 	ActionPlatformAccountUpdate: {ActionPlatformAccountView},
 	ActionPlatformAccountDelete: {ActionPlatformAccountView},
 	ActionPlatformAccountUse:    {ActionPlatformAccountView},
+	ActionSessionDisconnect:     {ActionSessionView},
 }
 
 var pageVisibilityActions = map[string][]string{
@@ -105,7 +107,7 @@ var pageVisibilityActions = map[string][]string{
 	"databases":        {ActionDBProxyView},
 	"platformAccounts": {ActionPlatformAccountView},
 	"applications":     {ActionAppView},
-	"audit":            {ActionAuditView, ActionDBAuditView},
+	"audit":            {ActionAuditView, ActionDBAuditView, ActionSessionView},
 	"rbac":             {ActionRBACManage},
 }
 

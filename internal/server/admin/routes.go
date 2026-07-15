@@ -36,6 +36,8 @@ func (s *Server) routes() http.Handler {
 	s.muxHandle(mux, webTerminalPath, s.handleWebTerminal)
 	s.muxHandle(mux, "/api/sessions", s.withAuthAndUser(s.handleSessions))
 	s.muxHandle(mux, "/api/sessions/", s.withAuthAndUser(s.handleSessionArtifact))
+	s.muxHandle(mux, "/api/online-sessions", s.withAuthAndUser(s.handleOnlineSessions))
+	s.muxHandle(mux, "/api/online-sessions/", s.withAuthAndUser(s.handleOnlineSession))
 	s.muxHandle(mux, "/api/user-sessions", s.withAuthAndUser(s.handleUserSessions))
 	s.muxHandle(mux, "/api/connection-passwords", s.withAuthAndUser(s.handleConnectionPasswords))
 

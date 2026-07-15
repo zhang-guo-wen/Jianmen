@@ -118,6 +118,63 @@
           </DataTableCard>
         </div>
       </el-tab-pane>
+      <el-tab-pane v-if="permission.canDo('session:view')" :label="t('audit.scope.online')" name="online">
+        <el-alert v-if="onlineError" :title="onlineError" type="warning" show-icon style="margin-bottom: 12px" />
+        <div class="page-container">
+          <DataTableCard
+            :data="onlineSessions"
+            :loading="onlineLoading"
+            :total="onlineTotal"
+            v-model:page="onlinePage"
+            v-model:page-size="onlinePageSize"
+            v-model:search="onlineKeyword"
+            :search-placeholder="t('audit.search.online')"
+            @search="onOnlineSearch"
+          >
+            <template #toolbar-extra>
+              <el-button :loading="onlineLoading" :icon="Refresh" @click="loadOnlineSessions">{{ t('common.refresh') }}</el-button>
+            </template>
+            <el-table-column :label="t('audit.column.instance')" min-width="180" show-overflow-tooltip>
+              <template #default="{ row }">{{ row.instance || '-' }}</template>
+            </el-table-column>
+            <el-table-column :label="t('audit.column.protocol')" width="110">
+              <template #default="{ row }">
+                <el-tag :type="onlineProtocolTag(row)" size="small" effect="plain">
+                  {{ onlineProtocol(row) }}
+                </el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column :label="t('audit.column.account')" min-width="140" show-overflow-tooltip>
+              <template #default="{ row }">{{ row.account || '-' }}</template>
+            </el-table-column>
+            <el-table-column :label="t('audit.column.operator')" min-width="120" show-overflow-tooltip>
+              <template #default="{ row }">{{ row.operator || '-' }}</template>
+            </el-table-column>
+            <el-table-column :label="t('sessions.column.started')" width="170" show-overflow-tooltip class-name="col-time">
+              <template #default="{ row }">{{ formatTime(row.started_at) }}</template>
+            </el-table-column>
+            <el-table-column :label="t('common.actions')" fixed="right" width="210">
+              <template #default="{ row }">
+                <el-button :disabled="!row.has_replay" link type="success" @click="loadOnlineReplay(row)">
+                  {{ t('audit.action.replay') }}
+                </el-button>
+                <el-button link type="primary" @click="loadOnlineLog(row)">
+                  {{ t('audit.action.log') }}
+                </el-button>
+                <el-button
+                  v-if="permission.canDo('session:disconnect')"
+                  :loading="disconnectingSessionID === row.id"
+                  link
+                  type="danger"
+                  @click="disconnectOnlineSession(row)"
+                >
+                  {{ t('audit.action.disconnect') }}
+                </el-button>
+              </template>
+            </el-table-column>
+          </DataTableCard>
+        </div>
+      </el-tab-pane>
     </el-tabs>
 
     <el-drawer
@@ -307,7 +364,7 @@ import { Terminal } from '@xterm/xterm';
 import '@xterm/xterm/css/xterm.css';
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { Refresh } from '@element-plus/icons-vue';
-import { ElMessage } from 'element-plus';
+import { ElMessage, ElMessageBox } from 'element-plus';
 import { useRoute } from 'vue-router';
 
 import DataTableCard from '@/components/DataTableCard.vue';
@@ -316,6 +373,7 @@ import {
   type DBConnectionMetaRecord,
   type DBConnectionRecord,
   type DBQueryEventRecord,
+  type OnlineSessionRecord,
   type SessionCommandRecord,
   type SessionFileEventRecord,
   type SessionRecord
@@ -323,7 +381,7 @@ import {
 import { useI18n } from '@/i18n';
 import { usePermissionStore } from '@/stores/permission';
 
-type AuditScope = 'ssh' | 'db';
+type AuditScope = 'ssh' | 'db' | 'online';
 type DetailKind = '' | 'meta' | 'commands' | 'files' | 'file-summary' | 'queries' | 'replay';
 type ReplayFrame = {
   time: number;
@@ -347,14 +405,19 @@ function routeQueryValue(value: unknown): string {
 
 function permittedAuditScope(value: unknown): AuditScope {
   const requested = routeQueryValue(value);
+  if (requested === 'online' && permission.canDo('session:view')) return 'online';
   if (requested === 'db' && permission.canDo('db:audit:view')) return 'db';
   if (requested === 'ssh' && permission.canDo('audit:view')) return 'ssh';
-  return permission.canDo('audit:view') ? 'ssh' : 'db';
+  if (permission.canDo('audit:view')) return 'ssh';
+  if (permission.canDo('db:audit:view')) return 'db';
+  return 'online';
 }
 
 const initialAuditScope = permittedAuditScope(route.query.scope);
 const initialAuditKeyword = routeQueryValue(route.query.q);
 const auditScope = ref<AuditScope>(initialAuditScope);
+const initialOnlineResourceType = initialAuditScope === 'online' ? routeQueryValue(route.query.resource_type) : '';
+const initialOnlineResourceID = initialAuditScope === 'online' ? routeQueryValue(route.query.resource_id) : '';
 
 // ── SSH session list state ──
 const sessions = ref<SessionRecord[]>([]);
@@ -373,6 +436,19 @@ const dbPageSize = ref(20);
 const dbKeyword = ref(initialAuditScope === 'db' ? initialAuditKeyword : '');
 const dbLoading = ref(false);
 const dbError = ref('');
+
+// Online session list state
+const onlineSessions = ref<OnlineSessionRecord[]>([]);
+const onlineTotal = ref(0);
+const onlinePage = ref(1);
+const onlinePageSize = ref(20);
+const onlineKeyword = ref(initialAuditScope === 'online' ? initialAuditKeyword : '');
+const onlineResourceType = ref(initialOnlineResourceType);
+const onlineResourceID = ref(initialOnlineResourceID);
+const onlineLoading = ref(false);
+const onlineError = ref('');
+const disconnectingSessionID = ref('');
+let onlineRefreshTimer: number | undefined;
 
 // ── Drawer state ──
 const detailLoading = ref(false);
@@ -739,6 +815,27 @@ function closeDetail() {
 
 // ── Data fetching ──
 
+async function loadOnlineSessions() {
+  onlineLoading.value = true;
+  onlineError.value = '';
+  try {
+    const res = await apiClient.getOnlineSessions({
+      page: onlinePage.value,
+      page_size: onlinePageSize.value,
+      q: onlineKeyword.value || undefined,
+      resource_type: onlineResourceType.value || undefined,
+      resource_id: onlineResourceID.value || undefined,
+    });
+    onlineSessions.value = res.items ?? [];
+    onlineTotal.value = res.total ?? 0;
+  } catch (err) {
+    onlineSessions.value = [];
+    onlineError.value = err instanceof Error ? err.message : t('audit.error.loadOnline');
+  } finally {
+    onlineLoading.value = false;
+  }
+}
+
 async function loadSessions() {
   sessionsLoading.value = true;
   sessionError.value = '';
@@ -781,6 +878,12 @@ async function loadDBConnections() {
 function onLogSearch(q: string) {
   logKeyword.value = q;
   logPage.value = 1;
+}
+
+function onOnlineSearch(q: string) {
+  onlineKeyword.value = q;
+  onlinePage.value = 1;
+  void loadOnlineSessions();
 }
 
 function onSessionSearch(q: string) {
@@ -1105,6 +1208,61 @@ function utf8ByteLength(value: string): number {
 
 // ── DB artifacts ──
 
+function onlineProtocol(row: OnlineSessionRecord): string {
+  if (row.resource_type === 'database_instance') return formatDatabaseProtocol(row.protocol);
+  if (row.protocol_subtype === 'sftp') return 'SFTP';
+  if (row.protocol_subtype === 'web-terminal') return 'Web';
+  return 'SSH';
+}
+
+function onlineProtocolTag(row: OnlineSessionRecord): 'primary' | 'success' | 'warning' | 'info' | 'danger' | '' {
+  if (row.resource_type === 'database_instance') return databaseProtocolTag(row.protocol);
+  if (row.protocol_subtype === 'sftp') return 'warning';
+  if (row.protocol_subtype === 'web-terminal') return 'success';
+  return 'info';
+}
+
+function loadOnlineReplay(row: OnlineSessionRecord) {
+  void loadSessionArtifact({ id: row.audit_session_id, replay_dir: row.has_replay ? 'online' : '' }, 'replay');
+}
+
+function loadOnlineLog(row: OnlineSessionRecord) {
+  if (row.resource_type === 'database_instance') {
+    void loadDBArtifact({ id: row.audit_session_id }, 'queries');
+    return;
+  }
+  const kind = row.protocol_subtype === 'sftp' ? 'files' : 'commands';
+  void loadSessionArtifact({
+    id: row.audit_session_id,
+    protocol: row.protocol,
+    protocol_subtype: row.protocol_subtype,
+    replay_dir: row.has_replay ? 'online' : '',
+  }, kind);
+}
+
+async function disconnectOnlineSession(row: OnlineSessionRecord) {
+  try {
+    await ElMessageBox.confirm(
+      t('audit.confirm.disconnectMessage'),
+      t('audit.confirm.disconnectTitle'),
+      { type: 'warning' },
+    );
+  } catch {
+    return;
+  }
+
+  disconnectingSessionID.value = row.id;
+  try {
+    await apiClient.disconnectOnlineSession(row.id);
+    ElMessage.success(t('audit.success.disconnected'));
+    await loadOnlineSessions();
+  } catch (err) {
+    ElMessage.error(err instanceof Error ? err.message : t('audit.error.disconnect'));
+  } finally {
+    disconnectingSessionID.value = '';
+  }
+}
+
 async function loadDBArtifact(connection: DBConnectionRecord, kind: 'meta' | 'queries') {
   const id = String(connection.id ?? '');
 
@@ -1135,6 +1293,17 @@ function applyRouteAuditFilter() {
   const scope = permittedAuditScope(route.query.scope);
   const keyword = routeQueryValue(route.query.q);
   auditScope.value = scope;
+  if (scope === 'online') {
+    onlineKeyword.value = keyword;
+    onlineResourceType.value = routeQueryValue(route.query.resource_type);
+    onlineResourceID.value = routeQueryValue(route.query.resource_id);
+    if (onlinePage.value === 1) void loadOnlineSessions();
+    else onlinePage.value = 1;
+    return;
+  }
+  onlineKeyword.value = '';
+  onlineResourceType.value = '';
+  onlineResourceID.value = '';
   if (scope === 'ssh') {
     sessionKeyword.value = keyword;
     if (sessionPage.value === 1) void loadSessions();
@@ -1149,6 +1318,12 @@ function applyRouteAuditFilter() {
 onMounted(() => {
   if (permission.canDo('audit:view')) void loadSessions();
   if (permission.canDo('db:audit:view')) void loadDBConnections();
+  if (permission.canDo('session:view')) {
+    void loadOnlineSessions();
+    onlineRefreshTimer = window.setInterval(() => {
+      if (auditScope.value === 'online' && !onlineLoading.value) void loadOnlineSessions();
+    }, 5000);
+  }
 });
 
 watch(
@@ -1173,8 +1348,12 @@ watch([sessionPage, sessionPageSize], () => {
 watch([dbPage, dbPageSize], () => {
   if (auditScope.value === 'db') loadDBConnections();
 });
+watch([onlinePage, onlinePageSize], () => {
+  if (auditScope.value === 'online') loadOnlineSessions();
+});
 
 onBeforeUnmount(() => {
+  if (onlineRefreshTimer !== undefined) window.clearInterval(onlineRefreshTimer);
   stopReplay();
   destroyReplayTerminal();
 });

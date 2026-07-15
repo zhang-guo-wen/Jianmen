@@ -206,6 +206,21 @@ export interface SessionRecord {
   [key: string]: unknown;
 }
 
+export interface OnlineSessionRecord {
+  id: string;
+  audit_session_id: string;
+  resource_type: 'host' | 'database_instance';
+  resource_id: string;
+  account_id?: string;
+  instance: string;
+  protocol: string;
+  protocol_subtype?: string;
+  account: string;
+  operator: string;
+  started_at: string;
+  has_replay: boolean;
+}
+
 export interface ConnectionPasswordRecord {
   password: string;
   expires_at: string;
@@ -846,6 +861,10 @@ export const apiClient = {
       method: 'POST',
       body: JSON.stringify({ target_id: targetId })
     }),
+  getOnlineSessions: (params?: { page?: number; page_size?: number; q?: string; resource_type?: string; resource_id?: string }) =>
+    request<PageResponse<OnlineSessionRecord>>(`/api/online-sessions${buildQS(params as Record<string, string | number | undefined>)}`),
+  disconnectOnlineSession: (id: string) =>
+    request<void>(`/api/online-sessions/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   getSessions: (params?: { page?: number; page_size?: number; q?: string }) =>
     request<PageResponse<SessionRecord>>(`/api/audit/ssh${buildQS(params as Record<string, string | number | undefined>)}`),
   getSessionMeta: (id: string | number) =>

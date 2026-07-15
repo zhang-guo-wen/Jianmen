@@ -288,6 +288,7 @@ func (g *Gateway) handleMySQL(ctx context.Context, client net.Conn) *gatewayConn
 	return &gatewayConn{
 		protocol:      "mysql",
 		accountID:     acct.ID,
+		instanceID:    acct.InstanceID,
 		accountName:   resolved.rawName,
 		upstream:      upstream,
 		upstreamAddr:  upstreamAddress(acct.Instance),

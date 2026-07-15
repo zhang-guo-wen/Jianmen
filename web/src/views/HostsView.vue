@@ -1585,9 +1585,17 @@ function handleHostAuditLog(host: HostView) {
   });
 }
 
-/** 更多操作 - 在线会话（占位） */
-function handleHostSessions(_host: HostView) {
-  ElMessage.info('在线会话功能开发中');
+/** More action - open filtered online sessions. */
+function handleHostSessions(host: HostView) {
+  void router.push({
+    name: "audit",
+    query: {
+      scope: "online",
+      resource_type: "host",
+      resource_id: String(host.id ?? ""),
+      q: hostName(host),
+    },
+  });
 }
 
 /** 更多操作 - 权限管理（占位） */

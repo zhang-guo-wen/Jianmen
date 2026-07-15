@@ -9,16 +9,17 @@ import (
 )
 
 type User struct {
-	ID           string     `gorm:"primaryKey;size:64" json:"id"`
-	Username     string     `gorm:"uniqueIndex;index:idx_users_status_username,priority:2;size:128;not null" json:"username"`
-	PasswordHash string     `gorm:"size:255" json:"-"`
-	TokenHash    string     `gorm:"index;size:255" json:"-"`
-	DisplayName  string     `gorm:"size:128" json:"display_name,omitempty"`
-	Email        string     `gorm:"index;size:255" json:"email,omitempty"`
-	Status       string     `gorm:"index:idx_users_status_username,priority:1;size:32;not null;default:active" json:"status"`
-	LastLoginAt  *time.Time `json:"last_login_at,omitempty"`
-	CreatedAt    time.Time  `json:"created_at"`
-	UpdatedAt    time.Time  `json:"updated_at"`
+	ID              string     `gorm:"primaryKey;size:64" json:"id"`
+	Username        string     `gorm:"uniqueIndex;index:idx_users_status_username,priority:2;size:128;not null" json:"username"`
+	PasswordHash    string     `gorm:"size:255" json:"-"`
+	MySQLNativeHash string     `gorm:"size:40" json:"-"`
+	TokenHash       string     `gorm:"index;size:255" json:"-"`
+	DisplayName     string     `gorm:"size:128" json:"display_name,omitempty"`
+	Email           string     `gorm:"index;size:255" json:"email,omitempty"`
+	Status          string     `gorm:"index:idx_users_status_username,priority:1;size:32;not null;default:active" json:"status"`
+	LastLoginAt     *time.Time `json:"last_login_at,omitempty"`
+	CreatedAt       time.Time  `json:"created_at"`
+	UpdatedAt       time.Time  `json:"updated_at"`
 
 	RequestedTargetID string `gorm:"-" json:"-"`
 }

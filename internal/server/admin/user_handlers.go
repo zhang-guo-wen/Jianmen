@@ -2,10 +2,12 @@ package admin
 
 import (
 	"encoding/json"
-	"jianmen/internal/model"
-	"jianmen/internal/rbac"
 	"net/http"
 	"strings"
+
+	"jianmen/internal/model"
+	"jianmen/internal/rbac"
+	"jianmen/internal/util"
 )
 
 func (s *Server) handleUsers(w http.ResponseWriter, r *http.Request) {
@@ -117,13 +119,14 @@ func (s *Server) createUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	user := model.User{
-		ID:           model.NewID(),
-		Username:     username,
-		PasswordHash: passwordHash,
-		TokenHash:    tokenHash,
-		DisplayName:  strings.TrimSpace(req.DisplayName),
-		Email:        strings.TrimSpace(req.Email),
-		Status:       "active",
+		ID:              model.NewID(),
+		Username:        username,
+		PasswordHash:    passwordHash,
+		MySQLNativeHash: util.MySQLNativePasswordHash(password),
+		TokenHash:       tokenHash,
+		DisplayName:     strings.TrimSpace(req.DisplayName),
+		Email:           strings.TrimSpace(req.Email),
+		Status:          "active",
 	}
 	if err := s.db.Create(&user).Error; err != nil {
 		writeRBACDBError(w, r, err)

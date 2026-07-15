@@ -2,13 +2,13 @@ package service
 
 import (
 	"crypto/rand"
-	"crypto/sha1"
 	"encoding/base64"
-	"encoding/hex"
 	"fmt"
 	"time"
 
 	"golang.org/x/crypto/bcrypt"
+
+	"jianmen/internal/util"
 )
 
 type IssuedConnectionPassword struct {
@@ -31,12 +31,10 @@ func IssueConnectionPassword(now time.Time, ttl time.Duration) (IssuedConnection
 	if err != nil {
 		return IssuedConnectionPassword{}, fmt.Errorf("hash connection password: %w", err)
 	}
-	stage1 := sha1.Sum([]byte(plaintext))
-	stage2 := sha1.Sum(stage1[:])
 	return IssuedConnectionPassword{
 		Plaintext:       plaintext,
 		Hash:            string(hash),
 		ExpiresAt:       now.UTC().Add(ttl),
-		MySQLNativeHash: hex.EncodeToString(stage2[:]),
+		MySQLNativeHash: util.MySQLNativePasswordHash(plaintext),
 	}, nil
 }

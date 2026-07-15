@@ -53,6 +53,7 @@ func bootstrapConfigUsers(db *gorm.DB, users []config.User) error {
 				return fmt.Errorf("hash password for %s: %w", username, err)
 			}
 			user.PasswordHash = string(hash)
+			user.MySQLNativeHash = util.MySQLNativePasswordHash(pw)
 		}
 		if token := strings.TrimSpace(cfgUser.ApiToken); token != "" {
 			hash := sha256.Sum256([]byte(token))
@@ -62,10 +63,11 @@ func bootstrapConfigUsers(db *gorm.DB, users []config.User) error {
 		if err := db.Clauses(clause.OnConflict{
 			Columns: []clause.Column{{Name: "id"}},
 			DoUpdates: clause.Assignments(map[string]any{
-				"username":      user.Username,
-				"status":        user.Status,
-				"password_hash": user.PasswordHash,
-				"token_hash":    user.TokenHash,
+				"username":           user.Username,
+				"status":             user.Status,
+				"password_hash":      user.PasswordHash,
+				"my_sql_native_hash": user.MySQLNativeHash,
+				"token_hash":         user.TokenHash,
 			}),
 		}).Create(&user).Error; err != nil {
 			return fmt.Errorf("bootstrap metadata user %q: %w", userID, err)

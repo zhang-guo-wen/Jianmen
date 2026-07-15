@@ -25,11 +25,13 @@
           <span v-if="connectionTestResult.error" class="connect-error">{{ connectionTestResult.error }}</span>
         </template>
       </div>
-      <div v-if="gatewayAddress" class="connection-address-row">
-        <span>连接地址</span>
-        <code>{{ gatewayAddress }}</code>
-        <el-button class="copy-action" link type="primary" size="small" @click="copyValue(gatewayAddress)">复制</el-button>
-      </div>
+      <section v-if="connectionInfo && gatewayAddress" class="shared-connection-panel">
+        <div class="detail-grid">
+          <InfoValue label="连接地址" :value="gatewayAddress" @copy="copyValue" />
+          <InfoValue label="连接账户" :value="connectionInfo.compactUser" @copy="copyValue" />
+        </div>
+        <CommandRows :commands="commands" @copy="copyValue" />
+      </section>
 
       <div v-if="creatingSession" class="loading-state">
         <el-icon class="is-loading" :size="30"><Loading /></el-icon>
@@ -43,13 +45,11 @@
             <el-tag type="primary" effect="plain">长期有效</el-tag>
           </header>
           <div class="detail-grid">
-            <InfoValue label="连接账号" :value="connectionInfo.compactUser" @copy="copyValue" />
             <div class="detail-item password-tip">
               <span class="password-label">登录密码</span>
               <div class="password-hint">输入堡垒机的登录密码，不是目标{{ resourceType === 'host' ? '主机' : '数据库' }}的密码</div>
             </div>
           </div>
-          <CommandRows :commands="commands" @copy="copyValue" />
         </section>
 
         <section class="connection-panel temporary-panel">
@@ -58,10 +58,8 @@
             <div class="expiry-summary"><span>密码有效期</span><strong>{{ temporaryPasswordExpiryText }}</strong></div>
           </header>
           <div class="detail-grid">
-            <InfoValue label="连接账号" :value="connectionInfo.compactUser" @copy="copyValue" />
             <InfoValue label="临时密码" :value="temporaryPassword" accent @copy="copyValue" />
           </div>
-          <CommandRows :commands="temporaryCommands" @copy="copyValue" />
         </section>
       </template>
     </div>
@@ -172,32 +170,24 @@ const temporaryPasswordExpiresAt = ref('');
 
 const gatewayAddress = computed(() => connectionInfo.value ? `${connectionInfo.value.host}:${connectionInfo.value.port}` : '');
 const commands = computed<CommandItem[]>(() => buildCommands());
-const temporaryCommands = computed<CommandItem[]>(() => buildCommands(temporaryPassword.value));
 
-function buildCommands(password = ''): CommandItem[] {
+function buildCommands(): CommandItem[] {
   if (!connectionInfo.value) return [];
   const { host, port, compactUser } = connectionInfo.value;
   if (props.resourceType === 'host') {
-    const passwordPrefix = password ? `sshpass -p ${password} ` : '';
     const values: CommandItem[] = [];
-    if (props.allowSSH) values.push({ label: 'SSH 命令', value: `${passwordPrefix}ssh ${compactUser}@${host} -p ${port}` });
-    if (props.allowSFTP) values.push({ label: 'XFTP/SFTP 命令', value: `${passwordPrefix}sftp -P ${port} ${compactUser}@${host}` });
+    if (props.allowSSH) values.push({ label: 'SSH 命令', value: `ssh ${compactUser}@${host} -p ${port}` });
+    if (props.allowSFTP) values.push({ label: 'XFTP/SFTP 命令', value: `sftp -P ${port} ${compactUser}@${host}` });
     return values;
   }
   const protocol = props.protocol.toLowerCase();
   if (protocol === 'redis') {
-    const auth = password ? `--pass ${password}` : '--askpass';
-    return [{ label: '连接命令', value: `redis-cli -h ${host} -p ${port} --user ${compactUser} ${auth}` }];
+    return [{ label: '连接命令', value: `redis-cli -h ${host} -p ${port} --user ${compactUser} --askpass` }];
   }
   if (protocol === 'postgres' || protocol === 'postgresql') {
-    if (password) {
-      const user = encodeURIComponent(compactUser);
-      return [{ label: '连接命令', value: `psql "postgresql://${user}:${encodeURIComponent(password)}@${host}:${port}"` }];
-    }
     return [{ label: '连接命令', value: `psql -h ${host} -p ${port} -U ${compactUser}` }];
   }
-  const auth = password ? `--password=${password}` : '-p';
-  return [{ label: '连接命令', value: `mysql --protocol=tcp -h ${host} -P ${port} -u ${compactUser} ${auth}` }];
+  return [{ label: '连接命令', value: `mysql --protocol=tcp -h ${host} -P ${port} -u ${compactUser} -p` }];
 }
 const temporaryPasswordExpiryText = computed(() => {
   const formatted = formatExpiresAt(temporaryPasswordExpiresAt.value);
@@ -346,8 +336,8 @@ function formatExpiresAt(value: string): string {
 .source-meta span, .detail-item > span { color: var(--el-text-color-secondary); font-size: 12px; }
 .source-meta code { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .connectivity-row { display: flex; align-items: center; gap: 8px; color: var(--el-text-color-secondary); font-size: 13px; }
-.connection-address-row { display: grid; grid-template-columns: 72px minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 9px 14px; border: 1px solid var(--el-border-color-light); border-radius: 10px; background: var(--el-fill-color-extra-light); color: var(--el-text-color-secondary); font-size: 13px; }
-.connection-address-row code { min-width: 0; color: var(--el-text-color-primary); }
+.shared-connection-panel { overflow: hidden; border: 1px solid var(--el-border-color-light); border-radius: 10px; }
+.shared-connection-panel .detail-grid { border-top: 0; }
 :deep(.copy-action) { justify-self: end; }
 .connect-error { color: var(--el-color-danger); }
 .loading-state { padding: 30px 0; text-align: center; }

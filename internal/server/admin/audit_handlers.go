@@ -90,7 +90,13 @@ func (s *Server) handleAuditArtifact(w http.ResponseWriter, r *http.Request) {
 	case "mysql", "postgres", "postgresql", "redis", "db", "database":
 		action = rbac.ActionDBAuditView
 	}
-	if !s.requirePermission(r, action) {
+	var allowed bool
+	if session.State == "started" {
+		allowed = s.requireAnyPermission(r, rbac.ActionSessionView, action)
+	} else {
+		allowed = s.requirePermission(r, action)
+	}
+	if !allowed {
 		s.forbidden(w, r)
 		return
 	}

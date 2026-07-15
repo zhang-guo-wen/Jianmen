@@ -12,7 +12,7 @@ func TestPermissionCatalogContainsEveryAction(t *testing.T) {
 		ActionHostCreate, ActionHostUpdate, ActionHostDelete, ActionHostView,
 		ActionTargetCreate, ActionTargetUpdate, ActionTargetDelete, ActionTargetView,
 		ActionDBProxyCreate, ActionDBProxyUpdate, ActionDBProxyDelete, ActionDBProxyView,
-		ActionRBACManage, ActionSessionView,
+		ActionRBACManage, ActionSessionView, ActionSessionDisconnect,
 		ActionAppCreate, ActionAppUpdate, ActionAppDelete, ActionAppView, ActionAppConnect,
 		ActionPlatformAccountCreate, ActionPlatformAccountUpdate, ActionPlatformAccountDelete,
 		ActionPlatformAccountView, ActionPlatformAccountUse,
@@ -71,6 +71,21 @@ func TestSFTPConnectDoesNotGrantSSHConnect(t *testing.T) {
 	want := []string{ActionSFTPConnect}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("actions = %#v, want %#v", got, want)
+	}
+}
+
+func TestSessionDisconnectIncludesViewAndAuditPage(t *testing.T) {
+	actions, err := ValidateAssignableActions([]string{ActionSessionDisconnect})
+	if err != nil {
+		t.Fatalf("ValidateAssignableActions() error = %v", err)
+	}
+	wantActions := []string{ActionSessionDisconnect, ActionSessionView}
+	if !reflect.DeepEqual(actions, wantActions) {
+		t.Fatalf("actions = %#v, want %#v", actions, wantActions)
+	}
+	wantPages := []PageAccess{{Key: "audit", Path: "/audit", Order: 60}}
+	if pages := AccessiblePages([]string{ActionSessionView}); !reflect.DeepEqual(pages, wantPages) {
+		t.Fatalf("pages = %#v, want %#v", pages, wantPages)
 	}
 }
 

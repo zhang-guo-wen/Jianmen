@@ -12,6 +12,7 @@ import (
 
 	"jianmen/internal/config"
 	"jianmen/internal/crypto"
+	"jianmen/internal/online"
 	"jianmen/internal/server/admin"
 	"jianmen/internal/server/appproxy"
 	"jianmen/internal/server/dbproxy"
@@ -103,22 +104,23 @@ func main() {
 	defer cancel()
 
 	errCh := make(chan error, 4)
+	onlineSessions := online.NewRegistry()
 
-	sshSrv := sshserver.New(cfg, appStore, logger, dataDir, metadataDB)
+	sshSrv := sshserver.New(cfg, appStore, logger, dataDir, onlineSessions, metadataDB)
 	go func() {
 		errCh <- sshSrv.ListenAndServe(ctx)
 	}()
 
 	superAdminIDs := admin.LoadSuperAdminIDs(cfg, dataDir)
 
-	dbGateway := dbproxy.NewGateway(cfg.DatabaseGateway, appStore, cfg.ReplayDir, logger, metadataDB, superAdminIDs, appStore)
+	dbGateway := dbproxy.NewGateway(cfg.DatabaseGateway, appStore, cfg.ReplayDir, logger, metadataDB, superAdminIDs, onlineSessions, appStore)
 
 	if cfg.Admin.Enabled {
 		appProxy := appproxy.New(cfg.ApplicationGateway, metadataDB, superAdminIDs, logger)
 		go func() {
 			errCh <- appProxy.ListenAndServe(ctx)
 		}()
-		adminSrv := admin.New(cfg, appStore, logger, dataDir, appProxy, metadataDB)
+		adminSrv := admin.New(cfg, appStore, logger, dataDir, appProxy, onlineSessions, metadataDB)
 		go func() {
 			errCh <- adminSrv.ListenAndServe(ctx)
 		}()

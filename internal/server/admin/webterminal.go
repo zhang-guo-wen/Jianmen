@@ -19,6 +19,7 @@ import (
 	"golang.org/x/crypto/ssh"
 
 	"jianmen/internal/model"
+	"jianmen/internal/online"
 	"jianmen/internal/rbac"
 	"jianmen/internal/recording"
 	"jianmen/internal/store"
@@ -49,8 +50,9 @@ type webTerminalResize struct {
 }
 
 type webTerminalAuditSink struct {
-	store     store.Store
-	sessionID string
+	store          store.Store
+	sessionID      string
+	onlineSessions *online.Registry
 }
 
 func (s *webTerminalAuditSink) WriteCommand(_ string, timestamp time.Time, command string) error {
@@ -73,6 +75,7 @@ func (s *webTerminalAuditSink) WriteFileEvent(_ string, timestamp time.Time, act
 }
 
 func (s *webTerminalAuditSink) UpdateProtocol(_ string, protocol string) error {
+	s.onlineSessions.UpdateProtocolSubtype(s.sessionID, protocol)
 	return s.store.UpdateAuditProtocol(s.sessionID, protocol)
 }
 
@@ -143,6 +146,31 @@ func (s *Server) handleWebTerminal(w http.ResponseWriter, r *http.Request) {
 	recorder := s.newWebTerminalRecorder(session, auditSession)
 	if recorder != nil {
 		defer recorder.Close()
+	}
+
+	if auditSession != nil {
+		accountName := target.Name
+		if accountName == "" {
+			accountName = target.Username
+		}
+		unregisterOnline := s.onlineSessions.Register(online.Session{
+			ID:              auditSession.ID,
+			AuditSessionID:  auditSession.ID,
+			ResourceType:    model.ResourceTypeHost,
+			ResourceID:      target.HostID,
+			AccountID:       target.ID,
+			Instance:        target.HostName,
+			Protocol:        "ssh",
+			ProtocolSubtype: session.ProtocolSubtype,
+			Account:         accountName,
+			Operator:        user.Username,
+			StartedAt:       auditSession.StartedAt,
+			HasReplay:       recorder != nil,
+		}, func() {
+			_ = conn.Close()
+			_ = targetClient.Close()
+		})
+		defer unregisterOnline()
 	}
 
 	if err := serveWebTerminalSSHSession(r.Context(), conn, targetClient, opts, recorder, s.logger); err != nil && r.Context().Err() == nil {

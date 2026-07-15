@@ -26,6 +26,7 @@ import (
 	"jianmen/internal/config"
 	"jianmen/internal/crypto"
 	"jianmen/internal/model"
+	"jianmen/internal/online"
 	"jianmen/internal/server/dbproxy"
 	"jianmen/internal/server/sshserver"
 	"jianmen/internal/storage"
@@ -307,6 +308,7 @@ func startDatabaseGateway(t *testing.T, fixture metadataFixture) string {
 		testLogger(),
 		fixture.db,
 		map[string]bool{integrationUserID: true},
+		online.NewRegistry(),
 		nil,
 	)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -345,7 +347,7 @@ func startSSHServer(t *testing.T, fixture metadataFixture) string {
 			Username: integrationUsername,
 		}},
 	}
-	server := sshserver.New(cfg, fixture.store, testLogger(), fixture.dataDir, fixture.db)
+	server := sshserver.New(cfg, fixture.store, testLogger(), fixture.dataDir, online.NewRegistry(), fixture.db)
 	ctx, cancel := context.WithCancel(context.Background())
 	errCh := make(chan error, 1)
 	go func() {

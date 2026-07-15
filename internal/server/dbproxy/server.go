@@ -17,6 +17,7 @@ import (
 
 	"jianmen/internal/config"
 	"jianmen/internal/model"
+	"jianmen/internal/online"
 	rbaccheck "jianmen/internal/rbac"
 )
 
@@ -30,6 +31,7 @@ type Gateway struct {
 	resourceChecker   resourceGrantChecker
 	superAdminIDs     map[string]bool
 	audit             auditWriter
+	onlineSessions    *online.Registry
 }
 
 type databaseAccountResolver interface {
@@ -51,7 +53,7 @@ type resourceGrantChecker interface {
 	HasGrant(userID, resourceType, resourceID string) (bool, error)
 }
 
-func NewGateway(cfg config.DatabaseGatewayConfig, store databaseAccountResolver, replayDir string, logger *slog.Logger, db *gorm.DB, superAdminIDs map[string]bool, auditStore auditWriter) *Gateway {
+func NewGateway(cfg config.DatabaseGatewayConfig, store databaseAccountResolver, replayDir string, logger *slog.Logger, db *gorm.DB, superAdminIDs map[string]bool, onlineSessions *online.Registry, auditStore auditWriter) *Gateway {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -61,7 +63,7 @@ func NewGateway(cfg config.DatabaseGatewayConfig, store databaseAccountResolver,
 		checker = rbaccheck.NewChecker(db)
 		resourceChecker = rbaccheck.NewResourceGrantChecker(db)
 	}
-	return &Gateway{cfg: cfg, store: store, db: db, replayDir: replayDir, logger: logger, permissionChecker: checker, resourceChecker: resourceChecker, superAdminIDs: superAdminIDs, audit: auditStore}
+	return &Gateway{cfg: cfg, store: store, db: db, replayDir: replayDir, logger: logger, permissionChecker: checker, resourceChecker: resourceChecker, superAdminIDs: superAdminIDs, audit: auditStore, onlineSessions: onlineSessions}
 }
 
 func (g *Gateway) Enabled() bool {
@@ -105,6 +107,7 @@ func (g *Gateway) ListenAndServe(ctx context.Context) error {
 type gatewayConn struct {
 	protocol      string
 	accountID     string
+	instanceID    string
 	accountName   string
 	upstream      net.Conn
 	upstreamAddr  string
@@ -194,6 +197,7 @@ func (g *Gateway) handleConn(ctx context.Context, client net.Conn) {
 	auditSession.BeforeCreate(nil)
 	if g.audit != nil {
 		g.audit.CreateAuditSession(auditSession)
+		defer g.audit.EndAuditSession(auditSession.ID)
 	}
 
 	recorder, recErr := g.newRecorder(conn, auditSession.ID)
@@ -201,13 +205,25 @@ func (g *Gateway) handleConn(ctx context.Context, client net.Conn) {
 		g.logger.Warn("db gateway recorder init failed, audit db queries may be incomplete", "error", recErr)
 	}
 	if recorder != nil {
-		defer func() {
-			recorder.Close()
-			if g.audit != nil {
-				g.audit.EndAuditSession(auditSession.ID)
-			}
-		}()
+		defer recorder.Close()
 	}
+
+	unregisterOnline := g.onlineSessions.Register(online.Session{
+		ID:             auditSession.ID,
+		AuditSessionID: auditSession.ID,
+		ResourceType:   model.ResourceTypeDatabaseInstance,
+		ResourceID:     conn.instanceID,
+		AccountID:      conn.accountID,
+		Instance:       conn.instanceName,
+		Protocol:       conn.protocol,
+		Account:        conn.accountUser,
+		Operator:       authUser,
+		StartedAt:      auditSession.StartedAt,
+	}, func() {
+		_ = client.Close()
+		_ = conn.upstream.Close()
+	})
+	defer unregisterOnline()
 
 	observer := newQueryObserver(conn.protocol, recorder)
 	done := make(chan struct{}, 2)
@@ -466,7 +482,7 @@ func (g *Gateway) handlePG(ctx context.Context, client net.Conn, firstByte byte)
 	}
 
 	return &gatewayConn{
-		protocol: "postgres", accountID: acct.ID, accountName: resolved.rawName,
+		protocol: "postgres", accountID: acct.ID, instanceID: acct.InstanceID, accountName: resolved.rawName,
 		upstream: upstream, upstreamAddr: upstreamAddress(acct.Instance), userID: userID,
 		accountUser: acct.Username, instanceName: acct.Instance.Name,
 		userSessionID: resolved.userSessionID,

@@ -219,7 +219,7 @@ func (g *Gateway) handleRedis(ctx context.Context, client net.Conn, firstByte by
 	}
 
 	return &gatewayConn{
-		protocol: "redis", accountID: acct.ID, accountName: resolved.rawName,
+		protocol: "redis", accountID: acct.ID, instanceID: acct.InstanceID, accountName: resolved.rawName,
 		upstream: upstream, upstreamAddr: upstreamAddress(acct.Instance), userID: userID,
 		accountUser: acct.Username, instanceName: acct.Instance.Name,
 		userSessionID: resolved.userSessionID,

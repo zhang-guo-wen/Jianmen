@@ -51,7 +51,7 @@ func (s *Server) newWebTerminalRecorder(session model.Session, auditSession *mod
 	}
 	var sink recording.AuditSink
 	if auditSession != nil {
-		sink = &webTerminalAuditSink{store: s.store, sessionID: auditSession.ID}
+		sink = &webTerminalAuditSink{store: s.store, sessionID: auditSession.ID, onlineSessions: s.onlineSessions}
 	}
 
 	recorder, err := recording.NewSessionRecorder(

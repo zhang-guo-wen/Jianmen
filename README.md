@@ -16,62 +16,6 @@
 - **REST API** — Bearer token 认证，支持 CLI 和第三方集成
 - **RBAC** — 角色/权限/资源绑定模型
 
-## 快速开始
-
-### 环境要求
-
-- Go 1.23+
-- Node.js 18+（前端开发）
-- 目标主机需运行 SSH Server（用于代理连接）
-
-### 安装与运行
-
-```bash
-# 克隆项目
-git clone https://github.com/your-org/jianmen.git
-cd jianmen
-
-# 编译
-go build -o bin/bastion-core.exe ./cmd/bastion-core
-
-# 准备配置
-cp config.example.json config.local.json
-# 编辑 config.local.json，配置堡垒机用户和目标主机信息
-
-# 启动服务
-./bin/bastion-core.exe -config config.local.json
-```
-
-启动后：
-
-| 服务 | 地址 |
-|------|------|
-| Admin API | `http://127.0.0.1:47100` |
-| Vue Web Admin | `http://127.0.0.1:47101` |
-| SSH/SFTP Gateway | `0.0.0.0:47102` |
-
-### 验证代理
-
-```bash
-# SSH 连接堡垒机（默认资产）
-ssh -p 47102 admin@127.0.0.1
-
-# 指定资产 ID
-ssh -p 47102 admin+web01@127.0.0.1
-
-# SFTP 连接
-sftp -P 47102 admin@127.0.0.1
-```
-
-### 前端开发
-
-```bash
-cd web
-npm install
-npm run dev        # 开发服务 http://127.0.0.1:47101
-npm run typecheck  # TypeScript 类型检查
-npm run build      # 生产构建
-```
 
 ## 截图
 
@@ -99,22 +43,6 @@ SSH / SFTP / DB 客户端
    目标主机 / 数据库
 ```
 
-## 项目结构
-
-```
-jianmen/
-├── cmd/
-│   └── bastion-core/    # 主服务入口
-├── internal/
-│   ├── server/          # SSH/Admin/DB 服务
-│   ├── proxy/           # SSH/SFTP/DB 协议代理
-│   ├── recording/       # 终端录像与命令记录
-│   ├── rbac/            # 授权检查与资源定义
-│   ├── store/           # 数据存储接口与实现
-│   └── model/           # 数据模型
-├── web/                 # Vue 3 前端
-└── config.example.json  # 配置示例
-```
 
 ## 许可证
 
@@ -122,8 +50,3 @@ jianmen/
 
 ## 贡献
 
-欢迎 Issue 和 PR。详见 [CONTRIBUTING.md](CONTRIBUTING.md)。
-
-## 安全
-
-漏洞报告请参阅 [SECURITY.md](SECURITY.md)。

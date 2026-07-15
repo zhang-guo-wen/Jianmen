@@ -1,0 +1,45 @@
+package model
+
+import (
+	"time"
+
+	"gorm.io/gorm"
+)
+
+type Host struct {
+	ID        string    `gorm:"primaryKey;size:64" json:"id"`
+	Name      string    `gorm:"size:255;not null" json:"name"`
+	Address   string    `gorm:"index;index:idx_hosts_address_port,priority:1;size:255;not null" json:"address"`
+	Port      int       `gorm:"index:idx_hosts_address_port,priority:2;not null;default:22" json:"port"`
+	GroupName string    `gorm:"size:128" json:"group"`
+	Remark    string    `gorm:"type:text" json:"remark,omitempty"`
+	Status    string    `gorm:"index;size:32;not null;default:active" json:"status"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+type HostAccount struct {
+	ID                    string         `gorm:"primaryKey;size:64" json:"id"`
+	HostID                string         `gorm:"index;index:idx_host_accounts_host_username,priority:1;index:idx_host_accounts_host_status,priority:1;size:64;not null" json:"host_id"`
+	Name                  string         `gorm:"size:128;not null;default:''" json:"name"`
+	Username              string         `gorm:"index:idx_host_accounts_host_username,priority:2;size:128;not null" json:"username"`
+	AuthType              string         `gorm:"size:32" json:"auth_type,omitempty"`
+	Password              EncryptedField `gorm:"type:text" json:"-"`
+	PrivateKeyPEM         EncryptedField `gorm:"type:text" json:"-"`
+	Passphrase            EncryptedField `gorm:"type:text" json:"-"`
+	InsecureIgnoreHostKey bool           `gorm:"not null;default:false" json:"insecure_ignore_host_key"`
+	HostKeyFingerprint    string         `gorm:"size:128" json:"host_key_fingerprint,omitempty"`
+	KnownHostsPath        string         `gorm:"size:255" json:"known_hosts_path,omitempty"`
+	Status                string         `gorm:"index;index:idx_host_accounts_host_status,priority:2;index:idx_host_accounts_status_expires,priority:1;size:32;not null;default:active" json:"status"`
+	ResourceSeq           int            `gorm:"index;not null;default:0" json:"resource_seq"`
+	ResourceID            string         `gorm:"uniqueIndex;size:4" json:"resource_id"`
+	GroupName             string         `gorm:"size:128" json:"group"`
+	Remark                string         `gorm:"type:text" json:"remark,omitempty"`
+	ExpiresAt             *time.Time     `gorm:"index;index:idx_host_accounts_status_expires,priority:2" json:"expires_at"`
+	CreatedAt             time.Time      `json:"created_at"`
+	UpdatedAt             time.Time      `json:"updated_at"`
+	Host                  Host           `gorm:"constraint:OnUpdate:CASCADE,OnDelete:CASCADE;" json:"-"`
+}
+
+func (m *Host) BeforeCreate(_ *gorm.DB) error        { return ensureID(&m.ID) }
+func (m *HostAccount) BeforeCreate(_ *gorm.DB) error { return ensureID(&m.ID) }

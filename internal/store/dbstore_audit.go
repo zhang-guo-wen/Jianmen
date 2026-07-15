@@ -49,7 +49,10 @@ func (s *DBStore) ListAuditSessions(params AuditListParams) ([]AuditSessionView,
 	}
 	if params.Search != "" {
 		like := "%" + strings.ToLower(params.Search) + "%"
-		q = q.Where("LOWER(username) LIKE ? OR LOWER(target_name) LIKE ? OR LOWER(account_name) LIKE ?", like, like, like)
+		q = q.Where(
+			"LOWER(username) LIKE ? OR LOWER(target_name) LIKE ? OR LOWER(target_address) LIKE ? OR LOWER(account_name) LIKE ? OR LOWER(account_username) LIKE ?",
+			like, like, like, like, like,
+		)
 	}
 	if params.Date != "" {
 		date, err := time.Parse("2006-01-02", params.Date)
@@ -75,16 +78,18 @@ func (s *DBStore) ListAuditSessions(params AuditListParams) ([]AuditSessionView,
 	views := make([]AuditSessionView, len(sessions))
 	for i, sess := range sessions {
 		views[i] = AuditSessionView{
-			ID:               sess.ID,
-			Username:         sess.Username,
-			Protocol:         sess.Protocol,
-			ProtocolSubtype:  sess.ProtocolSubtype,
-			TargetName:       sess.TargetName,
-			AccountName:      sess.AccountName,
-			ClientIP:         sess.ClientIP,
-			StartedAt:        sess.StartedAt.Format(time.RFC3339Nano),
-			State:            sess.State,
-			ReplayDir:        sess.ReplayDir,
+			ID:              sess.ID,
+			Username:        sess.Username,
+			Protocol:        sess.Protocol,
+			ProtocolSubtype: sess.ProtocolSubtype,
+			TargetName:      sess.TargetName,
+			TargetAddress:   sess.TargetAddress,
+			AccountName:     sess.AccountName,
+			AccountUsername: sess.AccountUsername,
+			ClientIP:        sess.ClientIP,
+			StartedAt:       sess.StartedAt.Format(time.RFC3339Nano),
+			State:           sess.State,
+			ReplayDir:       sess.ReplayDir,
 		}
 		if sess.EndedAt != nil {
 			views[i].EndedAt = sess.EndedAt.Format(time.RFC3339Nano)

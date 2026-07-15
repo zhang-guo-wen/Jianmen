@@ -18,12 +18,12 @@
             </template>
             <el-table-column :label="t('audit.column.instance')" min-width="150" show-overflow-tooltip>
               <template #default="{ row }">
-                {{ row.target_name || row.target_id || t('common.none') }}
+                {{ sessionInstance(row) }}
               </template>
             </el-table-column>
             <el-table-column :label="t('audit.column.account')" min-width="120" show-overflow-tooltip>
               <template #default="{ row }">
-                {{ row.account_username || '-' }}
+                {{ sessionAccount(row) }}
               </template>
             </el-table-column>
             <el-table-column :label="t('audit.column.operator')" min-width="120">
@@ -490,6 +490,22 @@ function isReplayData(value: unknown): value is ReplayData {
 
 function sessionId(session: SessionRecord): string {
   return String(session.id ?? '');
+}
+
+function displayAuditIdentity(actualValue: unknown, displayNameValue: unknown): string {
+  const actual = String(actualValue ?? '').trim();
+  const displayName = String(displayNameValue ?? '').trim();
+  if (!actual) return displayName || t('common.none');
+  if (!displayName || displayName === actual) return actual;
+  return `${actual}（${displayName}）`;
+}
+
+function sessionInstance(session: SessionRecord): string {
+  return displayAuditIdentity(session.target_address ?? session.target_id, session.target_name);
+}
+
+function sessionAccount(session: SessionRecord): string {
+  return displayAuditIdentity(session.account_username, session.account_name);
 }
 
 function sessionUser(session: SessionRecord): string {

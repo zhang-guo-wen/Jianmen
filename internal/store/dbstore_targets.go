@@ -24,7 +24,10 @@ func (s *DBStore) targetView(a model.HostAccount) TargetView {
 	if a.AuthType == "private_key" || a.AuthType == "key" {
 		authMethods = []string{"private_key"}
 	}
-	name := a.Username
+	name := strings.TrimSpace(a.Name)
+	if name == "" {
+		name = strings.TrimSpace(a.Username)
+	}
 	if name == "" {
 		name = a.ID
 	}
@@ -95,9 +98,14 @@ func (s *DBStore) targetConfig(a model.HostAccount) TargetConfig {
 	if a.ExpiresAt != nil {
 		expiresAt = a.ExpiresAt.UTC().Format(time.RFC3339Nano)
 	}
+	accountName := strings.TrimSpace(a.Name)
+	if accountName == "" {
+		accountName = a.Username
+	}
 	return TargetConfig{
 		ID: a.ID, Username: a.Username,
-		Name:                  a.Username + "@" + formatHostAddress(host, port),
+		Name:                  accountName,
+		HostName:              strings.TrimSpace(a.Host.Name),
 		Host:                  host,
 		Port:                  port,
 		Password:              a.Password.GetPlaintext(),
@@ -174,6 +182,7 @@ func (s *DBStore) AddTarget(target config.Target) (TargetView, error) {
 	a := model.HostAccount{
 		ID:                    target.ID,
 		HostID:                target.HostID,
+		Name:                  target.Name,
 		Username:              target.Username,
 		AuthType:              "password",
 		Password:              model.NewEncryptedField(target.Password),
@@ -226,6 +235,10 @@ func (s *DBStore) UpdateTarget(id string, target config.Target) (TargetView, err
 		return TargetView{}, err
 	}
 	a.Username = target.Username
+	a.Name = target.Name
+	if a.Name == "" {
+		a.Name = a.Username
+	}
 	a.GroupName = target.Group
 	a.Remark = target.Remark
 	a.InsecureIgnoreHostKey = target.InsecureIgnoreHostKey

@@ -47,6 +47,7 @@ func TestDBStoreSyncsResourcesAndUsesSequenceFloor(t *testing.T) {
 		HostID:   host.ID,
 		Host:     host.Address,
 		Port:     host.Port,
+		Name:     "operations",
 		Username: "root",
 	})
 	if err != nil {
@@ -54,6 +55,16 @@ func TestDBStoreSyncsResourcesAndUsesSequenceFloor(t *testing.T) {
 	}
 	if target.ResourceSeq != 8 {
 		t.Fatalf("resource seq = %d, want 8", target.ResourceSeq)
+	}
+	if target.Name != "operations" || target.Username != "root" {
+		t.Fatalf("target identity = name:%q username:%q", target.Name, target.Username)
+	}
+	targetConfig, err := st.TargetConfig(target.ID)
+	if err != nil {
+		t.Fatalf("load target config: %v", err)
+	}
+	if targetConfig.Name != "operations" || targetConfig.HostName != host.Name {
+		t.Fatalf("target config labels = account:%q host:%q", targetConfig.Name, targetConfig.HostName)
 	}
 
 	var resource model.Resource

@@ -221,23 +221,13 @@ func (s *Server) handleConn(ctx context.Context, rawConn net.Conn, serverConfig 
 	}
 	defer targetClient.Close()
 
-	session := model.NewSession(user, target.ID, target.Name, remoteIP(rawConn.RemoteAddr()))
+	session := model.NewSession(user, target.ID, target.Addr(), remoteIP(rawConn.RemoteAddr()))
 	session.AccountUsername = target.Username
 
 	// Look up UserSession from compact username to link the audit record.
 	userSession, _ := s.store.FindUserSessionByCompactUsername(serverConn.User())
 
-	auditSession := model.AuditSession{
-		UserID:      user.ID,
-		Username:    user.Username,
-		Protocol:    "ssh",
-		TargetName:  target.Name,
-		AccountName: target.Username,
-		ClientIP:    session.ClientIP,
-		StartedAt:   time.Now().UTC(),
-		State:       "started",
-		ReplayDir:   filepath.Join(s.cfg.ReplayDir, "ssh", session.ID),
-	}
+	auditSession := newSSHAuditSession(user, target, session, s.cfg.ReplayDir)
 	if userSession != nil {
 		auditSession.UserSessionID = userSession.ID
 	}
@@ -285,6 +275,22 @@ func (s *Server) handleConn(ctx context.Context, rawConn net.Conn, serverConfig 
 		}
 		proxy := sshproxy.NewSession(targetClient, channel, requests, recorder, access, s.logger)
 		go proxy.Serve(ctx)
+	}
+}
+
+func newSSHAuditSession(user model.User, target store.TargetConfig, session model.Session, replayRoot string) model.AuditSession {
+	return model.AuditSession{
+		UserID:          user.ID,
+		Username:        user.Username,
+		Protocol:        "ssh",
+		TargetName:      target.HostName,
+		TargetAddress:   target.Addr(),
+		AccountName:     target.Name,
+		AccountUsername: target.Username,
+		ClientIP:        session.ClientIP,
+		StartedAt:       session.StartedAt,
+		State:           "started",
+		ReplayDir:       filepath.Join(replayRoot, "ssh", session.ID),
 	}
 }
 

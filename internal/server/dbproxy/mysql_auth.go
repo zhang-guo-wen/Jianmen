@@ -18,12 +18,40 @@ import (
 	"jianmen/internal/model"
 )
 
+const mysqlAuthSaltAlphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+
+func generateMySQLAuthSalt(size int) ([]byte, error) {
+	if size <= 0 {
+		return nil, fmt.Errorf("mysql auth salt size must be positive")
+	}
+
+	salt := make([]byte, size)
+	random := make([]byte, size*2)
+	limit := byte(256 - 256%len(mysqlAuthSaltAlphabet))
+	for filled := 0; filled < size; {
+		if _, err := rand.Read(random); err != nil {
+			return nil, fmt.Errorf("read random bytes: %w", err)
+		}
+		for _, value := range random {
+			if value >= limit {
+				continue
+			}
+			salt[filled] = mysqlAuthSaltAlphabet[int(value)%len(mysqlAuthSaltAlphabet)]
+			filled++
+			if filled == size {
+				break
+			}
+		}
+	}
+	return salt, nil
+}
+
 // sendFakeMySQLHandshake 向客户端发送一个伪装 MySQL 8.0 握手包，
 // 让客户端先发送 login 包（包含用户名），以便网关解析账号。
 func sendFakeMySQLHandshake(conn net.Conn) ([]byte, error) {
 	// 生成 20 字节随机 salt
-	salt := make([]byte, 20)
-	if _, err := rand.Read(salt); err != nil {
+	salt, err := generateMySQLAuthSalt(20)
+	if err != nil {
 		return nil, err
 	}
 	capFlags := uint32(mysqlClientProtocol41 | mysqlClientSecureConnection | mysqlClientPluginAuth)
@@ -64,7 +92,7 @@ func sendFakeMySQLHandshake(conn net.Conn) ([]byte, error) {
 	pkt[3] = 0 // seq=0
 	copy(pkt[4:], p)
 
-	_, err := conn.Write(pkt)
+	_, err = conn.Write(pkt)
 	return salt, err
 }
 
@@ -129,6 +157,9 @@ func (g *Gateway) handleMySQL(ctx context.Context, client net.Conn) *gatewayConn
 	acct := resolved.account
 	if g.store == nil || g.store.AuthenticateMySQLConnectionPassword(ctx, resolved.user.ID, acct.ID, fakeSalt, authResponse) != nil {
 		g.logger.Warn("mysql gateway auth failed", "user", resolved.rawName)
+		if err := writeMySQLClientAuthError(client); err != nil {
+			g.logger.Warn("mysql gateway failed to send auth error", "error", err)
+		}
 		return nil
 	}
 
@@ -272,6 +303,13 @@ func writeMySQLClientAuthOK(conn net.Conn) error {
 	// so the client-side auth result must be seq=2 regardless of upstream auth
 	// switches or multi-step authentication.
 	payload := []byte{0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00}
+	_, err := conn.Write(mysqlPacketWithSeq(2, payload))
+	return err
+}
+
+func writeMySQLClientAuthError(conn net.Conn) error {
+	payload := []byte{0xff, 0x15, 0x04, '#', '2', '8', '0', '0', '0'}
+	payload = append(payload, "access denied for bastion connection"...)
 	_, err := conn.Write(mysqlPacketWithSeq(2, payload))
 	return err
 }

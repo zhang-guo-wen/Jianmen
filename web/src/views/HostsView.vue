@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <div class="view-stack">
     <div class="page-container">
       <DataTableCard
@@ -487,163 +487,32 @@
         </el-form>
       </FormDialog>
 
-      <!-- 连接弹窗 -->
-      <el-dialog
+      <ConnectionConfigDialog
         v-model="connectionDialogVisible"
-        destroy-on-close
-        title="连接主机账号"
-        width="min(720px, calc(100vw - 32px))"
-      >
-        <div v-if="selectedConnectionTarget" class="connection-dialog">
-          <el-alert
-            v-if="connectionError"
-            show-icon
-            type="error"
-            :closable="false"
-            :title="connectionError"
-          />
-          <el-alert
-            v-else
-            show-icon
-            type="info"
-            :closable="false"
-            title="输入堡垒机的登录密码，不是目标主机的密码"
-          />
-
-          <div
-            style="
-              margin-bottom: 8px;
-              display: flex;
-              align-items: center;
-              gap: 8px;
-            "
-            v-if="!creatingSession"
-          >
-            <span style="font-size: 13px; color: #667085">连通性：</span>
-            <el-tag v-if="connectionTesting" type="info" size="small"
-              >测试中...</el-tag
-            >
-            <template v-else-if="connectionTestResult !== null">
-              <el-tag
-                :type="connectionTestResult.ok ? 'success' : 'danger'"
-                size="small"
-              >
-                {{ connectionTestResult.ok ? "可达" : "不可达" }}
-              </el-tag>
-              <span
-                v-if="connectionTestResult.latency_ms !== undefined"
-                style="font-size: 12px; color: #667085"
-              >
-                延迟 {{ connectionTestResult.latency_ms }}ms
-              </span>
-              <span
-                v-if="connectionTestResult.error"
-                style="font-size: 12px; color: var(--el-color-danger)"
-              >
-                {{ connectionTestResult.error }}
-              </span>
-            </template>
-          </div>
-
-          <div
-            v-if="creatingSession"
-            style="text-align: center; padding: 30px 0"
-          >
-            <el-icon class="is-loading" :size="28"><Loading /></el-icon>
-            <p style="margin-top: 10px; color: #667085">正在创建连接会话...</p>
-          </div>
-
-          <template v-else-if="!connectionError && connectionCompactUser">
-            <el-descriptions
-              :column="1"
-              border
-              size="small"
-              style="margin-top: 12px"
-            >
-              <el-descriptions-item label="连接地址">
-                <code
-                  >{{ bastionHost }}:{{
-                    bastionPort || 47102
-                  }}</code
-                >
-                <el-button
-                  link
-                  type="primary"
-                  size="small"
-                  style="margin-left: 8px"
-                  @click="
-                    copyText(
-                      `${bastionHost}:${bastionPort || 47102}`,
-                    )
-                  "
-                  >复制</el-button
-                >
-              </el-descriptions-item>
-              <el-descriptions-item label="用户名">
-                <code>{{ connectionCompactUser }}</code>
-                <el-button
-                  link
-                  type="primary"
-                  size="small"
-                  style="margin-left: 8px"
-                  @click="copyText(connectionCompactUser)"
-                  >复制</el-button
-                >
-              </el-descriptions-item>
-            </el-descriptions>
-
-            <div style="margin-top: 12px">
-              <el-input
-                v-model="connectionPassword"
-                type="password"
-                show-password
-                placeholder="输入堡垒机登录密码（自动携带到客户端）"
-                size="small"
-              />
-            </div>
-
-            <div style="margin-top: 12px">
-              <el-input
-                :model-value="`ssh ${connectionCompactUser}@${bastionHost} -p ${bastionPort || 47102}`"
-                readonly
-                size="small"
-              >
-                <template #append>
-                  <el-button
-                    @click="
-                      copyText(
-                        `ssh ${connectionCompactUser}@${bastionHost} -p ${bastionPort || 47102}`,
-                      )
-                    "
-                    >复制 SSH 命令</el-button
-                  >
-                </template>
-              </el-input>
-            </div>
-          </template>
-        </div>
-        <template #footer>
-          <el-button type="primary" :loading="preferences.loading" @click="openHostSSHClient">本地 SSH 客户端打开</el-button>
-          <el-button type="primary" @click="openTerminalFromDialog">在浏览器中打开</el-button>
-          <el-button style="margin-left:8px" @click="connectionDialogVisible = false">关闭</el-button>
-        </template>
-      </el-dialog>
+        resource-type="host"
+        :target="selectedConnectionTarget"
+        :resource-name="connectionResourceName"
+        :source-address="connectionSourceAddress"
+        :source-account="connectionSourceAccount"
+        :allow-ssh="permission.canDo('session:connect')"
+        :allow-sftp="permission.canDo('sftp:connect')"
+      />
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, nextTick, onMounted, reactive, ref, watch } from "vue";
-import { useRouter } from "vue-router";
 import {
   ElMessage,
   ElMessageBox,
   type FormInstance,
   type FormRules,
 } from "element-plus";
-import { ArrowDown, Loading } from "@element-plus/icons-vue";
+import { ArrowDown } from "@element-plus/icons-vue";
 import DataTableCard from "@/components/DataTableCard.vue";
 import FormDialog from "@/components/FormDialog.vue";
+import ConnectionConfigDialog from "@/components/ConnectionConfigDialog.vue";
 import StatusSwitch from "@/components/StatusSwitch.vue";
 import {
   apiClient,
@@ -655,7 +524,6 @@ import {
 } from "@/api/client";
 import { useI18n } from "@/i18n";
 import { usePermissionStore } from "@/stores/permission";
-import { usePreferencesStore } from "@/stores/preferences";
 
 type AuthMethod = "password" | "private_key";
 type HostKeyMode = "ignore" | "fingerprint" | "known_hosts";
@@ -689,7 +557,6 @@ interface AccountForm {
 
 const { t } = useI18n();
 const permission = usePermissionStore();
-const preferences = usePreferencesStore();
 
 // ── Host list state ──
 const hosts = ref<HostView[]>([]);
@@ -714,7 +581,6 @@ const hostDialogVisible = ref(false);
 const accountFormVisible = ref(false);
 const accountsDialogVisible = ref(false);
 const connectionDialogVisible = ref(false);
-const router = useRouter();
 
 // ── Editing state ──
 const editingHostId = ref<string | null>(null);
@@ -737,20 +603,10 @@ const accountDetailLoading = ref(false);
 
 // ── Connection state ──
 const selectedConnectionTarget = ref<TargetRecord | null>(null);
-const bastionHost = ref(window.location.hostname);
-const bastionPort = ref(47102);
-const userSessionId = ref("");
-const creatingSession = ref(false);
-const connectionError = ref("");
-const connectionPassword = ref("");
-const connectionTesting = ref(false);
-const connectionTestResult = ref<{
-  ok: boolean;
-  error?: string;
-  latency_ms?: number;
-} | null>(null);
+const connectionResourceName = computed(() => selectedHost.value ? hostName(selectedHost.value) : accountDisplayName(selectedConnectionTarget.value ?? {}));
+const connectionSourceAddress = computed(() => selectedHost.value ? hostEndpoint(selectedHost.value) : targetHostString(selectedConnectionTarget.value ?? {}));
+const connectionSourceAccount = computed(() => stringFrom(selectedConnectionTarget.value?.username));
 
-// ── Refs ──
 const hostFormRef = ref<FormInstance>();
 const accountFormRef = ref<FormInstance>();
 const privateKeyFileInputRef = ref<HTMLInputElement>();
@@ -803,16 +659,6 @@ const accountExpiryText = computed(() => {
   if (!accountForm.expires_at) return "永久有效";
   return formatDateTime(accountForm.expires_at);
 });
-const connectionCompactUser = computed(() => {
-  const target = selectedConnectionTarget.value;
-  if (!target) return "";
-  const resId =
-    target.resource_id || targetId(target) || resourceId(target) || "0000";
-  const sessionId = userSessionId.value;
-  return sessionId ? `H${resId}${sessionId}` : "";
-});
-
-// ── Form rules ──
 const hostRules: FormRules<HostForm> = {
   address: [{ required: true, message: "请输入主机地址", trigger: "blur" }],
   port: [
@@ -949,9 +795,6 @@ function targetHostString(target: TargetRecord): string {
     : addr2;
 }
 
-function resourceId(target: TargetRecord): string {
-  return stringFrom(target.resource_id).trim() || targetId(target);
-}
 
 function isAuthMethod(value: unknown): value is AuthMethod {
   return value === "password" || value === "private_key";
@@ -1711,53 +1554,9 @@ async function confirmDeleteAccount(target: TargetRecord) {
 // Connection
 // ════════════════════════════════════════════════════════════════
 
-async function openConnectionDialog(target: TargetRecord) {
+function openConnectionDialog(target: TargetRecord) {
   selectedConnectionTarget.value = target;
-  userSessionId.value = "";
-  connectionError.value = "";
-  connectionPassword.value = "";
-  connectionTestResult.value = null;
-  creatingSession.value = true;
   connectionDialogVisible.value = true;
-  // Run connectivity test in parallel
-  testHostConnection();
-  try {
-    const targetIdStr = String(target.id || target.resource_id || "");
-    if (!targetIdStr) {
-      connectionError.value = "无法获取目标资源ID";
-      return;
-    }
-    const session = await apiClient.createUserSession(targetIdStr);
-    userSessionId.value = session?.session_id || "";
-  } catch (err) {
-    connectionError.value =
-      err instanceof Error ? err.message : "创建连接会话失败";
-  } finally {
-    creatingSession.value = false;
-  }
-}
-
-async function testHostConnection() {
-  if (!selectedConnectionTarget.value) return;
-  connectionTesting.value = true;
-  connectionTestResult.value = null;
-  try {
-    const target = selectedConnectionTarget.value;
-    const result = await apiClient.testTargetConnection(
-      targetStatusPayload(target, false),
-    );
-    connectionTestResult.value = {
-      ok: result.ok,
-      error: result.ok ? undefined : result.message || "连接失败",
-    };
-  } catch (err) {
-    connectionTestResult.value = {
-      ok: false,
-      error: err instanceof Error ? err.message : "连接失败",
-    };
-  } finally {
-    connectionTesting.value = false;
-  }
 }
 
 /** 从主机直接打开连接，单账号时直接弹连接窗，多账号时打开账号管理 */
@@ -1790,71 +1589,6 @@ function handleHostSessions(_host: HostView) {
 function handleHostPermissions(_host: HostView) {
   ElMessage.info('权限管理功能开发中');
 }
-
-async function copyText(value: string) {
-  if (!hasValue(value)) {
-    ElMessage.warning("没有可复制的内容");
-    return;
-  }
-  try {
-    if (!navigator.clipboard?.writeText)
-      throw new Error("clipboard unavailable");
-    await navigator.clipboard.writeText(value);
-    ElMessage.success("已复制");
-  } catch {
-    ElMessage.warning("复制失败，请手动选择文本复制");
-  }
-}
-
-function openTerminalFromDialog() {
-  const target = selectedConnectionTarget.value
-  if (!target) return
-  const tid = String(target.id || target.resource_id || '')
-  if (!tid) {
-    ElMessage.warning('无法获取目标资源ID')
-    return
-  }
-  connectionDialogVisible.value = false
-  router.push({ path: '/web-terminal', query: { target_id: tid } })
-}
-
-// ── 本地 SSH 客户端协议 ──
-
-/** 对密码做 URL 编码 */
-function encodePassword(pwd: string): string {
-  return encodeURIComponent(pwd);
-}
-
-/** 当前连接的 ssh:// 协议 URL（含密码） */
-const hostSSHClientUrl = computed(() => {
-  const user = connectionCompactUser.value
-  const host = bastionHost.value
-  const port = bastionPort.value || 47102
-  if (!user || !host) return '#'
-  const pwd = connectionPassword.value
-  if (pwd) {
-    return `ssh://${user}:${encodePassword(pwd)}@${host}:${port}`
-  }
-  return `ssh://${user}@${host}:${port}`
-})
-
-/** 点击协议链接时：浏览器触发协议 + 复制命令行到剪贴板 */
-async function openHostSSHClient() {
-  if (!preferences.loaded) {
-    try { await preferences.fetch() } catch { /* redirect below */ }
-  }
-  if (!preferences.hasSSHClient) {
-    connectionDialogVisible.value = false
-    ElMessage.info('请先在配置管理中选择本地 SSH 客户端')
-    router.push('/settings')
-    return
-  }
-  window.location.href = hostSSHClientUrl.value
-}
-
-// ════════════════════════════════════════════════════════════════
-// Watchers & lifecycle
-// ════════════════════════════════════════════════════════════════
 
 watch(
   () => accountForm.username,
@@ -2042,12 +1776,6 @@ onMounted(() => {
 }
 
 /* Connection */
-.connection-dialog {
-  display: flex;
-  flex-direction: column;
-  gap: 18px;
-}
-
 /* 弹窗底部按钮间距 */
 :deep(.el-dialog__footer .el-button + .el-button) {
   margin-left: 8px;

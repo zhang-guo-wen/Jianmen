@@ -44,6 +44,7 @@ func (s *Server) routes() http.Handler {
 	s.muxHandle(mux, "/api/db/instances/", s.withAuthAndUser(s.handleDBInstance))
 	s.muxHandle(mux, "/api/db/accounts/test", s.withAuthAndUser(s.handleTestDBConnection))
 	s.muxHandle(mux, "/api/db/accounts/test/", s.withAuthAndUser(s.handleTestDBConnection))
+	s.muxHandle(mux, "/api/db/accounts", s.withAuthAndUser(s.handleDBAccounts))
 	s.muxHandle(mux, "/api/db/accounts/", s.withAuthAndUser(s.handleDBAccount))
 	s.muxHandle(mux, "/api/db/connections", s.withAuthAndUser(s.handleDBConnections))
 	s.muxHandle(mux, "/api/db/connections/", s.withAuthAndUser(s.handleDBConnectionArtifact))

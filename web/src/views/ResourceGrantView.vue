@@ -118,8 +118,10 @@
                 :data="filteredResources"
                 v-loading="loadingResources"
                 height="250"
+                row-key="id"
                 stripe
-                @selection-change="handleResourceSelectionChange"
+                @select="handleResourceSelect"
+                @select-all="handleResourceSelectAll"
                 class="resource-table"
               >
                 <el-table-column type="selection" width="50" />
@@ -200,6 +202,11 @@
                 </el-table-column>
               </template>
               </el-table>
+              <div class="resource-load-status">
+                <span v-if="loadingMoreResources">正在加载...</span>
+                <span v-else-if="filteredResources.length > 0 && !resourceHasMore">已加载全部 {{ resourceTotal }} 条</span>
+                <span v-else-if="resourceHasMore">向下滚动加载更多</span>
+              </div>
 
               <div v-if="selectedResources.length > 0" class="selected-resource-display">
                 <el-tag
@@ -251,7 +258,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted, watch } from 'vue'
+import { ref, reactive, computed, nextTick, onBeforeUnmount, onMounted, watch } from 'vue'
 import { useI18n } from '@/i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Search } from '@element-plus/icons-vue'
@@ -279,9 +286,18 @@ const keyword = ref('')
 const grantDialogVisible = ref(false)
 
 // Resource selection state
+type ResourceRow = Record<string, unknown> & { id: string }
+type SelectedResource = { id: string; name: string; type: string }
+
 const resourceTabType = ref('host')
 const resourceSearchQuery = ref('')
 const loadingResources = ref(false)
+const loadingMoreResources = ref(false)
+const resourceRows = ref<ResourceRow[]>([])
+const resourcePage = ref(1)
+const resourcePageSize = 20
+const resourceTotal = ref(0)
+const resourceHasMore = computed(() => resourceRows.value.length < resourceTotal.value)
 const hosts = ref<Array<{ id: string; name: string; address: string; port: number; account_count: number }>>([])
 const databaseInstances = ref<Array<{ id: string; name: string; protocol: string; address: string; port: number }>>([])
 const hostAccounts = ref<Array<{ id: string; username: string; host_name: string; host_address: string }>>([])
@@ -289,7 +305,13 @@ const dbAccounts = ref<Array<{ id: string; unique_name: string; username: string
 const applications = ref<Array<{ id: string; name: string; group: string; listen_port: number }>>([])
 const resourceGroups = ref<Array<{ id: string; name: string; description: string; group_type: string; member_count: number }>>([])
 const accountGroups = ref<Array<{ id: string; name: string; description: string; member_count: number }>>([])
-const selectedResources = ref<Array<{ id: string; name: string; type: string }>>([])
+const selectedResources = ref<SelectedResource[]>([])
+const selectedResourceMap = new Map<string, SelectedResource>()
+const resourceTableRef = ref<any>()
+let resourceRequestSequence = 0
+let resourceSearchTimer: ReturnType<typeof setTimeout> | undefined
+let suppressResourceSearchReload = false
+let resourceScrollElement: HTMLElement | null = null
 
 const allUsers = ref<UserRecord[]>([])
 const userGroups = ref<{ id: string; name: string }[]>([])
@@ -314,56 +336,8 @@ const principalOptions = computed(() => {
   return userGroups.value.map(g => ({ id: g.id, name: g.name }))
 })
 
-// Filtered resources based on tab type and search query
-const filteredResources = computed(() => {
-  const query = resourceSearchQuery.value.toLowerCase()
-  if (resourceTabType.value === 'host') {
-    if (!query) return hosts.value
-    return hosts.value.filter(host =>
-      (host.name || '').toLowerCase().includes(query) ||
-      (host.address || '').toLowerCase().includes(query)
-    )
-  } else if (resourceTabType.value === 'database_instance') {
-    if (!query) return databaseInstances.value
-    return databaseInstances.value.filter(instance =>
-      (instance.name || '').toLowerCase().includes(query) ||
-      (instance.address || '').toLowerCase().includes(query) ||
-      (instance.protocol || '').toLowerCase().includes(query)
-    )
-  } else if (resourceTabType.value === 'host_account') {
-    if (!query) return hostAccounts.value
-    return hostAccounts.value.filter(a =>
-      (a.username || '').toLowerCase().includes(query) ||
-      (a.host_name || '').toLowerCase().includes(query) ||
-      (a.host_address || '').toLowerCase().includes(query)
-    )
-  } else if (resourceTabType.value === 'database_account') {
-    if (!query) return dbAccounts.value
-    return dbAccounts.value.filter(a =>
-      (a.unique_name || '').toLowerCase().includes(query) ||
-      (a.instance_name || '').toLowerCase().includes(query) ||
-      (a.instance_address || '').toLowerCase().includes(query)
-    )
-  } else if (resourceTabType.value === 'resource_group') {
-    if (!query) return resourceGroups.value
-    return resourceGroups.value.filter(g =>
-      (g.name || '').toLowerCase().includes(query) ||
-      (g.description || '').toLowerCase().includes(query)
-    )
-  } else if (resourceTabType.value === 'account_group') {
-    if (!query) return accountGroups.value
-    return accountGroups.value.filter(g =>
-      (g.name || '').toLowerCase().includes(query) ||
-      (g.description || '').toLowerCase().includes(query)
-    )
-  } else {
-    if (!query) return applications.value
-    return applications.value.filter(app =>
-      (app.name || '').toLowerCase().includes(query) ||
-      (app.group || '').toLowerCase().includes(query)
-    )
-  }
-})
+// Resource search is executed by the backend.
+const filteredResources = computed(() => resourceRows.value)
 
 // Methods
 const formatTime = (time: string) => {
@@ -470,52 +444,6 @@ const loadUserGroups = async () => {
   }
 }
 
-const showGrantDialog = () => {
-  grantForm.principal_type = 'user'
-  grantForm.principal_id = ''
-  grantForm.resource_type = 'host'
-  grantForm.resource_id = ''
-  grantForm.resource_ids = []
-  grantForm.effect = 'allow'
-  expiresOption.value = 'never'
-  customExpiresAt.value = null
-  selectedResources.value = []
-  resourceTabType.value = 'host'
-  resourceSearchQuery.value = ''
-  grantDialogVisible.value = true
-  loadResources()
-}
-
-const handleResourceTabChange = () => {
-  resourceSearchQuery.value = ''
-  loadResources()
-}
-
-const loadResources = async () => {
-  loadingResources.value = true
-  try {
-    if (resourceTabType.value === 'host') {
-      await loadHosts()
-    } else if (resourceTabType.value === 'database_instance') {
-      await loadDatabaseInstances()
-    } else if (resourceTabType.value === 'host_account') {
-      await loadHostAccounts()
-    } else if (resourceTabType.value === 'database_account') {
-      await loadDbAccounts()
-    } else if (resourceTabType.value === 'application') {
-      await loadApplications()
-    } else if (resourceTabType.value === 'resource_group') {
-      await loadResourceGroups()
-    } else if (resourceTabType.value === 'account_group') {
-      await loadAccountGroups()
-    }
-  } catch (e) {
-    console.error('Failed to load resources:', e)
-  } finally {
-    loadingResources.value = false
-  }
-}
-
 const loadResourceGroups = async () => {
   try {
     const all = await apiClient.getResourceGroups()
@@ -612,20 +540,167 @@ const loadApplications = async () => {
   }))
 }
 
-const handleResourceSelectionChange = (rows: any[]) => {
-  selectedResources.value = rows.map(row => {
-    const name = row.username ? `${row.username}@${row.host_name || row.instance_name || row.host_address || ''}` :
-                 row.name ? `${row.name}${row.address ? ` (${row.address}:${row.port || ''})` : ''}` :
-                 row.unique_name || ''
-    return { id: row.id, name, type: resourceTabType.value }
-  })
-  grantForm.resource_ids = selectedResources.value.map(r => r.id)
+const resetResourceSelection = () => {
+  selectedResourceMap.clear()
+  selectedResources.value = []
+  grantForm.resource_ids = []
+}
+
+const showGrantDialog = () => {
+  grantForm.principal_type = 'user'
+  grantForm.principal_id = ''
+  grantForm.resource_type = 'host'
+  grantForm.resource_id = ''
+  grantForm.resource_ids = []
+  grantForm.effect = 'allow'
+  expiresOption.value = 'never'
+  customExpiresAt.value = null
+  resetResourceSelection()
+  resourceTabType.value = 'host'
+  resourceSearchQuery.value = ''
+  grantDialogVisible.value = true
+  void loadResources(true)
+}
+
+const handleResourceTabChange = () => {
+  if (resourceSearchTimer) clearTimeout(resourceSearchTimer)
+  suppressResourceSearchReload = true
+  resourceSearchQuery.value = ''
+  suppressResourceSearchReload = false
+  resetResourceSelection()
+  grantForm.resource_type = resourceTabType.value
+  void loadResources(true)
+}
+
+const mapResourceRows = (items: any[]): ResourceRow[] => {
+  if (resourceTabType.value === 'host') {
+    return items.map(host => ({ id: String(host.id ?? ''), name: host.name || '', address: host.address || '', port: Number(host.port) || 22, account_count: Number(host.account_count) || 0 }))
+  }
+  if (resourceTabType.value === 'database_instance') {
+    return items.map(instance => ({ id: String(instance.id ?? ''), name: instance.name || '', protocol: instance.protocol || '', address: instance.address || '', port: Number(instance.port) || 0 }))
+  }
+  if (resourceTabType.value === 'host_account') {
+    return items.map(target => ({ id: String(target.id ?? ''), username: target.username || '', host_name: target.name || target.host || '', host_address: `${target.host || ''}:${target.port || ''}` }))
+  }
+  if (resourceTabType.value === 'database_account') {
+    return items.map(account => ({ id: String(account.id ?? ''), unique_name: account.unique_name || '', username: account.username || '', instance_name: account.instance_name || '', instance_address: account.instance_address || '' }))
+  }
+  if (resourceTabType.value === 'application') {
+    return items.map(app => ({ id: String(app.id ?? ''), name: app.name || '', group: app.group || '', listen_port: Number(app.listen_port) || 0 }))
+  }
+  if (resourceTabType.value === 'resource_group') {
+    return items.map(group => ({ id: String(group.id ?? ''), name: group.name || '', description: group.description || '', group_type: group.group_type || 'resource', member_count: Number(group.host_count || 0) + Number(group.database_count || 0) }))
+  }
+  return items.map(group => ({ id: String(group.id ?? ''), name: group.name || '', description: group.description || '', member_count: Number(group.account_count) || 0 }))
+}
+
+const fetchResourcePage = async (pageNumber: number) => {
+  const params = { page: pageNumber, page_size: resourcePageSize, q: resourceSearchQuery.value.trim() || undefined }
+  if (resourceTabType.value === 'host') return apiClient.getHosts(params)
+  if (resourceTabType.value === 'database_instance') return apiClient.getDBInstances(params)
+  if (resourceTabType.value === 'host_account') return apiClient.getTargets(params)
+  if (resourceTabType.value === 'database_account') return apiClient.getAllDBAccounts(params)
+  if (resourceTabType.value === 'application') return apiClient.getApplications(params)
+  return apiClient.getResourceGroups({ ...params, group_type: resourceTabType.value === 'account_group' ? 'account' : 'resource' })
+}
+
+const restoreResourceSelections = async () => {
+  await nextTick()
+  for (const row of resourceRows.value) {
+    resourceTableRef.value?.toggleRowSelection(row, selectedResourceMap.has(row.id))
+  }
+}
+
+const bindResourceScroll = async () => {
+  await nextTick()
+  const tableRoot = resourceTableRef.value?.$el as HTMLElement | undefined
+  const nextElement = tableRoot?.querySelector<HTMLElement>('.el-scrollbar__wrap') || null
+  if (nextElement === resourceScrollElement) return
+  resourceScrollElement?.removeEventListener('scroll', handleResourceScroll)
+  resourceScrollElement = nextElement
+  resourceScrollElement?.addEventListener('scroll', handleResourceScroll, { passive: true })
+}
+
+const loadResources = async (reset = false) => {
+  if (!reset && (!resourceHasMore.value || loadingResources.value || loadingMoreResources.value)) return
+  const nextPage = reset ? 1 : resourcePage.value + 1
+  const requestSequence = ++resourceRequestSequence
+  if (reset) loadingResources.value = true
+  else loadingMoreResources.value = true
+  try {
+    const response = await fetchResourcePage(nextPage)
+    if (requestSequence !== resourceRequestSequence) return
+    const nextRows = mapResourceRows(response.items || []).filter(row => row.id)
+    if (reset) {
+      resourceRows.value = nextRows
+    } else {
+      const existingIds = new Set(resourceRows.value.map(row => row.id))
+      resourceRows.value = [...resourceRows.value, ...nextRows.filter(row => !existingIds.has(row.id))]
+    }
+    resourcePage.value = nextPage
+    resourceTotal.value = Number(response.total) || 0
+    await restoreResourceSelections()
+    await bindResourceScroll()
+  } catch (error) {
+    if (requestSequence === resourceRequestSequence) {
+      console.error('Failed to load resources:', error)
+      ElMessage.error('资源加载失败')
+    }
+  } finally {
+    if (requestSequence === resourceRequestSequence) {
+      loadingResources.value = false
+      loadingMoreResources.value = false
+    }
+  }
+}
+
+const handleResourceScroll = (event: Event) => {
+  const target = event.currentTarget as HTMLElement
+  if (target.scrollHeight - target.scrollTop - target.clientHeight <= 32) {
+    void loadResources(false)
+  }
+}
+
+const resourceSelectionName = (row: any) => {
+  if (row.username) return `${row.username}@${row.host_name || row.instance_name || row.host_address || ''}`
+  if (row.name) return `${row.name}${row.address ? ` (${row.address}:${row.port || ''})` : ''}`
+  return row.unique_name || row.id
+}
+
+const syncSelectedResources = () => {
+  selectedResources.value = Array.from(selectedResourceMap.values())
+  grantForm.resource_ids = selectedResources.value.map(resource => resource.id)
   grantForm.resource_type = resourceTabType.value
 }
 
+const handleResourceSelect = (selection: ResourceRow[], row: ResourceRow) => {
+  if (selection.some(item => item.id === row.id)) {
+    selectedResourceMap.set(row.id, { id: row.id, name: resourceSelectionName(row), type: resourceTabType.value })
+  } else {
+    selectedResourceMap.delete(row.id)
+  }
+  syncSelectedResources()
+}
+
+const handleResourceSelectAll = (selection: ResourceRow[]) => {
+  const selectedIds = new Set(selection.map(row => row.id))
+  for (const row of resourceRows.value) {
+    if (selectedIds.has(row.id)) {
+      selectedResourceMap.set(row.id, { id: row.id, name: resourceSelectionName(row), type: resourceTabType.value })
+    } else {
+      selectedResourceMap.delete(row.id)
+    }
+  }
+  syncSelectedResources()
+}
+
 const removeResourceSelection = (index: number) => {
-  selectedResources.value.splice(index, 1)
-  grantForm.resource_ids = selectedResources.value.map(r => r.id)
+  const resource = selectedResources.value[index]
+  if (!resource) return
+  selectedResourceMap.delete(resource.id)
+  const visibleRow = resourceRows.value.find(row => row.id === resource.id)
+  if (visibleRow) resourceTableRef.value?.toggleRowSelection(visibleRow, false)
+  syncSelectedResources()
 }
 
 const handleExpiresOptionChange = (val: string) => {
@@ -710,8 +785,21 @@ watch([page, pageSize], () => {
   loadGrants()
 })
 
+watch(resourceSearchQuery, () => {
+  if (!grantDialogVisible.value || suppressResourceSearchReload) return
+  if (resourceSearchTimer) clearTimeout(resourceSearchTimer)
+  resourceSearchTimer = setTimeout(() => {
+    void loadResources(true)
+  }, 300)
+}, { flush: 'sync' })
+
 watch(() => grantForm.principal_type, () => {
   grantForm.principal_id = ''
+})
+
+onBeforeUnmount(() => {
+  if (resourceSearchTimer) clearTimeout(resourceSearchTimer)
+  resourceScrollElement?.removeEventListener('scroll', handleResourceScroll)
 })
 
 // Init
@@ -740,6 +828,14 @@ onMounted(async () => {
 
 .resource-table {
   width: 100%;
+}
+
+.resource-load-status {
+  min-height: 24px;
+  padding-top: 6px;
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+  text-align: center;
 }
 
 .selected-resource-display {

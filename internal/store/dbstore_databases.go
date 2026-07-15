@@ -186,6 +186,18 @@ func (s *DBStore) InstanceAccounts(instanceID string) ([]DatabaseAccountView, er
 	return views, nil
 }
 
+func (s *DBStore) DatabaseAccounts() ([]DatabaseAccountView, error) {
+	var accounts []model.DatabaseAccount
+	if err := s.db.Order("username ASC").Find(&accounts).Error; err != nil {
+		return nil, err
+	}
+	views := make([]DatabaseAccountView, 0, len(accounts))
+	for _, account := range accounts {
+		views = append(views, s.databaseAccountView(account))
+	}
+	return views, nil
+}
+
 func (s *DBStore) databaseInstanceView(inst model.DatabaseInstance, accountCount int) DatabaseInstanceView {
 	return DatabaseInstanceView{
 		ID:           inst.ID,

@@ -51,21 +51,21 @@
         <el-form-item :label="t('application.field.name')" required>
           <el-input v-model="form.name" :placeholder="t('application.placeholder.name')" />
         </el-form-item>
-        <el-form-item :label="t('application.field.host')" required>
-          <el-input v-model="form.host" :placeholder="t('application.placeholder.host')" />
+        <el-form-item :label="t('application.field.scheme')">
+          <el-select v-model="form.scheme" style="width: 100%">
+            <el-option label="http" value="http" />
+            <el-option label="https" value="https" />
+          </el-select>
         </el-form-item>
         <el-row :gutter="12">
-          <el-col :span="12">
-            <el-form-item :label="t('application.field.scheme')">
-              <el-select v-model="form.scheme">
-                <el-option label="http" value="http" />
-                <el-option label="https" value="https" />
-              </el-select>
+          <el-col :span="16">
+            <el-form-item :label="t('application.field.host')" required>
+              <el-input v-model="form.host" :placeholder="t('application.placeholder.host')" />
             </el-form-item>
           </el-col>
-          <el-col :span="12">
+          <el-col :span="8">
             <el-form-item :label="t('application.field.port')">
-              <el-input-number v-model="form.port" :min="1" :max="65535" controls-position="right" />
+              <el-input-number v-model="form.port" :min="1" :max="65535" controls-position="right" style="width: 100%" />
             </el-form-item>
           </el-col>
         </el-row>

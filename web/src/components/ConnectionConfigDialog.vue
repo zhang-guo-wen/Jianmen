@@ -120,10 +120,8 @@ const InfoValue = defineComponent({
   setup(componentProps, { emit }) {
     return () => h('div', { class: ['detail-item', componentProps.accent ? 'accent-value' : ''] }, [
       h('span', componentProps.label),
-      h('div', { class: 'value-line' }, [
-        h('code', componentProps.value || '-'),
-        h(ElButton, { class: 'copy-action', link: true, type: 'primary', size: 'small', onClick: () => emit('copy', componentProps.value) }, () => '复制'),
-      ]),
+      h('code', { class: 'detail-value' }, componentProps.value || '-'),
+      h(ElButton, { class: 'copy-action', link: true, type: 'primary', size: 'small', onClick: () => emit('copy', componentProps.value) }, () => '复制'),
     ]);
   },
 });
@@ -348,10 +346,9 @@ function formatExpiresAt(value: string): string {
 .source-meta span, .detail-item > span { color: var(--el-text-color-secondary); font-size: 12px; }
 .source-meta code { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .connectivity-row { display: flex; align-items: center; gap: 8px; color: var(--el-text-color-secondary); font-size: 13px; }
-.connection-address-row { display: flex; align-items: center; gap: 10px; padding: 9px 14px; border: 1px solid var(--el-border-color-light); border-radius: 10px; background: var(--el-fill-color-extra-light); color: var(--el-text-color-secondary); font-size: 13px; }
-.connection-address-row > span { flex: 0 0 72px; }
-.connection-address-row code { flex: 1; min-width: 0; color: var(--el-text-color-primary); }
-:deep(.copy-action) { flex: 0 0 auto; margin-left: auto; }
+.connection-address-row { display: grid; grid-template-columns: 72px minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 9px 14px; border: 1px solid var(--el-border-color-light); border-radius: 10px; background: var(--el-fill-color-extra-light); color: var(--el-text-color-secondary); font-size: 13px; }
+.connection-address-row code { min-width: 0; color: var(--el-text-color-primary); }
+:deep(.copy-action) { justify-self: end; }
 .connect-error { color: var(--el-color-danger); }
 .loading-state { padding: 30px 0; text-align: center; }
 .loading-state p { margin: 10px 0 0; color: var(--el-text-color-secondary); }
@@ -364,13 +361,12 @@ function formatExpiresAt(value: string): string {
 .expiry-summary span { flex: 0 0 auto; color: var(--el-text-color-secondary); }
 .expiry-summary strong { overflow: hidden; color: var(--el-color-warning-dark-2); text-overflow: ellipsis; white-space: nowrap; }
 .detail-grid { display: grid; grid-template-columns: 1fr; gap: 1px; background: var(--el-border-color-lighter); border-top: 1px solid var(--el-border-color-lighter); }
-.detail-item { display: grid; grid-template-columns: 72px minmax(0, 1fr); align-items: center; gap: 10px; min-width: 0; padding: 9px 14px; background: var(--el-bg-color); }
+.detail-item { display: grid; grid-template-columns: 72px minmax(0, 1fr) auto; align-items: center; gap: 10px; min-width: 0; padding: 9px 14px; background: var(--el-bg-color); }
 .detail-item code, .detail-item strong { overflow-wrap: anywhere; font-size: 13px; }
-.value-line { display: flex; justify-content: space-between; align-items: center; gap: 8px; min-width: 0; }
-.value-line code { flex: 1; min-width: 0; }
+.detail-value { min-width: 0; }
 .accent-value code { color: var(--el-color-warning-dark-2); font-size: 14px; font-weight: 800; letter-spacing: .04em; }
 .password-label { color: var(--el-text-color-regular) !important; font-size: 14px !important; }
-.password-hint { color: var(--el-text-color-secondary); font-size: 13px; font-weight: 400; line-height: 1.5; }
+.password-hint { grid-column: 2 / 4; color: var(--el-text-color-secondary); font-size: 13px; font-weight: 400; line-height: 1.5; }
 .command-list { display: flex; flex-direction: column; gap: 8px; padding: 10px 14px; border-top: 1px solid var(--el-border-color-lighter); background: var(--el-fill-color-extra-light); }
 :deep(.command-input .el-input__inner) { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 12px; }
 .path-field { display: flex; gap: 8px; width: 100%; }

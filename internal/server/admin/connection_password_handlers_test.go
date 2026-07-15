@@ -44,14 +44,15 @@ func TestHandleConnectionPasswordsRequiresResourceAuthorization(t *testing.T) {
 	}
 	var envelope struct {
 		Data struct {
-			Password string `json:"password"`
-			OneTime  bool   `json:"one_time"`
+			Password         string `json:"password"`
+			ExpiresInSeconds int    `json:"expires_in_seconds"`
+			Reusable         bool   `json:"reusable"`
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(response.Body.Bytes(), &envelope); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if envelope.Data.Password == "" || !envelope.Data.OneTime {
+	if envelope.Data.Password == "" || envelope.Data.ExpiresInSeconds != 1800 || !envelope.Data.Reusable {
 		t.Fatalf("unexpected response: %s", response.Body.String())
 	}
 	var saved model.ConnectionPassword

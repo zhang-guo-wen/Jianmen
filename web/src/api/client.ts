@@ -238,6 +238,7 @@ export interface SessionCommandRecord {
   command?: string;
   preview?: string;
   confidence?: string;
+  timestamp?: string;
   started_at?: string;
   ended_at?: string;
   offset_ms?: number;
@@ -250,6 +251,7 @@ export interface SessionFileEventRecord {
   path?: string;
   path2?: string;
   result?: string;
+  timestamp?: string;
   started_at?: string;
   ended_at?: string;
   size?: number;

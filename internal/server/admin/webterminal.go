@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -46,6 +47,34 @@ type webTerminalOptions struct {
 type webTerminalResize struct {
 	Columns int
 	Rows    int
+}
+
+type webTerminalAuditSink struct {
+	store     store.Store
+	sessionID string
+}
+
+func (s *webTerminalAuditSink) WriteCommand(_ string, timestamp time.Time, command string) error {
+	return s.store.CreateAuditSSHCommand(&model.AuditSSHCommand{
+		AuditSessionID: s.sessionID,
+		Timestamp:      timestamp,
+		Command:        command,
+	})
+}
+
+func (s *webTerminalAuditSink) WriteFileEvent(_ string, timestamp time.Time, action, path string, size int64, result string) error {
+	return s.store.CreateAuditSFTPEvent(&model.AuditSFTPEvent{
+		AuditSessionID: s.sessionID,
+		Timestamp:      timestamp,
+		Action:         action,
+		Path:           path,
+		Size:           size,
+		Result:         result,
+	})
+}
+
+func (s *webTerminalAuditSink) UpdateProtocol(_ string, protocol string) error {
+	return s.store.UpdateAuditProtocol(s.sessionID, protocol)
 }
 
 func (s *Server) handleWebTerminal(w http.ResponseWriter, r *http.Request) {
@@ -102,7 +131,17 @@ func (s *Server) handleWebTerminal(w http.ResponseWriter, r *http.Request) {
 	}
 	defer conn.Close()
 
-	recorder := s.newWebTerminalRecorder(r, user, target)
+	session := newWebTerminalSession(r, user, target)
+	auditSession := s.startWebTerminalAudit(session)
+	if auditSession != nil {
+		defer func() {
+			if err := s.store.EndAuditSession(auditSession.ID); err != nil {
+				s.logger.Warn("failed to end web terminal audit session", "session", auditSession.ID, "error", err)
+			}
+		}()
+	}
+
+	recorder := s.newWebTerminalRecorder(session, auditSession)
 	if recorder != nil {
 		defer recorder.Close()
 	}
@@ -192,10 +231,7 @@ func dialWebTerminalTarget(target store.TargetConfig) (*ssh.Client, error) {
 	return ssh.Dial("tcp", target.Addr(), clientConfig)
 }
 
-func (s *Server) newWebTerminalRecorder(r *http.Request, user model.User, target store.TargetConfig) *recording.SessionRecorder {
-	if s == nil || s.cfg == nil || !s.cfg.Recording.Enabled {
-		return nil
-	}
+func newWebTerminalSession(r *http.Request, user model.User, target store.TargetConfig) model.Session {
 	user.RequestedTargetID = target.ID
 	session := model.NewSession(user, target.ID, firstNonEmpty(target.Name, target.ID, target.Addr()), webTerminalClientIP(r))
 	session.Protocol = "ssh"
@@ -206,6 +242,37 @@ func (s *Server) newWebTerminalRecorder(r *http.Request, user model.User, target
 	session.HostIP = target.Host
 	session.ConnIP = target.Host
 	session.ConnPort = target.Port
+	return session
+}
+
+func (s *Server) startWebTerminalAudit(session model.Session) *model.AuditSession {
+	auditSession := &model.AuditSession{
+		UserID:          session.UserID,
+		Username:        session.UserUsername,
+		Protocol:        "ssh",
+		ProtocolSubtype: session.ProtocolSubtype,
+		TargetName:      session.Target,
+		AccountName:     session.AccountUsername,
+		ClientIP:        session.ClientIP,
+		StartedAt:       session.StartedAt,
+		State:           "started",
+		ReplayDir:       filepath.Join(s.cfg.ReplayDir, "ssh", session.ID),
+	}
+	if err := s.store.CreateAuditSession(auditSession); err != nil {
+		s.logger.Warn("failed to create web terminal audit session", "session", session.ID, "error", err)
+		return nil
+	}
+	return auditSession
+}
+
+func (s *Server) newWebTerminalRecorder(session model.Session, auditSession *model.AuditSession) *recording.SessionRecorder {
+	if s == nil || s.cfg == nil || !s.cfg.Recording.Enabled {
+		return nil
+	}
+	var sink recording.AuditSink
+	if auditSession != nil {
+		sink = &webTerminalAuditSink{store: s.store, sessionID: auditSession.ID}
+	}
 
 	recorder, err := recording.NewSessionRecorder(
 		s.cfg.ReplayDir,
@@ -213,15 +280,15 @@ func (s *Server) newWebTerminalRecorder(r *http.Request, user model.User, target
 		s.cfg.Recording.RecordInput,
 		s.cfg.Recording.RecordCommands,
 		s.logger,
-		nil,
+		sink,
 	)
 	if err != nil {
-		s.logger.Warn("failed to initialize web terminal recorder", "target", target.ID, "error", err)
+		s.logger.Warn("failed to initialize web terminal recorder", "target", session.TargetID, "error", err)
 		return nil
 	}
 	s.logger.Info("web terminal recording started",
 		"session", session.ID,
-		"target", target.Name,
+		"target", session.Target,
 		"client", session.ClientIP,
 	)
 	return recorder

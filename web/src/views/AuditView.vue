@@ -245,7 +245,7 @@
         >
           <el-table-column :label="t('audit.column.time')" width="175" show-overflow-tooltip class-name="col-time">
             <template #default="{ row }">
-              {{ formatTime(row.started_at) }}
+              {{ formatTime(row.timestamp ?? row.started_at) }}
             </template>
           </el-table-column>
           <el-table-column prop="command" :label="t('audit.column.command')" min-width="280" show-overflow-tooltip />
@@ -262,7 +262,7 @@
         >
           <el-table-column :label="t('audit.column.time')" width="175" show-overflow-tooltip class-name="col-time">
             <template #default="{ row }">
-              {{ formatTime(row.started_at) }}
+              {{ formatTime(row.timestamp ?? row.started_at) }}
             </template>
           </el-table-column>
           <el-table-column :label="t('audit.column.action')" width="80">

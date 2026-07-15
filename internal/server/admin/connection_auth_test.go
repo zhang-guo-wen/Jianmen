@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"gorm.io/gorm"
 
@@ -180,16 +181,24 @@ func TestHandleWebTerminalRequiresHostAccountGrant(t *testing.T) {
 }
 
 func TestWebTerminalRecorderUsesAuthenticatedIdentity(t *testing.T) {
-	server, _ := newAdminDBTestServer(t)
+	server, db := newAdminDBTestServer(t)
 	server.cfg = &config.Config{ReplayDir: t.TempDir(), Recording: config.RecordingConfig{Enabled: true}}
 	user := model.User{ID: "real-user-id", Username: "real-user"}
 	target := store.TargetConfig{ID: "target-1", HostID: "host-1", Name: "root@127.0.0.1", Host: "127.0.0.1", Port: 22, Username: "root"}
 	req := httptest.NewRequest(http.MethodGet, webTerminalPath, nil)
-	recorder := server.newWebTerminalRecorder(req, user, target)
+	session := newWebTerminalSession(req, user, target)
+	auditSession := server.startWebTerminalAudit(session)
+	if auditSession == nil {
+		t.Fatal("web terminal audit session was not created")
+	}
+	recorder := server.newWebTerminalRecorder(session, auditSession)
 	if recorder == nil {
 		t.Fatal("web terminal recorder was not created")
 	}
 	defer recorder.Close()
+	if recorder.Dir() != auditSession.ReplayDir {
+		t.Fatalf("recorder dir = %q, audit replay dir = %q", recorder.Dir(), auditSession.ReplayDir)
+	}
 
 	raw, err := os.ReadFile(filepath.Join(recorder.Dir(), "meta.json"))
 	if err != nil {
@@ -201,6 +210,30 @@ func TestWebTerminalRecorderUsesAuthenticatedIdentity(t *testing.T) {
 	}
 	if meta["user_id"] != user.ID || meta["user"] != user.Username {
 		t.Fatalf("recorder identity = user_id:%v user:%v", meta["user_id"], meta["user"])
+	}
+
+	commandAt := session.StartedAt.Add(time.Second)
+	sink := &webTerminalAuditSink{store: server.store, sessionID: auditSession.ID}
+	if err := sink.WriteCommand(session.ID, commandAt, "whoami"); err != nil {
+		t.Fatalf("write web terminal audit command: %v", err)
+	}
+	if err := server.store.EndAuditSession(auditSession.ID); err != nil {
+		t.Fatalf("end web terminal audit session: %v", err)
+	}
+
+	var storedSession model.AuditSession
+	if err := db.First(&storedSession, "id = ?", auditSession.ID).Error; err != nil {
+		t.Fatalf("load web terminal audit session: %v", err)
+	}
+	if storedSession.ProtocolSubtype != "web-terminal" || storedSession.State != "ended" || storedSession.EndedAt == nil {
+		t.Fatalf("unexpected stored audit session: %#v", storedSession)
+	}
+	var storedCommand model.AuditSSHCommand
+	if err := db.First(&storedCommand, "audit_session_id = ?", auditSession.ID).Error; err != nil {
+		t.Fatalf("load web terminal audit command: %v", err)
+	}
+	if storedCommand.Command != "whoami" || !storedCommand.Timestamp.Equal(commandAt) {
+		t.Fatalf("unexpected stored audit command: %#v", storedCommand)
 	}
 }
 

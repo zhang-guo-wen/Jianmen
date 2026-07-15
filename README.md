@@ -51,11 +51,13 @@
 ![img_1.png](docs/picture/img_1.png)
 web终端功能
 ![img_7.png](docs/picture/img_7.png)
-ssh和xftp审计回放功能
+审计回放功能
 ![img_6.png](docs/picture/img_6.png)
+ssh和xftp审计日志
+![img10.png](docs/picture/img10.png)
 数据库审计功能
 ![img_3.png](docs/picture/img_3.png)
-
+内网应用代理功能
 ![img_2.png](docs/picture/img_2.png)
 
 权限管理

@@ -19,11 +19,11 @@ func (s *Server) handleAuditSSH(w http.ResponseWriter, r *http.Request) {
 	}
 	params := store.AuditListParams{
 		Protocol: "ssh,sftp",
-		Search:   strings.ToLower(r.URL.Query().Get("search")),
+		Search:   strings.ToLower(firstNonEmpty(r.URL.Query().Get("q"), r.URL.Query().Get("search"))),
 		Date:     r.URL.Query().Get("date"),
 	}
 	params.Page, _ = strconv.Atoi(r.URL.Query().Get("page"))
-	params.Size, _ = strconv.Atoi(r.URL.Query().Get("size"))
+	params.Size, _ = strconv.Atoi(firstNonEmpty(r.URL.Query().Get("page_size"), r.URL.Query().Get("size")))
 
 	items, total, err := s.store.ListAuditSessions(params)
 	if err != nil {
@@ -32,7 +32,7 @@ func (s *Server) handleAuditSSH(w http.ResponseWriter, r *http.Request) {
 	}
 	s.writeJSON(w, r, http.StatusOK, map[string]any{
 		"items": items, "total": total,
-		"page": params.Page, "size": params.Size,
+		"page": params.Page, "page_size": params.Size,
 	})
 }
 
@@ -43,7 +43,7 @@ func (s *Server) handleAuditDB(w http.ResponseWriter, r *http.Request) {
 	}
 	params := store.AuditListParams{
 		Protocol: "mysql,postgres,redis",
-		Search:   strings.ToLower(r.URL.Query().Get("search")),
+		Search:   strings.ToLower(firstNonEmpty(r.URL.Query().Get("q"), r.URL.Query().Get("search"))),
 		Date:     r.URL.Query().Get("date"),
 	}
 	protocolFilter := r.URL.Query().Get("protocol")
@@ -51,7 +51,7 @@ func (s *Server) handleAuditDB(w http.ResponseWriter, r *http.Request) {
 		params.Protocol = protocolFilter
 	}
 	params.Page, _ = strconv.Atoi(r.URL.Query().Get("page"))
-	params.Size, _ = strconv.Atoi(r.URL.Query().Get("size"))
+	params.Size, _ = strconv.Atoi(firstNonEmpty(r.URL.Query().Get("page_size"), r.URL.Query().Get("size")))
 
 	items, total, err := s.store.ListAuditSessions(params)
 	if err != nil {
@@ -60,7 +60,7 @@ func (s *Server) handleAuditDB(w http.ResponseWriter, r *http.Request) {
 	}
 	s.writeJSON(w, r, http.StatusOK, map[string]any{
 		"items": items, "total": total,
-		"page": params.Page, "size": params.Size,
+		"page": params.Page, "page_size": params.Size,
 	})
 }
 

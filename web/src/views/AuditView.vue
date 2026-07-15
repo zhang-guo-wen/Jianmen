@@ -208,11 +208,13 @@
 
         <DataTableCard
           v-else-if="isDBQueries"
+          :key="`queries-${logSearchVersion}`"
           :data="pagedQueryEvents"
-          :total="mergedQueryEvents.length"
-          :show-search="false"
+          :total="filteredQueryEvents.length"
+          :search-placeholder="t('audit.search.sqlLog')"
           v-model:page="logPage"
           v-model:page-size="logPageSize"
+          @search="onLogSearch"
         >
           <el-table-column :label="t('audit.column.time')" width="170" show-overflow-tooltip class-name="col-time">
             <template #default="{ row }">
@@ -236,11 +238,13 @@
 
         <DataTableCard
           v-else-if="isCommands"
+          :key="`commands-${logSearchVersion}`"
           :data="pagedCommandEvents"
-          :total="commandEvents.length"
-          :show-search="false"
+          :total="filteredCommandEvents.length"
+          :search-placeholder="t('audit.search.commandLog')"
           v-model:page="logPage"
           v-model:page-size="logPageSize"
+          @search="onLogSearch"
         >
           <el-table-column :label="t('audit.column.time')" width="175" show-overflow-tooltip class-name="col-time">
             <template #default="{ row }">
@@ -354,6 +358,8 @@ const detailData = ref<unknown>(null);
 const drawerVisible = ref(false);
 const logPage = ref(1);
 const logPageSize = ref(30);
+const logKeyword = ref('');
+const logSearchVersion = ref(0);
 
 // ── Replay state ──
 const playbackSpeed = ref(1);
@@ -438,15 +444,24 @@ function extractItems<T>(data: unknown): T[] {
 }
 const commandEvents = computed(() => extractItems<SessionCommandRecord>(detailData.value));
 const fileEvents = computed(() => extractItems<SessionFileEventRecord>(detailData.value));
+const normalizedLogKeyword = computed(() => logKeyword.value.trim().toLowerCase());
+const filteredQueryEvents = computed(() => {
+  if (!normalizedLogKeyword.value) return mergedQueryEvents.value;
+  return mergedQueryEvents.value.filter((event) => event.sql.toLowerCase().includes(normalizedLogKeyword.value));
+});
+const filteredCommandEvents = computed(() => {
+  if (!normalizedLogKeyword.value) return commandEvents.value;
+  return commandEvents.value.filter((event) => String(event.command ?? '').toLowerCase().includes(normalizedLogKeyword.value));
+});
 
 // Client-side pagination for drawer sub-tables
 const pagedQueryEvents = computed(() => {
   const start = (logPage.value - 1) * logPageSize.value;
-  return mergedQueryEvents.value.slice(start, start + logPageSize.value);
+  return filteredQueryEvents.value.slice(start, start + logPageSize.value);
 });
 const pagedCommandEvents = computed(() => {
   const start = (logPage.value - 1) * logPageSize.value;
-  return commandEvents.value.slice(start, start + logPageSize.value);
+  return filteredCommandEvents.value.slice(start, start + logPageSize.value);
 });
 const pagedFileEvents = computed(() => {
   const start = (logPage.value - 1) * logPageSize.value;
@@ -682,6 +697,8 @@ function setDetail(title: string, kind: DetailKind, data: unknown) {
   drawerVisible.value = true;
   playbackSpeed.value = 1;
   logPage.value = 1;
+  logKeyword.value = '';
+  logSearchVersion.value++;
   replayProgress.value = 0;
   replaySeekPercent.value = 0;
   replayCurrentTime.value = 0;
@@ -734,6 +751,11 @@ async function loadDBConnections() {
   } finally {
     dbLoading.value = false;
   }
+}
+
+function onLogSearch(q: string) {
+  logKeyword.value = q;
+  logPage.value = 1;
 }
 
 function onSessionSearch(q: string) {

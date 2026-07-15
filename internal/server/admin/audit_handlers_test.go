@@ -55,6 +55,51 @@ func TestHandleAuditSSHUsesStandardPaginationAndSearchParams(t *testing.T) {
 	}
 }
 
+func TestHandleAuditSearchIncludesCommandAndSQLContent(t *testing.T) {
+	server, db := newAdminDBTestServer(t)
+	server.superAdminIDs["u-admin"] = true
+
+	now := time.Now().UTC()
+	sshSession := model.AuditSession{ID: "audit-command-search", UserID: "u1", Username: "alice", Protocol: "ssh", TargetName: "host-a", StartedAt: now, State: "ended"}
+	dbSession := model.AuditSession{ID: "audit-sql-search", UserID: "u1", Username: "alice", Protocol: "mysql", TargetName: "db-a", StartedAt: now.Add(-time.Minute), State: "ended"}
+	if err := db.Create(&[]model.AuditSession{sshSession, dbSession}).Error; err != nil {
+		t.Fatalf("create audit sessions: %v", err)
+	}
+	if err := db.Create(&model.AuditSSHCommand{AuditSessionID: sshSession.ID, Timestamp: now, Command: "kubectl get pods"}).Error; err != nil {
+		t.Fatalf("create SSH command: %v", err)
+	}
+	if err := db.Create(&model.AuditDBQuery{AuditSessionID: dbSession.ID, Timestamp: now, SQLText: "SELECT * FROM customer_orders"}).Error; err != nil {
+		t.Fatalf("create database query: %v", err)
+	}
+
+	assertAuditSearchResult := func(path, expectedID string) {
+		t.Helper()
+		req := asTestSuperAdmin(httptest.NewRequest(http.MethodGet, path, nil))
+		rec := httptest.NewRecorder()
+		if strings.HasPrefix(path, "/api/audit/ssh") {
+			server.handleAuditSSH(rec, req)
+		} else {
+			server.handleAuditDB(rec, req)
+		}
+		if rec.Code != http.StatusOK {
+			t.Fatalf("search status = %d, want %d; body=%s", rec.Code, http.StatusOK, rec.Body.String())
+		}
+		var page struct {
+			Items []store.AuditSessionView `json:"items"`
+			Total int64                    `json:"total"`
+		}
+		if err := decodeTestData(t, rec.Body.Bytes(), &page); err != nil {
+			t.Fatalf("decode search result: %v", err)
+		}
+		if page.Total != 1 || len(page.Items) != 1 || page.Items[0].ID != expectedID {
+			t.Fatalf("unexpected search result for %s: %#v", path, page)
+		}
+	}
+
+	assertAuditSearchResult("/api/audit/ssh?q=KUBECTL", sshSession.ID)
+	assertAuditSearchResult("/api/audit/db?q=CUSTOMER_ORDERS", dbSession.ID)
+}
+
 func TestHandleAuditSSHCommandsLoadsOutputFromRecordingFile(t *testing.T) {
 	server, db := newAdminDBTestServer(t)
 	server.superAdminIDs["u-admin"] = true

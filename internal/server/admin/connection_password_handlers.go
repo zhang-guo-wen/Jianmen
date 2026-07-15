@@ -14,7 +14,7 @@ import (
 	"jianmen/internal/service"
 )
 
-const connectionPasswordTTL = 5 * time.Minute
+const connectionPasswordTTL = 30 * time.Minute
 
 type connectionPasswordRequest struct {
 	TargetID string `json:"target_id"`
@@ -79,7 +79,7 @@ func (s *Server) handleConnectionPasswords(w http.ResponseWriter, r *http.Reques
 		"password":           issued.Plaintext,
 		"expires_at":         issued.ExpiresAt.Format(time.RFC3339),
 		"expires_in_seconds": int(connectionPasswordTTL.Seconds()),
-		"one_time":           true,
+		"reusable":           true,
 	})
 }
 

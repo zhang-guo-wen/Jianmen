@@ -13,7 +13,7 @@ import (
 	"jianmen/internal/storage"
 )
 
-func TestConnectionPasswordIsResourceBoundAndOneTime(t *testing.T) {
+func TestConnectionPasswordIsResourceBoundAndReusable(t *testing.T) {
 	db, err := storage.Open(storage.Config{Driver: storage.DriverSQLite, DSN: ":memory:"})
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
@@ -52,15 +52,15 @@ func TestConnectionPasswordIsResourceBoundAndOneTime(t *testing.T) {
 	if err := store.AuthenticateConnectionPassword(ctx, user.ID, model.ResourceTypeHostAccount, "host-account-1", issued.Plaintext); err != nil {
 		t.Fatalf("first authentication failed: %v", err)
 	}
-	if err := store.AuthenticateConnectionPassword(ctx, user.ID, model.ResourceTypeHostAccount, "host-account-1", issued.Plaintext); err == nil {
-		t.Fatal("one-time password authenticated twice")
+	if err := store.AuthenticateConnectionPassword(ctx, user.ID, model.ResourceTypeHostAccount, "host-account-1", issued.Plaintext); err != nil {
+		t.Fatalf("second authentication failed: %v", err)
 	}
 	if err := store.AuthenticateConnectionPassword(ctx, user.ID, model.ResourceTypeHostAccount, "host-account-1", "permanent-password"); err != nil {
 		t.Fatalf("permanent password no longer works: %v", err)
 	}
 }
 
-func TestConnectionPasswordExpiresAndCompactSSHConsumesIt(t *testing.T) {
+func TestConnectionPasswordExpiresAndCompactSSHIsReusable(t *testing.T) {
 	db, err := storage.Open(storage.Config{Driver: storage.DriverSQLite, DSN: ":memory:"})
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
@@ -100,8 +100,8 @@ func TestConnectionPasswordExpiresAndCompactSSHConsumesIt(t *testing.T) {
 	if authenticated.RequestedTargetID != account.ID {
 		t.Fatalf("requested target = %q, want %q", authenticated.RequestedTargetID, account.ID)
 	}
-	if _, err := store.Authenticate(context.Background(), "H1234abcde", valid.Plaintext); err == nil {
-		t.Fatal("compact SSH password authenticated twice")
+	if _, err := store.Authenticate(context.Background(), "H1234abcde", valid.Plaintext); err != nil {
+		t.Fatalf("compact SSH password was not reusable: %v", err)
 	}
 }
 
@@ -136,8 +136,8 @@ func TestMultipleMySQLConnectionPasswordsAuthenticateIndependently(t *testing.T)
 		if err := store.AuthenticateMySQLConnectionPassword(context.Background(), user.ID, "database-account", salt, response); err != nil {
 			t.Fatalf("authenticate password %d: %v", index, err)
 		}
-		if err := store.AuthenticateMySQLConnectionPassword(context.Background(), user.ID, "database-account", salt, response); err == nil {
-			t.Fatalf("password %d authenticated twice", index)
+		if err := store.AuthenticateMySQLConnectionPassword(context.Background(), user.ID, "database-account", salt, response); err != nil {
+			t.Fatalf("password %d was not reusable: %v", index, err)
 		}
 	}
 }

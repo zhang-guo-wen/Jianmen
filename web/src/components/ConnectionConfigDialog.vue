@@ -192,7 +192,7 @@ function buildCommands(): CommandItem[] {
 }
 const temporaryPasswordExpiryText = computed(() => {
   const formatted = formatExpiresAt(temporaryPasswordExpiresAt.value);
-  return formatted ? `${formatted}（使用一次后失效）` : '使用一次后失效';
+  return formatted ? `${formatted}（到期前可重复使用）` : '30 分钟内可重复使用';
 });
 const sshClientUrl = computed(() => {
   if (!connectionInfo.value) return '#';

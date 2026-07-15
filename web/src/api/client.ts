@@ -209,7 +209,7 @@ export interface ConnectionPasswordRecord {
   password: string;
   expires_at: string;
   expires_in_seconds: number;
-  one_time: boolean;
+  reusable: boolean;
 }
 
 export interface UserSessionRecord {

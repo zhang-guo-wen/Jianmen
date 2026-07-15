@@ -65,6 +65,8 @@
         v-model="grantDialogVisible"
         :title="t('resourceGrant.addGrant')"
         width="800px"
+        top="4vh"
+        class="resource-grant-dialog"
       >
         <el-form :model="grantForm" label-width="120px">
           <el-form-item :label="t('resourceGrant.principalType')" required>
@@ -117,7 +119,7 @@
                 ref="resourceTableRef"
                 :data="filteredResources"
                 v-loading="loadingResources"
-                height="250"
+                height="210"
                 row-key="id"
                 stripe
                 @select="handleResourceSelect"
@@ -815,15 +817,15 @@ onMounted(async () => {
   width: 100%;
   border: 1px solid var(--el-border-color-lighter);
   border-radius: 4px;
-  padding: 12px;
+  padding: 10px;
 }
 
 .resource-tabs {
-  margin-bottom: 12px;
+  margin-bottom: 8px;
 }
 
 .resource-search {
-  margin-bottom: 12px;
+  margin-bottom: 8px;
 }
 
 .resource-table {
@@ -831,16 +833,18 @@ onMounted(async () => {
 }
 
 .resource-load-status {
-  min-height: 24px;
-  padding-top: 6px;
+  min-height: 18px;
+  padding-top: 4px;
   color: var(--el-text-color-secondary);
   font-size: 12px;
   text-align: center;
 }
 
 .selected-resource-display {
-  margin-top: 12px;
-  padding-top: 12px;
+  max-height: 68px;
+  margin-top: 8px;
+  padding-top: 8px;
+  overflow-y: auto;
   border-top: 1px solid var(--el-border-color-lighter);
 }
 
@@ -849,4 +853,21 @@ onMounted(async () => {
   flex-direction: column;
   gap: 8px;
 }
+
+:deep(.resource-grant-dialog) {
+  margin-bottom: 4vh;
+}
+
+:deep(.resource-grant-dialog .el-dialog__body) {
+  padding: 12px 20px 4px;
+}
+
+:deep(.resource-grant-dialog .el-form-item) {
+  margin-bottom: 12px;
+}
+
+:deep(.resource-grant-dialog .el-dialog__footer) {
+  padding-top: 12px;
+}
+
 </style>

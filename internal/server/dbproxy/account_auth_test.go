@@ -4,7 +4,9 @@ import (
 	"crypto/md5"
 	"encoding/binary"
 	"encoding/hex"
+	"io"
 	"net"
+	"strings"
 	"testing"
 )
 
@@ -66,6 +68,53 @@ func TestFakeMySQLHandshakeAdvertisesCompleteAuthPluginName(t *testing.T) {
 	}
 	if handshake.AuthPluginName != "mysql_native_password" {
 		t.Fatalf("auth plugin = %q, want mysql_native_password", handshake.AuthPluginName)
+	}
+}
+
+func TestGenerateMySQLAuthSaltUsesConnectorCompatibleASCII(t *testing.T) {
+	for iteration := 0; iteration < 100; iteration++ {
+		salt, err := generateMySQLAuthSalt(20)
+		if err != nil {
+			t.Fatalf("generate salt: %v", err)
+		}
+		if len(salt) != 20 {
+			t.Fatalf("salt length = %d, want 20", len(salt))
+		}
+		for _, value := range salt {
+			if !strings.ContainsRune(mysqlAuthSaltAlphabet, rune(value)) {
+				t.Fatalf("salt contains byte 0x%02x outside the safe alphabet", value)
+			}
+		}
+	}
+}
+
+func TestWriteMySQLClientAuthErrorUsesHandshakeResponseSequence(t *testing.T) {
+	client, server := net.Pipe()
+	defer client.Close()
+	defer server.Close()
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- writeMySQLClientAuthError(server)
+	}()
+
+	header := make([]byte, 4)
+	if _, err := io.ReadFull(client, header); err != nil {
+		t.Fatalf("read auth error header: %v", err)
+	}
+	if header[3] != 2 {
+		t.Fatalf("auth error sequence = %d, want 2", header[3])
+	}
+	payloadLength := int(header[0]) | int(header[1])<<8 | int(header[2])<<16
+	payload := make([]byte, payloadLength)
+	if _, err := io.ReadFull(client, payload); err != nil {
+		t.Fatalf("read auth error payload: %v", err)
+	}
+	if len(payload) < 9 || payload[0] != 0xff || binary.LittleEndian.Uint16(payload[1:3]) != 1045 {
+		t.Fatalf("unexpected auth error payload: %x", payload)
+	}
+	if err := <-errCh; err != nil {
+		t.Fatalf("write auth error: %v", err)
 	}
 }
 

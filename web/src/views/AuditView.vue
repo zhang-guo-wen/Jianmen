@@ -83,7 +83,13 @@
             <el-table-column :label="t('audit.column.operator')" min-width="120" show-overflow-tooltip>
               <template #default="{ row }">{{ row.username || row.name || '-' }}</template>
             </el-table-column>
-            <el-table-column prop="protocol" :label="t('audit.column.protocol')" width="90" />
+            <el-table-column :label="t('audit.column.protocol')" width="110">
+              <template #default="{ row }">
+                <el-tag :type="databaseProtocolTag(row.protocol)" size="small" effect="plain">
+                  {{ formatDatabaseProtocol(row.protocol) }}
+                </el-tag>
+              </template>
+            </el-table-column>
             <el-table-column :label="t('sessions.column.started')" min-width="170" show-overflow-tooltip class-name="col-time">
               <template #default="{ row }">
                 {{ formatTime(row.started_at) }}
@@ -94,11 +100,8 @@
                 {{ formatDuration(row.duration_ms ?? computeDurationMs(row.started_at, row.ended_at)) }}
               </template>
             </el-table-column>
-            <el-table-column :label="t('common.actions')" fixed="right" width="170">
+            <el-table-column :label="t('common.actions')" fixed="right" width="90">
               <template #default="{ row }">
-                <el-button link type="primary" @click="loadDBArtifact(row, 'meta')">
-                  {{ t('audit.action.meta') }}
-                </el-button>
                 <el-button link type="primary" @click="loadDBArtifact(row, 'queries')">
                   {{ t('audit.action.queries') }}
                 </el-button>
@@ -118,7 +121,7 @@
       <template #title>
         <div class="toolbar">
           <span>{{ detailTitle || t('audit.title.detail') }}</span>
-          <el-tag v-if="detailKind">{{ detailKind }}</el-tag>
+          <el-tag v-if="detailKind">{{ detailKind === 'queries' ? t('audit.action.queries') : detailKind }}</el-tag>
         </div>
       </template>
       <el-alert v-if="detailError" :title="detailError" type="error" show-icon />
@@ -211,28 +214,24 @@
           v-model:page="logPage"
           v-model:page-size="logPageSize"
         >
-          <el-table-column prop="seq" :label="t('audit.column.seq')" width="70" />
-          <el-table-column prop="query_kind" :label="t('audit.column.queryKind')" width="100" />
-          <el-table-column :label="t('audit.column.result')" width="90">
-            <template #default="{ row }">
-              <el-tag :type="queryStatusType(row.status)" size="small">
-                {{ row.status || t('dashboard.unknown') }}
-              </el-tag>
-            </template>
-          </el-table-column>
-          <el-table-column :label="t('audit.column.duration')" width="100">
-            <template #default="{ row }">
-              {{ formatDuration(row.duration_ms) }}
-            </template>
-          </el-table-column>
           <el-table-column :label="t('audit.column.time')" width="170" show-overflow-tooltip class-name="col-time">
             <template #default="{ row }">
               {{ formatTime(row.started_at) }}
             </template>
           </el-table-column>
-          <el-table-column prop="comment" :label="t('audit.column.comment')" min-width="140" show-overflow-tooltip />
-          <el-table-column prop="sql" :label="t('audit.column.sql')" min-width="320" show-overflow-tooltip />
-          <el-table-column prop="error_message" :label="t('audit.column.error')" min-width="180" show-overflow-tooltip />
+          <el-table-column prop="sql" :label="t('audit.column.sql')" min-width="420" show-overflow-tooltip />
+          <el-table-column :label="t('audit.column.duration')" width="100">
+            <template #default="{ row }">
+              {{ formatDuration(row.duration_ms) }}
+            </template>
+          </el-table-column>
+          <el-table-column :label="t('audit.column.result')" width="110">
+            <template #default="{ row }">
+              <el-tag :type="queryStatusType(row.status)" size="small" effect="plain">
+                {{ queryStatusLabel(row.status) }}
+              </el-tag>
+            </template>
+          </el-table-column>
         </DataTableCard>
 
         <DataTableCard
@@ -595,6 +594,34 @@ function sessionProtocolTag(row: SessionRecord): 'success' | 'warning' | 'info' 
   return 'success';
 }
 
+function formatDatabaseProtocol(protocol: unknown): string {
+  switch (String(protocol ?? '').toLowerCase()) {
+    case 'mysql':
+      return 'MySQL';
+    case 'postgres':
+    case 'postgresql':
+      return 'PostgreSQL';
+    case 'redis':
+      return 'Redis';
+    default:
+      return String(protocol || '-');
+  }
+}
+
+function databaseProtocolTag(protocol: unknown): 'primary' | 'success' | 'warning' | 'info' | 'danger' | '' {
+  switch (String(protocol ?? '').toLowerCase()) {
+    case 'mysql':
+      return 'warning';
+    case 'postgres':
+    case 'postgresql':
+      return 'primary';
+    case 'redis':
+      return 'danger';
+    default:
+      return 'info';
+  }
+}
+
 function formatReplayDuration(value: number): string {
   if (!Number.isFinite(value) || value <= 0) {
     return '0s';
@@ -618,6 +645,19 @@ function formatBytes(value: number): string {
     return `${(value / 1024).toFixed(1)} KB`;
   }
   return `${(value / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function queryStatusLabel(status: unknown): string {
+  switch (String(status ?? '').toLowerCase()) {
+    case 'success':
+      return '成功';
+    case 'error':
+      return '失败';
+    case 'policy_denied':
+      return '拒绝';
+    default:
+      return '未知';
+  }
 }
 
 function queryStatusType(status: unknown): 'success' | 'warning' | 'danger' | 'info' {

@@ -236,7 +236,7 @@ export interface SessionMetaRecord {
 export interface SessionCommandRecord {
   seq?: number;
   command?: string;
-  preview?: string;
+  output?: string;
   confidence?: string;
   timestamp?: string;
   started_at?: string;

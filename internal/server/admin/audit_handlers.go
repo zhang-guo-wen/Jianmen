@@ -1,6 +1,8 @@
 package admin
 
 import (
+	"bufio"
+	"encoding/json"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -98,6 +100,17 @@ func (s *Server) handleAuditArtifact(w http.ResponseWriter, r *http.Request) {
 		s.writeJSON(w, r, http.StatusOK, session)
 	case artifact == "commands" && (protocol == "ssh" || protocol == "sftp"):
 		limit, offset := pageFromQuery(r)
+		if session.ReplayDir != "" {
+			items, total, fileErr := readAuditSSHCommandPage(filepath.Join(session.ReplayDir, "commands.jsonl"), limit, offset)
+			if fileErr == nil {
+				s.writeJSON(w, r, http.StatusOK, map[string]any{"items": items, "total": total})
+				return
+			}
+			if !os.IsNotExist(fileErr) {
+				s.writeErrorText(w, r, http.StatusInternalServerError, fileErr.Error())
+				return
+			}
+		}
 		items, total, err := s.store.ListAuditSSHCommands(sessionID, store.PageOpts{Limit: limit, Offset: offset})
 		if err != nil {
 			s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
@@ -166,4 +179,59 @@ func pageFromQuery(r *http.Request) (int, int) {
 		page = 1
 	}
 	return size, (page - 1) * size
+}
+
+type recordedSSHCommand struct {
+	Seq        int64  `json:"seq"`
+	OffsetMs   int64  `json:"offset_ms"`
+	Command    string `json:"command"`
+	Preview    string `json:"preview"`
+	Confidence string `json:"confidence"`
+	StartedAt  int64  `json:"started_at"`
+	EndedAt    int64  `json:"ended_at"`
+}
+
+type auditSSHCommandOutput struct {
+	Seq        int64  `json:"seq"`
+	OffsetMs   int64  `json:"offset_ms"`
+	Command    string `json:"command"`
+	Output     string `json:"output"`
+	Confidence string `json:"confidence"`
+	StartedAt  int64  `json:"started_at"`
+	EndedAt    int64  `json:"ended_at"`
+}
+
+func readAuditSSHCommandPage(path string, limit, offset int) ([]auditSSHCommandOutput, int, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer file.Close()
+
+	items := make([]auditSSHCommandOutput, 0, limit)
+	total := 0
+	scanner := bufio.NewScanner(file)
+	scanner.Buffer(make([]byte, 0, 64*1024), 8*1024*1024)
+	for scanner.Scan() {
+		var recorded recordedSSHCommand
+		if err := json.Unmarshal(scanner.Bytes(), &recorded); err != nil {
+			continue
+		}
+		if total >= offset && len(items) < limit {
+			items = append(items, auditSSHCommandOutput{
+				Seq:        recorded.Seq,
+				OffsetMs:   recorded.OffsetMs,
+				Command:    recorded.Command,
+				Output:     recorded.Preview,
+				Confidence: recorded.Confidence,
+				StartedAt:  recorded.StartedAt,
+				EndedAt:    recorded.EndedAt,
+			})
+		}
+		total++
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, 0, err
+	}
+	return items, total, nil
 }

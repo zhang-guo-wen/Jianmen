@@ -249,7 +249,7 @@
             </template>
           </el-table-column>
           <el-table-column prop="command" :label="t('audit.column.command')" min-width="280" show-overflow-tooltip />
-          <el-table-column prop="preview" :label="t('audit.column.preview')" min-width="280" show-overflow-tooltip />
+          <el-table-column prop="output" :label="t('audit.column.output')" min-width="280" show-overflow-tooltip />
         </DataTableCard>
 
         <DataTableCard

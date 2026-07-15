@@ -1,0 +1,35 @@
+{
+  "listen_addr": "0.0.0.0:47102",
+  "host_key_path": "/app/data/host_key",
+  "replay_dir": "/app/data/replay",
+  "targets_file": "/app/data/targets.json",
+  "admin": {
+    "enabled": true,
+    "listen_addr": "0.0.0.0:47100",
+    "cors_allowed_origins": []
+  },
+  "database": {
+    "enabled": true,
+    "driver": "sqlite",
+    "dsn": "/app/data/bastion.db",
+    "auto_migrate": true,
+    "max_open_conns": 1,
+    "max_idle_conns": 1,
+    "conn_max_lifetime_seconds": 0
+  },
+  "database_gateway": {
+    "enabled": true,
+    "listen_addr": "0.0.0.0:33060"
+  },
+  "application_gateway": {
+    "enabled": true,
+    "port_start": 47110,
+    "port_end": 47199
+  },
+  "recording": {
+    "enabled": true,
+    "record_input": true,
+    "record_commands": true
+  },
+  "users": []
+}

@@ -9,7 +9,6 @@
         <div class="source-meta">
           <div><span>地址</span><code>{{ sourceAddress || '-' }}</code></div>
           <div><span>账号</span><code>{{ sourceAccount || '-' }}</code></div>
-          <div v-if="gatewayAddress"><span>连接地址</span><div class="source-value"><code>{{ gatewayAddress }}</code><el-button link type="primary" size="small" @click="copyValue(gatewayAddress)">复制</el-button></div></div>
         </div>
       </section>
 
@@ -25,6 +24,11 @@
           <span v-if="connectionTestResult.latency_ms !== undefined">延迟 {{ connectionTestResult.latency_ms }}ms</span>
           <span v-if="connectionTestResult.error" class="connect-error">{{ connectionTestResult.error }}</span>
         </template>
+      </div>
+      <div v-if="gatewayAddress" class="connection-address-row">
+        <span>连接地址</span>
+        <code>{{ gatewayAddress }}</code>
+        <el-button link type="primary" size="small" @click="copyValue(gatewayAddress)">复制</el-button>
       </div>
 
       <div v-if="creatingSession" class="loading-state">
@@ -42,7 +46,7 @@
             <InfoValue label="连接账号" :value="connectionInfo.compactUser" @copy="copyValue" />
             <div class="detail-item password-tip">
               <span>登录密码</span>
-              <strong>输入堡垒机的登录密码，不是目标{{ resourceType === 'host' ? '主机' : '数据库' }}的密码</strong>
+              <div class="password-value">输入堡垒机的登录密码，不是目标{{ resourceType === 'host' ? '主机' : '数据库' }}的密码</div>
             </div>
           </div>
           <CommandRows :commands="commands" @copy="copyValue" />
@@ -51,7 +55,7 @@
         <section class="connection-panel temporary-panel">
           <header>
             <strong>临时连接</strong>
-            <div class="expiry-summary"><span>账户有效期</span><strong>{{ temporaryPasswordExpiryText }}</strong></div>
+            <div class="expiry-summary"><span>密码有效期</span><strong>{{ temporaryPasswordExpiryText }}</strong></div>
           </header>
           <div class="detail-grid">
             <InfoValue label="连接账号" :value="connectionInfo.compactUser" @copy="copyValue" />
@@ -343,8 +347,9 @@ function formatExpiresAt(value: string): string {
 .source-meta > div { display: grid; grid-template-columns: 54px minmax(0, 1fr); gap: 8px; align-items: center; }
 .source-meta span, .detail-item > span { color: var(--el-text-color-secondary); font-size: 12px; }
 .source-meta code { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.source-value { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; }
 .connectivity-row { display: flex; align-items: center; gap: 8px; color: var(--el-text-color-secondary); font-size: 13px; }
+.connection-address-row { display: flex; align-items: center; gap: 10px; color: var(--el-text-color-secondary); font-size: 13px; }
+.connection-address-row code { color: var(--el-text-color-primary); }
 .connect-error { color: var(--el-color-danger); }
 .loading-state { padding: 30px 0; text-align: center; }
 .loading-state p { margin: 10px 0 0; color: var(--el-text-color-secondary); }
@@ -362,7 +367,7 @@ function formatExpiresAt(value: string): string {
 .value-line { display: flex; justify-content: space-between; align-items: center; gap: 8px; min-width: 0; }
 .value-line code { min-width: 0; }
 .accent-value code { color: var(--el-color-warning-dark-2); font-size: 14px; font-weight: 800; letter-spacing: .04em; }
-.password-tip strong { color: var(--el-color-primary); }
+.password-value { color: var(--el-text-color-primary); font-size: 13px; font-weight: 400; line-height: 1.5; }
 .command-list { display: flex; flex-direction: column; gap: 8px; padding: 10px 14px; border-top: 1px solid var(--el-border-color-lighter); background: var(--el-fill-color-extra-light); }
 :deep(.command-input .el-input__inner) { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 12px; }
 .path-field { display: flex; gap: 8px; width: 100%; }

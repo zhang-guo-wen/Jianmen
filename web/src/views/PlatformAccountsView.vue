@@ -175,6 +175,7 @@ import DataTableCard from '@/components/DataTableCard.vue';
 import FormDialog from '@/components/FormDialog.vue';
 import StatusSwitch from '@/components/StatusSwitch.vue';
 import { usePermissionStore } from '@/stores/permission';
+import { writeClipboardText } from '@/utils/clipboard';
 
 const { t } = useI18n();
 const permission = usePermissionStore();
@@ -337,9 +338,13 @@ async function openPasswordDialog(row: PlatformAccountView) {
   }
 }
 
-function copyPassword() {
-  navigator.clipboard.writeText(revealedPassword.value);
-  ElMessage.success('已复制');
+async function copyPassword() {
+  try {
+    await writeClipboardText(revealedPassword.value);
+    ElMessage.success('已复制');
+  } catch {
+    ElMessage.error('复制失败');
+  }
 }
 
 async function openShareDialog(row: PlatformAccountView) {

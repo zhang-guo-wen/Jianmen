@@ -152,6 +152,7 @@ import type { FormInstance, FormRules } from 'element-plus';
 
 import { apiClient, clearToken, setToken } from '@/api/client';
 import { useI18n } from '@/i18n';
+import { writeClipboardText } from '@/utils/clipboard';
 
 const { t } = useI18n();
 const router = useRouter();
@@ -272,7 +273,7 @@ async function retryGetKey() {
 
 async function copyKey() {
   try {
-    await navigator.clipboard.writeText(encryptionKey.value);
+    await writeClipboardText(encryptionKey.value);
     ElMessage.success(t('quickConnect.message.copied'));
   } catch {
     ElMessage.error(t('quickConnect.error.copy'));

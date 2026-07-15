@@ -113,6 +113,7 @@ import { ref, computed, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { pinyin } from 'pinyin-pro'
 import * as api from '@/api/client'
+import { writeClipboardText } from '@/utils/clipboard'
 
 const props = defineProps<{ visible: boolean }>()
 const emit = defineEmits<{
@@ -210,7 +211,7 @@ function formatRows() {
   }))
 }
 
-function copyAll() {
+async function copyAll() {
   const text = tableRows.value
     .map(r => {
       const roleName = roles.value.find(rr => String(rr.id) === r.roleId)?.name || ''
@@ -218,10 +219,12 @@ function copyAll() {
       return roleName ? `${part}  角色:${roleName}` : part
     })
     .join('\n')
-  navigator.clipboard.writeText(text).then(
-    () => ElMessage.success('已复制'),
-    () => ElMessage.error('复制失败')
-  )
+  try {
+    await writeClipboardText(text)
+    ElMessage.success('已复制')
+  } catch {
+    ElMessage.error('复制失败')
+  }
 }
 
 function backToInput() {

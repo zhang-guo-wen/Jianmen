@@ -354,6 +354,7 @@ import ConnectionConfigDialog from '@/components/ConnectionConfigDialog.vue'
 import StatusSwitch from '@/components/StatusSwitch.vue'
 import * as api from '@/api/client'
 import { usePermissionStore } from '@/stores/permission'
+import { writeClipboardText } from '@/utils/clipboard'
 
 interface InstanceForm {
   name: string
@@ -457,32 +458,13 @@ function formatTime(value: unknown): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
 }
 
-async function writeClipboard(value: string) {
-  if (navigator.clipboard?.writeText) {
-    await navigator.clipboard.writeText(value)
-    return
-  }
-  const textarea = document.createElement('textarea')
-  textarea.value = value
-  textarea.setAttribute('readonly', 'true')
-  textarea.style.position = 'fixed'
-  textarea.style.top = '-9999px'
-  document.body.appendChild(textarea)
-  textarea.select()
-  try {
-    if (!document.execCommand('copy')) throw new Error('copy command failed')
-  } finally {
-    document.body.removeChild(textarea)
-  }
-}
-
 async function copyText(value: string) {
   if (!value.trim()) {
     ElMessage.warning('没有可复制的内容')
     return
   }
   try {
-    await writeClipboard(value)
+    await writeClipboardText(value)
     ElMessage.success('已复制')
   } catch {
     ElMessage.warning('复制失败')

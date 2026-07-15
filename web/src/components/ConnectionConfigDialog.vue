@@ -45,8 +45,8 @@
           <div class="detail-grid">
             <InfoValue label="连接账号" :value="connectionInfo.compactUser" @copy="copyValue" />
             <div class="detail-item password-tip">
-              <span>登录密码</span>
-              <div class="password-value">输入堡垒机的登录密码，不是目标{{ resourceType === 'host' ? '主机' : '数据库' }}的密码</div>
+              <span class="password-label">登录密码</span>
+              <div class="password-hint">输入堡垒机的登录密码，不是目标{{ resourceType === 'host' ? '主机' : '数据库' }}的密码</div>
             </div>
           </div>
           <CommandRows :commands="commands" @copy="copyValue" />
@@ -348,8 +348,9 @@ function formatExpiresAt(value: string): string {
 .source-meta span, .detail-item > span { color: var(--el-text-color-secondary); font-size: 12px; }
 .source-meta code { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .connectivity-row { display: flex; align-items: center; gap: 8px; color: var(--el-text-color-secondary); font-size: 13px; }
-.connection-address-row { display: flex; align-items: center; gap: 10px; color: var(--el-text-color-secondary); font-size: 13px; }
-.connection-address-row code { color: var(--el-text-color-primary); }
+.connection-address-row { display: flex; align-items: center; gap: 10px; padding: 9px 14px; border: 1px solid var(--el-border-color-light); border-radius: 10px; background: var(--el-fill-color-extra-light); color: var(--el-text-color-secondary); font-size: 13px; }
+.connection-address-row > span { flex: 0 0 72px; }
+.connection-address-row code { flex: 1; color: var(--el-text-color-primary); }
 .connect-error { color: var(--el-color-danger); }
 .loading-state { padding: 30px 0; text-align: center; }
 .loading-state p { margin: 10px 0 0; color: var(--el-text-color-secondary); }
@@ -367,7 +368,8 @@ function formatExpiresAt(value: string): string {
 .value-line { display: flex; justify-content: space-between; align-items: center; gap: 8px; min-width: 0; }
 .value-line code { min-width: 0; }
 .accent-value code { color: var(--el-color-warning-dark-2); font-size: 14px; font-weight: 800; letter-spacing: .04em; }
-.password-value { color: var(--el-text-color-primary); font-size: 13px; font-weight: 400; line-height: 1.5; }
+.password-label { color: var(--el-text-color-regular) !important; font-size: 14px !important; }
+.password-hint { color: var(--el-text-color-secondary); font-size: 13px; font-weight: 400; line-height: 1.5; }
 .command-list { display: flex; flex-direction: column; gap: 8px; padding: 10px 14px; border-top: 1px solid var(--el-border-color-lighter); background: var(--el-fill-color-extra-light); }
 :deep(.command-input .el-input__inner) { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 12px; }
 .path-field { display: flex; gap: 8px; width: 100%; }

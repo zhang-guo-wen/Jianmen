@@ -28,7 +28,7 @@
       <div v-if="gatewayAddress" class="connection-address-row">
         <span>连接地址</span>
         <code>{{ gatewayAddress }}</code>
-        <el-button link type="primary" size="small" @click="copyValue(gatewayAddress)">复制</el-button>
+        <el-button class="copy-action" link type="primary" size="small" @click="copyValue(gatewayAddress)">复制</el-button>
       </div>
 
       <div v-if="creatingSession" class="loading-state">
@@ -122,7 +122,7 @@ const InfoValue = defineComponent({
       h('span', componentProps.label),
       h('div', { class: 'value-line' }, [
         h('code', componentProps.value || '-'),
-        h(ElButton, { link: true, type: 'primary', size: 'small', onClick: () => emit('copy', componentProps.value) }, () => '复制'),
+        h(ElButton, { class: 'copy-action', link: true, type: 'primary', size: 'small', onClick: () => emit('copy', componentProps.value) }, () => '复制'),
       ]),
     ]);
   },
@@ -350,7 +350,8 @@ function formatExpiresAt(value: string): string {
 .connectivity-row { display: flex; align-items: center; gap: 8px; color: var(--el-text-color-secondary); font-size: 13px; }
 .connection-address-row { display: flex; align-items: center; gap: 10px; padding: 9px 14px; border: 1px solid var(--el-border-color-light); border-radius: 10px; background: var(--el-fill-color-extra-light); color: var(--el-text-color-secondary); font-size: 13px; }
 .connection-address-row > span { flex: 0 0 72px; }
-.connection-address-row code { flex: 1; color: var(--el-text-color-primary); }
+.connection-address-row code { flex: 1; min-width: 0; color: var(--el-text-color-primary); }
+:deep(.copy-action) { flex: 0 0 auto; margin-left: auto; }
 .connect-error { color: var(--el-color-danger); }
 .loading-state { padding: 30px 0; text-align: center; }
 .loading-state p { margin: 10px 0 0; color: var(--el-text-color-secondary); }
@@ -366,7 +367,7 @@ function formatExpiresAt(value: string): string {
 .detail-item { display: grid; grid-template-columns: 72px minmax(0, 1fr); align-items: center; gap: 10px; min-width: 0; padding: 9px 14px; background: var(--el-bg-color); }
 .detail-item code, .detail-item strong { overflow-wrap: anywhere; font-size: 13px; }
 .value-line { display: flex; justify-content: space-between; align-items: center; gap: 8px; min-width: 0; }
-.value-line code { min-width: 0; }
+.value-line code { flex: 1; min-width: 0; }
 .accent-value code { color: var(--el-color-warning-dark-2); font-size: 14px; font-weight: 800; letter-spacing: .04em; }
 .password-label { color: var(--el-text-color-regular) !important; font-size: 14px !important; }
 .password-hint { color: var(--el-text-color-secondary); font-size: 13px; font-weight: 400; line-height: 1.5; }

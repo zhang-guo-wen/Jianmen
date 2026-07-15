@@ -233,6 +233,7 @@ type AuditSessionView struct {
 	EndedAt         string `json:"ended_at,omitempty"`
 	State           string `json:"state"`
 	ReplayDir       string `json:"replay_dir,omitempty"`
+	LogCount        int64  `json:"log_count"`
 }
 
 // PageOpts 分页参数。

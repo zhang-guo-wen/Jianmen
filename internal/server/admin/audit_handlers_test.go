@@ -100,6 +100,76 @@ func TestHandleAuditSearchIncludesCommandAndSQLContent(t *testing.T) {
 	assertAuditSearchResult("/api/audit/db?q=CUSTOMER_ORDERS", dbSession.ID)
 }
 
+func TestHandleAuditListsIncludeLogCounts(t *testing.T) {
+	server, db := newAdminDBTestServer(t)
+	server.superAdminIDs["u-admin"] = true
+
+	now := time.Now().UTC()
+	sshSession := model.AuditSession{ID: "audit-count-ssh", UserID: "u1", Username: "alice", Protocol: "ssh", TargetName: "host-a", StartedAt: now, State: "ended"}
+	sftpSession := model.AuditSession{ID: "audit-count-sftp", UserID: "u1", Username: "alice", Protocol: "ssh", ProtocolSubtype: "sftp", TargetName: "host-b", StartedAt: now.Add(-time.Minute), State: "ended"}
+	dbSession := model.AuditSession{ID: "audit-count-db", UserID: "u1", Username: "alice", Protocol: "mysql", TargetName: "db-a", StartedAt: now.Add(-2 * time.Minute), State: "ended"}
+	if err := db.Create(&[]model.AuditSession{sshSession, sftpSession, dbSession}).Error; err != nil {
+		t.Fatalf("create audit sessions: %v", err)
+	}
+	if err := db.Create(&[]model.AuditSSHCommand{
+		{AuditSessionID: sshSession.ID, Timestamp: now, Command: "whoami"},
+		{AuditSessionID: sshSession.ID, Timestamp: now.Add(time.Second), Command: "hostname"},
+		{AuditSessionID: sftpSession.ID, Timestamp: now, Command: "ignored for sftp count"},
+	}).Error; err != nil {
+		t.Fatalf("create SSH commands: %v", err)
+	}
+	if err := db.Create(&[]model.AuditSFTPEvent{
+		{AuditSessionID: sftpSession.ID, Timestamp: now, Action: "open_read", Path: "/tmp/a", Result: "success"},
+		{AuditSessionID: sftpSession.ID, Timestamp: now.Add(time.Second), Action: "read", Path: "/tmp/a", Result: "success"},
+		{AuditSessionID: sftpSession.ID, Timestamp: now.Add(2 * time.Second), Action: "close", Path: "/tmp/a", Result: "success"},
+	}).Error; err != nil {
+		t.Fatalf("create SFTP events: %v", err)
+	}
+	if err := db.Create(&[]model.AuditDBQuery{
+		{AuditSessionID: dbSession.ID, Timestamp: now, SQLText: "SELECT 1"},
+		{AuditSessionID: dbSession.ID, Timestamp: now.Add(time.Second), SQLText: "SELECT 2"},
+	}).Error; err != nil {
+		t.Fatalf("create database queries: %v", err)
+	}
+
+	assertCounts := func(path string, handler http.HandlerFunc, expected map[string]int64) {
+		t.Helper()
+		req := asTestSuperAdmin(httptest.NewRequest(http.MethodGet, path, nil))
+		rec := httptest.NewRecorder()
+		handler(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusOK, rec.Body.String())
+		}
+		var page struct {
+			Items []store.AuditSessionView `json:"items"`
+		}
+		if err := decodeTestData(t, rec.Body.Bytes(), &page); err != nil {
+			t.Fatalf("decode audit page: %v", err)
+		}
+		for _, item := range page.Items {
+			want, ok := expected[item.ID]
+			if !ok {
+				continue
+			}
+			if item.LogCount != want {
+				t.Fatalf("session %s log_count = %d, want %d", item.ID, item.LogCount, want)
+			}
+			delete(expected, item.ID)
+		}
+		if len(expected) != 0 {
+			t.Fatalf("missing audit sessions: %#v", expected)
+		}
+	}
+
+	assertCounts("/api/audit/ssh?page_size=20", server.handleAuditSSH, map[string]int64{
+		sshSession.ID:  2,
+		sftpSession.ID: 3,
+	})
+	assertCounts("/api/audit/db?page_size=20", server.handleAuditDB, map[string]int64{
+		dbSession.ID: 2,
+	})
+}
+
 func TestHandleAuditSSHCommandsLoadsOutputFromRecordingFile(t *testing.T) {
 	server, db := newAdminDBTestServer(t)
 	server.superAdminIDs["u-admin"] = true

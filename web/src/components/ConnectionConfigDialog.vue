@@ -7,8 +7,9 @@
           <strong>{{ resourceName || '-' }}</strong>
         </div>
         <div class="source-meta">
-          <div><span>源地址</span><code>{{ sourceAddress || '-' }}</code></div>
-          <div><span>原账号</span><code>{{ sourceAccount || '-' }}</code></div>
+          <div><span>地址</span><code>{{ sourceAddress || '-' }}</code></div>
+          <div><span>账号</span><code>{{ sourceAccount || '-' }}</code></div>
+          <div v-if="gatewayAddress"><span>连接地址</span><div class="source-value"><code>{{ gatewayAddress }}</code><el-button link type="primary" size="small" @click="copyValue(gatewayAddress)">复制</el-button></div></div>
         </div>
       </section>
 
@@ -38,7 +39,6 @@
             <el-tag type="primary" effect="plain">长期有效</el-tag>
           </header>
           <div class="detail-grid">
-            <InfoValue label="连接地址" :value="gatewayAddress" @copy="copyValue" />
             <InfoValue label="连接账号" :value="connectionInfo.compactUser" @copy="copyValue" />
             <div class="detail-item password-tip">
               <span>登录密码</span>
@@ -51,18 +51,13 @@
         <section class="connection-panel temporary-panel">
           <header>
             <strong>临时连接</strong>
-            <el-tag type="warning" effect="dark">一次性</el-tag>
+            <div class="expiry-summary"><span>账户有效期</span><strong>{{ temporaryPasswordExpiryText }}</strong></div>
           </header>
           <div class="detail-grid">
-            <InfoValue label="连接地址" :value="gatewayAddress" @copy="copyValue" />
             <InfoValue label="连接账号" :value="connectionInfo.compactUser" @copy="copyValue" />
             <InfoValue label="临时密码" :value="temporaryPassword" accent @copy="copyValue" />
-            <div class="detail-item expiry-item">
-              <span>有效期</span>
-              <strong>{{ temporaryPasswordExpiryText }}</strong>
-            </div>
           </div>
-          <CommandRows :commands="temporaryCommands" temporary @copy="copyValue" />
+          <CommandRows :commands="temporaryCommands" @copy="copyValue" />
         </section>
       </template>
     </div>
@@ -104,7 +99,7 @@
 import { computed, defineComponent, h, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { Loading } from '@element-plus/icons-vue';
-import { ElButton, ElMessage } from 'element-plus';
+import { ElButton, ElInput, ElMessage } from 'element-plus';
 
 import { apiClient, type DBAccountRecord, type TargetRecord } from '@/api/client';
 import { buildSSHProtocolRegistrationCommand, isAbsoluteExecutablePath, SSH_CLIENT_OPTIONS } from '@/config/sshClients';
@@ -130,13 +125,17 @@ const InfoValue = defineComponent({
 });
 
 const CommandRows = defineComponent({
-  props: { commands: { type: Array as () => CommandItem[], required: true }, temporary: Boolean },
+  props: { commands: { type: Array as () => CommandItem[], required: true } },
   emits: ['copy'],
   setup(componentProps, { emit }) {
-    return () => h('div', { class: 'command-list' }, componentProps.commands.map(command => h('div', { class: 'command-row' }, [
-      h('div', [h('span', componentProps.temporary ? `临时${command.label}` : command.label), h('code', command.value)]),
-      h(ElButton, { type: 'primary', plain: true, size: 'small', onClick: () => emit('copy', command.value) }, () => `复制${command.label}`),
-    ])));
+    return () => h('div', { class: 'command-list' }, componentProps.commands.map(command => h(ElInput, {
+      class: 'command-input',
+      modelValue: command.value,
+      readonly: true,
+      size: 'small',
+    }, {
+      append: () => h(ElButton, { onClick: () => emit('copy', command.value) }, () => `复制${command.label}`),
+    })));
   },
 });
 
@@ -344,36 +343,35 @@ function formatExpiresAt(value: string): string {
 .source-meta > div { display: grid; grid-template-columns: 54px minmax(0, 1fr); gap: 8px; align-items: center; }
 .source-meta span, .detail-item > span { color: var(--el-text-color-secondary); font-size: 12px; }
 .source-meta code { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.source-value { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; }
 .connectivity-row { display: flex; align-items: center; gap: 8px; color: var(--el-text-color-secondary); font-size: 13px; }
 .connect-error { color: var(--el-color-danger); }
 .loading-state { padding: 30px 0; text-align: center; }
 .loading-state p { margin: 10px 0 0; color: var(--el-text-color-secondary); }
 .connection-panel { overflow: hidden; border: 1px solid var(--el-border-color-light); border-radius: 12px; }
-.connection-panel header { display: flex; justify-content: space-between; align-items: center; padding: 10px 14px; }
-.connection-panel header strong { font-size: 15px; }
+.connection-panel header { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 10px 14px; }
+.connection-panel header > strong { flex: 0 0 auto; font-size: 15px; }
 .permanent-panel header { background: var(--el-color-primary-light-9); }
 .temporary-panel header { background: var(--el-color-warning-light-9); }
-.detail-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1px; background: var(--el-border-color-lighter); border-top: 1px solid var(--el-border-color-lighter); }
-.detail-item { display: flex; flex-direction: column; gap: 5px; min-width: 0; padding: 9px 14px; background: var(--el-bg-color); }
+.expiry-summary { display: flex; align-items: center; justify-content: flex-end; gap: 8px; min-width: 0; font-size: 12px; }
+.expiry-summary span { flex: 0 0 auto; color: var(--el-text-color-secondary); }
+.expiry-summary strong { overflow: hidden; color: var(--el-color-warning-dark-2); text-overflow: ellipsis; white-space: nowrap; }
+.detail-grid { display: grid; grid-template-columns: 1fr; gap: 1px; background: var(--el-border-color-lighter); border-top: 1px solid var(--el-border-color-lighter); }
+.detail-item { display: grid; grid-template-columns: 72px minmax(0, 1fr); align-items: center; gap: 10px; min-width: 0; padding: 9px 14px; background: var(--el-bg-color); }
 .detail-item code, .detail-item strong { overflow-wrap: anywhere; font-size: 13px; }
-.value-line { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.value-line { display: flex; justify-content: space-between; align-items: center; gap: 8px; min-width: 0; }
+.value-line code { min-width: 0; }
 .accent-value code { color: var(--el-color-warning-dark-2); font-size: 14px; font-weight: 800; letter-spacing: .04em; }
-.password-tip { grid-column: 1 / -1; }
 .password-tip strong { color: var(--el-color-primary); }
-.expiry-item strong { color: var(--el-color-warning-dark-2); }
-.command-list { display: flex; flex-direction: column; gap: 6px; padding: 9px 14px 10px; border-top: 1px solid var(--el-border-color-lighter); background: var(--el-fill-color-extra-light); }
-.command-row { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
-.command-row > div { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
-.command-row span { color: var(--el-text-color-secondary); font-size: 11px; }
-.command-row code { overflow-x: auto; white-space: nowrap; font-size: 12px; }
+.command-list { display: flex; flex-direction: column; gap: 8px; padding: 10px 14px; border-top: 1px solid var(--el-border-color-lighter); background: var(--el-fill-color-extra-light); }
+:deep(.command-input .el-input__inner) { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 12px; }
 .path-field { display: flex; gap: 8px; width: 100%; }
 .path-help { margin-top: 5px; color: var(--el-text-color-secondary); font-size: 12px; }
 .registration-command { display: flex; flex-direction: column; gap: 6px; color: var(--el-text-color-secondary); font-size: 12px; }
 @media (max-width: 680px) {
   .resource-summary { grid-template-columns: auto minmax(0, 1fr); }
   .source-meta { grid-column: 1 / -1; }
-  .detail-grid { grid-template-columns: 1fr; }
-  .password-tip { grid-column: auto; }
-  .command-row { align-items: stretch; flex-direction: column; }
+  .connection-panel header { align-items: flex-start; flex-direction: column; gap: 6px; }
+  .expiry-summary { align-items: flex-start; flex-direction: column; gap: 2px; }
 }
 </style>

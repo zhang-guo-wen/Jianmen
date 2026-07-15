@@ -62,7 +62,7 @@
               <strong>{{ temporaryPasswordExpiryText }}</strong>
             </div>
           </div>
-          <CommandRows :commands="commands" temporary @copy="copyValue" />
+          <CommandRows :commands="temporaryCommands" temporary @copy="copyValue" />
         </section>
       </template>
     </div>
@@ -170,20 +170,34 @@ const temporaryPassword = ref('');
 const temporaryPasswordExpiresAt = ref('');
 
 const gatewayAddress = computed(() => connectionInfo.value ? `${connectionInfo.value.host}:${connectionInfo.value.port}` : '');
-const commands = computed<CommandItem[]>(() => {
+const commands = computed<CommandItem[]>(() => buildCommands());
+const temporaryCommands = computed<CommandItem[]>(() => buildCommands(temporaryPassword.value));
+
+function buildCommands(password = ''): CommandItem[] {
   if (!connectionInfo.value) return [];
   const { host, port, compactUser } = connectionInfo.value;
   if (props.resourceType === 'host') {
+    const passwordPrefix = password ? `sshpass -p ${password} ` : '';
     const values: CommandItem[] = [];
-    if (props.allowSSH) values.push({ label: 'SSH 命令', value: `ssh ${compactUser}@${host} -p ${port}` });
-    if (props.allowSFTP) values.push({ label: 'XFTP/SFTP 命令', value: `sftp -P ${port} ${compactUser}@${host}` });
+    if (props.allowSSH) values.push({ label: 'SSH 命令', value: `${passwordPrefix}ssh ${compactUser}@${host} -p ${port}` });
+    if (props.allowSFTP) values.push({ label: 'XFTP/SFTP 命令', value: `${passwordPrefix}sftp -P ${port} ${compactUser}@${host}` });
     return values;
   }
   const protocol = props.protocol.toLowerCase();
-  if (protocol === 'redis') return [{ label: '连接命令', value: `redis-cli -h ${host} -p ${port} --user ${compactUser} --askpass` }];
-  if (protocol === 'postgres' || protocol === 'postgresql') return [{ label: '连接命令', value: `psql -h ${host} -p ${port} -U ${compactUser}` }];
-  return [{ label: '连接命令', value: `mysql --protocol=tcp -h ${host} -P ${port} -u ${compactUser} -p` }];
-});
+  if (protocol === 'redis') {
+    const auth = password ? `--pass ${password}` : '--askpass';
+    return [{ label: '连接命令', value: `redis-cli -h ${host} -p ${port} --user ${compactUser} ${auth}` }];
+  }
+  if (protocol === 'postgres' || protocol === 'postgresql') {
+    if (password) {
+      const user = encodeURIComponent(compactUser);
+      return [{ label: '连接命令', value: `psql "postgresql://${user}:${encodeURIComponent(password)}@${host}:${port}"` }];
+    }
+    return [{ label: '连接命令', value: `psql -h ${host} -p ${port} -U ${compactUser}` }];
+  }
+  const auth = password ? `--password=${password}` : '-p';
+  return [{ label: '连接命令', value: `mysql --protocol=tcp -h ${host} -P ${port} -u ${compactUser} ${auth}` }];
+}
 const temporaryPasswordExpiryText = computed(() => {
   const formatted = formatExpiresAt(temporaryPasswordExpiresAt.value);
   return formatted ? `${formatted}（使用一次后失效）` : '使用一次后失效';

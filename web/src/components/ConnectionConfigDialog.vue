@@ -106,6 +106,7 @@ import { ElButton, ElInput, ElMessage } from 'element-plus';
 import { apiClient, type DBAccountRecord, type TargetRecord } from '@/api/client';
 import { buildSSHProtocolRegistrationCommand, isAbsoluteExecutablePath, SSH_CLIENT_OPTIONS } from '@/config/sshClients';
 import { usePreferencesStore } from '@/stores/preferences';
+import { writeClipboardText } from '@/utils/clipboard';
 
 interface CommandItem {
   label: string;
@@ -275,7 +276,7 @@ async function testConnection() {
 
 async function copyValue(value: string) {
   if (!value) return;
-  try { await navigator.clipboard.writeText(value); ElMessage.success('已复制'); }
+  try { await writeClipboardText(value); ElMessage.success('已复制'); }
   catch { ElMessage.warning('复制失败，请手动复制'); }
 }
 
@@ -318,7 +319,7 @@ async function saveClientAndCopyCommand() {
   }
 
   try {
-    await navigator.clipboard.writeText(initRegCommand.value);
+    await writeClipboardText(initRegCommand.value);
     ElMessage.success('配置已保存，注册命令已复制，请在管理员 CMD 中执行一次');
     initClientVisible.value = false;
   } catch {

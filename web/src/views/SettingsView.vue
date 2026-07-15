@@ -59,6 +59,7 @@ import { ElMessage } from 'element-plus';
 
 import { buildSSHProtocolRegistrationCommand, isAbsoluteExecutablePath, SSH_CLIENT_OPTIONS } from '@/config/sshClients';
 import { usePreferencesStore } from '@/stores/preferences';
+import { writeClipboardText } from '@/utils/clipboard';
 
 const preferences = usePreferencesStore();
 const form = reactive({ ...preferences.value });
@@ -118,7 +119,7 @@ function pickClientFile() {
 async function copyRegistrationCommand() {
   if (!registrationCommand.value) return;
   try {
-    await navigator.clipboard.writeText(registrationCommand.value);
+    await writeClipboardText(registrationCommand.value);
     ElMessage.success('注册命令已复制，请在管理员 CMD 中执行一次');
   } catch {
     ElMessage.warning('复制失败，请手动复制命令');

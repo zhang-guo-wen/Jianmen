@@ -186,6 +186,9 @@ func (s *Server) handleDBInstance(w http.ResponseWriter, r *http.Request) {
 			s.writeErrorText(w, r, http.StatusMethodNotAllowed, "method not allowed")
 			return
 		}
+		if !s.requireResourceGrant(w, r, model.ResourceTypeDatabaseInstance, id) {
+			return
+		}
 		s.handleDBDatabases(w, r, id)
 		return
 	}
@@ -193,6 +196,9 @@ func (s *Server) handleDBInstance(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			w.Header().Set("Allow", http.MethodPost)
 			s.writeErrorText(w, r, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+		if !s.requireResourceGrant(w, r, model.ResourceTypeDatabaseInstance, id) {
 			return
 		}
 		s.handleDBProvisionAccount(w, r, id)
@@ -316,7 +322,7 @@ func (s *Server) handleDBAccount(w http.ResponseWriter, r *http.Request) {
 			s.forbidden(w, r)
 			return
 		}
-		if !s.requireResourceGrant(w, r, model.ResourceTypeDatabaseAccount, id) {
+		if !s.requireDatabaseAccountManagement(w, r, id) {
 			return
 		}
 		view, err := s.store.DatabaseAccount(id)
@@ -330,7 +336,7 @@ func (s *Server) handleDBAccount(w http.ResponseWriter, r *http.Request) {
 			s.forbidden(w, r)
 			return
 		}
-		if !s.requireResourceGrant(w, r, model.ResourceTypeDatabaseAccount, id) {
+		if !s.requireDatabaseAccountManagement(w, r, id) {
 			return
 		}
 		s.handleUpdateDBAccount(w, r, id)

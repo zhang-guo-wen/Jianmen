@@ -129,6 +129,7 @@ export interface TargetRecord {
   known_hosts_path?: string;
   status?: string;
   [key: string]: unknown;
+  can_manage?: boolean;
 }
 
 export interface TargetPayload {
@@ -164,6 +165,7 @@ export interface HostView {
   account_count?: number;
   created_at?: string;
   updated_at?: string;
+  can_manage?: boolean;
 }
 
 export interface HostPayload {
@@ -291,6 +293,7 @@ export interface DatabaseInstanceView {
   created_at?: string;
   updated_at?: string;
   [key: string]: unknown;
+  can_manage?: boolean;
 }
 
 export interface DBAccountRecord {
@@ -307,6 +310,7 @@ export interface DBAccountRecord {
   created_at?: string;
   updated_at?: string;
   [key: string]: unknown;
+  can_manage?: boolean;
 }
 
 export interface DBInstancePayload {
@@ -387,6 +391,7 @@ export interface ApplicationView {
   status?: string;
   created_at?: string;
   updated_at?: string;
+  can_manage?: boolean;
 }
 
 export interface ApplicationPayload {

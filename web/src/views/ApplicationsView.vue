@@ -34,8 +34,8 @@
       <el-table-column :label="t('application.column.actions')" width="160" fixed="right">
         <template #default="{ row }">
           <el-button v-if="permission.canDo('app:connect')" link type="success" size="small" @click="visitApp(row)">{{ t('application.action.visit') }}</el-button>
-          <el-button v-if="permission.canDo('application:update')" link type="primary" size="small" @click="openEdit(row)">{{ t('common.edit') }}</el-button>
-          <el-button v-if="permission.canDo('application:delete')" link type="danger" size="small" @click="deleteApp(row)">{{ t('common.delete') }}</el-button>
+          <el-button v-if="row.can_manage && permission.canDo('application:update')" link type="primary" size="small" @click="openEdit(row)">{{ t('common.edit') }}</el-button>
+          <el-button v-if="row.can_manage && permission.canDo('application:delete')" link type="danger" size="small" @click="deleteApp(row)">{{ t('common.delete') }}</el-button>
         </template>
       </el-table-column>
     </DataTableCard>

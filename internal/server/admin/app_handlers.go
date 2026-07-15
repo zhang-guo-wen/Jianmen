@@ -16,7 +16,11 @@ func (s *Server) handleApplications(w http.ResponseWriter, r *http.Request) {
 			s.forbidden(w, r)
 			return
 		}
-		apps := s.store.Applications()
+		apps, err := s.visibleApplications(r, s.store.Applications())
+		if err != nil {
+			s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
+			return
+		}
 		resp := paginateSlice(apps, r, func(v store.ApplicationView, q string) bool {
 			return strings.Contains(strings.ToLower(v.Name), q) ||
 				strings.Contains(strings.ToLower(v.InternalHost), q) ||
@@ -57,6 +61,11 @@ func (s *Server) handleCreateApplication(w http.ResponseWriter, r *http.Request)
 		s.writeErrorText(w, r, http.StatusBadRequest, err.Error())
 		return
 	}
+	if err := s.grantCreatedResource(r, model.ResourceTypeApplication, view.ID); err != nil {
+		_ = s.store.DeleteApplication(view.ID)
+		s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
+		return
+	}
 	if s.appProxy != nil && view.Status == "active" {
 		if err := s.appProxy.AddProxy(model.Application{
 			ID:             view.ID,
@@ -90,6 +99,9 @@ func (s *Server) handleApplication(w http.ResponseWriter, r *http.Request) {
 			s.forbidden(w, r)
 			return
 		}
+		if !s.requireResourceGrant(w, r, model.ResourceTypeApplication, id) {
+			return
+		}
 		view, err := s.store.Application(id)
 		if err != nil {
 			writeApplicationStoreError(w, r, err)
@@ -101,10 +113,16 @@ func (s *Server) handleApplication(w http.ResponseWriter, r *http.Request) {
 			s.forbidden(w, r)
 			return
 		}
+		if !s.requireResourceGrant(w, r, model.ResourceTypeApplication, id) {
+			return
+		}
 		s.handleUpdateApplication(w, r, id)
 	case http.MethodDelete:
 		if !s.requirePermission(r, rbac.ActionAppDelete) {
 			s.forbidden(w, r)
+			return
+		}
+		if !s.requireResourceGrant(w, r, model.ResourceTypeApplication, id) {
 			return
 		}
 		view, err := s.store.Application(id)

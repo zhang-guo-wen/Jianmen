@@ -42,6 +42,7 @@ type HostView struct {
 	AccountCount int    `json:"account_count"`
 	CreatedAt    string `json:"created_at"`
 	UpdatedAt    string `json:"updated_at"`
+	CanManage    bool   `json:"can_manage"`
 }
 
 type TargetView struct {
@@ -63,6 +64,7 @@ type TargetView struct {
 	InsecureIgnoreHostKey bool     `json:"insecure_ignore_host_key"`
 	HostKeyFingerprint    string   `json:"host_key_fingerprint"`
 	KnownHostsPath        string   `json:"known_hosts_path"`
+	CanManage             bool     `json:"can_manage"`
 }
 
 // TargetConfig carries enough info to dial a target host via SSH.
@@ -109,6 +111,7 @@ type DatabaseInstanceView struct {
 	AccountCount int    `json:"account_count"`
 	CreatedAt    string `json:"created_at,omitempty"`
 	UpdatedAt    string `json:"updated_at,omitempty"`
+	CanManage    bool   `json:"can_manage"`
 }
 
 type DatabaseAccountView struct {
@@ -124,6 +127,7 @@ type DatabaseAccountView struct {
 	ResourceSeq int        `json:"resource_seq,omitempty"`
 	CreatedAt   string     `json:"created_at,omitempty"`
 	UpdatedAt   string     `json:"updated_at,omitempty"`
+	CanManage   bool       `json:"can_manage"`
 }
 
 type ApplicationView struct {
@@ -138,6 +142,7 @@ type ApplicationView struct {
 	Status         string `json:"status"`
 	CreatedAt      string `json:"created_at"`
 	UpdatedAt      string `json:"updated_at"`
+	CanManage      bool   `json:"can_manage"`
 }
 
 type PlatformAccountView struct {

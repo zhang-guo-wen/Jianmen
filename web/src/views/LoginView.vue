@@ -54,10 +54,12 @@ import type { FormInstance, FormRules } from 'element-plus';
 
 import { apiClient, setToken } from '@/api/client';
 import { useI18n, type Locale } from '@/i18n';
+import { usePreferencesStore } from '@/stores/preferences';
 
 const route = useRoute();
 const router = useRouter();
 const { locale, localeOptions, setLocale, t } = useI18n();
+const preferences = usePreferencesStore();
 const formRef = ref<FormInstance>();
 const submitting = ref(false);
 const loginError = ref('');
@@ -91,6 +93,7 @@ async function submit() {
       return;
     }
     setToken(token);
+    await preferences.fetch({ force: true }).catch(() => undefined);
     router.push(typeof route.query.redirect === 'string' ? route.query.redirect : '/quick-connect');
   } catch (err: any) {
     loginError.value = err?.message || '登录失败，请检查用户名和密码';

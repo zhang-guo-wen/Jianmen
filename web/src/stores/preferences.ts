@@ -1,7 +1,9 @@
-﻿import { defineStore } from 'pinia';
+import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
 
 import { apiClient, type UserPreferences, type UserPreferencesUpdate } from '@/api/client';
+
+const APPEARANCE_CACHE_KEY = 'jianmen_user_appearance';
 
 const defaults: UserPreferences = {
   theme: 'system',
@@ -11,8 +13,25 @@ const defaults: UserPreferences = {
   terminal_font_size: 14,
 };
 
+function cachedAppearance(): Partial<UserPreferences> {
+  try {
+    const cached = JSON.parse(localStorage.getItem(APPEARANCE_CACHE_KEY) || '{}') as Partial<UserPreferences>;
+    const theme = cached.theme;
+    const fontSize = Number(cached.terminal_font_size);
+    return {
+      ...(theme === 'system' || theme === 'light' || theme === 'dark' ? { theme } : {}),
+      ...(typeof cached.terminal_font_family === 'string' && cached.terminal_font_family.trim()
+        ? { terminal_font_family: cached.terminal_font_family }
+        : {}),
+      ...(fontSize >= 10 && fontSize <= 30 ? { terminal_font_size: fontSize } : {}),
+    };
+  } catch {
+    return {};
+  }
+}
+
 export const usePreferencesStore = defineStore('preferences', () => {
-  const value = ref<UserPreferences>({ ...defaults });
+  const value = ref<UserPreferences>({ ...defaults, ...cachedAppearance() });
   const loaded = ref(false);
   const loading = ref(false);
   const saving = ref(false);
@@ -23,6 +42,14 @@ export const usePreferencesStore = defineStore('preferences', () => {
 
   function resolveDark(theme = value.value.theme): boolean {
     return theme === 'dark' || (theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+  }
+
+  function persistAppearance() {
+    localStorage.setItem(APPEARANCE_CACHE_KEY, JSON.stringify({
+      theme: value.value.theme,
+      terminal_font_family: value.value.terminal_font_family,
+      terminal_font_size: value.value.terminal_font_size,
+    }));
   }
 
   function apply() {
@@ -46,6 +73,7 @@ export const usePreferencesStore = defineStore('preferences', () => {
     try {
       value.value = { ...defaults, ...(await apiClient.getMyPreferences()) };
       loaded.value = true;
+      persistAppearance();
       apply();
       return value.value;
     } catch (err) {
@@ -63,6 +91,7 @@ export const usePreferencesStore = defineStore('preferences', () => {
     try {
       value.value = { ...defaults, ...(await apiClient.updateMyPreferences(patch)) };
       loaded.value = true;
+      persistAppearance();
       apply();
       return value.value;
     } catch (err) {
@@ -74,6 +103,7 @@ export const usePreferencesStore = defineStore('preferences', () => {
   }
 
   function reset() {
+    localStorage.removeItem(APPEARANCE_CACHE_KEY);
     value.value = { ...defaults };
     loaded.value = false;
     loading.value = false;

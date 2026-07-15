@@ -54,6 +54,8 @@ import 'element-plus/theme-chalk/dark/css-vars.css';
 import { createApp } from 'vue';
 
 import App from './App.vue';
+import { getToken } from './api/client';
+import { usePreferencesStore } from './stores/preferences';
 import { vPermission } from './directives/permission';
 import i18n from './i18n';
 import router from './router';
@@ -111,10 +113,23 @@ const elementComponents = [
 
 app.use(i18n);
 app.use(router);
-app.use(createPinia());
+const pinia = createPinia();
+app.use(pinia);
 for (const component of elementComponents) {
   app.use(component);
 }
 app.use(ElLoading);
 app.directive('permission', vPermission);
-app.mount('#app');
+
+const preferences = usePreferencesStore(pinia);
+preferences.apply();
+
+async function mountApp() {
+  const publicPaths = new Set(['/login', '/setup']);
+  if (getToken() && !publicPaths.has(window.location.pathname)) {
+    await preferences.fetch().catch(() => undefined);
+  }
+  app.mount('#app');
+}
+
+void mountApp();

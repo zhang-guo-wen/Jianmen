@@ -89,6 +89,10 @@ func (s *DBStore) ListAuditSessions(params AuditListParams) ([]AuditSessionView,
 	if err := q.Order("started_at DESC").Offset((params.Page - 1) * params.Size).Limit(params.Size).Find(&sessions).Error; err != nil {
 		return nil, 0, err
 	}
+	logCounts, err := s.auditLogCounts(sessions)
+	if err != nil {
+		return nil, 0, err
+	}
 	views := make([]AuditSessionView, len(sessions))
 	for i, sess := range sessions {
 		views[i] = AuditSessionView{
@@ -104,12 +108,70 @@ func (s *DBStore) ListAuditSessions(params AuditListParams) ([]AuditSessionView,
 			StartedAt:       sess.StartedAt.Format(time.RFC3339Nano),
 			State:           sess.State,
 			ReplayDir:       sess.ReplayDir,
+			LogCount:        logCounts[sess.ID],
 		}
 		if sess.EndedAt != nil {
 			views[i].EndedAt = sess.EndedAt.Format(time.RFC3339Nano)
 		}
 	}
 	return views, total, nil
+}
+
+type auditLogCountRow struct {
+	AuditSessionID string `gorm:"column:audit_session_id"`
+	Count          int64  `gorm:"column:count"`
+}
+
+func (s *DBStore) auditLogCounts(sessions []model.AuditSession) (map[string]int64, error) {
+	counts := make(map[string]int64, len(sessions))
+	idsByKind := map[string][]string{
+		"ssh":  {},
+		"sftp": {},
+		"db":   {},
+	}
+	for _, session := range sessions {
+		kind := auditLogKind(session)
+		idsByKind[kind] = append(idsByKind[kind], session.ID)
+	}
+
+	queries := []struct {
+		kind  string
+		model any
+	}{
+		{kind: "ssh", model: &model.AuditSSHCommand{}},
+		{kind: "sftp", model: &model.AuditSFTPEvent{}},
+		{kind: "db", model: &model.AuditDBQuery{}},
+	}
+	for _, query := range queries {
+		ids := idsByKind[query.kind]
+		if len(ids) == 0 {
+			continue
+		}
+		var rows []auditLogCountRow
+		if err := s.db.Model(query.model).
+			Select("audit_session_id, COUNT(*) AS count").
+			Where("audit_session_id IN ?", ids).
+			Group("audit_session_id").
+			Scan(&rows).Error; err != nil {
+			return nil, fmt.Errorf("count %s audit logs: %w", query.kind, err)
+		}
+		for _, row := range rows {
+			counts[row.AuditSessionID] = row.Count
+		}
+	}
+	return counts, nil
+}
+
+func auditLogKind(session model.AuditSession) string {
+	if strings.EqualFold(session.ProtocolSubtype, "sftp") || strings.EqualFold(session.Protocol, "sftp") {
+		return "sftp"
+	}
+	switch strings.ToLower(session.Protocol) {
+	case "mysql", "postgres", "postgresql", "redis", "db", "database":
+		return "db"
+	default:
+		return "ssh"
+	}
 }
 
 func splitCSV(s string) []string {

@@ -202,6 +202,7 @@ export interface SessionRecord {
   protocol?: string;
   protocol_subtype?: string;
   replay_dir?: string;
+  log_count?: number;
   [key: string]: unknown;
 }
 
@@ -274,6 +275,7 @@ export interface DBConnectionRecord {
   started_at?: string;
   ended_at?: string;
   duration_ms?: number;
+  log_count?: number;
   [key: string]: unknown;
 }
 

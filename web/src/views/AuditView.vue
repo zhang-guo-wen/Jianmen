@@ -46,6 +46,9 @@
                 {{ formatDurationSeconds(computeDuration(row.started_at, row.ended_at)) }}
               </template>
             </el-table-column>
+            <el-table-column :label="t('audit.column.logCount')" width="90" align="center">
+              <template #default="{ row }">{{ row.log_count ?? 0 }}</template>
+            </el-table-column>
             <el-table-column :label="t('common.actions')" fixed="right" width="180">
               <template #default="{ row }">
                 <el-button :disabled="!hasReplay(row)" link type="success" @click="loadSessionArtifact(row, 'replay')">
@@ -99,6 +102,9 @@
               <template #default="{ row }">
                 {{ formatDuration(row.duration_ms ?? computeDurationMs(row.started_at, row.ended_at)) }}
               </template>
+            </el-table-column>
+            <el-table-column :label="t('audit.column.logCount')" width="90" align="center">
+              <template #default="{ row }">{{ row.log_count ?? 0 }}</template>
             </el-table-column>
             <el-table-column :label="t('common.actions')" fixed="right" width="90">
               <template #default="{ row }">

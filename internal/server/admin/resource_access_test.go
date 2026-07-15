@@ -26,6 +26,18 @@ func TestVisibleResourcesUseContainerAndAccountGrants(t *testing.T) {
 	if len(hosts) != 2 {
 		t.Fatalf("visible hosts = %d, want 2", len(hosts))
 	}
+	for _, host := range hosts {
+		switch host.ID {
+		case "host-container":
+			if host.AccountCount != 1 || !host.CanManage {
+				t.Fatalf("container-granted host = %#v, want one visible account with management", host)
+			}
+		case "host-account":
+			if host.AccountCount != 1 || host.CanManage {
+				t.Fatalf("account-granted host = %#v, want one visible account without management", host)
+			}
+		}
+	}
 
 	targets, err := server.visibleTargets(request, server.store.Targets())
 	if err != nil {
@@ -48,8 +60,15 @@ func TestVisibleResourcesUseContainerAndAccountGrants(t *testing.T) {
 		t.Fatalf("visible database instances = %d, want 2: %#v", len(instances), instances)
 	}
 	for _, instance := range instances {
-		if instance.ID == "db-account-only" && instance.CanManage {
-			t.Fatal("account-only database grant incorrectly provided instance management access")
+		switch instance.ID {
+		case "db-visible":
+			if instance.AccountCount != 1 || !instance.CanManage {
+				t.Fatalf("container-granted database = %#v, want one visible account with management", instance)
+			}
+		case "db-account-only":
+			if instance.AccountCount != 1 || instance.CanManage {
+				t.Fatalf("account-granted database = %#v, want one visible account without management", instance)
+			}
 		}
 	}
 }
@@ -224,6 +243,7 @@ func seedResourceAccessTestData(t *testing.T, db *gorm.DB) {
 		&model.DatabaseInstance{ID: "db-account-only", Name: "account-only-db", Protocol: "mysql", Address: "10.0.1.3", Port: 3306},
 		&model.DatabaseAccount{ID: "dba-visible", InstanceID: "db-visible", UniqueName: "db-visible-user", Username: "app", Status: "active", ResourceID: "2001"},
 		&model.DatabaseAccount{ID: "dba-account-only", InstanceID: "db-account-only", UniqueName: "db-account-only-user", Username: "readonly", Status: "active", ResourceID: "2002"},
+		&model.DatabaseAccount{ID: "dba-account-hidden", InstanceID: "db-account-only", UniqueName: "db-account-hidden-user", Username: "hidden", Status: "active", ResourceID: "2003"},
 		&model.ResourceGrant{ID: "grant-host-container", PrincipalType: "user", PrincipalID: "u1", ResourceType: model.ResourceTypeHost, ResourceID: "host-container", Effect: model.PermissionEffectAllow},
 		&model.ResourceGrant{ID: "grant-host-account", PrincipalType: "user", PrincipalID: "u1", ResourceType: model.ResourceTypeHostAccount, ResourceID: "ha-account", Effect: model.PermissionEffectAllow},
 		&model.ResourceGrant{ID: "grant-db-container", PrincipalType: "user", PrincipalID: "u1", ResourceType: model.ResourceTypeDatabaseInstance, ResourceID: "db-visible", Effect: model.PermissionEffectAllow},

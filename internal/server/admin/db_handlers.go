@@ -34,15 +34,16 @@ func (s *Server) handleDBGateway(w http.ResponseWriter, r *http.Request) {
 
 func parseListenAddr(addr string) (host string, port int) {
 	if addr == "" {
-		return "127.0.0.1", 33060
+		return "", 33060
 	}
 	h, p, err := net.SplitHostPort(addr)
 	if err != nil {
 		return addr, 33060
 	}
 	host = h
-	if host == "" || host == "0.0.0.0" {
-		host = "127.0.0.1"
+	// Wildcard bind addresses are not client connection addresses; the UI falls back to its current host.
+	if host == "0.0.0.0" || host == "::" {
+		host = ""
 	}
 	if n, err := strconv.Atoi(p); err == nil {
 		port = n

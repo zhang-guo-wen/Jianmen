@@ -348,6 +348,7 @@
 import { ref, reactive, watch, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { ArrowDown, Loading } from '@element-plus/icons-vue'
+import { useRouter } from 'vue-router'
 import DataTableCard from '@/components/DataTableCard.vue'
 import FormDialog from '@/components/FormDialog.vue'
 import ConnectionConfigDialog from '@/components/ConnectionConfigDialog.vue'
@@ -375,6 +376,7 @@ interface AccountFormState {
 
 // ── Instance state ──
 const permission = usePermissionStore()
+const router = useRouter()
 
 const instances = ref<api.DatabaseInstanceView[]>([])
 const instancesLoading = ref(false)
@@ -784,9 +786,12 @@ async function handleDBConnect(inst: api.DatabaseInstanceView) {
   }
 }
 
-/** 更多操作 - 审计日志（占位） */
-function handleDBAuditLog(_inst: api.DatabaseInstanceView) {
-  ElMessage.info('审计日志功能开发中');
+/** More action - open filtered audit logs. */
+function handleDBAuditLog(inst: api.DatabaseInstanceView) {
+  void router.push({
+    name: 'audit',
+    query: { scope: 'db', q: String(inst.name || instanceEndpoint(inst)) },
+  })
 }
 
 /** 更多操作 - 在线会话（占位） */

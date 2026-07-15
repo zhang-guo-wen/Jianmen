@@ -10,6 +10,7 @@
             :total="sessionTotal"
             v-model:page="sessionPage"
             v-model:page-size="sessionPageSize"
+            v-model:search="sessionKeyword"
             search-placeholder="搜索会话..."
             @search="onSessionSearch"
           >
@@ -71,6 +72,7 @@
             :total="dbTotal"
             v-model:page="dbPage"
             v-model:page-size="dbPageSize"
+            v-model:search="dbKeyword"
             search-placeholder="搜索数据库连接..."
             @search="onDBSearch"
           >
@@ -306,6 +308,7 @@ import '@xterm/xterm/css/xterm.css';
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { Refresh } from '@element-plus/icons-vue';
 import { ElMessage } from 'element-plus';
+import { useRoute } from 'vue-router';
 
 import DataTableCard from '@/components/DataTableCard.vue';
 import {
@@ -335,14 +338,30 @@ type ReplayData = {
 
 const { t } = useI18n();
 const permission = usePermissionStore();
-const auditScope = ref<AuditScope>(permission.canDo('audit:view') ? 'ssh' : 'db');
+const route = useRoute();
+
+function routeQueryValue(value: unknown): string {
+  if (Array.isArray(value)) return routeQueryValue(value[0]);
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function permittedAuditScope(value: unknown): AuditScope {
+  const requested = routeQueryValue(value);
+  if (requested === 'db' && permission.canDo('db:audit:view')) return 'db';
+  if (requested === 'ssh' && permission.canDo('audit:view')) return 'ssh';
+  return permission.canDo('audit:view') ? 'ssh' : 'db';
+}
+
+const initialAuditScope = permittedAuditScope(route.query.scope);
+const initialAuditKeyword = routeQueryValue(route.query.q);
+const auditScope = ref<AuditScope>(initialAuditScope);
 
 // ── SSH session list state ──
 const sessions = ref<SessionRecord[]>([]);
 const sessionTotal = ref(0);
 const sessionPage = ref(1);
 const sessionPageSize = ref(20);
-const sessionKeyword = ref('');
+const sessionKeyword = ref(initialAuditScope === 'ssh' ? initialAuditKeyword : '');
 const sessionsLoading = ref(false);
 const sessionError = ref('');
 
@@ -351,7 +370,7 @@ const dbConnections = ref<DBConnectionRecord[]>([]);
 const dbTotal = ref(0);
 const dbPage = ref(1);
 const dbPageSize = ref(20);
-const dbKeyword = ref('');
+const dbKeyword = ref(initialAuditScope === 'db' ? initialAuditKeyword : '');
 const dbLoading = ref(false);
 const dbError = ref('');
 
@@ -1112,10 +1131,32 @@ async function loadDBArtifact(connection: DBConnectionRecord, kind: 'meta' | 'qu
 
 // ── Lifecycle & watchers ──
 
+function applyRouteAuditFilter() {
+  const scope = permittedAuditScope(route.query.scope);
+  const keyword = routeQueryValue(route.query.q);
+  auditScope.value = scope;
+  if (scope === 'ssh') {
+    sessionKeyword.value = keyword;
+    if (sessionPage.value === 1) void loadSessions();
+    else sessionPage.value = 1;
+  } else {
+    dbKeyword.value = keyword;
+    if (dbPage.value === 1) void loadDBConnections();
+    else dbPage.value = 1;
+  }
+}
+
 onMounted(() => {
   if (permission.canDo('audit:view')) void loadSessions();
   if (permission.canDo('db:audit:view')) void loadDBConnections();
 });
+
+watch(
+  () => route.fullPath,
+  () => {
+    if (route.name === 'audit') applyRouteAuditFilter();
+  },
+);
 
 watch(isReplay, async (value) => {
   if (value) {

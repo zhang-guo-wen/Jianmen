@@ -1,6 +1,6 @@
-# syntax=docker/dockerfile:1
+﻿# syntax=docker/dockerfile:1
 
-FROM --platform=$BUILDPLATFORM node:24-alpine AS frontend
+FROM --platform=$BUILDPLATFORM node:24-bookworm-slim AS frontend
 
 WORKDIR /src/web
 
@@ -60,3 +60,4 @@ STOPSIGNAL SIGTERM
 
 ENTRYPOINT ["/app/jianmen"]
 CMD ["-config", "/app/config.json"]
+

@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <div class="settings-grid">
     <el-card class="settings-card" shadow="never" v-loading="preferences.loading">
       <template #header><strong>界面与终端</strong></template>
@@ -32,11 +32,11 @@
             <el-option v-for="option in SSH_CLIENT_OPTIONS" :key="option.command" :label="option.label" :value="option.command" />
           </el-select>
         </el-form-item>
-        <el-form-item v-if="form.ssh_client && form.ssh_client !== 'default'" label="客户端路径">
-          <el-input v-model="form.ssh_client_path" :placeholder="clientPathPlaceholder">
+        <el-form-item v-if="form.ssh_client && form.ssh_client !== 'default'" label="客户端路径" required :error="clientPathError">
+          <el-input v-model="form.ssh_client_path" placeholder="请输入完整绝对路径，如 C:\Program Files\PuTTY\putty.exe">
             <template #append><el-button @click="pickClientFile">选择文件</el-button></template>
           </el-input>
-          <div class="field-help">浏览器无法读取完整本地路径时，请手动粘贴可执行文件路径。</div>
+          <div class="field-help">程序路径必填，不提供默认值；浏览器无法读取完整路径时，请手动粘贴。</div>
         </el-form-item>
         <el-alert v-if="registrationCommand" type="info" :closable="false" show-icon>
           <template #title>首次使用需要注册系统 ssh:// 协议</template>
@@ -57,7 +57,7 @@
 import { computed, onMounted, reactive, watch } from 'vue';
 import { ElMessage } from 'element-plus';
 
-import { buildSSHProtocolRegistrationCommand, SSH_CLIENT_OPTIONS, sshClientOption } from '@/config/sshClients';
+import { buildSSHProtocolRegistrationCommand, isAbsoluteExecutablePath, SSH_CLIENT_OPTIONS } from '@/config/sshClients';
 import { usePreferencesStore } from '@/stores/preferences';
 
 const preferences = usePreferencesStore();
@@ -68,7 +68,12 @@ const themeOptions = [
   { label: '深色', value: 'dark' },
 ];
 
-const clientPathPlaceholder = computed(() => sshClientOption(form.ssh_client)?.defaultPath || '请输入可执行文件路径');
+const clientPathError = computed(() => {
+  if (!form.ssh_client || form.ssh_client === 'default') return '';
+  if (!form.ssh_client_path.trim()) return '请输入本地 SSH 客户端的程序路径';
+  if (!isAbsoluteExecutablePath(form.ssh_client_path)) return '请输入完整的 Windows 绝对路径，例如 C:\\Program Files\\PuTTY\\putty.exe';
+  return '';
+});
 const registrationCommand = computed(() => buildSSHProtocolRegistrationCommand(form.ssh_client, form.ssh_client_path));
 
 watch(() => form.ssh_client, (client) => {
@@ -85,6 +90,10 @@ onMounted(async () => {
 });
 
 async function save() {
+  if (clientPathError.value) {
+    ElMessage.warning(clientPathError.value);
+    return;
+  }
   try {
     const saved = await preferences.update({ ...form });
     Object.assign(form, saved);

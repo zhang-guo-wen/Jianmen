@@ -2,6 +2,7 @@ import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
 
 import { apiClient, type UserPreferences, type UserPreferencesUpdate } from '@/api/client';
+import { isAbsoluteExecutablePath } from '@/config/sshClients';
 
 const APPEARANCE_CACHE_KEY = 'jianmen_user_appearance';
 
@@ -38,7 +39,7 @@ export const usePreferencesStore = defineStore('preferences', () => {
   const error = ref('');
   let mediaQuery: MediaQueryList | null = null;
 
-  const hasSSHClient = computed(() => Boolean(value.value.ssh_client));
+  const hasSSHClient = computed(() => value.value.ssh_client === 'default' || Boolean(value.value.ssh_client && isAbsoluteExecutablePath(value.value.ssh_client_path)));
 
   function resolveDark(theme = value.value.theme): boolean {
     return theme === 'dark' || (theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);

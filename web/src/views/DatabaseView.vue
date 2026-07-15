@@ -331,65 +331,16 @@
       </template>
     </el-dialog>
 
-    <!-- 连接弹窗 -->
-    <el-dialog
+    <ConnectionConfigDialog
       v-model="connectDialogVisible"
-      destroy-on-close
-      title="连接数据库账号"
-      width="min(720px, calc(100vw - 32px))"
-      @opened="onConnectDialogOpened"
-    >
-      <div v-if="connectTarget" class="connection-dialog">
-        <el-alert show-icon type="info" :closable="false"
-          title="输入堡垒机的登录密码，不是目标数据库的密码" />
-
-        <div style="margin-bottom: 8px; display: flex; align-items: center; gap: 8px;" v-if="!creatingSession">
-          <span style="font-size: 13px; color: #667085;">连通性：</span>
-          <el-tag v-if="connectionTesting" type="info" size="small">测试中...</el-tag>
-          <template v-else-if="connectionTestResult !== null">
-            <el-tag :type="connectionTestResult.ok ? 'success' : 'danger'" size="small">
-              {{ connectionTestResult.ok ? '可达' : '不可达' }}
-            </el-tag>
-            <span v-if="connectionTestResult.latency_ms !== undefined" style="font-size: 12px; color: #667085;">
-              延迟 {{ connectionTestResult.latency_ms }}ms
-            </span>
-            <span v-if="connectionTestResult.error" style="font-size: 12px; color: var(--el-color-danger);">
-              {{ connectionTestResult.error }}
-            </span>
-          </template>
-        </div>
-
-        <div v-if="creatingSession" style="text-align: center; padding: 30px 0;">
-          <el-icon class="is-loading" :size="28"><Loading /></el-icon>
-          <p style="margin-top: 10px; color: #667085;">正在创建连接会话...</p>
-        </div>
-
-        <template v-else-if="!connectionError && compactUser">
-          <el-descriptions :column="1" border size="small" style="margin-top: 12px">
-            <el-descriptions-item label="连接地址">
-              <code>{{ gatewayHost }}:{{ gatewayPort }}</code>
-              <el-button link type="primary" size="small" style="margin-left: 8px" @click="copyText(`${gatewayHost}:${gatewayPort}`)">复制</el-button>
-            </el-descriptions-item>
-            <el-descriptions-item label="用户名">
-              <code>{{ compactUser }}</code>
-              <el-button link type="primary" size="small" style="margin-left: 8px" @click="copyText(compactUser)">复制</el-button>
-            </el-descriptions-item>
-            <el-descriptions-item label="密码">堡垒机登录密码</el-descriptions-item>
-          </el-descriptions>
-
-          <div style="margin-top: 12px">
-            <el-input :model-value="connectCommand" readonly size="small">
-              <template #append>
-                <el-button @click="copyText(connectCommand)">复制命令</el-button>
-              </template>
-            </el-input>
-          </div>
-        </template>
-      </div>
-      <template #footer>
-        <el-button @click="connectDialogVisible = false">关闭</el-button>
-      </template>
-    </el-dialog>
+      resource-type="database"
+      :target="connectTarget"
+      :resource-name="String(selectedInstance?.name || '')"
+      :source-address="selectedInstance ? instanceEndpoint(selectedInstance) : ''"
+      :source-account="String(connectTarget?.username || '')"
+      :protocol="String(selectedInstance?.protocol || 'mysql')"
+      :allow-ssh="false"
+    />
   </div>
 </template>
 
@@ -399,6 +350,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { ArrowDown, Loading } from '@element-plus/icons-vue'
 import DataTableCard from '@/components/DataTableCard.vue'
 import FormDialog from '@/components/FormDialog.vue'
+import ConnectionConfigDialog from '@/components/ConnectionConfigDialog.vue'
 import StatusSwitch from '@/components/StatusSwitch.vue'
 import * as api from '@/api/client'
 import { usePermissionStore } from '@/stores/permission'
@@ -478,71 +430,13 @@ const accountForm = reactive<AccountFormState>({
 // ── Connect dialog state ──
 const connectDialogVisible = ref(false)
 const connectTarget = ref<api.DBAccountRecord | null>(null)
-const userSessionId = ref('')
 
 // ── Gateway config ──
-const gatewayConfig = ref<{ host: string; port: number; enabled: boolean }>({
-  host: window.location.hostname,
-  port: 33060,
-  enabled: false,
-})
-
-async function loadGatewayConfig() {
-  try {
-    const cfg = await api.apiClient.getDBGateway()
-    if (cfg && typeof cfg === 'object') {
-      gatewayConfig.value = {
-        host: String(cfg.host || window.location.hostname),
-        port: Number(cfg.port) || 33060,
-        enabled: Boolean(cfg.enabled),
-      }
-    }
-  } catch {
-    // 使用默认值
-  }
-}
-
-const creatingSession = ref(false)
-const connectionError = ref('')
-const connectionTesting = ref(false)
-const connectionTestResult = ref<{ ok: boolean; error?: string; latency_ms?: number } | null>(null)
 const accountFormTesting = ref(false)
 const accountFormTestResult = ref<{ ok: boolean; error?: string; latency_ms?: number } | null>(null)
 const savedCredentialTesting = ref(false)
 const savedCredentialTestResult = ref<{ ok: boolean; error?: string; latency_ms?: number } | null>(null)
 
-const compactUser = computed(() => {
-  if (!connectTarget.value) return ''
-  const resourceId = connectTarget.value.resource_id || '0000'
-  const sessionId = userSessionId.value
-  if (!sessionId) return ''
-  const inst = selectedInstance.value
-  const prefix = inst?.protocol === 'redis' ? 'R' : 'D'
-  return prefix + resourceId + sessionId
-})
-const gatewayHost = computed(() => gatewayConfig.value.host)
-const gatewayPort = computed(() => gatewayConfig.value.port)
-
-const connectCommand = computed(() => {
-  if (!connectTarget.value || !selectedInstance.value) return ''
-  const inst = selectedInstance.value
-  const protocol = inst.protocol || 'mysql'
-  const resourceId = connectTarget.value.resource_id || '0000'
-  const sessionId = userSessionId.value || '00001'
-  const prefix = protocol === 'redis' ? 'R' : 'D'
-  const compactUser = `${prefix}${resourceId}${sessionId}`
-  const host = gatewayConfig.value.host
-  const proxyPort = gatewayConfig.value.port
-  if (protocol === 'mysql') {
-    return `mysql --protocol=tcp -h ${host} -P ${proxyPort} -u ${compactUser} -p`
-  }
-  if (protocol === 'redis') {
-    return `redis-cli -h ${host} -p ${proxyPort} -a ${compactUser} --user ${connectTarget.value.username || 'default'}`
-  }
-  return `psql -h ${host} -p ${proxyPort} -U ${compactUser}`
-})
-
-// ── Helpers ──
 function instanceEndpoint(inst: api.DatabaseInstanceView): string {
   const address = (inst.address || '').trim()
   const port = inst.port
@@ -924,57 +818,17 @@ function handleDBPermissions(_inst: api.DatabaseInstanceView) {
 }
 
 // ── Connect dialog ──
-async function openConnectDialog(acc: api.DBAccountRecord) {
+function openConnectDialog(acc: api.DBAccountRecord) {
   connectTarget.value = acc
   selectedInstance.value = instances.value.find(i => i.id === acc.instance_id) || selectedInstance.value
-  userSessionId.value = ''
-  connectionError.value = ''
-  connectionTestResult.value = null
   connectDialogVisible.value = true
 }
 
-async function onConnectDialogOpened() {
-  if (!connectTarget.value) return
-  creatingSession.value = true
-  connectionError.value = ''
-  connectionTestResult.value = null
-  testDBConnectionForTarget()
-  try {
-    const targetId = connectTarget.value.id || connectTarget.value.resource_id || ''
-    if (targetId) {
-      const session = await api.apiClient.createUserSession(String(targetId))
-      userSessionId.value = session?.session_id || ''
-    }
-  } catch (err) {
-    connectionError.value = err instanceof Error ? err.message : '创建会话失败'
-  } finally {
-    creatingSession.value = false
-  }
-}
-
-async function testDBConnectionForTarget() {
-  if (!connectTarget.value) return
-  connectionTesting.value = true
-  connectionTestResult.value = null
-  try {
-    const id = connectTarget.value.id || connectTarget.value.resource_id || ''
-    if (!id) return
-    const result = await api.apiClient.testDBConnection(String(id))
-    connectionTestResult.value = { ok: result.ok, latency_ms: result.latency_ms, error: result.ok ? undefined : (result.error || '连接失败') }
-  } catch (err) {
-    connectionTestResult.value = { ok: false, error: err instanceof Error ? err.message : '连接失败' }
-  } finally {
-    connectionTesting.value = false
-  }
-}
-
-// ── Watchers ──
 watch([accountPage, accountPageSize], () => {
   if (accountsDialogVisible.value) loadSelectedInstanceAccounts()
 })
 
 onMounted(() => {
-  loadGatewayConfig()
   loadInstances()
   loadGroupOptions()
 })

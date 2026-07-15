@@ -361,7 +361,7 @@ func (s *Server) handleTarget(w http.ResponseWriter, r *http.Request) {
 			s.forbidden(w, r)
 			return
 		}
-		if !s.requireResourceGrant(w, r, model.ResourceTypeHostAccount, id) {
+		if !s.requireHostAccountManagement(w, r, id) {
 			return
 		}
 		s.handleUpdateTarget(w, r, id)
@@ -370,7 +370,7 @@ func (s *Server) handleTarget(w http.ResponseWriter, r *http.Request) {
 			s.forbidden(w, r)
 			return
 		}
-		if !s.requireResourceGrant(w, r, model.ResourceTypeHostAccount, id) {
+		if !s.requireHostAccountManagement(w, r, id) {
 			return
 		}
 		if err := s.store.DeleteTarget(id); err != nil {

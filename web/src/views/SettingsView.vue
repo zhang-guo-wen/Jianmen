@@ -1,14 +1,5 @@
 ﻿<template>
   <div class="settings-grid">
-    <section class="settings-hero">
-      <div>
-        <span class="eyebrow">PERSONAL WORKSPACE</span>
-        <h2>把连接习惯留在 Jianmen</h2>
-        <p>主题、本地 SSH 客户端与终端显示配置会跟随当前用户保存。</p>
-      </div>
-      <div class="hero-orbit" aria-hidden="true"><span>SSH</span></div>
-    </section>
-
     <el-card class="settings-card" shadow="never" v-loading="preferences.loading">
       <template #header><strong>界面与终端</strong></template>
       <el-form label-position="top">
@@ -128,12 +119,6 @@ async function copyRegistrationCommand() {
 
 <style scoped>
 .settings-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(320px, .9fr); gap: 16px; overflow: auto; padding-bottom: 4px; }
-.settings-hero { grid-column: 1 / -1; display: flex; align-items: center; justify-content: space-between; min-height: 170px; padding: 28px 34px; color: #f8fafc; overflow: hidden; position: relative; border-radius: 22px; background: radial-gradient(circle at 78% 28%, rgb(56 189 248 / 35%), transparent 24%), linear-gradient(125deg, #0f172a, #164e63 58%, #0e7490); box-shadow: var(--shadow-elevated); }
-.settings-hero h2 { margin: 8px 0 6px; font-size: clamp(26px, 4vw, 42px); letter-spacing: -.045em; }
-.settings-hero p { margin: 0; color: #bae6fd; }
-.eyebrow { color: #67e8f9; font-size: 11px; font-weight: 800; letter-spacing: .18em; }
-.hero-orbit { display: grid; place-items: center; width: 108px; height: 108px; margin-right: 28px; border: 1px solid rgb(255 255 255 / 26%); border-radius: 50%; box-shadow: inset 0 0 0 18px rgb(255 255 255 / 4%), 0 0 60px rgb(34 211 238 / 22%); }
-.hero-orbit span { font-size: 22px; font-weight: 900; letter-spacing: .08em; }
 .settings-card { border: 1px solid var(--color-border); border-radius: 18px; background: var(--color-card); }
 .form-pair { display: grid; grid-template-columns: minmax(0, 1fr) 150px; gap: 14px; }
 .card-heading { display: flex; align-items: center; justify-content: space-between; }
@@ -142,5 +127,5 @@ async function copyRegistrationCommand() {
 .command-box code { white-space: pre-wrap; word-break: break-all; }
 .settings-actions { grid-column: 1 / -1; display: flex; align-items: center; justify-content: flex-end; gap: 14px; }
 .save-error { color: var(--el-color-danger); font-size: 13px; }
-@media (max-width: 900px) { .settings-grid { grid-template-columns: 1fr; } .hero-orbit { display: none; } .form-pair { grid-template-columns: 1fr; } }
+@media (max-width: 900px) { .settings-grid { grid-template-columns: 1fr; } .form-pair { grid-template-columns: 1fr; } }
 </style>

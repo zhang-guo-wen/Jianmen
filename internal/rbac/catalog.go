@@ -105,23 +105,14 @@ var actionDependencies = map[string][]string{
 }
 
 var pageVisibilityActions = map[string][]string{
-<<<<<<< HEAD
-	"quickConnect": {ActionSessionConnect, ActionSFTPConnect, ActionDBConnect, ActionAppConnect},
-	"hosts":        {ActionHostView},
-	"databases":    {ActionDBProxyView},
-	"applications": {ActionAppView},
-	"audit":        {ActionAuditView, ActionDBAuditView, ActionSessionView},
-	"aiAccess":     {ActionAIManage},
-	"rbac":         {ActionRBACManage},
-=======
 	"quickConnect":     {ActionSessionConnect, ActionSFTPConnect, ActionDBConnect, ActionAppConnect},
 	"hosts":            {ActionHostView},
 	"databases":        {ActionDBProxyView},
 	"platformAccounts": {ActionPlatformAccountView},
 	"applications":     {ActionAppView},
 	"audit":            {ActionAuditView, ActionDBAuditView, ActionSessionView},
+	"aiAccess":         {ActionAIManage},
 	"rbac":             {ActionRBACManage},
->>>>>>> dev
 }
 
 var permissionCatalog = flattenPermissionPages(permissionPages)

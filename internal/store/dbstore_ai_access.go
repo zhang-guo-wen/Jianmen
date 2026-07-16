@@ -17,7 +17,7 @@ var (
 )
 
 func (s *DBStore) CreateAIAccessToken(ctx context.Context, token model.AIAccessToken) error {
-	if token.UserID == "" || token.Name == "" || token.AccessTokenHash == "" || token.RefreshTokenHash == "" {
+	if token.UserID == "" || token.Name == "" || token.AccessTokenHash == "" || token.RefreshTokenHash == "" || token.AccessToken.GetPlaintext() == "" || token.RefreshToken.GetPlaintext() == "" {
 		return errors.New("AI access token fields are required")
 	}
 	if token.AccessExpiresAt.IsZero() || token.RefreshExpiresAt.IsZero() {
@@ -35,6 +35,17 @@ func (s *DBStore) ListAIAccessTokens(ctx context.Context, userID string) ([]mode
 		return nil, fmt.Errorf("list AI access tokens: %w", err)
 	}
 	return tokens, nil
+}
+
+func (s *DBStore) AIAccessToken(ctx context.Context, userID, tokenID string) (model.AIAccessToken, error) {
+	var token model.AIAccessToken
+	if err := s.db.WithContext(ctx).Where("id = ? AND user_id = ?", tokenID, userID).First(&token).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return model.AIAccessToken{}, ErrAIAccessTokenNotFound
+		}
+		return model.AIAccessToken{}, fmt.Errorf("get AI access token: %w", err)
+	}
+	return token, nil
 }
 
 func (s *DBStore) AuthenticateAIAccessToken(ctx context.Context, accessHash string, now time.Time) (model.AIAccessToken, error) {
@@ -71,6 +82,8 @@ func (s *DBStore) RotateAIAccessToken(ctx context.Context, refreshHash string, r
 		updates := map[string]any{
 			"access_token_hash":  replacement.AccessTokenHash,
 			"refresh_token_hash": replacement.RefreshTokenHash,
+			"access_token":       replacement.AccessToken,
+			"refresh_token":      replacement.RefreshToken,
 			"access_expires_at":  replacement.AccessExpiresAt,
 			"refresh_expires_at": replacement.RefreshExpiresAt,
 			"last_used_at":       now.UTC(),
@@ -86,6 +99,8 @@ func (s *DBStore) RotateAIAccessToken(ctx context.Context, refreshHash string, r
 		}
 		current.AccessTokenHash = replacement.AccessTokenHash
 		current.RefreshTokenHash = replacement.RefreshTokenHash
+		current.AccessToken = replacement.AccessToken
+		current.RefreshToken = replacement.RefreshToken
 		current.AccessExpiresAt = replacement.AccessExpiresAt
 		current.RefreshExpiresAt = replacement.RefreshExpiresAt
 		usedAt := now.UTC()

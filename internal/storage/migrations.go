@@ -90,6 +90,13 @@ var migrations = []Migration{
 			return tx.AutoMigrate(&model.AIAccessToken{})
 		},
 	},
+	{
+		Version: "202607160002",
+		Name:    "encrypted AI token values",
+		Run: func(tx *gorm.DB) error {
+			return tx.AutoMigrate(&model.AIAccessToken{})
+		},
+	},
 }
 
 func Migrate(db *gorm.DB) error {

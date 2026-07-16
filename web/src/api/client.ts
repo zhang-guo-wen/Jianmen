@@ -105,6 +105,7 @@ export interface AIAccessTokenRecord {
   last_used_at?: string;
   revoked_at?: string;
   created_at: string;
+  has_secret?: boolean;
 }
 
 export interface IssuedAIAccessToken extends AIAccessTokenRecord {
@@ -822,6 +823,8 @@ export const apiClient = {
 
   // AI access tokens
   getAITokens: () => request<AIAccessTokenRecord[]>('/api/ai/tokens'),
+  getAIToken: (id: string) => request<IssuedAIAccessToken>(`/api/ai/tokens/${encodeURIComponent(id)}`),
+  getAIDocs: () => request<string>('/api/ai/docs'),
   createAIToken: (payload: { name: string; access_ttl_seconds?: number; refresh_ttl_seconds?: number }) =>
     request<IssuedAIAccessToken>('/api/ai/tokens', {
       method: 'POST',

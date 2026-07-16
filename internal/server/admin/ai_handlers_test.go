@@ -43,12 +43,37 @@ func TestHandleAITokensIssueRotateAndRevoke(t *testing.T) {
 	if strings.Contains(response.Body.String(), saved.AccessTokenHash) || strings.Contains(response.Body.String(), saved.RefreshTokenHash) {
 		t.Fatal("response exposed token hashes")
 	}
+	if saved.AccessToken.GetPlaintext() != issued.AccessToken || saved.RefreshToken.GetPlaintext() != issued.RefreshToken {
+		t.Fatal("database did not retain encrypted token values")
+	}
 
 	listRequest := withTestUser(httptest.NewRequest(http.MethodGet, "/api/ai/tokens", nil), "ai-user", "ai-user")
 	listResponse := httptest.NewRecorder()
 	server.handleAITokens(listResponse, listRequest)
 	if listResponse.Code != http.StatusOK || !strings.Contains(listResponse.Body.String(), "ops agent") {
 		t.Fatalf("list response = %d; body=%s", listResponse.Code, listResponse.Body.String())
+	}
+	if strings.Contains(listResponse.Body.String(), issued.AccessToken) || strings.Contains(listResponse.Body.String(), issued.RefreshToken) {
+		t.Fatal("token list exposed plaintext credentials")
+	}
+	for attempt := 0; attempt < 2; attempt++ {
+		detailRequest := withTestUser(httptest.NewRequest(http.MethodGet, "/api/ai/tokens/"+issued.ID, nil), "ai-user", "ai-user")
+		detailResponse := httptest.NewRecorder()
+		server.handleAIToken(detailResponse, detailRequest)
+		if detailResponse.Code != http.StatusOK {
+			t.Fatalf("detail attempt %d status = %d; body=%s", attempt, detailResponse.Code, detailResponse.Body.String())
+		}
+		var detail struct {
+			AccessToken  string `json:"access_token"`
+			RefreshToken string `json:"refresh_token"`
+			HasSecret    bool   `json:"has_secret"`
+		}
+		if err := decodeTestData(t, detailResponse.Body.Bytes(), &detail); err != nil {
+			t.Fatalf("decode detail: %v", err)
+		}
+		if !detail.HasSecret || detail.AccessToken != issued.AccessToken || detail.RefreshToken != issued.RefreshToken {
+			t.Fatalf("unexpected repeatable token detail: %#v", detail)
+		}
 	}
 
 	refreshRequest := httptest.NewRequest(http.MethodPost, "/api/ai/auth/refresh", bytes.NewBufferString(`{"refresh_token":"`+issued.RefreshToken+`"}`))
@@ -66,6 +91,12 @@ func TestHandleAITokensIssueRotateAndRevoke(t *testing.T) {
 	}
 	if refreshed.AccessToken == issued.AccessToken || refreshed.RefreshToken == issued.RefreshToken {
 		t.Fatal("refresh did not rotate credentials")
+	}
+	if err := db.First(&saved, "id = ?", issued.ID).Error; err != nil {
+		t.Fatalf("reload refreshed token: %v", err)
+	}
+	if saved.AccessToken.GetPlaintext() != refreshed.AccessToken || saved.RefreshToken.GetPlaintext() != refreshed.RefreshToken {
+		t.Fatal("refreshed plaintext credentials were not retained")
 	}
 	oldRefresh := httptest.NewRecorder()
 	server.handleAIRefresh(oldRefresh, httptest.NewRequest(http.MethodPost, "/api/ai/auth/refresh", bytes.NewBufferString(`{"refresh_token":"`+issued.RefreshToken+`"}`)))

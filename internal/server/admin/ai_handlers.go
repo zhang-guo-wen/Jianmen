@@ -42,48 +42,93 @@ func (s *Server) handleAIDocs(w http.ResponseWriter, r *http.Request) {
 	content := fmt.Sprintf(`# Jianmen AI Bastion API
 
 Base URL: %s
+Documentation URL: %s/api/ai/docs
 
-This API lets an AI agent use resources authorized to the signed-in Jianmen user. The agent never receives the user's administrator password or target server secret.
+## Purpose
+
+Use Jianmen as the controlled gateway for AI agents that need SSH, SFTP, or database access. The AI token inherits the issuing user's current RBAC permissions and resource grants. Jianmen never returns target server passwords, private keys, or database account passwords.
 
 ## Authentication
 
-1. In Jianmen, open **AI access** and create an access token.
-2. Send access_token as Authorization: Bearer <access_token>.
-3. Before expiry, call POST /api/ai/auth/refresh with refresh_token. Refresh rotates both tokens; discard the old pair immediately.
-4. A token only inherits the user's current RBAC resource grants. Revoking the token or the user's access takes effect immediately.
+Send the access token with every AI API request:
 
-## Endpoints
+    Authorization: Bearer <access_token>
 
-- GET /api/ai/resources - list authorized host accounts and database accounts.
-- GET /api/ai/resources/{type}/{id} - read connection metadata.
-- POST /api/ai/resources/{type}/{id}/session - create or reuse a bastion session identity.
-- POST /api/ai/resources/{type}/{id}/credentials - issue a reusable 30-minute connection password.
-- POST /api/ai/auth/refresh - rotate an access/refresh token pair.
+Access tokens are short-lived. Refresh both credentials before the access token expires:
 
-Supported resource types are host_account and database_account.
+    POST /api/ai/auth/refresh
+    Content-Type: application/json
 
-## Typical SSH flow
+    {"refresh_token":"<refresh_token>"}
 
-    curl -H "Authorization: Bearer $JIANMEN_AI_ACCESS_TOKEN" %s/api/ai/resources
-    curl -X POST -H "Authorization: Bearer $JIANMEN_AI_ACCESS_TOKEN" %s/api/ai/resources/host_account/<id>/session
-    curl -X POST -H "Authorization: Bearer $JIANMEN_AI_ACCESS_TOKEN" %s/api/ai/resources/host_account/<id>/credentials
-    ssh -p <bastion_ssh_port> <compact_username>@<bastion_host>
+A successful refresh rotates both access_token and refresh_token. Replace the old pair immediately.
 
-Use compact_username as the SSH username. The temporary password authenticates to the bastion; the target server password is never returned.
+## Resource discovery
 
-## Typical database flow
+List every currently authorized account resource:
 
-    curl -X POST -H "Authorization: Bearer $JIANMEN_AI_ACCESS_TOKEN" %s/api/ai/resources/database_account/<id>/session
-    curl -X POST -H "Authorization: Bearer $JIANMEN_AI_ACCESS_TOKEN" %s/api/ai/resources/database_account/<id>/credentials
+    GET /api/ai/resources
 
-Use the returned database gateway address, compact username, and temporary password. Do not log tokens or temporary passwords.
+Read one resource and its bastion endpoint metadata:
 
-## Refresh example
+    GET /api/ai/resources/{type}/{id}
 
-    curl -X POST -H "Content-Type: application/json" -d '{"refresh_token":"<refresh_token>"}' %s/api/ai/auth/refresh
+Supported types:
 
-All successful responses use Jianmen's JSON envelope. Secret values are only returned at the moment they are issued.
-`, baseURL, baseURL, baseURL, baseURL, baseURL, baseURL, baseURL)
+- host_account
+- database_account
+
+Revoked, disabled, expired, or no-longer-authorized resources are omitted or rejected.
+
+## SSH and SFTP workflow
+
+1. Select a host_account from GET /api/ai/resources.
+2. Create or reuse the user's compact bastion identity:
+
+       POST /api/ai/resources/host_account/{id}/session
+
+3. Issue a reusable 30-minute bastion password:
+
+       POST /api/ai/resources/host_account/{id}/credentials
+
+4. Connect with the returned values:
+
+       ssh -p <bastion.ssh_port> <compact_username>@<bastion.host>
+       sftp -P <bastion.ssh_port> <compact_username>@<bastion.host>
+
+The temporary password authenticates to Jianmen. It is not the target host password.
+
+## Database workflow
+
+1. Select a database_account from GET /api/ai/resources.
+2. Create or reuse the compact database identity:
+
+       POST /api/ai/resources/database_account/{id}/session
+
+3. Issue a reusable 30-minute gateway password:
+
+       POST /api/ai/resources/database_account/{id}/credentials
+
+4. Use compact_username, the temporary password, database_gateway_host, and database_gateway_port returned by Jianmen.
+
+## Response format
+
+Successful JSON responses use this envelope:
+
+    {"code":0,"data":{...},"message":"ok","request_id":"...","timestamp":"..."}
+
+Errors use:
+
+    {"code":401,"error":{"code":"UNAUTHORIZED","message":"..."},"request_id":"...","timestamp":"..."}
+
+## Security rules for AI clients
+
+- Never write access_token, refresh_token, or temporary passwords to logs.
+- Keep the refresh token separate from normal task context where possible.
+- Refresh before expiry and discard the old token pair after rotation.
+- Re-query resources before each task because RBAC and resource grants are evaluated dynamically.
+- Stop immediately when Jianmen returns 401 or 403; do not retry with unrelated credentials.
+`, baseURL, baseURL)
 	w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
 	w.Header().Set("Cache-Control", "public, max-age=60")
 	_, _ = w.Write([]byte(content))
@@ -104,11 +149,7 @@ func (s *Server) handleAITokens(w http.ResponseWriter, r *http.Request) {
 		}
 		views := make([]map[string]any, 0, len(tokens))
 		for _, token := range tokens {
-			views = append(views, map[string]any{
-				"id": token.ID, "name": token.Name,
-				"access_expires_at": token.AccessExpiresAt, "refresh_expires_at": token.RefreshExpiresAt,
-				"last_used_at": token.LastUsedAt, "revoked_at": token.RevokedAt, "created_at": token.CreatedAt,
-			})
+			views = append(views, aiTokenResponse(token, false))
 		}
 		s.writeJSON(w, r, http.StatusOK, views)
 	case http.MethodPost:
@@ -134,6 +175,7 @@ func (s *Server) handleAITokens(w http.ResponseWriter, r *http.Request) {
 		token := model.AIAccessToken{
 			ID: model.NewID(), UserID: userID, Name: name,
 			AccessTokenHash: issued.AccessTokenHash, RefreshTokenHash: issued.RefreshTokenHash,
+			AccessToken: model.NewEncryptedField(issued.AccessToken), RefreshToken: model.NewEncryptedField(issued.RefreshToken),
 			AccessExpiresAt: issued.AccessExpiresAt, RefreshExpiresAt: issued.RefreshExpiresAt,
 		}
 		if err := s.store.CreateAIAccessToken(r.Context(), token); err != nil {
@@ -153,26 +195,38 @@ func (s *Server) handleAITokens(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAIToken(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodDelete {
-		w.Header().Set("Allow", http.MethodDelete)
-		s.writeErrorText(w, r, http.StatusMethodNotAllowed, "method not allowed")
-		return
-	}
 	id := strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/ai/tokens/"), "/")
 	if id == "" || strings.Contains(id, "/") {
 		s.writeErrorText(w, r, http.StatusNotFound, "token not found")
 		return
 	}
-	if err := s.store.RevokeAIAccessToken(r.Context(), userIDFromRequest(r), id, time.Now().UTC()); err != nil {
-		if errors.Is(err, store.ErrAIAccessTokenNotFound) {
-			s.writeErrorText(w, r, http.StatusNotFound, "token not found")
+	switch r.Method {
+	case http.MethodGet:
+		token, err := s.store.AIAccessToken(r.Context(), userIDFromRequest(r), id)
+		if err != nil {
+			if errors.Is(err, store.ErrAIAccessTokenNotFound) {
+				s.writeErrorText(w, r, http.StatusNotFound, "token not found")
+				return
+			}
+			s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
 			return
 		}
-		s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
-		return
+		s.writeJSON(w, r, http.StatusOK, aiTokenResponse(token, true))
+	case http.MethodDelete:
+		if err := s.store.RevokeAIAccessToken(r.Context(), userIDFromRequest(r), id, time.Now().UTC()); err != nil {
+			if errors.Is(err, store.ErrAIAccessTokenNotFound) {
+				s.writeErrorText(w, r, http.StatusNotFound, "token not found")
+				return
+			}
+			s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
+			return
+		}
+		s.logger.Info("AI access token revoked", "user_id", userIDFromRequest(r), "token_id", id)
+		w.WriteHeader(http.StatusNoContent)
+	default:
+		w.Header().Set("Allow", "GET, DELETE")
+		s.writeErrorText(w, r, http.StatusMethodNotAllowed, "method not allowed")
 	}
-	s.logger.Info("AI access token revoked", "user_id", userIDFromRequest(r), "token_id", id)
-	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) handleAIRefresh(w http.ResponseWriter, r *http.Request) {
@@ -195,6 +249,7 @@ func (s *Server) handleAIRefresh(w http.ResponseWriter, r *http.Request) {
 	}
 	rotated, err := s.store.RotateAIAccessToken(r.Context(), service.HashAIAccessToken(request.RefreshToken), model.AIAccessToken{
 		AccessTokenHash: issued.AccessTokenHash, RefreshTokenHash: issued.RefreshTokenHash,
+		AccessToken: model.NewEncryptedField(issued.AccessToken), RefreshToken: model.NewEncryptedField(issued.RefreshToken),
 		AccessExpiresAt: issued.AccessExpiresAt, RefreshExpiresAt: issued.RefreshExpiresAt,
 	}, time.Now().UTC())
 	if err != nil {
@@ -211,6 +266,20 @@ func (s *Server) handleAIRefresh(w http.ResponseWriter, r *http.Request) {
 		"access_token": issued.AccessToken, "refresh_token": issued.RefreshToken,
 		"access_expires_at": issued.AccessExpiresAt, "refresh_expires_at": issued.RefreshExpiresAt,
 	})
+}
+
+func aiTokenResponse(token model.AIAccessToken, includeSecrets bool) map[string]any {
+	response := map[string]any{
+		"id": token.ID, "name": token.Name,
+		"access_expires_at": token.AccessExpiresAt, "refresh_expires_at": token.RefreshExpiresAt,
+		"last_used_at": token.LastUsedAt, "revoked_at": token.RevokedAt, "created_at": token.CreatedAt,
+		"has_secret": token.AccessToken.GetPlaintext() != "" && token.RefreshToken.GetPlaintext() != "",
+	}
+	if includeSecrets {
+		response["access_token"] = token.AccessToken.GetPlaintext()
+		response["refresh_token"] = token.RefreshToken.GetPlaintext()
+	}
+	return response
 }
 
 func (s *Server) withAIToken(next http.HandlerFunc) http.HandlerFunc {

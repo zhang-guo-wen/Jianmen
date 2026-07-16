@@ -653,6 +653,8 @@ export interface ResourceGroupRecord {
   description?: string;
   host_count: number;
   database_count: number;
+  application_count: number;
+  platform_count: number;
   account_count: number;
   created_at: string;
   updated_at: string;

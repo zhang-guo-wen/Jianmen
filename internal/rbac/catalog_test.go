@@ -14,8 +14,6 @@ func TestPermissionCatalogContainsEveryAction(t *testing.T) {
 		ActionDBProxyCreate, ActionDBProxyUpdate, ActionDBProxyDelete, ActionDBProxyView,
 		ActionRBACManage, ActionSessionView, ActionSessionDisconnect,
 		ActionAppCreate, ActionAppUpdate, ActionAppDelete, ActionAppView, ActionAppConnect,
-		ActionPlatformAccountCreate, ActionPlatformAccountUpdate, ActionPlatformAccountDelete,
-		ActionPlatformAccountView, ActionPlatformAccountUse,
 	}
 
 	if err := ValidatePermissionCatalog(); err != nil {

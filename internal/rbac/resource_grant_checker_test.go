@@ -13,6 +13,8 @@ func TestResourceGrantCheckerMatchesResourceAndAccountGroups(t *testing.T) {
 		&model.Host{ID: "h1", Name: "host", Address: "127.0.0.1", Port: 22, GroupName: "prod"},
 		&model.HostAccount{ID: "ha-resource", HostID: "h1", Username: "root", Status: "active", ResourceID: "0001"},
 		&model.HostAccount{ID: "ha-account", HostID: "h1", Username: "deploy", Status: "active", ResourceID: "0002", GroupName: "ops"},
+		&model.Application{ID: "app1", Name: "console", AppGroup: "prod", ListenPort: 18080, InternalScheme: "http", InternalHost: "127.0.0.1", InternalPort: 8080, Status: "active"},
+		&model.PlatformAccount{ID: "platform1", Name: "gitlab", PlatformName: "GitLab", GroupName: "prod", Username: "admin", OwnerID: "u1", Visibility: "private", Status: "active"},
 		&model.ResourceGroup{ID: "rg-prod", Name: "prod", GroupType: model.ResourceGroupTypeResource},
 		&model.ResourceGroup{ID: "ag-ops", Name: "ops", GroupType: model.ResourceGroupTypeAccount},
 		&model.ResourceGrant{ID: "grant-resource", PrincipalType: "user", PrincipalID: "u1", ResourceType: model.ResourceTypeGroup, ResourceID: "rg-prod", Effect: model.PermissionEffectAllow},
@@ -25,13 +27,22 @@ func TestResourceGrantCheckerMatchesResourceAndAccountGroups(t *testing.T) {
 	}
 
 	checker := NewResourceGrantChecker(db)
-	for _, accountID := range []string{"ha-resource", "ha-account"} {
-		allowed, err := checker.HasGrant("u1", model.ResourceTypeHostAccount, accountID)
+	checks := []struct {
+		resourceType string
+		resourceID   string
+	}{
+		{model.ResourceTypeHostAccount, "ha-resource"},
+		{model.ResourceTypeHostAccount, "ha-account"},
+		{model.ResourceTypeApplication, "app1"},
+		{model.ResourceTypePlatformAccount, "platform1"},
+	}
+	for _, check := range checks {
+		allowed, err := checker.HasGrant("u1", check.resourceType, check.resourceID)
 		if err != nil {
-			t.Fatalf("HasGrant(%s): %v", accountID, err)
+			t.Fatalf("HasGrant(%s, %s): %v", check.resourceType, check.resourceID, err)
 		}
 		if !allowed {
-			t.Fatalf("HasGrant(%s) = false, want true", accountID)
+			t.Fatalf("HasGrant(%s, %s) = false, want true", check.resourceType, check.resourceID)
 		}
 	}
 }

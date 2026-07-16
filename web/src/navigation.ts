@@ -1,7 +1,6 @@
 ﻿import {
   DataAnalysis,
   DocumentChecked,
-  Key,
   Link,
   Lock,
   Monitor,
@@ -53,16 +52,6 @@ export const APP_NAV_ITEMS: AppNavigationItem[] = [
     titleKey: 'route.databases.title',
     descriptionKey: 'route.databases.description',
     component: () => import('@/views/DatabaseView.vue'),
-  },
-  {
-    key: 'platformAccounts',
-    path: '/platform-accounts',
-    name: 'platform-accounts',
-    icon: Key,
-    labelKey: 'nav.platformAccounts',
-    titleKey: 'route.platformAccounts.title',
-    descriptionKey: 'route.platformAccounts.description',
-    component: () => import('@/views/PlatformAccountsView.vue'),
   },
   {
     key: 'applications',

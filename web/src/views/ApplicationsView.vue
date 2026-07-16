@@ -82,7 +82,16 @@
         <el-collapse>
           <el-collapse-item title="更多设置">
             <el-form-item :label="t('application.field.group')">
-              <el-input v-model="form.group" />
+              <el-select
+                v-model="form.group"
+                allow-create
+                clearable
+                filterable
+                default-first-option
+                style="width: 100%"
+              >
+                <el-option v-for="group in resourceGroupOptions" :key="group" :label="group" :value="group" />
+              </el-select>
             </el-form-item>
             <el-form-item :label="t('application.field.remark')">
               <el-input v-model="form.remark" type="textarea" />
@@ -116,6 +125,7 @@ const total = ref(0)
 const page = ref(1)
 const pageSize = ref(20)
 const search = ref('')
+const resourceGroupOptions = ref<string[]>([])
 
 const dialogVisible = ref(false)
 const editingId = ref('')
@@ -153,7 +163,20 @@ function onSearch(val: string) {
 }
 
 watch([page, pageSize], () => fetchApps())
-onMounted(() => fetchApps())
+
+async function loadResourceGroupOptions() {
+  try {
+    const res = await apiClient.getResourceGroups({ group_type: 'resource', page: 1, page_size: 200 })
+    resourceGroupOptions.value = (res.items ?? []).map(group => group.name).filter(Boolean)
+  } catch {
+    resourceGroupOptions.value = []
+  }
+}
+
+onMounted(() => {
+  void fetchApps()
+  void loadResourceGroupOptions()
+})
 
 function visitApp(app: ApplicationView) {
   window.open(`http://${window.location.hostname}:${app.listen_port}`, '_blank')
@@ -207,7 +230,7 @@ async function submitApp() {
       ElMessage.success('应用已创建')
     }
     dialogVisible.value = false
-    fetchApps()
+    await Promise.all([fetchApps(), loadResourceGroupOptions()])
   } catch (e: any) {
     ElMessage.error(e.message || t('application.error.save'))
   } finally {

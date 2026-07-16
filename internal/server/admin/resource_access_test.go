@@ -209,7 +209,7 @@ func TestCreateApplicationAutomaticallyGrantsCreator(t *testing.T) {
 	if err := db.Create(&model.User{ID: "app-creator", Username: "creator", Status: "active"}).Error; err != nil {
 		t.Fatalf("create user: %v", err)
 	}
-	body := bytes.NewBufferString(`{"name":"created-app","scheme":"http","host":"127.0.0.1","port":8080,"listen_port":47130}`)
+	body := bytes.NewBufferString(`{"address":"http://127.0.0.1:8080/nacos/#/login?namespace="}`)
 	request := asTestUser(httptest.NewRequest(http.MethodPost, "/api/applications", body), "app-creator", "creator")
 	recorder := httptest.NewRecorder()
 	server.handleCreateApplication(recorder, request)
@@ -219,6 +219,12 @@ func TestCreateApplicationAutomaticallyGrantsCreator(t *testing.T) {
 	var created store.ApplicationView
 	if err := decodeTestData(t, recorder.Body.Bytes(), &created); err != nil {
 		t.Fatalf("decode application: %v", err)
+	}
+	if created.Name != "127.0.0.1" || created.Address != "http://127.0.0.1:8080/nacos/#/login?namespace=" || created.EntryPath != "/nacos/#/login?namespace=" {
+		t.Fatalf("unexpected parsed application: %#v", created)
+	}
+	if created.InternalScheme != "http" || created.InternalHost != "127.0.0.1" || created.InternalPort != 8080 || created.ListenPort != 47110 {
+		t.Fatalf("unexpected application endpoint: %#v", created)
 	}
 	var count int64
 	db.Model(&model.ResourceGrant{}).Where("principal_id = ? AND resource_type = ? AND resource_id = ?", "app-creator", model.ResourceTypeApplication, created.ID).Count(&count)

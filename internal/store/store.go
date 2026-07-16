@@ -136,6 +136,8 @@ type ApplicationView struct {
 	Name           string `json:"name"`
 	AppGroup       string `json:"group"`
 	ListenPort     int    `json:"listen_port"`
+	Address        string `json:"address"`
+	EntryPath      string `json:"entry_path"`
 	InternalScheme string `json:"internal_scheme"`
 	InternalHost   string `json:"internal_host"`
 	InternalPort   int    `json:"internal_port"`
@@ -144,6 +146,19 @@ type ApplicationView struct {
 	CreatedAt      string `json:"created_at"`
 	UpdatedAt      string `json:"updated_at"`
 	CanManage      bool   `json:"can_manage"`
+}
+
+type ApplicationInput struct {
+	Name           string
+	Address        string
+	EntryPath      string
+	InternalScheme string
+	InternalHost   string
+	InternalPort   int
+	ListenPort     int
+	AppGroup       string
+	Remark         string
+	Status         string
 }
 
 type PlatformAccountView struct {
@@ -298,8 +313,8 @@ type Store interface {
 	// Application CRUD
 	Applications() []ApplicationView
 	Application(id string) (ApplicationView, error)
-	AddApplication(name, scheme, host string, port, listenPort int, group, remark string) (ApplicationView, error)
-	UpdateApplication(id, name, scheme, host string, port, listenPort int, group, remark, status string) (ApplicationView, error)
+	AddApplication(input ApplicationInput) (ApplicationView, error)
+	UpdateApplication(id string, input ApplicationInput) (ApplicationView, error)
 	DeleteApplication(id string) error
 
 	// PlatformAccount CRUD

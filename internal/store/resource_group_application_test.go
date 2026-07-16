@@ -16,7 +16,7 @@ func TestApplicationsAndPlatformsCreateResourceGroups(t *testing.T) {
 		t.Fatalf("automigrate: %v", err)
 	}
 	store := NewDBStore(db)
-	if _, err := store.AddApplication("app", "http", "127.0.0.1", 8080, 47110, "applications", ""); err != nil {
+	if _, err := store.AddApplication(ApplicationInput{Name: "app", Address: "http://127.0.0.1:8080/", EntryPath: "/", InternalScheme: "http", InternalHost: "127.0.0.1", InternalPort: 8080, ListenPort: 47110, AppGroup: "applications"}); err != nil {
 		t.Fatalf("add application: %v", err)
 	}
 	owner := model.User{ID: "owner-1", Username: "owner", Status: "active"}

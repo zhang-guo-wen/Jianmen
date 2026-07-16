@@ -3,6 +3,7 @@
   DocumentChecked,
   Link,
   Lock,
+  Key,
   Monitor,
   Setting,
 } from '@element-plus/icons-vue';
@@ -82,6 +83,16 @@ export const APP_NAV_ITEMS: AppNavigationItem[] = [
     titleKey: 'route.rbac.title',
     descriptionKey: 'route.rbac.description',
     component: () => import('@/views/UnifiedRBACView.vue'),
+  },
+  {
+    key: 'aiAccess',
+    path: '/ai-access',
+    name: 'ai-access',
+    icon: Key,
+    labelKey: 'nav.aiAccess',
+    titleKey: 'route.aiAccess.title',
+    descriptionKey: 'route.aiAccess.description',
+    component: () => import('@/views/AIAccessView.vue'),
   },
   {
     key: 'settings',

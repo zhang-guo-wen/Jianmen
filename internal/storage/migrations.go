@@ -83,6 +83,13 @@ var migrations = []Migration{
 			return tx.AutoMigrate(&model.UserGroup{}, &model.UserGroupMember{}, &model.ResourceGrant{})
 		},
 	},
+	{
+		Version: "202607160001",
+		Name:    "AI access tokens",
+		Run: func(tx *gorm.DB) error {
+			return tx.AutoMigrate(&model.AIAccessToken{})
+		},
+	},
 }
 
 func Migrate(db *gorm.DB) error {

@@ -267,6 +267,11 @@ type Store interface {
 	CreateConnectionPassword(ctx context.Context, credential model.ConnectionPassword) error
 	AuthenticateConnectionPassword(ctx context.Context, userID, resourceType, resourceID, password string) error
 	AuthenticateMySQLConnectionPassword(ctx context.Context, userID, resourceID string, salt, response []byte) error
+	CreateAIAccessToken(ctx context.Context, token model.AIAccessToken) error
+	ListAIAccessTokens(ctx context.Context, userID string) ([]model.AIAccessToken, error)
+	AuthenticateAIAccessToken(ctx context.Context, accessHash string, now time.Time) (model.AIAccessToken, error)
+	RotateAIAccessToken(ctx context.Context, refreshHash string, replacement model.AIAccessToken, now time.Time) (model.AIAccessToken, error)
+	RevokeAIAccessToken(ctx context.Context, userID, tokenID string, now time.Time) error
 
 	Hosts() []HostView
 	Host(id string) (HostView, error)

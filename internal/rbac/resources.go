@@ -32,6 +32,7 @@ const (
 	ActionAppDelete         = "application:delete"
 	ActionAppView           = "application:view"
 	ActionAppConnect        = "app:connect"
+	ActionAIManage          = "ai:access:manage"
 
 	ActionPlatformAccountCreate = "platform_account:create"
 	ActionPlatformAccountUpdate = "platform_account:update"

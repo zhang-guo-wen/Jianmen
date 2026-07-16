@@ -68,6 +68,9 @@ var permissionPages = []PermissionPageDefinition{
 		action(ActionSessionView, "查看会话", "查看在线及历史会话"),
 		action(ActionSessionDisconnect, "断开会话", "强制中断在线会话"),
 	),
+	page("aiAccess", "AI Access", "/ai-access", 65,
+		action(ActionAIManage, "Manage AI access", "Issue and revoke AI access tokens"),
+	),
 	page("rbac", "权限管理", "/rbac", 70,
 		action(ActionRBACManage, "管理权限", "管理用户、角色、操作与资源授权"),
 	),
@@ -96,6 +99,7 @@ var pageVisibilityActions = map[string][]string{
 	"databases":    {ActionDBProxyView},
 	"applications": {ActionAppView},
 	"audit":        {ActionAuditView, ActionDBAuditView, ActionSessionView},
+	"aiAccess":     {ActionAIManage},
 	"rbac":         {ActionRBACManage},
 }
 

@@ -364,6 +364,7 @@ func (s *Server) listDBConnections() ([]dbConnectionListItem, error) {
 type contextKey string
 
 const (
-	ctxKeyUserID   contextKey = "admin_user_id"
-	ctxKeyUsername contextKey = "admin_username"
+	ctxKeyUserID    contextKey = "admin_user_id"
+	ctxKeyUsername  contextKey = "admin_username"
+	ctxKeyAITokenID contextKey = "ai_token_id"
 )

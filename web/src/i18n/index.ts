@@ -114,6 +114,9 @@ const zhCN = {
   'nav.quickConnect': '快速连接',
   'nav.rbac': '权限管理',
   'nav.settings': '配置管理',
+  'nav.aiAccess': 'AI 授权',
+  'route.aiAccess.title': 'AI 授权',
+  'route.aiAccess.description': '为 AI 客户端签发临时访问令牌并提供连接文档',
 
   'route.audit.description': '安全事件与合规审计轨迹',
   'route.audit.title': '审计日志',

@@ -97,6 +97,21 @@ export interface MyAccessContextResponse {
   pages: AccessPage[];
 }
 
+export interface AIAccessTokenRecord {
+  id: string;
+  name: string;
+  access_expires_at: string;
+  refresh_expires_at: string;
+  last_used_at?: string;
+  revoked_at?: string;
+  created_at: string;
+}
+
+export interface IssuedAIAccessToken extends AIAccessTokenRecord {
+  access_token: string;
+  refresh_token: string;
+}
+
 export interface UserPreferences {
   theme: 'system' | 'light' | 'dark';
   ssh_client: string;
@@ -804,6 +819,16 @@ export const apiClient = {
       method: 'PUT',
       body: JSON.stringify(payload),
     }),
+
+  // AI access tokens
+  getAITokens: () => request<AIAccessTokenRecord[]>('/api/ai/tokens'),
+  createAIToken: (payload: { name: string; access_ttl_seconds?: number; refresh_ttl_seconds?: number }) =>
+    request<IssuedAIAccessToken>('/api/ai/tokens', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  revokeAIToken: (id: string) =>
+    request<void>(`/api/ai/tokens/${encodeURIComponent(id)}`, { method: 'DELETE' }),
 
   // hosts
   getHosts: (params?: { page?: number; page_size?: number; q?: string }) =>

@@ -142,6 +142,7 @@ func AllModels() []any {
 		&UserGroupMember{},
 		&UserPreference{},
 		&ConnectionPassword{},
+		&AIAccessToken{},
 		&ResourceGrant{},
 		&Host{},
 		&HostAccount{},

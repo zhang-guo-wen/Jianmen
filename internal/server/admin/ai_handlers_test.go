@@ -1,0 +1,152 @@
+package admin
+
+import (
+	"bytes"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+	"time"
+
+	"jianmen/internal/model"
+	"jianmen/internal/rbac"
+	"jianmen/internal/service"
+)
+
+func TestHandleAITokensIssueRotateAndRevoke(t *testing.T) {
+	server, db := newAdminDBTestServer(t)
+	if err := db.Create(&model.User{ID: "ai-user", Username: "ai-user", Status: "active"}).Error; err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+
+	request := withTestUser(httptest.NewRequest(http.MethodPost, "/api/ai/tokens", bytes.NewBufferString(`{"name":"ops agent","access_ttl_seconds":3600,"refresh_ttl_seconds":86400}`)), "ai-user", "ai-user")
+	response := httptest.NewRecorder()
+	server.handleAITokens(response, request)
+	if response.Code != http.StatusCreated {
+		t.Fatalf("issue status = %d; body=%s", response.Code, response.Body.String())
+	}
+	var issued struct {
+		ID           string `json:"id"`
+		AccessToken  string `json:"access_token"`
+		RefreshToken string `json:"refresh_token"`
+	}
+	if err := decodeTestData(t, response.Body.Bytes(), &issued); err != nil {
+		t.Fatalf("decode issue: %v", err)
+	}
+	if issued.ID == "" || issued.AccessToken == "" || issued.RefreshToken == "" {
+		t.Fatalf("missing issued credential: %#v", issued)
+	}
+	var saved model.AIAccessToken
+	if err := db.First(&saved, "id = ?", issued.ID).Error; err != nil {
+		t.Fatalf("load token: %v", err)
+	}
+	if strings.Contains(response.Body.String(), saved.AccessTokenHash) || strings.Contains(response.Body.String(), saved.RefreshTokenHash) {
+		t.Fatal("response exposed token hashes")
+	}
+
+	listRequest := withTestUser(httptest.NewRequest(http.MethodGet, "/api/ai/tokens", nil), "ai-user", "ai-user")
+	listResponse := httptest.NewRecorder()
+	server.handleAITokens(listResponse, listRequest)
+	if listResponse.Code != http.StatusOK || !strings.Contains(listResponse.Body.String(), "ops agent") {
+		t.Fatalf("list response = %d; body=%s", listResponse.Code, listResponse.Body.String())
+	}
+
+	refreshRequest := httptest.NewRequest(http.MethodPost, "/api/ai/auth/refresh", bytes.NewBufferString(`{"refresh_token":"`+issued.RefreshToken+`"}`))
+	refreshResponse := httptest.NewRecorder()
+	server.handleAIRefresh(refreshResponse, refreshRequest)
+	if refreshResponse.Code != http.StatusOK {
+		t.Fatalf("refresh status = %d; body=%s", refreshResponse.Code, refreshResponse.Body.String())
+	}
+	var refreshed struct {
+		AccessToken  string `json:"access_token"`
+		RefreshToken string `json:"refresh_token"`
+	}
+	if err := decodeTestData(t, refreshResponse.Body.Bytes(), &refreshed); err != nil {
+		t.Fatalf("decode refresh: %v", err)
+	}
+	if refreshed.AccessToken == issued.AccessToken || refreshed.RefreshToken == issued.RefreshToken {
+		t.Fatal("refresh did not rotate credentials")
+	}
+	oldRefresh := httptest.NewRecorder()
+	server.handleAIRefresh(oldRefresh, httptest.NewRequest(http.MethodPost, "/api/ai/auth/refresh", bytes.NewBufferString(`{"refresh_token":"`+issued.RefreshToken+`"}`)))
+	if oldRefresh.Code != http.StatusUnauthorized {
+		t.Fatalf("old refresh status = %d; body=%s", oldRefresh.Code, oldRefresh.Body.String())
+	}
+
+	revokeRequest := withTestUser(httptest.NewRequest(http.MethodDelete, "/api/ai/tokens/"+issued.ID, nil), "ai-user", "ai-user")
+	revokeResponse := httptest.NewRecorder()
+	server.handleAIToken(revokeResponse, revokeRequest)
+	if revokeResponse.Code != http.StatusNoContent {
+		t.Fatalf("revoke status = %d; body=%s", revokeResponse.Code, revokeResponse.Body.String())
+	}
+}
+
+func TestAIResourcesRequireCurrentRBACGrantAndIssueSessionCredential(t *testing.T) {
+	server, db := newAdminDBTestServer(t)
+	seedConnectionAction(t, db, "ai-resource-user", rbac.ActionSessionConnect)
+	if err := db.Create(&model.ResourceGrant{PrincipalType: "user", PrincipalID: "ai-resource-user", ResourceType: model.ResourceTypeHostAccount, ResourceID: "ai-account", Effect: model.PermissionEffectAllow}).Error; err != nil {
+		t.Fatalf("create grant: %v", err)
+	}
+	host := model.Host{ID: "ai-host", Name: "ai-host", Address: "10.0.0.10", Port: 22, Status: "active"}
+	account := model.HostAccount{ID: "ai-account", HostID: host.ID, Name: "root account", Username: "root", AuthType: "password", Password: model.NewEncryptedField("target-secret"), Status: "active", ResourceID: "A001"}
+	if err := db.Create(&host).Error; err != nil {
+		t.Fatalf("create host: %v", err)
+	}
+	if err := db.Create(&account).Error; err != nil {
+		t.Fatalf("create account: %v", err)
+	}
+	issued, err := service.IssueAIAccessToken(time.Now().UTC(), time.Hour, 24*time.Hour)
+	if err != nil {
+		t.Fatalf("issue token: %v", err)
+	}
+	if err := db.Create(&model.AIAccessToken{ID: "ai-token", UserID: "ai-resource-user", Name: "agent", AccessTokenHash: issued.AccessTokenHash, RefreshTokenHash: issued.RefreshTokenHash, AccessExpiresAt: issued.AccessExpiresAt, RefreshExpiresAt: issued.RefreshExpiresAt}).Error; err != nil {
+		t.Fatalf("create AI token: %v", err)
+	}
+
+	request := httptest.NewRequest(http.MethodGet, "/api/ai/resources", nil)
+	request.Header.Set("Authorization", "Bearer "+issued.AccessToken)
+	response := httptest.NewRecorder()
+	server.withAIToken(server.handleAIResources)(response, request)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "ai-account") {
+		t.Fatalf("resource list status = %d; body=%s", response.Code, response.Body.String())
+	}
+
+	credentialRequest := httptest.NewRequest(http.MethodPost, "/api/ai/resources/host_account/ai-account/credentials", nil)
+	credentialRequest.Header.Set("Authorization", "Bearer "+issued.AccessToken)
+	credentialResponse := httptest.NewRecorder()
+	server.withAIToken(server.handleAIResources)(credentialResponse, credentialRequest)
+	if credentialResponse.Code != http.StatusCreated {
+		t.Fatalf("credential status = %d; body=%s", credentialResponse.Code, credentialResponse.Body.String())
+	}
+	var credential struct {
+		Password string `json:"password"`
+	}
+	if err := decodeTestData(t, credentialResponse.Body.Bytes(), &credential); err != nil {
+		t.Fatalf("decode credential: %v", err)
+	}
+	if credential.Password == "" || credential.Password == "target-secret" {
+		t.Fatalf("unexpected credential: %#v", credential)
+	}
+
+	sessionRequest := httptest.NewRequest(http.MethodPost, "/api/ai/resources/host_account/ai-account/session", nil)
+	sessionRequest.Header.Set("Authorization", "Bearer "+issued.AccessToken)
+	sessionResponse := httptest.NewRecorder()
+	server.withAIToken(server.handleAIResources)(sessionResponse, sessionRequest)
+	if sessionResponse.Code != http.StatusCreated || !strings.Contains(sessionResponse.Body.String(), "compact_username") {
+		t.Fatalf("session response = %d; body=%s", sessionResponse.Code, sessionResponse.Body.String())
+	}
+}
+
+func TestHandleAIDocsIsPublicMarkdown(t *testing.T) {
+	server, _ := newAdminDBTestServer(t)
+	request := httptest.NewRequest(http.MethodGet, "/api/ai/docs", nil)
+	request.Host = "bastion.example.test"
+	response := httptest.NewRecorder()
+	server.handleAIDocs(response, request)
+	if response.Code != http.StatusOK || !strings.Contains(response.Header().Get("Content-Type"), "text/markdown") {
+		t.Fatalf("docs response = %d %q", response.Code, response.Header().Get("Content-Type"))
+	}
+	if !strings.Contains(response.Body.String(), "bastion.example.test") || !strings.Contains(response.Body.String(), "/api/ai/auth/refresh") {
+		t.Fatalf("docs missing base URL or refresh endpoint")
+	}
+}

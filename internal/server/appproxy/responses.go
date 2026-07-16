@@ -12,12 +12,16 @@ import (
 )
 
 func (s *Server) writeUnauthorized(w http.ResponseWriter, r *http.Request) {
+	s.writeUnauthorizedForApp(w, r, model.Application{})
+}
+
+func (s *Server) writeUnauthorizedForApp(w http.ResponseWriter, r *http.Request, app model.Application) {
 	w.Header().Set("Cache-Control", "no-store")
 	if !isPageNavigation(r) {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
-	http.Redirect(w, r, s.loginRedirectURL(r), http.StatusFound)
+	http.Redirect(w, r, s.loginRedirectURLForApp(r, app), http.StatusFound)
 }
 
 func (s *Server) writeForbidden(w http.ResponseWriter, r *http.Request, app model.Application) {
@@ -71,10 +75,22 @@ func isPageNavigation(r *http.Request) bool {
 }
 
 func (s *Server) loginRedirectURL(r *http.Request) string {
+	return s.loginRedirectURLForApp(r, model.Application{})
+}
+
+func (s *Server) loginRedirectURLForApp(r *http.Request, app model.Application) string {
+	returnURL := requestPublicURL(r)
+	if entryURL, err := url.Parse(strings.TrimSpace(app.EntryPath)); err == nil && entryURL.Fragment != "" && entryURL.Path == r.URL.Path && entryURL.RawQuery == r.URL.RawQuery {
+		if parsedReturnURL, parseErr := url.Parse(returnURL); parseErr == nil {
+			parsedReturnURL.Fragment = entryURL.Fragment
+			returnURL = parsedReturnURL.String()
+		}
+	}
+
 	loginURL := s.adminBaseURL(r)
 	loginURL.Path = "/login"
 	query := loginURL.Query()
-	query.Set("redirect", requestPublicURL(r))
+	query.Set("redirect", returnURL)
 	loginURL.RawQuery = query.Encode()
 	return loginURL.String()
 }

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -106,13 +107,13 @@ func (s *Server) RemoveProxy(listenPort int) {
 	}
 }
 
-func (s *Server) UpdateProxy(app model.Application) error {
-	s.RemoveProxy(app.ListenPort)
+func (s *Server) UpdateProxy(previousListenPort int, app model.Application) error {
+	s.RemoveProxy(previousListenPort)
 	return s.AddProxy(app)
 }
 
 func (s *Server) startProxy(app model.Application) error {
-	target := fmt.Sprintf("%s://%s:%d", app.InternalScheme, app.InternalHost, app.InternalPort)
+	target := fmt.Sprintf("%s://%s", app.InternalScheme, net.JoinHostPort(app.InternalHost, fmt.Sprintf("%d", app.InternalPort)))
 	targetURL, err := url.Parse(target)
 	if err != nil {
 		return fmt.Errorf("parse target %q: %w", target, err)
@@ -120,7 +121,7 @@ func (s *Server) startProxy(app model.Application) error {
 
 	rp := httputil.NewSingleHostReverseProxy(targetURL)
 	rp.ErrorHandler = s.proxyErrorHandler(app)
-	handler := s.authMiddleware(s.rbacMiddleware(app, rp))
+	handler := s.authMiddleware(app, s.rbacMiddleware(app, s.entryRedirectMiddleware(app, rp)))
 
 	addr := fmt.Sprintf(":%d", app.ListenPort)
 	srv := &http.Server{
@@ -140,11 +141,25 @@ func (s *Server) startProxy(app model.Application) error {
 	return nil
 }
 
-func (s *Server) authMiddleware(next http.Handler) http.Handler {
+func (s *Server) entryRedirectMiddleware(app model.Application, next http.Handler) http.Handler {
+	entryPath := strings.TrimSpace(app.EntryPath)
+	if entryPath == "" {
+		entryPath = "/"
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if isPageNavigation(r) && r.URL.Path == "/" && r.URL.RawQuery == "" && entryPath != "/" {
+			http.Redirect(w, r, entryPath, http.StatusFound)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func (s *Server) authMiddleware(app model.Application, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		token := requestToken(r)
 		if token == "" || !s.validateToken(token) {
-			s.writeUnauthorized(w, r)
+			s.writeUnauthorizedForApp(w, r, app)
 			return
 		}
 		next.ServeHTTP(w, r)
@@ -155,7 +170,7 @@ func (s *Server) rbacMiddleware(app model.Application, next http.Handler) http.H
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		userID := s.getUserID(r)
 		if userID == "" {
-			s.writeUnauthorized(w, r)
+			s.writeUnauthorizedForApp(w, r, app)
 			return
 		}
 		if err := s.authorizeApp(userID, app.ID); err != nil {

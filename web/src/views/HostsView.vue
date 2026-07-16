@@ -61,7 +61,7 @@
                 @click="openEditHostDialog(row)"
                 >编辑</el-button
               >
-              <el-dropdown v-if="permission.canDo('audit:view') || permission.canDo('session:view') || (row.can_manage && (permission.canDo('rbac:manage') || permission.canDo('host:delete')))" trigger="click" teleported>
+              <el-dropdown v-if="permission.canDo('audit:view') || permission.canDo('session:view') || (row.can_manage && permission.canDo('host:delete'))" trigger="click" teleported>
                 <el-button link type="primary" size="small"
                   >更多<el-icon class="el-icon--right"><ArrowDown /></el-icon></el-button
                 >
@@ -69,7 +69,6 @@
                   <el-dropdown-menu>
                     <el-dropdown-item v-if="permission.canDo('audit:view')" @click="handleHostAuditLog(row)">审计日志</el-dropdown-item>
                     <el-dropdown-item v-if="permission.canDo('session:view')" @click="handleHostSessions(row)">在线会话</el-dropdown-item>
-                    <el-dropdown-item v-if="row.can_manage && permission.canDo('rbac:manage')" @click="handleHostPermissions(row)">权限管理</el-dropdown-item>
                     <el-dropdown-item v-if="row.can_manage && permission.canDo('host:delete')"
                       class="danger-dropdown-item"
                       @click="confirmDeleteHost(row)"
@@ -1596,11 +1595,6 @@ function handleHostSessions(host: HostView) {
       q: hostName(host),
     },
   });
-}
-
-/** 更多操作 - 权限管理（占位） */
-function handleHostPermissions(_host: HostView) {
-  ElMessage.info('权限管理功能开发中');
 }
 
 watch(

@@ -140,10 +140,6 @@ body {
   border-top: 1px solid rgb(255 255 255 / 8%);
 }
 
-.sidebar-locale {
-  width: 100%;
-}
-
 .sidebar-logout {
   width: 100%;
   --el-button-bg-color: rgb(255 255 255 / 6%);

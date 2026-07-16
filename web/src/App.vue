@@ -27,18 +27,6 @@
           </el-menu-item>
         </el-menu>
         <div class="sidebar-footer">
-          <el-select
-            v-model="selectedLocale"
-            class="sidebar-locale"
-            :aria-label="t('app.language')"
-          >
-            <el-option
-              v-for="option in localeOptions"
-              :key="option.value"
-              :label="option.label"
-              :value="option.value"
-            />
-          </el-select>
           <el-button
             class="sidebar-logout"
             type="primary"
@@ -88,23 +76,17 @@ import { usePreferencesStore } from "@/stores/preferences";
 import {
   isTranslationKey,
   useI18n,
-  type Locale,
   type TranslationKey,
 } from "@/i18n";
 
 const route = useRoute();
 const router = useRouter();
-const { elementLocale, locale, localeOptions, setLocale, t } = useI18n();
+const { elementLocale, t } = useI18n();
 
 const isLoginRoute = computed(
   () => route.name === "login" || route.name === "setup",
 );
 const activePath = computed(() => route.path);
-const selectedLocale = computed<Locale>({
-  get: () => locale.value,
-  set: (nextLocale) => setLocale(nextLocale),
-});
-
 const permission = usePermissionStore();
 const preferences = usePreferencesStore();
 const navItems = computed(() =>

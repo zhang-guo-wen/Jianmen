@@ -6,19 +6,6 @@
           <h1 class="login-title">Jianmen</h1>
           <p class="login-subtitle">{{ t('login.subtitle') }}</p>
         </div>
-        <el-select
-          v-model="selectedLocale"
-          class="login-language"
-          size="small"
-          :aria-label="t('app.language')"
-        >
-          <el-option
-            v-for="option in localeOptions"
-            :key="option.value"
-            :label="option.label"
-            :value="option.value"
-          />
-        </el-select>
       </div>
       <el-form ref="formRef" :model="form" :rules="rules" label-position="top" @submit.prevent="submit">
         <el-form-item :label="t('login.username')" prop="username">
@@ -48,17 +35,17 @@
 </template>
 
 <script setup lang="ts">
-import { computed, reactive, ref } from 'vue';
+import { reactive, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import type { FormInstance, FormRules } from 'element-plus';
 
 import { apiClient, setToken } from '@/api/client';
-import { useI18n, type Locale } from '@/i18n';
+import { useI18n } from '@/i18n';
 import { usePreferencesStore } from '@/stores/preferences';
 
 const route = useRoute();
 const router = useRouter();
-const { locale, localeOptions, setLocale, t } = useI18n();
+const { t } = useI18n();
 const preferences = usePreferencesStore();
 const formRef = ref<FormInstance>();
 const submitting = ref(false);
@@ -67,11 +54,6 @@ const loginError = ref('');
 const form = reactive({
   username: '',
   password: '',
-});
-
-const selectedLocale = computed<Locale>({
-  get: () => locale.value,
-  set: (nextLocale) => setLocale(nextLocale)
 });
 
 const rules: FormRules = {
@@ -118,10 +100,6 @@ async function submit() {
   align-items: flex-start;
   justify-content: space-between;
   gap: 16px;
-}
-
-.login-language {
-  width: 120px;
 }
 
 .login-button {

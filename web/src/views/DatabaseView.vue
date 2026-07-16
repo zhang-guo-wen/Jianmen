@@ -38,7 +38,7 @@
           <div class="table-actions">
             <el-button v-if="permission.canDo('db:connect')" link type="success" size="small" @click="handleDBConnect(row)">连接</el-button>
             <el-button v-if="row.can_manage && permission.canDo('dbproxy:update')" link type="primary" size="small" @click="editInstance(row)">编辑</el-button>
-            <el-dropdown v-if="permission.canDo('db:audit:view') || permission.canDo('session:view') || (row.can_manage && (permission.canDo('rbac:manage') || permission.canDo('dbproxy:delete')))" trigger="click" teleported>
+            <el-dropdown v-if="permission.canDo('db:audit:view') || permission.canDo('session:view') || (row.can_manage && permission.canDo('dbproxy:delete'))" trigger="click" teleported>
               <el-button link type="primary" size="small"
                 >更多<el-icon class="el-icon--right"><ArrowDown /></el-icon></el-button
               >
@@ -46,7 +46,6 @@
                 <el-dropdown-menu>
                   <el-dropdown-item v-if="permission.canDo('db:audit:view')" @click="handleDBAuditLog(row)">审计日志</el-dropdown-item>
                   <el-dropdown-item v-if="permission.canDo('session:view')" @click="handleDBSessions(row)">在线会话</el-dropdown-item>
-                  <el-dropdown-item v-if="row.can_manage && permission.canDo('rbac:manage')" @click="handleDBPermissions(row)">权限管理</el-dropdown-item>
                   <el-dropdown-item v-if="row.can_manage && permission.canDo('dbproxy:delete')" class="danger-dropdown-item" @click="deleteInstance(row)">删除</el-dropdown-item>
                 </el-dropdown-menu>
               </template>
@@ -805,11 +804,6 @@ function handleDBSessions(inst: api.DatabaseInstanceView) {
       q: String(inst.name || instanceEndpoint(inst)),
     },
   })
-}
-
-/** 更多操作 - 权限管理（占位） */
-function handleDBPermissions(_inst: api.DatabaseInstanceView) {
-  ElMessage.info('权限管理功能开发中');
 }
 
 // ── Connect dialog ──

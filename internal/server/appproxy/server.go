@@ -23,6 +23,7 @@ import (
 
 type Server struct {
 	cfg           config.ApplicationGatewayConfig
+	adminCfg      config.AdminConfig
 	db            *gorm.DB
 	checker       permissionChecker
 	resourceGrant resourceGrantChecker
@@ -47,12 +48,13 @@ type proxyEntry struct {
 	proxy  *httputil.ReverseProxy
 }
 
-func New(cfg config.ApplicationGatewayConfig, db *gorm.DB, superAdminIDs map[string]bool, logger *slog.Logger) *Server {
+func New(cfg config.ApplicationGatewayConfig, adminCfg config.AdminConfig, db *gorm.DB, superAdminIDs map[string]bool, logger *slog.Logger) *Server {
 	if logger == nil {
 		logger = slog.Default()
 	}
 	return &Server{
 		cfg:           cfg,
+		adminCfg:      adminCfg,
 		db:            db,
 		checker:       rbaccheck.NewChecker(db),
 		resourceGrant: rbaccheck.NewResourceGrantChecker(db),
@@ -117,6 +119,7 @@ func (s *Server) startProxy(app model.Application) error {
 	}
 
 	rp := httputil.NewSingleHostReverseProxy(targetURL)
+	rp.ErrorHandler = s.proxyErrorHandler(app)
 	handler := s.authMiddleware(s.rbacMiddleware(app, rp))
 
 	addr := fmt.Sprintf(":%d", app.ListenPort)
@@ -139,21 +142,9 @@ func (s *Server) startProxy(app model.Application) error {
 
 func (s *Server) authMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		cookie, err := r.Cookie("jianmen_token")
-		if err != nil {
-			auth := r.Header.Get("Authorization")
-			token := strings.TrimPrefix(auth, "Bearer ")
-			if token != "" && token != auth {
-				if !s.validateToken(token) {
-					http.Error(w, "unauthorized", http.StatusUnauthorized)
-					return
-				}
-			} else {
-				http.Error(w, "unauthorized", http.StatusUnauthorized)
-				return
-			}
-		} else if !s.validateToken(cookie.Value) {
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
+		token := requestToken(r)
+		if token == "" || !s.validateToken(token) {
+			s.writeUnauthorized(w, r)
 			return
 		}
 		next.ServeHTTP(w, r)
@@ -164,11 +155,11 @@ func (s *Server) rbacMiddleware(app model.Application, next http.Handler) http.H
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		userID := s.getUserID(r)
 		if userID == "" {
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			s.writeUnauthorized(w, r)
 			return
 		}
 		if err := s.authorizeApp(userID, app.ID); err != nil {
-			http.Error(w, "forbidden", http.StatusForbidden)
+			s.writeForbidden(w, r, app)
 			return
 		}
 		next.ServeHTTP(w, r)
@@ -208,16 +199,19 @@ func (s *Server) validateToken(token string) bool {
 }
 
 func (s *Server) getUserID(r *http.Request) string {
-	cookie, err := r.Cookie("jianmen_token")
-	if err != nil {
-		auth := r.Header.Get("Authorization")
-		token := strings.TrimPrefix(auth, "Bearer ")
-		if token == "" || token == auth {
-			return ""
-		}
-		return s.userIDForToken(token)
+	return s.userIDForToken(requestToken(r))
+}
+
+func requestToken(r *http.Request) string {
+	if cookie, err := r.Cookie("jianmen_token"); err == nil && cookie.Value != "" {
+		return cookie.Value
 	}
-	return s.userIDForToken(cookie.Value)
+	auth := r.Header.Get("Authorization")
+	token := strings.TrimPrefix(auth, "Bearer ")
+	if token == "" || token == auth {
+		return ""
+	}
+	return token
 }
 
 func (s *Server) userIDForToken(token string) string {

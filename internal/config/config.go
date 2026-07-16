@@ -4,27 +4,30 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"net/url"
 	"os"
+	"strings"
 )
 
 type Config struct {
-	ListenAddr      string                `json:"listen_addr"`
-	HostKeyPath     string                `json:"host_key_path"`
-	ReplayDir       string                `json:"replay_dir"`
-	TargetsFile     string                `json:"targets_file"`
-	Admin           AdminConfig           `json:"admin"`
-	Database        DatabaseConfig        `json:"database"`
+	ListenAddr         string                   `json:"listen_addr"`
+	HostKeyPath        string                   `json:"host_key_path"`
+	ReplayDir          string                   `json:"replay_dir"`
+	TargetsFile        string                   `json:"targets_file"`
+	Admin              AdminConfig              `json:"admin"`
+	Database           DatabaseConfig           `json:"database"`
 	DatabaseGateway    DatabaseGatewayConfig    `json:"database_gateway"`
 	ApplicationGateway ApplicationGatewayConfig `json:"application_gateway"`
 	Recording          RecordingConfig          `json:"recording"`
-	Users           []User                `json:"users"`
-	Targets         []Target              `json:"targets"`
-	DefaultTarget   string   `json:"default_target"`
+	Users              []User                   `json:"users"`
+	Targets            []Target                 `json:"targets"`
+	DefaultTarget      string                   `json:"default_target"`
 }
 
 type AdminConfig struct {
 	Enabled            bool     `json:"enabled"`
 	ListenAddr         string   `json:"listen_addr"`
+	PublicURL          string   `json:"public_url"`
 	CORSAllowedOrigins []string `json:"cors_allowed_origins"`
 	Dev                bool     `json:"dev"`
 }
@@ -84,7 +87,6 @@ type Target struct {
 	HostKeyFingerprint    string `json:"host_key_fingerprint"`
 	KnownHostsPath        string `json:"known_hosts_path"`
 }
-
 
 func Load(path string) (*Config, error) {
 	file, err := os.Open(path)
@@ -183,6 +185,9 @@ func (c *Config) Validate() error {
 		if _, _, err := net.SplitHostPort(c.Admin.ListenAddr); err != nil {
 			return fmt.Errorf("invalid admin.listen_addr %q: %w", c.Admin.ListenAddr, err)
 		}
+		if err := validatePublicURL(c.Admin.PublicURL); err != nil {
+			return fmt.Errorf("invalid admin.public_url: %w", err)
+		}
 	}
 	if c.Database.Enabled {
 		switch c.Database.Driver {
@@ -215,6 +220,30 @@ func (c *Config) Validate() error {
 	// Users may be empty — the setup wizard creates the first admin user.
 	if len(c.Users) == 0 {
 		// No hard error; admin user is created via the setup wizard at /api/init/setup
+	}
+	return nil
+}
+
+func validatePublicURL(raw string) error {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		return err
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return fmt.Errorf("scheme must be http or https")
+	}
+	if parsed.Host == "" {
+		return fmt.Errorf("host is required")
+	}
+	if parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return fmt.Errorf("credentials, query, and fragment are not allowed")
+	}
+	if parsed.Path != "" && parsed.Path != "/" {
+		return fmt.Errorf("path must be empty")
 	}
 	return nil
 }

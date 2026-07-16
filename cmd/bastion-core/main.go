@@ -116,7 +116,7 @@ func main() {
 	dbGateway := dbproxy.NewGateway(cfg.DatabaseGateway, appStore, cfg.ReplayDir, logger, metadataDB, superAdminIDs, onlineSessions, appStore)
 
 	if cfg.Admin.Enabled {
-		appProxy := appproxy.New(cfg.ApplicationGateway, metadataDB, superAdminIDs, logger)
+		appProxy := appproxy.New(cfg.ApplicationGateway, cfg.Admin, metadataDB, superAdminIDs, logger)
 		go func() {
 			errCh <- appProxy.ListenAndServe(ctx)
 		}()

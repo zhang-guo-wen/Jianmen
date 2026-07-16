@@ -4,7 +4,7 @@
   Key,
   Link,
   Lock,
-  Key,
+  Cpu,
   Monitor,
   Setting,
 } from '@element-plus/icons-vue';
@@ -99,7 +99,7 @@ export const APP_NAV_ITEMS: AppNavigationItem[] = [
     key: 'aiAccess',
     path: '/ai-access',
     name: 'ai-access',
-    icon: Key,
+    icon: Cpu,
     labelKey: 'nav.aiAccess',
     titleKey: 'route.aiAccess.title',
     descriptionKey: 'route.aiAccess.description',

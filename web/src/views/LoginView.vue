@@ -42,6 +42,7 @@ import type { FormInstance, FormRules } from 'element-plus';
 import { apiClient, setToken } from '@/api/client';
 import { useI18n } from '@/i18n';
 import { usePreferencesStore } from '@/stores/preferences';
+import { resolveLoginRedirect } from '@/utils/loginRedirect';
 
 const route = useRoute();
 const router = useRouter();
@@ -76,7 +77,12 @@ async function submit() {
     }
     setToken(token);
     await preferences.fetch({ force: true }).catch(() => undefined);
-    router.push(typeof route.query.redirect === 'string' ? route.query.redirect : '/quick-connect');
+    const redirect = resolveLoginRedirect(route.query.redirect);
+    if (redirect.external) {
+      window.location.assign(redirect.target);
+      return;
+    }
+    await router.push(redirect.target);
   } catch (err: any) {
     loginError.value = err?.message || '登录失败，请检查用户名和密码';
   } finally {

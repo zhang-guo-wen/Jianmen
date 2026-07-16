@@ -71,6 +71,17 @@ docker run -d \
 http://服务器IP:47100
 ```
 
+应用代理在用户未登录时会自动跳转到 Jianmen 登录页。默认会使用当前访问的主机名和 `admin.listen_addr` 的端口生成登录地址。如果通过域名、HTTPS 反向代理或开发服务访问，请显式配置对外管理地址：
+
+```json
+"admin": {
+  "listen_addr": "0.0.0.0:47100",
+  "public_url": "https://jianmen.example.com"
+}
+```
+
+`admin.public_url` 只允许 HTTP/HTTPS 的站点根地址，不能包含路径、查询参数或片段。为了让登录 Cookie 在管理端口和应用代理端口之间共享，建议使用相同主机名。
+
 容器默认使用仓库中的 `config.docker.json`。如需自定义数据库、监听地址或端口，可以挂载自己的配置文件：
 
 ```bash

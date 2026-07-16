@@ -87,6 +87,9 @@ func (s *DBStore) AddApplication(name, scheme, host string, port, listenPort int
 		if err := tx.Create(&app).Error; err != nil {
 			return err
 		}
+		if err := ensureResourceGroup(tx, app.AppGroup); err != nil {
+			return err
+		}
 		return s.syncResourceTx(tx, model.ResourceTypeApplication, app.ID, app.Name, "")
 	}); err != nil {
 		return ApplicationView{}, err
@@ -129,6 +132,9 @@ func (s *DBStore) UpdateApplication(id, name, scheme, host string, port, listenP
 	}
 	if err := s.db.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Save(&app).Error; err != nil {
+			return err
+		}
+		if err := ensureResourceGroup(tx, app.AppGroup); err != nil {
 			return err
 		}
 		return s.syncResourceTx(tx, model.ResourceTypeApplication, app.ID, app.Name, "")

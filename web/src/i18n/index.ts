@@ -678,6 +678,8 @@ const zhCN = {
   'resourceGroups.description': '描述',
   'resourceGroups.hostCount': '主机数',
   'resourceGroups.databaseCount': '数据库实例数',
+  'resourceGroups.applicationCount': '应用数',
+  'resourceGroups.platformCount': '平台数',
   'resourceGroups.accountCount': '账号数',
   'resourceGroups.confirmDelete': '确认删除分组 "{name}"？删除后关联的分组将被清空。',
 } satisfies Record<string, string>;
@@ -1354,6 +1356,8 @@ const enUS = {
   'resourceGroups.description': 'Description',
   'resourceGroups.hostCount': 'Hosts',
   'resourceGroups.databaseCount': 'DB Instances',
+  'resourceGroups.applicationCount': 'Applications',
+  'resourceGroups.platformCount': 'Platforms',
   'resourceGroups.accountCount': 'Accounts',
   'resourceGroups.confirmDelete': 'Delete group "{name}"? Related items will be ungrouped.',
 } satisfies Record<TranslationKey, string>;

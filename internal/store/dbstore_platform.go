@@ -3,6 +3,7 @@ package store
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"gorm.io/gorm"
@@ -135,9 +136,13 @@ func (s *DBStore) AddPlatformAccount(acc model.PlatformAccount) (PlatformAccount
 	if acc.Visibility == "" {
 		acc.Visibility = "private"
 	}
+	acc.GroupName = strings.TrimSpace(acc.GroupName)
 
 	if err := s.db.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Create(&acc).Error; err != nil {
+			return err
+		}
+		if err := ensureResourceGroup(tx, acc.GroupName); err != nil {
 			return err
 		}
 		return s.syncResourceTx(tx, model.ResourceTypePlatformAccount, acc.ID, acc.Name, "")
@@ -168,7 +173,7 @@ func (s *DBStore) UpdatePlatformAccount(id string, acc model.PlatformAccount) (P
 		existing.Category = acc.Category
 	}
 	if acc.GroupName != "" {
-		existing.GroupName = acc.GroupName
+		existing.GroupName = strings.TrimSpace(acc.GroupName)
 	}
 	if acc.Username != "" {
 		existing.Username = acc.Username
@@ -198,6 +203,9 @@ func (s *DBStore) UpdatePlatformAccount(id string, acc model.PlatformAccount) (P
 
 	if err := s.db.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Save(&existing).Error; err != nil {
+			return err
+		}
+		if err := ensureResourceGroup(tx, existing.GroupName); err != nil {
 			return err
 		}
 		return s.syncResourceTx(tx, model.ResourceTypePlatformAccount, existing.ID, existing.Name, "")

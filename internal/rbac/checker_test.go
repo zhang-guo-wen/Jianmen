@@ -49,7 +49,7 @@ func TestHasPermissionSupportsResourceGroupGrant(t *testing.T) {
 	assertPermission(t, checker, "u1", "session:connect", "host_account", "target-missing", false)
 }
 
-func TestHasPermissionSupportsGroupForHostAndDatabaseInstance(t *testing.T) {
+func TestHasPermissionSupportsGroupForResourceContainers(t *testing.T) {
 	db := newTestDB(t)
 	seedRBAC(t, db, "u1", []model.Permission{
 		{ID: "p-connect", Action: "session:connect", Effect: model.PermissionEffectAllow},
@@ -71,6 +71,12 @@ func TestHasPermissionSupportsGroupForHostAndDatabaseInstance(t *testing.T) {
 	if err := db.Create(&model.DatabaseAccount{ID: "dbacct1", InstanceID: "db1", UniqueName: "app_user", Username: "app", Status: "active"}).Error; err != nil {
 		t.Fatalf("create db account: %v", err)
 	}
+	if err := db.Create(&model.Application{ID: "app1", Name: "console", AppGroup: "prod", ListenPort: 18080, InternalScheme: "http", InternalHost: "127.0.0.1", InternalPort: 8080, Status: "active"}).Error; err != nil {
+		t.Fatalf("create application: %v", err)
+	}
+	if err := db.Create(&model.PlatformAccount{ID: "platform1", Name: "gitlab", PlatformName: "GitLab", GroupName: "prod", Username: "admin", OwnerID: "u1", Visibility: "private", Status: "active"}).Error; err != nil {
+		t.Fatalf("create platform account: %v", err)
+	}
 
 	checker := NewChecker(db)
 	// host 本身在 prod 组内
@@ -79,6 +85,8 @@ func TestHasPermissionSupportsGroupForHostAndDatabaseInstance(t *testing.T) {
 	assertPermission(t, checker, "u1", "session:connect", model.ResourceTypeDatabaseInstance, "db1", true)
 	// database_account 所属实例在 prod 组内
 	assertPermission(t, checker, "u1", "session:connect", model.ResourceTypeDatabaseAccount, "dbacct1", true)
+	assertPermission(t, checker, "u1", "session:connect", model.ResourceTypeApplication, "app1", true)
+	assertPermission(t, checker, "u1", "session:connect", model.ResourceTypePlatformAccount, "platform1", true)
 }
 
 func TestHasPermissionDenyOverridesAllow(t *testing.T) {

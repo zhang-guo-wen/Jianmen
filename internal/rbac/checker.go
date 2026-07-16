@@ -137,6 +137,18 @@ func (c *Checker) groupContainsResource(groupID, resourceType, resourceID string
 			Where("group_name = ? AND id = ?", groupName, resourceID).
 			Count(&count)
 		return count > 0
+	case resourceType == model.ResourceTypeApplication:
+		var count int64
+		c.db.Model(&model.Application{}).
+			Where("app_group = ? AND id = ?", groupName, resourceID).
+			Count(&count)
+		return count > 0
+	case resourceType == model.ResourceTypePlatformAccount:
+		var count int64
+		c.db.Model(&model.PlatformAccount{}).
+			Where("group_name = ? AND id = ?", groupName, resourceID).
+			Count(&count)
+		return count > 0
 	default:
 		return false
 	}

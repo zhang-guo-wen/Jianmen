@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"strings"
 
+	"gorm.io/gorm"
+
 	"jianmen/internal/model"
 	"jianmen/internal/rbac"
 )
@@ -82,9 +84,11 @@ func (s *Server) listResourceGroups(w http.ResponseWriter, r *http.Request) {
 
 	type groupWithCount struct {
 		model.ResourceGroup
-		HostCount     int64 `json:"host_count"`
-		DatabaseCount int64 `json:"database_count"`
-		AccountCount  int64 `json:"account_count"`
+		HostCount        int64 `json:"host_count"`
+		DatabaseCount    int64 `json:"database_count"`
+		ApplicationCount int64 `json:"application_count"`
+		PlatformCount    int64 `json:"platform_count"`
+		AccountCount     int64 `json:"account_count"`
 	}
 
 	result := make([]groupWithCount, 0, len(groups))
@@ -93,6 +97,8 @@ func (s *Server) listResourceGroups(w http.ResponseWriter, r *http.Request) {
 		if g.GroupType == model.ResourceGroupTypeResource {
 			s.db.Model(&model.Host{}).Where("group_name = ?", g.Name).Count(&gwc.HostCount)
 			s.db.Model(&model.DatabaseInstance{}).Where("group_name = ?", g.Name).Count(&gwc.DatabaseCount)
+			s.db.Model(&model.Application{}).Where("app_group = ?", g.Name).Count(&gwc.ApplicationCount)
+			s.db.Model(&model.PlatformAccount{}).Where("group_name = ?", g.Name).Count(&gwc.PlatformCount)
 		} else {
 			s.db.Model(&model.HostAccount{}).Where("group_name = ?", g.Name).Count(&gwc.AccountCount)
 			var dbCount int64
@@ -163,22 +169,22 @@ func (s *Server) updateResourceGroup(w http.ResponseWriter, r *http.Request, id 
 		return
 	}
 
-	if strings.TrimSpace(update.Name) != "" {
-		oldName := group.Name
-		group.Name = update.Name
-		if group.GroupType == model.ResourceGroupTypeResource {
-			s.db.Model(&model.Host{}).Where("group_name = ?", oldName).Update("group_name", group.Name)
-			s.db.Model(&model.DatabaseInstance{}).Where("group_name = ?", oldName).Update("group_name", group.Name)
-		} else {
-			s.db.Model(&model.HostAccount{}).Where("group_name = ?", oldName).Update("group_name", group.Name)
-			s.db.Model(&model.DatabaseAccount{}).Where("group_name = ?", oldName).Update("group_name", group.Name)
-		}
+	oldName := group.Name
+	if name := strings.TrimSpace(update.Name); name != "" {
+		group.Name = name
 	}
 	if update.Description != "" {
 		group.Description = update.Description
 	}
 
-	if err := s.db.Save(&group).Error; err != nil {
+	if err := s.db.Transaction(func(tx *gorm.DB) error {
+		if oldName != group.Name {
+			if err := updateGroupedResources(tx, group.GroupType, oldName, group.Name); err != nil {
+				return err
+			}
+		}
+		return tx.Save(&group).Error
+	}); err != nil {
 		s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -198,19 +204,42 @@ func (s *Server) deleteResourceGroup(w http.ResponseWriter, r *http.Request, id 
 		return
 	}
 
-	// 按分组类型清空对应资源的 group_name
-	if group.GroupType == model.ResourceGroupTypeResource {
-		s.db.Model(&model.Host{}).Where("group_name = ?", group.Name).Update("group_name", "")
-		s.db.Model(&model.DatabaseInstance{}).Where("group_name = ?", group.Name).Update("group_name", "")
-	} else {
-		s.db.Model(&model.HostAccount{}).Where("group_name = ?", group.Name).Update("group_name", "")
-		s.db.Model(&model.DatabaseAccount{}).Where("group_name = ?", group.Name).Update("group_name", "")
-	}
-
-	if err := s.db.Delete(&group).Error; err != nil {
+	if err := s.db.Transaction(func(tx *gorm.DB) error {
+		if err := updateGroupedResources(tx, group.GroupType, group.Name, ""); err != nil {
+			return err
+		}
+		return tx.Delete(&group).Error
+	}); err != nil {
 		s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
 		return
 	}
 
 	s.writeJSON(w, r, http.StatusOK, map[string]string{"message": "resource group deleted"})
+}
+
+func updateGroupedResources(tx *gorm.DB, groupType, oldName, newName string) error {
+	type groupedModel struct {
+		model  any
+		column string
+	}
+	var items []groupedModel
+	if groupType == model.ResourceGroupTypeResource {
+		items = []groupedModel{
+			{model: &model.Host{}, column: "group_name"},
+			{model: &model.DatabaseInstance{}, column: "group_name"},
+			{model: &model.Application{}, column: "app_group"},
+			{model: &model.PlatformAccount{}, column: "group_name"},
+		}
+	} else {
+		items = []groupedModel{
+			{model: &model.HostAccount{}, column: "group_name"},
+			{model: &model.DatabaseAccount{}, column: "group_name"},
+		}
+	}
+	for _, item := range items {
+		if err := tx.Model(item.model).Where(item.column+" = ?", oldName).Update(item.column, newName).Error; err != nil {
+			return err
+		}
+	}
+	return nil
 }

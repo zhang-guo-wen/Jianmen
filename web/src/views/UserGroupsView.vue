@@ -127,7 +127,7 @@ const saving = ref(false)
 
 // 分页与搜索状态
 const page = ref(1)
-const pageSize = ref(20)
+const pageSize = ref(50)
 const total = ref(0)
 const keyword = ref('')
 

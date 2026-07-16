@@ -96,7 +96,7 @@ func (s *DBStore) PlatformAccounts(params PlatformAccountListParams) ([]Platform
 	}
 	pageSize := params.PageSize
 	if pageSize < 1 || pageSize > 200 {
-		pageSize = 20
+		pageSize = 50
 	}
 
 	var accounts []model.PlatformAccount

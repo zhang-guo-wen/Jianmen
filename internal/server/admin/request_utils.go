@@ -10,6 +10,8 @@ import (
 	"jianmen/internal/store"
 )
 
+const defaultPageSize = 50
+
 func (s *Server) forbidden(w http.ResponseWriter, r *http.Request) {
 	s.writeErrorText(w, r, http.StatusForbidden, "forbidden")
 }
@@ -64,7 +66,7 @@ func paginateSlice[T any](items []T, r *http.Request, match func(T, string) bool
 		items = filtered
 	}
 	page := positiveIntRequestQuery(r, "page", 1)
-	pageSize := positiveIntRequestQuery(r, "page_size", 20)
+	pageSize := positiveIntRequestQuery(r, "page_size", defaultPageSize)
 	if pageSize > 200 {
 		pageSize = 200
 	}

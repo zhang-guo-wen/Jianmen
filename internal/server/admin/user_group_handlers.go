@@ -118,7 +118,7 @@ func (s *Server) listUserGroups(w http.ResponseWriter, r *http.Request) {
 	tx.Count(&total)
 
 	page := positiveIntRequestQuery(r, "page", 1)
-	pageSize := positiveIntRequestQuery(r, "page_size", 20)
+	pageSize := positiveIntRequestQuery(r, "page_size", defaultPageSize)
 	if pageSize > 200 {
 		pageSize = 200
 	}

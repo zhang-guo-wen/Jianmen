@@ -69,7 +69,7 @@ func (s *Server) handleRBACRoles(w http.ResponseWriter, r *http.Request) {
 		var total int64
 		tx.Count(&total)
 		page := positiveIntRequestQuery(r, "page", 1)
-		pageSize := positiveIntRequestQuery(r, "page_size", 20)
+		pageSize := positiveIntRequestQuery(r, "page_size", defaultPageSize)
 		if pageSize > 200 {
 			pageSize = 200
 		}
@@ -192,7 +192,7 @@ func (s *Server) handleRBACPermissions(w http.ResponseWriter, r *http.Request) {
 		var total int64
 		tx.Count(&total)
 		page := positiveIntRequestQuery(r, "page", 1)
-		pageSize := positiveIntRequestQuery(r, "page_size", 20)
+		pageSize := positiveIntRequestQuery(r, "page_size", defaultPageSize)
 		if pageSize > 200 {
 			pageSize = 200
 		}
@@ -307,7 +307,7 @@ func (s *Server) handleRBACUserRoles(w http.ResponseWriter, r *http.Request) {
 		var total int64
 		tx.Count(&total)
 		page := positiveIntRequestQuery(r, "page", 1)
-		pageSize := positiveIntRequestQuery(r, "page_size", 20)
+		pageSize := positiveIntRequestQuery(r, "page_size", defaultPageSize)
 		if pageSize > 200 {
 			pageSize = 200
 		}
@@ -387,7 +387,7 @@ func (s *Server) handleRBACRolePermissions(w http.ResponseWriter, r *http.Reques
 		var total int64
 		tx.Count(&total)
 		page := positiveIntRequestQuery(r, "page", 1)
-		pageSize := positiveIntRequestQuery(r, "page_size", 20)
+		pageSize := positiveIntRequestQuery(r, "page_size", defaultPageSize)
 		if pageSize > 200 {
 			pageSize = 200
 		}

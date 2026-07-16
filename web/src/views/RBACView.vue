@@ -558,24 +558,24 @@ const allPermissionsLoaded = ref(false);
 const roles = ref<RBACRoleRecord[]>([]);
 const roleTotal = ref(0);
 const rolePage = ref(1);
-const rolePageSize = ref(20);
+const rolePageSize = ref(50);
 const roleKeyword = ref('');
 
 const permissions = ref<RBACPermissionRecord[]>([]);
 const permissionTotal = ref(0);
 const permissionPage = ref(1);
-const permissionPageSize = ref(20);
+const permissionPageSize = ref(50);
 const permissionKeyword = ref('');
 
 const userRoles = ref<RBACUserRoleRecord[]>([]);
 const userRoleTotal = ref(0);
 const userRolePage = ref(1);
-const userRolePageSize = ref(20);
+const userRolePageSize = ref(50);
 
 const rolePermissions = ref<RBACRolePermissionRecord[]>([]);
 const rolePermissionTotal = ref(0);
 const rolePermissionPage = ref(1);
-const rolePermissionPageSize = ref(20);
+const rolePermissionPageSize = ref(50);
 
 // ── Resource state (for resource picker) ──
 const targets = ref<TargetRecord[]>([]);

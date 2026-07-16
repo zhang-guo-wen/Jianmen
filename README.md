@@ -35,30 +35,13 @@
 
 ## 部署
 
-Jianmen 的前端资源已经嵌入 Go 二进制中，部署时只需要运行一个程序。生产环境必须持久化 `data/` 目录，其中包含 SQLite 数据库、SSH Host Key、凭据加密密钥和审计回放文件。
-
 ### Docker 部署
-
-GitHub Container Registry 提供以下镜像标签：
-
-| 标签 | 用途 |
-|---|---|
-| `latest` | 最新正式版本 |
-| `X.Y.Z`、`X.Y` | 指定正式版本 |
-| `dev` | `dev` 分支最新构建，仅用于测试 |
 
 拉取正式版本镜像：
 
 ```bash
 docker pull ghcr.io/zhang-guo-wen/jianmen:latest
 ```
-
-如果镜像设置为私有，需要先使用具备 `read:packages` 权限的 GitHub Personal Access Token 登录：
-
-```bash
-echo "$CR_PAT" | docker login ghcr.io -u zhang-guo-wen --password-stdin
-```
-
 启动容器：
 
 ```bash
@@ -122,111 +105,7 @@ docker rm -f jianmen
 | Windows | `jianmen-vX.Y.Z-windows-amd64.zip` | `jianmen-vX.Y.Z-windows-arm64.zip` |
 | Linux | `jianmen-vX.Y.Z-linux-amd64.tar.gz` | `jianmen-vX.Y.Z-linux-arm64.tar.gz` |
 
-Release 页面显示的是 ZIP 或 Gzip 压缩后的大小。解压后的二进制会更大，并且已经包含 Web 前端，不需要再部署 Node.js 或 Nginx。
-
-可以使用 Release 附带的 `checksums.txt` 校验文件：
-
-```bash
-sha256sum -c checksums.txt --ignore-missing
-```
-
-Windows PowerShell 可以计算 SHA-256 后与 `checksums.txt` 对比：
-
-```powershell
-(Get-FileHash .\jianmen-vX.Y.Z-windows-amd64.zip -Algorithm SHA256).Hash.ToLower()
-```
-
-无论使用 Windows 还是 Linux，需要从其他计算机访问 Web 管理页面时，都要将 `config.local.json` 中的管理监听地址修改为：
-
-```json
-{
-  "admin": {
-    "enabled": true,
-    "listen_addr": "0.0.0.0:47100"
-  }
-}
-```
-
 同时需要在服务器防火墙或云安全组中放行实际使用的端口。
-#### Windows
-
-```powershell
-Expand-Archive .\jianmen-vX.Y.Z-windows-amd64.zip -DestinationPath C:\Jianmen
-cd C:\Jianmen\jianmen-vX.Y.Z-windows-amd64
-Copy-Item .\config.example.json .\config.local.json
-notepad .\config.local.json
-.\jianmen.exe -config .\config.local.json
-```
-
-
-#### Linux
-
-```bash
-sudo mkdir -p /opt/jianmen
-tar -xzf jianmen-vX.Y.Z-linux-amd64.tar.gz
-sudo cp -a jianmen-vX.Y.Z-linux-amd64/. /opt/jianmen/
-cd /opt/jianmen
-sudo cp config.example.json config.local.json
-sudo chmod +x jianmen
-sudo nano config.local.json
-sudo ./jianmen -config ./config.local.json
-```
-
-长期运行时建议配置 systemd。创建 `/etc/systemd/system/jianmen.service`：
-
-```ini
-[Unit]
-Description=Jianmen Bastion Host
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-Type=simple
-User=jianmen
-Group=jianmen
-WorkingDirectory=/opt/jianmen
-ExecStart=/opt/jianmen/jianmen -config /opt/jianmen/config.local.json
-Restart=on-failure
-RestartSec=5
-LimitNOFILE=65535
-
-[Install]
-WantedBy=multi-user.target
-```
-
-创建运行用户并启动服务：
-
-```bash
-sudo useradd --system --home /opt/jianmen --shell /usr/sbin/nologin jianmen
-sudo chown -R jianmen:jianmen /opt/jianmen
-sudo systemctl daemon-reload
-sudo systemctl enable --now jianmen
-sudo systemctl status jianmen
-```
-
-查看运行日志：
-
-```bash
-sudo journalctl -u jianmen -f
-```
-
-### 从源码构建安装包
-
-Windows：
-
-```powershell
-.\build.ps1
-```
-
-Linux、macOS 或 Git Bash：
-
-```bash
-./build.sh
-```
-
-脚本会先执行前端构建并将产物嵌入 Go 程序，然后在 `dist/` 中生成 Windows amd64 和 Linux amd64 二进制文件。
-
-推送 `v*` 格式的 Git 标签后，GitHub Actions 会自动构建 Windows/Linux 的 amd64、arm64 安装包并创建 GitHub Release，同时发布对应版本的 Docker 镜像。
 
 ## 截图
 快速连接

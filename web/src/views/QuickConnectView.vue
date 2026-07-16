@@ -36,50 +36,17 @@
             />
 
             <div v-if="targets.length" class="connection-card-grid">
-              <article v-for="target in targets" :key="targetKey(target)" class="connection-card">
-                <header class="connection-card__header">
+              <article v-for="target in targets" :key="targetKey(target)" class="connection-card host-connection-card">
+                <div class="connection-card__summary">
                   <div class="protocol-mark">SSH</div>
                   <div class="connection-card__identity">
-                    <div class="connection-card__title-row">
-                      <h3>{{ quickHostName(target) }}</h3>
-                      <el-tag
-                        :type="target.status === 'disabled' ? 'info' : 'success'"
-                        size="small"
-                        effect="plain"
-                      >
-                        {{ target.status === 'disabled' ? t('common.disabled') : t('common.enabled') }}
-                      </el-tag>
-                    </div>
-                    <p>{{ quickHostRemark(target) }}</p>
+                    <h3>{{ quickHostName(target) }}</h3>
+                    <p>{{ accountDisplayName(target) }}</p>
                   </div>
-                </header>
-
-                <div class="account-strip">
-                  <span>账户名称</span>
-                  <strong>{{ accountDisplayName(target) }}</strong>
                 </div>
-
-                <dl class="connection-details">
-                  <div>
-                    <dt>连接地址</dt>
-                    <dd><code>{{ connectionAddress(target) }}</code></dd>
-                  </div>
-                  <div>
-                    <dt>连接账户</dt>
-                    <dd>
-                      <code>{{ connectionState(target).compactUser || connectionPlaceholder(target) }}</code>
-                    </dd>
-                  </div>
-                  <div class="password-detail">
-                    <dt>连接临时密码</dt>
-                    <dd>
-                      <code>{{ connectionState(target).password || connectionPlaceholder(target) }}</code>
-                      <small v-if="connectionState(target).expiresAt">
-                        有效至 {{ formatExpiresAt(connectionState(target).expiresAt) }}
-                      </small>
-                    </dd>
-                  </div>
-                </dl>
+                <div class="connection-card__remark" :title="quickHostRemark(target)">
+                  {{ quickHostRemark(target) }}
+                </div>
 
                 <div v-if="connectionState(target).error" class="connection-card__error">
                   <span>{{ connectionState(target).error }}</span>
@@ -89,23 +56,26 @@
                 <footer class="connection-card__actions">
                   <el-button
                     type="primary"
+                    size="small"
                     :loading="connectionState(target).loading"
                     @click="copyAllConnectionInfo(target)"
                   >
-                    一键复制
+                    复制
                   </el-button>
                   <el-button
                     v-if="permission.canDo('session:connect')"
+                    size="small"
                     @click="openWebConnection(target)"
                   >
-                    Web 连接
+                    Web
                   </el-button>
                   <el-button
                     v-if="permission.canDo('session:connect')"
+                    size="small"
                     :loading="connectionState(target).loading || preferences.loading"
                     @click="openClientConnection(target)"
                   >
-                    客户端连接
+                    客户端
                   </el-button>
                 </footer>
               </article>
@@ -129,38 +99,73 @@
       </el-tab-pane>
 
       <el-tab-pane v-if="permission.canDo('db:connect')" label="数据库" name="db">
-        <DataTableCard
-          :data="displayedDBAccounts"
-          :loading="dbLoading"
-          :total="dbTotal"
-          v-model:page="dbPage"
-          v-model:page-size="dbPageSize"
-          search-placeholder="搜索实例、账号..."
-          @search="onDBSearch"
-        >
-          <template #toolbar-extra>
-            <el-button :loading="dbLoading" :icon="Refresh" @click="loadDBAccounts">{{ t('common.refresh') }}</el-button>
-          </template>
-          <el-table-column :label="t('audit.column.instance')" min-width="160" show-overflow-tooltip>
-            <template #default="{ row }">{{ row._instance_name || '-' }}</template>
-          </el-table-column>
-          <el-table-column :label="t('audit.column.account')" min-width="130" show-overflow-tooltip>
-            <template #default="{ row }">{{ row.username || '-' }}</template>
-          </el-table-column>
-          <el-table-column :label="t('audit.column.protocol')" width="100">
-            <template #default="{ row }">{{ row._protocol || 'mysql' }}</template>
-          </el-table-column>
-          <el-table-column :label="t('common.status')" width="90">
-            <template #default="{ row }">
-              <el-tag :type="row.status === 'disabled' ? 'info' : 'success'" size="small">{{ row.status === 'disabled' ? t('common.disabled') : t('common.enabled') }}</el-tag>
-            </template>
-          </el-table-column>
-          <el-table-column :label="t('common.actions')" fixed="right" width="100">
-            <template #default="{ row }">
-              <el-button link type="primary" @click="openDBConfig(row)">{{ t('quickConnect.action.connect') }}</el-button>
-            </template>
-          </el-table-column>
-        </DataTableCard>
+        <section class="page-card quick-card-page">
+          <div class="page-card__toolbar">
+            <div class="page-card__search">
+              <el-input
+                v-model="dbSearchInput"
+                placeholder="搜索实例、账号..."
+                clearable
+                @keyup.enter="onDBSearch(dbSearchInput)"
+                @clear="onDBSearch('')"
+              >
+                <template #prefix>
+                  <el-icon><Search /></el-icon>
+                </template>
+              </el-input>
+            </div>
+            <div class="page-card__spacer"></div>
+            <div class="page-card__actions">
+              <el-button :loading="dbLoading" :icon="Refresh" @click="loadDBAccounts">
+                {{ t('common.refresh') }}
+              </el-button>
+            </div>
+          </div>
+
+          <div v-loading="dbLoading" class="page-card__body quick-card-body">
+            <el-alert
+              v-if="dbError"
+              class="load-alert"
+              type="error"
+              show-icon
+              :closable="false"
+              :title="dbError"
+            />
+
+            <div v-if="displayedDBAccounts.length" class="connection-card-grid database-card-grid">
+              <article v-for="account in displayedDBAccounts" :key="databaseTargetKey(account)" class="connection-card database-connection-card">
+                <div class="connection-card__summary">
+                  <div class="protocol-mark" :class="`protocol-mark--${account._protocol || 'mysql'}`">
+                    {{ databaseProtocolLabel(account._protocol) }}
+                  </div>
+                  <div class="connection-card__identity">
+                    <h3>{{ account._instance_name || '-' }}</h3>
+                    <p>{{ account.username || '-' }}</p>
+                  </div>
+                </div>
+                <footer class="connection-card__actions database-card__actions">
+                  <el-button type="primary" size="small" @click="openDBConfig(account)">
+                    {{ t('quickConnect.action.connect') }}
+                  </el-button>
+                </footer>
+              </article>
+            </div>
+
+            <el-empty v-else-if="!dbLoading" description="暂无可连接的数据库账号" />
+          </div>
+
+          <div v-if="dbTotal > 0" class="page-card__footer">
+            <el-pagination
+              v-model:current-page="dbPage"
+              v-model:page-size="dbPageSize"
+              :page-sizes="[20, 50, 100]"
+              :total="dbTotal"
+              layout="total, sizes, prev, pager, next"
+              size="small"
+              background
+            />
+          </div>
+        </section>
       </el-tab-pane>
     </el-tabs>
 
@@ -196,7 +201,6 @@ import { useRouter } from 'vue-router';
 
 import { apiClient, type DBAccountRecord, type HostView, type PageResponse, type TargetRecord } from '@/api/client';
 import ConnectionConfigDialog from '@/components/ConnectionConfigDialog.vue';
-import DataTableCard from '@/components/DataTableCard.vue';
 import { useI18n } from '@/i18n';
 import { usePermissionStore } from '@/stores/permission';
 import { usePreferencesStore } from '@/stores/preferences';
@@ -245,6 +249,7 @@ const targetConnectionStates = reactive<Record<string, SSHConnectionState>>({});
 const targetConnectionRequests = new Map<string, Promise<SSHConnectionState>>();
 
 // DB state
+const dbSearchInput = ref('');
 const dbKeyword = ref('');
 const dbLoading = ref(false);
 const dbError = ref('');
@@ -305,13 +310,6 @@ function connectionState(target: TargetRecord): SSHConnectionState {
 function connectionAddress(target: TargetRecord): string {
   const state = connectionState(target);
   return `${state.host}:${state.port}`;
-}
-
-function connectionPlaceholder(target: TargetRecord): string {
-  const state = connectionState(target);
-  if (state.loading) return '生成中...';
-  if (state.error) return '生成失败';
-  return '等待生成';
 }
 
 async function loadTargets() {
@@ -476,12 +474,6 @@ async function openClientConnection(target: TargetRecord) {
   window.location.href = `ssh://${state.compactUser}:${password}@${state.host}:${state.port}`;
 }
 
-function formatExpiresAt(value: string): string {
-  if (!value) return '';
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleString('zh-CN', { hour12: false });
-}
-
 async function loadDBAccounts() {
   dbLoading.value = true;
   dbError.value = '';
@@ -527,7 +519,22 @@ const displayedDBAccounts = computed(() => {
   return dbFiltered.value.slice(start, start + dbPageSize.value);
 });
 
+function databaseTargetKey(account: QuickDBTarget): string {
+  return String(account.id || `${account._instance_name || ''}-${account.username || ''}`);
+}
+
+function databaseProtocolLabel(protocol?: string): string {
+  const labels: Record<string, string> = {
+    mysql: 'MySQL',
+    postgres: 'PG',
+    postgresql: 'PG',
+    redis: 'Redis',
+  };
+  return labels[String(protocol || 'mysql').toLowerCase()] || String(protocol || 'DB').toUpperCase();
+}
+
 function onDBSearch(query: string) {
+  dbSearchInput.value = query;
   dbKeyword.value = query;
   dbPage.value = 1;
 }
@@ -574,8 +581,8 @@ onMounted(() => {
 
 .connection-card-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
-  gap: 16px;
+  grid-template-columns: repeat(auto-fill, minmax(238px, 1fr));
+  gap: 10px;
 }
 
 .connection-card {
@@ -583,173 +590,123 @@ onMounted(() => {
   min-width: 0;
   flex-direction: column;
   border: 1px solid var(--color-border);
-  border-radius: 18px;
+  border-radius: 12px;
   background: var(--color-card);
-  box-shadow: 0 8px 24px rgb(15 23 42 / 6%);
+  box-shadow: 0 5px 16px rgb(15 23 42 / 5%);
   overflow: hidden;
   transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
 }
 
 .connection-card:hover {
   border-color: rgb(14 165 233 / 36%);
-  box-shadow: 0 14px 34px rgb(15 23 42 / 10%);
-  transform: translateY(-2px);
+  box-shadow: 0 9px 22px rgb(15 23 42 / 9%);
+  transform: translateY(-1px);
 }
 
-.connection-card__header {
+.connection-card__summary {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
-  gap: 12px;
+  gap: 9px;
   align-items: center;
-  padding: 16px 16px 13px;
+  min-width: 0;
+  padding: 12px 12px 8px;
 }
 
 .protocol-mark {
   display: grid;
-  width: 46px;
-  height: 46px;
-  border-radius: 14px;
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
   place-items: center;
   background: linear-gradient(145deg, #0f766e, #0ea5a3);
   color: white;
-  font-size: 12px;
+  font-size: 10px;
   font-weight: 900;
-  letter-spacing: .08em;
-  box-shadow: 0 8px 18px rgb(15 118 110 / 22%);
+  letter-spacing: .05em;
+  box-shadow: 0 6px 14px rgb(15 118 110 / 18%);
+}
+
+.protocol-mark--mysql {
+  background: linear-gradient(145deg, #2563eb, #0ea5e9);
+}
+
+.protocol-mark--postgres,
+.protocol-mark--postgresql {
+  background: linear-gradient(145deg, #475569, #2563eb);
+}
+
+.protocol-mark--redis {
+  background: linear-gradient(145deg, #dc2626, #f97316);
 }
 
 .connection-card__identity {
   min-width: 0;
 }
 
-.connection-card__title-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-
-.connection-card__title-row h3 {
+.connection-card__identity h3 {
   margin: 0;
   overflow: hidden;
   color: var(--color-text);
-  font-size: 16px;
-  font-weight: 850;
-  letter-spacing: -.02em;
+  font-size: 14px;
+  font-weight: 800;
+  letter-spacing: -.015em;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .connection-card__identity p {
-  margin: 5px 0 0;
+  margin: 3px 0 0;
   overflow: hidden;
   color: var(--color-text-secondary);
   font-size: 12px;
-  line-height: 1.45;
+  line-height: 1.35;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.account-strip {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin: 0 16px;
-  padding: 10px 12px;
-  border: 1px solid rgb(14 165 233 / 14%);
-  border-radius: 12px;
-  background: rgb(14 165 233 / 6%);
-}
-
-.account-strip span {
-  color: var(--color-text-secondary);
-  font-size: 12px;
-}
-
-.account-strip strong {
+.connection-card__remark {
+  min-width: 0;
+  margin: 0 12px;
   overflow: hidden;
-  color: var(--color-text);
-  font-size: 13px;
+  color: var(--color-text-secondary);
+  font-size: 11px;
+  line-height: 1.35;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.connection-details {
-  display: grid;
-  gap: 0;
-  margin: 14px 16px 0;
-  border: 1px solid var(--color-border);
-  border-radius: 12px;
-  overflow: hidden;
-}
-
-.connection-details > div {
-  display: grid;
-  grid-template-columns: 92px minmax(0, 1fr);
-  gap: 12px;
-  align-items: center;
-  min-width: 0;
-  padding: 10px 12px;
-  background: var(--color-card);
-}
-
-.connection-details > div + div {
-  border-top: 1px solid var(--color-border);
-}
-
-.connection-details dt {
-  color: var(--color-text-secondary);
-  font-size: 12px;
-}
-
-.connection-details dd {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-  gap: 3px;
-  margin: 0;
-}
-
-.connection-details code {
-  overflow-wrap: anywhere;
-  color: var(--color-text);
-  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
-  font-size: 12px;
-  font-weight: 700;
-}
-
-.password-detail code {
-  color: var(--el-color-warning-dark-2);
-}
-
-.connection-details small {
-  color: var(--color-text-secondary);
-  font-size: 10px;
 }
 
 .connection-card__error {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
-  margin: 10px 16px 0;
+  gap: 6px;
+  margin: 7px 12px 0;
   color: var(--el-color-danger);
-  font-size: 12px;
+  font-size: 11px;
 }
 
 .connection-card__actions {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 8px;
+  gap: 6px;
   margin-top: auto;
-  padding: 14px 16px 16px;
+  padding: 10px 12px 12px;
 }
 
 .connection-card__actions .el-button {
   min-width: 0;
   margin: 0;
-  padding-inline: 8px;
+  padding: 5px 6px;
+  font-size: 12px;
+}
+
+.database-card-grid {
+  grid-template-columns: repeat(auto-fill, minmax(238px, 1fr));
+}
+
+.database-card__actions {
+  grid-template-columns: 1fr;
+  padding-top: 8px;
 }
 
 @media (max-width: 780px) {
@@ -757,12 +714,16 @@ onMounted(() => {
     padding: 12px;
   }
 
-  .connection-card-grid {
-    grid-template-columns: minmax(0, 1fr);
+  .connection-card-grid,
+  .database-card-grid {
+    grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
   }
+}
 
-  .connection-card__actions {
-    grid-template-columns: 1fr;
+@media (max-width: 480px) {
+  .connection-card-grid,
+  .database-card-grid {
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 </style>

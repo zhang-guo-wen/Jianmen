@@ -422,6 +422,8 @@ export interface ApplicationView {
   name: string;
   group?: string;
   listen_port: number;
+  address: string;
+  entry_path: string;
   internal_scheme: string;
   internal_host: string;
   internal_port: number;
@@ -433,10 +435,8 @@ export interface ApplicationView {
 }
 
 export interface ApplicationPayload {
-  name: string;
-  scheme?: string;
-  host: string;
-  port?: number;
+  name?: string;
+  address: string;
   listen_port?: number;
   group?: string;
   remark?: string;

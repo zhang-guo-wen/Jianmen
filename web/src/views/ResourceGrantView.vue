@@ -280,7 +280,7 @@ const saving = ref(false)
 // Grants state
 const grants = ref<ResourceGrantRecord[]>([])
 const page = ref(1)
-const pageSize = ref(20)
+const pageSize = ref(50)
 const total = ref(0)
 const keyword = ref('')
 
@@ -297,7 +297,7 @@ const loadingResources = ref(false)
 const loadingMoreResources = ref(false)
 const resourceRows = ref<ResourceRow[]>([])
 const resourcePage = ref(1)
-const resourcePageSize = 20
+const resourcePageSize = 50
 const resourceTotal = ref(0)
 const resourceHasMore = computed(() => resourceRows.value.length < resourceTotal.value)
 const hosts = ref<Array<{ id: string; name: string; address: string; port: number; account_count: number }>>([])

@@ -160,7 +160,7 @@ func (s *Server) listResourceGrants(w http.ResponseWriter, r *http.Request) {
 	}
 
 	page := positiveIntRequestQuery(r, "page", 1)
-	pageSize := positiveIntRequestQuery(r, "page_size", 20)
+	pageSize := positiveIntRequestQuery(r, "page_size", defaultPageSize)
 	if pageSize > 200 {
 		pageSize = 200
 	}

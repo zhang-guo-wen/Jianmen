@@ -2,146 +2,130 @@
   <div class="view-stack">
     <div class="page-container">
       <DataTableCard
-      :data="apps"
-      :loading="loading"
-      :total="total"
-      v-model:page="page"
-      v-model:page-size="pageSize"
-      :search-placeholder="t('application.placeholder.search')"
-      @search="onSearch"
-    >
-      <template #toolbar-extra>
-        <el-button v-if="permission.canDo('application:create')" type="primary" @click="openCreate">{{ t('application.create') }}</el-button>
-      </template>
+        :data="apps"
+        :loading="loading"
+        :total="total"
+        v-model:page="page"
+        v-model:page-size="pageSize"
+        :search-placeholder="t('application.placeholder.search')"
+        @search="onSearch"
+      >
+        <template #toolbar-extra>
+          <el-button v-if="permission.canDo('application:create')" type="primary" @click="openCreate">
+            {{ t('application.create') }}
+          </el-button>
+        </template>
 
-      <el-table-column prop="name" :label="t('application.column.name')" min-width="130" show-overflow-tooltip />
-      <el-table-column prop="group" :label="t('application.column.group')" width="100" show-overflow-tooltip />
-      <el-table-column :label="t('application.column.listenPort')" width="100">
-        <template #default="{ row }">
-          <el-tag size="small">{{ row.listen_port }}</el-tag>
-        </template>
-      </el-table-column>
-      <el-table-column :label="t('application.column.target')" min-width="150" show-overflow-tooltip>
-        <template #default="{ row }">{{ row.internal_scheme }}://{{ row.internal_host }}:{{ row.internal_port }}</template>
-      </el-table-column>
-      <el-table-column :label="t('application.column.status')" width="80" align="center">
-        <template #default="{ row }">
-          <el-tag :type="row.status === 'active' ? 'success' : 'info'" size="small">
-            {{ row.status === 'active' ? t('common.enabled') : t('common.disabled') }}
-          </el-tag>
-        </template>
-      </el-table-column>
-      <el-table-column :label="t('application.column.actions')" width="160" fixed="right">
-        <template #default="{ row }">
-          <el-button v-if="permission.canDo('app:connect')" link type="success" size="small" @click="visitApp(row)">{{ t('application.action.visit') }}</el-button>
-          <el-button v-if="row.can_manage && permission.canDo('application:update')" link type="primary" size="small" @click="openEdit(row)">{{ t('common.edit') }}</el-button>
-          <el-button v-if="row.can_manage && permission.canDo('application:delete')" link type="danger" size="small" @click="deleteApp(row)">{{ t('common.delete') }}</el-button>
-        </template>
-      </el-table-column>
-    </DataTableCard>
+        <el-table-column prop="name" :label="t('application.column.name')" min-width="130" show-overflow-tooltip />
+        <el-table-column :label="t('application.column.target')" min-width="220" show-overflow-tooltip>
+          <template #default="{ row }">{{ row.address }}</template>
+        </el-table-column>
+        <el-table-column :label="t('application.column.accessAddress')" min-width="240">
+          <template #default="{ row }">
+            <el-tooltip :content="t('application.action.clickToCopy')" placement="top">
+              <el-link class="access-address" type="primary" :underline="false" @click="copyAccessAddress(row)">
+                {{ applicationAccessURL(row) }}
+              </el-link>
+            </el-tooltip>
+          </template>
+        </el-table-column>
+        <el-table-column prop="group" :label="t('application.column.group')" width="100" show-overflow-tooltip />
+        <el-table-column :label="t('application.column.status')" width="80" align="center">
+          <template #default="{ row }">
+            <el-tag :type="row.status === 'active' ? 'success' : 'info'" size="small">
+              {{ row.status === 'active' ? t('common.enabled') : t('common.disabled') }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column :label="t('application.column.actions')" width="160" fixed="right">
+          <template #default="{ row }">
+            <el-button v-if="permission.canDo('app:connect')" link type="success" size="small" @click="visitApp(row)">
+              {{ t('application.action.visit') }}
+            </el-button>
+            <el-button v-if="row.can_manage && permission.canDo('application:update')" link type="primary" size="small" @click="openEdit(row)">
+              {{ t('common.edit') }}
+            </el-button>
+            <el-button v-if="row.can_manage && permission.canDo('application:delete')" link type="danger" size="small" @click="deleteApp(row)">
+              {{ t('common.delete') }}
+            </el-button>
+          </template>
+        </el-table-column>
+      </DataTableCard>
 
-    <FormDialog
-      v-model:visible="dialogVisible"
-      :title="editingId ? t('application.edit') : t('application.create')"
-      width="560px"
-      :loading="submitting"
-      @submit="submitApp"
-    >
-      <el-form :model="form" label-width="80px">
-        <el-form-item :label="t('application.field.name')" required>
-          <el-input v-model="form.name" :placeholder="t('application.placeholder.name')" />
-        </el-form-item>
-        <el-form-item :label="t('application.field.scheme')">
-          <el-select v-model="form.scheme" style="width: 100%">
-            <el-option label="http" value="http" />
-            <el-option label="https" value="https" />
-          </el-select>
-        </el-form-item>
-        <el-row :gutter="12">
-          <el-col :span="16">
-            <el-form-item :label="t('application.field.host')" required>
-              <el-input v-model="form.host" :placeholder="t('application.placeholder.host')" />
-            </el-form-item>
-          </el-col>
-          <el-col :span="8">
-            <el-form-item :label="t('application.field.port')">
-              <el-input-number v-model="form.port" :min="1" :max="65535" controls-position="right" style="width: 100%" />
-            </el-form-item>
-          </el-col>
-        </el-row>
-        <el-form-item :label="t('application.field.listenPort')">
-          <el-select v-model="form.listen_port" placeholder="自动分配" clearable>
-            <el-option
-              v-for="p in availablePorts"
-              :key="p"
-              :label="String(p)"
-              :value="p"
-            />
-          </el-select>
-        </el-form-item>
-        <el-collapse>
-          <el-collapse-item title="更多设置">
-            <el-form-item :label="t('application.field.group')">
-              <el-select
-                v-model="form.group"
-                allow-create
-                clearable
-                filterable
-                default-first-option
-                style="width: 100%"
-              >
-                <el-option v-for="group in resourceGroupOptions" :key="group" :label="group" :value="group" />
-              </el-select>
-            </el-form-item>
-            <el-form-item :label="t('application.field.remark')">
-              <el-input v-model="form.remark" type="textarea" />
-            </el-form-item>
-          </el-collapse-item>
-        </el-collapse>
-      </el-form>
-    </FormDialog>
+      <FormDialog
+        v-model:visible="dialogVisible"
+        :title="editingId ? t('application.edit') : t('application.create')"
+        width="560px"
+        :loading="submitting"
+        @submit="submitApp"
+      >
+        <el-form :model="form" label-width="88px">
+          <el-form-item :label="t('application.field.address')" required>
+            <div class="field-stack">
+              <el-input v-model="form.address" :placeholder="t('application.placeholder.address')" />
+              <span class="field-hint">{{ t('application.hint.address') }}</span>
+            </div>
+          </el-form-item>
+          <el-collapse v-model="moreSections">
+            <el-collapse-item :title="t('application.moreSettings')" name="more">
+              <el-form-item :label="t('application.field.name')">
+                <el-input v-model="form.name" :placeholder="t('application.placeholder.name')" />
+              </el-form-item>
+              <el-form-item :label="t('application.field.listenPort')">
+                <div class="field-stack">
+                  <el-input-number v-model="form.listen_port" :min="0" :max="65535" controls-position="right" style="width: 100%" />
+                  <span class="field-hint">{{ t('application.hint.listenPort') }}</span>
+                </div>
+              </el-form-item>
+              <el-form-item :label="t('application.field.group')">
+                <el-select
+                  v-model="form.group"
+                  allow-create
+                  clearable
+                  filterable
+                  default-first-option
+                  style="width: 100%"
+                >
+                  <el-option v-for="group in resourceGroupOptions" :key="group" :label="group" :value="group" />
+                </el-select>
+              </el-form-item>
+              <el-form-item :label="t('application.field.remark')">
+                <el-input v-model="form.remark" type="textarea" />
+              </el-form-item>
+            </el-collapse-item>
+          </el-collapse>
+        </el-form>
+      </FormDialog>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import DataTableCard from '@/components/DataTableCard.vue'
 import FormDialog from '@/components/FormDialog.vue'
 import { apiClient, type ApplicationView, type ApplicationPayload } from '@/api/client'
 import { useI18n } from '@/i18n'
 import { usePermissionStore } from '@/stores/permission'
+import { writeClipboardText } from '@/utils/clipboard'
 
 const { t } = useI18n()
 const permission = usePermissionStore()
-
-const PORT_START = 47110
-const PORT_END = 47199
 
 const apps = ref<ApplicationView[]>([])
 const loading = ref(false)
 const total = ref(0)
 const page = ref(1)
-const pageSize = ref(20)
+const pageSize = ref(50)
 const search = ref('')
 const resourceGroupOptions = ref<string[]>([])
 
 const dialogVisible = ref(false)
 const editingId = ref('')
 const submitting = ref(false)
-const form = reactive({ name: '', scheme: 'http', host: '', port: 80, listen_port: 0, group: '', remark: '' })
-
-const usedPorts = computed(() => apps.value.map(a => a.listen_port))
-
-const availablePorts = computed(() => {
-  const ports: number[] = []
-  for (let p = PORT_START; p <= PORT_END; p++) {
-    if (!usedPorts.value.includes(p)) ports.push(p)
-    if (ports.length >= 100) break
-  }
-  return ports
-})
+const moreSections = ref<string[]>([])
+const form = reactive({ address: '', name: '', listen_port: 0, group: '', remark: '' })
 
 async function fetchApps() {
   loading.value = true
@@ -159,10 +143,10 @@ async function fetchApps() {
 function onSearch(val: string) {
   search.value = val
   page.value = 1
-  fetchApps()
+  void fetchApps()
 }
 
-watch([page, pageSize], () => fetchApps())
+watch([page, pageSize], () => void fetchApps())
 
 async function loadResourceGroupOptions() {
   try {
@@ -178,56 +162,71 @@ onMounted(() => {
   void loadResourceGroupOptions()
 })
 
+function proxyHostname(): string {
+  const hostname = window.location.hostname
+  return hostname.includes(':') && !hostname.startsWith('[') ? `[${hostname}]` : hostname
+}
+
+function applicationAccessURL(app: ApplicationView): string {
+  const entryPath = app.entry_path?.startsWith('/') ? app.entry_path : `/${app.entry_path || ''}`
+  return `http://${proxyHostname()}:${app.listen_port}${entryPath}`
+}
+
 function visitApp(app: ApplicationView) {
-  window.open(`http://${window.location.hostname}:${app.listen_port}`, '_blank')
+  window.open(applicationAccessURL(app), '_blank', 'noopener')
+}
+
+async function copyAccessAddress(app: ApplicationView) {
+  try {
+    await writeClipboardText(applicationAccessURL(app))
+    ElMessage.success(t('application.message.copied'))
+  } catch {
+    ElMessage.error(t('application.error.copy'))
+  }
 }
 
 function openCreate() {
   editingId.value = ''
+  form.address = ''
   form.name = ''
-  form.scheme = 'http'
-  form.host = ''
-  form.port = 80
   form.listen_port = 0
   form.group = ''
   form.remark = ''
+  moreSections.value = []
   dialogVisible.value = true
 }
 
 function openEdit(app: ApplicationView) {
   editingId.value = app.id!
+  form.address = app.address
   form.name = app.name
-  form.scheme = app.internal_scheme
-  form.host = app.internal_host
-  form.port = app.internal_port
   form.listen_port = app.listen_port
   form.group = app.group || ''
   form.remark = app.remark || ''
+  moreSections.value = []
   dialogVisible.value = true
 }
 
 async function submitApp() {
-  if (!form.name.trim() || !form.host.trim()) {
-    ElMessage.warning('请填写必填字段')
+  if (!form.address.trim()) {
+    ElMessage.warning(t('application.error.addressRequired'))
     return
   }
   submitting.value = true
   try {
     const payload: ApplicationPayload = {
-      name: form.name.trim(),
-      scheme: form.scheme,
-      host: form.host.trim(),
-      port: form.port,
+      address: form.address.trim(),
+      name: form.name.trim() || undefined,
       listen_port: form.listen_port || 0,
       group: form.group.trim() || undefined,
       remark: form.remark.trim() || undefined,
     }
     if (editingId.value) {
       await apiClient.updateApplication(editingId.value, payload)
-      ElMessage.success('应用已更新')
+      ElMessage.success(t('application.message.updated'))
     } else {
       await apiClient.createApplication(payload)
-      ElMessage.success('应用已创建')
+      ElMessage.success(t('application.message.created'))
     }
     dialogVisible.value = false
     await Promise.all([fetchApps(), loadResourceGroupOptions()])
@@ -243,15 +242,15 @@ async function deleteApp(app: ApplicationView) {
     await ElMessageBox.confirm(
       t('application.deleteConfirm').replace('{name}', app.name),
       t('application.delete'),
-      { cancelButtonText: '取消', confirmButtonText: '删除', type: 'warning' }
+      { cancelButtonText: t('common.cancel'), confirmButtonText: t('common.delete'), type: 'warning' }
     )
   } catch {
     return
   }
   try {
     await apiClient.deleteApplication(app.id!)
-    ElMessage.success('应用已删除')
-    fetchApps()
+    ElMessage.success(t('application.message.deleted'))
+    void fetchApps()
   } catch (e: any) {
     ElMessage.error(e.message || t('application.error.delete'))
   }
@@ -259,4 +258,24 @@ async function deleteApp(app: ApplicationView) {
 </script>
 
 <style scoped>
+.access-address {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
+.field-stack {
+  display: grid;
+  width: 100%;
+  gap: 6px;
+}
+
+.field-hint {
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+  line-height: 1.5;
+}
 </style>

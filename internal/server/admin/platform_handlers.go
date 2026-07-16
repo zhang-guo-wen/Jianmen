@@ -82,7 +82,7 @@ func (s *Server) handleListPlatformAccounts(w http.ResponseWriter, r *http.Reque
 		Platform:   r.URL.Query().Get("platform"),
 		Category:   r.URL.Query().Get("category"),
 		Page:       positiveIntRequestQuery(r, "page", 1),
-		PageSize:   positiveIntRequestQuery(r, "page_size", 20),
+		PageSize:   positiveIntRequestQuery(r, "page_size", defaultPageSize),
 		UserID:     userID,
 		RoleIDs:    roleIDs,
 		IsAdmin:    isAdmin,

@@ -192,7 +192,7 @@ function formatTime(iso?: string): string {
 const users = ref<api.UserRecord[]>([]);
 const total = ref(0);
 const page = ref(1);
-const pageSize = ref(20);
+const pageSize = ref(50);
 const keyword = ref('');
 const loading = ref(false);
 const error = ref('');

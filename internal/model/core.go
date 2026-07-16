@@ -77,6 +77,8 @@ type Application struct {
 	Name           string    `gorm:"size:255;not null" json:"name"`
 	AppGroup       string    `gorm:"size:128" json:"group"`
 	ListenPort     int       `gorm:"uniqueIndex;not null" json:"listen_port"`
+	Address        string    `gorm:"size:2048;not null;default:''" json:"address"`
+	EntryPath      string    `gorm:"size:2048;not null;default:/" json:"entry_path"`
 	InternalScheme string    `gorm:"size:8;not null;default:http" json:"internal_scheme"`
 	InternalHost   string    `gorm:"size:255;not null" json:"internal_host"`
 	InternalPort   int       `gorm:"not null;default:80" json:"internal_port"`

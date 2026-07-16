@@ -563,7 +563,7 @@ const router = useRouter();
 const hosts = ref<HostView[]>([]);
 const hostTotal = ref(0);
 const hostPage = ref(1);
-const hostPageSize = ref(20);
+const hostPageSize = ref(50);
 const keyword = ref("");
 const hostsLoading = ref(false);
 const hostError = ref("");
@@ -573,7 +573,7 @@ const selectedHost = ref<HostView | null>(null);
 const accounts = ref<TargetRecord[]>([]);
 const accountTotal = ref(0);
 const accountPage = ref(1);
-const accountPageSize = ref(20);
+const accountPageSize = ref(50);
 const accountsLoading = ref(false);
 const accountError = ref("");
 

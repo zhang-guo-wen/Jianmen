@@ -60,7 +60,7 @@ func (s *Server) listUsers(w http.ResponseWriter, r *http.Request) {
 		var total int64
 		tx.Count(&total)
 		page := positiveIntRequestQuery(r, "page", 1)
-		pageSize := positiveIntRequestQuery(r, "page_size", 20)
+		pageSize := positiveIntRequestQuery(r, "page_size", defaultPageSize)
 		if pageSize > 200 {
 			pageSize = 200
 		}

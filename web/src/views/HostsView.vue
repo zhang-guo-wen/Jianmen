@@ -1288,7 +1288,7 @@ function setSelectedHost(host: HostView) {
 async function openCreateHostDialog() {
   editingHostId.value = null;
   hostNameTouched.value = false;
-  hostMorePanels.value = [];
+  hostMorePanels.value = ["more"];
   resetHostForm();
   hostDialogVisible.value = true;
   await nextTick();
@@ -1394,7 +1394,7 @@ async function openCreateAccountDialog(host: HostView) {
   setSelectedHost(host);
   editingAccountId.value = null;
   accountNameTouched.value = false;
-  accountMorePanels.value = [];
+  accountMorePanels.value = ["more"];
   accountTestResult.value = null;
   resetAccountForm();
   accountFormVisible.value = true;

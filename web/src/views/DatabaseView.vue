@@ -74,8 +74,8 @@
         <el-form-item label="端口">
           <el-input-number v-model="instanceForm.port" :min="1" :max="65535" />
         </el-form-item>
-        <el-collapse>
-          <el-collapse-item title="更多设置">
+        <el-collapse v-model="instanceMorePanels">
+          <el-collapse-item name="more" title="更多设置">
             <el-form-item label="分组">
               <el-select
                 v-model="instanceForm.group"
@@ -217,8 +217,8 @@
           <el-date-picker v-model="accountForm.expiresAt" type="datetime"
             placeholder="自定义时间" style="margin-top:8px;width:100%" />
         </el-form-item>
-        <el-collapse>
-          <el-collapse-item title="更多设置">
+        <el-collapse v-model="accountMorePanels">
+          <el-collapse-item name="more" title="更多设置">
             <el-form-item label="分组">
               <el-select
                 v-model="accountForm.group"
@@ -386,6 +386,7 @@ const instanceSearchKeyword = ref('')
 const showInstanceDialog = ref(false)
 const submitting = ref(false)
 const editingInstance = ref<api.DatabaseInstanceView | null>(null)
+const instanceMorePanels = ref<string[]>([])
 const instanceGroupOptions = ref<string[]>([])
 const accountGroupOptions = ref<string[]>([])
 const instanceForm = reactive<InstanceForm>({
@@ -410,6 +411,7 @@ const accountPageSize = ref(20)
 
 const accountDialogVisible = ref(false)
 const editingAccount = ref<api.DBAccountRecord | null>(null)
+const accountMorePanels = ref<string[]>([])
 const accountSubmitting = ref(false)
 const statusUpdatingId = ref('')
 
@@ -500,6 +502,7 @@ function onInstanceSearch(keyword: string) {
 
 function openCreateInstance() {
   editingInstance.value = null
+  instanceMorePanels.value = ['more']
   Object.assign(instanceForm, {
     name: '',
     protocol: 'mysql',
@@ -513,6 +516,7 @@ function openCreateInstance() {
 
 function editInstance(inst: api.DatabaseInstanceView) {
   editingInstance.value = inst
+  instanceMorePanels.value = []
   Object.assign(instanceForm, {
     name: inst.name || '',
     protocol: inst.protocol || 'mysql',
@@ -632,6 +636,7 @@ async function loadSelectedInstanceAccounts() {
 
 function openCreateAccount() {
   editingAccount.value = null
+  accountMorePanels.value = ['more']
   accountForm.username = ''
   accountForm.password = ''
   accountForm.group = ''
@@ -645,6 +650,7 @@ function openCreateAccount() {
 
 function editAccount(row: api.DBAccountRecord) {
   editingAccount.value = row
+  accountMorePanels.value = []
   accountForm.username = row.username || ''
   accountForm.password = ''
   accountForm.group = row.group || ''

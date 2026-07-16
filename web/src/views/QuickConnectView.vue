@@ -143,8 +143,19 @@
                     <p>{{ account.username || '-' }}</p>
                   </div>
                 </div>
+                <div class="connection-card__remark" :title="databaseRemark(account)">
+                  {{ databaseRemark(account) }}
+                </div>
                 <footer class="connection-card__actions database-card__actions">
-                  <el-button type="primary" size="small" @click="openDBConfig(account)">
+                  <el-button
+                    type="primary"
+                    size="small"
+                    :loading="databaseConnectionLoading(account)"
+                    @click="copyDBConnectionInfo(account)"
+                  >
+                    复制
+                  </el-button>
+                  <el-button size="small" @click="openDBConfig(account)">
                     {{ t('quickConnect.action.connect') }}
                   </el-button>
                 </footer>
@@ -223,6 +234,7 @@ interface SSHConnectionState {
 
 type QuickDBTarget = DBAccountRecord & {
   _instance_name?: string;
+  _instance_remark?: string;
   _protocol?: string;
   _instance_address?: string;
   _instance_port?: number;
@@ -254,6 +266,7 @@ const dbKeyword = ref('');
 const dbLoading = ref(false);
 const dbError = ref('');
 const dbAccounts = ref<QuickDBTarget[]>([]);
+const dbConnectionStates = reactive<Record<string, { loading: boolean }>>({});
 const dbPage = ref(1);
 const dbPageSize = ref(50);
 
@@ -489,6 +502,7 @@ async function loadDBAccounts() {
         all.push({
           ...account,
           _instance_name: inst.name,
+          _instance_remark: inst.remark,
           _protocol: inst.protocol || 'mysql',
           _instance_address: inst.address,
           _instance_port: inst.port,
@@ -508,7 +522,9 @@ const dbFiltered = computed(() => {
   const query = dbKeyword.value.trim().toLowerCase();
   if (!query) return dbAccounts.value;
   return dbAccounts.value.filter(account =>
-    [account._instance_name, account.username, account._protocol].some(value => String(value ?? '').toLowerCase().includes(query)),
+    [account._instance_name, account._instance_remark, account.username, account._protocol].some(value =>
+      String(value ?? '').toLowerCase().includes(query),
+    ),
   );
 });
 
@@ -521,6 +537,14 @@ const displayedDBAccounts = computed(() => {
 
 function databaseTargetKey(account: QuickDBTarget): string {
   return String(account.id || `${account._instance_name || ''}-${account.username || ''}`);
+}
+
+function databaseRemark(account: QuickDBTarget): string {
+  return String(account._instance_remark || '暂无备注');
+}
+
+function databaseConnectionLoading(account: QuickDBTarget): boolean {
+  return dbConnectionStates[databaseTargetKey(account)]?.loading ?? false;
 }
 
 function databaseProtocolLabel(protocol?: string): string {
@@ -537,6 +561,53 @@ function onDBSearch(query: string) {
   dbSearchInput.value = query;
   dbKeyword.value = query;
   dbPage.value = 1;
+}
+
+function databaseConnectionCommand(protocol: string, host: string, port: number, username: string): string {
+  const normalized = protocol.toLowerCase();
+  if (normalized === 'redis') return `redis-cli -h ${host} -p ${port} --user ${username} --askpass`;
+  if (normalized === 'postgres' || normalized === 'postgresql') return `psql -h ${host} -p ${port} -U ${username}`;
+  return `mysql --protocol=tcp -h ${host} -P ${port} -u ${username} -p`;
+}
+
+async function copyDBConnectionInfo(account: QuickDBTarget) {
+  const targetID = String(account.id || account.resource_id || '');
+  if (!targetID) {
+    ElMessage.error('无法获取数据库账号 ID');
+    return;
+  }
+
+  const key = databaseTargetKey(account);
+  dbConnectionStates[key] = { loading: true };
+  try {
+    const [session, credential, gateway] = await Promise.all([
+      apiClient.createUserSession(targetID),
+      apiClient.createConnectionPassword(targetID),
+      apiClient.getDBGateway(),
+    ]);
+    const host = gateway?.host || window.location.hostname || '127.0.0.1';
+    const port = Number(gateway?.port) || 33060;
+    const compactUser = String(session.compact_username || '');
+    const password = String(credential.password || '');
+    const protocol = String(account._protocol || 'mysql');
+    if (!compactUser || !password) throw new Error('连接信息不完整');
+
+    const content = [
+      `数据库实例：${account._instance_name || '-'}`,
+      `实例备注：${databaseRemark(account)}`,
+      `数据库账号：${account.username || '-'}`,
+      `连接地址：${host}:${port}`,
+      `连接账户：${compactUser}`,
+      `连接临时密码：${password}`,
+      `连接命令：${databaseConnectionCommand(protocol, host, port, compactUser)}`,
+    ].join('\n');
+    await writeClipboardText(content);
+    ElMessage.success('数据库临时连接信息已复制');
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : '复制数据库连接信息失败');
+  } finally {
+    dbConnectionStates[key].loading = false;
+  }
 }
 
 function openDBConfig(account: QuickDBTarget) {
@@ -705,7 +776,7 @@ onMounted(() => {
 }
 
 .database-card__actions {
-  grid-template-columns: 1fr;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   padding-top: 8px;
 }
 

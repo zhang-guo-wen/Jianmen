@@ -43,12 +43,12 @@
                     <h3>{{ quickHostName(target) }}</h3>
                     <p>{{ accountDisplayName(target) }}</p>
                   </div>
-                </div>
-                <div class="connection-card__meta">
-                  <span class="connection-card__group">分组 · {{ quickHostGroup(target) }}</span>
-                  <span class="connection-card__remark" :title="quickHostRemark(target)">
-                    {{ quickHostRemark(target) }}
+                  <span class="connection-card__group" :title="quickHostGroup(target)">
+                    {{ quickHostGroup(target) }}
                   </span>
+                </div>
+                <div class="connection-card__remark" :title="quickHostRemark(target)">
+                  {{ quickHostRemark(target) }}
                 </div>
 
                 <div v-if="connectionState(target).error" class="connection-card__error">
@@ -145,12 +145,12 @@
                     <h3>{{ account._instance_name || '-' }}</h3>
                     <p>{{ account.username || '-' }}</p>
                   </div>
-                </div>
-                <div class="connection-card__meta">
-                  <span class="connection-card__group">分组 · {{ databaseGroup(account) }}</span>
-                  <span class="connection-card__remark" :title="databaseRemark(account)">
-                    {{ databaseRemark(account) }}
+                  <span class="connection-card__group" :title="databaseGroup(account)">
+                    {{ databaseGroup(account) }}
                   </span>
+                </div>
+                <div class="connection-card__remark" :title="databaseRemark(account)">
+                  {{ databaseRemark(account) }}
                 </div>
                 <footer class="connection-card__actions database-card__actions">
                   <el-button
@@ -696,7 +696,7 @@ onMounted(() => {
 
 .connection-card__summary {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-columns: auto minmax(0, 1fr) auto;
   gap: 9px;
   align-items: center;
   min-width: 0;
@@ -755,17 +755,9 @@ onMounted(() => {
   white-space: nowrap;
 }
 
-.connection-card__meta {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-  margin: 0 12px;
-}
-
 .connection-card__group {
-  flex: 0 0 auto;
-  max-width: 45%;
+  align-self: start;
+  max-width: 92px;
   overflow: hidden;
   padding: 2px 7px;
   border: 1px solid var(--color-border);
@@ -780,6 +772,7 @@ onMounted(() => {
 
 .connection-card__remark {
   min-width: 0;
+  margin: 0 12px;
   overflow: hidden;
   color: var(--color-text-secondary);
   font-size: 11px;
@@ -787,6 +780,7 @@ onMounted(() => {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
 .connection-card__error {
   display: flex;
   align-items: center;

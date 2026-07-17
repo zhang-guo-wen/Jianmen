@@ -23,7 +23,7 @@ func TestAuthorizeConnectionRequiresActionAndResourceGrant(t *testing.T) {
 	server, db := newAdminDBTestServer(t)
 	seedConnectionAction(t, db, "user-connect", rbac.ActionSessionConnect)
 
-	allowed, err := server.authorizeConnection("user-connect", rbac.ActionSessionConnect, model.ResourceTypeHostAccount, "account-1")
+	allowed, err := server.authorizeConnection(context.Background(), "user-connect", rbac.ActionSessionConnect, model.ResourceTypeHostAccount, "account-1")
 	if err != nil {
 		t.Fatalf("authorize with action only: %v", err)
 	}
@@ -41,7 +41,7 @@ func TestAuthorizeConnectionRequiresActionAndResourceGrant(t *testing.T) {
 	if err := db.Create(&grant).Error; err != nil {
 		t.Fatalf("create resource grant: %v", err)
 	}
-	allowed, err = server.authorizeConnection("user-connect", rbac.ActionSessionConnect, model.ResourceTypeHostAccount, "account-1")
+	allowed, err = server.authorizeConnection(context.Background(), "user-connect", rbac.ActionSessionConnect, model.ResourceTypeHostAccount, "account-1")
 	if err != nil {
 		t.Fatalf("authorize with grant: %v", err)
 	}
@@ -65,6 +65,7 @@ func TestAuthorizeAnyConnectionAcceptsXFTPAction(t *testing.T) {
 	}
 
 	allowed, err := server.authorizeAnyConnection(
+		context.Background(),
 		"xftp-user",
 		[]string{rbac.ActionSessionConnect, rbac.ActionSFTPConnect},
 		model.ResourceTypeHostAccount,
@@ -82,7 +83,7 @@ func TestAuthorizeConnectionSuperAdminBypassesChecks(t *testing.T) {
 	server, _ := newAdminDBTestServer(t)
 	server.superAdminIDs["super"] = true
 
-	allowed, err := server.authorizeConnection("super", rbac.ActionDBConnect, model.ResourceTypeDatabaseAccount, "missing")
+	allowed, err := server.authorizeConnection(context.Background(), "super", rbac.ActionDBConnect, model.ResourceTypeDatabaseAccount, "missing")
 	if err != nil {
 		t.Fatalf("authorize super administrator: %v", err)
 	}

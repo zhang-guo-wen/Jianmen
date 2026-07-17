@@ -14,6 +14,7 @@ func TestResourceGrantCheckerMatchesResourceAndAccountGroups(t *testing.T) {
 		&model.HostAccount{ID: "ha-resource", HostID: "h1", Username: "root", Status: "active", ResourceID: "0001"},
 		&model.HostAccount{ID: "ha-account", HostID: "h1", Username: "deploy", Status: "active", ResourceID: "0002", GroupName: "ops"},
 		&model.Application{ID: "app1", Name: "console", AppGroup: "prod", ListenPort: 18080, InternalScheme: "http", InternalHost: "127.0.0.1", InternalPort: 8080, Status: "active"},
+		&model.ContainerEndpoint{ID: "container1", Name: "docker", GroupName: "prod", Runtime: model.ContainerRuntimeDocker, ConnectionMode: model.ContainerConnectionDockerAPI, Address: "tcp://127.0.0.1:2375", Status: "active"},
 		&model.PlatformAccount{ID: "platform1", Name: "gitlab", PlatformName: "GitLab", GroupName: "ops", Username: "admin", OwnerID: "u1", Status: "active"},
 		&model.ResourceGroup{ID: "rg-prod", Name: "prod", GroupType: model.ResourceGroupTypeResource},
 		&model.ResourceGroup{ID: "ag-ops", Name: "ops", GroupType: model.ResourceGroupTypeAccount},
@@ -34,6 +35,7 @@ func TestResourceGrantCheckerMatchesResourceAndAccountGroups(t *testing.T) {
 		{model.ResourceTypeHostAccount, "ha-resource"},
 		{model.ResourceTypeHostAccount, "ha-account"},
 		{model.ResourceTypeApplication, "app1"},
+		{model.ResourceTypeContainerEndpoint, "container1"},
 		{model.ResourceTypePlatformAccount, "platform1"},
 	}
 	for _, check := range checks {

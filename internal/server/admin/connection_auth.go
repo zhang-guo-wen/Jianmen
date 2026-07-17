@@ -1,19 +1,18 @@
 package admin
 
 import (
+	"context"
 	"errors"
 	"strings"
-
-	"jianmen/internal/rbac"
 )
 
 // authorizeConnection requires both an action permission and a resource grant.
 // Super administrators bypass both checks, consistently with the other admin APIs.
-func (s *Server) authorizeConnection(userID, action, resourceType, resourceID string) (bool, error) {
-	return s.authorizeAnyConnection(userID, []string{action}, resourceType, resourceID)
+func (s *Server) authorizeConnection(ctx context.Context, userID, action, resourceType, resourceID string) (bool, error) {
+	return s.authorizeAnyConnection(ctx, userID, []string{action}, resourceType, resourceID)
 }
 
-func (s *Server) authorizeAnyConnection(userID string, actions []string, resourceType, resourceID string) (bool, error) {
+func (s *Server) authorizeAnyConnection(ctx context.Context, userID string, actions []string, resourceType, resourceID string) (bool, error) {
 	userID = strings.TrimSpace(userID)
 	if userID == "" {
 		return false, nil
@@ -22,16 +21,12 @@ func (s *Server) authorizeAnyConnection(userID string, actions []string, resourc
 		return true, nil
 	}
 
-	checker := s.rbacChecker
-	if checker == nil && s.db != nil {
-		checker = rbac.NewChecker(s.db)
-	}
-	if checker == nil {
+	if s.rbacChecker == nil {
 		return false, errors.New("rbac checker unavailable")
 	}
 	actionAllowed := false
 	for _, action := range actions {
-		allowed, err := checker.HasPermission(userID, action, "", "")
+		allowed, err := s.rbacChecker.HasPermission(userID, action, "", "")
 		if err != nil {
 			return false, err
 		}
@@ -44,8 +39,8 @@ func (s *Server) authorizeAnyConnection(userID string, actions []string, resourc
 		return false, nil
 	}
 
-	if s.db == nil {
-		return false, errors.New("resource grant checker unavailable")
+	if s.resourceGrants == nil {
+		return false, errors.New("resource grant service unavailable")
 	}
-	return rbac.NewResourceGrantChecker(s.db).HasGrant(userID, resourceType, resourceID)
+	return s.resourceGrants.Check(ctx, userID, resourceType, resourceID)
 }

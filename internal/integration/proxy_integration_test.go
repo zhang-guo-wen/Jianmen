@@ -347,7 +347,10 @@ func startSSHServer(t *testing.T, fixture metadataFixture) string {
 			Username: integrationUsername,
 		}},
 	}
-	server := sshserver.New(cfg, fixture.store, testLogger(), fixture.dataDir, online.NewRegistry(), fixture.db)
+	server, err := sshserver.New(cfg, fixture.store, fixture.db, testLogger(), fixture.dataDir, online.NewRegistry())
+	if err != nil {
+		t.Fatalf("new ssh server: %v", err)
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	errCh := make(chan error, 1)
 	go func() {

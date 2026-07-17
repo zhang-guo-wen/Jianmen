@@ -23,6 +23,7 @@ import (
 	"jianmen/internal/config"
 	"jianmen/internal/crypto"
 	"jianmen/internal/model"
+	"jianmen/internal/rbac"
 	"jianmen/internal/service"
 	"jianmen/internal/storage"
 	"jianmen/internal/store"
@@ -801,14 +802,31 @@ func newAdminDBTestServer(t *testing.T) (*Server, *gorm.DB) {
 	}
 
 	cfg := &config.Config{Admin: config.AdminConfig{}}
+	storeInst := store.NewDBStore(db)
+	authService, err := service.NewAdminAuthService(storeInst)
+	if err != nil {
+		t.Fatalf("new admin auth service: %v", err)
+	}
+	resourceGrants, err := service.NewResourceGrantService(storeInst, rbac.NewResourceGrantChecker(db))
+	if err != nil {
+		t.Fatalf("new resource grant service: %v", err)
+	}
+	resourceGroups, err := service.NewResourceGroupService(storeInst)
+	if err != nil {
+		t.Fatalf("new resource group service: %v", err)
+	}
 	return &Server{
-		cfg:           cfg,
-		store:         store.NewDBStore(db),
-		db:            db,
-		logger:        slog.New(slog.NewTextHandler(io.Discard, nil)),
-		dataDir:       dataDir,
-		superAdminIDs: map[string]bool{},
-		loginCaptcha:  testLoginCaptcha{},
+		cfg:            cfg,
+		store:          storeInst,
+		db:             db,
+		rbacChecker:    rbac.NewChecker(db),
+		logger:         slog.New(slog.NewTextHandler(io.Discard, nil)),
+		dataDir:        dataDir,
+		superAdminIDs:  map[string]bool{},
+		loginCaptcha:   testLoginCaptcha{},
+		adminAuth:      authService,
+		resourceGrants: resourceGrants,
+		resourceGroups: resourceGroups,
 	}, db
 }
 

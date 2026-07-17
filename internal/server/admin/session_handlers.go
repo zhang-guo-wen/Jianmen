@@ -85,7 +85,7 @@ func (s *Server) handleUserSessions(w http.ResponseWriter, r *http.Request) {
 		s.writeErrorText(w, r, http.StatusInternalServerError, "failed to look up target")
 		return
 	}
-	allowed, err := s.authorizeAnyConnection(userID, connectionActions, resourceType, req.TargetID)
+	allowed, err := s.authorizeAnyConnection(r.Context(), userID, connectionActions, resourceType, req.TargetID)
 	if err != nil {
 		s.logger.Warn("connection configuration authorization failed", "user_id", userID, "resource_type", resourceType, "resource_id", req.TargetID, "error", err)
 		s.forbidden(w, r)

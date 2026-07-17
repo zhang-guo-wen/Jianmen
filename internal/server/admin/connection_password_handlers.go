@@ -51,7 +51,7 @@ func (s *Server) handleConnectionPasswords(w http.ResponseWriter, r *http.Reques
 		s.writeErrorText(w, r, http.StatusInternalServerError, "failed to look up target")
 		return
 	}
-	allowed, err := s.authorizeAnyConnection(userID, actions, resourceType, request.TargetID)
+	allowed, err := s.authorizeAnyConnection(r.Context(), userID, actions, resourceType, request.TargetID)
 	if err != nil || !allowed {
 		s.forbidden(w, r)
 		return

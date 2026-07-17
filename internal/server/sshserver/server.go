@@ -65,25 +65,28 @@ func (a *auditStore) UpdateProtocol(sessionID string, protocol string) error {
 	return a.store.UpdateAuditProtocol(a.sessionID, protocol)
 }
 
-func New(cfg *config.Config, s store.Store, logger *slog.Logger, dataDir string, onlineSessions *online.Registry, dbs ...*gorm.DB) *Server {
-	if logger == nil {
-		logger = slog.Default()
-	}
-	var checker *rbac.Checker
-	var resourceGrantChecker *rbac.ResourceGrantChecker
-	if len(dbs) > 0 && dbs[0] != nil {
-		checker = rbac.NewChecker(dbs[0])
-		resourceGrantChecker = rbac.NewResourceGrantChecker(dbs[0])
+func New(cfg *config.Config, s store.Store, db *gorm.DB, logger *slog.Logger, dataDir string, onlineSessions *online.Registry) (*Server, error) {
+	switch {
+	case cfg == nil:
+		return nil, errors.New("ssh server config is required")
+	case s == nil:
+		return nil, errors.New("ssh server store is required")
+	case db == nil:
+		return nil, errors.New("ssh server metadata database is required")
+	case logger == nil:
+		return nil, errors.New("ssh server logger is required")
+	case onlineSessions == nil:
+		return nil, errors.New("ssh server online session registry is required")
 	}
 	return &Server{
 		cfg:                  cfg,
 		store:                s,
-		rbacChecker:          checker,
-		resourceGrantChecker: resourceGrantChecker,
+		rbacChecker:          rbac.NewChecker(db),
+		resourceGrantChecker: rbac.NewResourceGrantChecker(db),
 		logger:               logger,
 		superAdminIDs:        admin.LoadSuperAdminIDs(cfg, dataDir),
 		onlineSessions:       onlineSessions,
-	}
+	}, nil
 }
 
 func (s *Server) ListenAndServe(ctx context.Context) error {

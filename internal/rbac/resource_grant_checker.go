@@ -220,6 +220,12 @@ func (c *ResourceGrantChecker) groupContainsResource(groupID, resourceType, reso
 			Where("app_group = ? AND id = ?", groupName, resourceID).
 			Count(&count)
 		return count > 0
+	case resourceType == model.ResourceTypeContainerEndpoint:
+		var count int64
+		c.db.Model(&model.ContainerEndpoint{}).
+			Where("group_name = ? AND id = ?", groupName, resourceID).
+			Count(&count)
+		return count > 0
 	default:
 		return false
 	}

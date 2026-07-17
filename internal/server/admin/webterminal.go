@@ -109,7 +109,7 @@ func (s *Server) handleWebTerminal(w http.ResponseWriter, r *http.Request) {
 		s.writeErrorText(w, r, http.StatusForbidden, "target account has expired")
 		return
 	}
-	allowed, err := s.authorizeConnection(user.ID, rbac.ActionSessionConnect, model.ResourceTypeHostAccount, target.ID)
+	allowed, err := s.authorizeConnection(r.Context(), user.ID, rbac.ActionSessionConnect, model.ResourceTypeHostAccount, target.ID)
 	if err != nil {
 		s.logger.Warn("web terminal authorization failed", "user", user.Username, "target", target.ID, "error", err)
 		s.writeErrorText(w, r, http.StatusForbidden, "connection is not authorized")

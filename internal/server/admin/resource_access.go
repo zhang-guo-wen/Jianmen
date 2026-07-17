@@ -1,11 +1,10 @@
 package admin
 
 import (
-	"fmt"
+	"errors"
 	"net/http"
 
 	"jianmen/internal/model"
-	"jianmen/internal/rbac"
 	"jianmen/internal/store"
 )
 
@@ -17,10 +16,10 @@ func (s *Server) hasResourceGrant(r *http.Request, resourceType, resourceID stri
 	if s.isSuperAdmin(userID) {
 		return true, nil
 	}
-	if s.db == nil {
-		return false, fmt.Errorf("database not available")
+	if s.resourceGrants == nil {
+		return false, errors.New("resource grant service unavailable")
 	}
-	return rbac.NewResourceGrantChecker(s.db).HasGrant(userID, resourceType, resourceID)
+	return s.resourceGrants.Check(r.Context(), userID, resourceType, resourceID)
 }
 
 func (s *Server) requireResourceGrant(w http.ResponseWriter, r *http.Request, resourceType, resourceID string) bool {

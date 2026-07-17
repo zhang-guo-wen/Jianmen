@@ -45,7 +45,7 @@ func (s *Server) handleTestDBConnection(w http.ResponseWriter, r *http.Request) 
 		s.writeErrorText(w, r, http.StatusNotFound, "account not found")
 		return
 	}
-	allowed, err := s.authorizeConnection(userIDFromRequest(r), rbac.ActionDBConnect, model.ResourceTypeDatabaseAccount, acct.ID)
+	allowed, err := s.authorizeConnection(r.Context(), userIDFromRequest(r), rbac.ActionDBConnect, model.ResourceTypeDatabaseAccount, acct.ID)
 	if err != nil {
 		s.logger.Warn("database account test authorization failed", "account", acct.ID, "error", err)
 		s.forbidden(w, r)

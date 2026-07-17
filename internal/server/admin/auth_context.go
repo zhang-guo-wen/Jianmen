@@ -2,13 +2,15 @@ package admin
 
 import (
 	"context"
-	"jianmen/internal/config"
-	"jianmen/internal/model"
+	"errors"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
+
+	"jianmen/internal/config"
+	"jianmen/internal/service"
 )
 
 func (s *Server) withAuthAndUser(next http.HandlerFunc) http.HandlerFunc {
@@ -19,30 +21,35 @@ func (s *Server) withAuthAndUser(next http.HandlerFunc) http.HandlerFunc {
 			s.writeErrorText(w, r, http.StatusUnauthorized, "missing or invalid bearer token")
 			return
 		}
-
-		if s.db != nil {
-			var user model.User
-			if err := s.db.Where("token_hash = ? AND status = ?", hashToken(token), "active").First(&user).Error; err == nil {
-				if user.IsExpired(time.Now().UTC()) && !s.isSuperAdmin(user.ID) {
-					_ = s.db.Model(&user).Update("status", "disabled").Error
-					s.writeErrorText(w, r, http.StatusUnauthorized, "user account expired")
-					return
-				}
-				ctx := context.WithValue(r.Context(), ctxKeyUserID, user.ID)
-				ctx = context.WithValue(ctx, ctxKeyUsername, user.Username)
-				authenticatedRequest := r.WithContext(ctx)
-				if isAuditableMutation(authenticatedRequest) {
-					aw := &auditResponseWriter{ResponseWriter: w}
-					next(aw, authenticatedRequest)
-					s.recordOperation(authenticatedRequest, aw.statusCode())
-					return
-				}
-				next(w, authenticatedRequest)
-				return
-			}
+		if s.adminAuth == nil {
+			s.writeErrorText(w, r, http.StatusServiceUnavailable, "authentication service unavailable")
+			return
 		}
 
-		s.writeErrorText(w, r, http.StatusUnauthorized, "invalid token")
+		user, err := s.adminAuth.Authenticate(r.Context(), hashToken(token), time.Now().UTC(), s.isSuperAdmin)
+		if err != nil {
+			switch {
+			case errors.Is(err, service.ErrAdminUserExpired):
+				s.writeErrorText(w, r, http.StatusUnauthorized, "user account expired")
+			case errors.Is(err, service.ErrInvalidAdminToken):
+				s.writeErrorText(w, r, http.StatusUnauthorized, "invalid token")
+			default:
+				s.logger.Error("admin authentication failed", "error", err)
+				s.writeErrorText(w, r, http.StatusInternalServerError, "authentication failed")
+			}
+			return
+		}
+
+		ctx := context.WithValue(r.Context(), ctxKeyUserID, user.ID)
+		ctx = context.WithValue(ctx, ctxKeyUsername, user.Username)
+		authenticatedRequest := r.WithContext(ctx)
+		if isAuditableMutation(authenticatedRequest) {
+			aw := &auditResponseWriter{ResponseWriter: w}
+			next(aw, authenticatedRequest)
+			s.recordOperation(authenticatedRequest, aw.statusCode())
+			return
+		}
+		next(w, authenticatedRequest)
 	}
 }
 

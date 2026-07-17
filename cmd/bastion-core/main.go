@@ -6,21 +6,17 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"syscall"
-	"time"
 
 	"jianmen/internal/config"
-	"jianmen/internal/crypto"
 	"jianmen/internal/online"
+	"jianmen/internal/rbac"
 	"jianmen/internal/server/admin"
 	"jianmen/internal/server/appproxy"
 	"jianmen/internal/server/dbproxy"
 	"jianmen/internal/server/sshserver"
-	"jianmen/internal/storage"
+	"jianmen/internal/service"
 	"jianmen/internal/store"
-
-	"gorm.io/gorm"
 )
 
 func main() {
@@ -36,63 +32,12 @@ func main() {
 		logger.Error("failed to load config", "path", *configPath, "error", err)
 		os.Exit(1)
 	}
-	if !cfg.Database.Enabled {
-		logger.Error("metadata database is required; set database.enabled to true")
-		os.Exit(1)
-	}
-
-	// 初始化加密密钥（在任何数据库操作之前）
-	dataDir := filepath.Dir(cfg.Database.DSN)
-	if dataDir == "." || dataDir == "" {
-		dataDir = "data"
-	}
-	newKeyGenerated, err := crypto.Init(dataDir)
+	metadataDB, dataDir, cleanupMetadata, err := initializeMetadata(cfg, logger)
 	if err != nil {
-		logger.Error("failed to initialize crypto", "error", err)
+		logger.Error("failed to initialize metadata", "error", err)
 		os.Exit(1)
 	}
-	if newKeyGenerated {
-		logger.Info("generated new encryption key", "path", filepath.Join(dataDir, "encryption.key"))
-		logger.Info("please save this key file, it is required to decrypt stored credentials")
-	}
-
-	var metadataDB *gorm.DB
-	if cfg.Database.Enabled {
-		db, err := storage.Open(storage.Config{
-			Driver:          storage.Driver(cfg.Database.Driver),
-			DSN:             cfg.Database.DSN,
-			MaxOpenConns:    cfg.Database.MaxOpenConns,
-			MaxIdleConns:    cfg.Database.MaxIdleConns,
-			ConnMaxLifetime: time.Duration(cfg.Database.ConnMaxLifetimeSeconds) * time.Second,
-		})
-		if err != nil {
-			logger.Error("failed to open metadata database", "driver", cfg.Database.Driver, "error", err)
-			os.Exit(1)
-		}
-		sqlDB, err := db.DB()
-		if err != nil {
-			logger.Error("failed to initialize metadata database", "driver", cfg.Database.Driver, "error", err)
-			os.Exit(1)
-		}
-		defer sqlDB.Close()
-		migrationMode := "versioned"
-		if cfg.Database.AutoMigrate {
-			migrationMode = "automigrate"
-			if err := storage.AutoMigrate(db); err != nil {
-				logger.Error("failed to migrate metadata database", "driver", cfg.Database.Driver, "error", err)
-				os.Exit(1)
-			}
-		} else if err := storage.Migrate(db); err != nil {
-			logger.Error("failed to migrate metadata database", "driver", cfg.Database.Driver, "error", err)
-			os.Exit(1)
-		}
-		if err := storage.BootstrapMetadata(db, cfg); err != nil {
-			logger.Error("failed to bootstrap metadata database", "driver", cfg.Database.Driver, "error", err)
-			os.Exit(1)
-		}
-		metadataDB = db
-		logger.Info("metadata database ready", "driver", cfg.Database.Driver, "migration_mode", migrationMode)
-	}
+	defer cleanupMetadata()
 
 	appStore := store.NewDBStore(metadataDB)
 	logger.Info("using database-backed store")
@@ -106,7 +51,11 @@ func main() {
 	errCh := make(chan error, 4)
 	onlineSessions := online.NewRegistry()
 
-	sshSrv := sshserver.New(cfg, appStore, logger, dataDir, onlineSessions, metadataDB)
+	sshSrv, err := sshserver.New(cfg, appStore, metadataDB, logger, dataDir, onlineSessions)
+	if err != nil {
+		logger.Error("failed to initialize SSH server", "error", err)
+		os.Exit(1)
+	}
 	go func() {
 		errCh <- sshSrv.ListenAndServe(ctx)
 	}()
@@ -120,7 +69,37 @@ func main() {
 		go func() {
 			errCh <- appProxy.ListenAndServe(ctx)
 		}()
-		adminSrv := admin.New(cfg, appStore, logger, dataDir, appProxy, onlineSessions, metadataDB)
+		adminAuth, err := service.NewAdminAuthService(appStore)
+		if err != nil {
+			logger.Error("failed to initialize admin auth service", "error", err)
+			os.Exit(1)
+		}
+		resourceGrants, err := service.NewResourceGrantService(appStore, rbac.NewResourceGrantChecker(metadataDB))
+		if err != nil {
+			logger.Error("failed to initialize resource grant service", "error", err)
+			os.Exit(1)
+		}
+		resourceGroups, err := service.NewResourceGroupService(appStore)
+		if err != nil {
+			logger.Error("failed to initialize resource group service", "error", err)
+			os.Exit(1)
+		}
+		adminSrv, err := admin.New(
+			cfg,
+			appStore,
+			metadataDB,
+			adminAuth,
+			resourceGrants,
+			resourceGroups,
+			logger,
+			dataDir,
+			appProxy,
+			onlineSessions,
+		)
+		if err != nil {
+			logger.Error("failed to initialize admin server", "error", err)
+			os.Exit(1)
+		}
 		go func() {
 			errCh <- adminSrv.ListenAndServe(ctx)
 		}()

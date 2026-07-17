@@ -1,6 +1,9 @@
 .idea/
 node_modules/
 dist/
+!internal/frontend/dist/
+internal/frontend/dist/*
+!internal/frontend/dist/.gitkeep
 data/
 logs/
 bin/

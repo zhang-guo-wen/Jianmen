@@ -21,7 +21,7 @@ func (s *Server) connectableTargets(r *http.Request, targets []store.TargetView)
 	userID := userIDFromRequest(r)
 	result := make([]store.TargetView, 0, len(targets))
 	for _, target := range targets {
-		allowed, err := s.authorizeAnyConnection(userID, []string{rbac.ActionSessionConnect, rbac.ActionSFTPConnect}, model.ResourceTypeHostAccount, target.ID)
+		allowed, err := s.authorizeAnyConnection(r.Context(), userID, []string{rbac.ActionSessionConnect, rbac.ActionSFTPConnect}, model.ResourceTypeHostAccount, target.ID)
 		if err != nil {
 			return nil, fmt.Errorf("authorize host account %q: %w", target.ID, err)
 		}
@@ -39,7 +39,7 @@ func (s *Server) connectableDatabaseAccounts(r *http.Request, accounts []store.D
 	userID := userIDFromRequest(r)
 	result := make([]store.DatabaseAccountView, 0, len(accounts))
 	for _, account := range accounts {
-		allowed, err := s.authorizeConnection(userID, rbac.ActionDBConnect, model.ResourceTypeDatabaseAccount, account.ID)
+		allowed, err := s.authorizeConnection(r.Context(), userID, rbac.ActionDBConnect, model.ResourceTypeDatabaseAccount, account.ID)
 		if err != nil {
 			return nil, fmt.Errorf("authorize database account %q: %w", account.ID, err)
 		}

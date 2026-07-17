@@ -79,7 +79,7 @@ func (s *Server) listAIResources(w http.ResponseWriter, r *http.Request) {
 	resources := make([]aiResource, 0)
 	targets := s.store.Targets()
 	for _, target := range targets {
-		allowed, authErr := s.authorizeAnyConnection(userID, []string{rbac.ActionSessionConnect, rbac.ActionSFTPConnect}, model.ResourceTypeHostAccount, target.ID)
+		allowed, authErr := s.authorizeAnyConnection(r.Context(), userID, []string{rbac.ActionSessionConnect, rbac.ActionSFTPConnect}, model.ResourceTypeHostAccount, target.ID)
 		if authErr != nil {
 			s.writeErrorText(w, r, http.StatusInternalServerError, authErr.Error())
 			return
@@ -94,7 +94,7 @@ func (s *Server) listAIResources(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	for _, account := range accounts {
-		allowed, authErr := s.authorizeAnyConnection(userID, []string{rbac.ActionDBConnect}, model.ResourceTypeDatabaseAccount, account.ID)
+		allowed, authErr := s.authorizeAnyConnection(r.Context(), userID, []string{rbac.ActionDBConnect}, model.ResourceTypeDatabaseAccount, account.ID)
 		if authErr != nil {
 			s.writeErrorText(w, r, http.StatusInternalServerError, authErr.Error())
 			return
@@ -117,7 +117,7 @@ func (s *Server) getAIResource(w http.ResponseWriter, r *http.Request, resourceT
 		return
 	}
 	actions := aiResourceActions(resourceType)
-	allowed, authErr := s.authorizeAnyConnection(userIDFromRequest(r), actions, resourceType, resourceID)
+	allowed, authErr := s.authorizeAnyConnection(r.Context(), userIDFromRequest(r), actions, resourceType, resourceID)
 	if authErr != nil || !allowed {
 		s.forbidden(w, r)
 		return
@@ -141,7 +141,7 @@ func (s *Server) issueAIResourceCredential(w http.ResponseWriter, r *http.Reques
 		s.writeAIResourceError(w, r, err)
 		return
 	}
-	allowed, err := s.authorizeAnyConnection(userIDFromRequest(r), aiResourceActions(resourceType), resourceType, resourceID)
+	allowed, err := s.authorizeAnyConnection(r.Context(), userIDFromRequest(r), aiResourceActions(resourceType), resourceType, resourceID)
 	if err != nil || !allowed {
 		s.forbidden(w, r)
 		return
@@ -170,7 +170,7 @@ func (s *Server) issueAIResourceSession(w http.ResponseWriter, r *http.Request, 
 		s.writeAIResourceError(w, r, err)
 		return
 	}
-	allowed, authErr := s.authorizeAnyConnection(userIDFromRequest(r), aiResourceActions(resourceType), resourceType, resourceID)
+	allowed, authErr := s.authorizeAnyConnection(r.Context(), userIDFromRequest(r), aiResourceActions(resourceType), resourceType, resourceID)
 	if authErr != nil || !allowed {
 		s.forbidden(w, r)
 		return

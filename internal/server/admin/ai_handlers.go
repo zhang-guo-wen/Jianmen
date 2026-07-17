@@ -223,14 +223,16 @@ func (s *Server) handleAITokens(w http.ResponseWriter, r *http.Request) {
 		}
 		s.logger.Info("AI access token issued", "user_id", userID, "token_id", token.ID, "name", token.Name, "access_expires_at", token.AccessExpiresAt, "refresh_expires_at", token.RefreshExpiresAt)
 		docsURL := s.aiBaseURL(r) + "/api/ai/docs"
+		docsContent := s.aiDocsContent(r)
 		prompt := "\u6388\u6743 AI \u4f7f\u7528\u5f53\u524d\u7528\u6237\u7684\u8d44\u6e90\u7684\u6743\u9650\u3002"
 		copyPrompt := fmt.Sprintf("\u4f60\u53ef\u4ee5\u4f7f\u7528\u6211\u7684\u6743\u9650\u8bbf\u95ee\u6211\u7684\u670d\u52a1\u5668\u3001\u6570\u636e\u5e93\u7b49\u8d44\u6e90\uff0c\n\u8bbf\u95ee\u4ee4\u724c\uff1a%s\n\u5237\u65b0\u4ee4\u724c\uff1a%s\n\u5177\u4f53\u89c1\u6587\u6863\uff1a[%s](%s)", issued.AccessToken, issued.RefreshToken, docsURL, docsURL)
-		fullPrompt := copyPrompt + "\n\n\u5b8c\u6574\u63d0\u793a\u8bcd\uff1a\n" + s.aiDocsContent(r)
+		fullPrompt := copyPrompt + "\n\n\u5b8c\u6574\u63d0\u793a\u8bcd\uff1a\n" + docsContent
 		s.writeJSON(w, r, http.StatusCreated, map[string]any{
 			"id": token.ID, "name": token.Name, "temporary_account_id": token.TemporaryAccountID,
 			"access_token": issued.AccessToken, "refresh_token": issued.RefreshToken,
 			"access_expires_at": issued.AccessExpiresAt, "refresh_expires_at": issued.RefreshExpiresAt,
 			"temporary_expires_at": temporaryExpiresAt, "prompt": prompt, "copy_prompt": copyPrompt, "full_prompt": fullPrompt,
+			"docs_url": docsURL, "docs_content": docsContent,
 		})
 	default:
 		w.Header().Set("Allow", "GET, POST")

@@ -212,9 +212,9 @@ func (s *Server) handleAITokens(w http.ResponseWriter, r *http.Request) {
 		}
 		s.logger.Info("AI access token issued", "user_id", userID, "token_id", token.ID, "name", token.Name, "access_expires_at", token.AccessExpiresAt, "refresh_expires_at", token.RefreshExpiresAt)
 		docsURL := s.aiBaseURL(r) + "/api/ai/docs"
-		prompt := "???? Jianmen AI ??????????????????????????????????????????????"
-		copyPrompt := fmt.Sprintf("AI ?????%s\n?????%s", docsURL, issued.AccessToken)
-		fullPrompt := fmt.Sprintf("%s\nAI ?????%s\n?????%s\n?????%s", prompt, docsURL, issued.AccessToken, issued.RefreshToken)
+		prompt := "\u6388\u6743 AI \u4f7f\u7528\u5f53\u524d\u7528\u6237\u7684\u6240\u6709\u6709\u6548\u6743\u9650\uff0c\u4ec5\u53ef\u901a\u8fc7 AI API \u8c03\u7528\u3002"
+		copyPrompt := fmt.Sprintf("AI \u6587\u6863\u8def\u5f84\uff1a%s\n\u8bbf\u95ee\u4ee4\u724c\uff1a%s", docsURL, issued.AccessToken)
+		fullPrompt := fmt.Sprintf("%s\nAI \u6587\u6863\u8def\u5f84\uff1a%s\n\u8bbf\u95ee\u4ee4\u724c\uff1a%s\n\u5237\u65b0\u4ee4\u724c\uff1a%s", prompt, docsURL, issued.AccessToken, issued.RefreshToken)
 		s.writeJSON(w, r, http.StatusCreated, map[string]any{
 			"id": token.ID, "name": token.Name, "temporary_account_id": token.TemporaryAccountID,
 			"access_token": issued.AccessToken, "refresh_token": issued.RefreshToken,

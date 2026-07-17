@@ -36,6 +36,9 @@ func TestHandleAITokensIssueRotateAndRevoke(t *testing.T) {
 	if issued.ID == "" || issued.AccessToken == "" || issued.RefreshToken == "" {
 		t.Fatalf("missing issued credential: %#v", issued)
 	}
+	if strings.Contains(response.Body.String(), "????") || !strings.Contains(response.Body.String(), "prompt") {
+		t.Fatalf("AI prompt response is missing or encoded incorrectly: %s", response.Body.String())
+	}
 	var saved model.AIAccessToken
 	if err := db.First(&saved, "id = ?", issued.ID).Error; err != nil {
 		t.Fatalf("load token: %v", err)

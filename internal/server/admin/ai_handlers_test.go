@@ -62,6 +62,9 @@ func TestHandleAITokensIssueRotateAndRevoke(t *testing.T) {
 	if err := db.First(&temporaryAccount, "id = ?", saved.TemporaryAccountID).Error; err != nil {
 		t.Fatalf("load AI temporary account: %v", err)
 	}
+	if len(temporaryAccount.SessionID) != 5 {
+		t.Fatalf("AI temporary session ID length = %d, want 5: %q", len(temporaryAccount.SessionID), temporaryAccount.SessionID)
+	}
 	if temporaryAccount.ExpiresAt != nil {
 		t.Fatalf("permanent AI authorization should not expire: %v", temporaryAccount.ExpiresAt)
 	}

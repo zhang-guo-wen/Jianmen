@@ -1,9 +1,11 @@
 package store
 
 import (
+	"context"
 	"testing"
 
 	"jianmen/internal/model"
+	"jianmen/internal/storage"
 )
 
 func TestNormalizeContainerEndpointInputAllowsSSHWithoutAddress(t *testing.T) {
@@ -41,5 +43,50 @@ func TestNormalizeContainerEndpointInputRequiresDockerAPIAddress(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("Docker API endpoint without address was accepted")
+	}
+}
+
+func TestListContainerEndpointsPaginatesAndIncludesHostMetadata(t *testing.T) {
+	db, err := storage.Open(storage.Config{Driver: storage.DriverSQLite, DSN: ":memory:"})
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	if err := storage.AutoMigrate(db); err != nil {
+		t.Fatalf("auto migrate: %v", err)
+	}
+
+	host := model.Host{
+		ID: "host-1", Name: "prod-node", Address: "10.0.0.8", Port: 22,
+		GroupName: "production", Remark: "payments cluster", Status: "active",
+	}
+	account := model.HostAccount{
+		ID: "account-1", HostID: host.ID, Name: "ops", Username: "root", Status: "active",
+	}
+	endpoints := []model.ContainerEndpoint{
+		{ID: "endpoint-active", Name: "docker-prod", Runtime: model.ContainerRuntimeDocker, ConnectionMode: model.ContainerConnectionSSH, HostID: host.ID, HostAccountID: account.ID, Status: "active"},
+		{ID: "endpoint-disabled", Name: "docker-disabled", Runtime: model.ContainerRuntimeDocker, ConnectionMode: model.ContainerConnectionSSH, HostID: host.ID, HostAccountID: account.ID, Status: "disabled"},
+	}
+	if err := db.Create(&host).Error; err != nil {
+		t.Fatalf("create host: %v", err)
+	}
+	if err := db.Create(&account).Error; err != nil {
+		t.Fatalf("create account: %v", err)
+	}
+	if err := db.Create(&endpoints).Error; err != nil {
+		t.Fatalf("create endpoints: %v", err)
+	}
+
+	items, total, err := NewDBStore(db).ListContainerEndpoints(context.Background(), ContainerEndpointListParams{
+		Page: 1, Size: 20, Query: "10.0.0.8", Status: "active",
+	})
+	if err != nil {
+		t.Fatalf("list container endpoints: %v", err)
+	}
+	if total != 1 || len(items) != 1 {
+		t.Fatalf("container endpoints = total:%d items:%#v", total, items)
+	}
+	got := items[0]
+	if got.ID != "endpoint-active" || got.HostName != host.Name || got.HostAddress != host.Address || got.HostGroup != host.GroupName || got.HostRemark != host.Remark || got.HostAccountName != account.Name {
+		t.Fatalf("container endpoint metadata = %#v", got)
 	}
 }

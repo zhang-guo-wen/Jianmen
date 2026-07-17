@@ -171,6 +171,9 @@ type ContainerEndpointView struct {
 	Port            int    `json:"port,omitempty"`
 	HostID          string `json:"host_id,omitempty"`
 	HostName        string `json:"host_name,omitempty"`
+	HostAddress     string `json:"host_address,omitempty"`
+	HostGroup       string `json:"host_group,omitempty"`
+	HostRemark      string `json:"host_remark,omitempty"`
 	HostAccountID   string `json:"host_account_id,omitempty"`
 	HostAccountName string `json:"host_account_name,omitempty"`
 	Remark          string `json:"remark,omitempty"`
@@ -178,6 +181,13 @@ type ContainerEndpointView struct {
 	CreatedAt       string `json:"created_at"`
 	UpdatedAt       string `json:"updated_at"`
 	CanManage       bool   `json:"can_manage"`
+}
+
+type ContainerEndpointListParams struct {
+	Page   int
+	Size   int
+	Query  string
+	Status string
 }
 
 type ContainerEndpointInput struct {
@@ -367,7 +377,7 @@ type Store interface {
 	DeleteApplication(id string) error
 
 	// Container management
-	ContainerEndpoints() []ContainerEndpointView
+	ListContainerEndpoints(ctx context.Context, params ContainerEndpointListParams) ([]ContainerEndpointView, int64, error)
 	ContainerEndpoint(id string) (ContainerEndpointView, error)
 	AddContainerEndpoint(input ContainerEndpointInput) (ContainerEndpointView, error)
 	UpdateContainerEndpoint(id string, input ContainerEndpointInput) (ContainerEndpointView, error)

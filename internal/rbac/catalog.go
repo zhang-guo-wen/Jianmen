@@ -39,6 +39,7 @@ var permissionPages = []PermissionPageDefinition{
 		action(ActionSFTPConnect, "XFTP 连接", "通过 SFTP/XFTP 连接主机账号", model.ResourceTypeHostAccount),
 		action(ActionDBConnect, "数据库连接", "通过数据库代理连接指定账号", model.ResourceTypeDatabaseAccount),
 		action(ActionAppConnect, "访问应用", "通过应用代理访问指定应用", model.ResourceTypeApplication),
+		action(ActionContainerConnect, "读取容器", "读取容器列表和日志", model.ResourceTypeContainerEndpoint),
 	),
 	page("hosts", "主机管理", "/hosts", 20,
 		action(ActionHostView, "查看主机", "浏览主机列表与详情"),
@@ -74,7 +75,6 @@ var permissionPages = []PermissionPageDefinition{
 		action(ActionContainerCreate, "新增容器连接", "创建 Docker 或 containerd 连接"),
 		action(ActionContainerUpdate, "编辑容器连接", "修改容器连接配置"),
 		action(ActionContainerDelete, "删除容器连接", "删除容器连接配置"),
-		action(ActionContainerConnect, "读取容器", "读取容器列表和日志", model.ResourceTypeContainerEndpoint),
 	),
 	page("audit", "审计中心", "/audit", 60,
 		action(ActionAuditView, "查看 SSH 审计", "查看 SSH 会话、命令与文件审计"),
@@ -105,7 +105,6 @@ var actionDependencies = map[string][]string{
 	ActionContainerCreate:       {ActionContainerView},
 	ActionContainerUpdate:       {ActionContainerView},
 	ActionContainerDelete:       {ActionContainerView},
-	ActionContainerConnect:      {ActionContainerView},
 	ActionPlatformAccountCreate: {ActionPlatformAccountView},
 	ActionPlatformAccountUpdate: {ActionPlatformAccountView},
 	ActionPlatformAccountDelete: {ActionPlatformAccountView},
@@ -114,7 +113,7 @@ var actionDependencies = map[string][]string{
 }
 
 var pageVisibilityActions = map[string][]string{
-	"quickConnect":     {ActionSessionConnect, ActionSFTPConnect, ActionDBConnect, ActionAppConnect},
+	"quickConnect":     {ActionSessionConnect, ActionSFTPConnect, ActionDBConnect, ActionAppConnect, ActionContainerConnect},
 	"hosts":            {ActionHostView},
 	"databases":        {ActionDBProxyView},
 	"platformAccounts": {ActionPlatformAccountView},

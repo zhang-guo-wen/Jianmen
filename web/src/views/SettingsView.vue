@@ -1,89 +1,106 @@
 <template>
-  <div class="settings-grid">
+  <div class="settings-page">
     <el-card class="settings-card" shadow="never" v-loading="preferences.loading">
-      <template #header><strong>界面与终端</strong></template>
-      <el-form label-position="top">
-        <el-form-item label="主题">
-          <el-segmented v-model="form.theme" :options="themeOptions" class="theme-segmented" block />
-        </el-form-item>
-        <div class="form-pair">
-          <el-form-item label="终端字体">
-            <el-input v-model="form.terminal_font_family" placeholder="Cascadia Mono, Consolas, monospace" />
-          </el-form-item>
-          <el-form-item label="终端字号">
-            <el-input-number v-model="form.terminal_font_size" :min="10" :max="30" controls-position="right" />
-          </el-form-item>
-        </div>
-      </el-form>
-    </el-card>
+      <el-tabs v-model="activeTab" class="settings-tabs">
+        <el-tab-pane label="界面与终端" name="appearance">
+          <section class="settings-section">
+            <div class="section-heading">
+              <div>
+                <h2>界面与终端</h2>
+                <p>调整系统主题以及 Web Terminal 的字体显示。</p>
+              </div>
+            </div>
+            <el-form label-position="top">
+              <el-form-item label="主题">
+                <el-segmented v-model="form.theme" :options="themeOptions" class="theme-segmented" block />
+              </el-form-item>
+              <div class="form-pair">
+                <el-form-item label="终端字体">
+                  <el-input v-model="form.terminal_font_family" placeholder="Cascadia Mono, Consolas, monospace" />
+                </el-form-item>
+                <el-form-item label="终端字号">
+                  <el-input-number v-model="form.terminal_font_size" :min="10" :max="30" controls-position="right" />
+                </el-form-item>
+              </div>
+            </el-form>
+          </section>
+        </el-tab-pane>
 
-    <el-card class="settings-card client-card" shadow="never">
-      <template #header>
-        <div class="card-heading">
-          <strong>本地 SSH 客户端</strong>
-          <el-tag :type="form.ssh_client ? 'success' : 'info'" effect="light">
-            {{ form.ssh_client ? '已配置' : '未配置' }}
-          </el-tag>
-        </div>
-      </template>
-      <el-form label-position="top">
-        <el-form-item label="默认客户端">
-          <el-select v-model="form.ssh_client" placeholder="选择本地 SSH 客户端" style="width: 100%">
-            <el-option v-for="option in SSH_CLIENT_OPTIONS" :key="option.command" :label="option.label" :value="option.command" />
-          </el-select>
-        </el-form-item>
-        <el-form-item v-if="form.ssh_client && form.ssh_client !== 'default'" label="客户端路径" required :error="sshClientPathError">
-          <el-input v-model="form.ssh_client_path" placeholder="请输入完整绝对路径，如 C:\Program Files\PuTTY\putty.exe">
-            <template #append><el-button @click="pickExecutable('ssh')">选择文件</el-button></template>
-          </el-input>
-          <div class="field-help">程序路径必填，不提供默认值；浏览器无法读取完整路径时，请手动粘贴。</div>
-        </el-form-item>
-        <el-alert v-if="sshRegistrationCommand" type="info" :closable="false" show-icon>
-          <template #title>请使用管理员权限在 CMD 中执行下面命令，授权打开本地 SSH 客户端</template>
-          <div class="command-box"><code>{{ sshRegistrationCommand }}</code></div>
-          <el-button link type="primary" @click="copyRegistrationCommand(sshRegistrationCommand)">复制管理员注册命令</el-button>
-        </el-alert>
-      </el-form>
-    </el-card>
+        <el-tab-pane label="SSH 客户端" name="ssh">
+          <section class="settings-section">
+            <div class="section-heading">
+              <div>
+                <h2>本地 SSH 客户端</h2>
+                <p>选择快速连接时使用的本地 SSH 工具。</p>
+              </div>
+              <el-tag :type="form.ssh_client ? 'success' : 'info'" effect="light">
+                {{ form.ssh_client ? '已配置' : '未配置' }}
+              </el-tag>
+            </div>
+            <el-form label-position="top">
+              <el-form-item label="默认客户端">
+                <el-select v-model="form.ssh_client" placeholder="选择本地 SSH 客户端" style="width: 100%">
+                  <el-option v-for="option in SSH_CLIENT_OPTIONS" :key="option.command" :label="option.label" :value="option.command" />
+                </el-select>
+              </el-form-item>
+              <el-form-item v-if="form.ssh_client && form.ssh_client !== 'default'" label="客户端路径" required :error="sshClientPathError">
+                <el-input v-model="form.ssh_client_path" placeholder="请输入完整绝对路径，如 C:\Program Files\PuTTY\putty.exe">
+                  <template #append><el-button @click="pickExecutable('ssh')">选择文件</el-button></template>
+                </el-input>
+                <div class="field-help">程序路径必填，不提供默认值；浏览器无法读取完整路径时，请手动粘贴。</div>
+              </el-form-item>
+              <el-alert v-if="sshRegistrationCommand" type="info" :closable="false" show-icon>
+                <template #title>请使用管理员权限在 CMD 中执行下面命令，授权打开本地 SSH 客户端</template>
+                <div class="command-box"><code>{{ sshRegistrationCommand }}</code></div>
+                <el-button link type="primary" @click="copyRegistrationCommand(sshRegistrationCommand)">复制管理员注册命令</el-button>
+              </el-alert>
+            </el-form>
+          </section>
+        </el-tab-pane>
 
-    <el-card class="settings-card client-card" shadow="never">
-      <template #header>
-        <div class="card-heading">
-          <strong>本地数据库客户端</strong>
-          <el-tag :type="form.database_client ? 'success' : 'info'" effect="light">
-            {{ form.database_client ? '已配置' : '未配置' }}
-          </el-tag>
-        </div>
-      </template>
-      <el-form label-position="top">
-        <el-form-item label="默认客户端">
-          <el-select v-model="form.database_client" placeholder="选择本地数据库客户端" clearable style="width: 100%">
-            <el-option v-for="option in DATABASE_CLIENT_OPTIONS" :key="option.command" :label="option.label" :value="option.command" />
-          </el-select>
-        </el-form-item>
-        <el-form-item v-if="form.database_client" label="客户端路径" required :error="databaseClientPathError">
-          <el-input v-model="form.database_client_path" placeholder="请输入完整绝对路径，如 C:\Program Files\DBeaver\dbeaver.exe">
-            <template #append><el-button @click="pickExecutable('database')">选择文件</el-button></template>
-          </el-input>
-          <div class="field-help">注册 jianmen-db:// 协议后，网页可携带临时堡垒机凭据启动 DBeaver。</div>
-        </el-form-item>
-        <el-alert v-if="databaseRegistrationCommand" type="info" :closable="false" show-icon>
-          <template #title>请使用管理员权限在 CMD 中执行下面命令，授权打开 DBeaver</template>
-          <div class="command-box"><code>{{ databaseRegistrationCommand }}</code></div>
-          <el-button link type="primary" @click="copyRegistrationCommand(databaseRegistrationCommand)">复制管理员注册命令</el-button>
-        </el-alert>
-      </el-form>
-    </el-card>
+        <el-tab-pane label="数据库客户端" name="database">
+          <section class="settings-section">
+            <div class="section-heading">
+              <div>
+                <h2>本地数据库客户端</h2>
+                <p>配置数据库快速连接使用的本地客户端。</p>
+              </div>
+              <el-tag :type="form.database_client ? 'success' : 'info'" effect="light">
+                {{ form.database_client ? '已配置' : '未配置' }}
+              </el-tag>
+            </div>
+            <el-form label-position="top">
+              <el-form-item label="默认客户端">
+                <el-select v-model="form.database_client" placeholder="选择本地数据库客户端" clearable style="width: 100%">
+                  <el-option v-for="option in DATABASE_CLIENT_OPTIONS" :key="option.command" :label="option.label" :value="option.command" />
+                </el-select>
+              </el-form-item>
+              <el-form-item v-if="form.database_client" label="客户端路径" required :error="databaseClientPathError">
+                <el-input v-model="form.database_client_path" placeholder="请输入完整绝对路径，如 C:\Program Files\DBeaver\dbeaver.exe">
+                  <template #append><el-button @click="pickExecutable('database')">选择文件</el-button></template>
+                </el-input>
+                <div class="field-help">注册 jianmen-db:// 协议后，网页可携带临时堡垒机凭据启动 DBeaver。</div>
+              </el-form-item>
+              <el-alert v-if="databaseRegistrationCommand" type="info" :closable="false" show-icon>
+                <template #title>请使用管理员权限在 CMD 中执行下面命令，授权打开 DBeaver</template>
+                <div class="command-box"><code>{{ databaseRegistrationCommand }}</code></div>
+                <el-button link type="primary" @click="copyRegistrationCommand(databaseRegistrationCommand)">复制管理员注册命令</el-button>
+              </el-alert>
+            </el-form>
+          </section>
+        </el-tab-pane>
+      </el-tabs>
 
-    <div class="settings-actions">
-      <span v-if="preferences.error" class="save-error">{{ preferences.error }}</span>
-      <el-button type="primary" size="large" :loading="preferences.saving" @click="save">保存用户配置</el-button>
-    </div>
+      <div class="settings-actions">
+        <span v-if="preferences.error" class="save-error">{{ preferences.error }}</span>
+        <el-button type="primary" size="large" :loading="preferences.saving" @click="save">保存用户配置</el-button>
+      </div>
+    </el-card>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, watch } from 'vue';
+import { computed, onMounted, reactive, ref, watch } from 'vue';
 import { ElMessage } from 'element-plus';
 
 import { buildDatabaseProtocolRegistrationCommand, DATABASE_CLIENT_OPTIONS } from '@/config/databaseClients';
@@ -93,6 +110,7 @@ import { writeClipboardText } from '@/utils/clipboard';
 
 const preferences = usePreferencesStore();
 const form = reactive({ ...preferences.value });
+const activeTab = ref('appearance');
 const themeOptions = [
   { label: '跟随系统', value: 'system' },
   { label: '浅色', value: 'light' },
@@ -168,16 +186,147 @@ async function copyRegistrationCommand(command: string) {
 </script>
 
 <style scoped>
-.settings-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; overflow: auto; padding-bottom: 4px; }
-.settings-card { border: 1px solid var(--color-border); border-radius: 18px; background: var(--color-card); }
-.form-pair { display: grid; grid-template-columns: minmax(0, 1fr) 150px; gap: 14px; }
-:deep(.theme-segmented .el-segmented__item) { min-width: 88px; padding: 0 14px; white-space: nowrap; }
-:deep(.theme-segmented .el-segmented__item-label) { overflow: visible; text-overflow: clip; }
-.card-heading { display: flex; align-items: center; justify-content: space-between; }
-.field-help { margin-top: 7px; color: var(--color-text-secondary); font-size: 12px; }
-.command-box { max-height: 92px; margin: 10px 0 4px; padding: 10px; overflow: auto; border-radius: 10px; background: var(--color-surface-muted); }
-.command-box code { white-space: pre-wrap; word-break: break-all; }
-.settings-actions { grid-column: 1 / -1; display: flex; align-items: center; justify-content: flex-end; gap: 14px; }
-.save-error { color: var(--el-color-danger); font-size: 13px; }
-@media (max-width: 900px) { .settings-grid { grid-template-columns: 1fr; } .form-pair { grid-template-columns: 1fr; } }
+.settings-page {
+  flex: 1;
+  min-height: 0;
+  padding-right: 4px;
+  overflow-y: auto;
+}
+
+.settings-card {
+  min-height: 100%;
+  border: 1px solid var(--color-border);
+  border-radius: 18px;
+  background: var(--color-card);
+}
+
+:deep(.settings-card > .el-card__body) {
+  display: flex;
+  flex-direction: column;
+  min-height: calc(100vh - var(--header-height) - 40px);
+  padding: 0;
+}
+
+.settings-tabs {
+  flex: 1;
+  min-height: 0;
+}
+
+:deep(.settings-tabs > .el-tabs__header) {
+  margin: 0;
+  padding: 0 24px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+:deep(.settings-tabs .el-tabs__nav-wrap::after) {
+  display: none;
+}
+
+:deep(.settings-tabs .el-tabs__item) {
+  height: 56px;
+  padding: 0 22px;
+  font-weight: 700;
+}
+
+:deep(.settings-tabs > .el-tabs__content) {
+  overflow: visible;
+}
+
+.settings-section {
+  max-width: 920px;
+  padding: 28px 32px 24px;
+}
+
+.section-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+  margin-bottom: 26px;
+}
+
+.section-heading h2 {
+  margin: 0;
+  font-size: 20px;
+  line-height: 1.3;
+}
+
+.section-heading p {
+  margin: 6px 0 0;
+  color: var(--color-text-secondary);
+  font-size: 13px;
+}
+
+.form-pair {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 150px;
+  gap: 14px;
+}
+
+:deep(.theme-segmented .el-segmented__item) {
+  min-width: 88px;
+  padding: 0 14px;
+  white-space: nowrap;
+}
+
+:deep(.theme-segmented .el-segmented__item-label) {
+  overflow: visible;
+  text-overflow: clip;
+}
+
+.field-help {
+  margin-top: 7px;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+}
+
+.command-box {
+  margin: 10px 0 4px;
+  padding: 10px;
+  border-radius: 10px;
+  background: var(--color-surface-muted);
+}
+
+.command-box code {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.settings-actions {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 14px;
+  padding: 16px 24px;
+  border-top: 1px solid var(--color-border);
+  background: var(--color-surface-muted);
+}
+
+.save-error {
+  color: var(--el-color-danger);
+  font-size: 13px;
+}
+
+@media (max-width: 700px) {
+  :deep(.settings-tabs > .el-tabs__header) {
+    padding: 0 14px;
+  }
+
+  :deep(.settings-tabs .el-tabs__item) {
+    padding: 0 14px;
+  }
+
+  .settings-section {
+    padding: 22px 18px;
+  }
+
+  .form-pair {
+    grid-template-columns: 1fr;
+  }
+
+  .settings-actions {
+    padding: 14px 18px;
+  }
+}
 </style>

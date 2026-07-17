@@ -1,12 +1,13 @@
 <template>
   <div class="settings-page">
     <el-card class="settings-card" shadow="never" v-loading="preferences.loading">
-      <el-tabs v-model="activeTab" class="settings-tabs">
-        <template #extra>
+      <div class="settings-tabs-shell">
+        <div class="settings-tab-actions">
           <span v-if="preferences.error" class="save-error">保存失败</span>
           <el-button type="primary" :loading="preferences.saving" @click="save">保存配置</el-button>
-        </template>
-        <el-tab-pane label="界面与终端" name="appearance">
+        </div>
+        <el-tabs v-model="activeTab" class="settings-tabs">
+          <el-tab-pane label="界面与终端" name="appearance">
           <section class="settings-section">
             <div class="section-heading">
               <div>
@@ -92,9 +93,9 @@
               </el-alert>
             </el-form>
           </section>
-        </el-tab-pane>
-      </el-tabs>
-
+          </el-tab-pane>
+        </el-tabs>
+      </div>
     </el-card>
   </div>
 </template>
@@ -219,24 +220,32 @@ async function copyRegistrationCommand(command: string) {
   z-index: 3;
   display: flex;
   align-items: center;
-  gap: 16px;
   margin: 0;
-  padding: 0 20px 0 24px;
+  padding: 0 168px 0 24px;
   background: var(--color-card);
   border-bottom: 1px solid var(--color-border);
 }
 
-:deep(.settings-tabs > .el-tabs__header .el-tabs__nav-wrap) {
-  flex: 1;
-  min-width: 0;
+.settings-tabs-shell {
+  position: relative;
 }
 
-:deep(.settings-tabs > .el-tabs__header .el-tabs__extra-content) {
+.settings-tab-actions {
+  position: sticky;
+  top: 0;
+  z-index: 4;
   display: flex;
-  flex-shrink: 0;
   align-items: center;
+  justify-content: flex-end;
   gap: 10px;
-  padding-bottom: 1px;
+  height: 0;
+  padding: 0 20px;
+  pointer-events: none;
+}
+
+.settings-tab-actions .el-button {
+  pointer-events: auto;
+  transform: translateY(8px);
 }
 
 :deep(.settings-tabs .el-tabs__nav-wrap::after) {
@@ -321,12 +330,11 @@ async function copyRegistrationCommand(command: string) {
 
 @media (max-width: 700px) {
   :deep(.settings-tabs > .el-tabs__header) {
-    gap: 8px;
-    padding: 0 12px;
+    padding: 0 116px 0 12px;
   }
 
-  :deep(.settings-tabs > .el-tabs__header .el-tabs__extra-content) {
-    gap: 6px;
+  .settings-tab-actions {
+    padding: 0 12px;
   }
 
   :deep(.settings-tabs .el-tabs__item) {

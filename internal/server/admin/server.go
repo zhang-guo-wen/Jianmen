@@ -54,7 +54,5 @@ func New(cfg *config.Config, store store.Store, logger *slog.Logger, dataDir str
 		dataDir: dataDir, superAdminIDs: superAdminIDs,
 		loginLimiter: newDefaultLoginLimiter(), loginCaptcha: loginCaptcha, appProxy: appProxy,
 		onlineSessions: onlineSessions, containerService: service.NewContainerService(),
-		loginLimiter: newDefaultLoginLimiter(), loginCaptcha: loginCaptcha, appProxy: appProxy,
-		onlineSessions: onlineSessions,
 	}
 }

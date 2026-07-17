@@ -34,11 +34,6 @@
             {{ row.application_count || 0 }}
           </template>
         </el-table-column>
-        <el-table-column :label="t('resourceGroups.platformCount')" width="90">
-          <template #default="{ row }">
-            {{ row.platform_count || 0 }}
-          </template>
-        </el-table-column>
         <el-table-column :label="t('common.actions')" width="150" fixed="right">
           <template #default="{ row }">
             <el-button link type="primary" size="small" @click="showEditDialog(row)">

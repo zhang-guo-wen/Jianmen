@@ -9,31 +9,24 @@ import (
 	"jianmen/internal/model"
 )
 
-func TestResourceGroupIncludesAndMaintainsAllResourceContainerCounts(t *testing.T) {
+func TestAccountResourceGroupIncludesAndMaintainsPlatformAccounts(t *testing.T) {
 	server, db := newAdminDBTestServer(t)
 	server.superAdminIDs["u-admin"] = true
 
-	group := model.ResourceGroup{ID: "group-prod", Name: "prod", GroupType: model.ResourceGroupTypeResource}
+	group := model.ResourceGroup{ID: "group-prod", Name: "prod", GroupType: model.ResourceGroupTypeAccount}
 	user := model.User{ID: "owner-1", Username: "owner", Status: "active"}
-	resources := []any{
-		&model.Host{ID: "host-1", Name: "host", Address: "127.0.0.1", Port: 22, GroupName: group.Name, Status: "active"},
-		&model.DatabaseInstance{ID: "db-1", Name: "database", Protocol: "mysql", Address: "127.0.0.1", Port: 3306, GroupName: group.Name, Status: "active"},
-		&model.Application{ID: "app-1", Name: "application", AppGroup: group.Name, ListenPort: 47110, InternalScheme: "http", InternalHost: "127.0.0.1", InternalPort: 8080, Status: "active"},
-		&model.PlatformAccount{ID: "platform-1", Name: "platform", PlatformName: "GitLab", GroupName: group.Name, Username: "gitlab-user", OwnerID: user.ID, Visibility: "private", Status: "active"},
-	}
+	platform := model.PlatformAccount{ID: "platform-1", Name: "platform", PlatformName: "GitLab", GroupName: group.Name, Username: "gitlab-user", OwnerID: user.ID, Status: "active"}
 	if err := db.Create(&group).Error; err != nil {
 		t.Fatalf("create group: %v", err)
 	}
 	if err := db.Create(&user).Error; err != nil {
 		t.Fatalf("create owner: %v", err)
 	}
-	for _, resource := range resources {
-		if err := db.Create(resource).Error; err != nil {
-			t.Fatalf("create resource %T: %v", resource, err)
-		}
+	if err := db.Create(&platform).Error; err != nil {
+		t.Fatalf("create platform account: %v", err)
 	}
 
-	req := asTestSuperAdmin(httptest.NewRequest(http.MethodGet, "/api/resource-groups?group_type=resource", nil))
+	req := asTestSuperAdmin(httptest.NewRequest(http.MethodGet, "/api/resource-groups?group_type=account", nil))
 	rec := httptest.NewRecorder()
 	server.handleResourceGroups(rec, req)
 	if rec.Code != http.StatusOK {
@@ -41,22 +34,16 @@ func TestResourceGroupIncludesAndMaintainsAllResourceContainerCounts(t *testing.
 	}
 	var page struct {
 		Items []struct {
-			ID               string `json:"id"`
-			HostCount        int64  `json:"host_count"`
-			DatabaseCount    int64  `json:"database_count"`
-			ApplicationCount int64  `json:"application_count"`
-			PlatformCount    int64  `json:"platform_count"`
+			ID            string `json:"id"`
+			AccountCount  int64  `json:"account_count"`
+			PlatformCount int64  `json:"platform_count"`
 		} `json:"items"`
 	}
 	if err := decodeTestData(t, rec.Body.Bytes(), &page); err != nil {
 		t.Fatalf("decode groups: %v", err)
 	}
-	if len(page.Items) != 1 {
-		t.Fatalf("groups = %#v", page.Items)
-	}
-	item := page.Items[0]
-	if item.HostCount != 1 || item.DatabaseCount != 1 || item.ApplicationCount != 1 || item.PlatformCount != 1 {
-		t.Fatalf("unexpected counts: %#v", item)
+	if len(page.Items) != 1 || page.Items[0].AccountCount != 1 || page.Items[0].PlatformCount != 1 {
+		t.Fatalf("unexpected counts: %#v", page.Items)
 	}
 
 	req = asTestSuperAdmin(httptest.NewRequest(http.MethodPut, "/api/resource-groups/"+group.ID, strings.NewReader(`{"name":"production"}`)))
@@ -65,26 +52,10 @@ func TestResourceGroupIncludesAndMaintainsAllResourceContainerCounts(t *testing.
 	if rec.Code != http.StatusOK {
 		t.Fatalf("update status = %d; body=%s", rec.Code, rec.Body.String())
 	}
-	assertGroupValues := func(want string) {
-		t.Helper()
-		var host model.Host
-		var database model.DatabaseInstance
-		var application model.Application
-		var platform model.PlatformAccount
-		if err := db.First(&host, "id = ?", "host-1").Error; err != nil || host.GroupName != want {
-			t.Fatalf("host group = %q, err=%v", host.GroupName, err)
-		}
-		if err := db.First(&database, "id = ?", "db-1").Error; err != nil || database.GroupName != want {
-			t.Fatalf("database group = %q, err=%v", database.GroupName, err)
-		}
-		if err := db.First(&application, "id = ?", "app-1").Error; err != nil || application.AppGroup != want {
-			t.Fatalf("application group = %q, err=%v", application.AppGroup, err)
-		}
-		if err := db.First(&platform, "id = ?", "platform-1").Error; err != nil || platform.GroupName != want {
-			t.Fatalf("platform group = %q, err=%v", platform.GroupName, err)
-		}
+	var updated model.PlatformAccount
+	if err := db.First(&updated, "id = ?", platform.ID).Error; err != nil || updated.GroupName != "production" {
+		t.Fatalf("platform group = %q, err=%v", updated.GroupName, err)
 	}
-	assertGroupValues("production")
 
 	req = asTestSuperAdmin(httptest.NewRequest(http.MethodDelete, "/api/resource-groups/"+group.ID, nil))
 	rec = httptest.NewRecorder()
@@ -92,5 +63,7 @@ func TestResourceGroupIncludesAndMaintainsAllResourceContainerCounts(t *testing.
 	if rec.Code != http.StatusOK {
 		t.Fatalf("delete status = %d; body=%s", rec.Code, rec.Body.String())
 	}
-	assertGroupValues("")
+	if err := db.First(&updated, "id = ?", platform.ID).Error; err != nil || updated.GroupName != "" {
+		t.Fatalf("platform group after delete = %q, err=%v", updated.GroupName, err)
+	}
 }

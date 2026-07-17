@@ -74,7 +74,7 @@ func TestHasPermissionSupportsGroupForResourceContainers(t *testing.T) {
 	if err := db.Create(&model.Application{ID: "app1", Name: "console", AppGroup: "prod", ListenPort: 18080, InternalScheme: "http", InternalHost: "127.0.0.1", InternalPort: 8080, Status: "active"}).Error; err != nil {
 		t.Fatalf("create application: %v", err)
 	}
-	if err := db.Create(&model.PlatformAccount{ID: "platform1", Name: "gitlab", PlatformName: "GitLab", GroupName: "prod", Username: "admin", OwnerID: "u1", Visibility: "private", Status: "active"}).Error; err != nil {
+	if err := db.Create(&model.PlatformAccount{ID: "platform1", Name: "gitlab", PlatformName: "GitLab", GroupName: "prod", Username: "admin", OwnerID: "u1", Status: "active"}).Error; err != nil {
 		t.Fatalf("create platform account: %v", err)
 	}
 

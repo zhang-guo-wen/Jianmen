@@ -16,13 +16,32 @@
           </el-button>
         </template>
         <el-table-column :label="t('platformAccounts.column.platform')" width="120" show-overflow-tooltip>
-          <template #default="{ row }"><el-tag size="small" type="primary" effect="plain">{{ row.platform_name }}</el-tag></template>
+          <template #default="{ row }"><el-tag size="small" type="primary" effect="plain">{{ row.platform_name || '-' }}</el-tag></template>
         </el-table-column>
         <el-table-column :label="t('platformAccounts.column.name')" min-width="140" show-overflow-tooltip>
-          <template #default="{ row }"><el-button link type="primary" @click="openEditDialog(row)">{{ row.name || row.username }}</el-button></template>
+          <template #default="{ row }"><el-button link type="primary" @click="openEditDialog(row)">{{ row.name || row.username || '-' }}</el-button></template>
         </el-table-column>
-        <el-table-column :label="t('platformAccounts.column.username')" min-width="120" show-overflow-tooltip>
-          <template #default="{ row }">{{ row.username }}</template>
+        <el-table-column :label="t('platformAccounts.column.username')" min-width="140" show-overflow-tooltip>
+          <template #default="{ row }">{{ row.username || '-' }}</template>
+        </el-table-column>
+        <el-table-column :label="t('platformAccounts.column.url')" min-width="220" show-overflow-tooltip>
+          <template #default="{ row }">
+            <el-button v-if="row.url" link type="primary" size="small" @click="copyText(row.url, t('platformAccounts.message.addressCopied'))">
+              <el-icon><CopyDocument /></el-icon>{{ row.url }}
+            </el-button>
+            <span v-else>-</span>
+          </template>
+        </el-table-column>
+        <el-table-column :label="t('platformAccounts.column.password')" width="110" align="center">
+          <template #default="{ row }">
+            <el-button v-if="row.has_password && permission.canDo('platform_account:use')" link type="primary" size="small" @click="copyPassword(row)">
+              <el-icon><CopyDocument /></el-icon>{{ t('platformAccounts.action.copyPassword') }}
+            </el-button>
+            <span v-else>-</span>
+          </template>
+        </el-table-column>
+        <el-table-column :label="t('platformAccounts.column.remark')" min-width="180" show-overflow-tooltip>
+          <template #default="{ row }">{{ row.remark || '-' }}</template>
         </el-table-column>
         <el-table-column :label="t('platformAccounts.column.group')" width="120" show-overflow-tooltip>
           <template #default="{ row }">{{ row.group || '-' }}</template>
@@ -37,9 +56,8 @@
             />
           </template>
         </el-table-column>
-        <el-table-column :label="t('platformAccounts.column.actions')" width="220" fixed="right">
+        <el-table-column :label="t('platformAccounts.column.actions')" width="160" fixed="right">
           <template #default="{ row }">
-            <el-button v-if="permission.canDo('platform_account:use')" link type="primary" size="small" @click="openPasswordDialog(row)">{{ t('platformAccounts.action.viewPassword') }}</el-button>
             <el-button v-if="permission.canDo('platform_account:update')" link type="primary" size="small" @click="openEditDialog(row)">{{ t('platformAccounts.action.edit') }}</el-button>
             <el-button v-if="permission.canDo('platform_account:delete')" link type="danger" size="small" @click="confirmDelete(row)">{{ t('platformAccounts.action.delete') }}</el-button>
           </template>
@@ -56,7 +74,7 @@
         <el-form ref="formRef" :model="form" :rules="rules" label-width="100px">
           <el-form-item :label="t('platformAccounts.field.url')">
             <el-input v-model="form.url" placeholder="https://jenkins.example.com">
-              <template #prefix v-if="form.url"><el-link :href="form.url" target="_blank" :underline="false">?</el-link></template>
+              <template #prefix v-if="form.url"><el-link :href="form.url" target="_blank" :underline="false">↗</el-link></template>
             </el-input>
           </el-form-item>
           <el-form-item :label="t('platformAccounts.field.platform')" prop="platform_name" required>
@@ -78,19 +96,16 @@
                   <el-option v-for="group in groupOptions" :key="group" :label="group" :value="group" />
                 </el-select>
               </el-form-item>
-              <el-form-item :label="t('platformAccounts.field.totpSecret')"><el-input v-model="form.totp_secret" /></el-form-item>
+              <el-form-item :label="t('platformAccounts.field.totpSecret')">
+                <el-input v-model="form.totp_secret" />
+                <el-text type="info" size="small">{{ t('platformAccounts.help.totpSecret') }}</el-text>
+              </el-form-item>
               <el-form-item :label="t('platformAccounts.field.remark')"><el-input v-model="form.remark" type="textarea" :autosize="{ minRows: 2, maxRows: 4 }" /></el-form-item>
             </el-collapse-item>
           </el-collapse>
         </el-form>
       </FormDialog>
 
-      <el-dialog v-model="passwordDialogVisible" :title="t('platformAccounts.password.title')" width="400px">
-        <el-alert :title="t('platformAccounts.password.warning')" type="warning" :closable="false" show-icon style="margin-bottom: 16px" />
-        <el-input v-model="revealedPassword" readonly>
-          <template #append><el-button @click="copyPassword">{{ t('platformAccounts.action.save') }}</el-button></template>
-        </el-input>
-      </el-dialog>
     </div>
   </div>
 </template>
@@ -100,6 +115,7 @@ import { ref, reactive, onMounted, watch } from 'vue'
 import { useI18n } from '@/i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
+import { CopyDocument } from '@element-plus/icons-vue'
 import { apiClient } from '@/api/client'
 import type { PlatformAccountView, PlatformAccountPayload } from '@/api/client'
 import DataTableCard from '@/components/DataTableCard.vue'
@@ -130,8 +146,6 @@ const rules: FormRules = {
 }
 const platformOptions = ['Jenkins', 'GitLab', 'Jira', 'Confluence', 'Harbor', 'Nexus', 'SonarQube', 'Grafana', 'Kibana', 'Prometheus']
 const groupOptions = ref<string[]>([])
-const passwordDialogVisible = ref(false)
-const revealedPassword = ref('')
 const statusUpdatingId = ref('')
 
 async function loadData() {
@@ -223,22 +237,23 @@ async function toggleStatus(row: PlatformAccountView, active: boolean) {
   }
 }
 
-async function openPasswordDialog(row: PlatformAccountView) {
+async function copyText(value: string, successMessage: string) {
+  if (!value) return
   try {
-    const response = await apiClient.getPlatformAccountPassword(row.id || '')
-    revealedPassword.value = response.password
-    passwordDialogVisible.value = true
-  } catch (error: any) {
-    ElMessage.error(error.message)
+    await writeClipboardText(value)
+    ElMessage.success(successMessage)
+  } catch {
+    ElMessage.error(t('platformAccounts.error.copy'))
   }
 }
 
-async function copyPassword() {
+async function copyPassword(row: PlatformAccountView) {
+  if (!row.id) return
   try {
-    await writeClipboardText(revealedPassword.value)
-    ElMessage.success('???')
-  } catch {
-    ElMessage.error('????')
+    const response = await apiClient.getPlatformAccountPassword(row.id)
+    await copyText(response.password, t('platformAccounts.message.passwordCopied'))
+  } catch (error: any) {
+    ElMessage.error(error.message || t('platformAccounts.error.copy'))
   }
 }
 

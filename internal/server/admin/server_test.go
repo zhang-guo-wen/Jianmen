@@ -478,8 +478,19 @@ func TestLoginCaptchaChallengeIsNotCached(t *testing.T) {
 	if rec.Header().Get("Cache-Control") != "no-store, max-age=0" {
 		t.Fatalf("Cache-Control = %q, want no-store, max-age=0", rec.Header().Get("Cache-Control"))
 	}
-	if !strings.Contains(rec.Body.String(), `"signature"`) {
-		t.Fatalf("challenge body missing signature: %s", rec.Body.String())
+	var challenge service.LoginCaptchaChallenge
+	if err := json.Unmarshal(rec.Body.Bytes(), &challenge); err != nil {
+		t.Fatalf("decode raw challenge response: %v; body=%s", err, rec.Body.String())
+	}
+	if challenge.Signature == "" || challenge.Challenge == "" || challenge.Salt == "" {
+		t.Fatalf("challenge response is incomplete: %#v", challenge)
+	}
+	var envelope map[string]json.RawMessage
+	if err := json.Unmarshal(rec.Body.Bytes(), &envelope); err != nil {
+		t.Fatalf("decode challenge shape: %v", err)
+	}
+	if _, wrapped := envelope["data"]; wrapped {
+		t.Fatalf("ALTCHA challenge must not use the API envelope: %s", rec.Body.String())
 	}
 }
 

@@ -107,7 +107,11 @@ func (s *Server) handleLoginCaptchaChallenge(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	w.Header().Set("Cache-Control", "no-store, max-age=0")
-	s.writeJSON(w, r, http.StatusOK, challenge)
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(challenge); err != nil {
+		s.logger.Error("failed to encode login captcha challenge", "error", err)
+	}
 }
 
 // handleLogin handles username+password login, returns an API token.

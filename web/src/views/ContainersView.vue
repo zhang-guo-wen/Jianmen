@@ -200,6 +200,8 @@ const logViewer = ref<HTMLElement | null>(null)
 let logPollingTimer: ReturnType<typeof setTimeout> | null = null
 let logSelectionTimer: ReturnType<typeof setTimeout> | null = null
 let logRequestController: AbortController | null = null
+let containerListController: AbortController | null = null
+let containerListVersion = 0
 let logSessionVersion = 0
 const logPollingInterval = 3000
 const logSelectionDelay = 180
@@ -245,6 +247,7 @@ async function loadEndpoints() {
     hosts.value = hostPage.items
     groups.value = (resourceGroups.items || []).map(item => item.name).filter(Boolean)
     if (selectedEndpoint.value && !endpoints.value.some(item => item.id === selectedEndpoint.value?.id)) {
+      stopContainerListRequest()
       stopLogPolling()
       selectedEndpoint.value = null
       selectedContainer.value = null
@@ -257,6 +260,7 @@ async function loadEndpoints() {
 }
 
 async function selectEndpoint(endpoint: ContainerEndpointView) {
+  stopContainerListRequest()
   stopLogPolling()
   selectedEndpoint.value = endpoint
   selectedContainer.value = null
@@ -271,17 +275,36 @@ async function selectEndpoint(endpoint: ContainerEndpointView) {
 }
 
 async function refreshEndpointContainers() {
-  if (!selectedEndpoint.value?.id) return
-  const id = selectedEndpoint.value.id
+  const id = selectedEndpoint.value?.id
+  if (!id) return
+
+  containerListController?.abort()
+  const controller = new AbortController()
+  const version = ++containerListVersion
+  containerListController = controller
   loadingContainers[id] = true
   try {
-    const result = await apiClient.listContainers(id)
-    containersByEndpoint[id] = result.items || []
+    const result = await apiClient.listContainers(id, controller.signal)
+    if (!controller.signal.aborted && version === containerListVersion && selectedEndpoint.value?.id === id) {
+      containersByEndpoint[id] = result.items || []
+    }
   } catch (error: any) {
-    ElMessage.error(error.message || '读取容器列表失败')
+    if (controller.signal.aborted || error?.name === 'AbortError') return
+    if (version === containerListVersion && selectedEndpoint.value?.id === id) {
+      ElMessage.error(error.message || '读取容器列表失败')
+    }
   } finally {
-    loadingContainers[id] = false
+    if (containerListController === controller) {
+      containerListController = null
+      loadingContainers[id] = false
+    }
   }
+}
+
+function stopContainerListRequest() {
+  containerListVersion++
+  containerListController?.abort()
+  containerListController = null
 }
 
 function selectContainer(endpoint: ContainerEndpointView, container: ContainerRecord) {
@@ -576,7 +599,10 @@ function connectionModeLabel(mode: string) {
 }
 
 onMounted(() => void loadEndpoints())
-onBeforeUnmount(stopLogPolling)
+onBeforeUnmount(() => {
+  stopContainerListRequest()
+  stopLogPolling()
+})
 </script>
 
 <style scoped>

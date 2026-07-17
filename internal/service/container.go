@@ -130,32 +130,57 @@ func (s *ContainerService) sshCommand(ctx context.Context, endpoint ContainerEnd
 	if address == "" {
 		return nil, errors.New("ssh target address is empty")
 	}
+
 	dialer := net.Dialer{Timeout: 10 * time.Second}
 	conn, err := dialer.DialContext(ctx, "tcp", address)
 	if err != nil {
 		return nil, err
 	}
+	// Bound the SSH handshake as well; NewClientConn does not accept a context.
+	deadline := time.Now().Add(10 * time.Second)
+	if ctxDeadline, ok := ctx.Deadline(); ok && ctxDeadline.Before(deadline) {
+		deadline = ctxDeadline
+	}
+	_ = conn.SetDeadline(deadline)
 	cc, chans, reqs, err := ssh.NewClientConn(conn, address, config)
 	if err != nil {
 		_ = conn.Close()
 		return nil, err
 	}
+	_ = conn.SetDeadline(time.Time{})
+
 	client := ssh.NewClient(cc, chans, reqs)
-	defer client.Close()
 	session, err := client.NewSession()
 	if err != nil {
+		_ = client.Close()
 		return nil, err
 	}
-	defer session.Close()
 	var stdout, stderr strings.Builder
 	session.Stdout = &stdout
 	session.Stderr = &stderr
 	done := make(chan error, 1)
 	go func() { done <- session.Run(command) }()
+
+	closeSession := func() {
+		closed := make(chan struct{})
+		go func() {
+			_ = session.Close()
+			_ = client.Close()
+			close(closed)
+		}()
+		select {
+		case <-closed:
+		case <-time.After(500 * time.Millisecond):
+		}
+	}
+
 	select {
 	case <-ctx.Done():
+		closeSession()
 		return nil, ctx.Err()
 	case err := <-done:
+		_ = session.Close()
+		_ = client.Close()
 		if err != nil {
 			message := strings.TrimSpace(stderr.String())
 			if message != "" {

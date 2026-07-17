@@ -1094,8 +1094,8 @@ export const apiClient = {
     request<void>(`/api/containers/endpoints/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   testContainerConnection: (payload: ContainerEndpointPayload) =>
     request<{ ok: boolean; message?: string; latency_ms: number }>('/api/containers/test', { method: 'POST', body: JSON.stringify(payload) }),
-  listContainers: (endpointId: string) =>
-    request<{ items: ContainerRecord[] }>(`/api/containers/endpoints/${encodeURIComponent(endpointId)}/containers`),
+  listContainers: (endpointId: string, signal?: AbortSignal) =>
+    request<{ items: ContainerRecord[] }>(`/api/containers/endpoints/${encodeURIComponent(endpointId)}/containers`, { signal }),
   getContainerLogs: (endpointId: string, containerId: string, tail = 200, signal?: AbortSignal) =>
     request<{ logs: string }>(`/api/containers/endpoints/${encodeURIComponent(endpointId)}/containers/${encodeURIComponent(containerId)}/logs?tail=${tail}`, { signal }),
 

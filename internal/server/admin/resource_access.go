@@ -255,3 +255,16 @@ func (s *Server) visibleApplications(r *http.Request, applications []store.Appli
 	}
 	return result, nil
 }
+func (s *Server) visiblePlatformAccounts(r *http.Request, accounts []store.PlatformAccountView) ([]store.PlatformAccountView, error) {
+	result := make([]store.PlatformAccountView, 0, len(accounts))
+	for _, account := range accounts {
+		allowed, err := s.hasResourceGrant(r, model.ResourceTypePlatformAccount, account.ID)
+		if err != nil {
+			return nil, err
+		}
+		if allowed {
+			result = append(result, account)
+		}
+	}
+	return result, nil
+}

@@ -268,7 +268,8 @@ import DataTableCard from '@/components/DataTableCard.vue'
 import {
   apiClient,
   type ResourceGrantRecord,
-  type UserRecord
+  type UserRecord,
+  type PlatformAccountView
 } from '@/api/client'
 
 const { t } = useI18n()
@@ -304,6 +305,7 @@ const hosts = ref<Array<{ id: string; name: string; address: string; port: numbe
 const databaseInstances = ref<Array<{ id: string; name: string; protocol: string; address: string; port: number }>>([])
 const hostAccounts = ref<Array<{ id: string; username: string; host_name: string; host_address: string }>>([])
 const dbAccounts = ref<Array<{ id: string; unique_name: string; username: string; instance_name: string; instance_address: string }>>([])
+const platformAccounts = ref<PlatformAccountView[]>([])
 const applications = ref<Array<{ id: string; name: string; group: string; listen_port: number }>>([])
 const resourceGroups = ref<Array<{ id: string; name: string; description: string; group_type: string; member_count: number }>>([])
 const accountGroups = ref<Array<{ id: string; name: string; description: string; member_count: number }>>([])
@@ -353,6 +355,7 @@ const resourceTypeLabel = (type: string) => {
     case 'database_instance': return '数据库'
     case 'host_account': return t('resourceGrant.hostAccounts')
     case 'database_account': return t('resourceGrant.databaseAccounts')
+    case 'platform_account': return t('resourceGrant.platformAccounts')
     case 'application': return '应用'
     case 'resource_group': return t('resourceGrant.resourceGroups')
     case 'account_group': return t('resourceGrant.accountGroups')
@@ -379,6 +382,8 @@ const getResourceName = (grant: ResourceGrantRecord) => {
   if (host) return `${host.username}@${host.host_name || host.host_address || ''}`
   const db = dbAccounts.value.find(a => a.id === grant.resource_id)
   if (db) return `${db.username || db.unique_name} (${db.instance_name || ''})`
+  const platform = platformAccounts.value.find(a => a.id === grant.resource_id)
+  if (platform) return `${platform.name || platform.username} (${platform.platform_name})`
   const app = applications.value.find(a => a.id === grant.resource_id)
   if (app) return app.name
   const group = resourceGroups.value.find(g => g.id === grant.resource_id)
@@ -413,6 +418,7 @@ const ensureNamesLoaded = async () => {
   const needDatabaseContainer = grants.value.some(g => g.resource_type === 'database_instance')
   const needHost = grants.value.some(g => g.resource_type === 'host_account')
   const needDb = grants.value.some(g => g.resource_type === 'database_account')
+  const needPlatform = grants.value.some(g => g.resource_type === 'platform_account')
   const needApplication = grants.value.some(g => g.resource_type === 'application')
   const needResGroup = grants.value.some(g => g.resource_type === 'resource_group')
   const needAccGroup = grants.value.some(g => g.resource_type === 'account_group')
@@ -423,6 +429,7 @@ const ensureNamesLoaded = async () => {
   if (needDatabaseContainer && databaseInstances.value.length === 0) await loadDatabaseInstances()
   if (needHost && hostAccounts.value.length === 0) await loadHostAccounts()
   if (needDb && dbAccounts.value.length === 0) await loadDbAccounts()
+  if (needPlatform && platformAccounts.value.length === 0) await loadPlatformAccounts()
   if (needApplication && applications.value.length === 0) await loadApplications()
   if (needResGroup && resourceGroups.value.length === 0) await loadResourceGroups()
   if (needAccGroup && accountGroups.value.length === 0) await loadAccountGroups()
@@ -532,6 +539,15 @@ const loadDbAccounts = async () => {
   dbAccounts.value = allAccounts
 }
 
+const loadPlatformAccounts = async () => {
+  try {
+    const response = await apiClient.getPlatformAccounts({ page: 1, page_size: 200 })
+    platformAccounts.value = response.items || []
+  } catch {
+    platformAccounts.value = []
+  }
+}
+
 const loadApplications = async () => {
   const first = await apiClient.getApplications({ page: 1, page_size: 200 })
   applications.value = (first.items || []).map(app => ({
@@ -587,6 +603,9 @@ const mapResourceRows = (items: any[]): ResourceRow[] => {
   if (resourceTabType.value === 'database_account') {
     return items.map(account => ({ id: String(account.id ?? ''), unique_name: account.unique_name || '', username: account.username || '', instance_name: account.instance_name || '', instance_address: account.instance_address || '' }))
   }
+  if (resourceTabType.value === 'platform_account') {
+    return items.map(account => ({ id: String(account.id ?? ''), name: account.name || '', platform_name: account.platform_name || '', username: account.username || '', url: account.url || '', group: account.group || '' }))
+  }
   if (resourceTabType.value === 'application') {
     return items.map(app => ({ id: String(app.id ?? ''), name: app.name || '', group: app.group || '', listen_port: Number(app.listen_port) || 0 }))
   }
@@ -602,6 +621,7 @@ const fetchResourcePage = async (pageNumber: number) => {
   if (resourceTabType.value === 'database_instance') return apiClient.getDBInstances(params)
   if (resourceTabType.value === 'host_account') return apiClient.getTargets(params)
   if (resourceTabType.value === 'database_account') return apiClient.getAllDBAccounts(params)
+  if (resourceTabType.value === 'platform_account') return apiClient.getPlatformAccounts(params)
   if (resourceTabType.value === 'application') return apiClient.getApplications(params)
   return apiClient.getResourceGroups({ ...params, group_type: resourceTabType.value === 'account_group' ? 'account' : 'resource' })
 }

@@ -25,15 +25,15 @@ func TestApplicationsAndPlatformsCreateResourceGroups(t *testing.T) {
 	}
 	if _, err := store.AddPlatformAccount(model.PlatformAccount{
 		Name: "gitlab", PlatformName: "GitLab", Username: "gitlab-user",
-		GroupName: "platforms", OwnerID: owner.ID, Visibility: "private", Status: "active",
+		GroupName: "platforms", OwnerID: owner.ID, Status: "active",
 	}); err != nil {
 		t.Fatalf("add platform account: %v", err)
 	}
 
-	for _, name := range []string{"applications", "platforms"} {
+	for _, expected := range []struct{ name, groupType string }{{"applications", model.ResourceGroupTypeResource}, {"platforms", model.ResourceGroupTypeAccount}} {
 		var group model.ResourceGroup
-		if err := db.Where("name = ? AND group_type = ?", name, model.ResourceGroupTypeResource).First(&group).Error; err != nil {
-			t.Fatalf("resource group %q was not created: %v", name, err)
+		if err := db.Where("name = ? AND group_type = ?", expected.name, expected.groupType).First(&group).Error; err != nil {
+			t.Fatalf("resource group %q was not created: %v", expected.name, err)
 		}
 	}
 }

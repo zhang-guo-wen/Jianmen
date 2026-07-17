@@ -66,6 +66,7 @@
 
     <template #footer>
       <el-button v-if="resourceType === 'host' && allowSSH" type="primary" :loading="preferences.loading" @click="openPreferredSSHClient">本地 SSH 客户端打开</el-button>
+      <el-button v-if="resourceType === 'database'" type="primary" :loading="preferences.loading" @click="openPreferredDatabaseClient">本地 DBeaver 打开</el-button>
       <el-button v-if="resourceType === 'host' && allowSSH" type="primary" @click="openInBrowser">在浏览器中打开</el-button>
       <el-button @click="visible = false">关闭</el-button>
     </template>
@@ -95,6 +96,29 @@
       <el-button @click="initClientVisible = false">关闭</el-button>
     </template>
   </el-dialog>
+
+  <el-dialog v-model="initDatabaseClientVisible" title="初始化本地数据库客户端" width="560px" destroy-on-close>
+    <el-form label-position="top">
+      <el-form-item label="客户端">
+        <el-input model-value="DBeaver" readonly />
+      </el-form-item>
+      <el-form-item label="程序路径" required :error="databaseClientPathError">
+        <div class="path-field">
+          <el-input v-model="initDatabaseClientPath" placeholder="请输入完整绝对路径，如 C:\Program Files\DBeaver\dbeaver.exe" />
+          <el-button @click="pickDatabaseClientFile">浏览...</el-button>
+        </div>
+        <div class="path-help">程序路径必须是包含盘符的完整 Windows 绝对路径。</div>
+      </el-form-item>
+    </el-form>
+    <div v-if="databaseRegistrationCommand" class="registration-command">
+      <div>复制以下命令，以<strong>管理员身份</strong>在 CMD 中执行：</div>
+      <el-input :model-value="databaseRegistrationCommand" readonly type="textarea" :rows="4" />
+    </div>
+    <template #footer>
+      <el-button type="primary" :disabled="!canSaveDatabaseClient" @click="saveDatabaseClientAndCopyCommand">保存并复制注册命令</el-button>
+      <el-button @click="initDatabaseClientVisible = false">关闭</el-button>
+    </template>
+  </el-dialog>
 </template>
 
 <script setup lang="ts">
@@ -104,6 +128,7 @@ import { Loading } from '@element-plus/icons-vue';
 import { ElButton, ElInput, ElMessage } from 'element-plus';
 
 import { apiClient, type DBAccountRecord, type TargetRecord } from '@/api/client';
+import { buildDatabaseProtocolRegistrationCommand, buildDatabaseProtocolURL } from '@/config/databaseClients';
 import { buildSSHProtocolRegistrationCommand, isAbsoluteExecutablePath, SSH_CLIENT_OPTIONS } from '@/config/sshClients';
 import { usePreferencesStore } from '@/stores/preferences';
 import { writeClipboardText } from '@/utils/clipboard';
@@ -201,7 +226,9 @@ const sshClientUrl = computed(() => {
 });
 
 const initClientVisible = ref(false);
+const initDatabaseClientVisible = ref(false);
 const initClientType = ref('xshell');
+const initDatabaseClientPath = ref('');
 const initClientPath = ref('');
 const configurableClients = SSH_CLIENT_OPTIONS.filter(item => item.command !== 'default');
 const initClientPathError = computed(() => {
@@ -211,6 +238,13 @@ const initClientPathError = computed(() => {
 });
 const initRegCommand = computed(() => buildSSHProtocolRegistrationCommand(initClientType.value, initClientPath.value));
 const canSaveClient = computed(() => Boolean(initClientType.value && !initClientPathError.value && initRegCommand.value));
+const databaseClientPathError = computed(() => {
+  if (!initDatabaseClientPath.value.trim()) return '请输入本地数据库客户端的程序路径';
+  if (!isAbsoluteExecutablePath(initDatabaseClientPath.value)) return '请输入完整的 Windows 绝对路径，例如 C:\\Program Files\\DBeaver\\dbeaver.exe';
+  return '';
+});
+const databaseRegistrationCommand = computed(() => buildDatabaseProtocolRegistrationCommand('dbeaver', initDatabaseClientPath.value));
+const canSaveDatabaseClient = computed(() => Boolean(!databaseClientPathError.value && databaseRegistrationCommand.value));
 
 watch(
   () => [props.modelValue, String(props.target?.id || props.target?.resource_id || ''), props.resourceType] as const,
@@ -278,6 +312,63 @@ async function copyValue(value: string) {
   if (!value) return;
   try { await writeClipboardText(value); ElMessage.success('已复制'); }
   catch { ElMessage.warning('复制失败，请手动复制'); }
+}
+
+async function openPreferredDatabaseClient() {
+  if (!connectionInfo.value || !temporaryPassword.value) {
+    ElMessage.error('数据库连接信息尚未生成');
+    return;
+  }
+  if (!preferences.loaded) {
+    try {
+      await preferences.fetch();
+    } catch {
+      // The setup dialog provides the client initialization flow.
+    }
+  }
+  if (!preferences.hasDatabaseClient) {
+    initDatabaseClientPath.value = preferences.value.database_client_path || '';
+    initDatabaseClientVisible.value = true;
+    ElMessage.warning('请先完成本地数据库客户端初始化');
+    return;
+  }
+  window.location.href = buildDatabaseProtocolURL({
+    protocol: props.protocol,
+    host: connectionInfo.value.host,
+    port: connectionInfo.value.port,
+    username: connectionInfo.value.compactUser,
+    password: temporaryPassword.value,
+    name: `${props.resourceName || 'Jianmen'} / ${props.sourceAccount || 'database'}`,
+  });
+}
+
+async function saveDatabaseClientAndCopyCommand() {
+  if (!canSaveDatabaseClient.value) return;
+  try {
+    await preferences.update({ database_client: 'dbeaver', database_client_path: initDatabaseClientPath.value.trim() });
+  } catch {
+    ElMessage.error(preferences.error || '数据库客户端配置保存失败');
+    return;
+  }
+  try {
+    await writeClipboardText(databaseRegistrationCommand.value);
+    ElMessage.success('配置已保存，注册命令已复制，请在管理员 CMD 中执行一次');
+    initDatabaseClientVisible.value = false;
+  } catch {
+    ElMessage.warning('配置已保存，但注册命令复制失败，请手动复制');
+  }
+}
+
+function pickDatabaseClientFile() {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = '.exe';
+  input.onchange = event => {
+    const file = (event.target as HTMLInputElement).files?.[0];
+    if (!file) return;
+    initDatabaseClientPath.value = (file as File & { path?: string }).path || file.name;
+  };
+  input.click();
 }
 
 async function openPreferredSSHClient() {

@@ -135,6 +135,8 @@ export interface UserPreferences {
   theme: 'system' | 'light' | 'dark';
   ssh_client: string;
   ssh_client_path: string;
+  database_client: string;
+  database_client_path: string;
   terminal_font_family: string;
   terminal_font_size: number;
 }

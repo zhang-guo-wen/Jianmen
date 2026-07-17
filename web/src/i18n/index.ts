@@ -105,9 +105,9 @@ const zhCN = {
   'nav.assets': '资产管理',
   'nav.audit': '审计日志',
 
-  'nav.containers': '????',
-  'route.containers.description': '?? Docker ? Kubernetes containerd ???????????',
-  'route.containers.title': '????',
+  'nav.containers': '容器管理',
+  'route.containers.description': '管理 Docker 与 Kubernetes containerd 运行时，查看容器和日志',
+  'route.containers.title': '容器管理',
   'nav.applications': '应用发布',
   'route.applications.description': '管理内网 Web 应用代理发布与访问控制',
   'route.applications.title': '应用发布',

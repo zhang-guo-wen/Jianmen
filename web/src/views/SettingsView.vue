@@ -194,7 +194,7 @@ async function copyRegistrationCommand(command: string) {
 }
 
 .settings-card {
-  min-height: 100%;
+  min-height: calc(100% - 2px);
   border: 1px solid var(--color-border);
   border-radius: 18px;
   background: var(--color-card);
@@ -203,8 +203,9 @@ async function copyRegistrationCommand(command: string) {
 :deep(.settings-card > .el-card__body) {
   display: flex;
   flex-direction: column;
-  min-height: calc(100vh - var(--header-height) - 40px);
+  min-height: calc(100vh - var(--header-height) - 42px);
   padding: 0;
+  overflow: visible;
 }
 
 .settings-tabs {

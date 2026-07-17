@@ -1087,8 +1087,8 @@ export const apiClient = {
     request<{ ok: boolean; message?: string; latency_ms: number }>('/api/containers/test', { method: 'POST', body: JSON.stringify(payload) }),
   listContainers: (endpointId: string) =>
     request<{ items: ContainerRecord[] }>(`/api/containers/endpoints/${encodeURIComponent(endpointId)}/containers`),
-  getContainerLogs: (endpointId: string, containerId: string, tail = 200) =>
-    request<{ logs: string }>(`/api/containers/endpoints/${encodeURIComponent(endpointId)}/containers/${encodeURIComponent(containerId)}/logs?tail=${tail}`),
+  getContainerLogs: (endpointId: string, containerId: string, tail = 200, signal?: AbortSignal) =>
+    request<{ logs: string }>(`/api/containers/endpoints/${encodeURIComponent(endpointId)}/containers/${encodeURIComponent(containerId)}/logs?tail=${tail}`, { signal }),
 
   // platform accounts
   getPlatformAccounts: (params?: { page?: number; page_size?: number; q?: string; platform?: string }) =>

@@ -198,6 +198,7 @@ const logSearch = ref('')
 const activeLogTab = ref<'logs' | 'details'>('logs')
 const logViewer = ref<HTMLElement | null>(null)
 let logPollingTimer: ReturnType<typeof setInterval> | null = null
+let logRequestController: AbortController | null = null
 const logPollingInterval = 3000
 const logsLoading = ref(false)
 const loading = ref(false)
@@ -280,6 +281,7 @@ async function refreshEndpointContainers() {
 }
 
 function selectContainer(endpoint: ContainerEndpointView, container: ContainerRecord) {
+  stopLogPolling()
   selectedEndpoint.value = endpoint
   selectedContainer.value = container
   activeLogTab.value = 'logs'
@@ -292,20 +294,28 @@ async function refreshLogs() {
   const endpointId = selectedEndpoint.value?.id
   const containerId = selectedContainer.value?.id
   if (!endpointId || !containerId) return
+
+  logRequestController?.abort()
+  const controller = new AbortController()
+  logRequestController = controller
   logsLoading.value = true
   try {
-    const result = await apiClient.getContainerLogs(endpointId, containerId)
-    if (selectedEndpoint.value?.id === endpointId && selectedContainer.value?.id === containerId) {
+    const result = await apiClient.getContainerLogs(endpointId, containerId, 200, controller.signal)
+    if (!controller.signal.aborted && selectedEndpoint.value?.id === endpointId && selectedContainer.value?.id === containerId) {
       logs.value = result.logs || ''
       scrollLogsToBottom()
     }
   } catch (error: any) {
+    if (controller.signal.aborted || error?.name === 'AbortError') return
     if (selectedEndpoint.value?.id === endpointId && selectedContainer.value?.id === containerId) {
       logs.value = error.message || '读取日志失败'
       scrollLogsToBottom()
     }
   } finally {
-    logsLoading.value = false
+    if (logRequestController === controller) {
+      logRequestController = null
+      logsLoading.value = false
+    }
   }
 }
 
@@ -322,10 +332,16 @@ function stopLogPolling() {
     clearInterval(logPollingTimer)
     logPollingTimer = null
   }
+  logRequestController?.abort()
+  logRequestController = null
+  logsLoading.value = false
 }
 
 function startLogPolling() {
-  stopLogPolling()
+  if (logPollingTimer !== null) {
+    clearInterval(logPollingTimer)
+    logPollingTimer = null
+  }
   if (!selectedContainer.value) return
   logPollingTimer = setInterval(() => {
     if (activeLogTab.value === 'logs' && !logsLoading.value) {

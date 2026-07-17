@@ -9,6 +9,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"jianmen/internal/model"
 )
 
 const (
@@ -118,10 +120,22 @@ func setRetryAfter(w http.ResponseWriter, d time.Duration) {
 	w.Header().Set("Retry-After", fmt.Sprintf("%d", seconds))
 }
 
-func (s *Server) logLogin(r *http.Request, username, outcome, reason string) {
+func (s *Server) logLogin(r *http.Request, username, userID, outcome, reason string) {
 	logger := s.logger
 	if logger == nil {
 		logger = slog.Default()
+	}
+	if s.store != nil {
+		if err := s.store.CreateLoginAuditLog(&model.LoginAuditLog{
+			UserID:    userID,
+			Username:  username,
+			Outcome:   outcome,
+			Reason:    reason,
+			ClientIP:  requestClientIP(r),
+			UserAgent: r.UserAgent(),
+		}); err != nil {
+			logger.Warn("failed to write login audit log", "username", username, "outcome", outcome, "error", err)
+		}
 	}
 	attrs := []any{
 		"username", username,

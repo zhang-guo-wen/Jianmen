@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 func (s *Server) withAuthAndUser(next http.HandlerFunc) http.HandlerFunc {
@@ -22,6 +23,11 @@ func (s *Server) withAuthAndUser(next http.HandlerFunc) http.HandlerFunc {
 		if s.db != nil {
 			var user model.User
 			if err := s.db.Where("token_hash = ? AND status = ?", hashToken(token), "active").First(&user).Error; err == nil {
+				if user.IsExpired(time.Now().UTC()) && !s.isSuperAdmin(user.ID) {
+					_ = s.db.Model(&user).Update("status", "disabled").Error
+					s.writeErrorText(w, r, http.StatusUnauthorized, "user account expired")
+					return
+				}
 				ctx := context.WithValue(r.Context(), ctxKeyUserID, user.ID)
 				ctx = context.WithValue(ctx, ctxKeyUsername, user.Username)
 				next(w, r.WithContext(ctx))
@@ -76,6 +82,16 @@ func (s *Server) requireAnyPermission(r *http.Request, actions ...string) bool {
 		}
 	}
 	return false
+}
+
+func (s *Server) withAnyPermission(actions []string, next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if !s.requireAnyPermission(r, actions...) {
+			s.forbidden(w, r)
+			return
+		}
+		next(w, r)
+	}
 }
 
 func (s *Server) withPermission(action string, next http.HandlerFunc) http.HandlerFunc {

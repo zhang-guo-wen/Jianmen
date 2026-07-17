@@ -17,6 +17,7 @@ type User struct {
 	DisplayName     string     `gorm:"size:128" json:"display_name,omitempty"`
 	Email           string     `gorm:"index;size:255" json:"email,omitempty"`
 	Status          string     `gorm:"index:idx_users_status_username,priority:1;size:32;not null;default:active" json:"status"`
+	ExpiresAt       *time.Time `gorm:"index" json:"expires_at,omitempty"`
 	LastLoginAt     *time.Time `json:"last_login_at,omitempty"`
 	CreatedAt       time.Time  `json:"created_at"`
 	UpdatedAt       time.Time  `json:"updated_at"`
@@ -62,6 +63,10 @@ func NewSession(user User, targetID, target, clientIP string) Session {
 		StartedAt:    time.Now().UTC(),
 		State:        "started",
 	}
+}
+
+func (u User) IsExpired(now time.Time) bool {
+	return u.ExpiresAt != nil && !u.ExpiresAt.After(now)
 }
 
 func (u *User) BeforeCreate(_ *gorm.DB) error {

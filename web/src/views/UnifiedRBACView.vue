@@ -30,6 +30,10 @@
       <el-tab-pane :label="t('nav.accountGroups')" name="accountGroups">
         <AccountGroupsContent v-if="activeTab === 'accountGroups'" />
       </el-tab-pane>
+
+      <el-tab-pane label="????" name="temporaryAccounts">
+        <TemporaryAccountsView v-if="activeTab === 'temporaryAccounts'" />
+      </el-tab-pane>
     </el-tabs>
   </div>
 </template>
@@ -43,6 +47,7 @@ import UserGroupsView from '@/views/UserGroupsView.vue'
 import ResourceGrantView from '@/views/ResourceGrantView.vue'
 import ResourceGroupsContent from '@/components/ResourceGroupsContent.vue'
 import AccountGroupsContent from '@/components/AccountGroupsContent.vue'
+import TemporaryAccountsView from '@/views/TemporaryAccountsView.vue'
 
 const { t } = useI18n()
 

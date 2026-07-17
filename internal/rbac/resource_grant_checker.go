@@ -44,9 +44,14 @@ func (c *ResourceGrantChecker) HasGrant(userID, resourceType, resourceID string)
 	if err != nil {
 		return false, err
 	}
+	temporaryGrants, err := c.temporaryGrantsForUser(userID)
+	if err != nil {
+		return false, err
+	}
 
 	// 合并所有授权
 	allGrants := append(directGrants, groupGrants...)
+	allGrants = append(allGrants, temporaryGrants...)
 
 	// 检查是否有 deny 授权
 	for _, grant := range allGrants {
@@ -77,6 +82,28 @@ func (c *ResourceGrantChecker) directGrantsForUser(userID string) ([]model.Resou
 }
 
 // groupGrantsForUser 获取用户通过用户组获得的授权
+func (c *ResourceGrantChecker) temporaryGrantsForUser(userID string) ([]model.ResourceGrant, error) {
+	now := time.Now().UTC()
+	var grants []model.TemporaryAccountGrant
+	err := c.db.
+		Joins("JOIN temporary_accounts ON temporary_accounts.id = temporary_account_grants.temporary_account_id").
+		Where("temporary_account_grants.user_id = ?", userID).
+		Where("temporary_account_grants.revoked_at IS NULL").
+		Where("temporary_accounts.status = ?", "active").
+		Where("temporary_account_grants.starts_at IS NULL OR temporary_account_grants.starts_at <= ?", now).
+		Where("temporary_account_grants.expires_at IS NULL OR temporary_account_grants.expires_at > ?", now).
+		Where("temporary_accounts.expires_at IS NULL OR temporary_accounts.expires_at > ?", now).
+		Find(&grants).Error
+	if err != nil {
+		return nil, err
+	}
+	out := make([]model.ResourceGrant, 0, len(grants))
+	for _, grant := range grants {
+		out = append(out, model.ResourceGrant{PrincipalType: "user", PrincipalID: userID, ResourceType: grant.ResourceType, ResourceID: grant.ResourceID, Effect: model.PermissionEffectAllow, ExpiresAt: grant.ExpiresAt})
+	}
+	return out, nil
+}
+
 func (c *ResourceGrantChecker) groupGrantsForUser(userID string) ([]model.ResourceGrant, error) {
 	now := time.Now().UTC()
 	var grants []model.ResourceGrant

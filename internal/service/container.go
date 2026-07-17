@@ -12,9 +12,11 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"golang.org/x/crypto/ssh"
+	"golang.org/x/sync/singleflight"
 
 	"jianmen/internal/model"
 )
@@ -26,6 +28,7 @@ type ContainerEndpointConfig struct {
 	Port           int
 	SSHAddress     string
 	SSHConfig      *ssh.ClientConfig
+	SSHCacheKey    string
 	Unavailable    bool
 }
 
@@ -46,12 +49,42 @@ type ContainerTestResult struct {
 }
 
 // ContainerService reads containers through the Docker Engine API or SSH tools.
+type cachedSSHClient struct {
+	client   *ssh.Client
+	lastUsed time.Time
+}
+
+const sshClientIdleTTL = 10 * time.Minute
+
+// ContainerService reads containers through Docker/containerd and reuses SSH
+// transports so switching containers on one host does not repeat handshakes.
 type ContainerService struct {
 	HTTPClient *http.Client
+
+	sshMu      sync.Mutex
+	sshClients map[string]cachedSSHClient
+	sshDial    singleflight.Group
 }
 
 func NewContainerService() *ContainerService {
-	return &ContainerService{HTTPClient: &http.Client{Timeout: 12 * time.Second}}
+	return &ContainerService{
+		HTTPClient: &http.Client{Timeout: 12 * time.Second},
+		sshClients: make(map[string]cachedSSHClient),
+	}
+}
+
+// Close releases cached SSH transports owned by the service.
+func (s *ContainerService) Close() {
+	s.sshMu.Lock()
+	clients := make([]*ssh.Client, 0, len(s.sshClients))
+	for key, cached := range s.sshClients {
+		clients = append(clients, cached.client)
+		delete(s.sshClients, key)
+	}
+	s.sshMu.Unlock()
+	for _, client := range clients {
+		_ = client.Close()
+	}
 }
 
 func (s *ContainerService) Test(ctx context.Context, endpoint ContainerEndpointConfig) (ContainerTestResult, error) {
@@ -122,37 +155,106 @@ func (s *ContainerService) sshCommand(ctx context.Context, endpoint ContainerEnd
 	if endpoint.Unavailable {
 		return nil, errors.New("host account is unavailable")
 	}
-	config := endpoint.SSHConfig
-	if config == nil {
+	if endpoint.SSHConfig == nil {
 		return nil, errors.New("ssh client config is required")
 	}
-	address := endpoint.SSHAddress
-	if address == "" {
+	if endpoint.SSHAddress == "" {
 		return nil, errors.New("ssh target address is empty")
 	}
 
-	dialer := net.Dialer{Timeout: 10 * time.Second}
-	conn, err := dialer.DialContext(ctx, "tcp", address)
+	client, err := s.acquireSSHClient(ctx, endpoint)
 	if err != nil {
 		return nil, err
 	}
-	// Bound the SSH handshake as well; NewClientConn does not accept a context.
+	cached := endpoint.SSHCacheKey != ""
+	output, runErr := s.runSSHCommand(ctx, endpoint.SSHCacheKey, client, command)
+	if !cached {
+		_ = client.Close()
+	}
+	if runErr != nil && ctx.Err() == nil && cached {
+		var exitErr *ssh.ExitError
+		if !errors.As(runErr, &exitErr) {
+			// A dead cached transport should be replaced transparently on the
+			// next operation, including the current read-only operation.
+			s.invalidateSSHClient(endpoint.SSHCacheKey, client)
+			if replacement, acquireErr := s.acquireSSHClient(ctx, endpoint); acquireErr == nil {
+				output, runErr = s.runSSHCommand(ctx, endpoint.SSHCacheKey, replacement, command)
+			}
+		}
+	}
+	return output, runErr
+}
+
+func (s *ContainerService) acquireSSHClient(ctx context.Context, endpoint ContainerEndpointConfig) (*ssh.Client, error) {
+	key := endpoint.SSHCacheKey
+	if key == "" {
+		return s.dialSSHClient(ctx, endpoint)
+	}
+
+	now := time.Now()
+	s.sshMu.Lock()
+	s.pruneSSHClientsLocked(now)
+	if cached, ok := s.sshClients[key]; ok {
+		cached.lastUsed = now
+		s.sshClients[key] = cached
+		s.sshMu.Unlock()
+		return cached.client, nil
+	}
+	s.sshMu.Unlock()
+
+	result := s.sshDial.DoChan(key, func() (any, error) {
+		s.sshMu.Lock()
+		if cached, ok := s.sshClients[key]; ok {
+			cached.lastUsed = time.Now()
+			s.sshClients[key] = cached
+			s.sshMu.Unlock()
+			return cached.client, nil
+		}
+		s.sshMu.Unlock()
+
+		client, err := s.dialSSHClient(ctx, endpoint)
+		if err != nil {
+			return nil, err
+		}
+		s.sshMu.Lock()
+		s.sshClients[key] = cachedSSHClient{client: client, lastUsed: time.Now()}
+		s.sshMu.Unlock()
+		return client, nil
+	})
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case call := <-result:
+		if call.Err != nil {
+			return nil, call.Err
+		}
+		return call.Val.(*ssh.Client), nil
+	}
+}
+
+func (s *ContainerService) dialSSHClient(ctx context.Context, endpoint ContainerEndpointConfig) (*ssh.Client, error) {
+	dialer := net.Dialer{Timeout: 10 * time.Second}
+	conn, err := dialer.DialContext(ctx, "tcp", endpoint.SSHAddress)
+	if err != nil {
+		return nil, err
+	}
 	deadline := time.Now().Add(10 * time.Second)
 	if ctxDeadline, ok := ctx.Deadline(); ok && ctxDeadline.Before(deadline) {
 		deadline = ctxDeadline
 	}
 	_ = conn.SetDeadline(deadline)
-	cc, chans, reqs, err := ssh.NewClientConn(conn, address, config)
+	cc, chans, reqs, err := ssh.NewClientConn(conn, endpoint.SSHAddress, endpoint.SSHConfig)
 	if err != nil {
 		_ = conn.Close()
 		return nil, err
 	}
 	_ = conn.SetDeadline(time.Time{})
+	return ssh.NewClient(cc, chans, reqs), nil
+}
 
-	client := ssh.NewClient(cc, chans, reqs)
+func (s *ContainerService) runSSHCommand(ctx context.Context, cacheKey string, client *ssh.Client, command string) ([]byte, error) {
 	session, err := client.NewSession()
 	if err != nil {
-		_ = client.Close()
 		return nil, err
 	}
 	var stdout, stderr strings.Builder
@@ -162,10 +264,21 @@ func (s *ContainerService) sshCommand(ctx context.Context, endpoint ContainerEnd
 	go func() { done <- session.Run(command) }()
 
 	closeSession := func() {
-		// Close the underlying connection first. Session.Close sends an SSH
-		// channel message and can block if the transport is already unhealthy.
-		_ = client.Close()
-		_ = session.Close()
+		if cacheKey == "" {
+			_ = client.Close()
+			_ = session.Close()
+			return
+		}
+		closed := make(chan struct{})
+		go func() {
+			_ = session.Close()
+			close(closed)
+		}()
+		select {
+		case <-closed:
+		case <-time.After(250 * time.Millisecond):
+			s.invalidateSSHClient(cacheKey, client)
+		}
 	}
 
 	select {
@@ -174,7 +287,6 @@ func (s *ContainerService) sshCommand(ctx context.Context, endpoint ContainerEnd
 		return nil, ctx.Err()
 	case err := <-done:
 		_ = session.Close()
-		_ = client.Close()
 		if err != nil {
 			message := strings.TrimSpace(stderr.String())
 			if message != "" {
@@ -184,6 +296,30 @@ func (s *ContainerService) sshCommand(ctx context.Context, endpoint ContainerEnd
 		}
 	}
 	return []byte(stdout.String()), nil
+}
+
+func (s *ContainerService) invalidateSSHClient(key string, client *ssh.Client) {
+	if key == "" || client == nil {
+		return
+	}
+	s.sshMu.Lock()
+	cached, ok := s.sshClients[key]
+	if ok && cached.client == client {
+		delete(s.sshClients, key)
+	}
+	s.sshMu.Unlock()
+	if ok && cached.client == client {
+		_ = client.Close()
+	}
+}
+
+func (s *ContainerService) pruneSSHClientsLocked(now time.Time) {
+	for key, cached := range s.sshClients {
+		if now.Sub(cached.lastUsed) > sshClientIdleTTL {
+			delete(s.sshClients, key)
+			_ = cached.client.Close()
+		}
+	}
 }
 
 func (s *ContainerService) dockerRequest(ctx context.Context, endpoint ContainerEndpointConfig, method, path string, body io.Reader) ([]byte, error) {

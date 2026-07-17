@@ -242,6 +242,7 @@ func (s *Server) containerServiceConfig(input store.ContainerEndpointInput) (ser
 		}
 		config.SSHAddress = target.Addr()
 		config.SSHConfig = sshConfig
+		config.SSHCacheKey = target.ID + "@" + target.Addr()
 		config.Unavailable = target.Disabled || target.Expired(time.Now().UTC())
 	}
 	return config, nil

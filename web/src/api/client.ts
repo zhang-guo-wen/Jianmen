@@ -127,6 +127,8 @@ export interface IssuedAIAccessToken extends AIAccessTokenRecord {
   prompt?: string;
   copy_prompt?: string;
   full_prompt?: string;
+  docs_url?: string;
+  docs_content?: string;
 }
 
 export interface UserPreferences {

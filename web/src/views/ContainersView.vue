@@ -206,6 +206,9 @@ let logSessionVersion = 0
 const logPollingInterval = 3000
 const logSelectionDelay = 180
 const logRequestTimeout = 10000
+const logCacheLimit = 24
+const maxRenderedLogChars = 1_000_000
+const logCache = new Map<string, { logs: string; updatedAt: number }>()
 const logsLoading = ref(false)
 const loading = ref(false)
 const dialogVisible = ref(false)
@@ -313,7 +316,9 @@ function selectContainer(endpoint: ContainerEndpointView, container: ContainerRe
   selectedContainer.value = container
   activeLogTab.value = 'logs'
   logSearch.value = ''
-  logs.value = ''
+  const cacheKey = containerLogCacheKey(endpoint.id, container.id)
+  logs.value = logCache.get(cacheKey)?.logs || ''
+  if (logs.value) scrollLogsToBottom()
   queueLogRefresh(logSessionVersion, logSelectionDelay)
 }
 
@@ -344,7 +349,8 @@ async function refreshLogs(version = logSessionVersion) {
   try {
     const result = await apiClient.getContainerLogs(endpointId, containerId, 200, controller.signal)
     if (!controller.signal.aborted && version === logSessionVersion && selectedEndpoint.value?.id === endpointId && selectedContainer.value?.id === containerId) {
-      logs.value = result.logs || ''
+      logs.value = truncateLogTail(result.logs || '')
+      cacheContainerLogs(endpointId, containerId, logs.value)
       scrollLogsToBottom()
     }
   } catch (error: any) {
@@ -375,6 +381,26 @@ async function refreshLogsNow() {
   }
   await refreshLogs(version)
   scheduleNextLogRefresh(version)
+}
+
+function truncateLogTail(value: string) {
+  if (value.length <= maxRenderedLogChars) return value
+  return `[?????????? ${maxRenderedLogChars} ???]\n${value.slice(-maxRenderedLogChars)}`
+}
+
+function containerLogCacheKey(endpointId: string | undefined, containerId: string | undefined) {
+  return `${endpointId || ''}:${containerId || ''}`
+}
+
+function cacheContainerLogs(endpointId: string, containerId: string, value: string) {
+  const key = containerLogCacheKey(endpointId, containerId)
+  logCache.delete(key)
+  logCache.set(key, { logs: value, updatedAt: Date.now() })
+  while (logCache.size > logCacheLimit) {
+    const oldestKey = logCache.keys().next().value
+    if (!oldestKey) break
+    logCache.delete(oldestKey)
+  }
 }
 
 function scrollLogsToBottom() {

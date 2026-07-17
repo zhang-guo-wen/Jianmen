@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -80,6 +81,34 @@ func TestTemporaryAuthorizationRejectsMoreThanSevenDays(t *testing.T) {
 	server.handleTemporaryAccounts(rec, req)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400; body = %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "\u4e34\u65f6\u6388\u6743\u6709\u6548\u671f\u4e0d\u80fd\u8d85\u8fc7 7 \u5929") {
+		t.Fatalf("response should explain the seven-day limit: %s", rec.Body.String())
+	}
+}
+
+func TestTemporaryAuthorizationExtensionRejectsMoreThanSevenDays(t *testing.T) {
+	server, db := newAdminDBTestServer(t)
+	server.superAdminIDs["u-admin"] = true
+	now := time.Now().UTC()
+	if err := db.Create(&model.TemporaryAccount{
+		ID: "temporary-1", SessionID: "session-1", Type: model.TemporaryAccountTypeUser,
+		Username: "tmp_session-1", Status: "active", StartsAt: now,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	body, _ := json.Marshal(map[string]any{
+		"expires_at": now.Add(8 * 24 * time.Hour),
+	})
+	req := asTestSuperAdmin(httptest.NewRequest(http.MethodPost, "/api/temporary-accounts/temporary-1/extend", bytes.NewReader(body)))
+	rec := httptest.NewRecorder()
+	server.extendTemporaryAccount(rec, req, "temporary-1")
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body = %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "\u4e34\u65f6\u6388\u6743\u6709\u6548\u671f\u4e0d\u80fd\u8d85\u8fc7 7 \u5929") {
+		t.Fatalf("response should explain the seven-day limit: %s", rec.Body.String())
 	}
 }
 

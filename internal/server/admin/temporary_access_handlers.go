@@ -13,8 +13,11 @@ import (
 	"jianmen/internal/model"
 	"jianmen/internal/rbac"
 	"jianmen/internal/service"
+	"jianmen/internal/storage"
 	"jianmen/internal/util"
 )
+
+const maxTemporaryAuthorizationDuration = 7 * 24 * time.Hour
 
 type temporaryAuthorizationRequest struct {
 	AuthorizedUserID string     `json:"authorized_user_id"`
@@ -168,8 +171,8 @@ func (s *Server) createTemporaryAuthorization(w http.ResponseWriter, r *http.Req
 	if req.ExpiresAt != nil {
 		expiresAt = req.ExpiresAt.UTC()
 	}
-	if !expiresAt.After(now) || expiresAt.After(now.Add(7*24*time.Hour)) {
-		s.writeErrorText(w, r, http.StatusBadRequest, "temporary authorization must expire within 7 days")
+	if !expiresAt.After(now) || expiresAt.After(now.Add(maxTemporaryAuthorizationDuration)) {
+		s.writeErrorText(w, r, http.StatusBadRequest, "\u4e34\u65f6\u6388\u6743\u6709\u6548\u671f\u4e0d\u80fd\u8d85\u8fc7 7 \u5929\uff0c\u8bf7\u9009\u62e9 7 \u5929\u4ee5\u5185\u7684\u65f6\u95f4")
 		return
 	}
 	userSession, err := s.store.CreateUserSession(model.UserSession{
@@ -206,7 +209,18 @@ func (s *Server) createTemporaryAuthorization(w http.ResponseWriter, r *http.Req
 
 func (s *Server) createTemporaryAccount(accountType, authorizedUserID string, expiresAt *time.Time, remark, createdBy, sessionID string) (model.TemporaryAccount, error) {
 	if strings.TrimSpace(sessionID) == "" {
-		sessionID = model.NewID()
+		var maxSessionSeq int
+		if err := s.db.Model(&model.UserSession{}).Select("COALESCE(MAX(session_seq), 0)").Scan(&maxSessionSeq).Error; err != nil {
+			return model.TemporaryAccount{}, fmt.Errorf("read session sequence floor: %w", err)
+		}
+		if err := storage.EnsureSequenceNextValue(s.db, storage.SequenceUserSession, maxSessionSeq+1); err != nil {
+			return model.TemporaryAccount{}, fmt.Errorf("ensure session sequence floor: %w", err)
+		}
+		seq, err := storage.NextSequenceValue(s.db, storage.SequenceUserSession, storage.MaxCompactSessionSeq)
+		if err != nil {
+			return model.TemporaryAccount{}, fmt.Errorf("allocate temporary session id: %w", err)
+		}
+		sessionID = util.EncodeBase62Padded(uint64(seq), 5)
 	}
 	usernameSuffix := sessionID
 	if len(usernameSuffix) > 12 {
@@ -297,8 +311,8 @@ func (s *Server) extendTemporaryAccount(w http.ResponseWriter, r *http.Request, 
 	if req.ExpiresAt != nil {
 		expiresAt = req.ExpiresAt.UTC()
 	}
-	if !expiresAt.After(now) || expiresAt.After(now.Add(7*24*time.Hour)) {
-		s.writeErrorText(w, r, http.StatusBadRequest, "temporary authorization must expire within 7 days")
+	if !expiresAt.After(now) || expiresAt.After(now.Add(maxTemporaryAuthorizationDuration)) {
+		s.writeErrorText(w, r, http.StatusBadRequest, "\u4e34\u65f6\u6388\u6743\u6709\u6548\u671f\u4e0d\u80fd\u8d85\u8fc7 7 \u5929\uff0c\u8bf7\u9009\u62e9 7 \u5929\u4ee5\u5185\u7684\u65f6\u95f4")
 		return
 	}
 	if err := s.db.Model(&account).Updates(map[string]any{"expires_at": expiresAt, "status": "active"}).Error; err != nil {

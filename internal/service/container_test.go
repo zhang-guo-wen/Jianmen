@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -128,5 +129,89 @@ func TestContainerServiceCancellationClosesSSHTransportFirst(t *testing.T) {
 	case <-serverDone:
 	case <-time.After(time.Second):
 		t.Fatal("SSH server did not observe the closed transport")
+	}
+}
+
+func TestContainerServiceReusesSSHClientForOneTarget(t *testing.T) {
+	_, privateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("generate host key: %v", err)
+	}
+	signer, err := ssh.NewSignerFromKey(privateKey)
+	if err != nil {
+		t.Fatalf("create host signer: %v", err)
+	}
+	serverConfig := &ssh.ServerConfig{NoClientAuth: true}
+	serverConfig.AddHostKey(signer)
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer listener.Close()
+	var connectionCount atomic.Int32
+	serverDone := make(chan struct{})
+	go func() {
+		defer close(serverDone)
+		for {
+			conn, acceptErr := listener.Accept()
+			if acceptErr != nil {
+				return
+			}
+			connectionCount.Add(1)
+			go func() {
+				defer conn.Close()
+				sshConn, channels, requests, handshakeErr := ssh.NewServerConn(conn, serverConfig)
+				if handshakeErr != nil {
+					return
+				}
+				defer sshConn.Close()
+				go ssh.DiscardRequests(requests)
+				for newChannel := range channels {
+					if newChannel.ChannelType() != "session" {
+						_ = newChannel.Reject(ssh.UnknownChannelType, "session required")
+						continue
+					}
+					channel, channelRequests, acceptErr := newChannel.Accept()
+					if acceptErr != nil {
+						continue
+					}
+					go func() {
+						defer channel.Close()
+						for request := range channelRequests {
+							if request.Type != "exec" {
+								_ = request.Reply(false, nil)
+								continue
+							}
+							_ = request.Reply(true, nil)
+							_, _ = channel.Write([]byte("ok\n"))
+							_, _ = channel.SendRequest("exit-status", false, ssh.Marshal(struct{ Status uint32 }{Status: 0}))
+							return
+						}
+					}()
+				}
+			}()
+		}
+	}()
+
+	svc := NewContainerService()
+	defer svc.Close()
+	endpoint := ContainerEndpointConfig{
+		SSHAddress:  listener.Addr().String(),
+		SSHCacheKey: "target-1@" + listener.Addr().String(),
+		SSHConfig:   &ssh.ClientConfig{User: "test", HostKeyCallback: ssh.InsecureIgnoreHostKey()},
+	}
+	for i := 0; i < 3; i++ {
+		output, err := svc.sshCommand(context.Background(), endpoint, "printf ok")
+		if err != nil || !strings.Contains(string(output), "ok") {
+			t.Fatalf("SSH command %d = %q, err=%v", i, output, err)
+		}
+	}
+	if got := connectionCount.Load(); got != 1 {
+		t.Fatalf("SSH connection count = %d, want 1", got)
+	}
+	listener.Close()
+	select {
+	case <-serverDone:
+	case <-time.After(time.Second):
 	}
 }

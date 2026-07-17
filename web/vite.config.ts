@@ -10,7 +10,13 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '');
 
   return {
-    plugins: [vue()],
+    plugins: [vue({
+      template: {
+        compilerOptions: {
+          isCustomElement: (tag) => tag === 'altcha-widget'
+        }
+      }
+    })],
     resolve: {
       alias: {
         '@': path.resolve(__dirname, 'src')

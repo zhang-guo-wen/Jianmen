@@ -54,6 +54,14 @@ export interface HealthResponse {
   [key: string]: unknown;
 }
 
+export interface LoginCaptchaChallenge {
+  algorithm: string;
+  challenge: string;
+  maxNumber: number;
+  salt: string;
+  signature: string;
+}
+
 export interface InitStatusResponse {
   initialized: boolean;
   admin?: {
@@ -493,7 +501,6 @@ export interface PlatformAccountView {
   name?: string;
   platform_name: string;
   url?: string;
-  category?: string;
   group?: string;
   username: string;
   has_password?: boolean;
@@ -501,7 +508,6 @@ export interface PlatformAccountView {
   remark?: string;
   owner_id?: string;
   owner_name?: string;
-  visibility?: string;
   status?: string;
   expires_at?: string;
   created_at?: string;
@@ -513,37 +519,15 @@ export interface PlatformAccountPayload {
   name?: string;
   platform_name: string;
   url?: string;
-  category?: string;
   group?: string;
   username: string;
   password?: string;
   totp_secret?: string;
   remark?: string;
-  visibility?: string;
   expires_at?: string;
 }
 
-export interface PlatformAccountShareView {
-  id?: string;
-  platform_account_id?: string;
-  user_id?: string;
-  username?: string;
-  role_id?: string;
-  role_name?: string;
-  access_level?: string;
-  expires_at?: string;
-  created_at?: string;
-  [key: string]: unknown;
-}
-
-export interface PlatformAccountSharePayload {
-  user_id?: string;
-  role_id?: string;
-  access_level?: string;
-  expires_at?: string;
-}
-
-// ── RBAC ───────────────────────────────────────────────────────────────
+// ?? RBAC ???????????????????????????????????????????????????????????????
 
 export interface RBACRoleRecord {
   id?: string;
@@ -1083,7 +1067,7 @@ export const apiClient = {
     request<{ logs: string }>(`/api/containers/endpoints/${encodeURIComponent(endpointId)}/containers/${encodeURIComponent(containerId)}/logs?tail=${tail}`),
 
   // platform accounts
-  getPlatformAccounts: (params?: { page?: number; page_size?: number; q?: string; owner_id?: string; visibility?: string; platform?: string; category?: string }) =>
+  getPlatformAccounts: (params?: { page?: number; page_size?: number; q?: string; platform?: string }) =>
     request<PageResponse<PlatformAccountView>>(`/api/platform-accounts${buildQS(params as Record<string, string | number | undefined>)}`),
   getPlatformAccount: (id: string) =>
     request<PlatformAccountView>(`/api/platform-accounts/${encodeURIComponent(id)}`),
@@ -1103,19 +1087,6 @@ export const apiClient = {
     }),
   getPlatformAccountPassword: (id: string) =>
     request<{ password: string }>(`/api/platform-accounts/${encodeURIComponent(id)}/password`),
-
-  // platform account shares
-  getPlatformAccountShares: (accountId: string) =>
-    request<PlatformAccountShareView[]>(`/api/platform-accounts/${encodeURIComponent(accountId)}/shares`),
-  createPlatformAccountShare: (accountId: string, payload: PlatformAccountSharePayload) =>
-    request<PlatformAccountShareView>(`/api/platform-accounts/${encodeURIComponent(accountId)}/shares`, {
-      method: 'POST',
-      body: JSON.stringify(payload)
-    }),
-  deletePlatformAccountShare: (accountId: string, shareId: string) =>
-    request<void>(`/api/platform-accounts/${encodeURIComponent(accountId)}/shares/${encodeURIComponent(shareId)}`, {
-      method: 'DELETE'
-    }),
 
   // rbac
   getRBACCatalog: () =>
@@ -1274,10 +1245,12 @@ export const apiClient = {
     }),
 
   // auth & init
-  login: (username: string, password: string) =>
+  getLoginCaptchaChallenge: () =>
+    request<LoginCaptchaChallenge>('/api/login/challenge'),
+  login: (username: string, password: string, captchaPayload: string) =>
     request<{ token: string }>('/api/login', {
       method: 'POST',
-      body: JSON.stringify({ username, password }),
+      body: JSON.stringify({ username, password, captcha_payload: captchaPayload }),
     }),
   getInitStatus: () => request<InitStatusResponse>('/api/init/status'),
   setup: (payload: { username: string; password: string; email: string; display_name?: string }) =>

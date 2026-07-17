@@ -9,3 +9,11 @@ declare module 'vue-router' {
     description?: string;
   }
 }
+
+import type { DefineComponent } from 'vue';
+
+declare module 'vue' {
+  interface GlobalComponents {
+    'altcha-widget': DefineComponent<Record<string, unknown>>;
+  }
+}

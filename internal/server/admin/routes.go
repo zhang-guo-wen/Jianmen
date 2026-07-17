@@ -24,6 +24,7 @@ func (s *Server) routes() http.Handler {
 	s.muxHandle(mux, "/api/init/status", s.handleInitStatus)
 	s.muxHandle(mux, "/api/init/setup", s.handleInitSetup)
 	s.muxHandle(mux, "/api/init/encryption-key", s.withAuthAndUser(s.handleInitEncryptionKey))
+	s.muxHandle(mux, "/api/login/challenge", s.handleLoginCaptchaChallenge)
 	s.muxHandle(mux, "/api/login", s.handleLogin)
 	s.muxHandle(mux, "/api/ai/docs", s.handleAIDocs)
 	s.muxHandle(mux, "/api/ai/auth/refresh", s.handleAIRefresh)

@@ -3,6 +3,7 @@ module jianmen
 go 1.23.0
 
 require (
+	github.com/altcha-org/altcha-lib-go v1.0.0
 	github.com/glebarez/sqlite v1.11.0
 	github.com/gorilla/websocket v1.5.3
 	github.com/pkg/sftp v1.13.10

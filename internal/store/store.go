@@ -209,7 +209,6 @@ type PlatformAccountView struct {
 	Name         string     `json:"name"`
 	PlatformName string     `json:"platform_name"`
 	URL          string     `json:"url,omitempty"`
-	Category     string     `json:"category,omitempty"`
 	Group        string     `json:"group,omitempty"`
 	Username     string     `json:"username"`
 	HasPassword  bool       `json:"has_password"`
@@ -217,23 +216,10 @@ type PlatformAccountView struct {
 	Remark       string     `json:"remark,omitempty"`
 	OwnerID      string     `json:"owner_id"`
 	OwnerName    string     `json:"owner_name,omitempty"`
-	Visibility   string     `json:"visibility"`
 	Status       string     `json:"status"`
 	ExpiresAt    *time.Time `json:"expires_at,omitempty"`
 	CreatedAt    string     `json:"created_at"`
 	UpdatedAt    string     `json:"updated_at"`
-}
-
-type PlatformAccountShareView struct {
-	ID                string     `json:"id"`
-	PlatformAccountID string     `json:"platform_account_id"`
-	UserID            string     `json:"user_id,omitempty"`
-	Username          string     `json:"username,omitempty"`
-	RoleID            string     `json:"role_id,omitempty"`
-	RoleName          string     `json:"role_name,omitempty"`
-	AccessLevel       string     `json:"access_level"`
-	ExpiresAt         *time.Time `json:"expires_at,omitempty"`
-	CreatedAt         string     `json:"created_at"`
 }
 
 type SessionView struct {
@@ -303,16 +289,11 @@ type PageOpts struct {
 
 // PlatformAccountListParams 平台账号列表查询参数。
 type PlatformAccountListParams struct {
-	Search     string // 模糊搜索名称、平台、用户名
-	OwnerID    string // 按所有者过滤
-	Visibility string // private / shared
-	Platform   string // 按平台名称过滤
-	Category   string // 按分类过滤
-	Page       int
-	PageSize   int
-	UserID     string   // 当前用户 ID（用于可见性过滤）
-	RoleIDs    []string // 当前用户角色 ID 列表
-	IsAdmin    bool     // 是否管理员（可看全域）
+	Search   string
+	Platform string
+	Page     int
+	PageSize int
+	Unpaged  bool
 }
 
 // Store abstracts runtime data access. Implementations may back with
@@ -381,12 +362,6 @@ type Store interface {
 	UpdatePlatformAccount(id string, acc model.PlatformAccount) (PlatformAccountView, error)
 	DeletePlatformAccount(id string) error
 	GetPlatformAccountPassword(id string) (string, error)
-
-	// PlatformAccountShare
-	PlatformAccountShares(accountID string) ([]PlatformAccountShareView, error)
-	AddPlatformAccountShare(share model.PlatformAccountShare) (PlatformAccountShareView, error)
-	DeletePlatformAccountShare(accountID, shareID string) error
-	GetPlatformAccountSharesForUser(userID string, roleIDs []string) ([]PlatformAccountShareView, error)
 
 	DatabaseAccountByUniqueName(uniqueName string) (*model.DatabaseAccount, error)
 	AuthenticateDirect(ctx context.Context, username, password string) (model.User, error)

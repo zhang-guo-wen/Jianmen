@@ -33,6 +33,8 @@ func TestHandleAITokensIssueRotateAndRevoke(t *testing.T) {
 		Prompt       string `json:"prompt"`
 		CopyPrompt   string `json:"copy_prompt"`
 		FullPrompt   string `json:"full_prompt"`
+		DocsURL      string `json:"docs_url"`
+		DocsContent  string `json:"docs_content"`
 	}
 	if err := decodeTestData(t, response.Body.Bytes(), &issued); err != nil {
 		t.Fatalf("decode issue: %v", err)
@@ -48,6 +50,9 @@ func TestHandleAITokensIssueRotateAndRevoke(t *testing.T) {
 	}
 	if !strings.Contains(issued.FullPrompt, "# Jianmen AI Bastion API") || !strings.Contains(issued.FullPrompt, "Base URL: https://public.example.test") {
 		t.Fatalf("full prompt does not contain AI documentation: %q", issued.FullPrompt)
+	}
+	if issued.DocsURL != "https://public.example.test/api/ai/docs" || !strings.Contains(issued.DocsContent, "# Jianmen AI Bastion API") {
+		t.Fatalf("unexpected AI documentation payload: url=%q content=%q", issued.DocsURL, issued.DocsContent)
 	}
 	var saved model.AIAccessToken
 	if err := db.First(&saved, "id = ?", issued.ID).Error; err != nil {

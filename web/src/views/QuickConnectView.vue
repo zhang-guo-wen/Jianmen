@@ -220,6 +220,10 @@
           </div>
         </section>
       </el-tab-pane>
+
+      <el-tab-pane v-if="canConnectContainer" label="容器" name="container">
+        <QuickContainerConnectPanel :active="activeTab === 'container'" />
+      </el-tab-pane>
     </el-tabs>
 
     <ConnectionConfigDialog
@@ -254,6 +258,7 @@ import { useRouter } from 'vue-router';
 
 import { apiClient, type DBAccountRecord, type HostView, type PageResponse, type TargetRecord } from '@/api/client';
 import ConnectionConfigDialog from '@/components/ConnectionConfigDialog.vue';
+import QuickContainerConnectPanel from '@/components/QuickContainerConnectPanel.vue';
 import { useI18n } from '@/i18n';
 import { usePermissionStore } from '@/stores/permission';
 import { usePreferencesStore } from '@/stores/preferences';
@@ -289,7 +294,8 @@ const permission = usePermissionStore();
 const preferences = usePreferencesStore();
 const router = useRouter();
 const canConnectHost = computed(() => permission.canDo('session:connect') || permission.canDo('sftp:connect'));
-const activeTab = ref(canConnectHost.value ? 'ssh' : 'db');
+const canConnectContainer = computed(() => permission.canDo('container:connect'));
+const activeTab = ref(canConnectHost.value ? 'ssh' : permission.canDo('db:connect') ? 'db' : 'container');
 
 // SSH state
 const sshSearchInput = ref('');

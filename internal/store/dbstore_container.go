@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"time"
@@ -10,16 +11,59 @@ import (
 	"jianmen/internal/model"
 )
 
-func (s *DBStore) ContainerEndpoints() []ContainerEndpointView {
+func (s *DBStore) ListContainerEndpoints(ctx context.Context, params ContainerEndpointListParams) ([]ContainerEndpointView, int64, error) {
+	page, size := params.Page, params.Size
+	if page <= 0 {
+		page = 1
+	}
+	if size <= 0 {
+		size = 50
+	}
+	if size > 200 {
+		size = 200
+	}
+
+	buildQuery := func() *gorm.DB {
+		query := s.db.WithContext(ctx).Model(&model.ContainerEndpoint{}).
+			Joins("LEFT JOIN hosts ON hosts.id = container_endpoints.host_id")
+		if status := strings.TrimSpace(params.Status); status != "" {
+			query = query.Where("container_endpoints.status = ?", status)
+		}
+		if keyword := strings.ToLower(strings.TrimSpace(params.Query)); keyword != "" {
+			like := "%" + keyword + "%"
+			query = query.Where(`(
+				LOWER(container_endpoints.name) LIKE ? OR
+				LOWER(container_endpoints.runtime) LIKE ? OR
+				LOWER(container_endpoints.address) LIKE ? OR
+				LOWER(container_endpoints.group_name) LIKE ? OR
+				LOWER(container_endpoints.remark) LIKE ? OR
+				LOWER(hosts.name) LIKE ? OR
+				LOWER(hosts.address) LIKE ? OR
+				LOWER(hosts.group_name) LIKE ? OR
+				LOWER(hosts.remark) LIKE ?)`,
+				like, like, like, like, like, like, like, like, like,
+			)
+		}
+		return query
+	}
+
+	var total int64
+	if err := buildQuery().Count(&total).Error; err != nil {
+		return nil, 0, fmt.Errorf("count container endpoints: %w", err)
+	}
 	var endpoints []model.ContainerEndpoint
-	if err := s.db.Order("created_at DESC").Find(&endpoints).Error; err != nil {
-		return nil
+	if err := buildQuery().Select("container_endpoints.*").
+		Order("container_endpoints.created_at DESC").
+		Offset((page - 1) * size).
+		Limit(size).
+		Find(&endpoints).Error; err != nil {
+		return nil, 0, fmt.Errorf("list container endpoints: %w", err)
 	}
-	views := make([]ContainerEndpointView, 0, len(endpoints))
-	for _, endpoint := range endpoints {
-		views = append(views, s.containerEndpointView(endpoint))
+	views, err := s.containerEndpointViews(ctx, endpoints)
+	if err != nil {
+		return nil, 0, err
 	}
-	return views
+	return views, total, nil
 }
 
 func (s *DBStore) ContainerEndpoint(id string) (ContainerEndpointView, error) {
@@ -27,7 +71,11 @@ func (s *DBStore) ContainerEndpoint(id string) (ContainerEndpointView, error) {
 	if err := s.db.First(&endpoint, "id = ?", strings.TrimSpace(id)).Error; err != nil {
 		return ContainerEndpointView{}, fmt.Errorf("%w: %q", ErrContainerEndpointNotFound, id)
 	}
-	return s.containerEndpointView(endpoint), nil
+	views, err := s.containerEndpointViews(context.Background(), []model.ContainerEndpoint{endpoint})
+	if err != nil {
+		return ContainerEndpointView{}, err
+	}
+	return views[0], nil
 }
 
 func (s *DBStore) AddContainerEndpoint(input ContainerEndpointInput) (ContainerEndpointView, error) {
@@ -52,7 +100,11 @@ func (s *DBStore) AddContainerEndpoint(input ContainerEndpointInput) (ContainerE
 	}); err != nil {
 		return ContainerEndpointView{}, fmt.Errorf("create container endpoint: %w", err)
 	}
-	return s.containerEndpointView(endpoint), nil
+	views, err := s.containerEndpointViews(context.Background(), []model.ContainerEndpoint{endpoint})
+	if err != nil {
+		return ContainerEndpointView{}, err
+	}
+	return views[0], nil
 }
 
 func (s *DBStore) UpdateContainerEndpoint(id string, input ContainerEndpointInput) (ContainerEndpointView, error) {
@@ -80,7 +132,11 @@ func (s *DBStore) UpdateContainerEndpoint(id string, input ContainerEndpointInpu
 	}); err != nil {
 		return ContainerEndpointView{}, fmt.Errorf("update container endpoint: %w", err)
 	}
-	return s.containerEndpointView(endpoint), nil
+	views, err := s.containerEndpointViews(context.Background(), []model.ContainerEndpoint{endpoint})
+	if err != nil {
+		return ContainerEndpointView{}, err
+	}
+	return views[0], nil
 }
 
 func (s *DBStore) DeleteContainerEndpoint(id string) error {
@@ -96,31 +152,65 @@ func (s *DBStore) DeleteContainerEndpoint(id string) error {
 	})
 }
 
-func (s *DBStore) containerEndpointView(endpoint model.ContainerEndpoint) ContainerEndpointView {
-	view := ContainerEndpointView{
-		ID: endpoint.ID, Name: endpoint.Name, Group: endpoint.GroupName,
-		Runtime: endpoint.Runtime, ConnectionMode: endpoint.ConnectionMode,
-		Address: endpoint.Address, Port: endpoint.Port, HostID: endpoint.HostID,
-		HostAccountID: endpoint.HostAccountID, Remark: endpoint.Remark,
-		Status: endpoint.Status, CreatedAt: endpoint.CreatedAt.Format(time.RFC3339),
-		UpdatedAt: endpoint.UpdatedAt.Format(time.RFC3339),
-	}
-	if endpoint.HostID != "" {
-		var host model.Host
-		if s.db.First(&host, "id = ?", endpoint.HostID).Error == nil {
-			view.HostName = host.Name
+func (s *DBStore) containerEndpointViews(ctx context.Context, endpoints []model.ContainerEndpoint) ([]ContainerEndpointView, error) {
+	hostIDs := make([]string, 0, len(endpoints))
+	accountIDs := make([]string, 0, len(endpoints))
+	for _, endpoint := range endpoints {
+		if endpoint.HostID != "" {
+			hostIDs = append(hostIDs, endpoint.HostID)
+		}
+		if endpoint.HostAccountID != "" {
+			accountIDs = append(accountIDs, endpoint.HostAccountID)
 		}
 	}
-	if endpoint.HostAccountID != "" {
-		var account model.HostAccount
-		if s.db.First(&account, "id = ?", endpoint.HostAccountID).Error == nil {
+
+	hosts := make(map[string]model.Host, len(hostIDs))
+	if len(hostIDs) > 0 {
+		var records []model.Host
+		if err := s.db.WithContext(ctx).Where("id IN ?", hostIDs).Find(&records).Error; err != nil {
+			return nil, fmt.Errorf("load container endpoint hosts: %w", err)
+		}
+		for _, host := range records {
+			hosts[host.ID] = host
+		}
+	}
+
+	accounts := make(map[string]model.HostAccount, len(accountIDs))
+	if len(accountIDs) > 0 {
+		var records []model.HostAccount
+		if err := s.db.WithContext(ctx).Where("id IN ?", accountIDs).Find(&records).Error; err != nil {
+			return nil, fmt.Errorf("load container endpoint accounts: %w", err)
+		}
+		for _, account := range records {
+			accounts[account.ID] = account
+		}
+	}
+
+	views := make([]ContainerEndpointView, 0, len(endpoints))
+	for _, endpoint := range endpoints {
+		view := ContainerEndpointView{
+			ID: endpoint.ID, Name: endpoint.Name, Group: endpoint.GroupName,
+			Runtime: endpoint.Runtime, ConnectionMode: endpoint.ConnectionMode,
+			Address: endpoint.Address, Port: endpoint.Port, HostID: endpoint.HostID,
+			HostAccountID: endpoint.HostAccountID, Remark: endpoint.Remark,
+			Status: endpoint.Status, CreatedAt: endpoint.CreatedAt.Format(time.RFC3339),
+			UpdatedAt: endpoint.UpdatedAt.Format(time.RFC3339),
+		}
+		if host, ok := hosts[endpoint.HostID]; ok {
+			view.HostName = host.Name
+			view.HostAddress = host.Address
+			view.HostGroup = host.GroupName
+			view.HostRemark = host.Remark
+		}
+		if account, ok := accounts[endpoint.HostAccountID]; ok {
 			view.HostAccountName = account.Name
 			if view.HostAccountName == "" {
 				view.HostAccountName = account.Username
 			}
 		}
+		views = append(views, view)
 	}
-	return view
+	return views, nil
 }
 
 func normalizeContainerEndpointInput(input ContainerEndpointInput) (ContainerEndpointInput, error) {

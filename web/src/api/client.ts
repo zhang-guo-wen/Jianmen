@@ -499,6 +499,9 @@ export interface ContainerEndpointView {
   port?: number;
   host_id?: string;
   host_name?: string;
+  host_address?: string;
+  host_group?: string;
+  host_remark?: string;
   host_account_id?: string;
   host_account_name?: string;
   remark?: string;
@@ -1116,7 +1119,7 @@ export const apiClient = {
     }),
 
   // containers
-  getContainerEndpoints: (params?: { page?: number; page_size?: number; q?: string }) =>
+  getContainerEndpoints: (params?: { page?: number; page_size?: number; q?: string; status?: string }) =>
     request<PageResponse<ContainerEndpointView>>(`/api/containers/endpoints${buildQS(params as Record<string, string | number | undefined>)}`),
   createContainerEndpoint: (payload: ContainerEndpointPayload) =>
     request<ContainerEndpointView>('/api/containers/endpoints', { method: 'POST', body: JSON.stringify(payload) }),

@@ -104,3 +104,18 @@ func TestAccessiblePagesUsesAnyChildAction(t *testing.T) {
 		t.Fatalf("wildcard pages = %d, want %d", len(all), len(PermissionPages()))
 	}
 }
+
+func TestContainerConnectOnlyOpensQuickConnectPage(t *testing.T) {
+	actions, err := ValidateAssignableActions([]string{ActionContainerConnect})
+	if err != nil {
+		t.Fatalf("ValidateAssignableActions() error = %v", err)
+	}
+	wantActions := []string{ActionContainerConnect}
+	if !reflect.DeepEqual(actions, wantActions) {
+		t.Fatalf("actions = %#v, want %#v", actions, wantActions)
+	}
+	wantPages := []PageAccess{{Key: "quickConnect", Path: "/quick-connect", Order: 10}}
+	if pages := AccessiblePages(actions); !reflect.DeepEqual(pages, wantPages) {
+		t.Fatalf("pages = %#v, want %#v", pages, wantPages)
+	}
+}

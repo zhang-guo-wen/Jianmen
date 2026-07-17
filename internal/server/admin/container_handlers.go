@@ -33,22 +33,27 @@ type containerEndpointPayload struct {
 func (s *Server) handleContainerEndpoints(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
-		if !s.requirePermission(r, rbac.ActionContainerView) {
+		if !s.requirePermission(r, rbac.ActionContainerView) && !s.requirePermission(r, rbac.ActionContainerConnect) {
 			s.forbidden(w, r)
 			return
 		}
-		items := s.store.ContainerEndpoints()
+		pageNumber := positiveIntRequestQuery(r, "page", 1)
+		pageSize := positiveIntRequestQuery(r, "page_size", defaultPageSize)
+		if pageSize > 200 {
+			pageSize = 200
+		}
+		items, total, err := s.store.ListContainerEndpoints(r.Context(), store.ContainerEndpointListParams{
+			Page: pageNumber, Size: pageSize, Query: r.URL.Query().Get("q"), Status: r.URL.Query().Get("status"),
+		})
+		if err != nil {
+			s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
+			return
+		}
 		canManage := s.isSuperAdmin(userIDFromRequest(r)) || s.requirePermission(r, rbac.ActionContainerUpdate) || s.requirePermission(r, rbac.ActionContainerDelete)
 		for i := range items {
 			items[i].CanManage = canManage
 		}
-		page := paginateSlice(items, r, func(item store.ContainerEndpointView, q string) bool {
-			return strings.Contains(strings.ToLower(item.Name), q) ||
-				strings.Contains(strings.ToLower(item.Runtime), q) ||
-				strings.Contains(strings.ToLower(item.Address), q) ||
-				strings.Contains(strings.ToLower(item.Group), q)
-		})
-		s.writeJSON(w, r, http.StatusOK, page)
+		s.writeJSON(w, r, http.StatusOK, pageResponse{Items: items, Total: int(total), Page: pageNumber, PageSize: pageSize})
 	case http.MethodPost:
 		if !s.requirePermission(r, rbac.ActionContainerCreate) {
 			s.forbidden(w, r)

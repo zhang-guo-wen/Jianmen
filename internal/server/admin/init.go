@@ -3,6 +3,7 @@ package admin
 import (
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"jianmen/internal/model"
+	"jianmen/internal/service"
 	"jianmen/internal/util"
 
 	"gorm.io/gorm"
@@ -86,6 +88,28 @@ func (s *Server) initStatusAdminSummary() *InitAdminSummary {
 	return &InitAdminSummary{Username: user.Username, DisplayName: user.DisplayName, Email: user.Email}
 }
 
+// handleLoginCaptchaChallenge returns a short-lived, single-use ALTCHA challenge.
+func (s *Server) handleLoginCaptchaChallenge(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", http.MethodGet)
+		s.writeErrorText(w, r, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	if s.loginCaptcha == nil {
+		s.writeErrorText(w, r, http.StatusServiceUnavailable, "login captcha unavailable")
+		return
+	}
+
+	challenge, err := s.loginCaptcha.CreateChallenge()
+	if err != nil {
+		s.logger.Error("failed to create login captcha challenge", "error", err)
+		s.writeErrorText(w, r, http.StatusInternalServerError, "failed to create login captcha challenge")
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store, max-age=0")
+	s.writeJSON(w, r, http.StatusOK, challenge)
+}
+
 // handleLogin handles username+password login, returns an API token.
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -101,8 +125,9 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, 1<<18)
 
 	var req struct {
-		Username string `json:"username"`
-		Password string `json:"password"`
+		Username       string `json:"username"`
+		Password       string `json:"password"`
+		CaptchaPayload string `json:"captcha_payload"`
 	}
 	decoder := json.NewDecoder(r.Body)
 	decoder.DisallowUnknownFields()
@@ -116,6 +141,10 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		s.writeErrorText(w, r, http.StatusBadRequest, "username and password are required")
 		return
 	}
+	if s.loginCaptcha == nil {
+		s.writeErrorText(w, r, http.StatusServiceUnavailable, "login captcha unavailable")
+		return
+	}
 	now := time.Now().UTC()
 	limiter := s.loginLimiterForRequest()
 	limitKey := loginLimitKey(r, username)
@@ -126,6 +155,19 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if err := s.loginCaptcha.Verify(req.CaptchaPayload); err != nil {
+		s.logLogin(r, username, "failure", "captcha_failed")
+		message := "security verification failed; please try again"
+		if errors.Is(err, service.ErrLoginCaptchaMissing) {
+			message = "security verification is required"
+		} else if errors.Is(err, service.ErrLoginCaptchaExpired) {
+			message = "security verification expired; please try again"
+		}
+		s.writeErrorText(w, r, http.StatusBadRequest, message)
+		return
+	}
+
+	// Verify the CAPTCHA before the expensive password hash check.
 	// Find user by username
 	var user model.User
 	if err := s.db.Where("username = ? AND status = ?", username, "active").First(&user).Error; err != nil {

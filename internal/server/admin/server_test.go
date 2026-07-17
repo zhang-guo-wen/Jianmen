@@ -23,6 +23,7 @@ import (
 	"jianmen/internal/config"
 	"jianmen/internal/crypto"
 	"jianmen/internal/model"
+	"jianmen/internal/service"
 	"jianmen/internal/storage"
 	"jianmen/internal/store"
 	"jianmen/internal/util"
@@ -439,6 +440,49 @@ func TestInitStatusReturnsSuperAdminSummaryAfterSetup(t *testing.T) {
 	}
 }
 
+func TestLoginRequiresCaptcha(t *testing.T) {
+	server, db := newAdminDBTestServer(t)
+	passwordHash, err := hashPassword("correct-password")
+	if err != nil {
+		t.Fatalf("hash password: %v", err)
+	}
+	if err := db.Create(&model.User{ID: "captcha-user", Username: "captcha-user", PasswordHash: passwordHash, Status: "active"}).Error; err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/login", bytes.NewBufferString(`{"username":"captcha-user","password":"correct-password"}`))
+	rec := httptest.NewRecorder()
+	server.handleLogin(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusBadRequest, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "security verification is required") {
+		t.Fatalf("body missing captcha error: %s", rec.Body.String())
+	}
+}
+
+func TestLoginCaptchaChallengeIsNotCached(t *testing.T) {
+	server, _ := newAdminDBTestServer(t)
+	captcha, err := service.NewLoginCaptcha()
+	if err != nil {
+		t.Fatalf("create captcha: %v", err)
+	}
+	server.loginCaptcha = captcha
+
+	req := httptest.NewRequest(http.MethodGet, "/api/login/challenge", nil)
+	rec := httptest.NewRecorder()
+	server.handleLoginCaptchaChallenge(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	if rec.Header().Get("Cache-Control") != "no-store, max-age=0" {
+		t.Fatalf("Cache-Control = %q, want no-store, max-age=0", rec.Header().Get("Cache-Control"))
+	}
+	if !strings.Contains(rec.Body.String(), `"signature"`) {
+		t.Fatalf("challenge body missing signature: %s", rec.Body.String())
+	}
+}
+
 func TestCreateUserStoresBcryptHashAndLoginWorks(t *testing.T) {
 	server, db := newAdminDBTestServer(t)
 
@@ -480,7 +524,8 @@ func TestCreateUserStoresBcryptHashAndLoginWorks(t *testing.T) {
 
 	loginReq := httptest.NewRequest(http.MethodPost, "/api/login", bytes.NewBufferString(`{
 		"username": "alice",
-		"password": "correct horse battery staple"
+		"password": "correct horse battery staple",
+		"captcha_payload": "test-captcha"
 	}`))
 	loginRec := httptest.NewRecorder()
 	server.handleLogin(loginRec, loginReq)
@@ -501,7 +546,7 @@ func TestLoginBackfillsMissingMySQLPasswordVerifier(t *testing.T) {
 		t.Fatalf("create user: %v", err)
 	}
 
-	req := httptest.NewRequest(http.MethodPost, "/api/login", bytes.NewBufferString(`{"username":"existing","password":"existing-user-password"}`))
+	req := httptest.NewRequest(http.MethodPost, "/api/login", bytes.NewBufferString(`{"username":"existing","password":"existing-user-password","captcha_payload":"test-captcha"}`))
 	rec := httptest.NewRecorder()
 	server.handleLogin(rec, req)
 	if rec.Code != http.StatusOK {
@@ -533,7 +578,8 @@ func TestLoginRateLimitAfterRepeatedFailures(t *testing.T) {
 	for i := 0; i < loginFailureLimit; i++ {
 		req := httptest.NewRequest(http.MethodPost, "/api/login", bytes.NewBufferString(`{
 			"username": "rate-limited",
-			"password": "wrong-password"
+			"password": "wrong-password",
+			"captcha_payload": "test-captcha"
 		}`))
 		req.RemoteAddr = "203.0.113.10:12345"
 		rec := httptest.NewRecorder()
@@ -545,7 +591,8 @@ func TestLoginRateLimitAfterRepeatedFailures(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost, "/api/login", bytes.NewBufferString(`{
 		"username": "rate-limited",
-		"password": "wrong-password"
+		"password": "wrong-password",
+		"captcha_payload": "test-captcha"
 	}`))
 	req.RemoteAddr = "203.0.113.10:12345"
 	rec := httptest.NewRecorder()
@@ -710,6 +757,19 @@ func newTargetTestServer(t *testing.T) *Server {
 	}
 }
 
+type testLoginCaptcha struct{}
+
+func (testLoginCaptcha) CreateChallenge() (service.LoginCaptchaChallenge, error) {
+	return service.LoginCaptchaChallenge{}, nil
+}
+
+func (testLoginCaptcha) Verify(payload string) error {
+	if payload == "" {
+		return service.ErrLoginCaptchaMissing
+	}
+	return nil
+}
+
 func newAdminDBTestServer(t *testing.T) (*Server, *gorm.DB) {
 	t.Helper()
 
@@ -737,6 +797,7 @@ func newAdminDBTestServer(t *testing.T) (*Server, *gorm.DB) {
 		logger:        slog.New(slog.NewTextHandler(io.Discard, nil)),
 		dataDir:       dataDir,
 		superAdminIDs: map[string]bool{},
+		loginCaptcha:  testLoginCaptcha{},
 	}, db
 }
 

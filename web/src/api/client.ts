@@ -54,6 +54,14 @@ export interface HealthResponse {
   [key: string]: unknown;
 }
 
+export interface LoginCaptchaChallenge {
+  algorithm: string;
+  challenge: string;
+  maxNumber: number;
+  salt: string;
+  signature: string;
+}
+
 export interface InitStatusResponse {
   initialized: boolean;
   admin?: {
@@ -1215,10 +1223,12 @@ export const apiClient = {
     }),
 
   // auth & init
-  login: (username: string, password: string) =>
+  getLoginCaptchaChallenge: () =>
+    request<LoginCaptchaChallenge>('/api/login/challenge'),
+  login: (username: string, password: string, captchaPayload: string) =>
     request<{ token: string }>('/api/login', {
       method: 'POST',
-      body: JSON.stringify({ username, password }),
+      body: JSON.stringify({ username, password, captcha_payload: captchaPayload }),
     }),
   getInitStatus: () => request<InitStatusResponse>('/api/init/status'),
   setup: (payload: { username: string; password: string; email: string; display_name?: string }) =>

@@ -253,6 +253,30 @@ export interface OnlineSessionRecord {
   has_replay: boolean;
 }
 
+export interface LoginAuditRecord {
+  id: string;
+  user_id?: string;
+  username: string;
+  outcome: 'success' | 'failure' | 'blocked' | string;
+  reason?: string;
+  client_ip: string;
+  user_agent?: string;
+  created_at: string;
+}
+
+export interface OperationAuditRecord {
+  id: string;
+  actor_id: string;
+  actor_username: string;
+  action: string;
+  resource_type: string;
+  resource_id?: string;
+  resource_name?: string;
+  detail?: string;
+  client_ip?: string;
+  created_at: string;
+}
+
 export interface ConnectionPasswordRecord {
   password: string;
   expires_at: string;
@@ -946,6 +970,10 @@ export const apiClient = {
     request<void>(`/api/online-sessions/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   getSessions: (params?: { page?: number; page_size?: number; q?: string }) =>
     request<PageResponse<SessionRecord>>(`/api/audit/ssh${buildQS(params as Record<string, string | number | undefined>)}`),
+  getLoginAuditLogs: (params?: { page?: number; page_size?: number; q?: string; outcome?: string; date?: string }) =>
+    request<PageResponse<LoginAuditRecord>>(`/api/audit/logins${buildQS(params as Record<string, string | number | undefined>)}`),
+  getOperationAuditLogs: (params?: { page?: number; page_size?: number; q?: string; action?: string; resource_type?: string; date?: string }) =>
+    request<PageResponse<OperationAuditRecord>>(`/api/audit/operations${buildQS(params as Record<string, string | number | undefined>)}`),
   getSessionMeta: (id: string | number) =>
     request<SessionMetaRecord>(
       `/api/audit/ssh/${encodeURIComponent(String(id))}`

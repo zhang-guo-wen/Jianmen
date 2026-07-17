@@ -30,7 +30,14 @@ func (s *Server) withAuthAndUser(next http.HandlerFunc) http.HandlerFunc {
 				}
 				ctx := context.WithValue(r.Context(), ctxKeyUserID, user.ID)
 				ctx = context.WithValue(ctx, ctxKeyUsername, user.Username)
-				next(w, r.WithContext(ctx))
+				authenticatedRequest := r.WithContext(ctx)
+				if isAuditableMutation(authenticatedRequest) {
+					aw := &auditResponseWriter{ResponseWriter: w}
+					next(aw, authenticatedRequest)
+					s.recordOperation(authenticatedRequest, aw.statusCode())
+					return
+				}
+				next(w, authenticatedRequest)
 				return
 			}
 		}

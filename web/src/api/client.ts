@@ -512,7 +512,6 @@ export interface PlatformAccountView {
   group?: string;
   username: string;
   has_password?: boolean;
-  has_totp?: boolean;
   remark?: string;
   owner_id?: string;
   owner_name?: string;
@@ -525,12 +524,11 @@ export interface PlatformAccountView {
 
 export interface PlatformAccountPayload {
   name?: string;
-  platform_name: string;
+  platform_name?: string;
   url?: string;
   group?: string;
   username: string;
   password?: string;
-  totp_secret?: string;
   remark?: string;
   expires_at?: string;
 }

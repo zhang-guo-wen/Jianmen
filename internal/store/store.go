@@ -212,7 +212,6 @@ type PlatformAccountView struct {
 	Group        string     `json:"group,omitempty"`
 	Username     string     `json:"username"`
 	HasPassword  bool       `json:"has_password"`
-	HasTOTP      bool       `json:"has_totp"`
 	Remark       string     `json:"remark,omitempty"`
 	OwnerID      string     `json:"owner_id"`
 	OwnerName    string     `json:"owner_name,omitempty"`

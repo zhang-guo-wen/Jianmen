@@ -15,22 +15,24 @@ import (
 func TestTemporaryAuthorizationCreatesBoundedGrant(t *testing.T) {
 	server, db := newAdminDBTestServer(t)
 	server.superAdminIDs["u-admin"] = true
-	if err := db.Create(&model.User{ID: "recipient", Username: "recipient", Status: "active"}).Error; err != nil {
+	server.cfg.ListenAddr = "0.0.0.0:47102"
+	if err := db.Create(&model.User{ID: "u-admin", Username: "admin", Status: "active"}).Error; err != nil {
 		t.Fatal(err)
 	}
 	if err := db.Create(&model.Host{ID: "host-1", Name: "build-host", Address: "127.0.0.1", Port: 22, Status: "active"}).Error; err != nil {
 		t.Fatal(err)
 	}
-	if err := db.Create(&model.HostAccount{ID: "account-1", HostID: "host-1", Name: "deploy", Username: "deploy", Status: "active"}).Error; err != nil {
+	if err := db.Create(&model.HostAccount{ID: "account-1", HostID: "host-1", Name: "deploy", Username: "deploy", Status: "active", ResourceID: "A001"}).Error; err != nil {
 		t.Fatal(err)
 	}
 
 	expiresAt := time.Now().UTC().Add(2 * time.Hour)
 	body, _ := json.Marshal(map[string]any{
-		"authorized_user_id": "recipient", "resource_type": model.ResourceTypeHostAccount,
-		"resource_id": "account-1", "expires_at": expiresAt, "remark": "incident response",
+		"resource_type": model.ResourceTypeHostAccount,
+		"resource_id":   "account-1", "expires_at": expiresAt, "remark": "incident response",
 	})
 	req := asTestSuperAdmin(httptest.NewRequest(http.MethodPost, "/api/temporary-accounts", bytes.NewReader(body)))
+	req.Header.Set("Origin", "https://bastion.example.test")
 	rec := httptest.NewRecorder()
 	server.handleTemporaryAccounts(rec, req)
 	if rec.Code != http.StatusCreated {
@@ -44,7 +46,16 @@ func TestTemporaryAuthorizationCreatesBoundedGrant(t *testing.T) {
 	if result.SessionID == "" || result.Type != model.TemporaryAccountTypeUser {
 		t.Fatalf("unexpected temporary account: %#v", result)
 	}
-	allowed, err := rbac.NewResourceGrantChecker(db).HasGrant("recipient", model.ResourceTypeHostAccount, "account-1")
+	if result.AuthorizedUserID != "u-admin" || result.Connection == nil {
+		t.Fatalf("temporary authorization did not default to current user or issue credentials: %#v", result)
+	}
+	if result.Connection.Address != "bastion.example.test:47102" || result.Connection.Username != "HA001"+result.SessionID || result.Connection.Password == "" {
+		t.Fatalf("unexpected connection info: %#v", result.Connection)
+	}
+	if err := server.store.AuthenticateConnectionPassword(req.Context(), "u-admin", model.ResourceTypeHostAccount, "account-1", result.Connection.Password); err != nil {
+		t.Fatalf("issued temporary password does not authenticate: %v", err)
+	}
+	allowed, err := rbac.NewResourceGrantChecker(db).HasGrant("u-admin", model.ResourceTypeHostAccount, "account-1")
 	if err != nil {
 		t.Fatal(err)
 	}

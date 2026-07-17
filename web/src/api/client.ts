@@ -717,6 +717,16 @@ export interface ResourceGrantPayload {
   expires_at?: string;
 }
 
+export interface TemporaryConnectionRecord {
+  address: string;
+  host: string;
+  port: number;
+  username: string;
+  password: string;
+  protocol: string;
+  expires_at: string;
+}
+
 export interface TemporaryAccountRecord {
   id: string;
   session_id: string;
@@ -731,6 +741,7 @@ export interface TemporaryAccountRecord {
   account_name?: string;
   remark?: string;
   created_at: string;
+  connection?: TemporaryConnectionRecord;
 }
 
 // ── Resource Group types ────────────────────────────────────────────
@@ -898,7 +909,7 @@ export const apiClient = {
   getAITokens: () => request<AIAccessTokenRecord[]>('/api/ai/tokens'),
   getAIToken: (id: string) => request<IssuedAIAccessToken>(`/api/ai/tokens/${encodeURIComponent(id)}`),
   getAIDocs: () => request<string>('/api/ai/docs'),
-  createAIToken: (payload: { name?: string; access_ttl_seconds?: number; refresh_ttl_seconds?: number; expires_at?: string; remark?: string }) =>
+  createAIToken: (payload: { name?: string; access_ttl_seconds?: number; refresh_ttl_seconds?: number; expires_at?: string; permanent?: boolean; remark?: string }) =>
     request<IssuedAIAccessToken>('/api/ai/tokens', {
       method: 'POST',
       body: JSON.stringify(payload),

@@ -278,6 +278,11 @@ func (s *Server) aiBastionInfo(r *http.Request) map[string]any {
 }
 
 func (s *Server) aiBaseURL(r *http.Request) string {
+	for _, candidate := range []string{r.Header.Get("Origin"), r.Header.Get("Referer")} {
+		if parsed, err := url.Parse(strings.TrimSpace(candidate)); err == nil && (parsed.Scheme == "http" || parsed.Scheme == "https") && parsed.Host != "" {
+			return strings.TrimRight(parsed.Scheme+"://"+parsed.Host, "/")
+		}
+	}
 	if configured := strings.TrimRight(strings.TrimSpace(s.cfg.Admin.PublicURL), "/"); configured != "" {
 		return configured
 	}

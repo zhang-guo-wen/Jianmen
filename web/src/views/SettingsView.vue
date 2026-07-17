@@ -235,7 +235,7 @@ async function copyRegistrationCommand(command: string) {
   top: 0;
   z-index: 4;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: flex-end;
   gap: 10px;
   height: 0;
@@ -245,7 +245,7 @@ async function copyRegistrationCommand(command: string) {
 
 .settings-tab-actions .el-button {
   pointer-events: auto;
-  transform: translateY(8px);
+  margin-top: 8px;
 }
 
 :deep(.settings-tabs .el-tabs__nav-wrap::after) {
@@ -323,6 +323,7 @@ async function copyRegistrationCommand(command: string) {
 }
 
 .save-error {
+  margin-top: 17px;
   color: var(--el-color-danger);
   font-size: 12px;
   white-space: nowrap;

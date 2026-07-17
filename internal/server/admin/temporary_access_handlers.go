@@ -120,10 +120,13 @@ func (s *Server) createTemporaryAuthorization(w http.ResponseWriter, r *http.Req
 		return
 	}
 	req.AuthorizedUserID = strings.TrimSpace(req.AuthorizedUserID)
+	if req.AuthorizedUserID == "" {
+		req.AuthorizedUserID = userIDFromRequest(r)
+	}
 	req.ResourceType = strings.TrimSpace(req.ResourceType)
 	req.ResourceID = strings.TrimSpace(req.ResourceID)
 	if req.AuthorizedUserID == "" || req.ResourceID == "" {
-		s.writeErrorText(w, r, http.StatusBadRequest, "authorized_user_id and resource_id are required")
+		s.writeErrorText(w, r, http.StatusBadRequest, "resource_id is required")
 		return
 	}
 	if req.ResourceType != model.ResourceTypeHostAccount && req.ResourceType != model.ResourceTypeDatabaseAccount {

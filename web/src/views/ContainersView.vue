@@ -1,20 +1,5 @@
 ﻿<template>
   <div class="containers-page">
-    <div class="containers-toolbar">
-      <div>
-        <span class="eyebrow">RUNTIME WORKSPACE</span>
-        <h2>容器工作台</h2>
-      </div>
-      <div class="toolbar-actions">
-        <el-button :loading="loading" @click="loadEndpoints">
-          <el-icon><Refresh /></el-icon>刷新
-        </el-button>
-        <el-button v-if="permission.canDo('container:create')" type="primary" @click="openCreate">
-          <el-icon><Plus /></el-icon>新增连接
-        </el-button>
-      </div>
-    </div>
-
     <div class="workspace-card">
       <aside class="endpoint-panel">
         <div class="panel-heading">
@@ -22,7 +7,14 @@
             <strong>连接与容器</strong>
             <span>{{ endpoints.length }} 个运行时</span>
           </div>
-          <el-button link :loading="loading" @click="loadEndpoints"><el-icon><Refresh /></el-icon></el-button>
+          <div class="panel-actions">
+            <el-button v-if="permission.canDo('container:create')" link type="primary" @click="openCreate">
+              <el-icon><Plus /></el-icon>新增
+            </el-button>
+            <el-button link :loading="loading" @click="loadEndpoints">
+              <el-icon><Refresh /></el-icon>刷新
+            </el-button>
+          </div>
         </div>
         <el-scrollbar class="endpoint-scroll">
           <div v-if="!loading && endpoints.length === 0" class="empty-tree">
@@ -61,43 +53,49 @@
       </aside>
 
       <main class="runtime-panel">
-        <div v-if="selectedContainer" class="detail-header">
-          <div>
-            <div class="detail-kicker">{{ selectedEndpoint?.name }} / CONTAINER</div>
-            <h3>{{ selectedContainer.name || selectedContainer.id }}</h3>
-            <p>{{ selectedContainer.image || '未返回镜像信息' }} · {{ selectedContainer.id }}</p>
+        <div v-if="selectedContainer" class="log-workspace">
+          <div class="log-toolbar">
+            <div class="log-tabs">
+              <button type="button" class="log-tab" :class="{ active: activeLogTab === 'logs' }" @click="activeLogTab = 'logs'">日志</button>
+              <button type="button" class="log-tab" :class="{ active: activeLogTab === 'details' }" @click="activeLogTab = 'details'">详情</button>
+            </div>
+            <div v-if="activeLogTab === 'logs'" class="log-actions">
+              <el-button size="small" @click="refreshLogs">
+                <el-icon><Refresh /></el-icon>刷新日志
+              </el-button>
+              <el-input v-model="logSearch" class="log-search" size="small" clearable placeholder="搜索日志">
+                <template #prefix><el-icon><Search /></el-icon></template>
+              </el-input>
+            </div>
           </div>
-          <div class="detail-actions">
-            <el-button size="small" @click="refreshLogs"><el-icon><Refresh /></el-icon>刷新日志</el-button>
-            <el-button size="small" @click="copyLogs"><el-icon><CopyDocument /></el-icon>复制日志</el-button>
+          <pre v-if="activeLogTab === 'logs'" v-loading="logsLoading" class="log-viewer">{{ filteredLogs || (logSearch ? '没有匹配的日志' : '暂无日志输出') }}</pre>
+          <div v-else class="container-details">
+            <div class="info-tile"><span>名称</span><strong>{{ selectedContainer.name || selectedContainer.id }}</strong></div>
+            <div class="info-tile"><span>容器 ID</span><strong>{{ selectedContainer.id }}</strong></div>
+            <div class="info-tile"><span>镜像</span><strong>{{ selectedContainer.image || '未返回镜像信息' }}</strong></div>
+            <div class="info-tile"><span>状态</span><strong>{{ selectedContainer.status || selectedContainer.state || '未知' }}</strong></div>
+            <div class="info-tile"><span>端口</span><strong>{{ selectedContainer.ports || '无端口映射' }}</strong></div>
+            <div class="info-tile"><span>运行时连接</span><strong>{{ selectedEndpoint?.name }}</strong></div>
           </div>
         </div>
-        <div v-else-if="selectedEndpoint" class="detail-header endpoint-summary">
-          <div>
-            <div class="detail-kicker">RUNTIME ENDPOINT</div>
-            <h3>{{ selectedEndpoint.name }}</h3>
-            <p>{{ endpointDescription(selectedEndpoint) }}</p>
+        <template v-else-if="selectedEndpoint">
+          <div class="detail-header endpoint-summary">
+            <div>
+              <h3>{{ selectedEndpoint.name }}</h3>
+              <p>{{ endpointDescription(selectedEndpoint) }}</p>
+            </div>
+            <el-button type="primary" plain @click="refreshEndpointContainers">读取容器</el-button>
           </div>
-          <el-button type="primary" plain @click="refreshEndpointContainers">读取容器</el-button>
-        </div>
+          <div class="endpoint-info-grid">
+            <div class="info-tile"><span>运行时</span><strong>{{ selectedEndpoint.runtime }}</strong></div>
+            <div class="info-tile"><span>连接方式</span><strong>{{ connectionModeLabel(selectedEndpoint.connection_mode) }}</strong></div>
+            <div class="info-tile"><span>连接目标</span><strong>{{ endpointTarget(selectedEndpoint) }}</strong></div>
+            <div class="info-tile"><span>SSH 账号</span><strong>{{ selectedEndpoint.host_account_name || '未使用 SSH' }}</strong></div>
+          </div>
+        </template>
         <el-empty v-else description="从左侧选择一个运行时连接" class="workspace-empty">
           <el-button type="primary" @click="openCreate">新增容器连接</el-button>
         </el-empty>
-
-        <div v-if="selectedContainer" class="log-workspace">
-          <div class="log-tabs">
-            <span class="active">日志</span>
-            <span>详情</span>
-            <el-tag size="small" effect="plain">tail 200</el-tag>
-          </div>
-          <pre v-loading="logsLoading" class="log-viewer">{{ logs || '暂无日志输出' }}</pre>
-        </div>
-        <div v-else-if="selectedEndpoint" class="endpoint-info-grid">
-          <div class="info-tile"><span>运行时</span><strong>{{ selectedEndpoint.runtime }}</strong></div>
-          <div class="info-tile"><span>连接方式</span><strong>{{ connectionModeLabel(selectedEndpoint.connection_mode) }}</strong></div>
-          <div class="info-tile"><span>连接目标</span><strong>{{ endpointTarget(selectedEndpoint) }}</strong></div>
-          <div class="info-tile"><span>SSH 账号</span><strong>{{ selectedEndpoint.host_account_name || '未使用 SSH' }}</strong></div>
-        </div>
       </main>
     </div>
 
@@ -180,11 +178,10 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { ArrowRight, Box, CopyDocument, Plus, Refresh } from '@element-plus/icons-vue'
+import { ArrowRight, Box, Plus, Refresh, Search } from '@element-plus/icons-vue'
 import FormDialog from '@/components/FormDialog.vue'
 import { apiClient, type ContainerEndpointPayload, type ContainerEndpointView, type ContainerRecord, type HostPayload, type HostView, type TargetPayload, type TargetRecord } from '@/api/client'
 import { usePermissionStore } from '@/stores/permission'
-import { writeClipboardText } from '@/utils/clipboard'
 
 const permission = usePermissionStore()
 const endpoints = ref<ContainerEndpointView[]>([])
@@ -197,6 +194,8 @@ const expandedEndpoints = reactive(new Set<string>())
 const selectedEndpoint = ref<ContainerEndpointView | null>(null)
 const selectedContainer = ref<ContainerRecord | null>(null)
 const logs = ref('')
+const logSearch = ref('')
+const activeLogTab = ref<'logs' | 'details'>('logs')
 const logsLoading = ref(false)
 const loading = ref(false)
 const dialogVisible = ref(false)
@@ -211,6 +210,15 @@ const testResult = ref<{ ok: boolean; message: string } | null>(null)
 const emptyForm = () => ({ name: '', group: '', runtime: 'docker', connection_mode: 'ssh', address: '', port: 0, host_id: '', host_account_id: '', remark: '' })
 const form = reactive(emptyForm())
 const quickAccount = reactive({ host_name: '', address: '', port: 22, username: '', password: '' })
+
+const filteredLogs = computed(() => {
+  const keyword = logSearch.value.trim().toLowerCase()
+  if (!keyword) return logs.value
+  return logs.value
+    .split('\n')
+    .filter(line => line.toLowerCase().includes(keyword))
+    .join('\n')
+})
 
 const addressPlaceholder = computed(() => {
   if (form.connection_mode === 'docker_api') return 'unix:///var/run/docker.sock 或 http://127.0.0.1:2375'
@@ -269,6 +277,8 @@ async function refreshEndpointContainers() {
 function selectContainer(endpoint: ContainerEndpointView, container: ContainerRecord) {
   selectedEndpoint.value = endpoint
   selectedContainer.value = container
+  activeLogTab.value = 'logs'
+  logSearch.value = ''
   void refreshLogs()
 }
 
@@ -285,14 +295,6 @@ async function refreshLogs() {
   }
 }
 
-async function copyLogs() {
-  try {
-    await writeClipboardText(logs.value)
-    ElMessage.success('日志已复制')
-  } catch {
-    ElMessage.error('复制日志失败')
-  }
-}
 
 function openCreate() {
   Object.assign(form, emptyForm())
@@ -476,23 +478,21 @@ onMounted(() => void loadEndpoints())
 </script>
 
 <style scoped>
-.containers-page { height: 100%; min-height: 0; display: flex; flex-direction: column; gap: 16px; }
-.containers-toolbar { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; }
-.eyebrow { color: #8c6a3c; font-size: 10px; letter-spacing: .18em; font-weight: 800; }
-.containers-toolbar h2 { margin: 4px 0 0; color: #1f2b27; font: 700 24px/1.1 Georgia, serif; }
-.toolbar-actions { display: flex; gap: 8px; }
-.workspace-card { min-height: 560px; flex: 1; display: grid; grid-template-columns: 330px minmax(0, 1fr); overflow: hidden; border: 1px solid #dce5df; border-radius: 18px; background: #fbfdfb; box-shadow: 0 18px 50px rgba(37, 62, 48, .08); }
+.containers-page { height: 100%; min-height: 0; display: flex; flex-direction: column; }
+.workspace-card { min-height: 0; height: 100%; flex: 1; display: grid; grid-template-columns: 220px minmax(0, 1fr); overflow: hidden; border: 1px solid #dce5df; border-radius: 18px; background: #fbfdfb; box-shadow: 0 18px 50px rgba(37, 62, 48, .08); }
 .endpoint-panel { display: flex; min-height: 0; flex-direction: column; border-right: 1px solid #e1e9e4; background: #f3f7f4; }
-.panel-heading { display: flex; align-items: center; justify-content: space-between; padding: 18px 18px 14px; border-bottom: 1px solid #e1e9e4; }
+.panel-heading { display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 14px 12px 12px; border-bottom: 1px solid #e1e9e4; }
 .panel-heading strong, .panel-heading span { display: block; }
 .panel-heading strong { color: #29443a; font-size: 14px; }
-.panel-heading span { margin-top: 4px; color: #82938a; font-size: 12px; }
-.endpoint-scroll { flex: 1; min-height: 0; padding: 10px; }
+.panel-heading span { margin-top: 4px; color: #82938a; font-size: 11px; }
+.panel-actions { display: flex; align-items: center; gap: 2px; }
+.panel-actions .el-button { padding: 4px 2px; font-size: 11px; }
+.endpoint-scroll { flex: 1; min-height: 0; padding: 8px 6px; }
 .tree-row { display: flex; align-items: center; width: 100%; border: 0; border-radius: 9px; background: transparent; color: #456056; cursor: pointer; text-align: left; }
 .tree-row:hover { background: #e8f0eb; }
 .tree-row.active { background: #dbece1; color: #204d37; }
-.endpoint-row { min-height: 40px; gap: 7px; padding: 7px 8px; }
-.container-row { gap: 8px; min-height: 34px; padding: 5px 8px 5px 33px; font-size: 12px; }
+.endpoint-row { min-height: 38px; gap: 5px; padding: 6px 5px; }
+.container-row { gap: 6px; min-height: 32px; padding: 4px 5px 4px 25px; font-size: 11px; }
 .tree-chevron { color: #82938a; transition: transform .2s ease; }
 .tree-chevron.expanded { transform: rotate(90deg); }
 .runtime-dot, .container-state { flex: 0 0 auto; width: 8px; height: 8px; border-radius: 50%; background: #9caea4; }
@@ -501,9 +501,9 @@ onMounted(() => void loadEndpoints())
 .container-state.running, .container-state.ready { background: #42a56d; }
 .container-state.exited, .container-state.stopped { background: #b6c1bb; }
 .tree-label { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.tree-meta { color: #92a098; font-size: 10px; }
+.tree-meta { color: #92a098; font-size: 9px; }
 .container-children { margin-left: 11px; border-left: 1px solid #d6e1da; }
-.tree-loading { padding: 7px 10px 7px 33px; color: #9aaa9f; font-size: 11px; }
+.tree-loading { padding: 7px 6px 7px 25px; color: #9aaa9f; font-size: 11px; }
 .empty-tree { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 80px 20px; color: #9aaa9f; font-size: 12px; }
 .empty-tree .el-icon { font-size: 30px; color: #bfd0c4; }
 .endpoint-footer { display: flex; justify-content: flex-end; gap: 8px; padding: 12px 15px; border-top: 1px solid #e1e9e4; }
@@ -512,14 +512,16 @@ onMounted(() => void loadEndpoints())
 .detail-kicker { color: #9aab9f; font-size: 10px; letter-spacing: .15em; font-weight: 800; }
 .detail-header h3 { margin: 7px 0 5px; color: #20342b; font-size: 21px; }
 .detail-header p { margin: 0; color: #83948a; font-size: 12px; }
-.detail-actions { display: flex; gap: 8px; }
 .log-workspace { display: flex; min-height: 0; flex: 1; flex-direction: column; }
-.log-tabs { display: flex; align-items: center; gap: 22px; padding: 13px 30px; border-bottom: 1px solid #edf2ee; color: #a2aea7; font-size: 12px; }
-.log-tabs .active { color: #2e7350; font-weight: 700; }
-.log-tabs .el-tag { margin-left: auto; }
-.log-viewer { min-height: 0; flex: 1; margin: 0; overflow: auto; padding: 24px 30px; background: #17221d; color: #d0e5d6; font: 12px/1.7 Consolas, 'SFMono-Regular', monospace; white-space: pre-wrap; }
+.log-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 14px; border-bottom: 1px solid #edf2ee; }
+.log-tabs { display: flex; align-items: center; gap: 18px; color: #a2aea7; font-size: 12px; }
+.log-tab { border: 0; padding: 3px 0; background: transparent; color: #a2aea7; cursor: pointer; font: inherit; }
+.log-tab.active { color: #2e7350; font-weight: 700; }
+.log-actions { display: flex; align-items: center; gap: 8px; }
+.log-search { width: 190px; }
+.log-viewer { min-height: 0; flex: 1; margin: 0; overflow: auto; padding: 12px 16px; background: #17221d; color: #d0e5d6; font: 12px/1.7 Consolas, 'SFMono-Regular', monospace; white-space: pre-wrap; }
 .workspace-empty { margin: auto; }
-.endpoint-info-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; padding: 30px; }
+.container-details, .endpoint-info-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; padding: 16px; }
 .info-tile { display: flex; flex-direction: column; gap: 8px; padding: 18px; border: 1px solid #e6eee8; border-radius: 12px; background: #fbfdfb; }
 .info-tile span { color: #96a49b; font-size: 11px; }
 .info-tile strong { overflow: hidden; color: #345444; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
@@ -528,6 +530,6 @@ onMounted(() => void loadEndpoints())
 .test-connection-row { display: flex; align-items: center; gap: 12px; margin-top: 16px; padding-top: 15px; border-top: 1px solid #edf2ee; }
 .test-ok { color: #2e8a57; font-size: 12px; }
 .test-failed { color: #c65845; font-size: 12px; }
-@media (max-width: 900px) { .workspace-card { grid-template-columns: 260px minmax(0, 1fr); } .detail-header { align-items: flex-start; flex-direction: column; } }
-@media (max-width: 680px) { .containers-toolbar { align-items: flex-start; flex-direction: column; } .workspace-card { display: flex; flex-direction: column; } .endpoint-panel { min-height: 270px; max-height: 40vh; border-right: 0; border-bottom: 1px solid #e1e9e4; } .runtime-panel { min-height: 420px; } }
+@media (max-width: 900px) { .workspace-card { grid-template-columns: 220px minmax(0, 1fr); } .detail-header { align-items: flex-start; flex-direction: column; } }
+@media (max-width: 680px) { .workspace-card { display: flex; flex-direction: column; } .endpoint-panel { min-height: 270px; max-height: 40vh; border-right: 0; border-bottom: 1px solid #e1e9e4; } .runtime-panel { min-height: 420px; } }
 </style>

@@ -30,6 +30,7 @@
           <div class="login-captcha-label">{{ t('login.captchaLabel') }}</div>
           <altcha-widget
             ref="captchaRef"
+            class="login-captcha-widget"
             auto="off"
             challenge="/api/login/challenge"
             language="zh-cn"
@@ -171,24 +172,37 @@ async function submit() {
 }
 
 .login-captcha-section {
-  margin: 4px 0 18px;
-  padding: 14px 16px;
-  border: 1px solid var(--color-border);
-  border-radius: 14px;
-  background: var(--color-surface-muted);
+  margin: 2px 0 20px;
 }
 
 .login-captcha-label {
   margin-bottom: 8px;
-  color: var(--color-text-primary);
-  font-size: 13px;
-  font-weight: 600;
+  color: var(--color-text);
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 22px;
+}
+
+.login-captcha-widget {
+  display: block;
+  width: 100%;
+  --altcha-max-width: 100%;
+  --altcha-padding: 12px 14px;
+  --altcha-border-color: var(--color-border);
+  --altcha-border-radius: var(--radius-sm);
+  --altcha-color-base: var(--color-card);
+  --altcha-color-base-content: var(--color-text);
+  --altcha-color-neutral: var(--color-border-strong);
+  --altcha-color-neutral-content: var(--color-text-secondary);
+  --altcha-color-primary: var(--color-primary);
+  --altcha-checkbox-border-radius: 6px;
 }
 
 .login-captcha-hint {
-  margin: 8px 0 0;
+  margin: 7px 2px 0;
   color: var(--color-text-secondary);
   font-size: 12px;
+  line-height: 1.5;
 }
 
 .login-button {

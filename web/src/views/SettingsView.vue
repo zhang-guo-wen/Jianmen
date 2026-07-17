@@ -1,11 +1,11 @@
 <template>
   <div class="settings-page">
-    <div class="settings-toolbar">
-      <span v-if="preferences.error" class="save-error">{{ preferences.error }}</span>
-      <el-button type="primary" size="large" :loading="preferences.saving" @click="save">保存用户配置</el-button>
-    </div>
     <el-card class="settings-card" shadow="never" v-loading="preferences.loading">
       <el-tabs v-model="activeTab" class="settings-tabs">
+        <template #extra>
+          <span v-if="preferences.error" class="save-error">保存失败</span>
+          <el-button type="primary" :loading="preferences.saving" @click="save">保存配置</el-button>
+        </template>
         <el-tab-pane label="界面与终端" name="appearance">
           <section class="settings-section">
             <div class="section-heading">
@@ -193,19 +193,6 @@ async function copyRegistrationCommand(command: string) {
   overflow-y: auto;
 }
 
-.settings-toolbar {
-  position: sticky;
-  top: 0;
-  z-index: 3;
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 14px;
-  min-height: 56px;
-  padding-bottom: 12px;
-  background: var(--color-bg);
-}
-
 .settings-card {
   min-height: 0;
   border: 1px solid var(--color-border);
@@ -227,9 +214,29 @@ async function copyRegistrationCommand(command: string) {
 }
 
 :deep(.settings-tabs > .el-tabs__header) {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 16px;
   margin: 0;
-  padding: 0 24px;
+  padding: 0 20px 0 24px;
+  background: var(--color-card);
   border-bottom: 1px solid var(--color-border);
+}
+
+:deep(.settings-tabs > .el-tabs__header .el-tabs__nav-wrap) {
+  flex: 1;
+  min-width: 0;
+}
+
+:deep(.settings-tabs > .el-tabs__header .el-tabs__extra-content) {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 10px;
+  padding-bottom: 1px;
 }
 
 :deep(.settings-tabs .el-tabs__nav-wrap::after) {
@@ -307,19 +314,23 @@ async function copyRegistrationCommand(command: string) {
 }
 
 .save-error {
-  flex: 1 1 240px;
-  min-width: 0;
   color: var(--el-color-danger);
-  font-size: 13px;
+  font-size: 12px;
+  white-space: nowrap;
 }
 
 @media (max-width: 700px) {
   :deep(.settings-tabs > .el-tabs__header) {
-    padding: 0 14px;
+    gap: 8px;
+    padding: 0 12px;
+  }
+
+  :deep(.settings-tabs > .el-tabs__header .el-tabs__extra-content) {
+    gap: 6px;
   }
 
   :deep(.settings-tabs .el-tabs__item) {
-    padding: 0 14px;
+    padding: 0 12px;
   }
 
   .settings-section {
@@ -328,10 +339,6 @@ async function copyRegistrationCommand(command: string) {
 
   .form-pair {
     grid-template-columns: 1fr;
-  }
-
-  .settings-toolbar {
-    align-items: flex-end;
   }
 }
 </style>

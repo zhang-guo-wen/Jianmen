@@ -28,6 +28,7 @@ type aiTokenRequest struct {
 	RefreshTTLSeconds int64      `json:"refresh_ttl_seconds"`
 	ExpiresAt         *time.Time `json:"expires_at,omitempty"`
 	Remark            string     `json:"remark,omitempty"`
+	Permanent         bool       `json:"permanent,omitempty"`
 }
 
 type aiRefreshRequest struct {
@@ -40,8 +41,15 @@ func (s *Server) handleAIDocs(w http.ResponseWriter, r *http.Request) {
 		s.writeErrorText(w, r, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
+	content := s.aiDocsContent(r)
+	w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
+	w.Header().Set("Cache-Control", "public, max-age=60")
+	_, _ = w.Write([]byte(content))
+}
+
+func (s *Server) aiDocsContent(r *http.Request) string {
 	baseURL := s.aiBaseURL(r)
-	content := fmt.Sprintf(`# Jianmen AI Bastion API
+	return fmt.Sprintf(`# Jianmen AI Bastion API
 
 Base URL: %s
 Documentation URL: %s/api/ai/docs
@@ -131,9 +139,6 @@ Errors use:
 - Re-query resources before each task because RBAC and resource grants are evaluated dynamically.
 - Stop immediately when Jianmen returns 401 or 403; do not retry with unrelated credentials.
 `, baseURL, baseURL)
-	w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
-	w.Header().Set("Cache-Control", "public, max-age=60")
-	_, _ = w.Write([]byte(content))
 }
 
 func (s *Server) handleAITokens(w http.ResponseWriter, r *http.Request) {
@@ -165,22 +170,28 @@ func (s *Server) handleAITokens(w http.ResponseWriter, r *http.Request) {
 			name = "AI client"
 		}
 		now := time.Now().UTC()
-		temporaryExpiresAt := now.Add(7 * 24 * time.Hour)
-		if request.ExpiresAt != nil {
-			temporaryExpiresAt = request.ExpiresAt.UTC()
-		}
-		if !temporaryExpiresAt.After(now) || temporaryExpiresAt.After(now.Add(7*24*time.Hour)) {
-			s.writeErrorText(w, r, http.StatusBadRequest, "AI authorization must expire within 7 days")
-			return
+		var temporaryExpiresAt *time.Time
+		if !request.Permanent {
+			value := now.Add(7 * 24 * time.Hour)
+			if request.ExpiresAt != nil {
+				value = request.ExpiresAt.UTC()
+			}
+			if !value.After(now) {
+				s.writeErrorText(w, r, http.StatusBadRequest, "AI authorization expiry must be in the future")
+				return
+			}
+			temporaryExpiresAt = &value
 		}
 		accessTTL, refreshTTL, err := aiTokenTTLs(request)
 		if err != nil {
 			s.writeErrorText(w, r, http.StatusBadRequest, err.Error())
 			return
 		}
-		remaining := time.Until(temporaryExpiresAt)
-		if remaining < accessTTL {
-			accessTTL = remaining
+		if temporaryExpiresAt != nil {
+			remaining := time.Until(*temporaryExpiresAt)
+			if remaining < accessTTL {
+				accessTTL = remaining
+			}
 		}
 		if accessTTL < aiAccessTokenMinTTL {
 			s.writeErrorText(w, r, http.StatusBadRequest, "AI authorization must last at least 5 minutes")
@@ -193,7 +204,7 @@ func (s *Server) handleAITokens(w http.ResponseWriter, r *http.Request) {
 		}
 		var temporaryAccount model.TemporaryAccount
 		if s.db != nil {
-			created, createErr := s.createTemporaryAccount(model.TemporaryAccountTypeAI, userID, temporaryExpiresAt, request.Remark, userID)
+			created, createErr := s.createTemporaryAccount(model.TemporaryAccountTypeAI, userID, temporaryExpiresAt, request.Remark, userID, "")
 			if createErr != nil {
 				s.writeErrorText(w, r, http.StatusInternalServerError, createErr.Error())
 				return
@@ -212,9 +223,9 @@ func (s *Server) handleAITokens(w http.ResponseWriter, r *http.Request) {
 		}
 		s.logger.Info("AI access token issued", "user_id", userID, "token_id", token.ID, "name", token.Name, "access_expires_at", token.AccessExpiresAt, "refresh_expires_at", token.RefreshExpiresAt)
 		docsURL := s.aiBaseURL(r) + "/api/ai/docs"
-		prompt := "\u6388\u6743 AI \u4f7f\u7528\u5f53\u524d\u7528\u6237\u7684\u6240\u6709\u6709\u6548\u6743\u9650\uff0c\u4ec5\u53ef\u901a\u8fc7 AI API \u8c03\u7528\u3002"
-		copyPrompt := fmt.Sprintf("AI \u6587\u6863\u8def\u5f84\uff1a%s\n\u8bbf\u95ee\u4ee4\u724c\uff1a%s", docsURL, issued.AccessToken)
-		fullPrompt := fmt.Sprintf("%s\nAI \u6587\u6863\u8def\u5f84\uff1a%s\n\u8bbf\u95ee\u4ee4\u724c\uff1a%s\n\u5237\u65b0\u4ee4\u724c\uff1a%s", prompt, docsURL, issued.AccessToken, issued.RefreshToken)
+		prompt := "\u6388\u6743 AI \u4f7f\u7528\u5f53\u524d\u7528\u6237\u7684\u8d44\u6e90\u7684\u6743\u9650\u3002"
+		copyPrompt := fmt.Sprintf("\u4f60\u53ef\u4ee5\u4f7f\u7528\u6211\u7684\u6743\u9650\u8bbf\u95ee\u6211\u7684\u670d\u52a1\u5668\u3001\u6570\u636e\u5e93\u7b49\u8d44\u6e90\uff0c\n\u8bbf\u95ee\u4ee4\u724c\uff1a%s\n\u5237\u65b0\u4ee4\u724c\uff1a%s\n\u5177\u4f53\u89c1\u6587\u6863\uff1a[%s](%s)", issued.AccessToken, issued.RefreshToken, docsURL, docsURL)
+		fullPrompt := copyPrompt + "\n\n\u5b8c\u6574\u63d0\u793a\u8bcd\uff1a\n" + s.aiDocsContent(r)
 		s.writeJSON(w, r, http.StatusCreated, map[string]any{
 			"id": token.ID, "name": token.Name, "temporary_account_id": token.TemporaryAccountID,
 			"access_token": issued.AccessToken, "refresh_token": issued.RefreshToken,

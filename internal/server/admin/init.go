@@ -154,13 +154,13 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	limitKey := loginLimitKey(r, username)
 	if retryAfter := limiter.retryAfter(limitKey, now); retryAfter > 0 {
 		setRetryAfter(w, retryAfter)
-		s.logLogin(r, username, "blocked", "rate_limited")
+		s.logLogin(r, username, "", "blocked", "rate_limited")
 		s.writeErrorText(w, r, http.StatusTooManyRequests, "too many failed login attempts; try again later")
 		return
 	}
 
 	if err := s.loginCaptcha.Verify(req.CaptchaPayload); err != nil {
-		s.logLogin(r, username, "failure", "captcha_failed")
+		s.logLogin(r, username, "", "failure", "captcha_failed")
 		message := "security verification failed; please try again"
 		if errors.Is(err, service.ErrLoginCaptchaMissing) {
 			message = "security verification is required"
@@ -176,14 +176,14 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	var user model.User
 	if err := s.db.Where("username = ? AND status = ?", username, "active").First(&user).Error; err != nil {
 		limiter.recordFailure(limitKey, now)
-		s.logLogin(r, username, "failure", "invalid_credentials")
+		s.logLogin(r, username, "", "failure", "invalid_credentials")
 		s.writeErrorText(w, r, http.StatusUnauthorized, "invalid username or password")
 		return
 	}
 
 	if !verifyPassword(user.PasswordHash, password) {
 		limiter.recordFailure(limitKey, now)
-		s.logLogin(r, username, "failure", "invalid_credentials")
+		s.logLogin(r, username, user.ID, "failure", "invalid_credentials")
 		s.writeErrorText(w, r, http.StatusUnauthorized, "invalid username or password")
 		return
 	}
@@ -211,7 +211,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	limiter.reset(limitKey)
-	s.logLogin(r, username, "success", "")
+	s.logLogin(r, username, user.ID, "success", "")
 	// Set jianmen_token cookie so proxy ports can authenticate via cookie
 	http.SetCookie(w, &http.Cookie{
 		Name:     "jianmen_token",

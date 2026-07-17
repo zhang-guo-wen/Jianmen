@@ -120,6 +120,7 @@ func AllModels() []any {
 		&TemporaryAccountGrant{},
 		&PlatformAccount{},
 		&AuditEvent{},
+		&LoginAuditLog{},
 		&AuditSession{},
 		&AuditSSHCommand{},
 		&AuditDBQuery{},
@@ -144,6 +145,7 @@ func (m *ContainerEndpoint) BeforeCreate(_ *gorm.DB) error { return ensureID(&m.
 func (m *UserSession) BeforeCreate(_ *gorm.DB) error       { return ensureID(&m.ID) }
 func (m *PlatformAccount) BeforeCreate(_ *gorm.DB) error   { return ensureID(&m.ID) }
 func (m *AuditEvent) BeforeCreate(_ *gorm.DB) error        { return ensureID(&m.ID) }
+func (m *LoginAuditLog) BeforeCreate(_ *gorm.DB) error     { return ensureID(&m.ID) }
 func (m *AuditSession) BeforeCreate(_ *gorm.DB) error      { return ensureID(&m.ID) }
 func (m *AuditSSHCommand) BeforeCreate(_ *gorm.DB) error   { return ensureID(&m.ID) }
 func (m *AuditDBQuery) BeforeCreate(_ *gorm.DB) error      { return ensureID(&m.ID) }

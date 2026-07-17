@@ -30,7 +30,7 @@
         </el-table-column>
         <el-table-column label="&#x6388;&#x6743;&#x6709;&#x6548;&#x671F;" width="170">
           <template #default="{ row }">
-            <span :class="{ expired: isExpired(row.expires_at) }">{{ formatTime(row.expires_at) }}</span>
+            <span :class="{ expired: isExpired(row.expires_at) }">{{ row.expires_at ? formatTime(row.expires_at) : '&#x6C38;&#x4E45;' }}</span>
           </template>
         </el-table-column>
         <el-table-column prop="resource_name" label="&#x8D44;&#x6E90;&#x540D;&#x79F0;" min-width="130" show-overflow-tooltip />
@@ -97,15 +97,30 @@
       </template>
     </el-dialog>
 
+    <el-dialog v-model="temporaryResultDialogVisible" title="&#x4E34;&#x65F6;&#x8D26;&#x53F7;&#x4FE1;&#x606F;" width="560px" destroy-on-close>
+      <el-alert title="&#x4EE5;&#x4E0B;&#x51ED;&#x636E;&#x5DF2;&#x81EA;&#x52A8;&#x590D;&#x5236;&#xFF0C;&#x6709;&#x6548;&#x671F;&#x4E0E;&#x6388;&#x6743;&#x4E00;&#x81F4;&#x3002;" type="success" show-icon :closable="false" />
+      <div v-if="temporaryResult?.connection" class="credential-card">
+        <div class="credential-row"><span>&#x5730;&#x5740;</span><code>{{ temporaryResult.connection.address }}</code></div>
+        <div class="credential-row"><span>&#x8D26;&#x53F7;</span><code>{{ temporaryResult.connection.username }}</code></div>
+        <div class="credential-row"><span>&#x5BC6;&#x7801;</span><code>{{ temporaryResult.connection.password }}</code></div>
+        <div class="credential-row"><span>&#x6709;&#x6548;&#x671F;&#x81F3;</span><span>{{ formatTime(temporaryResult.connection.expires_at) }}</span></div>
+      </div>
+      <template #footer>
+        <el-button @click="copyTemporaryConnection">&#x518D;&#x6B21;&#x590D;&#x5236;</el-button>
+        <el-button type="primary" @click="temporaryResultDialogVisible = false">&#x5B8C;&#x6210;</el-button>
+      </template>
+    </el-dialog>
+
     <el-dialog v-model="aiDialogVisible" title="AI &#x6388;&#x6743;" width="640px" destroy-on-close>
       <template v-if="!aiResult">
-        <el-alert title="&#x6388;&#x6743; AI &#x4F7F;&#x7528;&#x5F53;&#x524D;&#x7528;&#x6237;&#x7684;&#x6240;&#x6709;&#x6709;&#x6548;&#x6743;&#x9650;&#xFF0C;&#x4EC5;&#x53EF;&#x901A;&#x8FC7; AI API &#x8C03;&#x7528;&#x3002;&#x8BBF;&#x95EE;&#x4EE4;&#x724C;&#x9ED8;&#x8BA4; 48 &#x5C0F;&#x65F6;&#xFF0C;&#x5237;&#x65B0;&#x4EE4;&#x724C;&#x9ED8;&#x8BA4; 30 &#x5929;&#x3002;" type="warning" show-icon :closable="false" />
+        <el-alert title="&#x6388;&#x6743; AI &#x4F7F;&#x7528;&#x5F53;&#x524D;&#x7528;&#x6237;&#x7684;&#x8D44;&#x6E90;&#x7684;&#x6743;&#x9650;&#xFF0C;&#x8BBF;&#x95EE;&#x4EE4;&#x724C;&#x9ED8;&#x8BA4; 48 &#x5C0F;&#x65F6;&#xFF0C;&#x5237;&#x65B0;&#x4EE4;&#x724C;&#x9ED8;&#x8BA4; 30 &#x5929;&#x3002;" type="warning" show-icon :closable="false" />
         <el-form label-width="100px" class="dialog-form">
 
           <el-form-item label="&#x6709;&#x6548;&#x671F;" required>
             <div class="expiry-row">
               <el-segmented v-model="aiDuration" :options="aiDurations" @change="applyAIDuration" />
-              <el-date-picker v-model="aiForm.expires_at" type="datetime" placeholder="&#x9009;&#x62E9;&#x5230;&#x671F;&#x65F6;&#x95F4;" :disabled-date="disablePastDate" />
+              <el-date-picker v-if="aiDuration !== 'permanent'" v-model="aiForm.expires_at" type="datetime" placeholder="&#x9009;&#x62E9;&#x5230;&#x671F;&#x65F6;&#x95F4;" :disabled-date="disablePastDate" />
+              <span v-else class="permanent-option">&#x6C38;&#x4E45;&#x6709;&#x6548;</span>
             </div>
           </el-form-item>
           <el-form-item label="&#x5907;&#x6CE8;">
@@ -164,26 +179,29 @@ const pageSize = ref(20)
 const keyword = ref('')
 
 const temporaryDialogVisible = ref(false)
+const temporaryResultDialogVisible = ref(false)
 const aiDialogVisible = ref(false)
 const extendDialogVisible = ref(false)
 const extendTarget = ref<TemporaryAccountRecord | null>(null)
 const extendExpiresAt = ref<Date | null>(null)
 const aiResult = ref<IssuedAIAccessToken | null>(null)
+const temporaryResult = ref<TemporaryAccountRecord | null>(null)
 
 const temporaryForm = reactive({ resource_type: 'host_account', resource_id: '', expires_at: null as Date | null, remark: '' })
 const aiForm = reactive({ expires_at: null as Date | null, remark: '' })
 const temporaryDuration = ref('1d')
-const aiDuration = ref('48h')
-const temporaryDurations = [{ label: '1 小时', value: '1h' }, { label: '1 天', value: '1d' }, { label: '3 天', value: '3d' }, { label: '7 天', value: '7d' }]
-const aiDurations = [{ label: '48 小时', value: '48h' }, { label: '3 天', value: '3d' }, { label: '7 天', value: '7d' }]
+const aiDuration = ref('7d')
+const temporaryDurations = [{ label: '\u0031 \u5c0f\u65f6', value: '1h' }, { label: '\u0031 \u5929', value: '1d' }, { label: '\u0033 \u5929', value: '3d' }, { label: '\u0037 \u5929', value: '7d' }]
+const aiDurations = [{ label: '\u0037 \u5929', value: '7d' }, { label: '\u0033\u0030 \u5929', value: '30d' }, { label: '\u0031 \u5e74', value: '1y' }, { label: '\u6c38\u4e45', value: 'permanent' }]
 const resourceOptions = computed(() => temporaryForm.resource_type === 'host_account' ? hostAccounts.value : databaseAccounts.value)
 
 function addDuration(value: string): Date {
+  if (value === '1y') return new Date(Date.now() + 365 * 24 * 3600 * 1000)
   const hours = value.endsWith('h') ? Number(value.slice(0, -1)) : Number(value.slice(0, -1)) * 24
   return new Date(Date.now() + hours * 3600 * 1000)
 }
 function applyTemporaryDuration() { temporaryForm.expires_at = addDuration(temporaryDuration.value) }
-function applyAIDuration() { aiForm.expires_at = addDuration(aiDuration.value) }
+function applyAIDuration() { aiForm.expires_at = aiDuration.value === 'permanent' ? null : addDuration(aiDuration.value) }
 function disablePastDate(date: Date) { return date.getTime() < Date.now() - 86400000 }
 function formatTime(value?: string) { return value ? new Date(value).toLocaleString('zh-CN', { hour12: false }) : '-' }
 function isExpired(value?: string) { return Boolean(value && new Date(value).getTime() <= Date.now()) }
@@ -217,8 +235,9 @@ function openTemporaryDialog() {
 }
 function openAIDialog() {
   aiResult.value = null
+  temporaryResult.value = null
   aiForm.remark = ''
-  aiDuration.value = '48h'
+  aiDuration.value = '7d'
   applyAIDuration()
   aiDialogVisible.value = true
 }
@@ -226,27 +245,49 @@ async function submitTemporaryAuthorization() {
   if (!temporaryForm.resource_id || !temporaryForm.expires_at) return ElMessage.warning('请完整填写授权信息')
   submitting.value = true
   try {
-    await apiClient.createTemporaryAuthorization({
+    const result = await apiClient.createTemporaryAuthorization({
       resource_type: temporaryForm.resource_type,
       resource_id: temporaryForm.resource_id,
       expires_at: temporaryForm.expires_at.toISOString(),
       remark: temporaryForm.remark || undefined,
     })
-    ElMessage.success('临时授权已创建')
+    temporaryResult.value = result
     temporaryDialogVisible.value = false
+    temporaryResultDialogVisible.value = true
+    await copyTemporaryConnection()
     await loadAccounts()
   } catch (error) { ElMessage.error(error instanceof Error ? error.message : '创建临时授权失败') }
   finally { submitting.value = false }
 }
 async function submitAIAuthorization() {
-  if (!aiForm.expires_at) return ElMessage.warning('请选择有效期')
+  if (aiDuration.value !== 'permanent' && !aiForm.expires_at) return ElMessage.warning('\u8bf7\u9009\u62e9\u6709\u6548\u671f')
   submitting.value = true
   try {
-    aiResult.value = await apiClient.createAIToken({ expires_at: aiForm.expires_at.toISOString(), remark: aiForm.remark || undefined })
+    aiResult.value = await apiClient.createAIToken({
+      expires_at: aiForm.expires_at?.toISOString(),
+      permanent: aiDuration.value === 'permanent',
+      remark: aiForm.remark || undefined,
+    })
     await loadAccounts()
   } catch (error) { ElMessage.error(error instanceof Error ? error.message : '创建 AI 授权失败') }
   finally { submitting.value = false }
 }
+function temporaryConnectionText(): string {
+  const connection = temporaryResult.value?.connection
+  if (!connection) return ''
+  return `\u5730\u5740\uff1a${connection.address}\n\u8d26\u53f7\uff1a${connection.username}\n\u5bc6\u7801\uff1a${connection.password}`
+}
+async function copyTemporaryConnection() {
+  const value = temporaryConnectionText()
+  if (!value) return
+  try {
+    await writeClipboardText(value)
+    ElMessage.success('\u4e34\u65f6\u8d26\u53f7\u4fe1\u606f\u5df2\u81ea\u52a8\u590d\u5236')
+  } catch {
+    ElMessage.warning('\u81ea\u52a8\u590d\u5236\u5931\u8d25\uff0c\u8bf7\u70b9\u51fb\u201c\u518d\u6b21\u590d\u5236\u201d')
+  }
+}
+
 async function copyAIText(value: string) {
   if (!value) return
   await writeClipboardText(value)
@@ -262,8 +303,13 @@ async function submitExtend() {
   if (!extendTarget.value || !extendExpiresAt.value) return
   submitting.value = true
   try {
-    await apiClient.extendTemporaryAccount(extendTarget.value.id, extendExpiresAt.value.toISOString())
-    ElMessage.success('有效期已延长')
+    const result = await apiClient.extendTemporaryAccount(extendTarget.value.id, extendExpiresAt.value.toISOString())
+    if (result.connection) {
+      temporaryResult.value = result
+      temporaryResultDialogVisible.value = true
+      await copyTemporaryConnection()
+    }
+    ElMessage.success('\u6709\u6548\u671f\u5df2\u5ef6\u957f')
     extendDialogVisible.value = false
     await loadAccounts()
   } catch (error) { ElMessage.error(error instanceof Error ? error.message : '延长有效期失败') }
@@ -293,6 +339,11 @@ onMounted(loadAccounts)
 .expired { color: var(--el-color-danger); }
 .dialog-form { margin-top: 18px; }
 .expiry-row { display: grid; gap: 12px; width: 100%; }
+.permanent-option { color: var(--el-color-success); font-weight: 600; }
+.credential-card { display: grid; gap: 12px; margin-top: 18px; padding: 16px 18px; border: 1px solid var(--el-border-color); border-radius: 12px; background: var(--el-fill-color-light); }
+.credential-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.credential-row > span:first-child { color: var(--el-text-color-secondary); }
+.credential-row code { color: var(--el-text-color-primary); word-break: break-all; }
 .prompt-card { padding: 16px 18px; border: 1px solid var(--el-border-color); border-radius: 12px; background: linear-gradient(135deg, var(--el-fill-color-light), var(--el-color-success-light-9)); }
 .prompt-card p { margin: 8px 0 0; line-height: 1.75; color: var(--el-text-color-regular); }
 .prompt-title { font-weight: 700; }

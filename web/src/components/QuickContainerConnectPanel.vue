@@ -82,33 +82,46 @@
           />
         </div>
       </section>
-
-      <section class="container-log-panel">
-        <template v-if="selectedCard">
-          <header class="container-log-header">
-            <div class="container-log-title">
-              <span>容器日志</span>
-              <strong>{{ containerName(selectedCard) }}</strong>
-              <small>{{ hostName(selectedCard) }} · {{ hostAddress(selectedCard) }}</small>
-            </div>
-            <div class="container-log-actions">
-              <el-input v-model="logSearch" size="small" clearable placeholder="搜索当前日志">
-                <template #prefix><el-icon><Search /></el-icon></template>
-              </el-input>
-              <el-button size="small" :loading="logsLoading" :icon="Refresh" @click="refreshLogsNow">刷新日志</el-button>
-            </div>
-          </header>
-          <pre ref="logViewer" v-loading="logsLoading" class="container-log-viewer">{{ filteredLogs || (logSearch ? '没有匹配的日志' : '暂无日志输出') }}</pre>
-        </template>
-        <el-empty v-else class="container-log-empty" description="点击上方容器卡片查看日志" />
-      </section>
     </div>
   </section>
+
+  <el-drawer
+    v-model="logDrawerVisible"
+    class="container-log-drawer"
+    title="容器日志"
+    direction="rtl"
+    size="min(760px, 94vw)"
+    append-to-body
+    :modal="true"
+    :with-header="false"
+    :close-on-click-modal="true"
+    :close-on-press-escape="true"
+    @close="stopLogPolling"
+    @closed="handleLogDrawerClosed"
+  >
+    <section v-if="selectedCard" class="container-log-panel">
+      <header class="container-log-header">
+        <div class="container-log-title">
+          <span>容器日志</span>
+          <strong>{{ containerName(selectedCard) }}</strong>
+          <small>{{ hostName(selectedCard) }} · {{ hostAddress(selectedCard) }}</small>
+        </div>
+        <div class="container-log-actions">
+          <el-input v-model="logSearch" size="small" clearable placeholder="搜索当前日志">
+            <template #prefix><el-icon><Search /></el-icon></template>
+          </el-input>
+          <el-button size="small" :loading="logsLoading" :icon="Refresh" @click="refreshLogsNow">刷新日志</el-button>
+          <el-button class="container-log-close" circle text :icon="Close" aria-label="关闭日志" @click="logDrawerVisible = false" />
+        </div>
+      </header>
+      <pre ref="logViewer" v-loading="logsLoading" class="container-log-viewer">{{ filteredLogs || (logSearch ? '没有匹配的日志' : '暂无日志输出') }}</pre>
+    </section>
+  </el-drawer>
 </template>
 
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
-import { Refresh, Search, Sort } from '@element-plus/icons-vue';
+import { Close, Refresh, Search, Sort } from '@element-plus/icons-vue';
 
 import { apiClient, type ContainerEndpointView, type ContainerRecord } from '@/api/client';
 import { useI18n } from '@/i18n';
@@ -142,6 +155,7 @@ const inventoryCache = new Map<string, { items: ContainerRecord[]; updatedAt: nu
 let inventoryGeneration = 0;
 let searchTimer: ReturnType<typeof setTimeout> | null = null;
 
+const logDrawerVisible = ref(false);
 const logs = ref('');
 const logSearch = ref('');
 const logsLoading = ref(false);
@@ -318,6 +332,7 @@ async function loadContainerInventory(force = false) {
   failedEndpointCount.value = 0;
   containerCards.value = [];
   page.value = 1;
+  logDrawerVisible.value = false;
   stopLogPolling();
   selectedCard.value = null;
   logs.value = '';
@@ -345,6 +360,7 @@ function logCacheKey(card: QuickContainerCard): string {
 function selectContainer(card: QuickContainerCard) {
   stopLogPolling();
   selectedCard.value = card;
+  logDrawerVisible.value = true;
   logSearch.value = '';
   logs.value = logCache.get(logCacheKey(card)) || '';
   void refreshLogs(logGeneration).then(() => scheduleLogPolling(logGeneration));
@@ -354,7 +370,7 @@ async function refreshLogs(generation = logGeneration) {
   const card = selectedCard.value;
   const endpointID = String(card?.endpoint.id || '');
   const containerID = String(card?.container.id || '');
-  if (!props.active || !card || !endpointID || !containerID || generation !== logGeneration) return;
+  if (!props.active || !logDrawerVisible.value || !card || !endpointID || !containerID || generation !== logGeneration) return;
 
   logController?.abort();
   const controller = new AbortController();
@@ -392,7 +408,7 @@ function truncateLogs(value: string): string {
 }
 
 function scheduleLogPolling(generation: number) {
-  if (!props.active || !selectedCard.value || generation !== logGeneration) return;
+  if (!props.active || !logDrawerVisible.value || !selectedCard.value || generation !== logGeneration) return;
   logPollingTimer = setTimeout(async () => {
     logPollingTimer = null;
     await refreshLogs(generation);
@@ -417,6 +433,12 @@ function stopLogPolling() {
   logsLoading.value = false;
 }
 
+function handleLogDrawerClosed() {
+  selectedCard.value = null;
+  logSearch.value = '';
+  logs.value = '';
+}
+
 function scrollLogsToBottom() {
   if (logSearch.value) return;
   void nextTick(() => {
@@ -439,10 +461,11 @@ watch(() => filteredCards.value.length, total => {
 });
 watch(() => props.active, active => {
   if (!active) {
+    logDrawerVisible.value = false;
     stopLogPolling();
   } else if (!inventoryStarted.value) {
     void loadContainerInventory();
-  } else if (selectedCard.value) {
+  } else if (logDrawerVisible.value && selectedCard.value) {
     const generation = logGeneration;
     void refreshLogs(generation).then(() => scheduleLogPolling(generation));
   }
@@ -469,8 +492,8 @@ onBeforeUnmount(() => {
 .quick-filter-options .el-button, .quick-filter-more { flex: 0 0 auto; margin: 0; }
 .quick-filter-options .el-button { padding-inline: 9px; }
 .quick-filter-more { padding-inline: 4px; }
-.container-workspace { display: grid; height: calc(100vh - 225px); min-height: 620px; grid-template-rows: minmax(285px, 45%) minmax(260px, 1fr); background: var(--color-card); }
-.container-card-panel { display: flex; min-height: 0; flex-direction: column; border-bottom: 1px solid var(--color-border); background: radial-gradient(circle at 10% 0%, rgb(14 165 233 / 8%), transparent 30%), linear-gradient(180deg, var(--color-surface-muted), var(--color-card)); }
+.container-workspace { display: flex; height: calc(100vh - 225px); min-height: 620px; background: var(--color-card); }
+.container-card-panel { display: flex; flex: 1; min-height: 0; flex-direction: column; border-bottom: 0; background: radial-gradient(circle at 10% 0%, rgb(14 165 233 / 8%), transparent 30%), linear-gradient(180deg, var(--color-surface-muted), var(--color-card)); }
 .load-alert { margin: 12px 16px 0; }
 .inventory-status { display: flex; min-height: 36px; align-items: center; gap: 12px; padding: 8px 16px 4px; color: var(--color-text-secondary); font-size: 12px; }
 .inventory-status strong { color: var(--color-text); }
@@ -495,7 +518,8 @@ onBeforeUnmount(() => {
 .container-card-pagination { display: flex; justify-content: flex-end; padding: 8px 16px 12px; }
 .container-card-skeletons { display: grid; padding: 12px 16px; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
 .container-card-skeletons span { height: 108px; border-radius: 12px; background: linear-gradient(90deg, var(--color-surface-muted), var(--color-border), var(--color-surface-muted)); background-size: 220% 100%; animation: container-skeleton 1.3s linear infinite; }
-.container-log-panel { display: flex; min-height: 0; flex-direction: column; background: #111a16; }
+.container-log-panel { display: flex; width: 100%; height: 100%; min-height: 0; flex-direction: column; background: #111a16; }
+:global(.container-log-drawer .el-drawer__body) { padding: 0 !important; overflow: hidden; }
 .container-log-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 10px 14px; border-bottom: 1px solid rgb(255 255 255 / 8%); background: #18231e; }
 .container-log-title { display: grid; min-width: 0; grid-template-columns: auto auto minmax(0, 1fr); align-items: baseline; gap: 10px; }
 .container-log-title span { color: #7f9a8b; font-size: 10px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
@@ -503,9 +527,10 @@ onBeforeUnmount(() => {
 .container-log-title small { overflow: hidden; color: #8ca397; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
 .container-log-actions { display: flex; width: min(390px, 48%); align-items: center; gap: 8px; }
 .container-log-actions .el-input { min-width: 150px; flex: 1; }
+.container-log-close { flex: 0 0 auto; color: #b9d3c2; }
 .container-log-viewer { min-height: 0; flex: 1; margin: 0; overflow: auto; padding: 14px 16px; color: #d0e5d6; font: 12px/1.7 Consolas, 'SFMono-Regular', monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
 .container-log-empty { flex: 1; --el-empty-fill-color-2: #26362e; --el-text-color-secondary: #789083; }
 @keyframes container-skeleton { to { background-position: -220% 0; } }
-@media (max-width: 900px) { .container-workspace { height: auto; min-height: 680px; grid-template-rows: minmax(340px, auto) 360px; } .container-card-skeletons { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-@media (max-width: 680px) { .container-toolbar__actions { width: 100%; } .container-toolbar__actions .el-button { flex: 1; } .container-card-grid { grid-template-columns: minmax(0, 1fr); } .inventory-status { align-items: flex-start; flex-direction: column; gap: 2px; } .container-log-header { align-items: stretch; flex-direction: column; } .container-log-title { grid-template-columns: auto minmax(0, 1fr); } .container-log-title small { grid-column: 1 / -1; } .container-log-actions { width: 100%; } .container-card-pagination { overflow-x: auto; justify-content: flex-start; } }
+@media (max-width: 900px) { .container-workspace { height: calc(100vh - 285px); min-height: 560px; } .container-card-skeletons { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 680px) { .container-workspace { height: calc(100vh - 335px); min-height: 520px; } .container-toolbar__actions { width: 100%; } .container-toolbar__actions .el-button { flex: 1; } .container-card-grid { grid-template-columns: minmax(0, 1fr); } .inventory-status { align-items: flex-start; flex-direction: column; gap: 2px; } .container-log-header { align-items: stretch; flex-direction: column; } .container-log-title { grid-template-columns: auto minmax(0, 1fr); } .container-log-title small { grid-column: 1 / -1; } .container-log-actions { width: 100%; } .container-card-pagination { overflow-x: auto; justify-content: flex-start; } }
 </style>

@@ -116,11 +116,14 @@ func (s *Server) listResourceGrants(w http.ResponseWriter, r *http.Request) {
 			Pluck("id", &resourceDBInstanceIDs)
 		var resourceDBAccountIDs []string
 		s.db.Model(&model.DatabaseAccount{}).Where("unique_name LIKE ? OR username LIKE ?", like, like).Pluck("id", &resourceDBAccountIDs)
+		var resourcePlatformAccountIDs []string
+		s.db.Model(&model.PlatformAccount{}).Where("name LIKE ? OR platform_name LIKE ? OR username LIKE ? OR url LIKE ?", like, like, like, like).Pluck("id", &resourcePlatformAccountIDs)
 		var resourceGroupIDs []string
 		s.db.Model(&model.ResourceGroup{}).Where("name LIKE ?", like).Pluck("id", &resourceGroupIDs)
 		resourceIDs := append(resourceHostIDs, resourceHostAccountIDs...)
 		resourceIDs = append(resourceIDs, resourceDBInstanceIDs...)
 		resourceIDs = append(resourceIDs, resourceDBAccountIDs...)
+		resourceIDs = append(resourceIDs, resourcePlatformAccountIDs...)
 		resourceIDs = append(resourceIDs, resourceGroupIDs...)
 
 		// 组合搜索条件
@@ -256,6 +259,8 @@ func (s *Server) validateResourceGrantReferences(grant model.ResourceGrant) stri
 		s.db.Model(&model.DatabaseInstance{}).Where("id = ?", grant.ResourceID).Count(&count)
 	case model.ResourceTypeDatabaseAccount:
 		s.db.Model(&model.DatabaseAccount{}).Where("id = ?", grant.ResourceID).Count(&count)
+	case model.ResourceTypePlatformAccount:
+		s.db.Model(&model.PlatformAccount{}).Where("id = ?", grant.ResourceID).Count(&count)
 	case model.ResourceTypeApplication:
 		s.db.Model(&model.Application{}).Where("id = ?", grant.ResourceID).Count(&count)
 	case model.ResourceTypeGroup:

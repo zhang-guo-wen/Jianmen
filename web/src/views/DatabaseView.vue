@@ -1,7 +1,7 @@
 <template>
   <div class="view-stack">
     <DataTableCard
-      :data="instances"
+      :data="displayedInstances"
       :loading="instancesLoading"
       :total="instanceTotal"
       v-model:page="instancePage"
@@ -10,6 +10,24 @@
       @search="onInstanceSearch"
     >
       <template #toolbar-extra>
+        <div class="instance-filter-bar">
+          <div class="instance-filter-options" :class="{ 'is-expanded': instanceFiltersExpanded }">
+            <el-button size="small" :type="instanceFilter === 'all' ? 'primary' : undefined" @click="setInstanceFilter('all')">全部</el-button>
+            <el-button size="small" :type="instanceFilter === 'popular' ? 'primary' : undefined" @click="setInstanceFilter('popular')">常用</el-button>
+            <el-button
+              v-for="option in visibleInstanceQuickGroupOptions"
+              :key="option.value"
+              size="small"
+              :type="instanceFilter === option.value ? 'primary' : undefined"
+              @click="setInstanceFilter(option.value)"
+            >
+              {{ option.label }}
+            </el-button>
+          </div>
+          <el-button v-if="instanceQuickGroupOptions.length > filterPreviewLimit" link size="small" class="instance-filter-more" @click="instanceFiltersExpanded = !instanceFiltersExpanded">
+            {{ instanceFiltersExpanded ? '收起' : '更多' }}
+          </el-button>
+        </div>
         <el-button v-if="permission.canDo('dbproxy:create')" type="primary" @click="openCreateInstance">新增实例</el-button>
       </template>
       <el-table-column prop="name" label="名称" min-width="130" show-overflow-tooltip />
@@ -381,8 +399,11 @@ const instances = ref<api.DatabaseInstanceView[]>([])
 const instancesLoading = ref(false)
 const instancePage = ref(1)
 const instancePageSize = ref(50)
-const instanceTotal = ref(0)
 const instanceSearchKeyword = ref('')
+const instanceFilter = ref('all')
+const instanceFiltersExpanded = ref(false)
+const instanceUsageCounts = ref<Record<string, number>>({})
+const filterPreviewLimit = 6
 const showInstanceDialog = ref(false)
 const submitting = ref(false)
 const editingInstance = ref<api.DatabaseInstanceView | null>(null)
@@ -441,6 +462,83 @@ const accountFormTestResult = ref<{ ok: boolean; error?: string; latency_ms?: nu
 const savedCredentialTesting = ref(false)
 const savedCredentialTestResult = ref<{ ok: boolean; error?: string; latency_ms?: number } | null>(null)
 
+function instanceUsageCount(instance: api.DatabaseInstanceView): number {
+  return instanceUsageCounts.value[String(instance.name || '').trim().toLowerCase()] || 0
+}
+
+const instanceQuickGroupOptions = computed(() => {
+  const groups = new Map<string, number>()
+  instances.value.forEach(instance => {
+    const group = String(instance.group || '未分组')
+    groups.set(group, (groups.get(group) || 0) + instanceUsageCount(instance))
+  })
+  return Array.from(groups, ([label, count]) => ({ label, value: label, count }))
+    .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label, 'zh-CN'))
+})
+
+const visibleInstanceQuickGroupOptions = computed(() => {
+  if (instanceFiltersExpanded.value) return instanceQuickGroupOptions.value
+  const options = instanceQuickGroupOptions.value.slice(0, filterPreviewLimit)
+  if (instanceFilter.value !== 'all' && instanceFilter.value !== 'popular' && !options.some(option => option.value === instanceFilter.value)) {
+    const selected = instanceQuickGroupOptions.value.find(option => option.value === instanceFilter.value)
+    if (selected) return [selected, ...options.slice(0, filterPreviewLimit - 1)]
+  }
+  return options
+})
+
+const filteredInstances = computed(() => {
+  let items = instances.value
+  if (instanceFilter.value !== 'all' && instanceFilter.value !== 'popular') {
+    items = items.filter(instance => String(instance.group || '未分组') === instanceFilter.value)
+  }
+  if (instanceFilter.value === 'popular') {
+    items = [...items].sort((a, b) => instanceUsageCount(b) - instanceUsageCount(a) || String(a.name || '').localeCompare(String(b.name || ''), 'zh-CN'))
+  }
+  return items
+})
+
+const instanceTotal = computed(() => filteredInstances.value.length)
+const displayedInstances = computed(() => {
+  const start = (instancePage.value - 1) * instancePageSize.value
+  return filteredInstances.value.slice(start, start + instancePageSize.value)
+})
+
+async function fetchAllPages<T>(fetchPage: (page: number, pageSize: number) => Promise<api.PageResponse<T>>): Promise<T[]> {
+  const pageSize = 200
+  const items: T[] = []
+  let page = 1
+  let total = 0
+  do {
+    const response = await fetchPage(page, pageSize)
+    items.push(...(response.items ?? []))
+    total = response.total ?? items.length
+    page += 1
+    if (!response.items?.length) break
+  } while (items.length < total)
+  return items
+}
+
+async function loadInstanceUsage() {
+  instanceUsageCounts.value = {}
+  if (!permission.canDo('db:audit:view')) return
+  try {
+    const connections = await fetchAllPages(page => api.apiClient.getDBConnections({ page, page_size: 200 }))
+    const counts: Record<string, number> = {}
+    connections.forEach(connection => {
+      const name = String(connection.target_name || connection.upstream_addr || '').trim().toLowerCase()
+      if (name) counts[name] = (counts[name] || 0) + 1
+    })
+    instanceUsageCounts.value = counts
+  } catch {
+    // Audit permission or storage may be unavailable; group filters still work.
+  }
+}
+
+function setInstanceFilter(value: string) {
+  instanceFilter.value = value
+  instancePage.value = 1
+}
+
 function instanceEndpoint(inst: api.DatabaseInstanceView): string {
   const address = (inst.address || '').trim()
   const port = inst.port
@@ -478,16 +576,16 @@ async function copyText(value: string) {
 async function loadInstances() {
   instancesLoading.value = true
   try {
-    const res = await api.apiClient.getDBInstances({
-      page: instancePage.value,
-      page_size: instancePageSize.value,
+    const loaded = await fetchAllPages(page => api.apiClient.getDBInstances({
+      page,
+      page_size: 200,
       q: instanceSearchKeyword.value || undefined
-    })
-    instances.value = res.items
-    instanceTotal.value = res.total
+    }))
+    instances.value = loaded
+    await loadInstanceUsage()
   } catch (err) {
     instances.value = []
-    ElMessage.error(err instanceof Error ? err.message : '加载实例失败')
+    ElMessage.error(err instanceof Error ? err.message : '??????')
   } finally {
     instancesLoading.value = false
   }
@@ -495,6 +593,7 @@ async function loadInstances() {
 
 function onInstanceSearch(keyword: string) {
   instanceSearchKeyword.value = keyword
+  instanceFilter.value = 'all'
   instancePage.value = 1
   loadInstances()
 }
@@ -939,6 +1038,42 @@ function closeProvisionAndRefresh() {
 </script>
 
 <style scoped>
+.instance-filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: min(620px, 100%);
+}
+
+.instance-filter-options {
+  display: flex;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.instance-filter-options.is-expanded {
+  flex-wrap: wrap;
+  overflow: visible;
+  white-space: normal;
+}
+
+.instance-filter-options .el-button,
+.instance-filter-more {
+  flex: 0 0 auto;
+  margin: 0;
+}
+
+.instance-filter-options .el-button {
+  padding-inline: 9px;
+}
+
+.instance-filter-more {
+  padding-inline: 4px;
+}
+
 .dialog-stack {
   display: flex;
   flex-direction: column;

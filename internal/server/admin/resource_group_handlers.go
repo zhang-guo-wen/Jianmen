@@ -98,12 +98,14 @@ func (s *Server) listResourceGroups(w http.ResponseWriter, r *http.Request) {
 			s.db.Model(&model.Host{}).Where("group_name = ?", g.Name).Count(&gwc.HostCount)
 			s.db.Model(&model.DatabaseInstance{}).Where("group_name = ?", g.Name).Count(&gwc.DatabaseCount)
 			s.db.Model(&model.Application{}).Where("app_group = ?", g.Name).Count(&gwc.ApplicationCount)
-			s.db.Model(&model.PlatformAccount{}).Where("group_name = ?", g.Name).Count(&gwc.PlatformCount)
 		} else {
 			s.db.Model(&model.HostAccount{}).Where("group_name = ?", g.Name).Count(&gwc.AccountCount)
-			var dbCount int64
-			s.db.Model(&model.DatabaseAccount{}).Where("group_name = ?", g.Name).Count(&dbCount)
-			gwc.AccountCount += dbCount
+			var databaseCount int64
+			s.db.Model(&model.DatabaseAccount{}).Where("group_name = ?", g.Name).Count(&databaseCount)
+			var platformCount int64
+			s.db.Model(&model.PlatformAccount{}).Where("group_name = ?", g.Name).Count(&platformCount)
+			gwc.PlatformCount = platformCount
+			gwc.AccountCount += databaseCount + platformCount
 		}
 		result = append(result, gwc)
 	}
@@ -228,12 +230,12 @@ func updateGroupedResources(tx *gorm.DB, groupType, oldName, newName string) err
 			{model: &model.Host{}, column: "group_name"},
 			{model: &model.DatabaseInstance{}, column: "group_name"},
 			{model: &model.Application{}, column: "app_group"},
-			{model: &model.PlatformAccount{}, column: "group_name"},
 		}
 	} else {
 		items = []groupedModel{
 			{model: &model.HostAccount{}, column: "group_name"},
 			{model: &model.DatabaseAccount{}, column: "group_name"},
+			{model: &model.PlatformAccount{}, column: "group_name"},
 		}
 	}
 	for _, item := range items {

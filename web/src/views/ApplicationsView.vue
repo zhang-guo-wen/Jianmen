@@ -32,9 +32,12 @@
         <el-table-column prop="group" :label="t('application.column.group')" width="100" show-overflow-tooltip />
         <el-table-column :label="t('application.column.status')" width="80" align="center">
           <template #default="{ row }">
-            <el-tag :type="row.status === 'active' ? 'success' : 'info'" size="small">
-              {{ row.status === 'active' ? t('common.enabled') : t('common.disabled') }}
-            </el-tag>
+            <StatusSwitch
+              v-if="row.can_manage && permission.canDo('application:update')"
+              :model-value="row.status === 'active'"
+              :loading="statusUpdatingId === row.id"
+              @update:model-value="(val: boolean) => toggleStatus(row, val)"
+            />
           </template>
         </el-table-column>
         <el-table-column :label="t('application.column.actions')" width="160" fixed="right">
@@ -105,6 +108,7 @@ import { onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import DataTableCard from '@/components/DataTableCard.vue'
 import FormDialog from '@/components/FormDialog.vue'
+import StatusSwitch from '@/components/StatusSwitch.vue'
 import { apiClient, type ApplicationView, type ApplicationPayload } from '@/api/client'
 import { useI18n } from '@/i18n'
 import { usePermissionStore } from '@/stores/permission'
@@ -124,7 +128,8 @@ const resourceGroupOptions = ref<string[]>([])
 const dialogVisible = ref(false)
 const editingId = ref('')
 const submitting = ref(false)
-const moreSections = ref<string[]>([])
+const statusUpdatingId = ref('')
+const moreSections = ref<string[]>(['more'])
 const form = reactive({ address: '', name: '', listen_port: 0, group: '', remark: '' })
 
 async function fetchApps() {
@@ -192,7 +197,7 @@ function openCreate() {
   form.listen_port = 0
   form.group = ''
   form.remark = ''
-  moreSections.value = []
+  moreSections.value = ['more']
   dialogVisible.value = true
 }
 
@@ -203,8 +208,28 @@ function openEdit(app: ApplicationView) {
   form.listen_port = app.listen_port
   form.group = app.group || ''
   form.remark = app.remark || ''
-  moreSections.value = []
+  moreSections.value = ['more']
   dialogVisible.value = true
+}
+
+async function toggleStatus(app: ApplicationView, active: boolean) {
+  if (!app.id) return
+  statusUpdatingId.value = app.id
+  try {
+    await apiClient.updateApplication(app.id, {
+      address: app.address,
+      name: app.name,
+      listen_port: app.listen_port,
+      group: app.group,
+      remark: app.remark,
+      status: active ? 'active' : 'disabled',
+    })
+    app.status = active ? 'active' : 'disabled'
+  } catch (e: any) {
+    ElMessage.error(e.message || t('application.error.save'))
+  } finally {
+    statusUpdatingId.value = ''
+  }
 }
 
 async function submitApp() {

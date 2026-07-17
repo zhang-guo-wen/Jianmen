@@ -16,13 +16,7 @@
           </el-button>
         </template>
         <el-table-column :label="t('platformAccounts.column.platform')" width="120" show-overflow-tooltip>
-          <template #default="{ row }"><el-tag size="small" type="primary" effect="plain">{{ row.platform_name || '-' }}</el-tag></template>
-        </el-table-column>
-        <el-table-column :label="t('platformAccounts.column.name')" min-width="140" show-overflow-tooltip>
-          <template #default="{ row }"><el-button link type="primary" @click="openEditDialog(row)">{{ row.name || row.username || '-' }}</el-button></template>
-        </el-table-column>
-        <el-table-column :label="t('platformAccounts.column.username')" min-width="140" show-overflow-tooltip>
-          <template #default="{ row }">{{ row.username || '-' }}</template>
+          <template #default="{ row }">{{ row.platform_name || '-' }}</template>
         </el-table-column>
         <el-table-column :label="t('platformAccounts.column.url')" min-width="220" show-overflow-tooltip>
           <template #default="{ row }">
@@ -32,6 +26,9 @@
             <span v-else>-</span>
           </template>
         </el-table-column>
+        <el-table-column :label="t('platformAccounts.column.username')" min-width="140" show-overflow-tooltip>
+          <template #default="{ row }">{{ row.username || '-' }}</template>
+        </el-table-column>
         <el-table-column :label="t('platformAccounts.column.password')" width="110" align="center">
           <template #default="{ row }">
             <el-button v-if="row.has_password && permission.canDo('platform_account:use')" link type="primary" size="small" @click="copyPassword(row)">
@@ -39,9 +36,6 @@
             </el-button>
             <span v-else>-</span>
           </template>
-        </el-table-column>
-        <el-table-column :label="t('platformAccounts.column.remark')" min-width="180" show-overflow-tooltip>
-          <template #default="{ row }">{{ row.remark || '-' }}</template>
         </el-table-column>
         <el-table-column :label="t('platformAccounts.column.group')" width="120" show-overflow-tooltip>
           <template #default="{ row }">{{ row.group || '-' }}</template>
@@ -55,6 +49,9 @@
               @update:model-value="(val: boolean) => toggleStatus(row, val)"
             />
           </template>
+        </el-table-column>
+        <el-table-column :label="t('platformAccounts.column.remark')" min-width="180" show-overflow-tooltip>
+          <template #default="{ row }">{{ row.remark || '-' }}</template>
         </el-table-column>
         <el-table-column :label="t('platformAccounts.column.actions')" width="160" fixed="right">
           <template #default="{ row }">
@@ -86,7 +83,6 @@
           </el-form-item>
           <el-collapse v-model="morePanels" class="more-collapse">
             <el-collapse-item :title="t('platformAccounts.moreSettings')" name="more">
-              <el-form-item :label="t('platformAccounts.field.name')"><el-input v-model="form.name" :placeholder="t('platformAccounts.placeholder.name')" /></el-form-item>
               <el-form-item :label="t('platformAccounts.field.platform')">
                 <el-input v-model="form.platform_name" :placeholder="t('platformAccounts.placeholder.platform')" />
               </el-form-item>
@@ -133,7 +129,7 @@ const submitting = ref(false)
 const formRef = ref<FormInstance>()
 const morePanels = ref<string[]>(['more'])
 const form = reactive<PlatformAccountPayload & { password: string; group: string }>({
-  platform_name: '', username: '', password: '', name: '', url: '', group: '', remark: ''
+  platform_name: '', username: '', password: '', url: '', group: '', remark: ''
 })
 const rules: FormRules = {
   username: [{ required: true, message: () => t('platformAccounts.required.username'), trigger: 'blur' }]
@@ -178,7 +174,7 @@ function handleUrlInput(value: string) {
 }
 
 function resetForm() {
-  Object.assign(form, { platform_name: '', username: '', password: '', name: '', url: '', group: '', remark: '' })
+  Object.assign(form, { platform_name: '', username: '', password: '', url: '', group: '', remark: '' })
   morePanels.value = ['more']
   lastAutoPlatformName.value = ''
 }
@@ -191,7 +187,7 @@ function openCreateDialog() {
 
 function openEditDialog(row: PlatformAccountView) {
   editingId.value = row.id || ''
-  Object.assign(form, { platform_name: row.platform_name || '', username: row.username, password: '', name: row.name || '', url: row.url || '', group: row.group || '', remark: row.remark || '' })
+  Object.assign(form, { platform_name: row.platform_name || '', username: row.username, password: '', url: row.url || '', group: row.group || '', remark: row.remark || '' })
   morePanels.value = ['more']
   lastAutoPlatformName.value = ''
   dialogVisible.value = true

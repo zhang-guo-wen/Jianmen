@@ -13,6 +13,7 @@ import (
 	"jianmen/internal/model"
 	"jianmen/internal/rbac"
 	"jianmen/internal/service"
+	"jianmen/internal/storage"
 	"jianmen/internal/util"
 )
 
@@ -208,7 +209,18 @@ func (s *Server) createTemporaryAuthorization(w http.ResponseWriter, r *http.Req
 
 func (s *Server) createTemporaryAccount(accountType, authorizedUserID string, expiresAt *time.Time, remark, createdBy, sessionID string) (model.TemporaryAccount, error) {
 	if strings.TrimSpace(sessionID) == "" {
-		sessionID = model.NewID()
+		var maxSessionSeq int
+		if err := s.db.Model(&model.UserSession{}).Select("COALESCE(MAX(session_seq), 0)").Scan(&maxSessionSeq).Error; err != nil {
+			return model.TemporaryAccount{}, fmt.Errorf("read session sequence floor: %w", err)
+		}
+		if err := storage.EnsureSequenceNextValue(s.db, storage.SequenceUserSession, maxSessionSeq+1); err != nil {
+			return model.TemporaryAccount{}, fmt.Errorf("ensure session sequence floor: %w", err)
+		}
+		seq, err := storage.NextSequenceValue(s.db, storage.SequenceUserSession, storage.MaxCompactSessionSeq)
+		if err != nil {
+			return model.TemporaryAccount{}, fmt.Errorf("allocate temporary session id: %w", err)
+		}
+		sessionID = util.EncodeBase62Padded(uint64(seq), 5)
 	}
 	usernameSuffix := sessionID
 	if len(usernameSuffix) > 12 {

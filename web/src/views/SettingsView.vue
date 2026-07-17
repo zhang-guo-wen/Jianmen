@@ -1,5 +1,9 @@
 <template>
   <div class="settings-page">
+    <div class="settings-toolbar">
+      <span v-if="preferences.error" class="save-error">{{ preferences.error }}</span>
+      <el-button type="primary" size="large" :loading="preferences.saving" @click="save">保存用户配置</el-button>
+    </div>
     <el-card class="settings-card" shadow="never" v-loading="preferences.loading">
       <el-tabs v-model="activeTab" class="settings-tabs">
         <el-tab-pane label="界面与终端" name="appearance">
@@ -91,10 +95,6 @@
         </el-tab-pane>
       </el-tabs>
 
-      <div class="settings-actions">
-        <span v-if="preferences.error" class="save-error">{{ preferences.error }}</span>
-        <el-button type="primary" size="large" :loading="preferences.saving" @click="save">保存用户配置</el-button>
-      </div>
     </el-card>
   </div>
 </template>
@@ -193,8 +193,21 @@ async function copyRegistrationCommand(command: string) {
   overflow-y: auto;
 }
 
+.settings-toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 14px;
+  min-height: 56px;
+  padding-bottom: 12px;
+  background: var(--color-bg);
+}
+
 .settings-card {
-  min-height: calc(100% - 2px);
+  min-height: 0;
   border: 1px solid var(--color-border);
   border-radius: 18px;
   background: var(--color-card);
@@ -203,13 +216,13 @@ async function copyRegistrationCommand(command: string) {
 :deep(.settings-card > .el-card__body) {
   display: flex;
   flex-direction: column;
-  min-height: calc(100vh - var(--header-height) - 42px);
+  min-height: 0;
   padding: 0;
   overflow: visible;
 }
 
 .settings-tabs {
-  flex: 1;
+  flex: none;
   min-height: 0;
 }
 
@@ -293,18 +306,9 @@ async function copyRegistrationCommand(command: string) {
   overflow-wrap: anywhere;
 }
 
-.settings-actions {
-  display: flex;
-  flex-shrink: 0;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 14px;
-  padding: 16px 24px;
-  border-top: 1px solid var(--color-border);
-  background: var(--color-surface-muted);
-}
-
 .save-error {
+  flex: 1 1 240px;
+  min-width: 0;
   color: var(--el-color-danger);
   font-size: 13px;
 }
@@ -326,8 +330,8 @@ async function copyRegistrationCommand(command: string) {
     grid-template-columns: 1fr;
   }
 
-  .settings-actions {
-    padding: 14px 18px;
+  .settings-toolbar {
+    align-items: flex-end;
   }
 }
 </style>

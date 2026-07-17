@@ -19,7 +19,8 @@ func TestHandleAITokensIssueRotateAndRevoke(t *testing.T) {
 		t.Fatalf("create user: %v", err)
 	}
 
-	request := withTestUser(httptest.NewRequest(http.MethodPost, "/api/ai/tokens", bytes.NewBufferString(`{"name":"ops agent","access_ttl_seconds":3600,"refresh_ttl_seconds":86400}`)), "ai-user", "ai-user")
+	request := withTestUser(httptest.NewRequest(http.MethodPost, "/api/ai/tokens", bytes.NewBufferString(`{"name":"ops agent","access_ttl_seconds":3600,"refresh_ttl_seconds":86400,"permanent":true}`)), "ai-user", "ai-user")
+	request.Header.Set("Origin", "https://public.example.test")
 	response := httptest.NewRecorder()
 	server.handleAITokens(response, request)
 	if response.Code != http.StatusCreated {
@@ -29,6 +30,9 @@ func TestHandleAITokensIssueRotateAndRevoke(t *testing.T) {
 		ID           string `json:"id"`
 		AccessToken  string `json:"access_token"`
 		RefreshToken string `json:"refresh_token"`
+		Prompt       string `json:"prompt"`
+		CopyPrompt   string `json:"copy_prompt"`
+		FullPrompt   string `json:"full_prompt"`
 	}
 	if err := decodeTestData(t, response.Body.Bytes(), &issued); err != nil {
 		t.Fatalf("decode issue: %v", err)
@@ -36,12 +40,25 @@ func TestHandleAITokensIssueRotateAndRevoke(t *testing.T) {
 	if issued.ID == "" || issued.AccessToken == "" || issued.RefreshToken == "" {
 		t.Fatalf("missing issued credential: %#v", issued)
 	}
-	if strings.Contains(response.Body.String(), "????") || !strings.Contains(response.Body.String(), "prompt") {
-		t.Fatalf("AI prompt response is missing or encoded incorrectly: %s", response.Body.String())
+	if issued.Prompt != "\u6388\u6743 AI \u4f7f\u7528\u5f53\u524d\u7528\u6237\u7684\u8d44\u6e90\u7684\u6743\u9650\u3002" {
+		t.Fatalf("unexpected prompt: %q", issued.Prompt)
+	}
+	if !strings.Contains(issued.CopyPrompt, issued.AccessToken) || !strings.Contains(issued.CopyPrompt, issued.RefreshToken) || !strings.Contains(issued.CopyPrompt, "[https://public.example.test/api/ai/docs](https://public.example.test/api/ai/docs)") {
+		t.Fatalf("unexpected copy prompt: %q", issued.CopyPrompt)
+	}
+	if !strings.Contains(issued.FullPrompt, "# Jianmen AI Bastion API") || !strings.Contains(issued.FullPrompt, "Base URL: https://public.example.test") {
+		t.Fatalf("full prompt does not contain AI documentation: %q", issued.FullPrompt)
 	}
 	var saved model.AIAccessToken
 	if err := db.First(&saved, "id = ?", issued.ID).Error; err != nil {
 		t.Fatalf("load token: %v", err)
+	}
+	var temporaryAccount model.TemporaryAccount
+	if err := db.First(&temporaryAccount, "id = ?", saved.TemporaryAccountID).Error; err != nil {
+		t.Fatalf("load AI temporary account: %v", err)
+	}
+	if temporaryAccount.ExpiresAt != nil {
+		t.Fatalf("permanent AI authorization should not expire: %v", temporaryAccount.ExpiresAt)
 	}
 	if strings.Contains(response.Body.String(), saved.AccessTokenHash) || strings.Contains(response.Body.String(), saved.RefreshTokenHash) {
 		t.Fatal("response exposed token hashes")

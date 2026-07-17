@@ -2,12 +2,18 @@ package admin
 
 import (
 	"encoding/json"
+	"fmt"
+	"net"
 	"net/http"
+	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
 	"jianmen/internal/model"
 	"jianmen/internal/rbac"
+	"jianmen/internal/service"
+	"jianmen/internal/util"
 )
 
 type temporaryAuthorizationRequest struct {
@@ -22,21 +28,32 @@ type temporaryAccountActionRequest struct {
 	ExpiresAt *time.Time `json:"expires_at,omitempty"`
 }
 
+type temporaryConnectionView struct {
+	Address   string    `json:"address"`
+	Host      string    `json:"host"`
+	Port      int       `json:"port"`
+	Username  string    `json:"username"`
+	Password  string    `json:"password"`
+	Protocol  string    `json:"protocol"`
+	ExpiresAt time.Time `json:"expires_at"`
+}
+
 type temporaryAccountView struct {
-	ID               string     `json:"id"`
-	SessionID        string     `json:"session_id"`
-	Type             string     `json:"type"`
-	AuthorizedUserID string     `json:"authorized_user_id,omitempty"`
-	AuthorizedUser   string     `json:"authorized_user,omitempty"`
-	Status           string     `json:"status"`
-	StartsAt         time.Time  `json:"starts_at"`
-	ExpiresAt        *time.Time `json:"expires_at,omitempty"`
-	ResourceType     string     `json:"resource_type,omitempty"`
-	ResourceName     string     `json:"resource_name,omitempty"`
-	AccountName      string     `json:"account_name,omitempty"`
-	Remark           string     `json:"remark,omitempty"`
-	CreatedBy        string     `json:"created_by,omitempty"`
-	CreatedAt        time.Time  `json:"created_at"`
+	ID               string                   `json:"id"`
+	SessionID        string                   `json:"session_id"`
+	Type             string                   `json:"type"`
+	AuthorizedUserID string                   `json:"authorized_user_id,omitempty"`
+	AuthorizedUser   string                   `json:"authorized_user,omitempty"`
+	Status           string                   `json:"status"`
+	StartsAt         time.Time                `json:"starts_at"`
+	ExpiresAt        *time.Time               `json:"expires_at,omitempty"`
+	ResourceType     string                   `json:"resource_type,omitempty"`
+	ResourceName     string                   `json:"resource_name,omitempty"`
+	AccountName      string                   `json:"account_name,omitempty"`
+	Remark           string                   `json:"remark,omitempty"`
+	CreatedBy        string                   `json:"created_by,omitempty"`
+	CreatedAt        time.Time                `json:"created_at"`
+	Connection       *temporaryConnectionView `json:"connection,omitempty"`
 }
 
 func (s *Server) handleTemporaryAccounts(w http.ResponseWriter, r *http.Request) {
@@ -155,7 +172,15 @@ func (s *Server) createTemporaryAuthorization(w http.ResponseWriter, r *http.Req
 		s.writeErrorText(w, r, http.StatusBadRequest, "temporary authorization must expire within 7 days")
 		return
 	}
-	account, err := s.createTemporaryAccount(model.TemporaryAccountTypeUser, req.AuthorizedUserID, expiresAt, req.Remark, userIDFromRequest(r))
+	userSession, err := s.store.CreateUserSession(model.UserSession{
+		UserID: req.AuthorizedUserID, Type: "temporary", Status: "active",
+		ExpiresAt: &expiresAt, CreatedBy: userIDFromRequest(r),
+	})
+	if err != nil {
+		s.writeErrorText(w, r, http.StatusInternalServerError, "failed to create temporary session")
+		return
+	}
+	account, err := s.createTemporaryAccount(model.TemporaryAccountTypeUser, req.AuthorizedUserID, &expiresAt, req.Remark, userIDFromRequest(r), userSession.SessionID)
 	if err != nil {
 		s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
 		return
@@ -169,21 +194,91 @@ func (s *Server) createTemporaryAuthorization(w http.ResponseWriter, r *http.Req
 		s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
 		return
 	}
-	s.writeJSON(w, r, http.StatusCreated, s.temporaryAccountView(account))
+	connection, err := s.issueTemporaryConnection(r, req.AuthorizedUserID, req.ResourceType, req.ResourceID, userSession.SessionID, expiresAt)
+	if err != nil {
+		s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
+		return
+	}
+	view := s.temporaryAccountView(account)
+	view.Connection = &connection
+	s.writeJSON(w, r, http.StatusCreated, view)
 }
 
-func (s *Server) createTemporaryAccount(accountType, authorizedUserID string, expiresAt time.Time, remark, createdBy string) (model.TemporaryAccount, error) {
-	sessionID := model.NewID()
+func (s *Server) createTemporaryAccount(accountType, authorizedUserID string, expiresAt *time.Time, remark, createdBy, sessionID string) (model.TemporaryAccount, error) {
+	if strings.TrimSpace(sessionID) == "" {
+		sessionID = model.NewID()
+	}
+	usernameSuffix := sessionID
+	if len(usernameSuffix) > 12 {
+		usernameSuffix = usernameSuffix[:12]
+	}
 	account := model.TemporaryAccount{
 		ID: model.NewID(), SessionID: sessionID, Type: accountType,
-		Username: "tmp_" + sessionID[:12], AuthorizedUserID: authorizedUserID,
-		Status: "active", StartsAt: time.Now().UTC(), ExpiresAt: &expiresAt,
+		Username: "tmp_" + usernameSuffix, AuthorizedUserID: authorizedUserID,
+		Status: "active", StartsAt: time.Now().UTC(), ExpiresAt: expiresAt,
 		Remark: strings.TrimSpace(remark), CreatedBy: createdBy,
 	}
 	if err := s.db.Create(&account).Error; err != nil {
 		return model.TemporaryAccount{}, err
 	}
 	return account, nil
+}
+
+func (s *Server) issueTemporaryConnection(r *http.Request, userID, resourceType, resourceID, sessionID string, expiresAt time.Time) (temporaryConnectionView, error) {
+	now := time.Now().UTC()
+	issued, err := service.IssueConnectionPassword(now, expiresAt.Sub(now))
+	if err != nil {
+		return temporaryConnectionView{}, fmt.Errorf("issue temporary connection password: %w", err)
+	}
+	if err := s.store.CreateConnectionPassword(r.Context(), model.ConnectionPassword{
+		UserID: userID, ResourceType: resourceType, ResourceID: resourceID,
+		SecretHash: issued.Hash, MySQLNativeHash: issued.MySQLNativeHash, ExpiresAt: issued.ExpiresAt,
+	}); err != nil {
+		return temporaryConnectionView{}, fmt.Errorf("save temporary connection password: %w", err)
+	}
+
+	publicHost := requestHostnameFromPage(r, s.aiBaseURL(r))
+	prefix, compactResourceID, protocol, port, err := s.temporaryConnectionTarget(resourceType, resourceID)
+	if err != nil {
+		return temporaryConnectionView{}, err
+	}
+	return temporaryConnectionView{
+		Address: net.JoinHostPort(publicHost, strconv.Itoa(port)), Host: publicHost, Port: port,
+		Username: prefix + compactResourceID + sessionID, Password: issued.Plaintext,
+		Protocol: protocol, ExpiresAt: issued.ExpiresAt,
+	}, nil
+}
+
+func (s *Server) temporaryConnectionTarget(resourceType, resourceID string) (string, string, string, int, error) {
+	switch resourceType {
+	case model.ResourceTypeHostAccount:
+		var account model.HostAccount
+		if err := s.db.First(&account, "id = ?", resourceID).Error; err != nil {
+			return "", "", "", 0, err
+		}
+		_, port := parseListenAddr(s.cfg.ListenAddr)
+		return util.PrefixHost, account.ResourceID, "ssh", port, nil
+	case model.ResourceTypeDatabaseAccount:
+		var account model.DatabaseAccount
+		if err := s.db.Preload("Instance").First(&account, "id = ?", resourceID).Error; err != nil {
+			return "", "", "", 0, err
+		}
+		prefix := util.PrefixDatabase
+		if strings.EqualFold(account.Instance.Protocol, "redis") {
+			prefix = util.PrefixRedis
+		}
+		_, port := parseListenAddr(s.cfg.DatabaseGateway.ListenAddr)
+		return prefix, account.ResourceID, account.Instance.Protocol, port, nil
+	default:
+		return "", "", "", 0, fmt.Errorf("unsupported temporary resource type %q", resourceType)
+	}
+}
+
+func requestHostnameFromPage(r *http.Request, baseURL string) string {
+	if parsed, err := url.Parse(baseURL); err == nil && parsed.Hostname() != "" {
+		return parsed.Hostname()
+	}
+	return requestHostname(r)
 }
 
 func (s *Server) extendTemporaryAccount(w http.ResponseWriter, r *http.Request, id string) {
@@ -211,9 +306,17 @@ func (s *Server) extendTemporaryAccount(w http.ResponseWriter, r *http.Request, 
 		return
 	}
 	_ = s.db.Model(&model.TemporaryAccountGrant{}).Where("temporary_account_id = ?", account.ID).Updates(map[string]any{"expires_at": expiresAt, "revoked_at": nil}).Error
+	_ = s.db.Model(&model.UserSession{}).Where("session_id = ?", account.SessionID).Updates(map[string]any{"expires_at": expiresAt, "status": "active"}).Error
 	account.ExpiresAt = &expiresAt
 	account.Status = "active"
-	s.writeJSON(w, r, http.StatusOK, s.temporaryAccountView(account))
+	view := s.temporaryAccountView(account)
+	var grant model.TemporaryAccountGrant
+	if account.Type == model.TemporaryAccountTypeUser && s.db.Where("temporary_account_id = ? AND revoked_at IS NULL", account.ID).First(&grant).Error == nil {
+		if connection, issueErr := s.issueTemporaryConnection(r, account.AuthorizedUserID, grant.ResourceType, grant.ResourceID, account.SessionID, expiresAt); issueErr == nil {
+			view.Connection = &connection
+		}
+	}
+	s.writeJSON(w, r, http.StatusOK, view)
 }
 
 func (s *Server) disableTemporaryAccount(w http.ResponseWriter, r *http.Request, id string) {
@@ -228,6 +331,7 @@ func (s *Server) disableTemporaryAccount(w http.ResponseWriter, r *http.Request,
 		return
 	}
 	_ = s.db.Model(&model.TemporaryAccountGrant{}).Where("temporary_account_id = ?", account.ID).Update("revoked_at", now).Error
+	_ = s.db.Model(&model.UserSession{}).Where("session_id = ?", account.SessionID).Update("status", "disabled").Error
 	_ = s.db.Model(&model.AIAccessToken{}).Where("temporary_account_id = ?", account.ID).Update("revoked_at", now).Error
 	account.Status = "disabled"
 	s.writeJSON(w, r, http.StatusOK, s.temporaryAccountView(account))

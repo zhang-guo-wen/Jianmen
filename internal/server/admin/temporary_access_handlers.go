@@ -16,6 +16,8 @@ import (
 	"jianmen/internal/util"
 )
 
+const maxTemporaryAuthorizationDuration = 7 * 24 * time.Hour
+
 type temporaryAuthorizationRequest struct {
 	AuthorizedUserID string     `json:"authorized_user_id"`
 	ResourceType     string     `json:"resource_type"`
@@ -168,8 +170,8 @@ func (s *Server) createTemporaryAuthorization(w http.ResponseWriter, r *http.Req
 	if req.ExpiresAt != nil {
 		expiresAt = req.ExpiresAt.UTC()
 	}
-	if !expiresAt.After(now) || expiresAt.After(now.Add(7*24*time.Hour)) {
-		s.writeErrorText(w, r, http.StatusBadRequest, "temporary authorization must expire within 7 days")
+	if !expiresAt.After(now) || expiresAt.After(now.Add(maxTemporaryAuthorizationDuration)) {
+		s.writeErrorText(w, r, http.StatusBadRequest, "\u4e34\u65f6\u6388\u6743\u6709\u6548\u671f\u4e0d\u80fd\u8d85\u8fc7 7 \u5929\uff0c\u8bf7\u9009\u62e9 7 \u5929\u4ee5\u5185\u7684\u65f6\u95f4")
 		return
 	}
 	userSession, err := s.store.CreateUserSession(model.UserSession{
@@ -297,8 +299,8 @@ func (s *Server) extendTemporaryAccount(w http.ResponseWriter, r *http.Request, 
 	if req.ExpiresAt != nil {
 		expiresAt = req.ExpiresAt.UTC()
 	}
-	if !expiresAt.After(now) || expiresAt.After(now.Add(7*24*time.Hour)) {
-		s.writeErrorText(w, r, http.StatusBadRequest, "temporary authorization must expire within 7 days")
+	if !expiresAt.After(now) || expiresAt.After(now.Add(maxTemporaryAuthorizationDuration)) {
+		s.writeErrorText(w, r, http.StatusBadRequest, "\u4e34\u65f6\u6388\u6743\u6709\u6548\u671f\u4e0d\u80fd\u8d85\u8fc7 7 \u5929\uff0c\u8bf7\u9009\u62e9 7 \u5929\u4ee5\u5185\u7684\u65f6\u95f4")
 		return
 	}
 	if err := s.db.Model(&account).Updates(map[string]any{"expires_at": expiresAt, "status": "active"}).Error; err != nil {

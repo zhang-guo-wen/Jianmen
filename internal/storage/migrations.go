@@ -97,6 +97,13 @@ var migrations = []Migration{
 			return tx.AutoMigrate(&model.AIAccessToken{})
 		},
 	},
+	{
+		Version: "202607170001",
+		Name:    "container management endpoints",
+		Run: func(tx *gorm.DB) error {
+			return tx.AutoMigrate(&model.ContainerEndpoint{})
+		},
+	},
 }
 
 func Migrate(db *gorm.DB) error {

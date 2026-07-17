@@ -6,6 +6,7 @@
   Lock,
   Cpu,
   Monitor,
+  Box,
   Setting,
 } from '@element-plus/icons-vue';
 import type { Component } from 'vue';
@@ -74,6 +75,16 @@ export const APP_NAV_ITEMS: AppNavigationItem[] = [
     titleKey: 'route.applications.title',
     descriptionKey: 'route.applications.description',
     component: () => import('@/views/ApplicationsView.vue'),
+  },
+  {
+    key: 'containers',
+    path: '/containers',
+    name: 'containers',
+    icon: Box,
+    labelKey: 'nav.containers',
+    titleKey: 'route.containers.title',
+    descriptionKey: 'route.containers.description',
+    component: () => import('@/views/ContainersView.vue'),
   },
   {
     key: 'audit',

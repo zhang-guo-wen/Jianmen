@@ -14,6 +14,7 @@ func TestPermissionCatalogContainsEveryAction(t *testing.T) {
 		ActionDBProxyCreate, ActionDBProxyUpdate, ActionDBProxyDelete, ActionDBProxyView,
 		ActionRBACManage, ActionSessionView, ActionSessionDisconnect,
 		ActionAppCreate, ActionAppUpdate, ActionAppDelete, ActionAppView, ActionAppConnect,
+		ActionContainerCreate, ActionContainerUpdate, ActionContainerDelete, ActionContainerView, ActionContainerConnect,
 		ActionPlatformAccountCreate, ActionPlatformAccountUpdate, ActionPlatformAccountDelete,
 		ActionPlatformAccountView, ActionPlatformAccountUse,
 		ActionAIManage,

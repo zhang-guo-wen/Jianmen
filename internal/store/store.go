@@ -161,6 +161,49 @@ type ApplicationInput struct {
 	Status         string
 }
 
+type ContainerEndpointView struct {
+	ID              string `json:"id"`
+	Name            string `json:"name"`
+	Group           string `json:"group,omitempty"`
+	Runtime         string `json:"runtime"`
+	ConnectionMode  string `json:"connection_mode"`
+	Address         string `json:"address"`
+	Port            int    `json:"port,omitempty"`
+	HostID          string `json:"host_id,omitempty"`
+	HostName        string `json:"host_name,omitempty"`
+	HostAccountID   string `json:"host_account_id,omitempty"`
+	HostAccountName string `json:"host_account_name,omitempty"`
+	Remark          string `json:"remark,omitempty"`
+	Status          string `json:"status"`
+	CreatedAt       string `json:"created_at"`
+	UpdatedAt       string `json:"updated_at"`
+	CanManage       bool   `json:"can_manage"`
+}
+
+type ContainerEndpointInput struct {
+	ID             string
+	Name           string
+	Group          string
+	Runtime        string
+	ConnectionMode string
+	Address        string
+	Port           int
+	HostID         string
+	HostAccountID  string
+	Remark         string
+	Status         string
+}
+
+type ContainerRecord struct {
+	ID      string `json:"id"`
+	Name    string `json:"name"`
+	Image   string `json:"image,omitempty"`
+	State   string `json:"state,omitempty"`
+	Status  string `json:"status,omitempty"`
+	Ports   string `json:"ports,omitempty"`
+	Created string `json:"created,omitempty"`
+}
+
 type PlatformAccountView struct {
 	ID           string     `json:"id"`
 	Name         string     `json:"name"`
@@ -207,15 +250,16 @@ type SessionView struct {
 }
 
 var (
-	ErrTargetNotFound          = errSentinel("target not found")
-	ErrHostNotFound            = errSentinel("host not found")
-	ErrDBProxyNotFound         = errSentinel("database proxy not found")
-	ErrDBAccountNotFound       = errSentinel("database account not found")
-	ErrDBInstanceNotFound      = errSentinel("database instance not found")
-	ErrApplicationNotFound     = errSentinel("application not found")
-	ErrPlatformAccountNotFound = errSentinel("platform account not found")
-	ErrPlatformShareNotFound   = errSentinel("platform account share not found")
-	ErrTargetUnavailable       = errSentinel("target unavailable")
+	ErrTargetNotFound            = errSentinel("target not found")
+	ErrHostNotFound              = errSentinel("host not found")
+	ErrDBProxyNotFound           = errSentinel("database proxy not found")
+	ErrDBAccountNotFound         = errSentinel("database account not found")
+	ErrDBInstanceNotFound        = errSentinel("database instance not found")
+	ErrApplicationNotFound       = errSentinel("application not found")
+	ErrContainerEndpointNotFound = errSentinel("container endpoint not found")
+	ErrPlatformAccountNotFound   = errSentinel("platform account not found")
+	ErrPlatformShareNotFound     = errSentinel("platform account share not found")
+	ErrTargetUnavailable         = errSentinel("target unavailable")
 )
 
 type sentinelError struct{ msg string }
@@ -322,6 +366,13 @@ type Store interface {
 	AddApplication(input ApplicationInput) (ApplicationView, error)
 	UpdateApplication(id string, input ApplicationInput) (ApplicationView, error)
 	DeleteApplication(id string) error
+
+	// Container management
+	ContainerEndpoints() []ContainerEndpointView
+	ContainerEndpoint(id string) (ContainerEndpointView, error)
+	AddContainerEndpoint(input ContainerEndpointInput) (ContainerEndpointView, error)
+	UpdateContainerEndpoint(id string, input ContainerEndpointInput) (ContainerEndpointView, error)
+	DeleteContainerEndpoint(id string) error
 
 	// PlatformAccount CRUD
 	PlatformAccounts(params PlatformAccountListParams) ([]PlatformAccountView, int64, error)

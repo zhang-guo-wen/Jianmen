@@ -445,6 +445,49 @@ export interface ApplicationPayload {
 
 // ── PlatformAccount ────────────────────────────────────────────────────
 
+export interface ContainerEndpointView {
+  id?: string;
+  name: string;
+  group?: string;
+  runtime: 'docker' | 'containerd' | string;
+  connection_mode: 'ssh' | 'docker_api' | 'containerd' | string;
+  address: string;
+  port?: number;
+  host_id?: string;
+  host_name?: string;
+  host_account_id?: string;
+  host_account_name?: string;
+  remark?: string;
+  status?: string;
+  created_at?: string;
+  updated_at?: string;
+  can_manage?: boolean;
+}
+
+export interface ContainerEndpointPayload {
+  id?: string;
+  name?: string;
+  group?: string;
+  runtime: string;
+  connection_mode: string;
+  address: string;
+  port?: number;
+  host_id?: string;
+  host_account_id?: string;
+  remark?: string;
+  status?: string;
+}
+
+export interface ContainerRecord {
+  id: string;
+  name: string;
+  image?: string;
+  state?: string;
+  status?: string;
+  ports?: string;
+  created?: string;
+}
+
 export interface PlatformAccountView {
   id?: string;
   name?: string;
@@ -1022,6 +1065,22 @@ export const apiClient = {
     request<void>(`/api/applications/${encodeURIComponent(id)}`, {
       method: 'DELETE'
     }),
+
+  // containers
+  getContainerEndpoints: (params?: { page?: number; page_size?: number; q?: string }) =>
+    request<PageResponse<ContainerEndpointView>>(`/api/containers/endpoints${buildQS(params as Record<string, string | number | undefined>)}`),
+  createContainerEndpoint: (payload: ContainerEndpointPayload) =>
+    request<ContainerEndpointView>('/api/containers/endpoints', { method: 'POST', body: JSON.stringify(payload) }),
+  updateContainerEndpoint: (id: string, payload: ContainerEndpointPayload) =>
+    request<ContainerEndpointView>(`/api/containers/endpoints/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify(payload) }),
+  deleteContainerEndpoint: (id: string) =>
+    request<void>(`/api/containers/endpoints/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  testContainerConnection: (payload: ContainerEndpointPayload) =>
+    request<{ ok: boolean; message?: string; latency_ms: number }>('/api/containers/test', { method: 'POST', body: JSON.stringify(payload) }),
+  listContainers: (endpointId: string) =>
+    request<{ items: ContainerRecord[] }>(`/api/containers/endpoints/${encodeURIComponent(endpointId)}/containers`),
+  getContainerLogs: (endpointId: string, containerId: string, tail = 200) =>
+    request<{ logs: string }>(`/api/containers/endpoints/${encodeURIComponent(endpointId)}/containers/${encodeURIComponent(containerId)}/logs?tail=${tail}`),
 
   // platform accounts
   getPlatformAccounts: (params?: { page?: number; page_size?: number; q?: string; owner_id?: string; visibility?: string; platform?: string; category?: string }) =>

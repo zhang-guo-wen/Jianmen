@@ -15,7 +15,9 @@ const (
 	ResourceTypeDatabaseAccount  = "database_account"
 	ResourceTypeDatabaseInstance = "database_instance"
 	ResourceTypeApplication      = "application"
-	ResourceTypePlatformAccount  = "platform_account"
+
+	ResourceTypeContainerEndpoint = "container_endpoint"
+	ResourceTypePlatformAccount   = "platform_account"
 )
 
 type UserPublicKey struct {
@@ -151,6 +153,7 @@ func AllModels() []any {
 		&DatabaseInstance{},
 		&DatabaseAccount{},
 		&Application{},
+		&ContainerEndpoint{},
 		&Session{},
 		&UserSession{},
 		&TemporaryAccount{},
@@ -179,6 +182,7 @@ func (m *Permission) BeforeCreate(_ *gorm.DB) error          { return ensureID(&
 func (m *RolePermission) BeforeCreate(_ *gorm.DB) error      { return ensureID(&m.ID) }
 func (m *UserRole) BeforeCreate(_ *gorm.DB) error            { return ensureID(&m.ID) }
 func (m *Application) BeforeCreate(_ *gorm.DB) error         { return ensureID(&m.ID) }
+func (m *ContainerEndpoint) BeforeCreate(_ *gorm.DB) error   { return ensureID(&m.ID) }
 func (m *UserSession) BeforeCreate(_ *gorm.DB) error         { return ensureID(&m.ID) }
 func (m *TemporaryAccount) BeforeCreate(_ *gorm.DB) error    { return ensureID(&m.ID) }
 func (m *TemporaryCredential) BeforeCreate(_ *gorm.DB) error { return ensureID(&m.ID) }

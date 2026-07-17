@@ -131,10 +131,6 @@
       </template>
       <template v-else>
         <el-result icon="success" title="AI &#x6388;&#x6743;&#x6210;&#x529F;" sub-title="&#x4EE4;&#x724C;&#x4E0D;&#x4F1A;&#x5728;&#x9875;&#x9762;&#x4E2D;&#x660E;&#x6587;&#x5C55;&#x793A;&#xFF0C;&#x8BF7;&#x7ACB;&#x5373;&#x590D;&#x5236;&#x5E76;&#x59A5;&#x5584;&#x4FDD;&#x5B58;&#x3002;" />
-        <div class="prompt-card">
-          <div class="prompt-title">&#x63D0;&#x793A;&#x8BCD;</div>
-          <p>{{ aiResult.prompt }}</p>
-        </div>
         <div class="ai-docs-card">
           <div class="ai-docs-header">
             <div>
@@ -394,14 +390,11 @@ onMounted(loadAccounts)
 .credential-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .credential-row > span:first-child { color: var(--el-text-color-secondary); }
 .credential-row code { color: var(--el-text-color-primary); word-break: break-all; }
-.prompt-card { padding: 16px 18px; border: 1px solid var(--el-border-color); border-radius: 12px; background: linear-gradient(135deg, var(--el-fill-color-light), var(--el-color-success-light-9)); }
-.prompt-card p { margin: 8px 0 0; line-height: 1.75; color: var(--el-text-color-regular); }
 .prompt-title { font-weight: 700; }
-.ai-result-dialog :deep(.el-dialog__body) { max-height: calc(100vh - 220px); overflow-y: auto; }
 .ai-docs-card { margin-top: 16px; padding: 16px 18px; border: 1px solid var(--el-border-color); border-radius: 12px; background: var(--el-fill-color-light); }
 .ai-docs-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
 .ai-docs-link { display: block; max-width: 560px; margin-top: 6px; word-break: break-all; }
-.ai-docs-scroll { max-height: 360px; margin-top: 14px; overflow: auto; border: 1px solid var(--el-border-color-lighter); border-radius: 8px; background: var(--el-bg-color); }
+.ai-docs-scroll { max-height: 280px; margin-top: 14px; overflow: auto; border: 1px solid var(--el-border-color-lighter); border-radius: 8px; background: var(--el-bg-color); }
 .ai-docs-scroll pre { margin: 0; padding: 14px 16px; color: var(--el-text-color-regular); font: 12px/1.7 "JetBrains Mono", "Microsoft YaHei", monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
 .copy-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 12px; margin-top: 18px; }
 </style>

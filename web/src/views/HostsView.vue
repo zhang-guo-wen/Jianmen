@@ -7,7 +7,7 @@
         :total="hostTotal"
         v-model:page="hostPage"
         v-model:page-size="hostPageSize"
-        search-placeholder="搜索主机名称、地址、分组..."
+        search-placeholder="搜索名称、地址、分组..."
         @search="onHostSearch"
       >
         <template #toolbar-extra>
@@ -15,7 +15,7 @@
             >新增主机</el-button
           >
         </template>
-        <el-table-column label="主机名称" min-width="130" show-overflow-tooltip>
+        <el-table-column label="名称" min-width="130" show-overflow-tooltip>
           <template #default="{ row }">{{ hostName(row) }}</template>
         </el-table-column>
         <el-table-column label="地址" min-width="180" show-overflow-tooltip>
@@ -114,7 +114,7 @@
           </el-form-item>
           <el-collapse v-model="hostMorePanels" class="more-collapse">
             <el-collapse-item title="更多设置" name="more">
-              <el-form-item label="主机名称">
+              <el-form-item label="名称">
                 <el-input
                   v-model="hostForm.name"
                   placeholder="默认 = 地址:端口"

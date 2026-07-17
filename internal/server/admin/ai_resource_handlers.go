@@ -317,7 +317,7 @@ func aiTokenTTLs(request aiTokenRequest) (time.Duration, time.Duration, error) {
 		refreshTTL = time.Duration(request.RefreshTTLSeconds) * time.Second
 	}
 	if accessTTL < aiAccessTokenMinTTL || accessTTL > aiAccessTokenMaxTTL {
-		return 0, 0, fmt.Errorf("access TTL must be between 5 minutes and 24 hours")
+		return 0, 0, fmt.Errorf("access TTL must be between 5 minutes and 48 hours")
 	}
 	if refreshTTL < aiRefreshTokenMinTTL || refreshTTL > aiRefreshTokenMaxTTL {
 		return 0, 0, fmt.Errorf("refresh TTL must be between 1 day and 90 days")

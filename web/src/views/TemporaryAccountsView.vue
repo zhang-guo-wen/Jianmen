@@ -112,7 +112,7 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="aiDialogVisible" title="AI &#x6388;&#x6743;" width="720px" class="ai-result-dialog" destroy-on-close>
+    <el-dialog v-model="aiDialogVisible" title="AI &#x6388;&#x6743;" width="640px" class="ai-result-dialog" destroy-on-close>
       <template v-if="!aiResult">
         <el-alert title="&#x6388;&#x6743; AI &#x4F7F;&#x7528;&#x5F53;&#x524D;&#x7528;&#x6237;&#x7684;&#x8D44;&#x6E90;&#x7684;&#x6743;&#x9650;&#xFF0C;&#x8BBF;&#x95EE;&#x4EE4;&#x724C;&#x9ED8;&#x8BA4; 48 &#x5C0F;&#x65F6;&#xFF0C;&#x5237;&#x65B0;&#x4EE4;&#x724C;&#x9ED8;&#x8BA4; 30 &#x5929;&#x3002;" type="warning" show-icon :closable="false" />
         <el-form label-width="100px" class="dialog-form">
@@ -307,6 +307,8 @@ async function submitAIAuthorization() {
   submitting.value = true
   try {
     aiResult.value = await apiClient.createAIToken({
+      access_ttl_seconds: 48 * 60 * 60,
+      refresh_ttl_seconds: 30 * 24 * 60 * 60,
       expires_at: aiForm.expires_at?.toISOString(),
       permanent: aiDuration.value === 'permanent',
       remark: aiForm.remark || undefined,

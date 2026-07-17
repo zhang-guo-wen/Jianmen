@@ -111,7 +111,7 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="aiDialogVisible" title="AI &#x6388;&#x6743;" width="640px" destroy-on-close>
+    <el-dialog v-model="aiDialogVisible" title="AI &#x6388;&#x6743;" width="720px" class="ai-result-dialog" destroy-on-close>
       <template v-if="!aiResult">
         <el-alert title="&#x6388;&#x6743; AI &#x4F7F;&#x7528;&#x5F53;&#x524D;&#x7528;&#x6237;&#x7684;&#x8D44;&#x6E90;&#x7684;&#x6743;&#x9650;&#xFF0C;&#x8BBF;&#x95EE;&#x4EE4;&#x724C;&#x9ED8;&#x8BA4; 48 &#x5C0F;&#x65F6;&#xFF0C;&#x5237;&#x65B0;&#x4EE4;&#x724C;&#x9ED8;&#x8BA4; 30 &#x5929;&#x3002;" type="warning" show-icon :closable="false" />
         <el-form label-width="100px" class="dialog-form">
@@ -133,6 +133,25 @@
         <div class="prompt-card">
           <div class="prompt-title">&#x63D0;&#x793A;&#x8BCD;</div>
           <p>{{ aiResult.prompt }}</p>
+        </div>
+        <div class="ai-docs-card">
+          <div class="ai-docs-header">
+            <div>
+              <div class="prompt-title">AI &#x6587;&#x6863;</div>
+              <el-link
+                v-if="aiResult.docs_url"
+                :href="aiResult.docs_url"
+                target="_blank"
+                rel="noopener noreferrer"
+                type="primary"
+                class="ai-docs-link"
+              >{{ aiResult.docs_url }}</el-link>
+            </div>
+            <el-button v-if="aiResult.docs_content" link type="primary" @click="copyAIText(aiResult.docs_content)">&#x590D;&#x5236;&#x6587;&#x6863;</el-button>
+          </div>
+          <div class="ai-docs-scroll">
+            <pre>{{ aiResult.docs_content || '&#x6682;&#x65E0;&#x6587;&#x6863;&#x5185;&#x5BB9;' }}</pre>
+          </div>
         </div>
         <div class="copy-actions">
           <el-button type="primary" @click="copyAIText(aiResult.copy_prompt || '')">&#x590D;&#x5236;&#x6587;&#x6863;&#x8DEF;&#x5F84;&#x548C;&#x4EE4;&#x724C;</el-button>
@@ -347,5 +366,11 @@ onMounted(loadAccounts)
 .prompt-card { padding: 16px 18px; border: 1px solid var(--el-border-color); border-radius: 12px; background: linear-gradient(135deg, var(--el-fill-color-light), var(--el-color-success-light-9)); }
 .prompt-card p { margin: 8px 0 0; line-height: 1.75; color: var(--el-text-color-regular); }
 .prompt-title { font-weight: 700; }
-.copy-actions { display: flex; justify-content: center; gap: 12px; margin-top: 18px; }
+.ai-result-dialog :deep(.el-dialog__body) { max-height: calc(100vh - 220px); overflow-y: auto; }
+.ai-docs-card { margin-top: 16px; padding: 16px 18px; border: 1px solid var(--el-border-color); border-radius: 12px; background: var(--el-fill-color-light); }
+.ai-docs-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.ai-docs-link { display: block; max-width: 560px; margin-top: 6px; word-break: break-all; }
+.ai-docs-scroll { max-height: 360px; margin-top: 14px; overflow: auto; border: 1px solid var(--el-border-color-lighter); border-radius: 8px; background: var(--el-bg-color); }
+.ai-docs-scroll pre { margin: 0; padding: 14px 16px; color: var(--el-text-color-regular); font: 12px/1.7 "JetBrains Mono", "Microsoft YaHei", monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+.copy-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 12px; margin-top: 18px; }
 </style>

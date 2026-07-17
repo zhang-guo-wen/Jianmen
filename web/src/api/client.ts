@@ -127,6 +127,8 @@ export interface IssuedAIAccessToken extends AIAccessTokenRecord {
   prompt?: string;
   copy_prompt?: string;
   full_prompt?: string;
+  docs_url?: string;
+  docs_content?: string;
 }
 
 export interface UserPreferences {
@@ -251,6 +253,30 @@ export interface OnlineSessionRecord {
   operator: string;
   started_at: string;
   has_replay: boolean;
+}
+
+export interface LoginAuditRecord {
+  id: string;
+  user_id?: string;
+  username: string;
+  outcome: 'success' | 'failure' | 'blocked' | string;
+  reason?: string;
+  client_ip: string;
+  user_agent?: string;
+  created_at: string;
+}
+
+export interface OperationAuditRecord {
+  id: string;
+  actor_id: string;
+  actor_username: string;
+  action: string;
+  resource_type: string;
+  resource_id?: string;
+  resource_name?: string;
+  detail?: string;
+  client_ip?: string;
+  created_at: string;
 }
 
 export interface ConnectionPasswordRecord {
@@ -957,6 +983,10 @@ export const apiClient = {
     request<void>(`/api/online-sessions/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   getSessions: (params?: { page?: number; page_size?: number; q?: string }) =>
     request<PageResponse<SessionRecord>>(`/api/audit/ssh${buildQS(params as Record<string, string | number | undefined>)}`),
+  getLoginAuditLogs: (params?: { page?: number; page_size?: number; q?: string; outcome?: string; date?: string }) =>
+    request<PageResponse<LoginAuditRecord>>(`/api/audit/logins${buildQS(params as Record<string, string | number | undefined>)}`),
+  getOperationAuditLogs: (params?: { page?: number; page_size?: number; q?: string; action?: string; resource_type?: string; date?: string }) =>
+    request<PageResponse<OperationAuditRecord>>(`/api/audit/operations${buildQS(params as Record<string, string | number | undefined>)}`),
   getSessionMeta: (id: string | number) =>
     request<SessionMetaRecord>(
       `/api/audit/ssh/${encodeURIComponent(String(id))}`
@@ -1094,8 +1124,8 @@ export const apiClient = {
     request<void>(`/api/containers/endpoints/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   testContainerConnection: (payload: ContainerEndpointPayload) =>
     request<{ ok: boolean; message?: string; latency_ms: number }>('/api/containers/test', { method: 'POST', body: JSON.stringify(payload) }),
-  listContainers: (endpointId: string) =>
-    request<{ items: ContainerRecord[] }>(`/api/containers/endpoints/${encodeURIComponent(endpointId)}/containers`),
+  listContainers: (endpointId: string, signal?: AbortSignal) =>
+    request<{ items: ContainerRecord[] }>(`/api/containers/endpoints/${encodeURIComponent(endpointId)}/containers`, { signal }),
   getContainerLogs: (endpointId: string, containerId: string, tail = 200, signal?: AbortSignal) =>
     request<{ logs: string }>(`/api/containers/endpoints/${encodeURIComponent(endpointId)}/containers/${encodeURIComponent(containerId)}/logs?tail=${tail}`, { signal }),
 

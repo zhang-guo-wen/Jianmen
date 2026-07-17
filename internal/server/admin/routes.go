@@ -71,6 +71,8 @@ func (s *Server) routes() http.Handler {
 
 	s.muxHandle(mux, "/api/audit/ssh", s.withAuthAndUser(s.handleAuditSSH))
 	s.muxHandle(mux, "/api/audit/db", s.withAuthAndUser(s.handleAuditDB))
+	s.muxHandle(mux, "/api/audit/operations", s.withAuthAndUser(s.handleAuditOperations))
+	s.muxHandle(mux, "/api/audit/logins", s.withAuthAndUser(s.handleAuditLogins))
 	s.muxHandle(mux, "/api/audit/", s.withAuthAndUser(s.handleAuditArtifact))
 	s.muxHandle(mux, "/api/me", s.withAuthAndUser(s.handleMe))
 	s.muxHandle(mux, "/api/me/access-context", s.withAuthAndUser(s.handleMeAccessContext))

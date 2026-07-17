@@ -280,6 +280,25 @@ type AuditSessionView struct {
 	LogCount        int64  `json:"log_count"`
 }
 
+// AuditEventListParams controls operation audit log filtering and pagination.
+type AuditEventListParams struct {
+	Search       string
+	Action       string
+	ResourceType string
+	Date         string
+	Page         int
+	Size         int
+}
+
+// LoginAuditListParams controls login audit log filtering and pagination.
+type LoginAuditListParams struct {
+	Search  string
+	Outcome string
+	Date    string
+	Page    int
+	Size    int
+}
+
 // PageOpts 分页参数。
 type PageOpts struct {
 	Limit  int
@@ -390,6 +409,11 @@ type Store interface {
 	CreateAuditDBQuery(query *model.AuditDBQuery) error
 	ListAuditDBQueries(sessionID string, opts PageOpts) ([]model.AuditDBQuery, int64, error)
 	ListAuditDBQueryEvents(sessionID string) ([]model.AuditDBQuery, error)
+
+	CreateAuditEvent(event *model.AuditEvent) error
+	ListAuditEvents(params AuditEventListParams) ([]model.AuditEvent, int64, error)
+	CreateLoginAuditLog(log *model.LoginAuditLog) error
+	ListLoginAuditLogs(params LoginAuditListParams) ([]model.LoginAuditLog, int64, error)
 
 	FindUserSessionByCompactUsername(username string) (*model.UserSession, error)
 }

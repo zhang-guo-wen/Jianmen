@@ -1,6 +1,89 @@
 <template>
   <div class="view-stack audit-view">
     <el-tabs v-model="auditScope" class="page-tabs">
+      <el-tab-pane v-if="permission.canDo('audit:view')" :label="t('audit.scope.logins')" name="logins">
+        <el-alert v-if="loginAuditError" :title="loginAuditError" type="error" show-icon style="margin-bottom: 12px" />
+        <div class="page-container">
+          <DataTableCard
+            :data="loginAuditLogs"
+            :loading="loginAuditLoading"
+            :total="loginAuditTotal"
+            v-model:page="loginAuditPage"
+            v-model:page-size="loginAuditPageSize"
+            v-model:search="loginAuditKeyword"
+            :search-placeholder="t('audit.search.logins')"
+            @search="onLoginAuditSearch"
+          >
+            <template #toolbar-extra>
+              <el-select v-model="loginAuditOutcome" size="small" style="width: 110px" @change="loadLoginAuditLogs">
+                <el-option :label="t('audit.filter.all')" value="" />
+                <el-option :label="t('audit.result.success')" value="success" />
+                <el-option :label="t('audit.result.failure')" value="failure" />
+                <el-option :label="t('audit.result.blocked')" value="blocked" />
+              </el-select>
+              <el-button :loading="loginAuditLoading" :icon="Refresh" @click="loadLoginAuditLogs">{{ t('common.refresh') }}</el-button>
+            </template>
+            <el-table-column :label="t('audit.column.time')" width="175" show-overflow-tooltip class-name="col-time">
+              <template #default="{ row }">{{ formatTime(row.created_at) }}</template>
+            </el-table-column>
+            <el-table-column prop="username" :label="t('audit.column.username')" min-width="140" show-overflow-tooltip />
+            <el-table-column :label="t('audit.column.result')" width="100">
+              <template #default="{ row }">
+                <el-tag :type="loginOutcomeTag(row.outcome)" size="small" effect="plain">{{ loginOutcomeLabel(row.outcome) }}</el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column prop="reason" :label="t('audit.column.reason')" min-width="150" show-overflow-tooltip>
+              <template #default="{ row }">{{ row.reason || '-' }}</template>
+            </el-table-column>
+            <el-table-column prop="client_ip" :label="t('audit.column.client')" width="140" show-overflow-tooltip />
+            <el-table-column prop="user_agent" :label="t('audit.column.userAgent')" min-width="240" show-overflow-tooltip />
+          </DataTableCard>
+        </div>
+      </el-tab-pane>
+      <el-tab-pane v-if="permission.canDo('audit:view')" :label="t('audit.scope.operations')" name="operations">
+        <el-alert v-if="operationAuditError" :title="operationAuditError" type="error" show-icon style="margin-bottom: 12px" />
+        <div class="page-container">
+          <DataTableCard
+            :data="operationAuditLogs"
+            :loading="operationAuditLoading"
+            :total="operationAuditTotal"
+            v-model:page="operationAuditPage"
+            v-model:page-size="operationAuditPageSize"
+            v-model:search="operationAuditKeyword"
+            :search-placeholder="t('audit.search.operations')"
+            @search="onOperationAuditSearch"
+          >
+            <template #toolbar-extra>
+              <el-select v-model="operationAuditAction" size="small" style="width: 110px" @change="loadOperationAuditLogs">
+                <el-option :label="t('audit.filter.all')" value="" />
+                <el-option :label="t('audit.action.create')" value="create" />
+                <el-option :label="t('audit.action.update')" value="update" />
+                <el-option :label="t('audit.action.delete')" value="delete" />
+                <el-option :label="t('audit.action.revoke')" value="revoke" />
+                <el-option :label="t('audit.action.test')" value="test" />
+              </el-select>
+              <el-button :loading="operationAuditLoading" :icon="Refresh" @click="loadOperationAuditLogs">{{ t('common.refresh') }}</el-button>
+            </template>
+            <el-table-column :label="t('audit.column.time')" width="175" show-overflow-tooltip class-name="col-time">
+              <template #default="{ row }">{{ formatTime(row.created_at) }}</template>
+            </el-table-column>
+            <el-table-column prop="actor_username" :label="t('audit.column.operator')" width="130" show-overflow-tooltip />
+            <el-table-column :label="t('audit.column.action')" width="100">
+              <template #default="{ row }">{{ operationActionLabel(row.action) }}</template>
+            </el-table-column>
+            <el-table-column prop="resource_type" :label="t('audit.column.resource')" min-width="150" show-overflow-tooltip />
+            <el-table-column :label="t('audit.column.resourceId')" min-width="170" show-overflow-tooltip>
+              <template #default="{ row }">{{ row.resource_id || row.resource_name || '-' }}</template>
+            </el-table-column>
+            <el-table-column :label="t('audit.column.result')" width="100">
+              <template #default="{ row }">
+                <el-tag :type="operationResultTag(row)" size="small" effect="plain">{{ operationResultLabel(row) }}</el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column prop="client_ip" :label="t('audit.column.client')" width="140" show-overflow-tooltip />
+          </DataTableCard>
+        </div>
+      </el-tab-pane>
       <el-tab-pane v-if="permission.canDo('audit:view')" :label="t('audit.scope.ssh')" name="ssh">
         <el-alert v-if="sessionError" :title="sessionError" type="error" show-icon style="margin-bottom: 12px" />
         <div class="page-container">
@@ -376,12 +459,14 @@ import {
   type OnlineSessionRecord,
   type SessionCommandRecord,
   type SessionFileEventRecord,
-  type SessionRecord
+  type SessionRecord,
+  type LoginAuditRecord,
+  type OperationAuditRecord
 } from '@/api/client';
 import { useI18n } from '@/i18n';
 import { usePermissionStore } from '@/stores/permission';
 
-type AuditScope = 'ssh' | 'db' | 'online';
+type AuditScope = 'logins' | 'operations' | 'ssh' | 'db' | 'online';
 type DetailKind = '' | 'meta' | 'commands' | 'files' | 'file-summary' | 'queries' | 'replay';
 type ReplayFrame = {
   time: number;
@@ -405,6 +490,8 @@ function routeQueryValue(value: unknown): string {
 
 function permittedAuditScope(value: unknown): AuditScope {
   const requested = routeQueryValue(value);
+  if (requested === 'logins' && permission.canDo('audit:view')) return 'logins';
+  if (requested === 'operations' && permission.canDo('audit:view')) return 'operations';
   if (requested === 'online' && permission.canDo('session:view')) return 'online';
   if (requested === 'db' && permission.canDo('db:audit:view')) return 'db';
   if (requested === 'ssh' && permission.canDo('audit:view')) return 'ssh';
@@ -427,6 +514,24 @@ const sessionPageSize = ref(50);
 const sessionKeyword = ref(initialAuditScope === 'ssh' ? initialAuditKeyword : '');
 const sessionsLoading = ref(false);
 const sessionError = ref('');
+
+// Login and management operation audit state
+const loginAuditLogs = ref<LoginAuditRecord[]>([]);
+const loginAuditTotal = ref(0);
+const loginAuditPage = ref(1);
+const loginAuditPageSize = ref(50);
+const loginAuditKeyword = ref(initialAuditScope === 'logins' ? initialAuditKeyword : '');
+const loginAuditOutcome = ref('');
+const loginAuditLoading = ref(false);
+const loginAuditError = ref('');
+const operationAuditLogs = ref<OperationAuditRecord[]>([]);
+const operationAuditTotal = ref(0);
+const operationAuditPage = ref(1);
+const operationAuditPageSize = ref(50);
+const operationAuditKeyword = ref(initialAuditScope === 'operations' ? initialAuditKeyword : '');
+const operationAuditAction = ref('');
+const operationAuditLoading = ref(false);
+const operationAuditError = ref('');
 
 // ── DB connection list state ──
 const dbConnections = ref<DBConnectionRecord[]>([]);
@@ -836,6 +941,93 @@ async function loadOnlineSessions() {
   }
 }
 
+function loginOutcomeTag(outcome: unknown): 'success' | 'danger' | 'warning' | 'info' {
+  switch (String(outcome ?? '').toLowerCase()) {
+    case 'success': return 'success';
+    case 'blocked': return 'warning';
+    default: return 'danger';
+  }
+}
+
+function loginOutcomeLabel(outcome: unknown): string {
+  switch (String(outcome ?? '').toLowerCase()) {
+    case 'success': return t('audit.result.success');
+    case 'blocked': return t('audit.result.blocked');
+    default: return t('audit.result.failure');
+  }
+}
+
+function operationActionLabel(action: unknown): string {
+  const key = String(action ?? '').toLowerCase();
+  const labels: Record<string, string> = {
+    create: t('audit.action.create'),
+    update: t('audit.action.update'),
+    delete: t('audit.action.delete'),
+    revoke: t('audit.action.revoke'),
+    test: t('audit.action.test'),
+  };
+  return labels[key] || String(action || '-');
+}
+
+function operationDetail(row: OperationAuditRecord): Record<string, unknown> {
+  if (!row.detail) return {};
+  try {
+    const value = JSON.parse(row.detail) as unknown;
+    return value && typeof value === 'object' ? value as Record<string, unknown> : {};
+  } catch {
+    return {};
+  }
+}
+
+function operationResultLabel(row: OperationAuditRecord): string {
+  const result = String(operationDetail(row).result || '');
+  return result === 'success' ? t('audit.result.success') : t('audit.result.failure');
+}
+
+function operationResultTag(row: OperationAuditRecord): 'success' | 'danger' {
+  return String(operationDetail(row).result || '') === 'success' ? 'success' : 'danger';
+}
+
+async function loadLoginAuditLogs() {
+  loginAuditLoading.value = true;
+  loginAuditError.value = '';
+  try {
+    const res = await apiClient.getLoginAuditLogs({
+      page: loginAuditPage.value,
+      page_size: loginAuditPageSize.value,
+      q: loginAuditKeyword.value || undefined,
+      outcome: loginAuditOutcome.value || undefined,
+    });
+    loginAuditLogs.value = res.items ?? [];
+    loginAuditTotal.value = res.total ?? 0;
+  } catch (err) {
+    loginAuditLogs.value = [];
+    loginAuditError.value = err instanceof Error ? err.message : t('audit.error.loadLogins');
+  } finally {
+    loginAuditLoading.value = false;
+  }
+}
+
+async function loadOperationAuditLogs() {
+  operationAuditLoading.value = true;
+  operationAuditError.value = '';
+  try {
+    const res = await apiClient.getOperationAuditLogs({
+      page: operationAuditPage.value,
+      page_size: operationAuditPageSize.value,
+      q: operationAuditKeyword.value || undefined,
+      action: operationAuditAction.value || undefined,
+    });
+    operationAuditLogs.value = res.items ?? [];
+    operationAuditTotal.value = res.total ?? 0;
+  } catch (err) {
+    operationAuditLogs.value = [];
+    operationAuditError.value = err instanceof Error ? err.message : t('audit.error.loadOperations');
+  } finally {
+    operationAuditLoading.value = false;
+  }
+}
+
 async function loadSessions() {
   sessionsLoading.value = true;
   sessionError.value = '';
@@ -890,6 +1082,18 @@ function onSessionSearch(q: string) {
   sessionKeyword.value = q;
   sessionPage.value = 1;
   loadSessions();
+}
+
+function onLoginAuditSearch(q: string) {
+  loginAuditKeyword.value = q;
+  loginAuditPage.value = 1;
+  void loadLoginAuditLogs();
+}
+
+function onOperationAuditSearch(q: string) {
+  operationAuditKeyword.value = q;
+  operationAuditPage.value = 1;
+  void loadOperationAuditLogs();
 }
 
 function onDBSearch(q: string) {
@@ -1293,6 +1497,18 @@ function applyRouteAuditFilter() {
   const scope = permittedAuditScope(route.query.scope);
   const keyword = routeQueryValue(route.query.q);
   auditScope.value = scope;
+  if (scope === 'logins') {
+    loginAuditKeyword.value = keyword;
+    if (loginAuditPage.value === 1) void loadLoginAuditLogs();
+    else loginAuditPage.value = 1;
+    return;
+  }
+  if (scope === 'operations') {
+    operationAuditKeyword.value = keyword;
+    if (operationAuditPage.value === 1) void loadOperationAuditLogs();
+    else operationAuditPage.value = 1;
+    return;
+  }
   if (scope === 'online') {
     onlineKeyword.value = keyword;
     onlineResourceType.value = routeQueryValue(route.query.resource_type);
@@ -1316,7 +1532,11 @@ function applyRouteAuditFilter() {
 }
 
 onMounted(() => {
-  if (permission.canDo('audit:view')) void loadSessions();
+  if (permission.canDo('audit:view')) {
+    void loadSessions();
+    void loadLoginAuditLogs();
+    void loadOperationAuditLogs();
+  }
   if (permission.canDo('db:audit:view')) void loadDBConnections();
   if (permission.canDo('session:view')) {
     void loadOnlineSessions();
@@ -1344,6 +1564,12 @@ watch(isReplay, async (value) => {
 // Watch pagination changes for main lists
 watch([sessionPage, sessionPageSize], () => {
   if (auditScope.value === 'ssh') loadSessions();
+});
+watch([loginAuditPage, loginAuditPageSize], () => {
+  if (auditScope.value === 'logins') loadLoginAuditLogs();
+});
+watch([operationAuditPage, operationAuditPageSize], () => {
+  if (auditScope.value === 'operations') loadOperationAuditLogs();
 });
 watch([dbPage, dbPageSize], () => {
   if (auditScope.value === 'db') loadDBConnections();

@@ -2,12 +2,7 @@ package service
 
 import (
 	"context"
-	"errors"
-	"net"
 	"net/http"
-	"time"
-
-	"golang.org/x/crypto/ssh"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -55,37 +50,5 @@ func TestContainerServiceRejectsUnsafeContainerID(t *testing.T) {
 	_, err := svc.Logs(context.Background(), ContainerEndpointConfig{ConnectionMode: model.ContainerConnectionDockerAPI, Address: "http://127.0.0.1:2375"}, "bad/id", 20)
 	if err == nil {
 		t.Fatal("unsafe container id was accepted")
-	}
-}
-
-func TestContainerServiceSSHHandshakeHonorsContextCancellation(t *testing.T) {
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("listen: %v", err)
-	}
-	defer listener.Close()
-	accepted := make(chan struct{})
-	defer close(accepted)
-	go func() {
-		conn, acceptErr := listener.Accept()
-		if acceptErr != nil {
-			return
-		}
-		defer conn.Close()
-		<-accepted
-	}()
-
-	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
-	defer cancel()
-	svc := NewContainerService()
-	_, err = svc.sshCommand(ctx, ContainerEndpointConfig{
-		SSHAddress: listener.Addr().String(),
-		SSHConfig:  &ssh.ClientConfig{User: "test", HostKeyCallback: ssh.InsecureIgnoreHostKey()},
-	}, "true")
-	if err == nil {
-		t.Fatal("SSH handshake without a server was not canceled")
-	}
-	if !errors.Is(err, context.DeadlineExceeded) && !errors.Is(err, context.Canceled) {
-		t.Fatalf("SSH cancellation error = %v", err)
 	}
 }

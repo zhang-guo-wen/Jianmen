@@ -68,7 +68,7 @@
               </el-input>
             </div>
           </div>
-          <pre v-if="activeLogTab === 'logs'" v-loading="logsLoading" class="log-viewer">{{ filteredLogs || (logSearch ? '没有匹配的日志' : '暂无日志输出') }}</pre>
+          <pre v-if="activeLogTab === 'logs'" ref="logViewer" v-loading="logsLoading" class="log-viewer">{{ filteredLogs || (logSearch ? '没有匹配的日志' : '暂无日志输出') }}</pre>
           <div v-else class="container-details">
             <div class="info-tile"><span>名称</span><strong>{{ selectedContainer.name || selectedContainer.id }}</strong></div>
             <div class="info-tile"><span>容器 ID</span><strong>{{ selectedContainer.id }}</strong></div>
@@ -176,7 +176,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { ArrowRight, Box, Plus, Refresh, Search } from '@element-plus/icons-vue'
 import FormDialog from '@/components/FormDialog.vue'
@@ -196,6 +196,9 @@ const selectedContainer = ref<ContainerRecord | null>(null)
 const logs = ref('')
 const logSearch = ref('')
 const activeLogTab = ref<'logs' | 'details'>('logs')
+const logViewer = ref<HTMLElement | null>(null)
+let logPollingTimer: ReturnType<typeof setInterval> | null = null
+const logPollingInterval = 3000
 const logsLoading = ref(false)
 const loading = ref(false)
 const dialogVisible = ref(false)
@@ -237,6 +240,7 @@ async function loadEndpoints() {
     hosts.value = hostPage.items
     groups.value = (resourceGroups.items || []).map(item => item.name).filter(Boolean)
     if (selectedEndpoint.value && !endpoints.value.some(item => item.id === selectedEndpoint.value?.id)) {
+      stopLogPolling()
       selectedEndpoint.value = null
       selectedContainer.value = null
     }
@@ -248,6 +252,7 @@ async function loadEndpoints() {
 }
 
 async function selectEndpoint(endpoint: ContainerEndpointView) {
+  stopLogPolling()
   selectedEndpoint.value = endpoint
   selectedContainer.value = null
   logs.value = ''
@@ -280,21 +285,54 @@ function selectContainer(endpoint: ContainerEndpointView, container: ContainerRe
   activeLogTab.value = 'logs'
   logSearch.value = ''
   void refreshLogs()
+  startLogPolling()
 }
 
 async function refreshLogs() {
-  if (!selectedEndpoint.value?.id || !selectedContainer.value?.id) return
+  const endpointId = selectedEndpoint.value?.id
+  const containerId = selectedContainer.value?.id
+  if (!endpointId || !containerId) return
   logsLoading.value = true
   try {
-    const result = await apiClient.getContainerLogs(selectedEndpoint.value.id, selectedContainer.value.id)
-    logs.value = result.logs || ''
+    const result = await apiClient.getContainerLogs(endpointId, containerId)
+    if (selectedEndpoint.value?.id === endpointId && selectedContainer.value?.id === containerId) {
+      logs.value = result.logs || ''
+      scrollLogsToBottom()
+    }
   } catch (error: any) {
-    logs.value = error.message || '读取日志失败'
+    if (selectedEndpoint.value?.id === endpointId && selectedContainer.value?.id === containerId) {
+      logs.value = error.message || '读取日志失败'
+      scrollLogsToBottom()
+    }
   } finally {
     logsLoading.value = false
   }
 }
 
+function scrollLogsToBottom() {
+  void nextTick(() => {
+    if (logViewer.value) {
+      logViewer.value.scrollTop = logViewer.value.scrollHeight
+    }
+  })
+}
+
+function stopLogPolling() {
+  if (logPollingTimer !== null) {
+    clearInterval(logPollingTimer)
+    logPollingTimer = null
+  }
+}
+
+function startLogPolling() {
+  stopLogPolling()
+  if (!selectedContainer.value) return
+  logPollingTimer = setInterval(() => {
+    if (activeLogTab.value === 'logs' && !logsLoading.value) {
+      void refreshLogs()
+    }
+  }, logPollingInterval)
+}
 
 function openCreate() {
   Object.assign(form, emptyForm())
@@ -468,6 +506,15 @@ function endpointTarget(endpoint: ContainerEndpointView) {
   return `${host} / ${account}`
 }
 
+watch(activeLogTab, (tab) => {
+  if (tab === 'logs' && selectedContainer.value) {
+    scrollLogsToBottom()
+    startLogPolling()
+  } else {
+    stopLogPolling()
+  }
+})
+
 function connectionModeLabel(mode: string) {
   if (mode === 'docker_api') return 'Docker Engine API'
   if (mode === 'containerd') return 'SSH + CRI'
@@ -475,6 +522,7 @@ function connectionModeLabel(mode: string) {
 }
 
 onMounted(() => void loadEndpoints())
+onBeforeUnmount(stopLogPolling)
 </script>
 
 <style scoped>

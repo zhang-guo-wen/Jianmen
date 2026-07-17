@@ -12,6 +12,8 @@ type userPreferenceResponse struct {
 	Theme              string `json:"theme"`
 	SSHClient          string `json:"ssh_client"`
 	SSHClientPath      string `json:"ssh_client_path"`
+	DatabaseClient     string `json:"database_client"`
+	DatabaseClientPath string `json:"database_client_path"`
 	TerminalFontFamily string `json:"terminal_font_family"`
 	TerminalFontSize   int    `json:"terminal_font_size"`
 }
@@ -20,6 +22,8 @@ type userPreferenceRequest struct {
 	Theme              *string `json:"theme"`
 	SSHClient          *string `json:"ssh_client"`
 	SSHClientPath      *string `json:"ssh_client_path"`
+	DatabaseClient     *string `json:"database_client"`
+	DatabaseClientPath *string `json:"database_client_path"`
 	TerminalFontFamily *string `json:"terminal_font_family"`
 	TerminalFontSize   *int    `json:"terminal_font_size"`
 }
@@ -84,6 +88,12 @@ func applyUserPreferenceRequest(preference *model.UserPreference, request userPr
 	if request.SSHClientPath != nil {
 		preference.SSHClientPath = strings.TrimSpace(*request.SSHClientPath)
 	}
+	if request.DatabaseClient != nil {
+		preference.DatabaseClient = strings.ToLower(strings.TrimSpace(*request.DatabaseClient))
+	}
+	if request.DatabaseClientPath != nil {
+		preference.DatabaseClientPath = strings.TrimSpace(*request.DatabaseClientPath)
+	}
 	if request.TerminalFontFamily != nil {
 		preference.TerminalFontFamily = strings.TrimSpace(*request.TerminalFontFamily)
 	}
@@ -101,10 +111,14 @@ func validateUserPreference(preference model.UserPreference) string {
 	if !validClients[preference.SSHClient] {
 		return "unsupported ssh client"
 	}
+	validDatabaseClients := map[string]bool{"": true, "dbeaver": true}
+	if !validDatabaseClients[preference.DatabaseClient] {
+		return "unsupported database client"
+	}
 	if preference.TerminalFontSize < 10 || preference.TerminalFontSize > 30 {
 		return "terminal_font_size must be between 10 and 30"
 	}
-	if len(preference.SSHClientPath) > 512 || len(preference.TerminalFontFamily) > 128 {
+	if len(preference.SSHClientPath) > 512 || len(preference.DatabaseClientPath) > 512 || len(preference.TerminalFontFamily) > 128 {
 		return "preference value is too long"
 	}
 	return ""
@@ -115,6 +129,8 @@ func userPreferenceView(preference model.UserPreference) userPreferenceResponse 
 		Theme:              preference.Theme,
 		SSHClient:          preference.SSHClient,
 		SSHClientPath:      preference.SSHClientPath,
+		DatabaseClient:     preference.DatabaseClient,
+		DatabaseClientPath: preference.DatabaseClientPath,
 		TerminalFontFamily: preference.TerminalFontFamily,
 		TerminalFontSize:   preference.TerminalFontSize,
 	}

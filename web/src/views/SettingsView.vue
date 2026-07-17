@@ -32,16 +32,45 @@
             <el-option v-for="option in SSH_CLIENT_OPTIONS" :key="option.command" :label="option.label" :value="option.command" />
           </el-select>
         </el-form-item>
-        <el-form-item v-if="form.ssh_client && form.ssh_client !== 'default'" label="客户端路径" required :error="clientPathError">
+        <el-form-item v-if="form.ssh_client && form.ssh_client !== 'default'" label="客户端路径" required :error="sshClientPathError">
           <el-input v-model="form.ssh_client_path" placeholder="请输入完整绝对路径，如 C:\Program Files\PuTTY\putty.exe">
-            <template #append><el-button @click="pickClientFile">选择文件</el-button></template>
+            <template #append><el-button @click="pickExecutable('ssh')">选择文件</el-button></template>
           </el-input>
           <div class="field-help">程序路径必填，不提供默认值；浏览器无法读取完整路径时，请手动粘贴。</div>
         </el-form-item>
-        <el-alert v-if="registrationCommand" type="info" :closable="false" show-icon>
-          <template #title>请使用管理员权限在cmd终端执行下面命令，授权打开本地SSH客户端</template>
-          <div class="command-box"><code>{{ registrationCommand }}</code></div>
-          <el-button link type="primary" @click="copyRegistrationCommand">复制管理员注册命令</el-button>
+        <el-alert v-if="sshRegistrationCommand" type="info" :closable="false" show-icon>
+          <template #title>请使用管理员权限在 CMD 中执行下面命令，授权打开本地 SSH 客户端</template>
+          <div class="command-box"><code>{{ sshRegistrationCommand }}</code></div>
+          <el-button link type="primary" @click="copyRegistrationCommand(sshRegistrationCommand)">复制管理员注册命令</el-button>
+        </el-alert>
+      </el-form>
+    </el-card>
+
+    <el-card class="settings-card client-card" shadow="never">
+      <template #header>
+        <div class="card-heading">
+          <strong>本地数据库客户端</strong>
+          <el-tag :type="form.database_client ? 'success' : 'info'" effect="light">
+            {{ form.database_client ? '已配置' : '未配置' }}
+          </el-tag>
+        </div>
+      </template>
+      <el-form label-position="top">
+        <el-form-item label="默认客户端">
+          <el-select v-model="form.database_client" placeholder="选择本地数据库客户端" clearable style="width: 100%">
+            <el-option v-for="option in DATABASE_CLIENT_OPTIONS" :key="option.command" :label="option.label" :value="option.command" />
+          </el-select>
+        </el-form-item>
+        <el-form-item v-if="form.database_client" label="客户端路径" required :error="databaseClientPathError">
+          <el-input v-model="form.database_client_path" placeholder="请输入完整绝对路径，如 C:\Program Files\DBeaver\dbeaver.exe">
+            <template #append><el-button @click="pickExecutable('database')">选择文件</el-button></template>
+          </el-input>
+          <div class="field-help">注册 jianmen-db:// 协议后，网页可携带临时堡垒机凭据启动 DBeaver。</div>
+        </el-form-item>
+        <el-alert v-if="databaseRegistrationCommand" type="info" :closable="false" show-icon>
+          <template #title>请使用管理员权限在 CMD 中执行下面命令，授权打开 DBeaver</template>
+          <div class="command-box"><code>{{ databaseRegistrationCommand }}</code></div>
+          <el-button link type="primary" @click="copyRegistrationCommand(databaseRegistrationCommand)">复制管理员注册命令</el-button>
         </el-alert>
       </el-form>
     </el-card>
@@ -57,6 +86,7 @@
 import { computed, onMounted, reactive, watch } from 'vue';
 import { ElMessage } from 'element-plus';
 
+import { buildDatabaseProtocolRegistrationCommand, DATABASE_CLIENT_OPTIONS } from '@/config/databaseClients';
 import { buildSSHProtocolRegistrationCommand, isAbsoluteExecutablePath, SSH_CLIENT_OPTIONS } from '@/config/sshClients';
 import { usePreferencesStore } from '@/stores/preferences';
 import { writeClipboardText } from '@/utils/clipboard';
@@ -69,16 +99,16 @@ const themeOptions = [
   { label: '深色', value: 'dark' },
 ];
 
-const clientPathError = computed(() => {
-  if (!form.ssh_client || form.ssh_client === 'default') return '';
-  if (!form.ssh_client_path.trim()) return '请输入本地 SSH 客户端的程序路径';
-  if (!isAbsoluteExecutablePath(form.ssh_client_path)) return '请输入完整的 Windows 绝对路径，例如 C:\\Program Files\\PuTTY\\putty.exe';
-  return '';
-});
-const registrationCommand = computed(() => buildSSHProtocolRegistrationCommand(form.ssh_client, form.ssh_client_path));
+const sshClientPathError = computed(() => executablePathError(form.ssh_client, form.ssh_client_path, 'SSH', 'C:\\Program Files\\PuTTY\\putty.exe'));
+const databaseClientPathError = computed(() => executablePathError(form.database_client, form.database_client_path, '数据库', 'C:\\Program Files\\DBeaver\\dbeaver.exe'));
+const sshRegistrationCommand = computed(() => buildSSHProtocolRegistrationCommand(form.ssh_client, form.ssh_client_path));
+const databaseRegistrationCommand = computed(() => buildDatabaseProtocolRegistrationCommand(form.database_client, form.database_client_path));
 
 watch(() => form.ssh_client, (client) => {
-  if (client === 'default') form.ssh_client_path = '';
+  if (client === 'default' || !client) form.ssh_client_path = '';
+});
+watch(() => form.database_client, (client) => {
+  if (!client) form.database_client_path = '';
 });
 
 onMounted(async () => {
@@ -90,9 +120,17 @@ onMounted(async () => {
   }
 });
 
+function executablePathError(client: string, path: string, label: string, example: string): string {
+  if (!client || client === 'default') return '';
+  if (!path.trim()) return `请输入本地${label}客户端的程序路径`;
+  if (!isAbsoluteExecutablePath(path)) return `请输入完整的 Windows 绝对路径，例如 ${example}`;
+  return '';
+}
+
 async function save() {
-  if (clientPathError.value) {
-    ElMessage.warning(clientPathError.value);
+  const error = sshClientPathError.value || databaseClientPathError.value;
+  if (error) {
+    ElMessage.warning(error);
     return;
   }
   try {
@@ -104,22 +142,24 @@ async function save() {
   }
 }
 
-function pickClientFile() {
+function pickExecutable(type: 'ssh' | 'database') {
   const input = document.createElement('input');
   input.type = 'file';
   input.accept = '.exe';
   input.onchange = event => {
     const file = (event.target as HTMLInputElement).files?.[0];
     if (!file) return;
-    form.ssh_client_path = (file as File & { path?: string }).path || file.name;
+    const path = (file as File & { path?: string }).path || file.name;
+    if (type === 'ssh') form.ssh_client_path = path;
+    else form.database_client_path = path;
   };
   input.click();
 }
 
-async function copyRegistrationCommand() {
-  if (!registrationCommand.value) return;
+async function copyRegistrationCommand(command: string) {
+  if (!command) return;
   try {
-    await writeClipboardText(registrationCommand.value);
+    await writeClipboardText(command);
     ElMessage.success('注册命令已复制，请在管理员 CMD 中执行一次');
   } catch {
     ElMessage.warning('复制失败，请手动复制命令');
@@ -128,7 +168,7 @@ async function copyRegistrationCommand() {
 </script>
 
 <style scoped>
-.settings-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(320px, .9fr); gap: 16px; overflow: auto; padding-bottom: 4px; }
+.settings-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; overflow: auto; padding-bottom: 4px; }
 .settings-card { border: 1px solid var(--color-border); border-radius: 18px; background: var(--color-card); }
 .form-pair { display: grid; grid-template-columns: minmax(0, 1fr) 150px; gap: 14px; }
 :deep(.theme-segmented .el-segmented__item) { min-width: 88px; padding: 0 14px; white-space: nowrap; }

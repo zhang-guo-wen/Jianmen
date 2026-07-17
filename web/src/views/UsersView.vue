@@ -35,11 +35,11 @@
           <el-tag v-else type="warning" size="small">内置</el-tag>
         </template>
       </el-table-column>
-      <el-table-column label="???" width="170">
+      <el-table-column label="&#x6709;&#x6548;&#x671F;" width="170">
         <template #default="{ row }">
-          <span v-if="row.is_super_admin" class="text-muted">??</span>
+          <span v-if="row.is_super_admin" class="text-muted">&#x957F;&#x671F;</span>
           <span v-else-if="row.expires_at" :class="{ 'text-danger': new Date(row.expires_at).getTime() <= Date.now() }">{{ formatTime(row.expires_at) }}</span>
-          <span v-else>??</span>
+          <span v-else>&#x957F;&#x671F;</span>
         </template>
       </el-table-column>
       <el-table-column :label="t('users.lastLogin')" width="140">
@@ -166,10 +166,10 @@
             <el-form-item :label="t('users.email')" prop="email">
               <el-input v-model="form.email" type="email" placeholder="user@example.com" />
             </el-form-item>
-            <el-form-item label="???">
+            <el-form-item label="&#x6709;&#x6548;&#x671F;">
               <div class="user-expiry-control">
-                <el-switch v-model="form.permanent" active-text="????" inactive-text="?????" />
-                <el-date-picker v-if="!form.permanent" v-model="form.expires_at" type="datetime" placeholder="????" />
+                <el-switch v-model="form.permanent" active-text="&#x957F;&#x671F;&#x6709;&#x6548;" inactive-text="&#x4E00;&#x5E74;&#x540E;&#x5230;&#x671F;" />
+                <el-date-picker v-if="!form.permanent" v-model="form.expires_at" type="datetime" placeholder="&#x5230;&#x671F;&#x65F6;&#x95F4;" />
               </div>
             </el-form-item>
           </el-collapse-item>

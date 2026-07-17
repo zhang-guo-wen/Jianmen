@@ -31,7 +31,7 @@
         <AccountGroupsContent v-if="activeTab === 'accountGroups'" />
       </el-tab-pane>
 
-      <el-tab-pane label="????" name="temporaryAccounts">
+      <el-tab-pane label="&#x4E34;&#x65F6;&#x7528;&#x6237;" name="temporaryAccounts">
         <TemporaryAccountsView v-if="activeTab === 'temporaryAccounts'" />
       </el-tab-pane>
     </el-tabs>

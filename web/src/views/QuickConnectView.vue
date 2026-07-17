@@ -17,6 +17,24 @@
                 </template>
               </el-input>
             </div>
+            <div class="quick-filter-bar">
+              <div class="quick-filter-options" :class="{ 'is-expanded': sshFiltersExpanded }">
+                <el-button size="small" :type="sshFilter === 'all' ? 'primary' : undefined" @click="setSSHFilter('all')">全部</el-button>
+                <el-button size="small" :type="sshFilter === 'popular' ? 'primary' : undefined" @click="setSSHFilter('popular')">常用</el-button>
+                <el-button
+                  v-for="option in visibleSSHGroupOptions"
+                  :key="option.value"
+                  size="small"
+                  :type="sshFilter === option.value ? 'primary' : undefined"
+                  @click="setSSHFilter(option.value)"
+                >
+                  {{ option.label }}
+                </el-button>
+              </div>
+              <el-button v-if="sshGroupOptions.length > filterPreviewLimit" link size="small" class="quick-filter-more" @click="sshFiltersExpanded = !sshFiltersExpanded">
+                {{ sshFiltersExpanded ? '收起' : '更多' }}
+              </el-button>
+            </div>
             <div class="page-card__spacer"></div>
             <div class="page-card__actions">
               <el-button :loading="sshLoading" :icon="Refresh" @click="loadTargets">
@@ -35,8 +53,8 @@
               :title="sshError"
             />
 
-            <div v-if="targets.length" class="connection-card-grid">
-              <article v-for="target in targets" :key="targetKey(target)" class="connection-card host-connection-card">
+            <div v-if="displayedTargets.length" class="connection-card-grid">
+              <article v-for="target in displayedTargets" :key="targetKey(target)" class="connection-card host-connection-card">
                 <div class="connection-card__summary">
                   <div class="protocol-mark">SSH</div>
                   <div class="connection-card__identity">
@@ -87,12 +105,12 @@
             <el-empty v-else-if="!sshLoading" description="暂无可连接的主机账户" />
           </div>
 
-          <div v-if="targetTotal > 0" class="page-card__footer">
+          <div v-if="sshFilteredTotal > 0" class="page-card__footer">
             <el-pagination
               v-model:current-page="targetPage"
               v-model:page-size="targetPageSize"
               :page-sizes="[20, 50, 100]"
-              :total="targetTotal"
+              :total="sshFilteredTotal"
               layout="total, sizes, prev, pager, next"
               size="small"
               background
@@ -116,6 +134,24 @@
                   <el-icon><Search /></el-icon>
                 </template>
               </el-input>
+            </div>
+            <div class="quick-filter-bar">
+              <div class="quick-filter-options" :class="{ 'is-expanded': dbFiltersExpanded }">
+                <el-button size="small" :type="dbFilter === 'all' ? 'primary' : undefined" @click="setDBFilter('all')">全部</el-button>
+                <el-button size="small" :type="dbFilter === 'popular' ? 'primary' : undefined" @click="setDBFilter('popular')">常用</el-button>
+                <el-button
+                  v-for="option in visibleDBGroupOptions"
+                  :key="option.value"
+                  size="small"
+                  :type="dbFilter === option.value ? 'primary' : undefined"
+                  @click="setDBFilter(option.value)"
+                >
+                  {{ option.label }}
+                </el-button>
+              </div>
+              <el-button v-if="dbGroupOptions.length > filterPreviewLimit" link size="small" class="quick-filter-more" @click="dbFiltersExpanded = !dbFiltersExpanded">
+                {{ dbFiltersExpanded ? '收起' : '更多' }}
+              </el-button>
             </div>
             <div class="page-card__spacer"></div>
             <div class="page-card__actions">
@@ -261,12 +297,14 @@ const sshKeyword = ref('');
 const sshLoading = ref(false);
 const sshError = ref('');
 const targets = ref<TargetRecord[]>([]);
-const targetTotal = ref(0);
 const targetPage = ref(1);
 const targetPageSize = ref(50);
 const hostMeta = ref<Record<string, HostMeta>>({});
 const targetConnectionStates = reactive<Record<string, SSHConnectionState>>({});
 const targetConnectionRequests = new Map<string, Promise<SSHConnectionState>>();
+const sshUsageCounts = ref<Record<string, number>>({});
+const sshFilter = ref('all');
+const sshFiltersExpanded = ref(false);
 
 // DB state
 const dbSearchInput = ref('');
@@ -275,6 +313,9 @@ const dbLoading = ref(false);
 const dbError = ref('');
 const dbAccounts = ref<QuickDBTarget[]>([]);
 const dbConnectionStates = reactive<Record<string, { loading: boolean }>>({});
+const dbUsageCounts = ref<Record<string, number>>({});
+const dbFilter = ref('all');
+const dbFiltersExpanded = ref(false);
 const dbPage = ref(1);
 const dbPageSize = ref(50);
 
@@ -337,22 +378,108 @@ function connectionAddress(target: TargetRecord): string {
   return `${state.host}:${state.port}`;
 }
 
+const filterPreviewLimit = 6;
+
+async function fetchAllPages<T>(fetchPage: (page: number, pageSize: number) => Promise<PageResponse<T>>): Promise<T[]> {
+  const pageSize = 200;
+  const items: T[] = [];
+  let page = 1;
+  let total = 0;
+  do {
+    const response = await fetchPage(page, pageSize);
+    items.push(...(response.items ?? []));
+    total = response.total ?? items.length;
+    page += 1;
+    if (!response.items?.length) break;
+  } while (items.length < total);
+  return items;
+}
+
+function usageKey(targetName: string, accountName: string): string {
+  return `${String(targetName || '').trim().toLowerCase()}\u0000${String(accountName || '').trim().toLowerCase()}`;
+}
+
+function sshUsageCount(target: TargetRecord): number {
+  return sshUsageCounts.value[usageKey(quickHostName(target), accountDisplayName(target))] || 0;
+}
+
+function dbUsageCount(account: QuickDBTarget): number {
+  return dbUsageCounts.value[usageKey(account._instance_name || '', account.username || '')] || 0;
+}
+
+const sshGroupOptions = computed(() => {
+  const groups = new Map<string, number>();
+  targets.value.forEach(target => {
+    const group = quickHostGroup(target);
+    groups.set(group, (groups.get(group) || 0) + sshUsageCount(target));
+  });
+  return Array.from(groups, ([label, count]) => ({ label, value: label, count }))
+    .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label, 'zh-CN'));
+});
+
+const visibleSSHGroupOptions = computed(() => {
+  if (sshFiltersExpanded.value) return sshGroupOptions.value;
+  const options = sshGroupOptions.value.slice(0, filterPreviewLimit);
+  if (sshFilter.value !== 'all' && sshFilter.value !== 'popular' && !options.some(option => option.value === sshFilter.value)) {
+    const selected = sshGroupOptions.value.find(option => option.value === sshFilter.value);
+    if (selected) return [selected, ...options.slice(0, filterPreviewLimit - 1)];
+  }
+  return options;
+});
+
+const sshFilteredTargets = computed(() => {
+  let items = targets.value;
+  if (sshFilter.value !== 'all' && sshFilter.value !== 'popular') {
+    items = items.filter(target => quickHostGroup(target) === sshFilter.value);
+  }
+  if (sshFilter.value === 'popular') {
+    items = [...items].sort((a, b) => sshUsageCount(b) - sshUsageCount(a) || quickHostName(a).localeCompare(quickHostName(b), 'zh-CN'));
+  }
+  return items;
+});
+
+const sshFilteredTotal = computed(() => sshFilteredTargets.value.length);
+const displayedTargets = computed(() => {
+  const start = (targetPage.value - 1) * targetPageSize.value;
+  return sshFilteredTargets.value.slice(start, start + targetPageSize.value);
+});
+
+async function loadSSHUsage() {
+  sshUsageCounts.value = {};
+  if (!permission.canDo('audit:view')) return;
+  try {
+    const sessions = await fetchAllPages(page => apiClient.getSessions({ page, page_size: 200 }));
+    const counts: Record<string, number> = {};
+    sessions.forEach(session => {
+      const key = usageKey(String(session.target_name || session.target_address || ''), String(session.account_name || session.account_username || ''));
+      counts[key] = (counts[key] || 0) + 1;
+    });
+    sshUsageCounts.value = counts;
+  } catch {
+    // Audit permission or storage may be unavailable; group filters still work.
+  }
+}
+
+function setSSHFilter(value: string) {
+  sshFilter.value = value;
+  targetPage.value = 1;
+}
+
 async function loadTargets() {
   sshLoading.value = true;
   sshError.value = '';
   try {
-    const res: PageResponse<TargetRecord> = await apiClient.getTargets({
-      page: targetPage.value,
-      page_size: targetPageSize.value,
+    const items = await fetchAllPages(page => apiClient.getTargets({
+      page,
+      page_size: 200,
       q: sshKeyword.value.trim() || undefined,
       connectable: true,
-    });
-    const items = res.items ?? [];
+    }));
     items.forEach(initializeConnectionState);
     targets.value = items;
-    targetTotal.value = res.total ?? 0;
     await loadHostMeta();
-    void hydrateConnectionInfo(targets.value);
+    await loadSSHUsage();
+    void hydrateConnectionInfo(displayedTargets.value);
   } catch (error) {
     sshError.value = error instanceof Error ? error.message : '无法加载主机账号';
     ElMessage.error(sshError.value);
@@ -442,6 +569,7 @@ async function retryConnectionInfo(target: TargetRecord) {
 function onSSHSearch(query: string) {
   sshSearchInput.value = query;
   sshKeyword.value = query;
+  sshFilter.value = 'all';
   targetPage.value = 1;
   loadTargets();
 }
@@ -511,8 +639,8 @@ async function loadDBAccounts() {
     const all: QuickDBTarget[] = [];
     for (const inst of insts) {
       if (inst.status === 'disabled') continue;
-      const accRes = await apiClient.getDBAccounts(String(inst.id), { page: 1, page_size: 999, connectable: true });
-      for (const account of accRes.items ?? []) {
+      const accounts = await fetchAllPages(page => apiClient.getDBAccounts(String(inst.id), { page, page_size: 200, connectable: true }));
+      for (const account of accounts) {
         all.push({
           ...account,
           _instance_name: inst.name,
@@ -525,6 +653,7 @@ async function loadDBAccounts() {
       }
     }
     dbAccounts.value = all;
+    await loadDBUsage();
   } catch (error) {
     dbError.value = error instanceof Error ? error.message : '无法加载数据库账号';
     ElMessage.error(dbError.value);
@@ -543,12 +672,64 @@ const dbFiltered = computed(() => {
   );
 });
 
-const dbTotal = computed(() => dbFiltered.value.length);
+const dbGroupOptions = computed(() => {
+  const groups = new Map<string, number>();
+  dbAccounts.value.forEach(account => {
+    const group = databaseGroup(account);
+    groups.set(group, (groups.get(group) || 0) + dbUsageCount(account));
+  });
+  return Array.from(groups, ([label, count]) => ({ label, value: label, count }))
+    .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label, 'zh-CN'));
+});
+
+const visibleDBGroupOptions = computed(() => {
+  if (dbFiltersExpanded.value) return dbGroupOptions.value;
+  const options = dbGroupOptions.value.slice(0, filterPreviewLimit);
+  if (dbFilter.value !== 'all' && dbFilter.value !== 'popular' && !options.some(option => option.value === dbFilter.value)) {
+    const selected = dbGroupOptions.value.find(option => option.value === dbFilter.value);
+    if (selected) return [selected, ...options.slice(0, filterPreviewLimit - 1)];
+  }
+  return options;
+});
+
+const dbQuickFiltered = computed(() => {
+  let items = dbFiltered.value;
+  if (dbFilter.value !== 'all' && dbFilter.value !== 'popular') {
+    items = items.filter(account => databaseGroup(account) === dbFilter.value);
+  }
+  if (dbFilter.value === 'popular') {
+    items = [...items].sort((a, b) => dbUsageCount(b) - dbUsageCount(a) || String(a._instance_name || '').localeCompare(String(b._instance_name || ''), 'zh-CN'));
+  }
+  return items;
+});
+
+const dbTotal = computed(() => dbQuickFiltered.value.length);
 
 const displayedDBAccounts = computed(() => {
   const start = (dbPage.value - 1) * dbPageSize.value;
-  return dbFiltered.value.slice(start, start + dbPageSize.value);
+  return dbQuickFiltered.value.slice(start, start + dbPageSize.value);
 });
+
+async function loadDBUsage() {
+  dbUsageCounts.value = {};
+  if (!permission.canDo('db:audit:view')) return;
+  try {
+    const connections = await fetchAllPages(page => apiClient.getDBConnections({ page, page_size: 200 }));
+    const counts: Record<string, number> = {};
+    connections.forEach(connection => {
+      const key = usageKey(String(connection.target_name || connection.upstream_addr || ''), String(connection.account_name || connection.username || ''));
+      counts[key] = (counts[key] || 0) + 1;
+    });
+    dbUsageCounts.value = counts;
+  } catch {
+    // Audit permission or storage may be unavailable; group filters still work.
+  }
+}
+
+function setDBFilter(value: string) {
+  dbFilter.value = value;
+  dbPage.value = 1;
+}
 
 function databaseTargetKey(account: QuickDBTarget): string {
   return String(account.id || `${account._instance_name || ''}-${account.username || ''}`);
@@ -579,6 +760,7 @@ function databaseProtocolLabel(protocol?: string): string {
 function onDBSearch(query: string) {
   dbSearchInput.value = query;
   dbKeyword.value = query;
+  dbFilter.value = 'all';
   dbPage.value = 1;
 }
 
@@ -635,7 +817,9 @@ function openDBConfig(account: QuickDBTarget) {
   configVisible.value = true;
 }
 
-watch([targetPage, targetPageSize], () => loadTargets());
+watch([targetPage, targetPageSize, sshFilter], () => {
+  void hydrateConnectionInfo(displayedTargets.value);
+});
 
 watch(activeTab, tab => {
   if (tab === 'db' && permission.canDo('db:connect') && dbAccounts.value.length === 0) {
@@ -658,6 +842,44 @@ onMounted(() => {
 .quick-card-page {
   position: relative;
 }
+
+.quick-filter-bar {
+  display: flex;
+  align-items: center;
+  flex: 1 1 auto;
+  gap: 6px;
+  min-width: 0;
+}
+
+.quick-filter-options {
+  display: flex;
+  flex: 1 1 auto;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.quick-filter-options.is-expanded {
+  flex-wrap: wrap;
+  overflow: visible;
+  white-space: normal;
+}
+
+.quick-filter-options .el-button,
+.quick-filter-more {
+  flex: 0 0 auto;
+  margin: 0;
+}
+
+.quick-filter-options .el-button {
+  padding-inline: 9px;
+}
+
+.quick-filter-more {
+  padding-inline: 4px;
+}
+
 
 .quick-card-body {
   padding: 18px;
@@ -816,6 +1038,10 @@ onMounted(() => {
 }
 
 @media (max-width: 780px) {
+  .quick-filter-bar {
+    width: 100%;
+  }
+
   .quick-card-body {
     padding: 12px;
   }

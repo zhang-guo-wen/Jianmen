@@ -21,7 +21,7 @@
         <el-table-column label="&#x7C7B;&#x578B;" width="100">
           <template #default="{ row }">
             <el-tag :type="row.type === 'ai_user' ? 'success' : 'warning'" size="small">
-              {{ row.type === 'ai_user' ? 'AI 用户' : '临时用户' }}
+              {{ row.type === 'ai_user' ? 'AI \u7528\u6237' : '\u4e34\u65f6\u6388\u6743' }}
             </el-tag>
           </template>
         </el-table-column>
@@ -84,7 +84,8 @@
         <el-form-item label="&#x6709;&#x6548;&#x671F;" required>
           <div class="expiry-row">
             <el-segmented v-model="temporaryDuration" :options="temporaryDurations" @change="applyTemporaryDuration" />
-            <el-date-picker v-model="temporaryForm.expires_at" type="datetime" placeholder="&#x9009;&#x62E9;&#x5230;&#x671F;&#x65F6;&#x95F4;" :disabled-date="disablePastDate" />
+            <el-date-picker v-model="temporaryForm.expires_at" type="datetime" placeholder="&#x9009;&#x62E9;&#x5230;&#x671F;&#x65F6;&#x95F4;" :disabled-date="disablePastDate" @change="handleTemporaryExpiryChange" />
+          <el-alert v-if="temporaryExpiryError" :title="temporaryExpiryError" type="warning" show-icon :closable="false" class="expiry-warning" />
           </div>
         </el-form-item>
         <el-form-item label="&#x5907;&#x6CE8;">
@@ -93,11 +94,11 @@
       </el-form>
       <template #footer>
         <el-button @click="temporaryDialogVisible = false">&#x53D6;&#x6D88;</el-button>
-        <el-button type="primary" :loading="submitting" @click="submitTemporaryAuthorization">&#x786E;&#x8BA4;&#x6388;&#x6743;</el-button>
+        <el-button type="primary" :loading="submitting" :disabled="Boolean(temporaryExpiryError)" @click="submitTemporaryAuthorization">&#x786E;&#x8BA4;&#x6388;&#x6743;</el-button>
       </template>
     </el-dialog>
 
-    <el-dialog v-model="temporaryResultDialogVisible" title="&#x4E34;&#x65F6;&#x8D26;&#x53F7;&#x4FE1;&#x606F;" width="560px" destroy-on-close>
+    <el-dialog v-model="temporaryResultDialogVisible" title="&#x4E34;&#x65F6;&#x6388;&#x6743;&#x8FDE;&#x63A5;&#x4FE1;&#x606F;" width="560px" destroy-on-close>
       <el-alert title="&#x4EE5;&#x4E0B;&#x51ED;&#x636E;&#x5DF2;&#x81EA;&#x52A8;&#x590D;&#x5236;&#xFF0C;&#x6709;&#x6548;&#x671F;&#x4E0E;&#x6388;&#x6743;&#x4E00;&#x81F4;&#x3002;" type="success" show-icon :closable="false" />
       <div v-if="temporaryResult?.connection" class="credential-card">
         <div class="credential-row"><span>&#x5730;&#x5740;</span><code>{{ temporaryResult.connection.address }}</code></div>
@@ -164,10 +165,11 @@
     </el-dialog>
 
     <el-dialog v-model="extendDialogVisible" title="&#x5EF6;&#x957F;&#x6709;&#x6548;&#x671F;" width="460px">
-      <el-date-picker v-model="extendExpiresAt" type="datetime" placeholder="&#x65B0;&#x7684;&#x5230;&#x671F;&#x65F6;&#x95F4;&#xFF08;&#x6700;&#x591A; 7 &#x5929;&#xFF09;" style="width: 100%" :disabled-date="disablePastDate" />
+      <el-date-picker v-model="extendExpiresAt" type="datetime" placeholder="&#x65B0;&#x7684;&#x5230;&#x671F;&#x65F6;&#x95F4;&#xFF08;&#x6700;&#x591A; 7 &#x5929;&#xFF09;" style="width: 100%" :disabled-date="disablePastDate" @change="handleExtendExpiryChange" />
+      <el-alert v-if="extendExpiryError" :title="extendExpiryError" type="warning" show-icon :closable="false" class="expiry-warning" />
       <template #footer>
         <el-button @click="extendDialogVisible = false">&#x53D6;&#x6D88;</el-button>
-        <el-button type="primary" :loading="submitting" @click="submitExtend">&#x4FDD;&#x5B58;</el-button>
+        <el-button type="primary" :loading="submitting" :disabled="Boolean(extendExpiryError)" @click="submitExtend">&#x4FDD;&#x5B58;</el-button>
       </template>
     </el-dialog>
   </div>
@@ -199,6 +201,8 @@ const aiDialogVisible = ref(false)
 const extendDialogVisible = ref(false)
 const extendTarget = ref<TemporaryAccountRecord | null>(null)
 const extendExpiresAt = ref<Date | null>(null)
+const temporaryExpiryError = ref('')
+const extendExpiryError = ref('')
 const aiResult = ref<IssuedAIAccessToken | null>(null)
 const temporaryResult = ref<TemporaryAccountRecord | null>(null)
 
@@ -208,6 +212,8 @@ const temporaryDuration = ref('1d')
 const aiDuration = ref('7d')
 const temporaryDurations = [{ label: '\u0031 \u5c0f\u65f6', value: '1h' }, { label: '\u0031 \u5929', value: '1d' }, { label: '\u0033 \u5929', value: '3d' }, { label: '\u0037 \u5929', value: '7d' }]
 const aiDurations = [{ label: '\u0037 \u5929', value: '7d' }, { label: '\u0033\u0030 \u5929', value: '30d' }, { label: '\u0031 \u5e74', value: '1y' }, { label: '\u6c38\u4e45', value: 'permanent' }]
+const maxTemporaryAuthorizationDuration = 7 * 24 * 3600 * 1000
+const temporaryExpiryLimitMessage = '\u4e34\u65f6\u6388\u6743\u6709\u6548\u671f\u4e0d\u80fd\u8d85\u8fc7 7 \u5929\uff0c\u8bf7\u9009\u62e9 7 \u5929\u4ee5\u5185\u7684\u65f6\u95f4'
 const resourceOptions = computed(() => temporaryForm.resource_type === 'host_account' ? hostAccounts.value : databaseAccounts.value)
 
 function addDuration(value: string): Date {
@@ -215,9 +221,29 @@ function addDuration(value: string): Date {
   const hours = value.endsWith('h') ? Number(value.slice(0, -1)) : Number(value.slice(0, -1)) * 24
   return new Date(Date.now() + hours * 3600 * 1000)
 }
-function applyTemporaryDuration() { temporaryForm.expires_at = addDuration(temporaryDuration.value) }
+function applyTemporaryDuration() { temporaryForm.expires_at = addDuration(temporaryDuration.value); temporaryExpiryError.value = '' }
 function applyAIDuration() { aiForm.expires_at = aiDuration.value === 'permanent' ? null : addDuration(aiDuration.value) }
 function disablePastDate(date: Date) { return date.getTime() < Date.now() - 86400000 }
+function temporaryExpiryErrorMessage(value: Date | null) {
+  if (!value) return ''
+  if (value.getTime() <= Date.now()) return '\u6709\u6548\u671f\u5fc5\u987b\u665a\u4e8e\u5f53\u524d\u65f6\u95f4'
+  if (value.getTime() > Date.now() + maxTemporaryAuthorizationDuration + 1000) return temporaryExpiryLimitMessage
+  return ''
+}
+function handleTemporaryExpiryChange(value: Date | null) {
+  temporaryExpiryError.value = temporaryExpiryErrorMessage(value)
+}
+function handleExtendExpiryChange(value: Date | null) {
+  extendExpiryError.value = temporaryExpiryErrorMessage(value)
+}
+function validateTemporaryExpiry(value: Date | null) {
+  const message = temporaryExpiryErrorMessage(value)
+  if (!value || message) {
+    ElMessage.warning(message || '\u8bf7\u9009\u62e9\u6709\u6548\u671f')
+    return false
+  }
+  return true
+}
 function formatTime(value?: string) { return value ? new Date(value).toLocaleString('zh-CN', { hour12: false }) : '-' }
 function isExpired(value?: string) { return Boolean(value && new Date(value).getTime() <= Date.now()) }
 
@@ -228,7 +254,7 @@ async function loadAccounts() {
     accounts.value = response.items || []
     total.value = response.total || 0
   } catch (error) {
-    ElMessage.error(error instanceof Error ? error.message : '加载临时用户失败')
+    ElMessage.error(error instanceof Error ? error.message : '\u52a0\u8f7d\u4e34\u65f6\u6388\u6743\u5931\u8d25')
   } finally { loading.value = false }
 }
 async function loadOptions() {
@@ -244,6 +270,7 @@ function openTemporaryDialog() {
   temporaryForm.resource_id = ''
   temporaryForm.remark = ''
   temporaryDuration.value = '1d'
+  temporaryExpiryError.value = ''
   applyTemporaryDuration()
   temporaryDialogVisible.value = true
   void loadOptions()
@@ -258,6 +285,7 @@ function openAIDialog() {
 }
 async function submitTemporaryAuthorization() {
   if (!temporaryForm.resource_id || !temporaryForm.expires_at) return ElMessage.warning('请完整填写授权信息')
+  if (!validateTemporaryExpiry(temporaryForm.expires_at)) return
   submitting.value = true
   try {
     const result = await apiClient.createTemporaryAuthorization({
@@ -312,10 +340,12 @@ function closeAIDialog() { aiDialogVisible.value = false; aiResult.value = null 
 function openExtendDialog(row: TemporaryAccountRecord) {
   extendTarget.value = row
   extendExpiresAt.value = addDuration('1d')
+  extendExpiryError.value = ''
   extendDialogVisible.value = true
 }
 async function submitExtend() {
   if (!extendTarget.value || !extendExpiresAt.value) return
+  if (!validateTemporaryExpiry(extendExpiresAt.value)) return
   submitting.value = true
   try {
     const result = await apiClient.extendTemporaryAccount(extendTarget.value.id, extendExpiresAt.value.toISOString())
@@ -331,9 +361,9 @@ async function submitExtend() {
   finally { submitting.value = false }
 }
 async function disableAccount(row: TemporaryAccountRecord) {
-  await ElMessageBox.confirm('禁用后该临时用户的授权和 AI 令牌将立即失效。', '确认禁用', { type: 'warning' })
+  await ElMessageBox.confirm('\u7981\u7528\u540e\u8be5\u4e34\u65f6\u6388\u6743\u7684\u6388\u6743\u548c AI \u4ee4\u724c\u5c06\u7acb\u5373\u5931\u6548\u3002', '确认禁用', { type: 'warning' })
   await apiClient.disableTemporaryAccount(row.id)
-  ElMessage.success('临时用户已禁用')
+  ElMessage.success('\u4e34\u65f6\u6388\u6743\u5df2\u7981\u7528')
   await loadAccounts()
 }
 function handleMore(command: string, row: TemporaryAccountRecord) {
@@ -350,6 +380,7 @@ onMounted(loadAccounts)
 .temporary-access-view code { font-family: "JetBrains Mono", monospace; font-size: 12px; color: var(--el-color-primary); }
 .table-actions { display: inline-flex; align-items: center; justify-content: flex-end; gap: 10px; width: 100%; }
 .table-actions :deep(.el-button) { margin-left: 0; }
+.expiry-warning { margin-top: 10px; }
 .danger-dropdown-item { color: var(--el-color-danger); }
 .expired { color: var(--el-color-danger); }
 .dialog-form { margin-top: 18px; }

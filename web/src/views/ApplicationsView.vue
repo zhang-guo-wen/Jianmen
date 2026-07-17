@@ -40,6 +40,9 @@
             />
           </template>
         </el-table-column>
+        <el-table-column :label="t('application.column.remark')" min-width="160" show-overflow-tooltip>
+          <template #default="{ row }">{{ row.remark || '-' }}</template>
+        </el-table-column>
         <el-table-column :label="t('application.column.actions')" width="160" fixed="right">
           <template #default="{ row }">
             <el-button v-if="permission.canDo('app:connect')" link type="success" size="small" @click="visitApp(row)">

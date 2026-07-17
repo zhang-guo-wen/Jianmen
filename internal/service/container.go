@@ -162,16 +162,10 @@ func (s *ContainerService) sshCommand(ctx context.Context, endpoint ContainerEnd
 	go func() { done <- session.Run(command) }()
 
 	closeSession := func() {
-		closed := make(chan struct{})
-		go func() {
-			_ = session.Close()
-			_ = client.Close()
-			close(closed)
-		}()
-		select {
-		case <-closed:
-		case <-time.After(500 * time.Millisecond):
-		}
+		// Close the underlying connection first. Session.Close sends an SSH
+		// channel message and can block if the transport is already unhealthy.
+		_ = client.Close()
+		_ = session.Close()
 	}
 
 	select {

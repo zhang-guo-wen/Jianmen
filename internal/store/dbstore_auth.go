@@ -24,6 +24,10 @@ func (s *DBStore) Authenticate(_ context.Context, username, password string) (mo
 
 	var user model.User
 	if err := s.db.Where("token_hash = ? AND status = ?", hashStr, "active").First(&user).Error; err == nil {
+		if user.IsExpired(time.Now().UTC()) {
+			_ = s.db.Model(&user).Update("status", "disabled").Error
+			return model.User{}, errors.New("user account expired")
+		}
 		return user, nil
 	}
 
@@ -59,6 +63,10 @@ func (s *DBStore) authenticateCompact(login LoginName, password string) (model.U
 		}
 		return model.User{}, err
 	}
+	if user.IsExpired(time.Now().UTC()) {
+		_ = s.db.Model(&user).Update("status", "disabled").Error
+		return model.User{}, errors.New("user account expired")
+	}
 	if login.ResourceID == "" {
 		if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(password)); err != nil {
 			return model.User{}, errors.New("authentication failed")
@@ -91,6 +99,10 @@ func (s *DBStore) authenticateCompactPublicKey(login LoginName, key ssh.PublicKe
 			return model.User{}, errors.New("user is disabled or not found")
 		}
 		return model.User{}, err
+	}
+	if user.IsExpired(time.Now().UTC()) {
+		_ = s.db.Model(&user).Update("status", "disabled").Error
+		return model.User{}, errors.New("user account expired")
 	}
 	var pubKeys []model.UserPublicKey
 	if err := s.db.Where("user_id = ? AND revoked_at IS NULL", user.ID).Find(&pubKeys).Error; err != nil {
@@ -138,6 +150,10 @@ func (s *DBStore) AuthenticateDirect(_ context.Context, username, password strin
 			return model.User{}, errors.New("invalid username or password")
 		}
 		return model.User{}, err
+	}
+	if user.IsExpired(time.Now().UTC()) {
+		_ = s.db.Model(&user).Update("status", "disabled").Error
+		return model.User{}, errors.New("user account expired")
 	}
 	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(password)); err != nil {
 		return model.User{}, errors.New("invalid username or password")

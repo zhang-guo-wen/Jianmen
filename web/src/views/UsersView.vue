@@ -35,6 +35,13 @@
           <el-tag v-else type="warning" size="small">内置</el-tag>
         </template>
       </el-table-column>
+      <el-table-column label="???" width="170">
+        <template #default="{ row }">
+          <span v-if="row.is_super_admin" class="text-muted">??</span>
+          <span v-else-if="row.expires_at" :class="{ 'text-danger': new Date(row.expires_at).getTime() <= Date.now() }">{{ formatTime(row.expires_at) }}</span>
+          <span v-else>??</span>
+        </template>
+      </el-table-column>
       <el-table-column :label="t('users.lastLogin')" width="140">
         <template #default="{ row }">
           <span class="text-muted">{{ formatTime(row.last_login_at) }}</span>
@@ -159,6 +166,12 @@
             <el-form-item :label="t('users.email')" prop="email">
               <el-input v-model="form.email" type="email" placeholder="user@example.com" />
             </el-form-item>
+            <el-form-item label="???">
+              <div class="user-expiry-control">
+                <el-switch v-model="form.permanent" active-text="????" inactive-text="?????" />
+                <el-date-picker v-if="!form.permanent" v-model="form.expires_at" type="datetime" placeholder="????" />
+              </div>
+            </el-form-item>
           </el-collapse-item>
         </el-collapse>
       </el-form>
@@ -220,6 +233,8 @@ const form = reactive<api.UserPayload & { password?: string }>({
   password: '',
   display_name: '',
   email: '',
+  expires_at: '',
+  permanent: false,
 });
 
 const formRules: FormRules = {
@@ -345,6 +360,8 @@ function resetForm() {
   form.password = '';
   form.display_name = '';
   form.email = '';
+  form.expires_at = '';
+  form.permanent = false;
   morePanels.value = [];
 }
 
@@ -360,6 +377,8 @@ function openEditDialog(user: api.UserRecord) {
   form.display_name = String(user.display_name ?? '');
   form.email = String(user.email ?? '');
   form.password = '';
+  form.expires_at = user.expires_at ?? '';
+  form.permanent = !user.expires_at;
   morePanels.value = ['more'];
   dialogVisible.value = true;
 }
@@ -378,6 +397,8 @@ async function submitForm() {
       if (form.email !== (editingUser.value.email ?? '')) {
         payload.email = form.email;
       }
+      payload.permanent = form.permanent;
+      if (!form.permanent && form.expires_at) payload.expires_at = new Date(form.expires_at).toISOString();
       await api.apiClient.updateUser(String(editingUser.value.id ?? ''), payload);
       ElMessage.success(t('users.updated'));
     } else {
@@ -386,6 +407,8 @@ async function submitForm() {
         password: form.password,
         display_name: form.display_name || undefined,
         email: form.email || undefined,
+        permanent: form.permanent,
+        expires_at: !form.permanent && form.expires_at ? new Date(form.expires_at).toISOString() : undefined,
       });
       ElMessage.success(t('users.created'));
     }
@@ -464,4 +487,9 @@ onMounted(async () => {
 .more-collapse :deep(.el-collapse-item__header) { color: #374151; font-size: 13px; font-weight: 700; }
 .more-collapse :deep(.el-collapse-item__wrap) { border-bottom: 0; }
 :global(.form-dialog .el-dialog__body) { max-height: min(66vh, 620px); overflow-y: auto; padding-right: 22px; }
+</style>
+
+<style scoped>
+.user-expiry-control { display: grid; gap: 10px; }
+.text-danger { color: var(--el-color-danger); }
 </style>

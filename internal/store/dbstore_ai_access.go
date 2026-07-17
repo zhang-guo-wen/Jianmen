@@ -50,13 +50,16 @@ func (s *DBStore) AIAccessToken(ctx context.Context, userID, tokenID string) (mo
 
 func (s *DBStore) AuthenticateAIAccessToken(ctx context.Context, accessHash string, now time.Time) (model.AIAccessToken, error) {
 	var token model.AIAccessToken
-	err := s.db.WithContext(ctx).Preload("User").
+	err := s.db.WithContext(ctx).Preload("User").Preload("TemporaryAccount").
 		Where("access_token_hash = ? AND revoked_at IS NULL AND access_expires_at > ?", accessHash, now.UTC()).
 		First(&token).Error
 	if err != nil {
 		return model.AIAccessToken{}, ErrAIAccessTokenInvalid
 	}
-	if token.User.Status != "active" {
+	if token.User.Status != "active" || token.User.IsExpired(now) {
+		return model.AIAccessToken{}, ErrAIAccessTokenInvalid
+	}
+	if token.TemporaryAccountID != "" && (token.TemporaryAccount.Status != "active" || (token.TemporaryAccount.ExpiresAt != nil && !token.TemporaryAccount.ExpiresAt.After(now))) {
 		return model.AIAccessToken{}, ErrAIAccessTokenInvalid
 	}
 	usedAt := now.UTC()
@@ -71,12 +74,15 @@ func (s *DBStore) RotateAIAccessToken(ctx context.Context, refreshHash string, r
 	var rotated model.AIAccessToken
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var current model.AIAccessToken
-		if err := tx.Preload("User").Where(
+		if err := tx.Preload("User").Preload("TemporaryAccount").Where(
 			"refresh_token_hash = ? AND revoked_at IS NULL AND refresh_expires_at > ?", refreshHash, now.UTC(),
 		).First(&current).Error; err != nil {
 			return ErrAIAccessTokenInvalid
 		}
-		if current.User.Status != "active" {
+		if current.User.Status != "active" || current.User.IsExpired(now) {
+			return ErrAIAccessTokenInvalid
+		}
+		if current.TemporaryAccountID != "" && (current.TemporaryAccount.Status != "active" || (current.TemporaryAccount.ExpiresAt != nil && !current.TemporaryAccount.ExpiresAt.After(now))) {
 			return ErrAIAccessTokenInvalid
 		}
 		updates := map[string]any{

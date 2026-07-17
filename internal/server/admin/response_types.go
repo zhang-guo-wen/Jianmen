@@ -1,5 +1,7 @@
 package admin
 
+import "time"
+
 type sessionListItem struct {
 	ID              string  `json:"id"`
 	User            string  `json:"user"`
@@ -39,14 +41,18 @@ type pageResponse struct {
 }
 
 type createUserRequest struct {
-	Username    string `json:"username"`
-	Password    string `json:"password"`
-	DisplayName string `json:"display_name,omitempty"`
-	Email       string `json:"email,omitempty"`
+	Username    string     `json:"username"`
+	Password    string     `json:"password"`
+	DisplayName string     `json:"display_name,omitempty"`
+	Email       string     `json:"email,omitempty"`
+	ExpiresAt   *time.Time `json:"expires_at,omitempty"`
+	Permanent   bool       `json:"permanent,omitempty"`
 }
 
 type updateUserRequest struct {
-	DisplayName *string `json:"display_name,omitempty"`
-	Email       *string `json:"email,omitempty"`
-	Status      *string `json:"status,omitempty"`
+	DisplayName *string    `json:"display_name,omitempty"`
+	Email       *string    `json:"email,omitempty"`
+	Status      *string    `json:"status,omitempty"`
+	ExpiresAt   *time.Time `json:"expires_at,omitempty"`
+	Permanent   *bool      `json:"permanent,omitempty"`
 }

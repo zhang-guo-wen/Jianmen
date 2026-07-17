@@ -95,7 +95,7 @@
         <div v-else-if="selectedEndpoint" class="endpoint-info-grid">
           <div class="info-tile"><span>运行时</span><strong>{{ selectedEndpoint.runtime }}</strong></div>
           <div class="info-tile"><span>连接方式</span><strong>{{ connectionModeLabel(selectedEndpoint.connection_mode) }}</strong></div>
-          <div class="info-tile"><span>地址</span><strong>{{ selectedEndpoint.address }}</strong></div>
+          <div class="info-tile"><span>连接目标</span><strong>{{ endpointTarget(selectedEndpoint) }}</strong></div>
           <div class="info-tile"><span>SSH 账号</span><strong>{{ selectedEndpoint.host_account_name || '未使用 SSH' }}</strong></div>
         </div>
       </main>
@@ -116,23 +116,23 @@
           </el-radio-group>
         </el-form-item>
         <el-form-item label="连接方式" required>
-          <el-select v-model="form.connection_mode" style="width: 100%">
+          <el-select v-model="form.connection_mode" style="width: 100%" @change="onConnectionModeChange">
             <el-option v-if="form.runtime === 'docker'" label="Docker Engine API" value="docker_api" />
             <el-option v-if="form.runtime === 'docker'" label="SSH 执行 Docker 命令" value="ssh" />
             <el-option v-if="form.runtime === 'containerd'" label="SSH + CRI（crictl）" value="containerd" />
           </el-select>
           <div class="field-hint">Docker API 可连接 HTTP/TCP 或 Unix Socket；containerd 通过 SSH 调用 crictl 读取 Kubernetes 容器。</div>
         </el-form-item>
-        <el-form-item label="连接地址" required>
+        <el-form-item v-if="form.connection_mode === 'docker_api'" label="API 地址" required>
           <el-input v-model="form.address" :placeholder="addressPlaceholder">
-            <template #prepend v-if="form.connection_mode === 'docker_api'">API</template>
+            <template #prepend>API</template>
           </el-input>
         </el-form-item>
         <el-form-item v-if="form.connection_mode === 'docker_api'" label="端口">
           <el-input-number v-model="form.port" :min="0" :max="65535" controls-position="right" style="width: 100%" />
         </el-form-item>
         <template v-if="form.connection_mode !== 'docker_api'">
-          <el-form-item label="主机">
+          <el-form-item label="主机" required>
             <el-select v-model="form.host_id" filterable clearable style="width: 100%" placeholder="选择 SSH 主机" @change="onHostChange">
               <el-option v-for="host in hosts" :key="host.id" :label="`${host.name} (${host.address}:${host.port})`" :value="host.id" />
             </el-select>
@@ -208,7 +208,7 @@ const quickSaving = ref(false)
 const moreSections = ref<string[]>([])
 const testResult = ref<{ ok: boolean; message: string } | null>(null)
 
-const emptyForm = () => ({ name: '', group: '', runtime: 'docker', connection_mode: 'docker_api', address: 'unix:///var/run/docker.sock', port: 0, host_id: '', host_account_id: '', remark: '' })
+const emptyForm = () => ({ name: '', group: '', runtime: 'docker', connection_mode: 'ssh', address: '', port: 0, host_id: '', host_account_id: '', remark: '' })
 const form = reactive(emptyForm())
 const quickAccount = reactive({ host_name: '', address: '', port: 22, username: '', password: '' })
 
@@ -314,8 +314,17 @@ function openEdit(endpoint: ContainerEndpointView) {
 }
 
 function onRuntimeChange() {
-  form.connection_mode = form.runtime === 'docker' ? 'docker_api' : 'containerd'
-  form.address = form.runtime === 'docker' ? 'unix:///var/run/docker.sock' : '/run/containerd/containerd.sock'
+  form.connection_mode = form.runtime === 'docker' ? 'ssh' : 'containerd'
+  form.address = ''
+  form.port = 0
+}
+
+function onConnectionModeChange(mode: string) {
+  if (mode === 'docker_api') {
+    form.address = form.address.trim() || 'unix:///var/run/docker.sock'
+    return
+  }
+  form.address = ''
   form.port = 0
 }
 
@@ -352,7 +361,24 @@ function buildPayload(): ContainerEndpointPayload {
   }
 }
 
+function validateConnectionForm(): boolean {
+  if (form.connection_mode === 'docker_api' && !form.address.trim()) {
+    ElMessage.warning('请填写 Docker API 地址')
+    return false
+  }
+  if (form.connection_mode !== 'docker_api' && !form.host_id) {
+    ElMessage.warning('请选择 SSH 主机')
+    return false
+  }
+  if (form.connection_mode !== 'docker_api' && !form.host_account_id) {
+    ElMessage.warning('请选择 SSH 主机账号')
+    return false
+  }
+  return true
+}
+
 async function testConnection() {
+  if (!validateConnectionForm()) return
   testing.value = true
   testResult.value = null
   try {
@@ -366,8 +392,7 @@ async function testConnection() {
 }
 
 async function submitEndpoint() {
-  if (!form.address.trim()) return ElMessage.warning('请填写连接地址')
-  if (form.connection_mode !== 'docker_api' && !form.host_account_id) return ElMessage.warning('请选择 SSH 主机账号')
+  if (!validateConnectionForm()) return
   submitting.value = true
   try {
     const payload = buildPayload()
@@ -429,7 +454,16 @@ async function createQuickAccount() {
 }
 
 function endpointDescription(endpoint: ContainerEndpointView) {
-  return `${connectionModeLabel(endpoint.connection_mode)} · ${endpoint.address}${endpoint.port ? `:${endpoint.port}` : ''}`
+  return `${connectionModeLabel(endpoint.connection_mode)} / ${endpointTarget(endpoint)}`
+}
+
+function endpointTarget(endpoint: ContainerEndpointView) {
+  if (endpoint.connection_mode === 'docker_api') {
+    return `${endpoint.address}${endpoint.port ? `:${endpoint.port}` : ''}`
+  }
+  const host = endpoint.host_name || endpoint.host_id || '未选择主机'
+  const account = endpoint.host_account_name || endpoint.host_account_id || '未选择账号'
+  return `${host} / ${account}`
 }
 
 function connectionModeLabel(mode: string) {

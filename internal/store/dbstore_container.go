@@ -135,6 +135,9 @@ func normalizeContainerEndpointInput(input ContainerEndpointInput) (ContainerEnd
 	input.Remark = strings.TrimSpace(input.Remark)
 	if input.Name == "" {
 		input.Name = input.Address
+		if input.Name == "" {
+			input.Name = "SSH container"
+		}
 	}
 	if input.ID == "" {
 		input.ID = model.NewID()
@@ -151,11 +154,16 @@ func normalizeContainerEndpointInput(input ContainerEndpointInput) (ContainerEnd
 	if input.Runtime == model.ContainerRuntimeContainerd && input.ConnectionMode == model.ContainerConnectionDockerAPI {
 		return ContainerEndpointInput{}, fmt.Errorf("containerd runtime cannot use docker api connection")
 	}
-	if input.ConnectionMode == model.ContainerConnectionSSH && input.HostAccountID == "" {
-		return ContainerEndpointInput{}, fmt.Errorf("ssh connection requires a host account")
+	if input.ConnectionMode == model.ContainerConnectionSSH || input.ConnectionMode == model.ContainerConnectionContainerd {
+		if input.HostID == "" {
+			return ContainerEndpointInput{}, fmt.Errorf("ssh connection requires a host")
+		}
+		if input.HostAccountID == "" {
+			return ContainerEndpointInput{}, fmt.Errorf("ssh connection requires a host account")
+		}
 	}
-	if input.Address == "" {
-		return ContainerEndpointInput{}, fmt.Errorf("container endpoint address is required")
+	if input.ConnectionMode == model.ContainerConnectionDockerAPI && input.Address == "" {
+		return ContainerEndpointInput{}, fmt.Errorf("docker api address is required")
 	}
 	if input.Status == "" {
 		input.Status = "active"

@@ -85,11 +85,6 @@ func (s *Server) handleCreatePlatformAccount(w http.ResponseWriter, r *http.Requ
 		s.writeErrorText(w, r, http.StatusBadRequest, "username is required")
 		return
 	}
-	if strings.TrimSpace(payload.PlatformName) == "" {
-		s.writeErrorText(w, r, http.StatusBadRequest, "platform_name is required")
-		return
-	}
-
 	view, err := s.store.AddPlatformAccount(platformAccountModel(payload, userIDFromRequest(r)))
 	if err != nil {
 		writePlatformStoreError(w, r, err)
@@ -201,7 +196,6 @@ type platformAccountPayload struct {
 	Group        string  `json:"group"`
 	Username     string  `json:"username"`
 	Password     string  `json:"password"`
-	TOTPSecret   string  `json:"totp_secret"`
 	Remark       string  `json:"remark"`
 	Status       string  `json:"status"`
 	ExpiresAt    *string `json:"expires_at"`
@@ -219,14 +213,17 @@ func (s *Server) decodePlatformAccountPayload(w http.ResponseWriter, r *http.Req
 }
 
 func platformAccountModel(payload platformAccountPayload, ownerID string) model.PlatformAccount {
+	platformName := strings.TrimSpace(payload.PlatformName)
+	if platformName == "" {
+		platformName = strings.TrimSpace(payload.URL)
+	}
 	account := model.PlatformAccount{
 		Name:         strings.TrimSpace(payload.Name),
-		PlatformName: strings.TrimSpace(payload.PlatformName),
+		PlatformName: platformName,
 		URL:          strings.TrimSpace(payload.URL),
 		GroupName:    strings.TrimSpace(payload.Group),
 		Username:     strings.TrimSpace(payload.Username),
 		Password:     model.NewEncryptedField(payload.Password),
-		TOTPSecret:   model.NewEncryptedField(payload.TOTPSecret),
 		Remark:       strings.TrimSpace(payload.Remark),
 		OwnerID:      ownerID,
 		Status:       strings.TrimSpace(payload.Status),

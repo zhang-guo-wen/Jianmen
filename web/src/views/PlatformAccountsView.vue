@@ -73,15 +73,11 @@
       >
         <el-form ref="formRef" :model="form" :rules="rules" label-width="100px">
           <el-form-item :label="t('platformAccounts.field.url')">
-            <el-input v-model="form.url" placeholder="https://jenkins.example.com">
+            <el-input v-model="form.url" placeholder="https://jenkins.example.com" @input="handleUrlInput">
               <template #prefix v-if="form.url"><el-link :href="form.url" target="_blank" :underline="false">↗</el-link></template>
             </el-input>
           </el-form-item>
-          <el-form-item :label="t('platformAccounts.field.platform')" prop="platform_name" required>
-            <el-select v-model="form.platform_name" allow-create filterable default-first-option :placeholder="t('platformAccounts.placeholder.platform')" style="width: 100%">
-              <el-option v-for="platform in platformOptions" :key="platform" :label="platform" :value="platform" />
-            </el-select>
-          </el-form-item>
+
           <el-form-item :label="t('platformAccounts.field.username')" prop="username" required>
             <el-input v-model="form.username" :placeholder="t('platformAccounts.placeholder.username')" />
           </el-form-item>
@@ -91,14 +87,13 @@
           <el-collapse v-model="morePanels" class="more-collapse">
             <el-collapse-item :title="t('platformAccounts.moreSettings')" name="more">
               <el-form-item :label="t('platformAccounts.field.name')"><el-input v-model="form.name" :placeholder="t('platformAccounts.placeholder.name')" /></el-form-item>
+              <el-form-item :label="t('platformAccounts.field.platform')">
+                <el-input v-model="form.platform_name" :placeholder="t('platformAccounts.placeholder.platform')" />
+              </el-form-item>
               <el-form-item :label="t('platformAccounts.field.group')">
                 <el-select v-model="form.group" allow-create clearable filterable default-first-option :placeholder="t('platformAccounts.field.group')" style="width: 100%">
                   <el-option v-for="group in groupOptions" :key="group" :label="group" :value="group" />
                 </el-select>
-              </el-form-item>
-              <el-form-item :label="t('platformAccounts.field.totpSecret')">
-                <el-input v-model="form.totp_secret" />
-                <el-text type="info" size="small">{{ t('platformAccounts.help.totpSecret') }}</el-text>
               </el-form-item>
               <el-form-item :label="t('platformAccounts.field.remark')"><el-input v-model="form.remark" type="textarea" :autosize="{ minRows: 2, maxRows: 4 }" /></el-form-item>
             </el-collapse-item>
@@ -137,16 +132,15 @@ const editingId = ref('')
 const submitting = ref(false)
 const formRef = ref<FormInstance>()
 const morePanels = ref<string[]>(['more'])
-const form = reactive<PlatformAccountPayload & { password: string; totp_secret: string; group: string }>({
-  platform_name: '', username: '', password: '', name: '', url: '', group: '', remark: '', totp_secret: ''
+const form = reactive<PlatformAccountPayload & { password: string; group: string }>({
+  platform_name: '', username: '', password: '', name: '', url: '', group: '', remark: ''
 })
 const rules: FormRules = {
-  platform_name: [{ required: true, message: () => t('platformAccounts.required.platform'), trigger: 'blur' }],
   username: [{ required: true, message: () => t('platformAccounts.required.username'), trigger: 'blur' }]
 }
-const platformOptions = ['Jenkins', 'GitLab', 'Jira', 'Confluence', 'Harbor', 'Nexus', 'SonarQube', 'Grafana', 'Kibana', 'Prometheus']
 const groupOptions = ref<string[]>([])
 const statusUpdatingId = ref('')
+const lastAutoPlatformName = ref('')
 
 async function loadData() {
   loading.value = true
@@ -176,9 +170,17 @@ function onSearch(q: string) {
   void loadData()
 }
 
+function handleUrlInput(value: string) {
+  if (!form.platform_name || form.platform_name === lastAutoPlatformName.value) {
+    form.platform_name = value
+    lastAutoPlatformName.value = value
+  }
+}
+
 function resetForm() {
-  Object.assign(form, { platform_name: '', username: '', password: '', name: '', url: '', group: '', remark: '', totp_secret: '' })
+  Object.assign(form, { platform_name: '', username: '', password: '', name: '', url: '', group: '', remark: '' })
   morePanels.value = ['more']
+  lastAutoPlatformName.value = ''
 }
 
 function openCreateDialog() {
@@ -189,8 +191,9 @@ function openCreateDialog() {
 
 function openEditDialog(row: PlatformAccountView) {
   editingId.value = row.id || ''
-  Object.assign(form, { platform_name: row.platform_name, username: row.username, password: '', name: row.name || '', url: row.url || '', group: row.group || '', remark: row.remark || '', totp_secret: '' })
+  Object.assign(form, { platform_name: row.platform_name || '', username: row.username, password: '', name: row.name || '', url: row.url || '', group: row.group || '', remark: row.remark || '' })
   morePanels.value = ['more']
+  lastAutoPlatformName.value = ''
   dialogVisible.value = true
 }
 

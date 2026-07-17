@@ -59,6 +59,7 @@ import { reactive, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import type { FormInstance, FormRules } from 'element-plus';
 import 'altcha';
+import 'altcha/i18n/zh-cn';
 import 'altcha/altcha.css';
 
 import { apiClient, setToken } from '@/api/client';

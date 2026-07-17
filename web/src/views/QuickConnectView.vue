@@ -44,8 +44,11 @@
                     <p>{{ accountDisplayName(target) }}</p>
                   </div>
                 </div>
-                <div class="connection-card__remark" :title="quickHostRemark(target)">
-                  {{ quickHostRemark(target) }}
+                <div class="connection-card__meta">
+                  <span class="connection-card__group">分组 · {{ quickHostGroup(target) }}</span>
+                  <span class="connection-card__remark" :title="quickHostRemark(target)">
+                    {{ quickHostRemark(target) }}
+                  </span>
                 </div>
 
                 <div v-if="connectionState(target).error" class="connection-card__error">
@@ -143,8 +146,11 @@
                     <p>{{ account.username || '-' }}</p>
                   </div>
                 </div>
-                <div class="connection-card__remark" :title="databaseRemark(account)">
-                  {{ databaseRemark(account) }}
+                <div class="connection-card__meta">
+                  <span class="connection-card__group">分组 · {{ databaseGroup(account) }}</span>
+                  <span class="connection-card__remark" :title="databaseRemark(account)">
+                    {{ databaseRemark(account) }}
+                  </span>
                 </div>
                 <footer class="connection-card__actions database-card__actions">
                   <el-button
@@ -219,6 +225,7 @@ import { writeClipboardText } from '@/utils/clipboard';
 
 interface HostMeta {
   name: string;
+  group: string;
   remark: string;
 }
 
@@ -234,6 +241,7 @@ interface SSHConnectionState {
 
 type QuickDBTarget = DBAccountRecord & {
   _instance_name?: string;
+  _instance_group?: string;
   _instance_remark?: string;
   _protocol?: string;
   _instance_address?: string;
@@ -296,6 +304,10 @@ function quickHostName(target: TargetRecord): string {
   return hostMeta.value[String(target.host_id || '')]?.name || targetHost(target) || '-';
 }
 
+function quickHostGroup(target: TargetRecord): string {
+  return hostMeta.value[String(target.host_id || '')]?.group || '未分组';
+}
+
 function quickHostRemark(target: TargetRecord): string {
   return hostMeta.value[String(target.host_id || '')]?.remark || '暂无备注';
 }
@@ -356,6 +368,7 @@ async function loadHostMeta() {
       String(host.id || ''),
       {
         name: String(host.name || host.address || ''),
+        group: String(host.group || ''),
         remark: String(host.remark || ''),
       },
     ]));
@@ -441,6 +454,7 @@ async function copyAllConnectionInfo(target: TargetRecord) {
   }
   const content = [
     `主机名称：${quickHostName(target)}`,
+    `主机分组：${quickHostGroup(target)}`,
     `主机备注：${quickHostRemark(target)}`,
     `账户名称：${accountDisplayName(target)}`,
     `连接地址：${connectionAddress(target)}`,
@@ -502,6 +516,7 @@ async function loadDBAccounts() {
         all.push({
           ...account,
           _instance_name: inst.name,
+          _instance_group: inst.group,
           _instance_remark: inst.remark,
           _protocol: inst.protocol || 'mysql',
           _instance_address: inst.address,
@@ -522,7 +537,7 @@ const dbFiltered = computed(() => {
   const query = dbKeyword.value.trim().toLowerCase();
   if (!query) return dbAccounts.value;
   return dbAccounts.value.filter(account =>
-    [account._instance_name, account._instance_remark, account.username, account._protocol].some(value =>
+    [account._instance_name, account._instance_group, account._instance_remark, account.username, account._protocol].some(value =>
       String(value ?? '').toLowerCase().includes(query),
     ),
   );
@@ -537,6 +552,10 @@ const displayedDBAccounts = computed(() => {
 
 function databaseTargetKey(account: QuickDBTarget): string {
   return String(account.id || `${account._instance_name || ''}-${account.username || ''}`);
+}
+
+function databaseGroup(account: QuickDBTarget): string {
+  return String(account._instance_group || '未分组');
 }
 
 function databaseRemark(account: QuickDBTarget): string {
@@ -594,6 +613,7 @@ async function copyDBConnectionInfo(account: QuickDBTarget) {
 
     const content = [
       `数据库实例：${account._instance_name || '-'}`,
+      `实例分组：${databaseGroup(account)}`,
       `实例备注：${databaseRemark(account)}`,
       `数据库账号：${account.username || '-'}`,
       `连接地址：${host}:${port}`,
@@ -735,9 +755,31 @@ onMounted(() => {
   white-space: nowrap;
 }
 
-.connection-card__remark {
+.connection-card__meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   min-width: 0;
   margin: 0 12px;
+}
+
+.connection-card__group {
+  flex: 0 0 auto;
+  max-width: 45%;
+  overflow: hidden;
+  padding: 2px 7px;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  background: var(--color-surface-muted);
+  color: var(--color-text-secondary);
+  font-size: 10px;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.connection-card__remark {
+  min-width: 0;
   overflow: hidden;
   color: var(--color-text-secondary);
   font-size: 11px;
@@ -745,7 +787,6 @@ onMounted(() => {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-
 .connection-card__error {
   display: flex;
   align-items: center;

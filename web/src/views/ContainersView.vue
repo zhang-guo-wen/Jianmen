@@ -119,7 +119,6 @@
             <el-option v-if="form.runtime === 'docker'" label="SSH 执行 Docker 命令" value="ssh" />
             <el-option v-if="form.runtime === 'containerd'" label="SSH + CRI（crictl）" value="containerd" />
           </el-select>
-          <div class="field-hint">Docker API 可连接 HTTP/TCP 或 Unix Socket；containerd 通过 SSH 调用 crictl 读取 Kubernetes 容器。</div>
         </el-form-item>
         <el-form-item v-if="form.connection_mode === 'docker_api'" label="API 地址" required>
           <el-input v-model="form.address" :placeholder="addressPlaceholder">

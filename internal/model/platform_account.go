@@ -12,7 +12,6 @@ type PlatformAccount struct {
 	GroupName    string         `gorm:"size:128" json:"group,omitempty"`
 	Username     string         `gorm:"size:255;not null" json:"username"`
 	Password     EncryptedField `gorm:"type:text" json:"-"`
-	TOTPSecret   EncryptedField `gorm:"type:text" json:"-"`
 	Remark       string         `gorm:"type:text" json:"remark,omitempty"`
 	OwnerID      string         `gorm:"index;size:64;not null" json:"owner_id"`
 	Status       string         `gorm:"index;size:32;not null;default:active" json:"status"`

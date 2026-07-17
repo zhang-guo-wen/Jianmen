@@ -512,7 +512,6 @@ export interface PlatformAccountView {
   group?: string;
   username: string;
   has_password?: boolean;
-  has_totp?: boolean;
   remark?: string;
   owner_id?: string;
   owner_name?: string;
@@ -525,12 +524,11 @@ export interface PlatformAccountView {
 
 export interface PlatformAccountPayload {
   name?: string;
-  platform_name: string;
+  platform_name?: string;
   url?: string;
   group?: string;
   username: string;
   password?: string;
-  totp_secret?: string;
   remark?: string;
   expires_at?: string;
 }
@@ -1251,7 +1249,7 @@ export const apiClient = {
   // ?? Temporary authorizations ???????????????????????????????????????
   getTemporaryAccounts: (params?: { q?: string; page?: number; page_size?: number }) =>
     request<PageResponse<TemporaryAccountRecord>>(`/api/temporary-accounts${buildQS(params as Record<string, string | number | undefined>)}`),
-  createTemporaryAuthorization: (payload: { authorized_user_id: string; resource_type: string; resource_id: string; expires_at: string; remark?: string }) =>
+  createTemporaryAuthorization: (payload: { resource_type: string; resource_id: string; expires_at: string; remark?: string }) =>
     request<TemporaryAccountRecord>('/api/temporary-accounts', { method: 'POST', body: JSON.stringify(payload) }),
   extendTemporaryAccount: (id: string, expires_at: string) =>
     request<TemporaryAccountRecord>(`/api/temporary-accounts/${encodeURIComponent(id)}/extend`, { method: 'POST', body: JSON.stringify({ expires_at }) }),

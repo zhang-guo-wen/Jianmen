@@ -20,7 +20,6 @@ func (s *DBStore) platformAccountView(a model.PlatformAccount) PlatformAccountVi
 		Group:        a.GroupName,
 		Username:     a.Username,
 		HasPassword:  a.Password.GetPlaintext() != "",
-		HasTOTP:      a.TOTPSecret.GetPlaintext() != "",
 		Remark:       a.Remark,
 		OwnerID:      a.OwnerID,
 		Status:       a.Status,
@@ -138,9 +137,6 @@ func (s *DBStore) UpdatePlatformAccount(id string, acc model.PlatformAccount) (P
 	}
 	if acc.Password.GetPlaintext() != "" {
 		existing.Password = acc.Password
-	}
-	if acc.TOTPSecret.GetPlaintext() != "" {
-		existing.TOTPSecret = acc.TOTPSecret
 	}
 	if acc.Status != "" {
 		existing.Status = acc.Status

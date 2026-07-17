@@ -14,18 +14,20 @@ import (
 )
 
 const (
-	aiAccessTokenDefaultTTL  = time.Hour
+	aiAccessTokenDefaultTTL  = 48 * time.Hour
 	aiRefreshTokenDefaultTTL = 30 * 24 * time.Hour
 	aiAccessTokenMinTTL      = 5 * time.Minute
-	aiAccessTokenMaxTTL      = 24 * time.Hour
+	aiAccessTokenMaxTTL      = 48 * time.Hour
 	aiRefreshTokenMinTTL     = 24 * time.Hour
 	aiRefreshTokenMaxTTL     = 90 * 24 * time.Hour
 )
 
 type aiTokenRequest struct {
-	Name              string `json:"name"`
-	AccessTTLSeconds  int64  `json:"access_ttl_seconds"`
-	RefreshTTLSeconds int64  `json:"refresh_ttl_seconds"`
+	Name              string     `json:"name"`
+	AccessTTLSeconds  int64      `json:"access_ttl_seconds"`
+	RefreshTTLSeconds int64      `json:"refresh_ttl_seconds"`
+	ExpiresAt         *time.Time `json:"expires_at,omitempty"`
+	Remark            string     `json:"remark,omitempty"`
 }
 
 type aiRefreshRequest struct {
@@ -162,18 +164,44 @@ func (s *Server) handleAITokens(w http.ResponseWriter, r *http.Request) {
 		if name == "" {
 			name = "AI client"
 		}
+		now := time.Now().UTC()
+		temporaryExpiresAt := now.Add(7 * 24 * time.Hour)
+		if request.ExpiresAt != nil {
+			temporaryExpiresAt = request.ExpiresAt.UTC()
+		}
+		if !temporaryExpiresAt.After(now) || temporaryExpiresAt.After(now.Add(7*24*time.Hour)) {
+			s.writeErrorText(w, r, http.StatusBadRequest, "AI authorization must expire within 7 days")
+			return
+		}
 		accessTTL, refreshTTL, err := aiTokenTTLs(request)
 		if err != nil {
 			s.writeErrorText(w, r, http.StatusBadRequest, err.Error())
 			return
 		}
-		issued, err := service.IssueAIAccessToken(time.Now().UTC(), accessTTL, refreshTTL)
+		remaining := time.Until(temporaryExpiresAt)
+		if remaining < accessTTL {
+			accessTTL = remaining
+		}
+		if accessTTL < aiAccessTokenMinTTL {
+			s.writeErrorText(w, r, http.StatusBadRequest, "AI authorization must last at least 5 minutes")
+			return
+		}
+		issued, err := service.IssueAIAccessToken(now, accessTTL, refreshTTL)
 		if err != nil {
 			s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
 			return
 		}
+		var temporaryAccount model.TemporaryAccount
+		if s.db != nil {
+			created, createErr := s.createTemporaryAccount(model.TemporaryAccountTypeAI, userID, temporaryExpiresAt, request.Remark, userID)
+			if createErr != nil {
+				s.writeErrorText(w, r, http.StatusInternalServerError, createErr.Error())
+				return
+			}
+			temporaryAccount = created
+		}
 		token := model.AIAccessToken{
-			ID: model.NewID(), UserID: userID, Name: name,
+			ID: model.NewID(), UserID: userID, TemporaryAccountID: temporaryAccount.ID, Name: name,
 			AccessTokenHash: issued.AccessTokenHash, RefreshTokenHash: issued.RefreshTokenHash,
 			AccessToken: model.NewEncryptedField(issued.AccessToken), RefreshToken: model.NewEncryptedField(issued.RefreshToken),
 			AccessExpiresAt: issued.AccessExpiresAt, RefreshExpiresAt: issued.RefreshExpiresAt,
@@ -183,10 +211,15 @@ func (s *Server) handleAITokens(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		s.logger.Info("AI access token issued", "user_id", userID, "token_id", token.ID, "name", token.Name, "access_expires_at", token.AccessExpiresAt, "refresh_expires_at", token.RefreshExpiresAt)
+		docsURL := s.aiBaseURL(r) + "/api/ai/docs"
+		prompt := "???? Jianmen AI ??????????????????????????????????????????????"
+		copyPrompt := fmt.Sprintf("AI ?????%s\n?????%s", docsURL, issued.AccessToken)
+		fullPrompt := fmt.Sprintf("%s\nAI ?????%s\n?????%s\n?????%s", prompt, docsURL, issued.AccessToken, issued.RefreshToken)
 		s.writeJSON(w, r, http.StatusCreated, map[string]any{
-			"id": token.ID, "name": token.Name,
+			"id": token.ID, "name": token.Name, "temporary_account_id": token.TemporaryAccountID,
 			"access_token": issued.AccessToken, "refresh_token": issued.RefreshToken,
 			"access_expires_at": issued.AccessExpiresAt, "refresh_expires_at": issued.RefreshExpiresAt,
+			"temporary_expires_at": temporaryExpiresAt, "prompt": prompt, "copy_prompt": copyPrompt, "full_prompt": fullPrompt,
 		})
 	default:
 		w.Header().Set("Allow", "GET, POST")
@@ -290,9 +323,14 @@ func (s *Server) withAIToken(next http.HandlerFunc) http.HandlerFunc {
 			s.writeErrorText(w, r, http.StatusUnauthorized, "missing or invalid AI bearer token")
 			return
 		}
-		stored, err := s.store.AuthenticateAIAccessToken(r.Context(), service.HashAIAccessToken(token), time.Now().UTC())
+		now := time.Now().UTC()
+		stored, err := s.store.AuthenticateAIAccessToken(r.Context(), service.HashAIAccessToken(token), now)
 		if err != nil {
 			s.writeErrorText(w, r, http.StatusUnauthorized, "invalid or expired AI token")
+			return
+		}
+		if stored.TemporaryAccountID != "" && (stored.TemporaryAccount.Status != "active" || (stored.TemporaryAccount.ExpiresAt != nil && !stored.TemporaryAccount.ExpiresAt.After(now))) {
+			s.writeErrorText(w, r, http.StatusUnauthorized, "AI authorization expired or disabled")
 			return
 		}
 		ctx := r.Context()

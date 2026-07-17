@@ -104,6 +104,13 @@ var migrations = []Migration{
 			return tx.AutoMigrate(&model.ContainerEndpoint{})
 		},
 	},
+	{
+		Version: "202607170002",
+		Name:    "user expiry and temporary authorization metadata",
+		Run: func(tx *gorm.DB) error {
+			return tx.AutoMigrate(&model.User{}, &model.TemporaryAccount{}, &model.TemporaryCredential{}, &model.TemporaryAccountGrant{}, &model.AIAccessToken{})
+		},
+	},
 }
 
 func Migrate(db *gorm.DB) error {

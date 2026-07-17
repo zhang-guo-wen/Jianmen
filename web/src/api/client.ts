@@ -81,6 +81,7 @@ export interface UserRecord {
   status?: string;
   is_super_admin?: boolean;
   last_login_at?: string;
+  expires_at?: string;
   created_at?: string;
   updated_at?: string;
   [key: string]: unknown;
@@ -92,6 +93,8 @@ export interface UserPayload {
   display_name?: string;
   email?: string;
   status?: string;
+  expires_at?: string;
+  permanent?: boolean;
 }
 
 export interface AccessPage {
@@ -119,6 +122,11 @@ export interface AIAccessTokenRecord {
 export interface IssuedAIAccessToken extends AIAccessTokenRecord {
   access_token: string;
   refresh_token: string;
+  temporary_account_id?: string;
+  temporary_expires_at?: string;
+  prompt?: string;
+  copy_prompt?: string;
+  full_prompt?: string;
 }
 
 export interface UserPreferences {
@@ -687,6 +695,22 @@ export interface ResourceGrantPayload {
   expires_at?: string;
 }
 
+export interface TemporaryAccountRecord {
+  id: string;
+  session_id: string;
+  type: 'temporary_user' | 'ai_user' | string;
+  authorized_user_id?: string;
+  authorized_user?: string;
+  status: string;
+  starts_at: string;
+  expires_at?: string;
+  resource_type?: string;
+  resource_name?: string;
+  account_name?: string;
+  remark?: string;
+  created_at: string;
+}
+
 // ── Resource Group types ────────────────────────────────────────────
 
 export interface ResourceGroupRecord {
@@ -852,7 +876,7 @@ export const apiClient = {
   getAITokens: () => request<AIAccessTokenRecord[]>('/api/ai/tokens'),
   getAIToken: (id: string) => request<IssuedAIAccessToken>(`/api/ai/tokens/${encodeURIComponent(id)}`),
   getAIDocs: () => request<string>('/api/ai/docs'),
-  createAIToken: (payload: { name: string; access_ttl_seconds?: number; refresh_ttl_seconds?: number }) =>
+  createAIToken: (payload: { name?: string; access_ttl_seconds?: number; refresh_ttl_seconds?: number; expires_at?: string; remark?: string }) =>
     request<IssuedAIAccessToken>('/api/ai/tokens', {
       method: 'POST',
       body: JSON.stringify(payload),
@@ -1223,6 +1247,16 @@ export const apiClient = {
     }),
   checkResourceGrant: (userId: string, resourceType: string, resourceId: string) =>
     request<{ allowed: boolean }>(`/api/resource-grants/check?user_id=${encodeURIComponent(userId)}&resource_type=${encodeURIComponent(resourceType)}&resource_id=${encodeURIComponent(resourceId)}`),
+
+  // ?? Temporary authorizations ???????????????????????????????????????
+  getTemporaryAccounts: (params?: { q?: string; page?: number; page_size?: number }) =>
+    request<PageResponse<TemporaryAccountRecord>>(`/api/temporary-accounts${buildQS(params as Record<string, string | number | undefined>)}`),
+  createTemporaryAuthorization: (payload: { authorized_user_id: string; resource_type: string; resource_id: string; expires_at: string; remark?: string }) =>
+    request<TemporaryAccountRecord>('/api/temporary-accounts', { method: 'POST', body: JSON.stringify(payload) }),
+  extendTemporaryAccount: (id: string, expires_at: string) =>
+    request<TemporaryAccountRecord>(`/api/temporary-accounts/${encodeURIComponent(id)}/extend`, { method: 'POST', body: JSON.stringify({ expires_at }) }),
+  disableTemporaryAccount: (id: string) =>
+    request<TemporaryAccountRecord>(`/api/temporary-accounts/${encodeURIComponent(id)}/disable`, { method: 'POST' }),
 
   // ── Resource Groups ────────────────────────────────────────────────
   getResourceGroups: (params?: { group_type?: string; q?: string; page?: number; page_size?: number }) =>

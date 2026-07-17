@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"strings"
+	"time"
 
 	"jianmen/internal/model"
 	"jianmen/internal/rbac"
@@ -76,6 +77,10 @@ func (s *Server) listUsers(w http.ResponseWriter, r *http.Request) {
 		}
 		out := make([]userWithFlag, len(users))
 		for i, u := range users {
+			if !s.isSuperAdmin(u.ID) && u.IsExpired(time.Now().UTC()) && u.Status == "active" {
+				u.Status = "disabled"
+				_ = s.db.Model(&model.User{}).Where("id = ?", u.ID).Update("status", "disabled").Error
+			}
 			out[i] = userWithFlag{User: u, IsSuperAdmin: s.isSuperAdmin(u.ID)}
 		}
 		s.writeJSON(w, r, http.StatusOK, pageResponse{Items: out, Total: int(total), Page: page, PageSize: pageSize})
@@ -118,6 +123,19 @@ func (s *Server) createUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var expiresAt *time.Time
+	if !req.Permanent {
+		value := time.Now().UTC().AddDate(1, 0, 0)
+		if req.ExpiresAt != nil {
+			value = req.ExpiresAt.UTC()
+		}
+		if !value.After(time.Now().UTC()) {
+			s.writeErrorText(w, r, http.StatusBadRequest, "expires_at must be in the future")
+			return
+		}
+		expiresAt = &value
+	}
+
 	user := model.User{
 		ID:              model.NewID(),
 		Username:        username,
@@ -127,6 +145,7 @@ func (s *Server) createUser(w http.ResponseWriter, r *http.Request) {
 		DisplayName:     strings.TrimSpace(req.DisplayName),
 		Email:           strings.TrimSpace(req.Email),
 		Status:          "active",
+		ExpiresAt:       expiresAt,
 	}
 	if err := s.db.Create(&user).Error; err != nil {
 		writeRBACDBError(w, r, err)
@@ -174,6 +193,24 @@ func (s *Server) updateUser(w http.ResponseWriter, r *http.Request, id string) {
 	if req.Email != nil {
 		user.Email = strings.TrimSpace(*req.Email)
 	}
+	if req.Permanent != nil {
+		if *req.Permanent {
+			user.ExpiresAt = nil
+		} else if req.ExpiresAt != nil {
+			value := req.ExpiresAt.UTC()
+			user.ExpiresAt = &value
+		} else {
+			value := time.Now().UTC().AddDate(1, 0, 0)
+			user.ExpiresAt = &value
+		}
+	} else if req.ExpiresAt != nil {
+		value := req.ExpiresAt.UTC()
+		user.ExpiresAt = &value
+	}
+	if user.ExpiresAt != nil && !user.ExpiresAt.After(time.Now().UTC()) && (req.Status == nil || strings.TrimSpace(*req.Status) == "active") {
+		s.writeErrorText(w, r, http.StatusBadRequest, "expires_at must be in the future when user is active")
+		return
+	}
 	if req.Status != nil {
 		status := strings.TrimSpace(*req.Status)
 		if status != "active" && status != "disabled" {
@@ -184,6 +221,10 @@ func (s *Server) updateUser(w http.ResponseWriter, r *http.Request, id string) {
 		if status == "disabled" && s.isSuperAdmin(id) {
 			s.writeErrorText(w, r, http.StatusForbidden, "cannot disable super admin")
 			return
+		}
+		if status == "active" && !s.isSuperAdmin(id) && (user.ExpiresAt == nil || user.IsExpired(time.Now().UTC())) {
+			value := time.Now().UTC().AddDate(1, 0, 0)
+			user.ExpiresAt = &value
 		}
 		user.Status = status
 	}

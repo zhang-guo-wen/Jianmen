@@ -90,47 +90,6 @@ type Application struct {
 	UpdatedAt      time.Time `json:"updated_at"`
 }
 
-type TemporaryAccount struct {
-	ID          string     `gorm:"primaryKey;size:64" json:"id"`
-	Username    string     `gorm:"uniqueIndex;size:128;not null" json:"username"`
-	DisplayName string     `gorm:"size:128" json:"display_name,omitempty"`
-	Status      string     `gorm:"index;size:32;not null;default:active" json:"status"`
-	ExpiresAt   *time.Time `gorm:"index" json:"expires_at,omitempty"`
-	CreatedBy   string     `gorm:"index;size:64" json:"created_by,omitempty"`
-	CreatedAt   time.Time  `json:"created_at"`
-	UpdatedAt   time.Time  `json:"updated_at"`
-}
-
-type TemporaryCredential struct {
-	ID                 string           `gorm:"primaryKey;size:64" json:"id"`
-	TemporaryAccountID string           `gorm:"index;size:64;not null" json:"temporary_account_id"`
-	Type               string           `gorm:"size:32;not null" json:"type"`
-	PublicKey          string           `gorm:"type:text" json:"public_key,omitempty"`
-	SecretHash         string           `gorm:"size:255" json:"-"`
-	Fingerprint        string           `gorm:"index;size:128" json:"fingerprint,omitempty"`
-	ExpiresAt          *time.Time       `gorm:"index;index:idx_temporary_credentials_validity,priority:2" json:"expires_at,omitempty"`
-	RevokedAt          *time.Time       `gorm:"index;index:idx_temporary_credentials_validity,priority:1" json:"revoked_at,omitempty"`
-	CreatedAt          time.Time        `json:"created_at"`
-	UpdatedAt          time.Time        `json:"updated_at"`
-	TemporaryAccount   TemporaryAccount `gorm:"constraint:OnUpdate:CASCADE,OnDelete:CASCADE;" json:"-"`
-}
-
-type TemporaryAccountGrant struct {
-	ID                 string           `gorm:"primaryKey;size:64" json:"id"`
-	TemporaryAccountID string           `gorm:"index;size:64;not null" json:"temporary_account_id"`
-	UserID             string           `gorm:"index;index:idx_temporary_grants_match,priority:1;size:64" json:"user_id,omitempty"`
-	Action             string           `gorm:"index;index:idx_temporary_grants_match,priority:2;size:128" json:"action,omitempty"`
-	ResourceType       string           `gorm:"index;index:idx_temporary_grants_match,priority:3;size:64" json:"resource_type,omitempty"`
-	ResourceID         string           `gorm:"index;index:idx_temporary_grants_match,priority:4;size:64" json:"resource_id,omitempty"`
-	StartsAt           *time.Time       `gorm:"index" json:"starts_at,omitempty"`
-	ExpiresAt          *time.Time       `gorm:"index;index:idx_temporary_grants_match,priority:5" json:"expires_at,omitempty"`
-	CreatedBy          string           `gorm:"index;size:64" json:"created_by,omitempty"`
-	RevokedAt          *time.Time       `gorm:"index;index:idx_temporary_grants_match,priority:6" json:"revoked_at,omitempty"`
-	CreatedAt          time.Time        `json:"created_at"`
-	UpdatedAt          time.Time        `json:"updated_at"`
-	TemporaryAccount   TemporaryAccount `gorm:"constraint:OnUpdate:CASCADE,OnDelete:CASCADE;" json:"-"`
-}
-
 func AllModels() []any {
 	return []any{
 		&User{},
@@ -175,22 +134,17 @@ func ensureID(id *string) error {
 	return nil
 }
 
-func (m *UserPublicKey) BeforeCreate(_ *gorm.DB) error       { return ensureID(&m.ID) }
-func (m *Role) BeforeCreate(_ *gorm.DB) error                { return ensureID(&m.ID) }
-func (m *Permission) BeforeCreate(_ *gorm.DB) error          { return ensureID(&m.ID) }
-func (m *RolePermission) BeforeCreate(_ *gorm.DB) error      { return ensureID(&m.ID) }
-func (m *UserRole) BeforeCreate(_ *gorm.DB) error            { return ensureID(&m.ID) }
-func (m *Application) BeforeCreate(_ *gorm.DB) error         { return ensureID(&m.ID) }
-func (m *ContainerEndpoint) BeforeCreate(_ *gorm.DB) error   { return ensureID(&m.ID) }
-func (m *UserSession) BeforeCreate(_ *gorm.DB) error         { return ensureID(&m.ID) }
-func (m *TemporaryAccount) BeforeCreate(_ *gorm.DB) error    { return ensureID(&m.ID) }
-func (m *TemporaryCredential) BeforeCreate(_ *gorm.DB) error { return ensureID(&m.ID) }
-func (m *TemporaryAccountGrant) BeforeCreate(_ *gorm.DB) error {
-	return ensureID(&m.ID)
-}
-func (m *PlatformAccount) BeforeCreate(_ *gorm.DB) error { return ensureID(&m.ID) }
-func (m *AuditEvent) BeforeCreate(_ *gorm.DB) error      { return ensureID(&m.ID) }
-func (m *AuditSession) BeforeCreate(_ *gorm.DB) error    { return ensureID(&m.ID) }
-func (m *AuditSSHCommand) BeforeCreate(_ *gorm.DB) error { return ensureID(&m.ID) }
-func (m *AuditDBQuery) BeforeCreate(_ *gorm.DB) error    { return ensureID(&m.ID) }
-func (m *AuditSFTPEvent) BeforeCreate(_ *gorm.DB) error  { return ensureID(&m.ID) }
+func (m *UserPublicKey) BeforeCreate(_ *gorm.DB) error     { return ensureID(&m.ID) }
+func (m *Role) BeforeCreate(_ *gorm.DB) error              { return ensureID(&m.ID) }
+func (m *Permission) BeforeCreate(_ *gorm.DB) error        { return ensureID(&m.ID) }
+func (m *RolePermission) BeforeCreate(_ *gorm.DB) error    { return ensureID(&m.ID) }
+func (m *UserRole) BeforeCreate(_ *gorm.DB) error          { return ensureID(&m.ID) }
+func (m *Application) BeforeCreate(_ *gorm.DB) error       { return ensureID(&m.ID) }
+func (m *ContainerEndpoint) BeforeCreate(_ *gorm.DB) error { return ensureID(&m.ID) }
+func (m *UserSession) BeforeCreate(_ *gorm.DB) error       { return ensureID(&m.ID) }
+func (m *PlatformAccount) BeforeCreate(_ *gorm.DB) error   { return ensureID(&m.ID) }
+func (m *AuditEvent) BeforeCreate(_ *gorm.DB) error        { return ensureID(&m.ID) }
+func (m *AuditSession) BeforeCreate(_ *gorm.DB) error      { return ensureID(&m.ID) }
+func (m *AuditSSHCommand) BeforeCreate(_ *gorm.DB) error   { return ensureID(&m.ID) }
+func (m *AuditDBQuery) BeforeCreate(_ *gorm.DB) error      { return ensureID(&m.ID) }
+func (m *AuditSFTPEvent) BeforeCreate(_ *gorm.DB) error    { return ensureID(&m.ID) }

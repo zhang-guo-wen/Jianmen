@@ -60,7 +60,7 @@
               <button type="button" class="log-tab" :class="{ active: activeLogTab === 'details' }" @click="activeLogTab = 'details'">详情</button>
             </div>
             <div v-if="activeLogTab === 'logs'" class="log-actions">
-              <el-button size="small" @click="refreshLogs">
+              <el-button size="small" @click="refreshLogsNow">
                 <el-icon><Refresh /></el-icon>刷新日志
               </el-button>
               <el-input v-model="logSearch" class="log-search" size="small" clearable placeholder="搜索日志">
@@ -197,9 +197,13 @@ const logs = ref('')
 const logSearch = ref('')
 const activeLogTab = ref<'logs' | 'details'>('logs')
 const logViewer = ref<HTMLElement | null>(null)
-let logPollingTimer: ReturnType<typeof setInterval> | null = null
+let logPollingTimer: ReturnType<typeof setTimeout> | null = null
+let logSelectionTimer: ReturnType<typeof setTimeout> | null = null
 let logRequestController: AbortController | null = null
+let logSessionVersion = 0
 const logPollingInterval = 3000
+const logSelectionDelay = 180
+const logRequestTimeout = 10000
 const logsLoading = ref(false)
 const loading = ref(false)
 const dialogVisible = ref(false)
@@ -286,37 +290,68 @@ function selectContainer(endpoint: ContainerEndpointView, container: ContainerRe
   selectedContainer.value = container
   activeLogTab.value = 'logs'
   logSearch.value = ''
-  void refreshLogs()
-  startLogPolling()
+  logs.value = ''
+  queueLogRefresh(logSessionVersion, logSelectionDelay)
 }
 
-async function refreshLogs() {
+function queueLogRefresh(version: number, delay = 0) {
+  if (logSelectionTimer !== null) clearTimeout(logSelectionTimer)
+  logSelectionTimer = setTimeout(async () => {
+    logSelectionTimer = null
+    if (version !== logSessionVersion || activeLogTab.value !== 'logs') return
+    await refreshLogs(version)
+    scheduleNextLogRefresh(version)
+  }, delay)
+}
+
+async function refreshLogs(version = logSessionVersion) {
   const endpointId = selectedEndpoint.value?.id
   const containerId = selectedContainer.value?.id
-  if (!endpointId || !containerId) return
+  if (!endpointId || !containerId || version !== logSessionVersion) return
 
   logRequestController?.abort()
   const controller = new AbortController()
   logRequestController = controller
+  let timedOut = false
+  const timeout = setTimeout(() => {
+    timedOut = true
+    controller.abort()
+  }, logRequestTimeout)
   logsLoading.value = true
   try {
     const result = await apiClient.getContainerLogs(endpointId, containerId, 200, controller.signal)
-    if (!controller.signal.aborted && selectedEndpoint.value?.id === endpointId && selectedContainer.value?.id === containerId) {
+    if (!controller.signal.aborted && version === logSessionVersion && selectedEndpoint.value?.id === endpointId && selectedContainer.value?.id === containerId) {
       logs.value = result.logs || ''
       scrollLogsToBottom()
     }
   } catch (error: any) {
+    if (timedOut && version === logSessionVersion) {
+      logs.value = '日志请求超时，正在等待下次刷新'
+      scrollLogsToBottom()
+      return
+    }
     if (controller.signal.aborted || error?.name === 'AbortError') return
-    if (selectedEndpoint.value?.id === endpointId && selectedContainer.value?.id === containerId) {
+    if (version === logSessionVersion && selectedEndpoint.value?.id === endpointId && selectedContainer.value?.id === containerId) {
       logs.value = error.message || '读取日志失败'
       scrollLogsToBottom()
     }
   } finally {
+    clearTimeout(timeout)
     if (logRequestController === controller) {
       logRequestController = null
       logsLoading.value = false
     }
   }
+}
+
+async function refreshLogsNow() {
+  const version = logSessionVersion
+  if (logPollingTimer !== null) {
+    clearTimeout(logPollingTimer)
+    logPollingTimer = null
+  }
+  await refreshLogs(version)
+  scheduleNextLogRefresh(version)
 }
 
 function scrollLogsToBottom() {
@@ -328,25 +363,28 @@ function scrollLogsToBottom() {
 }
 
 function stopLogPolling() {
+  logSessionVersion++
   if (logPollingTimer !== null) {
-    clearInterval(logPollingTimer)
+    clearTimeout(logPollingTimer)
     logPollingTimer = null
+  }
+  if (logSelectionTimer !== null) {
+    clearTimeout(logSelectionTimer)
+    logSelectionTimer = null
   }
   logRequestController?.abort()
   logRequestController = null
   logsLoading.value = false
 }
 
-function startLogPolling() {
-  if (logPollingTimer !== null) {
-    clearInterval(logPollingTimer)
+function scheduleNextLogRefresh(version: number) {
+  if (logPollingTimer !== null) clearTimeout(logPollingTimer)
+  if (version !== logSessionVersion || !selectedContainer.value || activeLogTab.value !== 'logs') return
+  logPollingTimer = setTimeout(async () => {
     logPollingTimer = null
-  }
-  if (!selectedContainer.value) return
-  logPollingTimer = setInterval(() => {
-    if (activeLogTab.value === 'logs' && !logsLoading.value) {
-      void refreshLogs()
-    }
+    if (version !== logSessionVersion || activeLogTab.value !== 'logs') return
+    await refreshLogs(version)
+    scheduleNextLogRefresh(version)
   }, logPollingInterval)
 }
 
@@ -525,7 +563,7 @@ function endpointTarget(endpoint: ContainerEndpointView) {
 watch(activeLogTab, (tab) => {
   if (tab === 'logs' && selectedContainer.value) {
     scrollLogsToBottom()
-    startLogPolling()
+    queueLogRefresh(logSessionVersion)
   } else {
     stopLogPolling()
   }

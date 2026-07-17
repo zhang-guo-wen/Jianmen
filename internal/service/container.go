@@ -130,32 +130,56 @@ func (s *ContainerService) sshCommand(ctx context.Context, endpoint ContainerEnd
 	if address == "" {
 		return nil, errors.New("ssh target address is empty")
 	}
+
 	dialer := net.Dialer{Timeout: 10 * time.Second}
 	conn, err := dialer.DialContext(ctx, "tcp", address)
 	if err != nil {
 		return nil, err
 	}
-	cc, chans, reqs, err := ssh.NewClientConn(conn, address, config)
-	if err != nil {
-		_ = conn.Close()
-		return nil, err
+
+	type handshakeResult struct {
+		conn  ssh.Conn
+		chans <-chan ssh.NewChannel
+		reqs  <-chan *ssh.Request
+		err   error
 	}
-	client := ssh.NewClient(cc, chans, reqs)
+	handshake := make(chan handshakeResult, 1)
+	go func() {
+		cc, chans, reqs, handshakeErr := ssh.NewClientConn(conn, address, config)
+		handshake <- handshakeResult{conn: cc, chans: chans, reqs: reqs, err: handshakeErr}
+	}()
+
+	var result handshakeResult
+	select {
+	case <-ctx.Done():
+		_ = conn.Close()
+		return nil, ctx.Err()
+	case result = <-handshake:
+		if result.err != nil {
+			_ = conn.Close()
+			return nil, result.err
+		}
+	}
+
+	client := ssh.NewClient(result.conn, result.chans, result.reqs)
 	defer client.Close()
 	session, err := client.NewSession()
 	if err != nil {
 		return nil, err
 	}
-	defer session.Close()
 	var stdout, stderr strings.Builder
 	session.Stdout = &stdout
 	session.Stderr = &stderr
 	done := make(chan error, 1)
 	go func() { done <- session.Run(command) }()
+
 	select {
 	case <-ctx.Done():
+		// Closing the client unblocks both the SSH request and the remote command.
+		_ = client.Close()
 		return nil, ctx.Err()
 	case err := <-done:
+		_ = session.Close()
 		if err != nil {
 			message := strings.TrimSpace(stderr.String())
 			if message != "" {

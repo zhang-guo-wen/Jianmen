@@ -17,27 +17,28 @@ import (
 )
 
 type Server struct {
-	cfg              *config.Config
-	store            store.Store
-	db               *gorm.DB
-	logger           *slog.Logger
-	dataDir          string
-	loginLimiter     *loginLimiter
-	loginCaptcha     loginCaptchaVerifier
-	appProxy         *appproxy.Server
-	onlineSessions   *online.Registry
-	containerService *service.ContainerService
-	identity         *service.IdentityService
-	authorization    authorizationService
-	resourceGrants   *service.ResourceGrantService
-	resourceGroups   *service.ResourceGroupService
-	userManagement   *service.UserService
-	userGroups       *service.UserGroupService
-	roleManagement   *service.RoleService
-	temporaryAccess  *service.TemporaryAccessService
-	browserSessions  *service.BrowserSessionService
-	setupOnce        sync.Once
-	setupSlot        chan struct{}
+	cfg                  *config.Config
+	store                store.Store
+	db                   *gorm.DB
+	logger               *slog.Logger
+	dataDir              string
+	loginLimiter         *loginLimiter
+	loginCaptcha         loginCaptchaVerifier
+	appProxy             *appproxy.Server
+	onlineSessions       *online.Registry
+	containerService     *service.ContainerService
+	identity             *service.IdentityService
+	authorization        authorizationService
+	resourceGrants       *service.ResourceGrantService
+	resourceGroups       *service.ResourceGroupService
+	userManagement       *service.UserService
+	userGroups           *service.UserGroupService
+	roleManagement       *service.RoleService
+	databaseProvisioning databaseProvisioningService
+	temporaryAccess      *service.TemporaryAccessService
+	browserSessions      *service.BrowserSessionService
+	setupOnce            sync.Once
+	setupSlot            chan struct{}
 }
 
 type loginCaptchaVerifier interface {
@@ -64,6 +65,7 @@ func New(
 	authorization authorizationService,
 	resourceGrants *service.ResourceGrantService,
 	resourceGroups *service.ResourceGroupService,
+	databaseProvisioning databaseProvisioningService,
 	logger *slog.Logger,
 	dataDir string,
 	appProxy *appproxy.Server,
@@ -86,6 +88,8 @@ func New(
 		return nil, errors.New("admin resource grant service is required")
 	case resourceGroups == nil:
 		return nil, errors.New("admin resource group service is required")
+	case databaseProvisioning == nil:
+		return nil, errors.New("admin database provisioning service is required")
 	case logger == nil:
 		return nil, errors.New("admin logger is required")
 	case onlineSessions == nil:
@@ -129,7 +133,7 @@ func New(
 		loginLimiter: newDefaultLoginLimiter(), loginCaptcha: loginCaptcha, appProxy: appProxy,
 		onlineSessions: onlineSessions, containerService: service.NewContainerService(),
 		identity: identity, authorization: authorization,
-		resourceGrants: resourceGrants, resourceGroups: resourceGroups, userManagement: userManagement, userGroups: userGroups, roleManagement: roleManagement, temporaryAccess: temporaryAccess,
+		resourceGrants: resourceGrants, resourceGroups: resourceGroups, userManagement: userManagement, userGroups: userGroups, roleManagement: roleManagement, databaseProvisioning: databaseProvisioning, temporaryAccess: temporaryAccess,
 		browserSessions: browserSessions,
 	}, nil
 }

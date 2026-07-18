@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"flag"
-	"log/slog"
 	"os"
 	"os/signal"
 	"syscall"
@@ -23,9 +22,7 @@ func main() {
 	configPath := flag.String("config", "config.local.json", "path to config file")
 	flag.Parse()
 
-	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
-		Level: slog.LevelInfo,
-	}))
+	logger := newRuntimeLogger()
 
 	cfg, err := config.Load(*configPath)
 	if err != nil {
@@ -60,6 +57,11 @@ func main() {
 		logger.Error("failed to initialize browser session service", "error", err)
 		os.Exit(1)
 	}
+	databaseProvisioning, err := newDatabaseProvisioningRuntime(appStore, logger)
+	if err != nil {
+		logger.Error("failed to initialize database provisioning service")
+		os.Exit(1)
+	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -67,8 +69,9 @@ func main() {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	errCh := make(chan error, 4)
+	errCh := make(chan error, 5)
 	onlineSessions := online.NewRegistry()
+	startDatabaseProvisioningReconciler(ctx, errCh, databaseProvisioning)
 
 	sshSrv, err := sshserver.New(cfg, appStore, authorizationService, logger, onlineSessions)
 	if err != nil {
@@ -113,6 +116,7 @@ func main() {
 			authorizationService,
 			resourceGrants,
 			resourceGroups,
+			databaseProvisioning,
 			logger,
 			dataDir,
 			appProxy,

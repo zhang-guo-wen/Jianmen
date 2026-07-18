@@ -1,9 +1,10 @@
 package admin
 
 import (
-	"crypto/rand"
+	"context"
 	"encoding/json"
-	"math/big"
+	"errors"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -13,147 +14,152 @@ import (
 	"jianmen/internal/service"
 )
 
-// handleDBDatabases handles GET /api/db/instances/{id}/databases
+type databaseProvisioningService interface {
+	ListDatabases(
+		context.Context,
+		service.ListProvisioningDatabasesRequest,
+	) ([]string, error)
+	Provision(
+		context.Context,
+		service.ProvisionDatabaseAccountRequest,
+	) (service.ProvisionDatabaseAccountResult, error)
+}
+
+type provisionDatabaseAccountPayload struct {
+	AdminAccountID string            `json:"admin_account_id"`
+	Host           string            `json:"host"`
+	Grants         []service.DBGrant `json:"grants"`
+	Group          string            `json:"group"`
+	Remark         string            `json:"remark"`
+	ExpiresAt      *time.Time        `json:"expires_at"`
+}
+
+// handleDBDatabases handles GET /api/db/instances/{id}/databases.
 func (s *Server) handleDBDatabases(w http.ResponseWriter, r *http.Request, instanceID string) {
 	if !s.requirePermission(r, rbac.ActionDBProxyView) {
 		s.forbidden(w, r)
 		return
 	}
-
 	adminAccountID := strings.TrimSpace(r.URL.Query().Get("admin_account_id"))
 	if adminAccountID == "" {
 		s.writeErrorText(w, r, http.StatusBadRequest, "admin_account_id is required")
 		return
 	}
-
-	var acct model.DatabaseAccount
-	if err := s.db.Preload("Instance").First(&acct, "id = ? AND instance_id = ?", adminAccountID, instanceID).Error; err != nil {
-		s.writeErrorText(w, r, http.StatusNotFound, "admin account not found")
+	if !s.requireResourceAction(
+		w,
+		r,
+		rbac.ActionDBConnect,
+		model.ResourceTypeDatabaseAccount,
+		adminAccountID,
+	) {
 		return
 	}
-	if acct.Status != "active" {
-		s.writeErrorText(w, r, http.StatusBadRequest, "admin account is not active")
+	if s.databaseProvisioning == nil {
+		s.writeErrorText(w, r, http.StatusServiceUnavailable, "database provisioning is unavailable")
 		return
 	}
-	if acct.ExpiresAt != nil && time.Now().UTC().After(*acct.ExpiresAt) {
-		s.writeErrorText(w, r, http.StatusBadRequest, "admin account has expired")
-		return
-	}
-	if acct.Instance.Status != "active" {
-		s.writeErrorText(w, r, http.StatusBadRequest, "database instance is disabled")
-		return
-	}
-	if acct.Instance.Protocol != "mysql" {
-		s.writeErrorText(w, r, http.StatusBadRequest, "only mysql instances support auto-provisioning")
-		return
-	}
-
-	dbs, err := service.ListMySQLDatabases(acct.Instance, acct)
+	databases, err := s.databaseProvisioning.ListDatabases(
+		r.Context(),
+		service.ListProvisioningDatabasesRequest{
+			InstanceID: instanceID, AdminAccountID: adminAccountID,
+			Actor: databaseProvisioningActorFromRequest(r),
+		},
+	)
 	if err != nil {
-		s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
+		s.writeErrorText(w, r, http.StatusBadGateway, "database operation failed")
 		return
 	}
-
-	s.writeJSON(w, r, http.StatusOK, map[string]any{"databases": dbs})
+	s.writeJSON(w, r, http.StatusOK, map[string]any{"databases": databases})
 }
 
-// handleDBProvisionAccount handles POST /api/db/instances/{id}/provision-account
+// handleDBProvisionAccount handles POST /api/db/instances/{id}/provision-account.
 func (s *Server) handleDBProvisionAccount(w http.ResponseWriter, r *http.Request, instanceID string) {
 	if !s.requirePermission(r, rbac.ActionDBProxyCreate) {
 		s.forbidden(w, r)
 		return
 	}
-
 	defer r.Body.Close()
 	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
-
-	var payload struct {
-		AdminAccountID string            `json:"admin_account_id"`
-		NewUsername    string            `json:"new_username"`
-		Password       string            `json:"password"`
-		Host           string            `json:"host"`
-		Grants         []service.DBGrant `json:"grants"`
-		Group          string            `json:"group"`
-		Remark         string            `json:"remark"`
-		ExpiresAt      *time.Time        `json:"expires_at"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-		s.writeErrorText(w, r, http.StatusBadRequest, err.Error())
+	var payload provisionDatabaseAccountPayload
+	if err := decodeStrictProvisioningPayload(r, &payload); err != nil {
+		s.writeErrorText(w, r, http.StatusBadRequest, "invalid database provisioning request")
 		return
 	}
 	payload.AdminAccountID = strings.TrimSpace(payload.AdminAccountID)
-	payload.NewUsername = strings.TrimSpace(payload.NewUsername)
 	payload.Host = strings.TrimSpace(payload.Host)
-
-	if payload.AdminAccountID == "" {
-		s.writeErrorText(w, r, http.StatusBadRequest, "admin_account_id is required")
+	if payload.AdminAccountID == "" || payload.Host == "" {
+		s.writeErrorText(w, r, http.StatusBadRequest, "invalid database provisioning request")
 		return
 	}
-	if payload.Host == "" {
-		payload.Host = "%"
-	}
-
-	// Generate password
-	generatedPassword := payload.Password
-	if generatedPassword == "" {
-		generatedPassword = generateRandomPassword(20)
-	}
-
-	// Generate username
-	newUsername := payload.NewUsername
-	if newUsername == "" {
-		newUsername = "u_" + generateRandomPassword(8)
-	}
-
-	// Load admin credentials (must belong to this instance)
-	var acct model.DatabaseAccount
-	if err := s.db.Preload("Instance").First(&acct, "id = ? AND instance_id = ?", payload.AdminAccountID, instanceID).Error; err != nil {
-		s.writeErrorText(w, r, http.StatusNotFound, "admin account not found for this instance")
+	if !s.requireResourceAction(
+		w,
+		r,
+		rbac.ActionDBConnect,
+		model.ResourceTypeDatabaseAccount,
+		payload.AdminAccountID,
+	) {
 		return
 	}
-	if acct.Status != "active" {
-		s.writeErrorText(w, r, http.StatusBadRequest, "admin account is not active")
+	if s.databaseProvisioning == nil {
+		s.writeErrorText(w, r, http.StatusServiceUnavailable, "database provisioning is unavailable")
 		return
 	}
-	if acct.ExpiresAt != nil && time.Now().UTC().After(*acct.ExpiresAt) {
-		s.writeErrorText(w, r, http.StatusBadRequest, "admin account has expired")
-		return
-	}
-	if acct.Instance.Status != "active" {
-		s.writeErrorText(w, r, http.StatusBadRequest, "database instance is disabled")
-		return
-	}
-	if acct.Instance.Protocol != "mysql" {
-		s.writeErrorText(w, r, http.StatusBadRequest, "only mysql protocol is supported for provisioning")
-		return
-	}
-
-	// Execute CREATE USER + GRANT on target MySQL
-	if err := service.ProvisionMySQLAccount(acct.Instance, acct, newUsername, generatedPassword, payload.Host, payload.Grants); err != nil {
-		s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
-		return
-	}
-
-	// Register in the bastion host
-	view, err := s.store.AddDatabaseAccount(instanceID, newUsername, generatedPassword, payload.Group, payload.Remark, payload.ExpiresAt)
+	result, err := s.databaseProvisioning.Provision(
+		r.Context(),
+		service.ProvisionDatabaseAccountRequest{
+			InstanceID: instanceID, AdminAccountID: payload.AdminAccountID,
+			Host: payload.Host, Grants: payload.Grants,
+			Group: payload.Group, Remark: payload.Remark, ExpiresAt: payload.ExpiresAt,
+			Actor: databaseProvisioningActorFromRequest(r),
+		},
+	)
 	if err != nil {
-		writeDBStoreError(w, r, err)
+		s.writeDatabaseProvisioningServiceError(w, r, err)
 		return
 	}
-
 	s.writeJSON(w, r, http.StatusCreated, map[string]any{
-		"ok":                 true,
-		"account":            view,
-		"generated_password": generatedPassword,
+		"ok": true, "account": result.Account,
 	})
 }
 
-func generateRandomPassword(length int) string {
-	const chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!#$%&()*+,-./:;<=>?@[]^_"
-	result := make([]byte, length)
-	for i := range result {
-		n, _ := rand.Int(rand.Reader, big.NewInt(int64(len(chars))))
-		result[i] = chars[n.Int64()]
+func decodeStrictProvisioningPayload(
+	r *http.Request,
+	payload *provisionDatabaseAccountPayload,
+) error {
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(payload); err != nil {
+		return err
 	}
-	return string(result)
+	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		return errors.New("database provisioning request contains trailing data")
+	}
+	return nil
+}
+
+func databaseProvisioningActorFromRequest(r *http.Request) service.DatabaseProvisioningActor {
+	return service.DatabaseProvisioningActor{
+		UserID: userIDFromRequest(r), Username: usernameFromRequest(r),
+		ClientIP: requestClientIP(r),
+	}
+}
+
+func (s *Server) writeDatabaseProvisioningServiceError(
+	w http.ResponseWriter,
+	r *http.Request,
+	err error,
+) {
+	switch {
+	case errors.Is(err, service.ErrInvalidDatabaseProvisioningRequest):
+		s.writeErrorText(w, r, http.StatusBadRequest, "invalid database provisioning request")
+	case errors.Is(err, service.ErrDatabaseProvisioningCleanupRequired):
+		s.writeErrorText(
+			w,
+			r,
+			http.StatusInternalServerError,
+			"database account provisioning failed; cleanup is pending",
+		)
+	default:
+		s.writeErrorText(w, r, http.StatusBadGateway, "database account provisioning failed")
+	}
 }

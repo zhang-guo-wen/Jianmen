@@ -2,56 +2,16 @@ package admin
 
 import (
 	"encoding/json"
-	"jianmen/internal/model"
-	"jianmen/internal/rbac"
-	"jianmen/internal/store"
 	"net"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
+
+	"jianmen/internal/model"
+	"jianmen/internal/rbac"
+	"jianmen/internal/store"
 )
-
-func (s *Server) handleDBGateway(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		w.Header().Set("Allow", http.MethodGet)
-		s.writeErrorText(w, r, http.StatusMethodNotAllowed, "method not allowed")
-		return
-	}
-	if !s.requirePermission(r, rbac.ActionDBProxyView) {
-		s.forbidden(w, r)
-		return
-	}
-	cfg := s.cfg.DatabaseGateway
-	host, port := parseListenAddr(cfg.ListenAddr)
-	s.writeJSON(w, r, http.StatusOK, map[string]any{
-		"enabled":     cfg.Enabled,
-		"listen_addr": cfg.ListenAddr,
-		"host":        host,
-		"port":        port,
-	})
-}
-
-func parseListenAddr(addr string) (host string, port int) {
-	if addr == "" {
-		return "", 33060
-	}
-	h, p, err := net.SplitHostPort(addr)
-	if err != nil {
-		return addr, 33060
-	}
-	host = h
-	// Wildcard bind addresses are not client connection addresses; the UI falls back to its current host.
-	if host == "0.0.0.0" || host == "::" {
-		host = ""
-	}
-	if n, err := strconv.Atoi(p); err == nil {
-		port = n
-	} else {
-		port = 33060
-	}
-	return
-}
 
 // ensureDBPort 确保数据库地址包含端口，缺省则按协议补默认端口
 func ensureDBPort(address, protocol string) string {
@@ -97,12 +57,12 @@ func (s *Server) handleDBAccounts(w http.ResponseWriter, r *http.Request) {
 	}
 	accounts, err := s.store.DatabaseAccounts()
 	if err != nil {
-		s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
+		s.writeDatabaseOperationError(w, r, http.StatusInternalServerError, "database operation failed", err)
 		return
 	}
 	accounts, err = s.visibleDatabaseAccountsForActions(r, accounts, actions)
 	if err != nil {
-		s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
+		s.writeDatabaseOperationError(w, r, http.StatusInternalServerError, "database operation failed", err)
 		return
 	}
 	instances := make(map[string]store.DatabaseInstanceView)
@@ -134,9 +94,17 @@ func (s *Server) handleDBInstances(w http.ResponseWriter, r *http.Request) {
 		if !s.requireAuthenticatedUser(w, r) {
 			return
 		}
-		instances, err := s.visibleDatabaseInstances(r, s.store.DatabaseInstances())
+		actions := []string{rbac.ActionDBProxyView}
+		if connectableOnly(r) {
+			if !s.requireAnyPermission(r, rbac.ActionDBConnect) {
+				s.forbidden(w, r)
+				return
+			}
+			actions = []string{rbac.ActionDBConnect}
+		}
+		instances, err := s.visibleDatabaseInstancesForActions(r, s.store.DatabaseInstances(), actions)
 		if err != nil {
-			s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
+			s.writeDatabaseOperationError(w, r, http.StatusInternalServerError, "database operation failed", err)
 			return
 		}
 		resp := paginateSlice(instances, r, func(v store.DatabaseInstanceView, q string) bool {
@@ -163,25 +131,33 @@ func (s *Server) handleCreateDBInstance(w http.ResponseWriter, r *http.Request) 
 	defer r.Body.Close()
 	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	var payload struct {
-		Name     string `json:"name"`
-		Protocol string `json:"protocol"`
-		Address  string `json:"address"`
-		Port     int    `json:"port"`
-		Group    string `json:"group"`
-		Remark   string `json:"remark"`
+		Name          string  `json:"name"`
+		Protocol      string  `json:"protocol"`
+		Address       string  `json:"address"`
+		Port          int     `json:"port"`
+		TLSMode       string  `json:"tls_mode"`
+		TLSServerName string  `json:"tls_server_name"`
+		TLSCAPEM      *string `json:"tls_ca_pem"`
+		ClearTLSCA    bool    `json:"clear_tls_ca"`
+		Group         string  `json:"group"`
+		Remark        string  `json:"remark"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-		s.writeErrorText(w, r, http.StatusBadRequest, err.Error())
+		s.writeErrorText(w, r, http.StatusBadRequest, "invalid database request")
 		return
 	}
-	view, err := s.store.AddDatabaseInstance(payload.Name, payload.Protocol, payload.Address, payload.Port, payload.Group, payload.Remark)
+	view, err := s.store.AddDatabaseInstance(store.DatabaseInstanceInput{
+		Name: payload.Name, Protocol: payload.Protocol, Address: payload.Address, Port: payload.Port,
+		TLSMode: payload.TLSMode, TLSServerName: payload.TLSServerName, TLSCAPEM: payload.TLSCAPEM, ClearTLSCA: payload.ClearTLSCA,
+		Group: payload.Group, Remark: payload.Remark,
+	})
 	if err != nil {
-		s.writeErrorText(w, r, http.StatusBadRequest, err.Error())
+		writeDBStoreError(w, r, err)
 		return
 	}
 	if err := s.grantCreatedResource(r, model.ResourceTypeDatabaseInstance, view.ID); err != nil {
 		_ = s.store.DeleteDatabaseInstance(view.ID)
-		s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
+		s.writeDatabaseOperationError(w, r, http.StatusInternalServerError, "database operation failed", err)
 		return
 	}
 	s.writeJSON(w, r, http.StatusCreated, view)
@@ -214,7 +190,7 @@ func (s *Server) handleDBInstance(w http.ResponseWriter, r *http.Request) {
 			}
 			accounts, err = s.visibleDatabaseAccountsForActions(r, accounts, actions)
 			if err != nil {
-				s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
+				s.writeDatabaseOperationError(w, r, http.StatusInternalServerError, "database operation failed", err)
 				return
 			}
 
@@ -269,7 +245,7 @@ func (s *Server) handleDBInstance(w http.ResponseWriter, r *http.Request) {
 	case http.MethodGet:
 		visible, err := s.databaseInstanceVisible(r, id)
 		if err != nil {
-			s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
+			s.writeDatabaseOperationError(w, r, http.StatusInternalServerError, "database operation failed", err)
 			return
 		}
 		if !visible {
@@ -306,19 +282,27 @@ func (s *Server) handleUpdateDBInstance(w http.ResponseWriter, r *http.Request, 
 	defer r.Body.Close()
 	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	var payload struct {
-		Name     string `json:"name"`
-		Protocol string `json:"protocol"`
-		Address  string `json:"address"`
-		Port     int    `json:"port"`
-		Group    string `json:"group"`
-		Remark   string `json:"remark"`
-		Status   string `json:"status"`
+		Name          string  `json:"name"`
+		Protocol      string  `json:"protocol"`
+		Address       string  `json:"address"`
+		Port          int     `json:"port"`
+		TLSMode       string  `json:"tls_mode"`
+		TLSServerName string  `json:"tls_server_name"`
+		TLSCAPEM      *string `json:"tls_ca_pem"`
+		ClearTLSCA    bool    `json:"clear_tls_ca"`
+		Group         string  `json:"group"`
+		Remark        string  `json:"remark"`
+		Status        string  `json:"status"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-		s.writeErrorText(w, r, http.StatusBadRequest, err.Error())
+		s.writeErrorText(w, r, http.StatusBadRequest, "invalid database request")
 		return
 	}
-	view, err := s.store.UpdateDatabaseInstance(id, payload.Name, payload.Protocol, payload.Address, payload.Port, payload.Group, payload.Remark, payload.Status)
+	view, err := s.store.UpdateDatabaseInstance(id, store.DatabaseInstanceInput{
+		Name: payload.Name, Protocol: payload.Protocol, Address: payload.Address, Port: payload.Port,
+		TLSMode: payload.TLSMode, TLSServerName: payload.TLSServerName, TLSCAPEM: payload.TLSCAPEM, ClearTLSCA: payload.ClearTLSCA,
+		Group: payload.Group, Remark: payload.Remark, Status: payload.Status,
+	})
 	if err != nil {
 		writeDBStoreError(w, r, err)
 		return
@@ -336,7 +320,7 @@ func (s *Server) handleCreateDBAccount(w http.ResponseWriter, r *http.Request, i
 		ExpiresAt *time.Time `json:"expires_at"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-		s.writeErrorText(w, r, http.StatusBadRequest, err.Error())
+		s.writeErrorText(w, r, http.StatusBadRequest, "invalid database request")
 		return
 	}
 	if strings.TrimSpace(payload.Password) == "" {
@@ -402,7 +386,7 @@ func (s *Server) handleUpdateDBAccount(w http.ResponseWriter, r *http.Request, i
 		Status    string     `json:"status"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-		s.writeErrorText(w, r, http.StatusBadRequest, err.Error())
+		s.writeErrorText(w, r, http.StatusBadRequest, "invalid database request")
 		return
 	}
 	view, err := s.store.UpdateDatabaseAccount(id, payload.Username, payload.Password, payload.Group, payload.Remark, payload.ExpiresAt, payload.Status)

@@ -198,7 +198,9 @@ func TestDBStoreRejectsDuplicateAccountNamesPerParent(t *testing.T) {
 		t.Fatalf("duplicate target error = %v, want already exists", err)
 	}
 
-	instance, err := st.AddDatabaseInstance("orders", "mysql", "127.0.0.1", 3306, "", "")
+	instance, err := st.AddDatabaseInstance(DatabaseInstanceInput{
+		Name: "orders", Protocol: "mysql", Address: "127.0.0.1", Port: 3306, TLSMode: "disable",
+	})
 	if err != nil {
 		t.Fatalf("add database instance: %v", err)
 	}
@@ -208,6 +210,12 @@ func TestDBStoreRejectsDuplicateAccountNamesPerParent(t *testing.T) {
 	_, err = st.AddDatabaseAccount(instance.ID, "app", "pass2", "", "", nil)
 	if err == nil || !strings.Contains(err.Error(), "already exists") {
 		t.Fatalf("duplicate database account error = %v, want already exists", err)
+	}
+}
+
+func TestNormalizeDBProtocolRejectsLegacyTCP(t *testing.T) {
+	if _, err := normalizeDBProtocol("tcp"); err == nil {
+		t.Fatal("legacy tcp database protocol was accepted")
 	}
 }
 

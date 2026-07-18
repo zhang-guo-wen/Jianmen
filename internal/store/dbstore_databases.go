@@ -3,11 +3,14 @@ package store
 import (
 	"errors"
 	"fmt"
+	"net"
+	"strconv"
 	"strings"
 	"time"
 
 	"gorm.io/gorm"
 
+	"jianmen/internal/dbtls"
 	"jianmen/internal/model"
 	"jianmen/internal/util"
 )
@@ -51,28 +54,18 @@ func normalizeDBProtocol(protocol string) (string, error) {
 	if protocol == "" || protocol == "pg" || protocol == "postgresql" {
 		protocol = "postgres"
 	}
-	if protocol != "mysql" && protocol != "postgres" && protocol != "redis" && protocol != "tcp" {
+	if protocol != "mysql" && protocol != "postgres" && protocol != "redis" {
 		return "", fmt.Errorf("unsupported database protocol %q", protocol)
 	}
 	return protocol, nil
 }
 
-func (s *DBStore) AddDatabaseInstance(name, protocol, address string, port int, group, remark string) (DatabaseInstanceView, error) {
-	protocol, err := normalizeDBProtocol(protocol)
+func (s *DBStore) AddDatabaseInstance(input DatabaseInstanceInput) (DatabaseInstanceView, error) {
+	instance, err := normalizeDatabaseInstanceInput(input, "")
 	if err != nil {
 		return DatabaseInstanceView{}, err
 	}
-	if strings.TrimSpace(address) == "" {
-		return DatabaseInstanceView{}, fmt.Errorf("address is required")
-	}
-	inst := model.DatabaseInstance{
-		Name:      strings.TrimSpace(name),
-		Protocol:  protocol,
-		Address:   strings.TrimSpace(address),
-		Port:      port,
-		GroupName: strings.TrimSpace(group),
-		Remark:    strings.TrimSpace(remark),
-	}
+	inst := instance
 	if inst.Name == "" {
 		inst.Name = inst.Address
 	}
@@ -80,28 +73,17 @@ func (s *DBStore) AddDatabaseInstance(name, protocol, address string, port int, 
 		if err := tx.Create(&inst).Error; err != nil {
 			return err
 		}
-		if err := ensureResourceGroup(tx, strings.TrimSpace(group)); err != nil {
+		if err := ensureResourceGroup(tx, inst.GroupName); err != nil {
 			return err
 		}
 		return s.syncResourceTx(tx, model.ResourceTypeDatabaseInstance, inst.ID, databaseInstanceResourceName(inst), "")
 	}); err != nil {
 		return DatabaseInstanceView{}, err
 	}
-	return DatabaseInstanceView{
-		ID:        inst.ID,
-		Name:      inst.Name,
-		Protocol:  inst.Protocol,
-		Address:   inst.Address,
-		Port:      inst.Port,
-		Group:     inst.GroupName,
-		Remark:    inst.Remark,
-		Status:    inst.Status,
-		CreatedAt: inst.CreatedAt.Format(time.RFC3339),
-		UpdatedAt: inst.UpdatedAt.Format(time.RFC3339),
-	}, nil
+	return s.databaseInstanceView(inst, 0), nil
 }
 
-func (s *DBStore) UpdateDatabaseInstance(id, name, protocol, address string, port int, group, remark, status string) (DatabaseInstanceView, error) {
+func (s *DBStore) UpdateDatabaseInstance(id string, input DatabaseInstanceInput) (DatabaseInstanceView, error) {
 	id = strings.TrimSpace(id)
 	var inst model.DatabaseInstance
 	if err := s.db.First(&inst, "id = ?", id).Error; err != nil {
@@ -110,20 +92,20 @@ func (s *DBStore) UpdateDatabaseInstance(id, name, protocol, address string, por
 		}
 		return DatabaseInstanceView{}, err
 	}
-	protocol, err := normalizeDBProtocol(protocol)
+	updated, err := normalizeDatabaseInstanceInput(input, inst.TLSCAPEM)
 	if err != nil {
 		return DatabaseInstanceView{}, err
 	}
-	if strings.TrimSpace(address) == "" {
-		return DatabaseInstanceView{}, fmt.Errorf("address is required")
-	}
-	inst.Name = strings.TrimSpace(name)
-	inst.Protocol = protocol
-	inst.Address = strings.TrimSpace(address)
-	inst.Port = port
-	inst.GroupName = strings.TrimSpace(group)
-	inst.Remark = strings.TrimSpace(remark)
-	inst.Status = status
+	inst.Name = updated.Name
+	inst.Protocol = updated.Protocol
+	inst.Address = updated.Address
+	inst.Port = updated.Port
+	inst.TLSMode = updated.TLSMode
+	inst.TLSServerName = updated.TLSServerName
+	inst.TLSCAPEM = updated.TLSCAPEM
+	inst.GroupName = updated.GroupName
+	inst.Remark = updated.Remark
+	inst.Status = updated.Status
 	if inst.Name == "" {
 		inst.Name = inst.Address
 	}
@@ -131,7 +113,7 @@ func (s *DBStore) UpdateDatabaseInstance(id, name, protocol, address string, por
 		if err := tx.Save(&inst).Error; err != nil {
 			return err
 		}
-		if err := ensureResourceGroup(tx, strings.TrimSpace(group)); err != nil {
+		if err := ensureResourceGroup(tx, inst.GroupName); err != nil {
 			return err
 		}
 		return s.syncResourceTx(tx, model.ResourceTypeDatabaseInstance, inst.ID, databaseInstanceResourceName(inst), "")
@@ -200,18 +182,81 @@ func (s *DBStore) DatabaseAccounts() ([]DatabaseAccountView, error) {
 
 func (s *DBStore) databaseInstanceView(inst model.DatabaseInstance, accountCount int) DatabaseInstanceView {
 	return DatabaseInstanceView{
-		ID:           inst.ID,
-		Name:         inst.Name,
-		Protocol:     inst.Protocol,
-		Address:      inst.Address,
-		Port:         inst.Port,
-		Group:        inst.GroupName,
-		Remark:       inst.Remark,
-		Status:       inst.Status,
-		AccountCount: accountCount,
-		CreatedAt:    inst.CreatedAt.Format(time.RFC3339),
-		UpdatedAt:    inst.UpdatedAt.Format(time.RFC3339),
+		ID:            inst.ID,
+		Name:          inst.Name,
+		Protocol:      inst.Protocol,
+		Address:       inst.Address,
+		Port:          inst.Port,
+		TLSMode:       inst.TLSMode,
+		TLSServerName: inst.TLSServerName,
+		HasTLSCA:      strings.TrimSpace(inst.TLSCAPEM) != "",
+		Group:         inst.GroupName,
+		Remark:        inst.Remark,
+		Status:        inst.Status,
+		AccountCount:  accountCount,
+		CreatedAt:     inst.CreatedAt.Format(time.RFC3339),
+		UpdatedAt:     inst.UpdatedAt.Format(time.RFC3339),
 	}
+}
+
+func normalizeDatabaseInstanceInput(input DatabaseInstanceInput, existingCAPEM string) (model.DatabaseInstance, error) {
+	protocol, err := normalizeDBProtocol(input.Protocol)
+	if err != nil {
+		return model.DatabaseInstance{}, err
+	}
+	address := strings.TrimSpace(input.Address)
+	if address == "" {
+		return model.DatabaseInstance{}, errors.New("address is required")
+	}
+	tlsMode, err := dbtls.NormalizeMode(input.TLSMode)
+	if err != nil {
+		return model.DatabaseInstance{}, err
+	}
+	tlsCAPEM := existingCAPEM
+	if input.TLSCAPEM != nil {
+		tlsCAPEM = strings.TrimSpace(*input.TLSCAPEM)
+	}
+	if input.ClearTLSCA || tlsMode == dbtls.ModeDisable {
+		tlsCAPEM = ""
+	}
+	if tlsMode != dbtls.ModeDisable {
+		if _, err := dbtls.ClientConfig(dbtls.Config{
+			Mode:       tlsMode,
+			ServerName: input.TLSServerName,
+			CAPEM:      tlsCAPEM,
+		}, net.JoinHostPort(address, strconv.Itoa(defaultDatabasePort(protocol, input.Port)))); err != nil {
+			return model.DatabaseInstance{}, fmt.Errorf("validate upstream TLS: %w", err)
+		}
+	}
+	status := strings.TrimSpace(input.Status)
+	if status == "" {
+		status = "active"
+	}
+	return model.DatabaseInstance{
+		Name:          strings.TrimSpace(input.Name),
+		Protocol:      protocol,
+		Address:       address,
+		Port:          input.Port,
+		TLSMode:       tlsMode,
+		TLSServerName: strings.TrimSpace(input.TLSServerName),
+		TLSCAPEM:      tlsCAPEM,
+		GroupName:     strings.TrimSpace(input.Group),
+		Remark:        strings.TrimSpace(input.Remark),
+		Status:        status,
+	}, nil
+}
+
+func defaultDatabasePort(protocol string, port int) int {
+	if port > 0 {
+		return port
+	}
+	if protocol == "postgres" {
+		return 5432
+	}
+	if protocol == "redis" {
+		return 6379
+	}
+	return 3306
 }
 
 func (s *DBStore) databaseAccountCount(instanceID string) (int, error) {
@@ -309,10 +354,10 @@ func (s *DBStore) AddDatabaseAccount(instanceID, username, password, group, rema
 		if err := tx.Create(&acct).Error; err != nil {
 			return err
 		}
-			if err := ensureAccountGroup(tx, strings.TrimSpace(group)); err != nil {
-				return err
-			}
-			return s.syncResourceTx(tx, model.ResourceTypeDatabaseAccount, acct.ID, databaseAccountResourceName(acct), acct.InstanceID)
+		if err := ensureAccountGroup(tx, strings.TrimSpace(group)); err != nil {
+			return err
+		}
+		return s.syncResourceTx(tx, model.ResourceTypeDatabaseAccount, acct.ID, databaseAccountResourceName(acct), acct.InstanceID)
 	}); err != nil {
 		return DatabaseAccountView{}, err
 	}
@@ -346,10 +391,10 @@ func (s *DBStore) UpdateDatabaseAccount(id, username, password, group, remark st
 		if err := tx.Save(&acct).Error; err != nil {
 			return err
 		}
-			if err := ensureAccountGroup(tx, strings.TrimSpace(group)); err != nil {
-				return err
-			}
-			return s.syncResourceTx(tx, model.ResourceTypeDatabaseAccount, acct.ID, databaseAccountResourceName(acct), acct.InstanceID)
+		if err := ensureAccountGroup(tx, strings.TrimSpace(group)); err != nil {
+			return err
+		}
+		return s.syncResourceTx(tx, model.ResourceTypeDatabaseAccount, acct.ID, databaseAccountResourceName(acct), acct.InstanceID)
 	}); err != nil {
 		return DatabaseAccountView{}, err
 	}

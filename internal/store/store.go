@@ -101,18 +101,35 @@ func (t TargetConfig) Expired(now time.Time) bool {
 }
 
 type DatabaseInstanceView struct {
-	ID           string `json:"id"`
-	Name         string `json:"name"`
-	Protocol     string `json:"protocol"`
-	Address      string `json:"address"`
-	Port         int    `json:"port"`
-	Group        string `json:"group,omitempty"`
-	Remark       string `json:"remark,omitempty"`
-	Status       string `json:"status"`
-	AccountCount int    `json:"account_count"`
-	CreatedAt    string `json:"created_at,omitempty"`
-	UpdatedAt    string `json:"updated_at,omitempty"`
-	CanManage    bool   `json:"can_manage"`
+	ID            string `json:"id"`
+	Name          string `json:"name"`
+	Protocol      string `json:"protocol"`
+	Address       string `json:"address"`
+	Port          int    `json:"port"`
+	TLSMode       string `json:"tls_mode"`
+	TLSServerName string `json:"tls_server_name,omitempty"`
+	HasTLSCA      bool   `json:"has_tls_ca"`
+	Group         string `json:"group,omitempty"`
+	Remark        string `json:"remark,omitempty"`
+	Status        string `json:"status"`
+	AccountCount  int    `json:"account_count"`
+	CreatedAt     string `json:"created_at,omitempty"`
+	UpdatedAt     string `json:"updated_at,omitempty"`
+	CanManage     bool   `json:"can_manage"`
+}
+
+type DatabaseInstanceInput struct {
+	Name          string
+	Protocol      string
+	Address       string
+	Port          int
+	TLSMode       string
+	TLSServerName string
+	TLSCAPEM      *string
+	ClearTLSCA    bool
+	Group         string
+	Remark        string
+	Status        string
 }
 
 type DatabaseAccountView struct {
@@ -245,16 +262,17 @@ type SessionView struct {
 }
 
 var (
-	ErrTargetNotFound            = errSentinel("target not found")
-	ErrHostNotFound              = errSentinel("host not found")
-	ErrDBProxyNotFound           = errSentinel("database proxy not found")
-	ErrDBAccountNotFound         = errSentinel("database account not found")
-	ErrDBInstanceNotFound        = errSentinel("database instance not found")
-	ErrApplicationNotFound       = errSentinel("application not found")
-	ErrContainerEndpointNotFound = errSentinel("container endpoint not found")
-	ErrPlatformAccountNotFound   = errSentinel("platform account not found")
-	ErrPlatformShareNotFound     = errSentinel("platform account share not found")
-	ErrTargetUnavailable         = errSentinel("target unavailable")
+	ErrTargetNotFound                        = errSentinel("target not found")
+	ErrHostNotFound                          = errSentinel("host not found")
+	ErrDBProxyNotFound                       = errSentinel("database proxy not found")
+	ErrDBAccountNotFound                     = errSentinel("database account not found")
+	ErrDBInstanceNotFound                    = errSentinel("database instance not found")
+	ErrDatabaseProvisioningOperationNotFound = errSentinel("database provisioning operation not found")
+	ErrApplicationNotFound                   = errSentinel("application not found")
+	ErrContainerEndpointNotFound             = errSentinel("container endpoint not found")
+	ErrPlatformAccountNotFound               = errSentinel("platform account not found")
+	ErrPlatformShareNotFound                 = errSentinel("platform account share not found")
+	ErrTargetUnavailable                     = errSentinel("target unavailable")
 )
 
 type sentinelError struct{ msg string }
@@ -358,8 +376,8 @@ type Store interface {
 
 	DatabaseInstances() []DatabaseInstanceView
 	DatabaseInstance(id string) (DatabaseInstanceView, error)
-	AddDatabaseInstance(name, protocol, address string, port int, group, remark string) (DatabaseInstanceView, error)
-	UpdateDatabaseInstance(id, name, protocol, address string, port int, group, remark, status string) (DatabaseInstanceView, error)
+	AddDatabaseInstance(input DatabaseInstanceInput) (DatabaseInstanceView, error)
+	UpdateDatabaseInstance(id string, input DatabaseInstanceInput) (DatabaseInstanceView, error)
 	DeleteDatabaseInstance(id string) error
 
 	InstanceAccounts(instanceID string) ([]DatabaseAccountView, error)

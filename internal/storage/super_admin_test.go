@@ -59,3 +59,31 @@ func TestMigrateAddsUserSuperAdministratorColumn(t *testing.T) {
 		t.Fatalf("find super administrator migration: %v", err)
 	}
 }
+
+func TestBootstrapMetadataDoesNotOverwritePersistedSuperAdministratorState(t *testing.T) {
+	db, err := Open(Config{Driver: DriverSQLite, DSN: ":memory:"})
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	if err := AutoMigrate(db); err != nil {
+		t.Fatalf("auto migrate: %v", err)
+	}
+	cfg := &config.Config{
+		Users: []config.User{{ID: "u-admin", Username: "admin", SuperAdmin: true}},
+	}
+	if err := BootstrapMetadata(db, cfg); err != nil {
+		t.Fatalf("initial bootstrap: %v", err)
+	}
+
+	cfg.Users[0].SuperAdmin = false
+	if err := BootstrapMetadata(db, cfg); err != nil {
+		t.Fatalf("repeat bootstrap: %v", err)
+	}
+	var persisted model.User
+	if err := db.First(&persisted, "id = ?", "u-admin").Error; err != nil {
+		t.Fatalf("find persisted administrator: %v", err)
+	}
+	if !persisted.IsSuperAdmin {
+		t.Fatal("repeat bootstrap overwrote database super administrator state")
+	}
+}

@@ -23,7 +23,7 @@ var (
 type TemporaryAccessRepository interface {
 	CreateTemporaryAccess(ctx context.Context, input CreateTemporaryAccessInput) (TemporaryAccessResult, error)
 	CreateTemporaryAIAccess(ctx context.Context, input CreateTemporaryAIAccessInput) (TemporaryAIAccessResult, error)
-	ExtendTemporaryAccess(ctx context.Context, id string, expiresAt time.Time) error
+	ExtendTemporaryAccess(ctx context.Context, id string, expiresAt, now time.Time) error
 	DisableTemporaryAccess(ctx context.Context, id string, now time.Time) error
 	ListTemporaryAccess(ctx context.Context, params TemporaryAccessListParams) (TemporaryAccessPage, error)
 	GetTemporaryAccess(ctx context.Context, id string) (TemporaryAccessDetails, error)
@@ -206,7 +206,7 @@ func (s *TemporaryAccessService) Extend(ctx context.Context, id string, expiresA
 	if err := validateTemporaryAccessExpiry(expiresAt, now); err != nil {
 		return TemporaryAccessDetails{}, err
 	}
-	if err := s.repository.ExtendTemporaryAccess(ctx, id, expiresAt); err != nil {
+	if err := s.repository.ExtendTemporaryAccess(ctx, id, expiresAt, now); err != nil {
 		return TemporaryAccessDetails{}, fmt.Errorf("extend temporary access aggregate: %w", err)
 	}
 	details, err := s.repository.GetTemporaryAccess(ctx, id)

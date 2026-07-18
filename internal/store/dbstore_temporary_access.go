@@ -105,17 +105,19 @@ func (s *DBStore) CreateTemporaryAIAccess(ctx context.Context, input service.Cre
 	return result, nil
 }
 
-func (s *DBStore) ExtendTemporaryAccess(ctx context.Context, id string, expiresAt time.Time) error {
+func (s *DBStore) ExtendTemporaryAccess(ctx context.Context, id string, expiresAt, now time.Time) error {
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		account, err := findTemporaryAccount(tx, id)
 		if err != nil {
 			return err
 		}
-		if account.Status != "active" {
+		if account.Status != "active" || (account.ExpiresAt != nil && !account.ExpiresAt.After(now)) {
 			return service.ErrTemporaryAccessInactive
 		}
-		updated := tx.Model(&model.TemporaryAccount{}).Where("id = ? AND status = ?", account.ID, "active").Update("expires_at", expiresAt)
-		if err := requireTemporaryAccessUpdate(updated, "extend temporary account"); err != nil {
+		updated := tx.Model(&model.TemporaryAccount{}).
+			Where("id = ? AND status = ? AND (expires_at IS NULL OR expires_at > ?)", account.ID, "active", now).
+			Update("expires_at", expiresAt)
+		if err := requireTemporaryAccessActiveUpdate(updated, "extend temporary account"); err != nil {
 			return err
 		}
 		if account.Type == model.TemporaryAccountTypeUser {
@@ -448,6 +450,19 @@ func findTemporaryAccount(tx *gorm.DB, id string) (model.TemporaryAccount, error
 func requireTemporaryAccessUpdate(result *gorm.DB, operation string) error {
 	if result.Error != nil {
 		return fmt.Errorf("%s: %w", operation, result.Error)
+	}
+	if result.RowsAffected != 1 {
+		return fmt.Errorf("%w: %s affected %d rows", service.ErrTemporaryAccessNotFound, operation, result.RowsAffected)
+	}
+	return nil
+}
+
+func requireTemporaryAccessActiveUpdate(result *gorm.DB, operation string) error {
+	if result.Error != nil {
+		return fmt.Errorf("%s: %w", operation, result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return fmt.Errorf("%w: %s lost active state", service.ErrTemporaryAccessInactive, operation)
 	}
 	if result.RowsAffected != 1 {
 		return fmt.Errorf("%w: %s affected %d rows", service.ErrTemporaryAccessNotFound, operation, result.RowsAffected)

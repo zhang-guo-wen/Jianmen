@@ -120,7 +120,7 @@ func (s *temporaryAccessRepositoryStub) CreateTemporaryAIAccess(_ context.Contex
 	return TemporaryAIAccessResult{Token: input.Token}, nil
 }
 
-func (s *temporaryAccessRepositoryStub) ExtendTemporaryAccess(_ context.Context, _ string, _ time.Time) error {
+func (s *temporaryAccessRepositoryStub) ExtendTemporaryAccess(_ context.Context, _ string, _, _ time.Time) error {
 	return s.extendErr
 }
 

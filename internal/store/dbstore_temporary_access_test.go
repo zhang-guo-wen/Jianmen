@@ -114,8 +114,68 @@ func TestDBStoreExtendDisabledTemporaryAccessIsRejected(t *testing.T) {
 	if err := repository.DisableTemporaryAccess(context.Background(), result.Account.ID, now.Add(time.Minute)); err != nil {
 		t.Fatalf("disable temporary access: %v", err)
 	}
-	if err := repository.ExtendTemporaryAccess(context.Background(), result.Account.ID, now.Add(2*time.Hour)); err == nil {
-		t.Fatal("disabled temporary access was extended and reactivated")
+	err = repository.ExtendTemporaryAccess(context.Background(), result.Account.ID, now.Add(2*time.Hour), now)
+	if !errors.Is(err, service.ErrTemporaryAccessInactive) {
+		t.Fatalf("error = %v, want inactive temporary access", err)
+	}
+	if errors.Is(err, service.ErrTemporaryAccessNotFound) {
+		t.Fatalf("inactive temporary access was misclassified as not found: %v", err)
+	}
+}
+
+func TestDBStoreExtendExpiredTemporaryAccessIsRejected(t *testing.T) {
+	db := newTemporaryAccessTestDB(t)
+	seedTemporaryAccessUserAndHostAccount(t, db)
+	repository := NewDBStore(db)
+	temporaryAccess, err := service.NewTemporaryAccessService(repository)
+	if err != nil {
+		t.Fatalf("new temporary access service: %v", err)
+	}
+	now := time.Now().UTC().Truncate(time.Second)
+	expiredAt := now.Add(-time.Hour)
+	result, err := temporaryAccess.Create(context.Background(), service.CreateTemporaryAccessInput{
+		AuthorizedUserID: "user-1", ResourceType: model.ResourceTypeHostAccount, ResourceID: "host-account-1",
+		ExpiresAt: expiredAt, Now: now.Add(-2 * time.Hour),
+	})
+	if err != nil {
+		t.Fatalf("create already-expired temporary access: %v", err)
+	}
+
+	_, err = temporaryAccess.Extend(context.Background(), result.Account.ID, now.Add(time.Hour), now)
+	if !errors.Is(err, service.ErrTemporaryAccessInactive) {
+		t.Fatalf("error = %v, want inactive temporary access", err)
+	}
+	if errors.Is(err, service.ErrTemporaryAccessNotFound) {
+		t.Fatalf("expired temporary access was misclassified as not found: %v", err)
+	}
+
+	var account model.TemporaryAccount
+	if err := db.First(&account, "id = ?", result.Account.ID).Error; err != nil {
+		t.Fatalf("load expired temporary account: %v", err)
+	}
+	if account.ExpiresAt == nil || !account.ExpiresAt.Equal(expiredAt) {
+		t.Fatalf("expired account was extended to %v, want %v", account.ExpiresAt, expiredAt)
+	}
+	var grant model.TemporaryAccountGrant
+	if err := db.First(&grant, "temporary_account_id = ?", result.Account.ID).Error; err != nil {
+		t.Fatalf("load expired temporary grant: %v", err)
+	}
+	if grant.ExpiresAt == nil || !grant.ExpiresAt.Equal(expiredAt) {
+		t.Fatalf("expired grant was extended to %v, want %v", grant.ExpiresAt, expiredAt)
+	}
+	var session model.UserSession
+	if err := db.First(&session, "session_id = ?", result.Account.SessionID).Error; err != nil {
+		t.Fatalf("load expired temporary session: %v", err)
+	}
+	if session.ExpiresAt == nil || !session.ExpiresAt.Equal(expiredAt) {
+		t.Fatalf("expired session was extended to %v, want %v", session.ExpiresAt, expiredAt)
+	}
+	var password model.ConnectionPassword
+	if err := db.First(&password, "temporary_account_id = ?", result.Account.ID).Error; err != nil {
+		t.Fatalf("load expired connection password: %v", err)
+	}
+	if !password.ExpiresAt.Equal(expiredAt) {
+		t.Fatalf("expired password was extended to %v, want %v", password.ExpiresAt, expiredAt)
 	}
 }
 
@@ -136,7 +196,7 @@ func TestDBStoreExtendActiveTemporaryAccessExtendsBoundPassword(t *testing.T) {
 		t.Fatalf("create temporary access: %v", err)
 	}
 	extendedExpiry := now.Add(2 * time.Hour)
-	if err := repository.ExtendTemporaryAccess(context.Background(), result.Account.ID, extendedExpiry); err != nil {
+	if err := repository.ExtendTemporaryAccess(context.Background(), result.Account.ID, extendedExpiry, now); err != nil {
 		t.Fatalf("extend temporary access: %v", err)
 	}
 	var passwordExpiry time.Time
@@ -206,6 +266,27 @@ func TestDBStoreCreateTemporaryAccessConcurrentSessionsAreUnique(t *testing.T) {
 	}
 }
 
+func TestDBStoreCreateTemporaryAccessWaitSlotHonorsContext(t *testing.T) {
+	db := newTemporaryAccessTestDB(t)
+	repository := NewDBStore(db)
+	select {
+	case <-sqliteTemporaryAccessWriteSlot:
+	case <-time.After(time.Second):
+		t.Fatal("timed out acquiring SQLite temporary access write slot for test")
+	}
+	defer func() { sqliteTemporaryAccessWriteSlot <- struct{}{} }()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	_, err := repository.CreateTemporaryAccess(ctx, service.CreateTemporaryAccessInput{})
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("error = %v, want context deadline exceeded", err)
+	}
+	if errors.Is(err, service.ErrTemporaryAccessNotFound) {
+		t.Fatalf("write-slot cancellation was misclassified as not found: %v", err)
+	}
+}
+
 func TestDBStoreExtendTemporaryAccessRejectsMissingAggregateRecords(t *testing.T) {
 	db := newTemporaryAccessTestDB(t)
 	now := time.Now().UTC()
@@ -213,7 +294,7 @@ func TestDBStoreExtendTemporaryAccessRejectsMissingAggregateRecords(t *testing.T
 		t.Fatalf("create account: %v", err)
 	}
 
-	err := NewDBStore(db).ExtendTemporaryAccess(context.Background(), "temporary-1", now.Add(time.Hour))
+	err := NewDBStore(db).ExtendTemporaryAccess(context.Background(), "temporary-1", now.Add(time.Hour), now)
 	if err == nil {
 		t.Fatal("extend succeeded without its session and grant")
 	}

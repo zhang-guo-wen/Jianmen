@@ -1,6 +1,7 @@
 package rbac
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"time"
@@ -19,9 +20,20 @@ func NewChecker(db *gorm.DB) *Checker {
 }
 
 func (c *Checker) HasPermission(userID, action, resourceType, resourceID string) (bool, error) {
+	return c.HasPermissionContext(context.Background(), userID, action, resourceType, resourceID)
+}
+
+func (c *Checker) HasPermissionContext(
+	ctx context.Context,
+	userID string,
+	action string,
+	resourceType string,
+	resourceID string,
+) (bool, error) {
 	if c == nil || c.db == nil {
 		return false, errors.New("rbac: nil database")
 	}
+	scoped := &Checker{db: c.db.WithContext(ctx)}
 
 	userID = strings.TrimSpace(userID)
 	action = strings.TrimSpace(action)
@@ -31,7 +43,7 @@ func (c *Checker) HasPermission(userID, action, resourceType, resourceID string)
 		return false, nil
 	}
 
-	permissions, err := c.permissionsForUser(userID)
+	permissions, err := scoped.permissionsForUser(userID)
 	if err != nil {
 		return false, err
 	}
@@ -39,7 +51,7 @@ func (c *Checker) HasPermission(userID, action, resourceType, resourceID string)
 	hasAction := false
 	hasResourceGrant := resourceType == "" && resourceID == ""
 	for _, permission := range permissions {
-		if isDeny(permission) && c.matches(permission, action, resourceType, resourceID) {
+		if isDeny(permission) && scoped.matches(permission, action, resourceType, resourceID) {
 			return false, nil
 		}
 	}
@@ -52,7 +64,7 @@ func (c *Checker) HasPermission(userID, action, resourceType, resourceID string)
 			hasAction = true
 			continue
 		}
-		if resourceType != "" && resourceID != "" && c.resourceMatches(permission, resourceType, resourceID) {
+		if resourceType != "" && resourceID != "" && scoped.resourceMatches(permission, resourceType, resourceID) {
 			if actionMatches(permission.Action, action) {
 				return true, nil
 			}

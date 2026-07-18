@@ -1,6 +1,7 @@
 package rbac
 
 import (
+	"context"
 	"strings"
 	"time"
 
@@ -22,9 +23,19 @@ func NewResourceGrantChecker(db *gorm.DB) *ResourceGrantChecker {
 // 资源授权只管 SSH 连接权限，SFTP 不管
 // 新增删除主机等操作属于菜单权限，由角色控制
 func (c *ResourceGrantChecker) HasGrant(userID, resourceType, resourceID string) (bool, error) {
+	return c.HasGrantContext(context.Background(), userID, resourceType, resourceID)
+}
+
+func (c *ResourceGrantChecker) HasGrantContext(
+	ctx context.Context,
+	userID string,
+	resourceType string,
+	resourceID string,
+) (bool, error) {
 	if c == nil || c.db == nil {
 		return false, nil
 	}
+	scoped := &ResourceGrantChecker{db: c.db.WithContext(ctx)}
 
 	userID = strings.TrimSpace(userID)
 	resourceType = strings.TrimSpace(resourceType)
@@ -34,17 +45,17 @@ func (c *ResourceGrantChecker) HasGrant(userID, resourceType, resourceID string)
 	}
 
 	// 收集用户的直接授权
-	directGrants, err := c.directGrantsForUser(userID)
+	directGrants, err := scoped.directGrantsForUser(userID)
 	if err != nil {
 		return false, err
 	}
 
 	// 收集用户通过用户组获得的授权
-	groupGrants, err := c.groupGrantsForUser(userID)
+	groupGrants, err := scoped.groupGrantsForUser(userID)
 	if err != nil {
 		return false, err
 	}
-	temporaryGrants, err := c.temporaryGrantsForUser(userID)
+	temporaryGrants, err := scoped.temporaryGrantsForUser(userID)
 	if err != nil {
 		return false, err
 	}
@@ -55,14 +66,14 @@ func (c *ResourceGrantChecker) HasGrant(userID, resourceType, resourceID string)
 
 	// 检查是否有 deny 授权
 	for _, grant := range allGrants {
-		if c.matchesGrant(grant, resourceType, resourceID) && grant.Effect == model.PermissionEffectDeny {
+		if scoped.matchesGrant(grant, resourceType, resourceID) && grant.Effect == model.PermissionEffectDeny {
 			return false, nil
 		}
 	}
 
 	// 检查是否有 allow 授权
 	for _, grant := range allGrants {
-		if c.matchesGrant(grant, resourceType, resourceID) && grant.Effect == model.PermissionEffectAllow {
+		if scoped.matchesGrant(grant, resourceType, resourceID) && grant.Effect == model.PermissionEffectAllow {
 			return true, nil
 		}
 	}

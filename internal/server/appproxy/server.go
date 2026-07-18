@@ -19,28 +19,23 @@ import (
 
 	"jianmen/internal/config"
 	"jianmen/internal/model"
-	rbaccheck "jianmen/internal/rbac"
+	"jianmen/internal/rbac"
+	"jianmen/internal/service"
 )
 
 type Server struct {
-	cfg           config.ApplicationGatewayConfig
-	adminCfg      config.AdminConfig
-	db            *gorm.DB
-	checker       permissionChecker
-	resourceGrant resourceGrantChecker
-	superAdminIDs map[string]bool
-	logger        *slog.Logger
+	cfg        config.ApplicationGatewayConfig
+	adminCfg   config.AdminConfig
+	db         *gorm.DB
+	authorizer connectionAuthorizer
+	logger     *slog.Logger
 
 	mu      sync.Mutex
 	proxies map[int]*proxyEntry
 }
 
-type permissionChecker interface {
-	HasPermission(userID, action, resourceType, resourceID string) (bool, error)
-}
-
-type resourceGrantChecker interface {
-	HasGrant(userID, resourceType, resourceID string) (bool, error)
+type connectionAuthorizer interface {
+	Authorize(context.Context, service.AuthorizationRequest) (service.AuthorizationDecision, error)
 }
 
 type proxyEntry struct {
@@ -49,19 +44,17 @@ type proxyEntry struct {
 	proxy  *httputil.ReverseProxy
 }
 
-func New(cfg config.ApplicationGatewayConfig, adminCfg config.AdminConfig, db *gorm.DB, superAdminIDs map[string]bool, logger *slog.Logger) *Server {
+func New(cfg config.ApplicationGatewayConfig, adminCfg config.AdminConfig, db *gorm.DB, authorizer connectionAuthorizer, logger *slog.Logger) *Server {
 	if logger == nil {
 		logger = slog.Default()
 	}
 	return &Server{
-		cfg:           cfg,
-		adminCfg:      adminCfg,
-		db:            db,
-		checker:       rbaccheck.NewChecker(db),
-		resourceGrant: rbaccheck.NewResourceGrantChecker(db),
-		superAdminIDs: superAdminIDs,
-		logger:        logger,
-		proxies:       make(map[int]*proxyEntry),
+		cfg:        cfg,
+		adminCfg:   adminCfg,
+		db:         db,
+		authorizer: authorizer,
+		logger:     logger,
+		proxies:    make(map[int]*proxyEntry),
 	}
 }
 
@@ -173,7 +166,7 @@ func (s *Server) rbacMiddleware(app model.Application, next http.Handler) http.H
 			s.writeUnauthorizedForApp(w, r, app)
 			return
 		}
-		if err := s.authorizeApp(userID, app.ID); err != nil {
+		if err := s.authorizeApp(r.Context(), userID, app.ID); err != nil {
 			s.writeForbidden(w, r, app)
 			return
 		}
@@ -181,26 +174,25 @@ func (s *Server) rbacMiddleware(app model.Application, next http.Handler) http.H
 	})
 }
 
-func (s *Server) authorizeApp(userID, appID string) error {
-	if s.superAdminIDs[userID] {
-		return nil
-	}
-	if s.checker == nil || s.resourceGrant == nil {
+func (s *Server) authorizeApp(ctx context.Context, userID, appID string) error {
+	if s.authorizer == nil {
 		return errors.New("application authorization unavailable")
 	}
-	allowed, err := s.checker.HasPermission(userID, rbaccheck.ActionAppConnect, "", "")
+	decision, err := s.authorizer.Authorize(ctx, service.AuthorizationRequest{
+		UserID:       userID,
+		Actions:      []string{rbac.ActionAppConnect},
+		ResourceType: model.ResourceTypeApplication,
+		ResourceID:   appID,
+	})
 	if err != nil {
-		return fmt.Errorf("check application action: %w", err)
+		return fmt.Errorf("authorize application: %w", err)
 	}
-	if !allowed {
-		return errors.New("application action denied")
-	}
-	granted, err := s.resourceGrant.HasGrant(userID, model.ResourceTypeApplication, appID)
-	if err != nil {
-		return fmt.Errorf("check application resource grant: %w", err)
-	}
-	if !granted {
-		return errors.New("application resource denied")
+	if !decision.Allowed {
+		reason := strings.TrimSpace(decision.Reason)
+		if reason == "" {
+			reason = "denied"
+		}
+		return fmt.Errorf("application authorization denied: %s", reason)
 	}
 	return nil
 }

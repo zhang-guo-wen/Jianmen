@@ -41,6 +41,13 @@ type ActionAuthorizer interface {
 		resourceType string,
 		resourceID string,
 	) (bool, error)
+	HasDenyContext(
+		ctx context.Context,
+		userID string,
+		action string,
+		resourceType string,
+		resourceID string,
+	) (bool, error)
 }
 
 type ResourceAuthorizer interface {
@@ -78,6 +85,9 @@ func (s *AuthorizationService) Authorize(
 	ctx context.Context,
 	request AuthorizationRequest,
 ) (AuthorizationDecision, error) {
+	if err := ctx.Err(); err != nil {
+		return AuthorizationDecision{}, fmt.Errorf("authorization context: %w", err)
+	}
 	userID := strings.TrimSpace(request.UserID)
 	if userID == "" {
 		return AuthorizationDecision{Reason: AuthorizationReasonMissingUser}, nil
@@ -86,8 +96,16 @@ func (s *AuthorizationService) Authorize(
 	if err != nil {
 		return AuthorizationDecision{}, fmt.Errorf("authorize identity: %w", err)
 	}
+	if err := ctx.Err(); err != nil {
+		return AuthorizationDecision{}, fmt.Errorf("authorization context: %w", err)
+	}
 	if !found {
 		return AuthorizationDecision{Reason: AuthorizationReasonInvalidIdentity}, nil
+	}
+	resourceType := strings.TrimSpace(request.ResourceType)
+	resourceID := strings.TrimSpace(request.ResourceID)
+	if (resourceType == "") != (resourceID == "") {
+		return AuthorizationDecision{Reason: AuthorizationReasonInvalidResource}, nil
 	}
 	if subject.SuperAdmin {
 		return AuthorizationDecision{
@@ -97,29 +115,48 @@ func (s *AuthorizationService) Authorize(
 	}
 
 	allowedAction := false
+	resourcePermissionDenied := false
 	for _, action := range normalizedActions(request.Actions) {
 		allowed, err := s.actions.HasPermissionContext(ctx, subject.ID, action, "", "")
 		if err != nil {
 			return AuthorizationDecision{}, fmt.Errorf("authorize action %q: %w", action, err)
 		}
-		if allowed {
-			allowedAction = true
-			break
+		if err := ctx.Err(); err != nil {
+			return AuthorizationDecision{}, fmt.Errorf("authorization context: %w", err)
 		}
+		if !allowed {
+			continue
+		}
+		if resourceType != "" {
+			denied, err := s.actions.HasDenyContext(ctx, subject.ID, action, resourceType, resourceID)
+			if err != nil {
+				return AuthorizationDecision{}, fmt.Errorf("authorize resource deny %q: %w", action, err)
+			}
+			if err := ctx.Err(); err != nil {
+				return AuthorizationDecision{}, fmt.Errorf("authorization context: %w", err)
+			}
+			if denied {
+				resourcePermissionDenied = true
+				continue
+			}
+		}
+		allowedAction = true
+		break
 	}
 	if !allowedAction {
+		if resourcePermissionDenied {
+			return AuthorizationDecision{Reason: AuthorizationReasonResourceDenied}, nil
+		}
 		return AuthorizationDecision{Reason: AuthorizationReasonActionDenied}, nil
 	}
 
-	resourceType := strings.TrimSpace(request.ResourceType)
-	resourceID := strings.TrimSpace(request.ResourceID)
-	if (resourceType == "") != (resourceID == "") {
-		return AuthorizationDecision{Reason: AuthorizationReasonInvalidResource}, nil
-	}
 	if resourceType != "" {
 		allowed, err := s.resources.HasGrantContext(ctx, subject.ID, resourceType, resourceID)
 		if err != nil {
 			return AuthorizationDecision{}, fmt.Errorf("authorize resource: %w", err)
+		}
+		if err := ctx.Err(); err != nil {
+			return AuthorizationDecision{}, fmt.Errorf("authorization context: %w", err)
 		}
 		if !allowed {
 			return AuthorizationDecision{Reason: AuthorizationReasonResourceDenied}, nil

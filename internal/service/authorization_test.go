@@ -4,6 +4,10 @@ import (
 	"context"
 	"errors"
 	"testing"
+
+	"jianmen/internal/model"
+	"jianmen/internal/rbac"
+	"jianmen/internal/storage"
 )
 
 type fakeAuthorizationIdentity struct {
@@ -25,7 +29,9 @@ func (f *fakeAuthorizationIdentity) FindIdentitySubject(ctx context.Context, _ s
 
 type fakeActionAuthorizer struct {
 	allowed map[string]bool
+	denied  map[string]bool
 	err     error
+	denyErr error
 	ctxErr  error
 	calls   []string
 }
@@ -43,6 +49,20 @@ func (f *fakeActionAuthorizer) HasPermissionContext(
 		return false, f.err
 	}
 	return f.allowed[action], nil
+}
+
+func (f *fakeActionAuthorizer) HasDenyContext(
+	ctx context.Context,
+	_ string,
+	action string,
+	_ string,
+	_ string,
+) (bool, error) {
+	f.ctxErr = ctx.Err()
+	if f.denyErr != nil {
+		return false, f.denyErr
+	}
+	return f.denied[action], nil
 }
 
 type fakeResourceAuthorizer struct {
@@ -282,7 +302,7 @@ func TestAuthorizationServicePropagatesCheckerErrors(t *testing.T) {
 	}
 }
 
-func TestAuthorizationServicePropagatesCancelledContextToEveryChecker(t *testing.T) {
+func TestAuthorizationServiceFailsClosedForCancelledContext(t *testing.T) {
 	cancelled, cancel := context.WithCancel(context.Background())
 	cancel()
 	identity := &fakeAuthorizationIdentity{
@@ -293,20 +313,96 @@ func TestAuthorizationServicePropagatesCancelledContextToEveryChecker(t *testing
 	resources := &fakeResourceAuthorizer{allowed: true}
 	authorizer := newAuthorizationTestService(t, identity, actions, resources)
 
-	_, _ = authorizer.Authorize(cancelled, AuthorizationRequest{
+	decision, err := authorizer.Authorize(cancelled, AuthorizationRequest{
 		UserID:       "u1",
 		Actions:      []string{"session:connect"},
 		ResourceType: "host_account",
 		ResourceID:   "account-1",
 	})
-	if !errors.Is(identity.ctxErr, context.Canceled) {
-		t.Fatalf("identity context error = %v", identity.ctxErr)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("authorize error = %v, want context canceled", err)
 	}
-	if !errors.Is(actions.ctxErr, context.Canceled) {
-		t.Fatalf("action context error = %v", actions.ctxErr)
+	if decision.Allowed {
+		t.Fatalf("cancelled authorization decision = %#v", decision)
 	}
-	if !errors.Is(resources.ctxErr, context.Canceled) {
-		t.Fatalf("resource context error = %v", resources.ctxErr)
+}
+
+func TestAuthorizationServiceResourcePermissionDenyOverridesResourceGrantAllow(t *testing.T) {
+	db, err := storage.Open(storage.Config{Driver: storage.DriverSQLite, DSN: ":memory:"})
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	if err := storage.AutoMigrate(db); err != nil {
+		t.Fatalf("auto migrate: %v", err)
+	}
+	user := model.User{ID: "u-denied", Username: "denied", Status: "active"}
+	role := model.Role{ID: "r-denied", Name: "denied-role", Status: "active"}
+	permissions := []model.Permission{
+		{
+			ID:     "p-global-allow",
+			Action: rbac.ActionSessionConnect,
+			Effect: model.PermissionEffectAllow,
+		},
+		{
+			ID:           "p-resource-deny",
+			Action:       rbac.ActionSessionConnect,
+			ResourceType: model.ResourceTypeHostAccount,
+			ResourceID:   "account-denied",
+			Effect:       model.PermissionEffectDeny,
+		},
+	}
+	for _, record := range []any{&user, &role} {
+		if err := db.Create(record).Error; err != nil {
+			t.Fatalf("create %T: %v", record, err)
+		}
+	}
+	if err := db.Create(&model.UserRole{ID: "ur-denied", UserID: user.ID, RoleID: role.ID}).Error; err != nil {
+		t.Fatalf("create user role: %v", err)
+	}
+	for i := range permissions {
+		if err := db.Create(&permissions[i]).Error; err != nil {
+			t.Fatalf("create permission: %v", err)
+		}
+		if err := db.Create(&model.RolePermission{
+			ID:           "rp-" + permissions[i].ID,
+			RoleID:       role.ID,
+			PermissionID: permissions[i].ID,
+		}).Error; err != nil {
+			t.Fatalf("create role permission: %v", err)
+		}
+	}
+	if err := db.Create(&model.ResourceGrant{
+		ID:            "grant-allow",
+		PrincipalType: "user",
+		PrincipalID:   user.ID,
+		ResourceType:  model.ResourceTypeHostAccount,
+		ResourceID:    "account-denied",
+		Effect:        model.PermissionEffectAllow,
+	}).Error; err != nil {
+		t.Fatalf("create resource grant: %v", err)
+	}
+	identity := &fakeAuthorizationIdentity{
+		subject: IdentitySubject{ID: user.ID, Username: user.Username, Status: user.Status},
+		found:   true,
+	}
+	authorizer := newAuthorizationTestService(
+		t,
+		identity,
+		rbac.NewChecker(db),
+		rbac.NewResourceGrantChecker(db),
+	)
+
+	decision, err := authorizer.Authorize(context.Background(), AuthorizationRequest{
+		UserID:       user.ID,
+		Actions:      []string{rbac.ActionSessionConnect},
+		ResourceType: model.ResourceTypeHostAccount,
+		ResourceID:   "account-denied",
+	})
+	if err != nil {
+		t.Fatalf("authorize: %v", err)
+	}
+	if decision.Allowed {
+		t.Fatalf("resource permission deny was bypassed: %#v", decision)
 	}
 }
 

@@ -77,6 +77,36 @@ func (c *Checker) HasPermissionContext(
 	return hasAction && hasResourceGrant, nil
 }
 
+func (c *Checker) HasDenyContext(
+	ctx context.Context,
+	userID string,
+	action string,
+	resourceType string,
+	resourceID string,
+) (bool, error) {
+	if c == nil || c.db == nil {
+		return false, errors.New("rbac: nil database")
+	}
+	scoped := &Checker{db: c.db.WithContext(ctx)}
+	userID = strings.TrimSpace(userID)
+	action = strings.TrimSpace(action)
+	resourceType = strings.TrimSpace(resourceType)
+	resourceID = strings.TrimSpace(resourceID)
+	if userID == "" || action == "" {
+		return false, nil
+	}
+	permissions, err := scoped.permissionsForUser(userID)
+	if err != nil {
+		return false, err
+	}
+	for _, permission := range permissions {
+		if isDeny(permission) && scoped.matches(permission, action, resourceType, resourceID) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 func (c *Checker) permissionsForUser(userID string) ([]model.Permission, error) {
 	now := time.Now().UTC()
 	var permissions []model.Permission

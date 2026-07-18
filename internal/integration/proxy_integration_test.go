@@ -27,8 +27,10 @@ import (
 	"jianmen/internal/crypto"
 	"jianmen/internal/model"
 	"jianmen/internal/online"
+	"jianmen/internal/rbac"
 	"jianmen/internal/server/dbproxy"
 	"jianmen/internal/server/sshserver"
+	"jianmen/internal/service"
 	"jianmen/internal/storage"
 	jmstore "jianmen/internal/store"
 	"jianmen/internal/util"
@@ -276,9 +278,10 @@ func newMetadataFixture(t *testing.T) metadataFixture {
 	}
 	if err := storage.BootstrapMetadata(db, &config.Config{
 		Users: []config.User{{
-			ID:       integrationUserID,
-			Username: integrationUsername,
-			Password: integrationPassword,
+			ID:         integrationUserID,
+			Username:   integrationUsername,
+			Password:   integrationPassword,
+			SuperAdmin: true,
 		}},
 	}); err != nil {
 		t.Fatalf("bootstrap metadata: %v", err)
@@ -301,13 +304,14 @@ func newMetadataFixture(t *testing.T) metadataFixture {
 func startDatabaseGateway(t *testing.T, fixture metadataFixture) string {
 	t.Helper()
 	addr := freeTCPAddress(t)
+	authorizer := newIntegrationAuthorizer(t, fixture)
 	gateway := dbproxy.NewGateway(
 		config.DatabaseGatewayConfig{Enabled: true, ListenAddr: addr},
 		nil,
 		fixture.replayDir,
 		testLogger(),
 		fixture.db,
-		map[string]bool{integrationUserID: true},
+		authorizer,
 		online.NewRegistry(),
 		nil,
 	)
@@ -343,11 +347,12 @@ func startSSHServer(t *testing.T, fixture metadataFixture) string {
 			RecordCommands: true,
 		},
 		Users: []config.User{{
-			ID:       integrationUserID,
-			Username: integrationUsername,
+			ID:         integrationUserID,
+			Username:   integrationUsername,
+			SuperAdmin: true,
 		}},
 	}
-	server, err := sshserver.New(cfg, fixture.store, fixture.db, testLogger(), fixture.dataDir, online.NewRegistry())
+	server, err := sshserver.New(cfg, fixture.store, newIntegrationAuthorizer(t, fixture), testLogger(), online.NewRegistry())
 	if err != nil {
 		t.Fatalf("new ssh server: %v", err)
 	}
@@ -369,6 +374,23 @@ func startSSHServer(t *testing.T, fixture metadataFixture) string {
 	})
 	waitServerTCP(t, addr, errCh)
 	return addr
+}
+
+func newIntegrationAuthorizer(t *testing.T, fixture metadataFixture) *service.AuthorizationService {
+	t.Helper()
+	identity, err := service.NewIdentityService(fixture.store)
+	if err != nil {
+		t.Fatalf("new identity service: %v", err)
+	}
+	authorizer, err := service.NewAuthorizationService(
+		identity,
+		rbac.NewChecker(fixture.db),
+		rbac.NewResourceGrantChecker(fixture.db),
+	)
+	if err != nil {
+		t.Fatalf("new authorization service: %v", err)
+	}
+	return authorizer
 }
 
 func waitServerTCP(t *testing.T, addr string, errCh <-chan error) {

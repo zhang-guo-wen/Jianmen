@@ -3,6 +3,7 @@ package sshserver
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net"
@@ -12,7 +13,6 @@ import (
 	"time"
 
 	"golang.org/x/crypto/ssh"
-	"gorm.io/gorm"
 
 	"jianmen/internal/config"
 	"jianmen/internal/model"
@@ -20,18 +20,21 @@ import (
 	"jianmen/internal/proxy/sshproxy"
 	"jianmen/internal/rbac"
 	"jianmen/internal/recording"
-	"jianmen/internal/server/admin"
 	"jianmen/internal/store"
 )
 
 type Server struct {
-	cfg                  *config.Config
-	store                store.Store
-	rbacChecker          *rbac.Checker
-	resourceGrantChecker *rbac.ResourceGrantChecker
-	logger               *slog.Logger
-	superAdminIDs        map[string]bool
-	onlineSessions       *online.Registry
+	cfg            *config.Config
+	store          store.Store
+	authorizer     connectionAuthorizer
+	logger         *slog.Logger
+	onlineSessions *online.Registry
+}
+
+// connectionAuthorizer is the protocol boundary shared with the authorization
+// service without coupling the SSH server to service-owned types.
+type connectionAuthorizer interface {
+	AuthorizeConnection(ctx context.Context, userID string, actions []string, resourceType, resourceID string) (bool, error)
 }
 
 // auditStore adapts store.Store to recording.AuditSink.
@@ -65,27 +68,25 @@ func (a *auditStore) UpdateProtocol(sessionID string, protocol string) error {
 	return a.store.UpdateAuditProtocol(a.sessionID, protocol)
 }
 
-func New(cfg *config.Config, s store.Store, db *gorm.DB, logger *slog.Logger, dataDir string, onlineSessions *online.Registry) (*Server, error) {
+func New(cfg *config.Config, s store.Store, authorizer connectionAuthorizer, logger *slog.Logger, onlineSessions *online.Registry) (*Server, error) {
 	switch {
 	case cfg == nil:
 		return nil, errors.New("ssh server config is required")
+	case authorizer == nil:
+		return nil, errors.New("ssh server authorization service is required")
 	case s == nil:
 		return nil, errors.New("ssh server store is required")
-	case db == nil:
-		return nil, errors.New("ssh server metadata database is required")
 	case logger == nil:
 		return nil, errors.New("ssh server logger is required")
 	case onlineSessions == nil:
 		return nil, errors.New("ssh server online session registry is required")
 	}
 	return &Server{
-		cfg:                  cfg,
-		store:                s,
-		rbacChecker:          rbac.NewChecker(db),
-		resourceGrantChecker: rbac.NewResourceGrantChecker(db),
-		logger:               logger,
-		superAdminIDs:        admin.LoadSuperAdminIDs(cfg, dataDir),
-		onlineSessions:       onlineSessions,
+		cfg:            cfg,
+		store:          s,
+		authorizer:     authorizer,
+		logger:         logger,
+		onlineSessions: onlineSessions,
 	}, nil
 }
 
@@ -184,37 +185,10 @@ func (s *Server) handleConn(ctx context.Context, rawConn net.Conn, serverConfig 
 		return
 	}
 
-	access := sshproxy.Access{SSH: true, SFTP: true}
-	if !s.superAdminIDs[user.ID] {
-		if s.rbacChecker != nil {
-			sshAllowed, checkErr := s.rbacChecker.HasPermission(user.ID, rbac.ActionSessionConnect, "", "")
-			if checkErr != nil {
-				s.logger.Warn("SSH permission check failed", "user", user.Username, "target", target.ID, "error", checkErr)
-				return
-			}
-			sftpAllowed, checkErr := s.rbacChecker.HasPermission(user.ID, rbac.ActionSFTPConnect, "", "")
-			if checkErr != nil {
-				s.logger.Warn("XFTP permission check failed", "user", user.Username, "target", target.ID, "error", checkErr)
-				return
-			}
-			access = sshproxy.Access{SSH: sshAllowed, SFTP: sftpAllowed}
-		}
-		if !access.SSH && !access.SFTP {
-			s.logger.Warn("RBAC denied SSH and XFTP connection permissions", "user", user.Username, "target", target.ID)
-			return
-		}
-
-		if s.resourceGrantChecker != nil {
-			allowed, grantErr := s.resourceGrantChecker.HasGrant(user.ID, model.ResourceTypeHostAccount, target.ID)
-			if grantErr != nil {
-				s.logger.Warn("resource grant check failed", "user", user.Username, "target", target.ID, "error", grantErr)
-				return
-			}
-			if !allowed {
-				s.logger.Warn("resource grant denied", "user", user.Username, "target", target.ID)
-				return
-			}
-		}
+	access, err := s.authorizeTarget(ctx, user.ID, target.ID)
+	if err != nil {
+		s.logger.Warn("SSH target authorization failed", "user", user.Username, "target", target.ID, "error", err)
+		return
 	}
 
 	clientConfig, err := store.ClientConfigForTarget(target)
@@ -307,6 +281,38 @@ func (s *Server) handleConn(ctx context.Context, rawConn net.Conn, serverConfig 
 		proxy := sshproxy.NewSession(targetClient, channel, requests, recorder, access, s.logger)
 		go proxy.Serve(ctx)
 	}
+}
+
+func (s *Server) authorizeTarget(ctx context.Context, userID, targetID string) (sshproxy.Access, error) {
+	if s.authorizer == nil {
+		return sshproxy.Access{}, errors.New("ssh authorization unavailable")
+	}
+
+	sshAllowed, err := s.authorizer.AuthorizeConnection(
+		ctx,
+		userID,
+		[]string{rbac.ActionSessionConnect},
+		model.ResourceTypeHostAccount,
+		targetID,
+	)
+	if err != nil {
+		return sshproxy.Access{}, fmt.Errorf("authorize ssh connection: %w", err)
+	}
+	sftpAllowed, err := s.authorizer.AuthorizeConnection(
+		ctx,
+		userID,
+		[]string{rbac.ActionSFTPConnect},
+		model.ResourceTypeHostAccount,
+		targetID,
+	)
+	if err != nil {
+		return sshproxy.Access{}, fmt.Errorf("authorize sftp connection: %w", err)
+	}
+	access := sshproxy.Access{SSH: sshAllowed, SFTP: sftpAllowed}
+	if !access.SSH && !access.SFTP {
+		return sshproxy.Access{}, errors.New("ssh and sftp access denied")
+	}
+	return access, nil
 }
 
 func newSSHAuditSession(user model.User, target store.TargetConfig, session model.Session, replayRoot string) model.AuditSession {

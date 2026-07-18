@@ -65,7 +65,7 @@ func main() {
 	errCh := make(chan error, 4)
 	onlineSessions := online.NewRegistry()
 
-	sshSrv, err := sshserver.New(cfg, appStore, metadataDB, logger, dataDir, onlineSessions)
+	sshSrv, err := sshserver.New(cfg, appStore, authorizationService, logger, onlineSessions)
 	if err != nil {
 		logger.Error("failed to initialize SSH server", "error", err)
 		os.Exit(1)

@@ -28,9 +28,8 @@ func TestTemporaryAccessHandlerHasNoDirectDatabaseOrBackgroundContext(t *testing
 
 func TestTemporaryAuthorizationCreatesBoundedGrant(t *testing.T) {
 	server, db := newAdminDBTestServer(t)
-	server.superAdminIDs["u-admin"] = true
 	server.cfg.ListenAddr = "0.0.0.0:47102"
-	if err := db.Create(&model.User{ID: "u-admin", Username: "admin", Status: "active"}).Error; err != nil {
+	if err := db.Create(&model.User{ID: "u-admin", Username: "admin", Status: "active", IsSuperAdmin: true}).Error; err != nil {
 		t.Fatal(err)
 	}
 	if err := db.Create(&model.Host{ID: "host-1", Name: "build-host", Address: "127.0.0.1", Port: 22, Status: "active"}).Error; err != nil {
@@ -80,7 +79,7 @@ func TestTemporaryAuthorizationCreatesBoundedGrant(t *testing.T) {
 
 func TestTemporaryAuthorizationRejectsMoreThanSevenDays(t *testing.T) {
 	server, db := newAdminDBTestServer(t)
-	server.superAdminIDs["u-admin"] = true
+	seedTestSuperAdmin(t, db, "u-admin")
 	_ = db.Create(&model.User{ID: "recipient", Username: "recipient", Status: "active"}).Error
 	_ = db.Create(&model.Host{ID: "host-1", Name: "build-host", Address: "127.0.0.1", Port: 22, Status: "active"}).Error
 	_ = db.Create(&model.HostAccount{ID: "account-1", HostID: "host-1", Name: "deploy", Username: "deploy", Status: "active"}).Error
@@ -102,7 +101,6 @@ func TestTemporaryAuthorizationRejectsMoreThanSevenDays(t *testing.T) {
 
 func TestTemporaryAuthorizationExtensionRejectsMoreThanSevenDays(t *testing.T) {
 	server, db := newAdminDBTestServer(t)
-	server.superAdminIDs["u-admin"] = true
 	now := time.Now().UTC()
 	if err := db.Create(&model.TemporaryAccount{
 		ID: "temporary-1", SessionID: "session-1", Type: model.TemporaryAccountTypeUser,
@@ -126,8 +124,8 @@ func TestTemporaryAuthorizationExtensionRejectsMoreThanSevenDays(t *testing.T) {
 }
 
 func TestCreateUserDefaultsToOneYearExpiry(t *testing.T) {
-	server, _ := newAdminDBTestServer(t)
-	server.superAdminIDs["u-admin"] = true
+	server, db := newAdminDBTestServer(t)
+	seedTestSuperAdmin(t, db, "u-admin")
 	before := time.Now().UTC().AddDate(1, 0, 0)
 	body := bytes.NewBufferString(`{"username":"new-user","password":"password-123"}`)
 	req := asTestSuperAdmin(httptest.NewRequest(http.MethodPost, "/api/users", body))

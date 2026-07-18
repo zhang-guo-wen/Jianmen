@@ -39,6 +39,14 @@
           <el-tag class="protocol-tag" size="small" :type="row.protocol === 'mysql' ? 'success' : row.protocol === 'redis' ? 'danger' : 'primary'" effect="light">{{ row.protocol === 'mysql' ? 'MySQL' : row.protocol === 'redis' ? 'Redis' : 'PostgreSQL' }}</el-tag>
         </template>
       </el-table-column>
+      <el-table-column label="TLS" min-width="145">
+        <template #default="{ row }">
+          <div class="tls-summary">
+            <el-tag size="small" :type="tlsModeTagType(row.tls_mode)">{{ tlsModeLabel(row.tls_mode) }}</el-tag>
+            <span v-if="row.has_tls_ca" class="tls-ca-status">CA 已配置</span>
+          </div>
+        </template>
+      </el-table-column>
       <el-table-column label="账号管理" min-width="110" align="center">
         <template #default="{ row }">
           <el-button link type="primary" size="small" class="account-mgmt-btn" @click="showAccounts(row)">账号管理({{ row.account_count ?? 0 }})</el-button>
@@ -113,6 +121,59 @@
             </el-form-item>
             <el-form-item label="备注">
               <el-input v-model="instanceForm.remark" type="textarea" />
+            </el-form-item>
+            <el-form-item label="TLS 模式">
+              <el-select v-model="instanceForm.tlsMode" @change="onTLSModeChange">
+                <el-option label="验证证书和主机名（推荐）" value="verify-full" />
+                <el-option label="仅验证证书" value="verify-ca" />
+                <el-option label="禁用 TLS（高风险）" value="disable" />
+              </el-select>
+              <div class="tls-mode-help">{{ tlsModeDescription(instanceForm.tlsMode) }}</div>
+              <el-alert
+                v-if="instanceForm.tlsMode === 'disable'"
+                class="tls-risk-alert"
+                type="warning"
+                :closable="false"
+                show-icon
+              >
+                不加密且不校验证书，存在凭据被窃听风险；远程 Redis 实例会被后端拒绝。
+              </el-alert>
+            </el-form-item>
+            <el-form-item label="TLS 主机名">
+              <el-input v-model="instanceForm.tlsServerName" placeholder="verify-full 时用于主机名校验，可留空使用地址" />
+            </el-form-item>
+            <el-form-item label="TLS CA">
+              <div class="tls-ca-editor">
+                <div class="tls-ca-actions">
+                  <el-button size="small" :disabled="instanceForm.tlsMode === 'disable'" @click="chooseTLSCAFile">选择 PEM 文件</el-button>
+                  <input
+                    ref="tlsCAFileInput"
+                    class="tls-ca-file-input"
+                    type="file"
+                    accept=".pem,.crt,.cer,text/plain"
+                    @change="handleTLSCAFileChange"
+                  />
+                  <span v-if="instanceForm.tlsCaPem" class="tls-ca-status">已填写新的 CA</span>
+                  <span v-else-if="instanceForm.hasTlsCa" class="tls-ca-status">已配置（内容不回显）</span>
+                  <el-button
+                    v-if="instanceForm.hasTlsCa || instanceForm.tlsCaPem"
+                    link
+                    type="danger"
+                    size="small"
+                    @click="clearTLSCA"
+                  >
+                    清除 CA
+                  </el-button>
+                </div>
+                <el-input
+                  v-model="instanceForm.tlsCaPem"
+                  type="textarea"
+                  :rows="4"
+                  :disabled="instanceForm.tlsMode === 'disable'"
+                  placeholder="也可以手动粘贴 PEM 内容；编辑时留空会保留已有 CA"
+                  @input="onTLSCAPEMInput"
+                />
+              </div>
             </el-form-item>
           </el-collapse-item>
         </el-collapse>
@@ -282,11 +343,8 @@
               />
             </el-select>
           </el-form-item>
-          <el-form-item label="新用户名">
-            <el-input v-model="provision.newUsername" placeholder="留空自动生成" />
-          </el-form-item>
           <el-form-item label="主机">
-            <el-input v-model="provision.host" placeholder="%" />
+            <el-input v-model="provision.host" placeholder="例如 10.0.0.8（必填，禁止通配符）" />
           </el-form-item>
         </el-form>
       </template>
@@ -325,23 +383,18 @@
         <template v-else-if="provisionResult">
           <el-alert type="success" title="账号创建成功" :closable="false" show-icon />
           <el-descriptions :column="1" border size="small" style="margin-top:12px">
-            <el-descriptions-item label="用户名">
-              <code>{{ provisionResult.account.username }}</code>
+            <el-descriptions-item label="资源标识">
+              <code>{{ provisionResult.account.resource_id }}</code>
             </el-descriptions-item>
-            <el-descriptions-item label="密码">
-              <code>{{ provisionResult.generated_password }}</code>
-              <el-button link type="primary" size="small" style="margin-left:8px" @click="copyText(provisionResult.generated_password)">复制</el-button>
-            </el-descriptions-item>
-            <el-descriptions-item label="主机">{{ provision.host || '%' }}</el-descriptions-item>
+            <el-descriptions-item label="主机">{{ provision.host }}</el-descriptions-item>
           </el-descriptions>
-          <el-alert type="warning" :closable="false" style="margin-top:8px" title="密码仅显示一次，请立即复制保存" />
         </template>
         <el-alert v-else-if="provisionError" type="error" :title="provisionError" :closable="false" show-icon />
       </template>
 
       <template #footer>
         <el-button @click="autoProvisionVisible = false">取消</el-button>
-        <el-button v-if="provisionStep === 1" type="primary" :disabled="!provision.adminAccountId" @click="goProvisionStep2">下一步</el-button>
+        <el-button v-if="provisionStep === 1" type="primary" :disabled="!provision.adminAccountId || !provision.host.trim()" @click="goProvisionStep2">下一步</el-button>
         <el-button v-if="provisionStep === 2" :disabled="loadingDatabases" @click="provisionStep = 1">上一步</el-button>
         <el-button v-if="provisionStep === 2" type="primary" :disabled="provisioning || loadingDatabases" @click="doProvision">创建</el-button>
         <el-button v-if="provisionStep === 3 && !provisioning" type="primary" @click="closeProvisionAndRefresh">完成</el-button>
@@ -372,7 +425,8 @@ import ConnectionConfigDialog from '@/components/ConnectionConfigDialog.vue'
 import StatusSwitch from '@/components/StatusSwitch.vue'
 import * as api from '@/api/client'
 import { usePermissionStore } from '@/stores/permission'
-import { writeClipboardText } from '@/utils/clipboard'
+import { createProvisionIdempotencySession, type ProvisionRequest } from '@/utils/provisioningRequest'
+import { createLatestKeyedRequest } from '@/utils/connectionRequestState'
 
 interface InstanceForm {
   name: string
@@ -381,6 +435,11 @@ interface InstanceForm {
   port: number
   group: string
   remark: string
+  tlsMode: api.DatabaseTLSMode
+  tlsServerName: string
+  tlsCaPem: string
+  hasTlsCa: boolean
+  clearTlsCa: boolean
 }
 
 interface AccountFormState {
@@ -397,6 +456,7 @@ const router = useRouter()
 
 const instances = ref<api.DatabaseInstanceView[]>([])
 const instancesLoading = ref(false)
+const instanceRequests = createLatestKeyedRequest<api.DatabaseInstanceView[]>()
 const instancePage = ref(1)
 const instancePageSize = ref(50)
 const instanceSearchKeyword = ref('')
@@ -410,13 +470,21 @@ const editingInstance = ref<api.DatabaseInstanceView | null>(null)
 const instanceMorePanels = ref<string[]>([])
 const instanceGroupOptions = ref<string[]>([])
 const accountGroupOptions = ref<string[]>([])
+const tlsCAFileInput = ref<HTMLInputElement | null>(null)
+const previousTLSMode = ref<api.DatabaseTLSMode>('verify-full')
+const originalHasTLSCA = ref(false)
 const instanceForm = reactive<InstanceForm>({
   name: '',
   protocol: 'mysql',
   address: '',
   port: 3306,
   group: '',
-  remark: ''
+  remark: '',
+  tlsMode: 'verify-full',
+  tlsServerName: '',
+  tlsCaPem: '',
+  hasTlsCa: false,
+  clearTlsCa: false
 })
 
 // ── Account dialog state ──
@@ -426,6 +494,7 @@ const accountsDialogTitle = computed(() => selectedInstance.value ? `${selectedI
 
 const accounts = ref<api.DBAccountRecord[]>([])
 const accountsLoading = ref(false)
+const accountRequests = createLatestKeyedRequest<{ items: api.DBAccountRecord[]; total: number }>()
 const accountTotal = ref(0)
 const accountPage = ref(1)
 const accountPageSize = ref(50)
@@ -546,6 +615,34 @@ function instanceEndpoint(inst: api.DatabaseInstanceView): string {
   return port ? `${address}:${port}` : address
 }
 
+function normalizeTLSMode(value: unknown): api.DatabaseTLSMode {
+  return value === 'disable' || value === 'verify-ca' || value === 'verify-full' ? value : 'verify-full'
+}
+
+function tlsModeLabel(value: unknown): string {
+  switch (normalizeTLSMode(value)) {
+    case 'disable': return '已禁用'
+    case 'verify-ca': return '验证 CA'
+    default: return '验证 CA + 主机名'
+  }
+}
+
+function tlsModeTagType(value: unknown): 'success' | 'warning' | 'danger' {
+  switch (normalizeTLSMode(value)) {
+    case 'disable': return 'danger'
+    case 'verify-ca': return 'warning'
+    default: return 'success'
+  }
+}
+
+function tlsModeDescription(value: api.DatabaseTLSMode): string {
+  switch (value) {
+    case 'disable': return '不加密，也不校验证书；风险最高，仅适用于受控的本机链路。'
+    case 'verify-ca': return '加密并验证 CA，但不校验主机名；安全性低于 verify-full。'
+    default: return '加密并验证 CA 与主机名，可防止中间人攻击，推荐使用。'
+  }
+}
+
 function formatTime(value: unknown): string {
   let d: Date | null = null
   if (typeof value === 'number' && Number.isFinite(value)) {
@@ -559,35 +656,29 @@ function formatTime(value: unknown): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
 }
 
-async function copyText(value: string) {
-  if (!value.trim()) {
-    ElMessage.warning('没有可复制的内容')
-    return
-  }
-  try {
-    await writeClipboardText(value)
-    ElMessage.success('已复制')
-  } catch {
-    ElMessage.warning('复制失败')
-  }
-}
-
 // ── Instance methods ──
 async function loadInstances() {
-  instancesLoading.value = true
-  try {
+  const key = instanceSearchKeyword.value.trim()
+  const request = instanceRequests.begin(key, async () => {
     const loaded = await fetchAllPages(page => api.apiClient.getDBInstances({
       page,
       page_size: 200,
-      q: instanceSearchKeyword.value || undefined
+      q: key || undefined
     }))
-    instances.value = loaded
     await loadInstanceUsage()
+    return loaded
+  })
+  instancesLoading.value = instanceRequests.isLoading()
+  try {
+    const loaded = await request.promise
+    if (!instanceRequests.isCurrent(request.token, key)) return
+    instances.value = loaded
   } catch (err) {
+    if (!instanceRequests.isCurrent(request.token, key)) return
     instances.value = []
     ElMessage.error(err instanceof Error ? err.message : '??????')
   } finally {
-    instancesLoading.value = false
+    instancesLoading.value = instanceRequests.isLoading()
   }
 }
 
@@ -602,13 +693,20 @@ function onInstanceSearch(keyword: string) {
 function openCreateInstance() {
   editingInstance.value = null
   instanceMorePanels.value = ['more']
+  originalHasTLSCA.value = false
+  previousTLSMode.value = 'verify-full'
   Object.assign(instanceForm, {
     name: '',
     protocol: 'mysql',
     address: '',
     port: 3306,
     group: '',
-    remark: ''
+    remark: '',
+    tlsMode: 'verify-full',
+    tlsServerName: '',
+    tlsCaPem: '',
+    hasTlsCa: false,
+    clearTlsCa: false
   })
   showInstanceDialog.value = true
 }
@@ -616,13 +714,21 @@ function openCreateInstance() {
 function editInstance(inst: api.DatabaseInstanceView) {
   editingInstance.value = inst
   instanceMorePanels.value = []
+  const tlsMode = normalizeTLSMode(inst.tls_mode)
+  originalHasTLSCA.value = Boolean(inst.has_tls_ca)
+  previousTLSMode.value = tlsMode
   Object.assign(instanceForm, {
     name: inst.name || '',
     protocol: inst.protocol || 'mysql',
     address: inst.address || '',
     port: inst.port || 3306,
     group: inst.group || '',
-    remark: inst.remark || ''
+    remark: inst.remark || '',
+    tlsMode,
+    tlsServerName: inst.tls_server_name || '',
+    tlsCaPem: '',
+    hasTlsCa: originalHasTLSCA.value,
+    clearTlsCa: false
   })
   showInstanceDialog.value = true
 }
@@ -637,6 +743,67 @@ function onProtocolChange(protocol: string) {
   }
 }
 
+async function onTLSModeChange(mode: api.DatabaseTLSMode) {
+  if (mode !== 'disable') {
+    if (previousTLSMode.value === 'disable') {
+      instanceForm.hasTlsCa = originalHasTLSCA.value
+      instanceForm.clearTlsCa = false
+    }
+    previousTLSMode.value = mode
+    return
+  }
+  try {
+    await ElMessageBox.confirm(
+      '禁用 TLS 会使上游凭据通过明文链路传输，远程 Redis 也会被后端拒绝。确定继续吗？',
+      '高风险设置',
+      { type: 'warning', confirmButtonText: '继续禁用', cancelButtonText: '取消' }
+    )
+  } catch {
+    instanceForm.tlsMode = previousTLSMode.value
+    return
+  }
+  instanceForm.tlsCaPem = ''
+  instanceForm.hasTlsCa = false
+  instanceForm.clearTlsCa = editingInstance.value ? originalHasTLSCA.value : false
+  previousTLSMode.value = mode
+}
+
+function chooseTLSCAFile() {
+  tlsCAFileInput.value?.click()
+}
+
+async function handleTLSCAFileChange(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = ''
+  if (!file) return
+  try {
+    const pem = (await file.text()).trim()
+    if (!pem) {
+      ElMessage.warning('PEM 文件内容为空')
+      return
+    }
+    instanceForm.tlsCaPem = pem
+    instanceForm.hasTlsCa = true
+    instanceForm.clearTlsCa = false
+  } catch {
+    ElMessage.error('读取 PEM 文件失败')
+  }
+}
+
+function onTLSCAPEMInput() {
+  if (instanceForm.tlsCaPem.trim()) {
+    instanceForm.hasTlsCa = true
+    instanceForm.clearTlsCa = false
+  }
+}
+
+function clearTLSCA() {
+  instanceForm.tlsCaPem = ''
+  instanceForm.hasTlsCa = false
+  instanceForm.clearTlsCa = Boolean(editingInstance.value && originalHasTLSCA.value)
+}
+
 async function submitInstance() {
   if (!instanceForm.name.trim() || !instanceForm.address.trim()) {
     ElMessage.warning('请填写必填字段')
@@ -649,9 +816,13 @@ async function submitInstance() {
       protocol: instanceForm.protocol,
       address: instanceForm.address.trim(),
       port: instanceForm.port,
+      tls_mode: instanceForm.tlsMode,
+      tls_server_name: instanceForm.tlsServerName.trim() || undefined,
       group: instanceForm.group.trim() || undefined,
       remark: instanceForm.remark.trim() || undefined
     }
+    if (instanceForm.tlsCaPem.trim()) payload.tls_ca_pem = instanceForm.tlsCaPem.trim()
+    if (instanceForm.clearTlsCa) payload.clear_tls_ca = true
     if (editingInstance.value?.id) {
       await api.apiClient.updateDBInstance(editingInstance.value.id, payload)
       ElMessage.success('数据库实例已更新')
@@ -678,6 +849,8 @@ async function toggleInstance(inst: api.DatabaseInstanceView) {
       protocol: inst.protocol || 'mysql',
       address: inst.address || '',
       port: inst.port,
+      tls_mode: normalizeTLSMode(inst.tls_mode),
+      tls_server_name: inst.tls_server_name || undefined,
       group: inst.group || undefined,
       remark: inst.remark || undefined,
       status: newStatus
@@ -720,16 +893,26 @@ function showAccounts(inst: api.DatabaseInstanceView) {
 
 async function loadSelectedInstanceAccounts() {
   if (!selectedInstance.value) return
-  accountsLoading.value = true
+  const instanceID = selectedInstance.value.id
+  if (!instanceID) return
+  const page = accountPage.value
+  const pageSize = accountPageSize.value
+  const key = `${instanceID}:${page}:${pageSize}`
+  const request = accountRequests.begin(key, () => api.apiClient.getDBAccounts(instanceID, {
+    page,
+    page_size: pageSize,
+  }))
+  accountsLoading.value = accountRequests.isLoading()
   try {
-    const res = await api.apiClient.getDBAccounts(selectedInstance.value.id!, {
-      page: accountPage.value,
-      page_size: accountPageSize.value,
-    })
+    const res = await request.promise
+    if (!accountRequests.isCurrent(request.token, key)) return
     accounts.value = res.items
     accountTotal.value = res.total
+  } catch (err) {
+    if (!accountRequests.isCurrent(request.token, key)) return
+    ElMessage.error(err instanceof Error ? err.message : '加载账号失败')
   } finally {
-    accountsLoading.value = false
+    accountsLoading.value = accountRequests.isLoading()
   }
 }
 
@@ -922,6 +1105,13 @@ watch([accountPage, accountPageSize], () => {
   if (accountsDialogVisible.value) loadSelectedInstanceAccounts()
 })
 
+watch(showInstanceDialog, visible => {
+  if (!visible) {
+    instanceForm.tlsCaPem = ''
+    tlsCAFileInput.value = null
+  }
+})
+
 onMounted(() => {
   loadInstances()
   loadGroupOptions()
@@ -952,15 +1142,16 @@ const provisionError = ref('')
 const provisionResult = ref<any>(null)
 const dbGrants = ref<DBGrantRow[]>([])
 const adminAccounts = ref<any[]>([])
+const provisionIdempotency = createProvisionIdempotencySession()
 
 const provision = reactive({
   adminAccountId: '',
-  newUsername: '',
-  host: '%',
+  host: '',
 })
 
 async function openAutoProvision() {
   if (!selectedInstance.value) return
+  provisionIdempotency.reset()
   const instId = selectedInstance.value.id!
   try {
     const res = await api.apiClient.getDBAccounts(instId, { page_size: 200 })
@@ -974,8 +1165,7 @@ async function openAutoProvision() {
   } else {
     provision.adminAccountId = ''
   }
-  provision.newUsername = ''
-  provision.host = '%'
+  provision.host = ''
   provisionStep.value = 1
   provisionError.value = ''
   provisionResult.value = null
@@ -1002,22 +1192,25 @@ function setAllDBGrants(p: '' | 'read' | 'readwrite') {
 }
 
 async function doProvision() {
-  if (!selectedInstance.value) return
+  if (!selectedInstance.value || provisioning.value) return
   provisioning.value = true
   provisionError.value = ''
-  try {
-    const grants = dbGrants.value
+  const payload: ProvisionRequest = {
+    admin_account_id: provision.adminAccountId,
+    host: provision.host,
+    grants: dbGrants.value
       .filter(r => r.privilege !== '')
-      .map(r => ({ database: r.database, privilege: r.privilege }))
-    const res = await api.apiClient.provisionDBAccount(selectedInstance.value.id!, {
-      admin_account_id: provision.adminAccountId,
-      new_username: provision.newUsername || undefined,
-      host: provision.host || '%',
-      grants,
-    })
+      .map(r => ({ database: r.database, privilege: r.privilege })),
+  }
+  const idempotencyKey = provisionIdempotency.keyFor(payload, selectedInstance.value.id!)
+  try {
+    const res = await api.apiClient.provisionDBAccount(selectedInstance.value.id!, payload, idempotencyKey)
+    if (res.ok === false) throw new Error('自动供应未成功，请重试')
     provisionResult.value = res
     provisionStep.value = 3
+    provisionIdempotency.markSucceeded()
   } catch (e: any) {
+    provisionIdempotency.markFailed()
     provisionError.value = e.message || String(e)
   } finally {
     provisioning.value = false
@@ -1025,6 +1218,7 @@ async function doProvision() {
 }
 
 function resetAutoProvision() {
+  provisionIdempotency.reset()
   provisionStep.value = 1
   provisionError.value = ''
   provisionResult.value = null
@@ -1035,6 +1229,7 @@ function closeProvisionAndRefresh() {
   autoProvisionVisible.value = false
   loadSelectedInstanceAccounts()
 }
+
 </script>
 
 <style scoped>
@@ -1141,6 +1336,45 @@ function closeProvisionAndRefresh() {
 .protocol-tag {
   width: 80px;
   justify-content: center;
+}
+
+.tls-summary {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.tls-ca-status {
+  color: #667085;
+  font-size: 12px;
+}
+
+.tls-mode-help {
+  color: #667085;
+  font-size: 12px;
+  line-height: 1.5;
+  margin-top: 6px;
+}
+
+.tls-risk-alert {
+  margin-top: 8px;
+}
+
+.tls-ca-editor {
+  width: 100%;
+}
+
+.tls-ca-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.tls-ca-file-input {
+  display: none;
 }
 
 /* 账号管理按钮 */

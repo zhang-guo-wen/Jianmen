@@ -1,4 +1,7 @@
 ﻿const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? '').replace(/\/$/, '');
+
+import { withIdempotencyKey, type ProvisionRequest } from '@/utils/provisioningRequest';
+
 const CSRF_KEY = 'jianmen_csrf';
 
 // ── 统一响应格式 ──────────────────────────────────────────────────
@@ -135,8 +138,6 @@ export interface UserPreferences {
   theme: 'system' | 'light' | 'dark';
   ssh_client: string;
   ssh_client_path: string;
-  database_client: string;
-  database_client_path: string;
   terminal_font_family: string;
   terminal_font_size: number;
 }
@@ -356,9 +357,14 @@ export interface DBConnectionRecord {
 
 export interface DBGatewayConfig {
   enabled: boolean;
+  protocol: string;
   listen_addr: string;
   host: string;
   port: number;
+  tls_enabled: boolean;
+  tls_server_name?: string;
+  tls_ca_pem?: string;
+  tls_cert_sha256?: string;
 }
 
 export interface DatabaseInstanceView {
@@ -367,6 +373,9 @@ export interface DatabaseInstanceView {
   protocol?: string;
   address?: string;
   port?: number;
+  tls_mode?: DatabaseTLSMode;
+  tls_server_name?: string;
+  has_tls_ca?: boolean;
   group?: string;
   remark?: string;
   status?: string;
@@ -376,6 +385,8 @@ export interface DatabaseInstanceView {
   [key: string]: unknown;
   can_manage?: boolean;
 }
+
+export type DatabaseTLSMode = 'disable' | 'verify-ca' | 'verify-full';
 
 export interface DBAccountRecord {
   id?: string;
@@ -401,6 +412,10 @@ export interface DBInstancePayload {
   protocol: string;
   address: string;
   port?: number;
+  tls_mode: DatabaseTLSMode;
+  tls_server_name?: string;
+  tls_ca_pem?: string;
+  clear_tls_ca?: boolean;
   group?: string;
   remark?: string;
 }
@@ -1022,10 +1037,11 @@ export const apiClient = {
     request<string>(`/api/audit/ssh/${encodeURIComponent(String(id))}/replay`),
 
   // database gateway & instances
-  getDBGateway: () => request<DBGatewayConfig>('/api/db/gateway'),
+  getDBGateway: (protocol = 'mysql') =>
+    request<DBGatewayConfig>(`/api/db/gateway?protocol=${encodeURIComponent(protocol)}`),
 
-  getDBInstances: (params?: { page?: number; page_size?: number; q?: string }) =>
-    request<PageResponse<DatabaseInstanceView>>(`/api/db/instances${buildQS(params as Record<string, string | number | undefined>)}`),
+  getDBInstances: (params?: { page?: number; page_size?: number; q?: string; connectable?: boolean }) =>
+    request<PageResponse<DatabaseInstanceView>>(`/api/db/instances${buildQS(params)}`),
   createDBInstance: (payload: DBInstancePayload) =>
     request<DatabaseInstanceView>('/api/db/instances', {
       method: 'POST',
@@ -1080,22 +1096,13 @@ export const apiClient = {
   listDBDatabases: (instanceId: string, adminAccountId: string) =>
     request<{ databases: string[] }>(`/api/db/instances/${encodeURIComponent(instanceId)}/databases?admin_account_id=${encodeURIComponent(adminAccountId)}`),
 
-  provisionDBAccount: (instanceId: string, payload: {
-    admin_account_id: string
-    new_username?: string
-    password?: string
-    host?: string
-    grants: Array<{ database: string; privilege: string }>
-    group?: string
-    remark?: string
-    expires_at?: string
-  }) =>
-    request<{ ok: boolean; account: any; generated_password: string }>(
+  provisionDBAccount: (instanceId: string, payload: ProvisionRequest, idempotencyKey: string) =>
+    request<{ ok: boolean; account: DBAccountRecord }>(
       `/api/db/instances/${encodeURIComponent(instanceId)}/provision-account`,
-      {
+      withIdempotencyKey({
         method: 'POST',
         body: JSON.stringify(payload),
-      }
+      }, idempotencyKey)
     ),
 
   // database connections (audit)

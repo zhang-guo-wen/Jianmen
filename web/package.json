@@ -5,9 +5,10 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vue-tsc --noEmit && vite build",
+    "build": "npm run test:connection-commands && vue-tsc --noEmit && vite build",
     "preview": "vite preview",
-    "typecheck": "vue-tsc --noEmit"
+    "typecheck": "vue-tsc --noEmit",
+    "test:connection-commands": "tsx --test src/utils/databaseGatewayCommands.test.ts src/utils/provisioningRequest.test.ts src/utils/connectionLinks.test.ts"
   },
   "dependencies": {
     "@element-plus/icons-vue": "^2.3.1",
@@ -24,6 +25,7 @@
   "devDependencies": {
     "@types/node": "^22.10.2",
     "@vitejs/plugin-vue": "^6.0.7",
+    "tsx": "^4.23.1",
     "typescript": "^5.6.3",
     "vite": "^8.0.16",
     "vue-tsc": "^2.1.10"

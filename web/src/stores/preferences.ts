@@ -10,8 +10,6 @@ const defaults: UserPreferences = {
   theme: 'light',
   ssh_client: '',
   ssh_client_path: '',
-  database_client: '',
-  database_client_path: '',
   terminal_font_family: 'Cascadia Mono, Consolas, monospace',
   terminal_font_size: 14,
 };
@@ -42,7 +40,6 @@ export const usePreferencesStore = defineStore('preferences', () => {
   let mediaQuery: MediaQueryList | null = null;
 
   const hasSSHClient = computed(() => value.value.ssh_client === 'default' || Boolean(value.value.ssh_client && isAbsoluteExecutablePath(value.value.ssh_client_path)));
-  const hasDatabaseClient = computed(() => value.value.database_client === 'dbeaver' && isAbsoluteExecutablePath(value.value.database_client_path));
 
   function resolveDark(theme = value.value.theme): boolean {
     return theme === 'dark' || (theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
@@ -116,5 +113,5 @@ export const usePreferencesStore = defineStore('preferences', () => {
     apply();
   }
 
-  return { value, loaded, loading, saving, error, hasSSHClient, hasDatabaseClient, fetch, update, apply, reset };
+  return { value, loaded, loading, saving, error, hasSSHClient, fetch, update, apply, reset };
 });

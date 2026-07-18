@@ -188,14 +188,24 @@
                 <div class="connection-card__remark" :title="databaseRemark(account)">
                   {{ databaseRemark(account) }}
                 </div>
+                <div v-if="databaseCommandUnavailableReason(account._protocol)" class="database-command-warning">
+                  {{ databaseCommandUnavailableReason(account._protocol) }}
+                </div>
                 <footer class="connection-card__actions database-card__actions">
                   <el-button
                     type="primary"
                     size="small"
-                    :loading="databaseConnectionLoading(account)"
+                    :loading="databaseCopyLoading(account)"
                     @click="copyDBConnectionInfo(account)"
                   >
                     复制
+                  </el-button>
+                  <el-button
+                    size="small"
+                    :loading="databaseDownloadLoading(account)"
+                    @click="downloadDBGatewayCA(account)"
+                  >
+                    下载 CA
                   </el-button>
                   <el-button size="small" @click="openDBConfig(account)">
                     {{ t('quickConnect.action.connect') }}
@@ -263,6 +273,22 @@ import { useI18n } from '@/i18n';
 import { usePermissionStore } from '@/stores/permission';
 import { usePreferencesStore } from '@/stores/preferences';
 import { writeClipboardText } from '@/utils/clipboard';
+import {
+  REDIS_COMMAND_UNAVAILABLE_REASON,
+  buildDatabaseGatewayConnection,
+  databaseGatewayCAFileName,
+  hasDatabaseGatewayTLSIdentity,
+} from '@/utils/databaseGatewayCommands';
+import {
+	beginInFlightIfIdle,
+	createSingleFlight,
+	createLatestKeyedRequest,
+	endInFlight,
+  isInFlight,
+  type InFlightCounters,
+} from '@/utils/connectionRequestState';
+import { buildSSHDeepLink } from '@/utils/connectionLinks';
+import { loadDatabaseConnectionResources } from '@/utils/databaseConnectionOrchestration';
 
 interface HostMeta {
   name: string;
@@ -309,6 +335,11 @@ const hostMeta = ref<Record<string, HostMeta>>({});
 const targetConnectionStates = reactive<Record<string, SSHConnectionState>>({});
 const targetConnectionRequests = new Map<string, Promise<SSHConnectionState>>();
 const sshUsageCounts = ref<Record<string, number>>({});
+const sshRequests = createLatestKeyedRequest<{
+  items: TargetRecord[];
+  hostMeta: Record<string, HostMeta>;
+  usageCounts: Record<string, number>;
+}>();
 const sshFilter = ref('all');
 const sshFiltersExpanded = ref(false);
 
@@ -318,7 +349,8 @@ const dbKeyword = ref('');
 const dbLoading = ref(false);
 const dbError = ref('');
 const dbAccounts = ref<QuickDBTarget[]>([]);
-const dbConnectionStates = reactive<Record<string, { loading: boolean }>>({});
+const dbConnectionStates = reactive<InFlightCounters>({});
+const dbAccountsFlight = createSingleFlight<void>();
 const dbUsageCounts = ref<Record<string, number>>({});
 const dbFilter = ref('all');
 const dbFiltersExpanded = ref(false);
@@ -450,9 +482,8 @@ const displayedTargets = computed(() => {
   return sshFilteredTargets.value.slice(start, start + targetPageSize.value);
 });
 
-async function loadSSHUsage() {
-  sshUsageCounts.value = {};
-  if (!permission.canDo('audit:view')) return;
+async function loadSSHUsage(): Promise<Record<string, number>> {
+  if (!permission.canDo('audit:view')) return {};
   try {
     const sessions = await fetchAllPages(page => apiClient.getSessions({ page, page_size: 200 }));
     const counts: Record<string, number> = {};
@@ -460,9 +491,10 @@ async function loadSSHUsage() {
       const key = usageKey(String(session.target_name || session.target_address || ''), String(session.account_name || session.account_username || ''));
       counts[key] = (counts[key] || 0) + 1;
     });
-    sshUsageCounts.value = counts;
+    return counts;
   } catch {
     // Audit permission or storage may be unavailable; group filters still work.
+    return {};
   }
 }
 
@@ -472,32 +504,40 @@ function setSSHFilter(value: string) {
 }
 
 async function loadTargets() {
-  sshLoading.value = true;
-  sshError.value = '';
-  try {
+  const keyword = sshKeyword.value.trim();
+  const request = sshRequests.begin(keyword, async () => {
     const items = await fetchAllPages(page => apiClient.getTargets({
       page,
       page_size: 200,
-      q: sshKeyword.value.trim() || undefined,
+      q: keyword || undefined,
       connectable: true,
     }));
-    items.forEach(initializeConnectionState);
-    targets.value = items;
-    await loadHostMeta();
-    await loadSSHUsage();
+    const [nextHostMeta, nextUsageCounts] = await Promise.all([loadHostMeta(), loadSSHUsage()]);
+    return { items, hostMeta: nextHostMeta, usageCounts: nextUsageCounts };
+  });
+  sshLoading.value = sshRequests.isLoading();
+  sshError.value = '';
+  try {
+    const result = await request.promise;
+    if (!sshRequests.isCurrent(request.token, keyword)) return;
+    result.items.forEach(initializeConnectionState);
+    targets.value = result.items;
+    hostMeta.value = result.hostMeta;
+    sshUsageCounts.value = result.usageCounts;
     void hydrateConnectionInfo(displayedTargets.value);
   } catch (error) {
+    if (!sshRequests.isCurrent(request.token, keyword)) return;
     sshError.value = error instanceof Error ? error.message : '无法加载主机账号';
     ElMessage.error(sshError.value);
   } finally {
-    sshLoading.value = false;
+    sshLoading.value = sshRequests.isLoading();
   }
 }
 
-async function loadHostMeta() {
+async function loadHostMeta(): Promise<Record<string, HostMeta>> {
   try {
     const hostPage = await apiClient.getHosts({ page: 1, page_size: 999 });
-    hostMeta.value = Object.fromEntries((hostPage.items ?? []).map((host: HostView) => [
+    return Object.fromEntries((hostPage.items ?? []).map((host: HostView) => [
       String(host.id || ''),
       {
         name: String(host.name || host.address || ''),
@@ -506,7 +546,7 @@ async function loadHostMeta() {
       },
     ]));
   } catch {
-    hostMeta.value = {};
+    return {};
   }
 }
 
@@ -631,16 +671,23 @@ async function openClientConnection(target: TargetRecord) {
     ElMessage.warning('请先完成本地 SSH 客户端初始化');
     return;
   }
-  const password = encodeURIComponent(state.password);
-  window.location.href = `ssh://${state.compactUser}:${password}@${state.host}:${state.port}`;
+  window.location.href = buildSSHDeepLink({
+    username: state.compactUser,
+    host: state.host,
+    port: state.port,
+  });
 }
 
-async function loadDBAccounts() {
+function loadDBAccounts(): Promise<void> {
+  return dbAccountsFlight.run(performLoadDBAccounts);
+}
+
+async function performLoadDBAccounts() {
   dbLoading.value = true;
   dbError.value = '';
   dbPage.value = 1;
   try {
-    const instRes = await apiClient.getDBInstances({ page: 1, page_size: 999 });
+    const instRes = await apiClient.getDBInstances({ page: 1, page_size: 999, connectable: true });
     const insts = instRes.items ?? [];
     const all: QuickDBTarget[] = [];
     for (const inst of insts) {
@@ -749,8 +796,16 @@ function databaseRemark(account: QuickDBTarget): string {
   return String(account._instance_remark || '暂无备注');
 }
 
-function databaseConnectionLoading(account: QuickDBTarget): boolean {
-  return dbConnectionStates[databaseTargetKey(account)]?.loading ?? false;
+function databaseCopyLoading(account: QuickDBTarget): boolean {
+  return isInFlight(dbConnectionStates, databaseTargetKey(account), 'copy');
+}
+
+function databaseDownloadLoading(account: QuickDBTarget): boolean {
+  return isInFlight(dbConnectionStates, databaseTargetKey(account), 'download');
+}
+
+function databaseCommandUnavailableReason(protocol?: string): string {
+  return String(protocol || '').toLowerCase() === 'redis' ? REDIS_COMMAND_UNAVAILABLE_REASON : '';
 }
 
 function databaseProtocolLabel(protocol?: string): string {
@@ -770,11 +825,11 @@ function onDBSearch(query: string) {
   dbPage.value = 1;
 }
 
-function databaseConnectionCommand(protocol: string, host: string, port: number, username: string): string {
+function databaseGatewayDefaultPort(protocol: string): number {
   const normalized = protocol.toLowerCase();
-  if (normalized === 'redis') return `redis-cli -h ${host} -p ${port} --user ${username} --askpass`;
-  if (normalized === 'postgres' || normalized === 'postgresql') return `psql -h ${host} -p ${port} -U ${username}`;
-  return `mysql --protocol=tcp -h ${host} -P ${port} -u ${username} -p`;
+  if (normalized === 'redis') return 63790;
+  if (normalized === 'postgres' || normalized === 'postgresql') return 54330;
+  return 33060;
 }
 
 async function copyDBConnectionInfo(account: QuickDBTarget) {
@@ -783,21 +838,39 @@ async function copyDBConnectionInfo(account: QuickDBTarget) {
     ElMessage.error('无法获取数据库账号 ID');
     return;
   }
+  const protocol = String(account._protocol || 'mysql');
+  const unavailableReason = databaseCommandUnavailableReason(protocol);
+  if (unavailableReason) {
+    ElMessage.warning(unavailableReason);
+    return;
+  }
 
   const key = databaseTargetKey(account);
-  dbConnectionStates[key] = { loading: true };
+  if (!beginInFlightIfIdle(dbConnectionStates, key, 'copy')) return;
   try {
-    const [session, credential, gateway] = await Promise.all([
-      apiClient.createUserSession(targetID),
-      apiClient.createConnectionPassword(targetID),
-      apiClient.getDBGateway(),
-    ]);
-    const host = gateway?.host || window.location.hostname || '127.0.0.1';
-    const port = Number(gateway?.port) || 33060;
+    const { session, credential, gateway } = await loadDatabaseConnectionResources({
+      protocol,
+      targetID,
+      getGateway: value => apiClient.getDBGateway(value),
+      createSession: value => apiClient.createUserSession(value),
+      createPassword: value => apiClient.createConnectionPassword(value),
+    });
+    if (!session || !credential) throw new Error('连接信息不完整');
+    if (!gateway?.enabled) throw new Error(`${databaseProtocolLabel(protocol)} 数据库网关未启用`);
+    const host = gateway?.tls_server_name || gateway?.host || window.location.hostname || '127.0.0.1';
+    const port = Number(gateway?.port) || databaseGatewayDefaultPort(protocol);
     const compactUser = String(session.compact_username || '');
     const password = String(credential.password || '');
-    const protocol = String(account._protocol || 'mysql');
     if (!compactUser || !password) throw new Error('连接信息不完整');
+    const connection = buildDatabaseGatewayConnection({
+      protocol,
+      gateway,
+      port,
+      username: compactUser,
+      databaseName: 'postgres',
+    });
+    if (!connection) throw new Error('TLS 身份材料不完整，无法复制安全连接命令。请联系管理员配置证书、ca_file 和 server_name。');
+    if (!connection.command) throw new Error(connection.unavailableReason || '安全连接命令暂不可用');
 
     const content = [
       `数据库实例：${account._instance_name || '-'}`,
@@ -807,14 +880,44 @@ async function copyDBConnectionInfo(account: QuickDBTarget) {
       `连接地址：${host}:${port}`,
       `连接账户：${compactUser}`,
       `连接临时密码：${password}`,
-      `连接命令：${databaseConnectionCommand(protocol, host, port, compactUser)}`,
+      `请先下载 CA：${connection.caFileName}`,
+      `${connection.commandPlatform} 连接命令：${connection.command}`,
     ].join('\n');
     await writeClipboardText(content);
     ElMessage.success('数据库临时连接信息已复制');
   } catch (error) {
     ElMessage.error(error instanceof Error ? error.message : '复制数据库连接信息失败');
   } finally {
-    dbConnectionStates[key].loading = false;
+    endInFlight(dbConnectionStates, key, 'copy');
+  }
+}
+
+async function downloadDBGatewayCA(account: QuickDBTarget) {
+  const key = databaseTargetKey(account);
+  if (!beginInFlightIfIdle(dbConnectionStates, key, 'download')) return;
+  try {
+    const protocol = String(account._protocol || 'mysql');
+    const gateway = await apiClient.getDBGateway(protocol);
+    if (!hasDatabaseGatewayTLSIdentity(gateway)) {
+      throw new Error('TLS 身份材料不完整，无法下载 CA。请联系管理员配置证书、ca_file 和 server_name。');
+    }
+    const blob = new Blob([gateway.tls_ca_pem], { type: 'application/x-pem-file' });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = databaseGatewayCAFileName(protocol);
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(url);
+    const unavailableReason = databaseCommandUnavailableReason(protocol);
+    ElMessage.success(unavailableReason
+      ? `CA 已下载；${unavailableReason}`
+      : 'CA 已下载。请先保存该文件，再执行 Linux/macOS/Git Bash 命令。');
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : '下载 CA 失败');
+  } finally {
+    endInFlight(dbConnectionStates, key, 'download');
   }
 }
 
@@ -1009,6 +1112,13 @@ onMounted(() => {
   white-space: nowrap;
 }
 
+.database-command-warning {
+  margin: 7px 12px 0;
+  color: var(--el-color-warning-dark-2);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
 .connection-card__error {
   display: flex;
   align-items: center;
@@ -1039,7 +1149,7 @@ onMounted(() => {
 }
 
 .database-card__actions {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   padding-top: 8px;
 }
 

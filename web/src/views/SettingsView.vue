@@ -50,7 +50,7 @@
               </el-form-item>
               <el-form-item v-if="form.ssh_client && form.ssh_client !== 'default'" label="客户端路径" required :error="sshClientPathError">
                 <el-input v-model="form.ssh_client_path" placeholder="请输入完整绝对路径，如 C:\Program Files\PuTTY\putty.exe">
-                  <template #append><el-button @click="pickExecutable('ssh')">选择文件</el-button></template>
+                  <template #append><el-button @click="pickExecutable">选择文件</el-button></template>
                 </el-input>
                 <div class="field-help">程序路径必填，不提供默认值；浏览器无法读取完整路径时，请手动粘贴。</div>
               </el-form-item>
@@ -63,37 +63,6 @@
           </section>
         </el-tab-pane>
 
-        <el-tab-pane label="数据库客户端" name="database">
-          <section class="settings-section">
-            <div class="section-heading">
-              <div>
-                <h2>本地数据库客户端</h2>
-                <p>配置数据库快速连接使用的本地客户端。</p>
-              </div>
-              <el-tag :type="form.database_client ? 'success' : 'info'" effect="light">
-                {{ form.database_client ? '已配置' : '未配置' }}
-              </el-tag>
-            </div>
-            <el-form label-position="top">
-              <el-form-item label="默认客户端">
-                <el-select v-model="form.database_client" placeholder="选择本地数据库客户端" clearable style="width: 100%">
-                  <el-option v-for="option in DATABASE_CLIENT_OPTIONS" :key="option.command" :label="option.label" :value="option.command" />
-                </el-select>
-              </el-form-item>
-              <el-form-item v-if="form.database_client" label="客户端路径" required :error="databaseClientPathError">
-                <el-input v-model="form.database_client_path" placeholder="请输入完整绝对路径，如 C:\Program Files\DBeaver\dbeaver.exe">
-                  <template #append><el-button @click="pickExecutable('database')">选择文件</el-button></template>
-                </el-input>
-                <div class="field-help">注册 jianmen-db:// 协议后，网页可携带临时堡垒机凭据启动 DBeaver。</div>
-              </el-form-item>
-              <el-alert v-if="databaseRegistrationCommand" type="info" :closable="false" show-icon>
-                <template #title>请使用管理员权限在 CMD 中执行下面命令，授权打开 DBeaver</template>
-                <div class="command-box"><code>{{ databaseRegistrationCommand }}</code></div>
-                <el-button link type="primary" @click="copyRegistrationCommand(databaseRegistrationCommand)">复制管理员注册命令</el-button>
-              </el-alert>
-            </el-form>
-          </section>
-          </el-tab-pane>
         </el-tabs>
       </div>
     </el-card>
@@ -104,7 +73,6 @@
 import { computed, onMounted, reactive, ref, watch } from 'vue';
 import { ElMessage } from 'element-plus';
 
-import { buildDatabaseProtocolRegistrationCommand, DATABASE_CLIENT_OPTIONS } from '@/config/databaseClients';
 import { buildSSHProtocolRegistrationCommand, isAbsoluteExecutablePath, SSH_CLIENT_OPTIONS } from '@/config/sshClients';
 import { usePreferencesStore } from '@/stores/preferences';
 import { writeClipboardText } from '@/utils/clipboard';
@@ -119,17 +87,11 @@ const themeOptions = [
 ];
 
 const sshClientPathError = computed(() => executablePathError(form.ssh_client, form.ssh_client_path, 'SSH', 'C:\\Program Files\\PuTTY\\putty.exe'));
-const databaseClientPathError = computed(() => executablePathError(form.database_client, form.database_client_path, '数据库', 'C:\\Program Files\\DBeaver\\dbeaver.exe'));
 const sshRegistrationCommand = computed(() => buildSSHProtocolRegistrationCommand(form.ssh_client, form.ssh_client_path));
-const databaseRegistrationCommand = computed(() => buildDatabaseProtocolRegistrationCommand(form.database_client, form.database_client_path));
 
 watch(() => form.ssh_client, (client) => {
   if (client === 'default' || !client) form.ssh_client_path = '';
 });
-watch(() => form.database_client, (client) => {
-  if (!client) form.database_client_path = '';
-});
-
 onMounted(async () => {
   try {
     const loaded = await preferences.fetch();
@@ -147,7 +109,7 @@ function executablePathError(client: string, path: string, label: string, exampl
 }
 
 async function save() {
-  const error = sshClientPathError.value || databaseClientPathError.value;
+  const error = sshClientPathError.value;
   if (error) {
     ElMessage.warning(error);
     return;
@@ -161,7 +123,7 @@ async function save() {
   }
 }
 
-function pickExecutable(type: 'ssh' | 'database') {
+function pickExecutable() {
   const input = document.createElement('input');
   input.type = 'file';
   input.accept = '.exe';
@@ -169,8 +131,7 @@ function pickExecutable(type: 'ssh' | 'database') {
     const file = (event.target as HTMLInputElement).files?.[0];
     if (!file) return;
     const path = (file as File & { path?: string }).path || file.name;
-    if (type === 'ssh') form.ssh_client_path = path;
-    else form.database_client_path = path;
+    form.ssh_client_path = path;
   };
   input.click();
 }

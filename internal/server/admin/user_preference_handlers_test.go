@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"testing"
 
 	"jianmen/internal/model"
@@ -29,7 +30,7 @@ func TestMePreferencesDefaultsAndPersists(t *testing.T) {
 		t.Fatalf("unexpected defaults: %#v", defaults)
 	}
 
-	body := bytes.NewBufferString(`{"theme":"dark","ssh_client":"xshell","ssh_client_path":"C:\\Xshell.exe","database_client":"dbeaver","database_client_path":"C:\\DBeaver\\dbeaver.exe","terminal_font_family":"Cascadia Mono","terminal_font_size":16}`)
+	body := bytes.NewBufferString(`{"theme":"dark","ssh_client":"xshell","ssh_client_path":"C:\\Xshell.exe","terminal_font_family":"Cascadia Mono","terminal_font_size":16}`)
 	putRequest := asTestUser(httptest.NewRequest(http.MethodPut, "/api/me/preferences", body), "u1", "alice")
 	putRecorder := httptest.NewRecorder()
 	server.handleMePreferences(putRecorder, putRequest)
@@ -41,8 +42,17 @@ func TestMePreferencesDefaultsAndPersists(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read stored preference: %v", err)
 	}
-	if stored.Theme != "dark" || stored.SSHClient != "xshell" || stored.DatabaseClient != "dbeaver" || stored.TerminalFontSize != 16 {
+	if stored.Theme != "dark" || stored.SSHClient != "xshell" || stored.TerminalFontSize != 16 {
 		t.Fatalf("unexpected stored preference: %#v", stored)
+	}
+}
+
+func TestUserPreferenceModelHasNoRemovedDatabaseClientFields(t *testing.T) {
+	typeOfPreference := reflect.TypeOf(model.UserPreference{})
+	for _, field := range []string{"DatabaseClient", "DatabaseClientPath"} {
+		if _, ok := typeOfPreference.FieldByName(field); ok {
+			t.Fatalf("removed field %q is still present in the production model", field)
+		}
 	}
 }
 
@@ -57,9 +67,9 @@ func TestMePreferencesRejectsInvalidValues(t *testing.T) {
 	}
 }
 
-func TestMePreferencesRejectsUnsupportedDatabaseClient(t *testing.T) {
+func TestMePreferencesRejectsRemovedDatabaseClientFields(t *testing.T) {
 	server, _ := newAdminDBTestServer(t)
-	body := bytes.NewBufferString(`{"database_client":"navicat"}`)
+	body := bytes.NewBufferString(`{"database_client":"dbeaver","database_client_path":"C:\\DBeaver\\dbeaver.exe"}`)
 	request := asTestUser(httptest.NewRequest(http.MethodPut, "/api/me/preferences", body), "u1", "alice")
 	recorder := httptest.NewRecorder()
 	server.handleMePreferences(recorder, request)

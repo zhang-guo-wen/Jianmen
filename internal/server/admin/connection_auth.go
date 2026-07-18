@@ -6,8 +6,7 @@ import (
 	"strings"
 )
 
-// authorizeConnection requires both an action permission and a resource grant.
-// Super administrators bypass both checks, consistently with the other admin APIs.
+// authorizeConnection requires a unified action and resource decision.
 func (s *Server) authorizeConnection(ctx context.Context, userID, action, resourceType, resourceID string) (bool, error) {
 	return s.authorizeAnyConnection(ctx, userID, []string{action}, resourceType, resourceID)
 }
@@ -17,30 +16,8 @@ func (s *Server) authorizeAnyConnection(ctx context.Context, userID string, acti
 	if userID == "" {
 		return false, nil
 	}
-	if s.isSuperAdmin(userID) {
-		return true, nil
+	if s.authorization == nil {
+		return false, errors.New("authorization service unavailable")
 	}
-
-	if s.rbacChecker == nil {
-		return false, errors.New("rbac checker unavailable")
-	}
-	actionAllowed := false
-	for _, action := range actions {
-		allowed, err := s.rbacChecker.HasPermission(userID, action, "", "")
-		if err != nil {
-			return false, err
-		}
-		if allowed {
-			actionAllowed = true
-			break
-		}
-	}
-	if !actionAllowed {
-		return false, nil
-	}
-
-	if s.resourceGrants == nil {
-		return false, errors.New("resource grant service unavailable")
-	}
-	return s.resourceGrants.Check(ctx, userID, resourceType, resourceID)
+	return s.authorization.AuthorizeConnection(ctx, userID, actions, resourceType, resourceID)
 }

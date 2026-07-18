@@ -79,12 +79,10 @@ func (s *Server) initStatusAdminSummary() *InitAdminSummary {
 		return nil
 	}
 	var user model.User
-	for id := range s.superAdminIDs {
-		if err := s.db.First(&user, "id = ?", id).Error; err == nil {
-			return &InitAdminSummary{Username: user.Username, DisplayName: user.DisplayName, Email: user.Email}
-		}
-	}
-	if err := s.db.Order("created_at ASC").First(&user).Error; err != nil {
+	if err := s.db.
+		Where("is_super_admin = ? AND status = ?", true, "active").
+		Order("created_at ASC").
+		First(&user).Error; err != nil {
 		return nil
 	}
 	return &InitAdminSummary{Username: user.Username, DisplayName: user.DisplayName, Email: user.Email}
@@ -279,11 +277,9 @@ func (s *Server) handleInitSetup(w http.ResponseWriter, r *http.Request) {
 	}
 	defer releaseSetup()
 
-	var createdUserID string
 	var created bool
 	var alreadyInitialized bool
 	err = runSetupTransaction(r.Context(), s.db, func(tx *gorm.DB) error {
-		createdUserID = ""
 		created = false
 		alreadyInitialized = false
 		guard := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&model.SystemInitialization{
@@ -323,7 +319,6 @@ func (s *Server) handleInitSetup(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 
-		createdUserID = user.ID
 		created = true
 		return nil
 	})
@@ -340,13 +335,8 @@ func (s *Server) handleInitSetup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// setup 向导创建的用户即为超级管理员，直接拥有全部权限
-	// 同时持久化到文件，确保重启后仍然有效
-	if s.superAdminIDs != nil {
-		s.superAdminIDs[createdUserID] = true
-	}
+	// setup 创建的超级管理员身份已经与用户一起持久化到数据库。
 	if s.dataDir != "" {
-		saveSuperAdminID(s.dataDir, createdUserID)
 		// 清理旧的加密密钥标记文件，避免重置数据库后无法重新获取密钥
 		os.Remove(filepath.Join(s.dataDir, ".encryption_key_shown"))
 	}
@@ -365,7 +355,7 @@ func (s *Server) handleInitEncryptionKey(w http.ResponseWriter, r *http.Request)
 		s.writeErrorText(w, r, http.StatusServiceUnavailable, "metadata database unavailable")
 		return
 	}
-	if !s.isSuperAdmin(userIDFromRequest(r)) {
+	if !isSuperAdminRequest(r) {
 		s.forbidden(w, r)
 		return
 	}

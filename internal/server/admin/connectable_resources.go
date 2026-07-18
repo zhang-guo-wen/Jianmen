@@ -15,7 +15,7 @@ func connectableOnly(r *http.Request) bool {
 }
 
 func (s *Server) connectableTargets(r *http.Request, targets []store.TargetView) ([]store.TargetView, error) {
-	if !connectableOnly(r) || s.isSuperAdmin(userIDFromRequest(r)) {
+	if !connectableOnly(r) || isSuperAdminRequest(r) {
 		return targets, nil
 	}
 	userID := userIDFromRequest(r)
@@ -33,7 +33,7 @@ func (s *Server) connectableTargets(r *http.Request, targets []store.TargetView)
 }
 
 func (s *Server) connectableDatabaseAccounts(r *http.Request, accounts []store.DatabaseAccountView) ([]store.DatabaseAccountView, error) {
-	if !connectableOnly(r) || s.isSuperAdmin(userIDFromRequest(r)) {
+	if !connectableOnly(r) || isSuperAdminRequest(r) {
 		return accounts, nil
 	}
 	userID := userIDFromRequest(r)

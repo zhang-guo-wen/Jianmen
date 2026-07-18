@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -8,7 +9,6 @@ import (
 
 	"jianmen/internal/config"
 	"jianmen/internal/online"
-	"jianmen/internal/rbac"
 	"jianmen/internal/server/appproxy"
 	"jianmen/internal/service"
 	"jianmen/internal/store"
@@ -20,16 +20,15 @@ type Server struct {
 	cfg              *config.Config
 	store            store.Store
 	db               *gorm.DB
-	rbacChecker      *rbac.Checker
 	logger           *slog.Logger
 	dataDir          string
-	superAdminIDs    map[string]bool
 	loginLimiter     *loginLimiter
 	loginCaptcha     loginCaptchaVerifier
 	appProxy         *appproxy.Server
 	onlineSessions   *online.Registry
 	containerService *service.ContainerService
-	adminAuth        *service.AdminAuthService
+	identity         *service.IdentityService
+	authorization    authorizationService
 	resourceGrants   *service.ResourceGrantService
 	resourceGroups   *service.ResourceGroupService
 	temporaryAccess  *service.TemporaryAccessService
@@ -42,11 +41,22 @@ type loginCaptchaVerifier interface {
 	Verify(payload string) error
 }
 
+type authorizationService interface {
+	AuthorizeConnection(
+		ctx context.Context,
+		userID string,
+		actions []string,
+		resourceType string,
+		resourceID string,
+	) (bool, error)
+}
+
 func New(
 	cfg *config.Config,
 	repository store.Store,
 	db *gorm.DB,
-	adminAuth *service.AdminAuthService,
+	identity *service.IdentityService,
+	authorization authorizationService,
 	resourceGrants *service.ResourceGrantService,
 	resourceGroups *service.ResourceGroupService,
 	logger *slog.Logger,
@@ -61,8 +71,10 @@ func New(
 		return nil, errors.New("admin store is required")
 	case db == nil:
 		return nil, errors.New("admin metadata database is required")
-	case adminAuth == nil:
-		return nil, errors.New("admin auth service is required")
+	case identity == nil:
+		return nil, errors.New("admin identity service is required")
+	case authorization == nil:
+		return nil, errors.New("admin authorization service is required")
 	case resourceGrants == nil:
 		return nil, errors.New("admin resource grant service is required")
 	case resourceGroups == nil:
@@ -84,12 +96,12 @@ func New(
 	if err != nil {
 		return nil, fmt.Errorf("initialize temporary access service: %w", err)
 	}
-	superAdminIDs := LoadSuperAdminIDs(cfg, dataDir)
 	return &Server{
-		cfg: cfg, store: repository, db: db, rbacChecker: rbac.NewChecker(db), logger: logger,
-		dataDir: dataDir, superAdminIDs: superAdminIDs,
+		cfg: cfg, store: repository, db: db, logger: logger,
+		dataDir:      dataDir,
 		loginLimiter: newDefaultLoginLimiter(), loginCaptcha: loginCaptcha, appProxy: appProxy,
 		onlineSessions: onlineSessions, containerService: service.NewContainerService(),
-		adminAuth: adminAuth, resourceGrants: resourceGrants, resourceGroups: resourceGroups, temporaryAccess: temporaryAccess,
+		identity: identity, authorization: authorization,
+		resourceGrants: resourceGrants, resourceGroups: resourceGroups, temporaryAccess: temporaryAccess,
 	}, nil
 }

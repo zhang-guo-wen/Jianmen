@@ -11,7 +11,7 @@ import (
 
 func TestAccountResourceGroupIncludesAndMaintainsPlatformAccounts(t *testing.T) {
 	server, db := newAdminDBTestServer(t)
-	server.superAdminIDs["u-admin"] = true
+	seedTestSuperAdmin(t, db, "u-admin")
 
 	group := model.ResourceGroup{ID: "group-prod", Name: "prod", GroupType: model.ResourceGroupTypeAccount}
 	user := model.User{ID: "owner-1", Username: "owner", Status: "active"}

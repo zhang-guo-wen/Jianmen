@@ -11,7 +11,7 @@ import (
 )
 
 func TestMeAccessContextDefaultsToNoAccess(t *testing.T) {
-	server := &Server{superAdminIDs: map[string]bool{}}
+	server := &Server{}
 	req := httptest.NewRequest(http.MethodGet, "/api/me/access-context", nil)
 	req = req.WithContext(context.WithValue(req.Context(), ctxKeyUserID, "regular-user"))
 	rec := httptest.NewRecorder()
@@ -32,7 +32,7 @@ func TestMeAccessContextDefaultsToNoAccess(t *testing.T) {
 }
 
 func TestMeAccessContextReturnsAllPagesForSuperAdmin(t *testing.T) {
-	server := &Server{superAdminIDs: map[string]bool{"u-admin": true}}
+	server := &Server{}
 	req := asTestSuperAdmin(httptest.NewRequest(http.MethodGet, "/api/me/access-context", nil))
 	rec := httptest.NewRecorder()
 

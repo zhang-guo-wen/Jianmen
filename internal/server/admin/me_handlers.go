@@ -78,11 +78,11 @@ func (s *Server) currentUserAccessContext(w http.ResponseWriter, r *http.Request
 		s.writeErrorText(w, r, http.StatusNotFound, "user not found")
 		return meAccessContextResponse{}, false
 	}
-	if s.isSuperAdmin(userID) {
+	if isSuperAdminRequest(r) {
 		actions := []string{"*"}
 		return meAccessContextResponse{Actions: actions, Pages: appendSettingsPage(rbac.AccessiblePages(actions))}, true
 	}
-	if s.db == nil || s.rbacChecker == nil {
+	if s.db == nil {
 		return meAccessContextResponse{Actions: []string{}, Pages: appendSettingsPage(nil)}, true
 	}
 	actions, err := s.effectiveGlobalActions(userID)

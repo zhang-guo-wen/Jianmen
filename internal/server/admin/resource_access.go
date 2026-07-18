@@ -13,7 +13,7 @@ func (s *Server) hasResourceGrant(r *http.Request, resourceType, resourceID stri
 	if userID == "" {
 		return false, nil
 	}
-	if s.isSuperAdmin(userID) {
+	if isSuperAdminRequest(r) {
 		return true, nil
 	}
 	if s.resourceGrants == nil {
@@ -36,7 +36,7 @@ func (s *Server) requireResourceGrant(w http.ResponseWriter, r *http.Request, re
 }
 
 func (s *Server) requireHostAccountManagement(w http.ResponseWriter, r *http.Request, accountID string) bool {
-	if s.isSuperAdmin(userIDFromRequest(r)) {
+	if isSuperAdminRequest(r) {
 		return true
 	}
 	if s.db == nil {
@@ -52,7 +52,7 @@ func (s *Server) requireHostAccountManagement(w http.ResponseWriter, r *http.Req
 }
 
 func (s *Server) requireDatabaseAccountManagement(w http.ResponseWriter, r *http.Request, accountID string) bool {
-	if s.isSuperAdmin(userIDFromRequest(r)) {
+	if isSuperAdminRequest(r) {
 		return true
 	}
 	if s.db == nil {
@@ -68,7 +68,7 @@ func (s *Server) requireDatabaseAccountManagement(w http.ResponseWriter, r *http
 }
 
 func (s *Server) grantCreatedResource(r *http.Request, resourceType, resourceID string) error {
-	if s.db == nil || s.isSuperAdmin(userIDFromRequest(r)) {
+	if s.db == nil || isSuperAdminRequest(r) {
 		return nil
 	}
 	grant := model.ResourceGrant{
@@ -84,7 +84,7 @@ func (s *Server) grantCreatedResource(r *http.Request, resourceType, resourceID 
 func (s *Server) visibleHosts(r *http.Request, hosts []store.HostView) ([]store.HostView, error) {
 	result := make([]store.HostView, 0, len(hosts))
 	for _, host := range hosts {
-		if s.isSuperAdmin(userIDFromRequest(r)) {
+		if isSuperAdminRequest(r) {
 			host.CanManage = true
 			result = append(result, host)
 			continue
@@ -136,7 +136,7 @@ func (s *Server) hostVisible(r *http.Request, hostID string) (bool, error) {
 func (s *Server) visibleTargets(r *http.Request, targets []store.TargetView) ([]store.TargetView, error) {
 	result := make([]store.TargetView, 0, len(targets))
 	for _, target := range targets {
-		if s.isSuperAdmin(userIDFromRequest(r)) {
+		if isSuperAdminRequest(r) {
 			target.CanManage = true
 			result = append(result, target)
 			continue
@@ -162,7 +162,7 @@ func (s *Server) visibleTargets(r *http.Request, targets []store.TargetView) ([]
 func (s *Server) visibleDatabaseInstances(r *http.Request, instances []store.DatabaseInstanceView) ([]store.DatabaseInstanceView, error) {
 	result := make([]store.DatabaseInstanceView, 0, len(instances))
 	for _, instance := range instances {
-		if s.isSuperAdmin(userIDFromRequest(r)) {
+		if isSuperAdminRequest(r) {
 			instance.CanManage = true
 			result = append(result, instance)
 			continue
@@ -214,7 +214,7 @@ func (s *Server) databaseInstanceVisible(r *http.Request, instanceID string) (bo
 func (s *Server) visibleDatabaseAccounts(r *http.Request, accounts []store.DatabaseAccountView) ([]store.DatabaseAccountView, error) {
 	result := make([]store.DatabaseAccountView, 0, len(accounts))
 	for _, account := range accounts {
-		if s.isSuperAdmin(userIDFromRequest(r)) {
+		if isSuperAdminRequest(r) {
 			account.CanManage = true
 			result = append(result, account)
 			continue
@@ -238,7 +238,7 @@ func (s *Server) visibleDatabaseAccounts(r *http.Request, accounts []store.Datab
 func (s *Server) visibleApplications(r *http.Request, applications []store.ApplicationView) ([]store.ApplicationView, error) {
 	result := make([]store.ApplicationView, 0, len(applications))
 	for _, application := range applications {
-		if s.isSuperAdmin(userIDFromRequest(r)) {
+		if isSuperAdminRequest(r) {
 			application.CanManage = true
 			result = append(result, application)
 			continue

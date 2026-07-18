@@ -11,8 +11,8 @@ import (
 )
 
 func TestHandleOnlineSessionsFiltersAndDisconnects(t *testing.T) {
-	server, _ := newAdminDBTestServer(t)
-	server.superAdminIDs["u-admin"] = true
+	server, db := newAdminDBTestServer(t)
+	seedTestSuperAdmin(t, db, "u-admin")
 	server.onlineSessions = online.NewRegistry()
 	disconnected := false
 	server.onlineSessions.Register(online.Session{

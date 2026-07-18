@@ -15,7 +15,6 @@ import (
 
 func TestRBACCatalogReturnsCompleteCatalog(t *testing.T) {
 	server, _ := newRBACServer(t)
-	server.superAdminIDs = map[string]bool{"u-admin": true}
 
 	rec := requestRBAC(t, server.handleRBACCatalog, http.MethodGet, "/api/rbac/catalog", "")
 	if rec.Code != http.StatusOK {
@@ -29,9 +28,12 @@ func TestRBACCatalogReturnsCompleteCatalog(t *testing.T) {
 }
 
 func TestRBACCatalogRequiresManagePermission(t *testing.T) {
-	server, _ := newRBACServer(t)
+	server, db := newRBACServer(t)
+	if err := db.Create(&model.User{ID: "regular", Username: "regular", Status: "active"}).Error; err != nil {
+		t.Fatalf("create regular user: %v", err)
+	}
 	req := httptest.NewRequest(http.MethodGet, "/api/rbac/catalog", nil)
-	req = asTestSuperAdmin(req)
+	req = withTestUser(req, "regular", "regular")
 	rec := httptest.NewRecorder()
 
 	server.handleRBACCatalog(rec, req)
@@ -43,7 +45,6 @@ func TestRBACCatalogRequiresManagePermission(t *testing.T) {
 
 func TestRBACReplaceRoleActionsPreservesResourceAndDenyPermissions(t *testing.T) {
 	server, db := newRBACServer(t)
-	server.superAdminIDs = map[string]bool{"u-admin": true}
 	role := createRBACRole(t, server, `{"name":"operators"}`)
 	otherRole := createRBACRole(t, server, `{"name":"auditors"}`)
 
@@ -91,7 +92,6 @@ func TestRBACReplaceRoleActionsPreservesResourceAndDenyPermissions(t *testing.T)
 
 func TestRBACReplaceRoleActionsRejectsUnknownWithoutChangingBindings(t *testing.T) {
 	server, db := newRBACServer(t)
-	server.superAdminIDs = map[string]bool{"u-admin": true}
 	role := createRBACRole(t, server, `{"name":"operators"}`)
 	existing := createBoundPermission(t, db, role.ID, model.Permission{
 		Action: rbac.ActionHostView, Effect: model.PermissionEffectAllow,

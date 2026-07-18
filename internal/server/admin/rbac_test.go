@@ -14,11 +14,15 @@ import (
 	"gorm.io/gorm"
 
 	"jianmen/internal/model"
+	"jianmen/internal/rbac"
+	"jianmen/internal/service"
 	"jianmen/internal/storage"
+	"jianmen/internal/store"
 )
 
 func TestRBACNoDBReturns503AndStaticAPIsStillWork(t *testing.T) {
 	server := newTargetTestServer(t)
+	server.db = nil
 
 	rbacRec := requestRBAC(t, server.handleRBACRoles, http.MethodGet, "/api/rbac/roles", "")
 	if rbacRec.Code != http.StatusServiceUnavailable {
@@ -96,10 +100,17 @@ func TestRBACBindingsAndEffectiveAllow(t *testing.T) {
 	permission := createRBACPermission(t, server, `{
 		"name": "connect host",
 		"action": "session:connect",
-		"resource_type": "host_account",
-		"resource_id": "target-root",
 		"effect": "allow"
 	}`)
+	if err := db.Create(&model.ResourceGrant{
+		PrincipalType: "user",
+		PrincipalID:   "u1",
+		ResourceType:  model.ResourceTypeHostAccount,
+		ResourceID:    "target-root",
+		Effect:        model.PermissionEffectAllow,
+	}).Error; err != nil {
+		t.Fatalf("create resource grant: %v", err)
+	}
 
 	rolePermissionRec := requestRBAC(
 		t,
@@ -173,9 +184,26 @@ func newRBACServer(t *testing.T) (*Server, *gorm.DB) {
 	if err := storage.AutoMigrate(db); err != nil {
 		t.Fatalf("auto migrate: %v", err)
 	}
+	storeInst := store.NewDBStore(db)
+	identityService, err := service.NewIdentityService(storeInst)
+	if err != nil {
+		t.Fatalf("new RBAC identity service: %v", err)
+	}
+	authorizationService, err := service.NewAuthorizationService(
+		identityService,
+		rbac.NewChecker(db),
+		rbac.NewResourceGrantChecker(db),
+	)
+	if err != nil {
+		t.Fatalf("new RBAC authorization service: %v", err)
+	}
+	seedTestSuperAdmin(t, db, "u-admin")
 	return &Server{
-		db:     db,
-		logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		db:            db,
+		store:         storeInst,
+		identity:      identityService,
+		authorization: authorizationService,
+		logger:        slog.New(slog.NewTextHandler(io.Discard, nil)),
 	}, db
 }
 

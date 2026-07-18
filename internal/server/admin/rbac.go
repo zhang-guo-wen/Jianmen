@@ -8,7 +8,6 @@ import (
 	"gorm.io/gorm"
 
 	"jianmen/internal/model"
-	rbaccheck "jianmen/internal/rbac"
 )
 
 const rbacMetadataUnavailable = "metadata database unavailable"
@@ -451,7 +450,7 @@ func (s *Server) handleRBACRolePermission(w http.ResponseWriter, r *http.Request
 }
 
 func (s *Server) handleRBACEffective(w http.ResponseWriter, r *http.Request) {
-	db, ok := s.metadataDB(w, r)
+	_, ok := s.metadataDB(w, r)
 	if !ok {
 		return
 	}
@@ -475,7 +474,7 @@ func (s *Server) handleRBACEffective(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	allowed, err := rbaccheck.NewChecker(db).HasPermission(userID, action, resourceType, resourceID)
+	allowed, err := s.authorizeConnection(r.Context(), userID, action, resourceType, resourceID)
 	if err != nil {
 		writeRBACDBError(w, r, err)
 		return

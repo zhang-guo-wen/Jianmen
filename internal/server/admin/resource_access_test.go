@@ -83,7 +83,6 @@ func TestHandleDBAccountsPaginatesSearchesAndFiltersVisibleResources(t *testing.
 			t.Fatalf("seed database list permission: %v", err)
 		}
 	}
-	server.rbacChecker = rbac.NewChecker(db)
 
 	request := asTestUser(httptest.NewRequest(http.MethodGet, "/api/db/accounts?page=2&page_size=1", nil), "u1", "alice")
 	recorder := httptest.NewRecorder()
@@ -174,7 +173,6 @@ func TestAccountGrantAllowsViewingButNotContainerManagement(t *testing.T) {
 func TestApplicationsAreFilteredByResourceGrant(t *testing.T) {
 	server, db := newAdminDBTestServer(t)
 	seedConnectionAction(t, db, "app-user", rbac.ActionAppView)
-	server.rbacChecker = rbac.NewChecker(db)
 	applications := []model.Application{
 		{ID: "app-visible", Name: "visible", InternalScheme: "http", InternalHost: "127.0.0.1", InternalPort: 8080, ListenPort: 47120, Status: "active"},
 		{ID: "app-hidden", Name: "hidden", InternalScheme: "http", InternalHost: "127.0.0.1", InternalPort: 8081, ListenPort: 47121, Status: "active"},

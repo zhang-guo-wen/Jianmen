@@ -171,7 +171,6 @@ func TestInitSetupAfterUpgradePreservesExistingUserAndRejectsSetup(t *testing.T)
 
 	server, _ := newAdminDBTestServer(t)
 	server.db = db
-	server.superAdminIDs = nil
 	server.dataDir = ""
 	request := httptest.NewRequest(
 		http.MethodPost,
@@ -231,7 +230,6 @@ func newConcurrentInitSetupTestServers(t *testing.T) ([]*Server, *gorm.DB) {
 	for _, db := range []*gorm.DB{primaryDB, secondaryDB} {
 		server, _ := newAdminDBTestServer(t)
 		server.db = db
-		server.superAdminIDs = nil
 		server.dataDir = ""
 		servers = append(servers, server)
 		sqlDB, err := db.DB()

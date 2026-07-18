@@ -80,8 +80,15 @@ func TestAuthorizeAnyConnectionAcceptsXFTPAction(t *testing.T) {
 }
 
 func TestAuthorizeConnectionSuperAdminBypassesChecks(t *testing.T) {
-	server, _ := newAdminDBTestServer(t)
-	server.superAdminIDs["super"] = true
+	server, db := newAdminDBTestServer(t)
+	if err := db.Create(&model.User{
+		ID:           "super",
+		Username:     "super",
+		Status:       "active",
+		IsSuperAdmin: true,
+	}).Error; err != nil {
+		t.Fatalf("create super administrator: %v", err)
+	}
 
 	allowed, err := server.authorizeConnection(context.Background(), "super", rbac.ActionDBConnect, model.ResourceTypeDatabaseAccount, "missing")
 	if err != nil {
@@ -89,6 +96,17 @@ func TestAuthorizeConnectionSuperAdminBypassesChecks(t *testing.T) {
 	}
 	if !allowed {
 		t.Fatal("super administrator did not bypass connection authorization")
+	}
+
+	if err := db.Model(&model.User{}).Where("id = ?", "super").Update("status", "disabled").Error; err != nil {
+		t.Fatalf("disable super administrator: %v", err)
+	}
+	allowed, err = server.authorizeConnection(context.Background(), "super", rbac.ActionDBConnect, model.ResourceTypeDatabaseAccount, "missing")
+	if err != nil {
+		t.Fatalf("authorize disabled super administrator: %v", err)
+	}
+	if allowed {
+		t.Fatal("disabled super administrator bypassed connection authorization")
 	}
 }
 

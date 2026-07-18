@@ -49,7 +49,7 @@ func (s *Server) handleContainerEndpoints(w http.ResponseWriter, r *http.Request
 			s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
 			return
 		}
-		canManage := s.isSuperAdmin(userIDFromRequest(r)) || s.requirePermission(r, rbac.ActionContainerUpdate) || s.requirePermission(r, rbac.ActionContainerDelete)
+		canManage := isSuperAdminRequest(r) || s.requirePermission(r, rbac.ActionContainerUpdate) || s.requirePermission(r, rbac.ActionContainerDelete)
 		for i := range items {
 			items[i].CanManage = canManage
 		}
@@ -101,7 +101,7 @@ func (s *Server) handleContainerEndpoint(w http.ResponseWriter, r *http.Request)
 			writeContainerStoreError(w, r, err)
 			return
 		}
-		view.CanManage = s.isSuperAdmin(userIDFromRequest(r)) || s.requirePermission(r, rbac.ActionContainerUpdate) || s.requirePermission(r, rbac.ActionContainerDelete)
+		view.CanManage = isSuperAdminRequest(r) || s.requirePermission(r, rbac.ActionContainerUpdate) || s.requirePermission(r, rbac.ActionContainerDelete)
 		s.writeJSON(w, r, http.StatusOK, view)
 	case http.MethodPut:
 		if !s.requirePermission(r, rbac.ActionContainerUpdate) {

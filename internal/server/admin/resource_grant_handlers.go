@@ -94,7 +94,7 @@ func (s *Server) listResourceGrants(w http.ResponseWriter, r *http.Request) {
 	page, err := resourceGrants.List(
 		r.Context(),
 		userIDFromRequest(r),
-		s.isSuperAdmin(userIDFromRequest(r)),
+		isSuperAdminRequest(r),
 		r.URL.Query().Get("q"),
 		positiveIntRequestQuery(r, "page", 1),
 		positiveIntRequestQuery(r, "page_size", defaultPageSize),
@@ -121,7 +121,7 @@ func (s *Server) createResourceGrant(w http.ResponseWriter, r *http.Request) {
 		s.writeErrorText(w, r, http.StatusBadRequest, "invalid JSON: "+err.Error())
 		return
 	}
-	grant, err := resourceGrants.Create(r.Context(), userIDFromRequest(r), s.isSuperAdmin(userIDFromRequest(r)), model.ResourceGrant{
+	grant, err := resourceGrants.Create(r.Context(), userIDFromRequest(r), isSuperAdminRequest(r), model.ResourceGrant{
 		PrincipalType: request.PrincipalType,
 		PrincipalID:   request.PrincipalID,
 		ResourceType:  request.ResourceType,
@@ -141,7 +141,7 @@ func (s *Server) getResourceGrant(w http.ResponseWriter, r *http.Request, id str
 	if !ok {
 		return
 	}
-	grant, err := resourceGrants.Get(r.Context(), userIDFromRequest(r), s.isSuperAdmin(userIDFromRequest(r)), id)
+	grant, err := resourceGrants.Get(r.Context(), userIDFromRequest(r), isSuperAdminRequest(r), id)
 	if err != nil {
 		s.writeResourceGrantError(w, r, err)
 		return
@@ -154,7 +154,7 @@ func (s *Server) deleteResourceGrant(w http.ResponseWriter, r *http.Request, id 
 	if !ok {
 		return
 	}
-	if err := resourceGrants.Delete(r.Context(), userIDFromRequest(r), s.isSuperAdmin(userIDFromRequest(r)), id); err != nil {
+	if err := resourceGrants.Delete(r.Context(), userIDFromRequest(r), isSuperAdminRequest(r), id); err != nil {
 		s.writeResourceGrantError(w, r, err)
 		return
 	}

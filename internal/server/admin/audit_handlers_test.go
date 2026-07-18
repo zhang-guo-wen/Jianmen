@@ -16,7 +16,7 @@ import (
 
 func TestHandleAuditSSHUsesStandardPaginationAndSearchParams(t *testing.T) {
 	server, db := newAdminDBTestServer(t)
-	server.superAdminIDs["u-admin"] = true
+	seedTestSuperAdmin(t, db, "u-admin")
 
 	now := time.Now().UTC()
 	sessions := []model.AuditSession{
@@ -57,7 +57,7 @@ func TestHandleAuditSSHUsesStandardPaginationAndSearchParams(t *testing.T) {
 
 func TestHandleAuditSearchIncludesCommandAndSQLContent(t *testing.T) {
 	server, db := newAdminDBTestServer(t)
-	server.superAdminIDs["u-admin"] = true
+	seedTestSuperAdmin(t, db, "u-admin")
 
 	now := time.Now().UTC()
 	sshSession := model.AuditSession{ID: "audit-command-search", UserID: "u1", Username: "alice", Protocol: "ssh", TargetName: "host-a", StartedAt: now, State: "ended"}
@@ -102,7 +102,7 @@ func TestHandleAuditSearchIncludesCommandAndSQLContent(t *testing.T) {
 
 func TestHandleAuditListsIncludeLogCounts(t *testing.T) {
 	server, db := newAdminDBTestServer(t)
-	server.superAdminIDs["u-admin"] = true
+	seedTestSuperAdmin(t, db, "u-admin")
 
 	now := time.Now().UTC()
 	sshSession := model.AuditSession{ID: "audit-count-ssh", UserID: "u1", Username: "alice", Protocol: "ssh", TargetName: "host-a", StartedAt: now, State: "ended"}
@@ -172,7 +172,7 @@ func TestHandleAuditListsIncludeLogCounts(t *testing.T) {
 
 func TestHandleAuditSSHCommandsLoadsOutputFromRecordingFile(t *testing.T) {
 	server, db := newAdminDBTestServer(t)
-	server.superAdminIDs["u-admin"] = true
+	seedTestSuperAdmin(t, db, "u-admin")
 
 	replayDir := t.TempDir()
 	startedAt := time.Now().UTC().Add(-time.Minute)

@@ -410,15 +410,22 @@ func TestProtectedHandlersFailClosedWithoutAuthenticatedUser(t *testing.T) {
 func TestInitStatusReturnsSuperAdminSummaryAfterSetup(t *testing.T) {
 	server, db := newAdminDBTestServer(t)
 	if err := db.Create(&model.User{
-		ID:          "admin-user",
-		Username:    "admin",
-		DisplayName: "超级管理员",
-		Email:       "admin@example.com",
-		Status:      "active",
+		ID:       "normal-user",
+		Username: "normal",
+		Status:   "active",
+	}).Error; err != nil {
+		t.Fatalf("create normal user: %v", err)
+	}
+	if err := db.Create(&model.User{
+		ID:           "admin-user",
+		Username:     "admin",
+		DisplayName:  "超级管理员",
+		Email:        "admin@example.com",
+		Status:       "active",
+		IsSuperAdmin: true,
 	}).Error; err != nil {
 		t.Fatalf("create admin user: %v", err)
 	}
-	server.superAdminIDs = map[string]bool{"admin-user": true}
 
 	req := httptest.NewRequest(http.MethodGet, "/api/init/status", nil)
 	rec := httptest.NewRecorder()
@@ -645,12 +652,11 @@ func TestEncryptionKeyRequiresSuperAdminToken(t *testing.T) {
 	server, db := newAdminDBTestServer(t)
 	users := []model.User{
 		{ID: "regular", Username: "regular", Status: "active", TokenHash: hashToken("regular-token")},
-		{ID: "admin", Username: "admin", Status: "active", TokenHash: hashToken("admin-token")},
+		{ID: "admin", Username: "admin", Status: "active", TokenHash: hashToken("admin-token"), IsSuperAdmin: true},
 	}
 	if err := db.Create(&users).Error; err != nil {
 		t.Fatalf("create users: %v", err)
 	}
-	server.superAdminIDs = map[string]bool{"admin": true}
 	handler := server.withAuthAndUser(server.handleInitEncryptionKey)
 
 	missingAuthReq := httptest.NewRequest(http.MethodGet, "/api/init/encryption-key", nil)
@@ -693,8 +699,8 @@ func TestEncryptionKeyRequiresSuperAdminToken(t *testing.T) {
 }
 
 func TestHandleTestDBConnectionPayloadRequiresCredentials(t *testing.T) {
-	server, _ := newAdminDBTestServer(t)
-	server.superAdminIDs["u-admin"] = true
+	server, db := newAdminDBTestServer(t)
+	seedTestSuperAdmin(t, db, "u-admin")
 	req := httptest.NewRequest(http.MethodPost, "/api/db/accounts/test", strings.NewReader(`{"instance_id":"","username":"","password":""}`))
 	req = asTestSuperAdmin(req)
 	rec := httptest.NewRecorder()
@@ -708,7 +714,7 @@ func TestHandleTestDBConnectionPayloadRequiresCredentials(t *testing.T) {
 
 func TestHandleTestDBConnectionPayloadDoesNotCreateAccount(t *testing.T) {
 	server, db := newAdminDBTestServer(t)
-	server.superAdminIDs["u-admin"] = true
+	seedTestSuperAdmin(t, db, "u-admin")
 	inst := model.DatabaseInstance{Name: "temp-test", Protocol: "mysql", Address: "127.0.0.1", Port: 1, Status: "active"}
 	if err := db.Create(&inst).Error; err != nil {
 		t.Fatalf("create instance: %v", err)
@@ -761,11 +767,33 @@ func newTargetTestServer(t *testing.T) *Server {
 		},
 	}
 	storeInst := store.NewDBStore(db)
+	identityService, err := service.NewIdentityService(storeInst)
+	if err != nil {
+		t.Fatalf("new target test identity service: %v", err)
+	}
+	authorizationService, err := service.NewAuthorizationService(
+		identityService,
+		rbac.NewChecker(db),
+		rbac.NewResourceGrantChecker(db),
+	)
+	if err != nil {
+		t.Fatalf("new target test authorization service: %v", err)
+	}
+	if err := db.Create(&model.User{
+		ID:           "u-admin",
+		Username:     "admin",
+		Status:       "active",
+		IsSuperAdmin: true,
+	}).Error; err != nil {
+		t.Fatalf("create target test super administrator: %v", err)
+	}
 	return &Server{
 		cfg:           cfg,
 		store:         storeInst,
+		db:            db,
 		logger:        slog.New(slog.NewTextHandler(io.Discard, nil)),
-		superAdminIDs: map[string]bool{"u-admin": true},
+		identity:      identityService,
+		authorization: authorizationService,
 	}
 }
 
@@ -803,9 +831,17 @@ func newAdminDBTestServer(t *testing.T) (*Server, *gorm.DB) {
 
 	cfg := &config.Config{Admin: config.AdminConfig{}}
 	storeInst := store.NewDBStore(db)
-	authService, err := service.NewAdminAuthService(storeInst)
+	identityService, err := service.NewIdentityService(storeInst)
 	if err != nil {
-		t.Fatalf("new admin auth service: %v", err)
+		t.Fatalf("new identity service: %v", err)
+	}
+	authorizationService, err := service.NewAuthorizationService(
+		identityService,
+		rbac.NewChecker(db),
+		rbac.NewResourceGrantChecker(db),
+	)
+	if err != nil {
+		t.Fatalf("new authorization service: %v", err)
 	}
 	resourceGrants, err := service.NewResourceGrantService(storeInst, rbac.NewResourceGrantChecker(db))
 	if err != nil {
@@ -819,12 +855,11 @@ func newAdminDBTestServer(t *testing.T) (*Server, *gorm.DB) {
 		cfg:            cfg,
 		store:          storeInst,
 		db:             db,
-		rbacChecker:    rbac.NewChecker(db),
 		logger:         slog.New(slog.NewTextHandler(io.Discard, nil)),
 		dataDir:        dataDir,
-		superAdminIDs:  map[string]bool{},
 		loginCaptcha:   testLoginCaptcha{},
-		adminAuth:      authService,
+		identity:       identityService,
+		authorization:  authorizationService,
 		resourceGrants: resourceGrants,
 		resourceGroups: resourceGroups,
 	}, db
@@ -833,7 +868,21 @@ func newAdminDBTestServer(t *testing.T) (*Server, *gorm.DB) {
 func asTestSuperAdmin(req *http.Request) *http.Request {
 	ctx := context.WithValue(req.Context(), ctxKeyUserID, "u-admin")
 	ctx = context.WithValue(ctx, ctxKeyUsername, "admin")
+	ctx = context.WithValue(ctx, ctxKeySuperAdmin, true)
 	return req.WithContext(ctx)
+}
+
+func seedTestSuperAdmin(t *testing.T, db *gorm.DB, userID string) {
+	t.Helper()
+	user := model.User{
+		ID:           userID,
+		Username:     userID,
+		Status:       "active",
+		IsSuperAdmin: true,
+	}
+	if err := db.Create(&user).Error; err != nil {
+		t.Fatalf("create test super administrator %q: %v", userID, err)
+	}
 }
 
 func startTestPasswordSSHServer(t *testing.T, username, password string) string {

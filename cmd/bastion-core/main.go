@@ -88,11 +88,6 @@ func main() {
 		go func() {
 			errCh <- appProxy.ListenAndServe(ctx)
 		}()
-		adminAuth, err := service.NewAdminAuthService(appStore)
-		if err != nil {
-			logger.Error("failed to initialize admin auth service", "error", err)
-			os.Exit(1)
-		}
 		resourceGrants, err := service.NewResourceGrantService(appStore, rbac.NewResourceGrantChecker(metadataDB))
 		if err != nil {
 			logger.Error("failed to initialize resource grant service", "error", err)
@@ -107,7 +102,8 @@ func main() {
 			cfg,
 			appStore,
 			metadataDB,
-			adminAuth,
+			identityService,
+			authorizationService,
 			resourceGrants,
 			resourceGroups,
 			logger,

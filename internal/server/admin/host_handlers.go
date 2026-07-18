@@ -213,7 +213,7 @@ func (s *Server) handleCreateTarget(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if strings.TrimSpace(target.HostID) == "" {
-		if !s.isSuperAdmin(userIDFromRequest(r)) {
+		if !isSuperAdminRequest(r) {
 			s.writeErrorText(w, r, http.StatusBadRequest, "host_id is required")
 			return
 		}

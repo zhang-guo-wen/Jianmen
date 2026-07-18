@@ -77,11 +77,11 @@ func (s *Server) listUsers(w http.ResponseWriter, r *http.Request) {
 		}
 		out := make([]userWithFlag, len(users))
 		for i, u := range users {
-			if !s.isSuperAdmin(u.ID) && u.IsExpired(time.Now().UTC()) && u.Status == "active" {
+			if !u.IsSuperAdmin && u.IsExpired(time.Now().UTC()) && u.Status == "active" {
 				u.Status = "disabled"
 				_ = s.db.Model(&model.User{}).Where("id = ?", u.ID).Update("status", "disabled").Error
 			}
-			out[i] = userWithFlag{User: u, IsSuperAdmin: s.isSuperAdmin(u.ID)}
+			out[i] = userWithFlag{User: u, IsSuperAdmin: u.IsSuperAdmin}
 		}
 		s.writeJSON(w, r, http.StatusOK, pageResponse{Items: out, Total: int(total), Page: page, PageSize: pageSize})
 		return
@@ -218,11 +218,11 @@ func (s *Server) updateUser(w http.ResponseWriter, r *http.Request, id string) {
 			return
 		}
 		// 不允许禁用超级管理员
-		if status == "disabled" && s.isSuperAdmin(id) {
+		if status == "disabled" && user.IsSuperAdmin {
 			s.writeErrorText(w, r, http.StatusForbidden, "cannot disable super admin")
 			return
 		}
-		if status == "active" && !s.isSuperAdmin(id) && (user.ExpiresAt == nil || user.IsExpired(time.Now().UTC())) {
+		if status == "active" && !user.IsSuperAdmin && (user.ExpiresAt == nil || user.IsExpired(time.Now().UTC())) {
 			value := time.Now().UTC().AddDate(1, 0, 0)
 			user.ExpiresAt = &value
 		}
@@ -246,13 +246,13 @@ func (s *Server) deleteUser(w http.ResponseWriter, r *http.Request, id string) {
 		return
 	}
 	// 不允许删除超级管理员
-	if s.isSuperAdmin(id) {
-		s.writeErrorText(w, r, http.StatusForbidden, "cannot delete super admin")
-		return
-	}
 	var user model.User
 	if err := s.db.First(&user, "id = ?", id).Error; err != nil {
 		writeRBACDBError(w, r, err)
+		return
+	}
+	if user.IsSuperAdmin {
+		s.writeErrorText(w, r, http.StatusForbidden, "cannot delete super admin")
 		return
 	}
 	// Cascade delete user_roles

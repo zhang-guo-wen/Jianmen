@@ -1,12 +1,15 @@
 package admin
 
 import (
+	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"jianmen/internal/model"
 	"jianmen/internal/storage"
@@ -60,7 +63,7 @@ func TestInitSetupPersistsExactlyOneSuperAdministrator(t *testing.T) {
 }
 
 func TestInitSetupConcurrentRequestsCreateExactlyOneSuperAdministrator(t *testing.T) {
-	server, db := newConcurrentInitSetupTestServer(t)
+	servers, db := newConcurrentInitSetupTestServers(t)
 
 	const workers = 8
 	start := make(chan struct{})
@@ -77,7 +80,7 @@ func TestInitSetupConcurrentRequestsCreateExactlyOneSuperAdministrator(t *testin
 				strings.NewReader(`{"username":"admin-`+string(rune('a'+index))+`","password":"secure-password"}`),
 			)
 			response := httptest.NewRecorder()
-			server.handleInitSetup(response, request)
+			servers[index%len(servers)].handleInitSetup(response, request)
 			statuses <- response.Code
 		}(index)
 	}
@@ -124,34 +127,122 @@ func TestInitSetupConcurrentRequestsCreateExactlyOneSuperAdministrator(t *testin
 	}
 }
 
-func newConcurrentInitSetupTestServer(t *testing.T) (*Server, *gorm.DB) {
-	t.Helper()
+func TestAcquireSetupSlotHonorsContextCancellation(t *testing.T) {
+	server := &Server{}
+	release, err := server.acquireSetupSlot(context.Background())
+	if err != nil {
+		t.Fatalf("acquire setup slot: %v", err)
+	}
+	defer release()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	result := make(chan error, 1)
+	go func() {
+		_, err := server.acquireSetupSlot(ctx)
+		result <- err
+	}()
+	cancel()
+
+	select {
+	case err := <-result:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("acquire canceled setup slot error = %v, want context canceled", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("acquire setup slot did not return after context cancellation")
+	}
+}
+
+func TestInitSetupAfterUpgradePreservesExistingUserAndRejectsSetup(t *testing.T) {
+	db, err := storage.Open(storage.Config{Driver: storage.DriverSQLite, DSN: ":memory:"})
+	if err != nil {
+		t.Fatalf("open legacy sqlite: %v", err)
+	}
+	if err := db.AutoMigrate(&model.User{}); err != nil {
+		t.Fatalf("create legacy user schema: %v", err)
+	}
+	existing := model.User{ID: "existing", Username: "existing", Status: "active"}
+	if err := db.Create(&existing).Error; err != nil {
+		t.Fatalf("create existing user: %v", err)
+	}
+	if err := storage.Migrate(db); err != nil {
+		t.Fatalf("migrate legacy database: %v", err)
+	}
 
 	server, _ := newAdminDBTestServer(t)
+	server.db = db
+	server.superAdminIDs = nil
+	server.dataDir = ""
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/api/init/setup",
+		strings.NewReader(`{"username":"new-admin","password":"secure-password"}`),
+	)
+	response := httptest.NewRecorder()
+	server.handleInitSetup(response, request)
+	if response.Code != http.StatusForbidden {
+		t.Fatalf("setup status = %d, want %d; body=%s", response.Code, http.StatusForbidden, response.Body.String())
+	}
+
+	var users []model.User
+	if err := db.Find(&users).Error; err != nil {
+		t.Fatalf("list upgraded users: %v", err)
+	}
+	if len(users) != 1 || users[0].ID != existing.ID || users[0].IsSuperAdmin {
+		t.Fatalf("upgraded users changed unexpectedly: %#v", users)
+	}
+	var setupGuards int64
+	if err := db.Model(&model.SystemInitialization{}).Count(&setupGuards).Error; err != nil {
+		t.Fatalf("count setup guards: %v", err)
+	}
+	if setupGuards != 1 {
+		t.Fatalf("setup guard count = %d, want 1", setupGuards)
+	}
+}
+
+func newConcurrentInitSetupTestServers(t *testing.T) ([]*Server, *gorm.DB) {
+	t.Helper()
+
 	path := filepath.ToSlash(filepath.Join(t.TempDir(), "setup.db"))
-	db, err := storage.Open(storage.Config{
+	dsn := "file:" + path + "?_pragma=journal_mode(WAL)"
+	primaryDB, err := storage.Open(storage.Config{
 		Driver:       storage.DriverSQLite,
-		DSN:          "file:" + path + "?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)",
+		DSN:          dsn,
 		MaxOpenConns: 16,
 		MaxIdleConns: 16,
 	})
 	if err != nil {
-		t.Fatalf("open concurrent sqlite: %v", err)
+		t.Fatalf("open primary concurrent sqlite: %v", err)
 	}
-	if err := storage.AutoMigrate(db); err != nil {
+	if err := storage.AutoMigrate(primaryDB); err != nil {
 		t.Fatalf("automigrate concurrent sqlite: %v", err)
 	}
-	sqlDB, err := db.DB()
-	if err != nil {
-		t.Fatalf("get concurrent sql db: %v", err)
-	}
-	t.Cleanup(func() {
-		if err := sqlDB.Close(); err != nil {
-			t.Errorf("close concurrent sqlite: %v", err)
-		}
+	secondaryDB, err := storage.Open(storage.Config{
+		Driver:       storage.DriverSQLite,
+		DSN:          dsn,
+		MaxOpenConns: 16,
+		MaxIdleConns: 16,
 	})
-	server.db = db
-	server.superAdminIDs = nil
-	server.dataDir = ""
-	return server, db
+	if err != nil {
+		t.Fatalf("open secondary concurrent sqlite: %v", err)
+	}
+
+	servers := make([]*Server, 0, 2)
+	for _, db := range []*gorm.DB{primaryDB, secondaryDB} {
+		server, _ := newAdminDBTestServer(t)
+		server.db = db
+		server.superAdminIDs = nil
+		server.dataDir = ""
+		servers = append(servers, server)
+		sqlDB, err := db.DB()
+		if err != nil {
+			t.Fatalf("get concurrent sql db: %v", err)
+		}
+		t.Cleanup(func() {
+			if err := sqlDB.Close(); err != nil {
+				t.Errorf("close concurrent sqlite: %v", err)
+			}
+		})
+	}
+	return servers, primaryDB
 }

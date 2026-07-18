@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"context"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -271,13 +272,20 @@ func (s *Server) handleInitSetup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.setupMu.Lock()
-	defer s.setupMu.Unlock()
+	releaseSetup, err := s.acquireSetupSlot(r.Context())
+	if err != nil {
+		s.writeErrorText(w, r, http.StatusRequestTimeout, "setup request canceled")
+		return
+	}
+	defer releaseSetup()
 
 	var createdUserID string
 	var created bool
 	var alreadyInitialized bool
-	err = s.db.WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
+	err = runSetupTransaction(r.Context(), s.db, func(tx *gorm.DB) error {
+		createdUserID = ""
+		created = false
+		alreadyInitialized = false
 		guard := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&model.SystemInitialization{
 			Key:       model.SystemInitializationSetup,
 			CreatedAt: time.Now().UTC(),
@@ -320,6 +328,10 @@ func (s *Server) handleInitSetup(w http.ResponseWriter, r *http.Request) {
 		return nil
 	})
 	if err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			s.writeErrorText(w, r, http.StatusRequestTimeout, "setup request canceled")
+			return
+		}
 		s.writeErrorText(w, r, http.StatusInternalServerError, "failed to create user: "+err.Error())
 		return
 	}

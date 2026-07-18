@@ -33,7 +33,8 @@ type Server struct {
 	resourceGrants   *service.ResourceGrantService
 	resourceGroups   *service.ResourceGroupService
 	temporaryAccess  *service.TemporaryAccessService
-	setupMu          sync.Mutex
+	setupOnce        sync.Once
+	setupSlot        chan struct{}
 }
 
 type loginCaptchaVerifier interface {

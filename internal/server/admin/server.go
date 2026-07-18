@@ -31,6 +31,9 @@ type Server struct {
 	authorization    authorizationService
 	resourceGrants   *service.ResourceGrantService
 	resourceGroups   *service.ResourceGroupService
+	userManagement   *service.UserService
+	userGroups       *service.UserGroupService
+	roleManagement   *service.RoleService
 	temporaryAccess  *service.TemporaryAccessService
 	browserSessions  *service.BrowserSessionService
 	setupOnce        sync.Once
@@ -100,13 +103,33 @@ func New(
 	if err != nil {
 		return nil, fmt.Errorf("initialize temporary access service: %w", err)
 	}
+	userRepository, ok := repository.(service.UserRepository)
+	if !ok {
+		return nil, errors.New("admin store does not support user management")
+	}
+	userManagement, err := service.NewUserService(userRepository)
+	if err != nil {
+		return nil, fmt.Errorf("initialize user service: %w", err)
+	}
+	userGroupRepository, ok := repository.(service.UserGroupRepository)
+	if !ok {
+		return nil, errors.New("admin store does not support user group management")
+	}
+	userGroups, err := service.NewUserGroupService(userGroupRepository)
+	if err != nil {
+		return nil, fmt.Errorf("initialize user group service: %w", err)
+	}
+	roleManagement, err := newRoleManagementService(repository)
+	if err != nil {
+		return nil, err
+	}
 	return &Server{
 		cfg: cfg, store: repository, db: db, logger: logger,
 		dataDir:      dataDir,
 		loginLimiter: newDefaultLoginLimiter(), loginCaptcha: loginCaptcha, appProxy: appProxy,
 		onlineSessions: onlineSessions, containerService: service.NewContainerService(),
 		identity: identity, authorization: authorization,
-		resourceGrants: resourceGrants, resourceGroups: resourceGroups, temporaryAccess: temporaryAccess,
+		resourceGrants: resourceGrants, resourceGroups: resourceGroups, userManagement: userManagement, userGroups: userGroups, roleManagement: roleManagement, temporaryAccess: temporaryAccess,
 		browserSessions: browserSessions,
 	}, nil
 }

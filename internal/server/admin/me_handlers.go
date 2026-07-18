@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"log/slog"
 	"net/http"
 
 	"jianmen/internal/pkg/apiresp"
@@ -85,9 +86,14 @@ func (s *Server) currentUserAccessContext(w http.ResponseWriter, r *http.Request
 	if s.db == nil {
 		return meAccessContextResponse{Actions: []string{}, Pages: appendSettingsPage(nil)}, true
 	}
-	actions, err := s.effectiveGlobalActions(userID)
+	actions, err := s.effectiveGlobalActions(r.Context(), userID)
 	if err != nil {
-		s.writeError(w, r, http.StatusInternalServerError, apiresp.CodeInternal, err.Error(), nil)
+		logger := s.logger
+		if logger == nil {
+			logger = slog.Default()
+		}
+		logger.Warn("load effective permissions failed", "error", err)
+		s.writeError(w, r, http.StatusInternalServerError, apiresp.CodeInternal, "effective permissions unavailable", nil)
 		return meAccessContextResponse{}, false
 	}
 	return meAccessContextResponse{Actions: actions, Pages: appendSettingsPage(rbac.AccessiblePages(actions))}, true

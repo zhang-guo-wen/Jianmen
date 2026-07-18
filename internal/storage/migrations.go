@@ -156,6 +156,13 @@ var migrations = []Migration{
 			return nil
 		},
 	},
+	{
+		Version: "202607180007",
+		Name:    "permission logical uniqueness",
+		Run: func(tx *gorm.DB) error {
+			return tx.AutoMigrate(&model.Permission{})
+		},
+	},
 }
 
 func Migrate(db *gorm.DB) error {

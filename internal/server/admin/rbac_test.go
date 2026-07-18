@@ -20,6 +20,92 @@ import (
 	"jianmen/internal/store"
 )
 
+func TestWriteRBACServiceErrorDoesNotExposeWrappedConflict(t *testing.T) {
+	const sensitive = "UNIQUE constraint failed secret_table.permissions"
+
+	var logs bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/rbac/roles", nil)
+	writeRBACServiceError(rec, req, fmt.Errorf("role conflict: %w: %s", service.ErrRoleConflict, sensitive))
+
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusConflict, rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), sensitive) {
+		t.Fatalf("response leaked sensitive error: %s", rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "RBAC resource already exists") {
+		t.Fatalf("response missing fixed conflict message: %s", rec.Body.String())
+	}
+	if !strings.Contains(logs.String(), sensitive) {
+		t.Fatalf("server logger did not receive detailed error: %s", logs.String())
+	}
+}
+
+func TestWriteRBACServiceErrorDoesNotExposeUnknownInternalError(t *testing.T) {
+	const sensitive = "dial tcp secret.internal:5432: password=top-secret"
+
+	var logs bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/rbac/roles", nil)
+	writeRBACServiceError(rec, req, fmt.Errorf("database unavailable: %s", sensitive))
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusInternalServerError, rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), sensitive) {
+		t.Fatalf("response leaked sensitive error: %s", rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "RBAC operation failed") {
+		t.Fatalf("response missing fixed internal message: %s", rec.Body.String())
+	}
+	if !strings.Contains(logs.String(), sensitive) {
+		t.Fatalf("server logger did not receive detailed error: %s", logs.String())
+	}
+}
+
+func TestDecodeRBACJSONDoesNotExposeParserDetails(t *testing.T) {
+	const sensitive = "password=top-secret"
+
+	var logs bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/api/rbac/roles",
+		strings.NewReader(`{"password=top-secret":"value"}`),
+	)
+	var request struct {
+		Name string `json:"name"`
+	}
+	if decodeRBACJSON(rec, req, &request) {
+		t.Fatal("decode unexpectedly accepted an unknown field")
+	}
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusBadRequest, rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), sensitive) {
+		t.Fatalf("response leaked parser details: %s", rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "invalid RBAC request") {
+		t.Fatalf("response missing fixed validation message: %s", rec.Body.String())
+	}
+	if !strings.Contains(logs.String(), sensitive) {
+		t.Fatalf("server logger did not receive parser details: %s", logs.String())
+	}
+}
+
 func TestRBACNoDBReturns503AndStaticAPIsStillWork(t *testing.T) {
 	server := newTargetTestServer(t)
 	server.db = nil
@@ -59,6 +145,102 @@ func TestRBACCreateRole(t *testing.T) {
 	}
 	if role.Name != "operators" || role.Description != "SSH operators" || role.Status != "active" {
 		t.Fatalf("unexpected role: %#v", role)
+	}
+}
+
+func TestRBACCreateDuplicateRoleReturnsConflict(t *testing.T) {
+	server, _ := newRBACServer(t)
+	createRBACRole(t, server, `{"name":"operators"}`)
+	rec := requestRBAC(t, server.handleRBACRoles, http.MethodPost, "/api/rbac/roles", `{"name":"operators"}`)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("duplicate role status = %d, want %d; body=%s", rec.Code, http.StatusConflict, rec.Body.String())
+	}
+}
+
+func TestRBACRejectsBuiltinRoleCreationAndMutation(t *testing.T) {
+	server, db := newRBACServer(t)
+	rec := requestRBAC(t, server.handleRBACRoles, http.MethodPost, "/api/rbac/roles", `{"name":"builtin-from-api","builtin":true}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("builtin create status = %d, want %d; body=%s", rec.Code, http.StatusBadRequest, rec.Body.String())
+	}
+
+	builtin := model.Role{ID: "builtin-role", Name: "builtin", Builtin: true, Status: "active"}
+	if err := db.Create(&builtin).Error; err != nil {
+		t.Fatalf("seed builtin role: %v", err)
+	}
+	rec = requestRBAC(t, server.handleRBACRole, http.MethodPut, "/api/rbac/roles/"+builtin.ID, `{"name":"renamed"}`)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("builtin update status = %d, want %d; body=%s", rec.Code, http.StatusConflict, rec.Body.String())
+	}
+	rec = requestRBAC(t, server.handleRBACRole, http.MethodPut, "/api/rbac/roles/"+builtin.ID+"/actions", `{"actions":["host:view"]}`)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("builtin action replace status = %d, want %d; body=%s", rec.Code, http.StatusConflict, rec.Body.String())
+	}
+
+	normal := createRBACRole(t, server, `{"name":"normal-role"}`)
+	rec = requestRBAC(t, server.handleRBACRole, http.MethodPut, "/api/rbac/roles/"+normal.ID, `{"name":"normal-role","builtin":true}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("builtin field flip status = %d, want %d; body=%s", rec.Code, http.StatusBadRequest, rec.Body.String())
+	}
+	var stored model.Role
+	if err := db.First(&stored, "id = ?", normal.ID).Error; err != nil {
+		t.Fatalf("load normal role: %v", err)
+	}
+	if stored.Builtin {
+		t.Fatal("normal role builtin flag was changed")
+	}
+}
+
+func TestRBACPermissionValidationAndBindingErrors(t *testing.T) {
+	server, db := newRBACServer(t)
+	for _, body := range []string{
+		`{"action":"*"}`,
+		`{"action":"unknown:action"}`,
+		`{"action":"host:view","resource_type":"host_account","resource_id":"host-1"}`,
+	} {
+		rec := requestRBAC(t, server.handleRBACPermissions, http.MethodPost, "/api/rbac/permissions", body)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("invalid permission status = %d, want %d; body=%s", rec.Code, http.StatusBadRequest, rec.Body.String())
+		}
+	}
+	permissionBody := `{"action":"session:view"}`
+	rec := requestRBAC(t, server.handleRBACPermissions, http.MethodPost, "/api/rbac/permissions", permissionBody)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("first permission status = %d, want %d; body=%s", rec.Code, http.StatusCreated, rec.Body.String())
+	}
+	rec = requestRBAC(t, server.handleRBACPermissions, http.MethodPost, "/api/rbac/permissions", permissionBody)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("duplicate permission status = %d, want %d; body=%s", rec.Code, http.StatusConflict, rec.Body.String())
+	}
+
+	if err := db.Create(&model.User{ID: "binding-user", Username: "binding-user", Status: "active"}).Error; err != nil {
+		t.Fatalf("create binding user: %v", err)
+	}
+	rec = requestRBAC(t, server.handleRBACUserRoles, http.MethodPost, "/api/rbac/user-roles", `{"user_id":"binding-user","role_id":"missing"}`)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("missing role binding status = %d, want %d; body=%s", rec.Code, http.StatusNotFound, rec.Body.String())
+	}
+
+	role := createRBACRole(t, server, `{"name":"binding-role"}`)
+	userRoleBody := fmt.Sprintf(`{"user_id":"binding-user","role_id":%q}`, role.ID)
+	rec = requestRBAC(t, server.handleRBACUserRoles, http.MethodPost, "/api/rbac/user-roles", userRoleBody)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("first user-role status = %d, want %d; body=%s", rec.Code, http.StatusCreated, rec.Body.String())
+	}
+	rec = requestRBAC(t, server.handleRBACUserRoles, http.MethodPost, "/api/rbac/user-roles", userRoleBody)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("duplicate user-role status = %d, want %d; body=%s", rec.Code, http.StatusConflict, rec.Body.String())
+	}
+
+	permission := createRBACPermission(t, server, `{"action":"host:view"}`)
+	rolePermissionBody := fmt.Sprintf(`{"role_id":%q,"permission_id":%q}`, role.ID, permission.ID)
+	rec = requestRBAC(t, server.handleRBACRolePermissions, http.MethodPost, "/api/rbac/role-permissions", rolePermissionBody)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("first role-permission status = %d, want %d; body=%s", rec.Code, http.StatusCreated, rec.Body.String())
+	}
+	rec = requestRBAC(t, server.handleRBACRolePermissions, http.MethodPost, "/api/rbac/role-permissions", rolePermissionBody)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("duplicate role-permission status = %d, want %d; body=%s", rec.Code, http.StatusConflict, rec.Body.String())
 	}
 }
 
@@ -162,8 +344,11 @@ func TestRBACBindingsAndEffectiveAllow(t *testing.T) {
 }
 
 func TestRBACDeleteBuiltinRoleRejected(t *testing.T) {
-	server, _ := newRBACServer(t)
-	role := createRBACRole(t, server, `{"name":"admin","builtin":true}`)
+	server, db := newRBACServer(t)
+	role := model.Role{ID: "builtin-admin", Name: "admin", Builtin: true, Status: "active"}
+	if err := db.Create(&role).Error; err != nil {
+		t.Fatalf("seed builtin role: %v", err)
+	}
 
 	rec := requestRBAC(t, server.handleRBACRole, http.MethodDelete, "/api/rbac/roles/"+role.ID, "")
 	if rec.Code != http.StatusConflict {

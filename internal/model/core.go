@@ -46,10 +46,10 @@ type Role struct {
 type Permission struct {
 	ID           string    `gorm:"primaryKey;size:64" json:"id"`
 	Name         string    `gorm:"index;size:128" json:"name,omitempty"`
-	Action       string    `gorm:"index;index:idx_permissions_action_resource,priority:1;size:128" json:"action"`
-	ResourceType string    `gorm:"index;index:idx_permissions_action_resource,priority:2;size:64" json:"resource_type,omitempty"`
-	ResourceID   string    `gorm:"index;index:idx_permissions_action_resource,priority:3;size:64" json:"resource_id,omitempty"`
-	Effect       string    `gorm:"index:idx_permissions_action_resource,priority:4;size:16;not null;default:allow" json:"effect"`
+	Action       string    `gorm:"index;index:idx_permissions_action_resource,priority:1;uniqueIndex:idx_permissions_logic,priority:1;size:128" json:"action"`
+	ResourceType string    `gorm:"index;index:idx_permissions_action_resource,priority:2;uniqueIndex:idx_permissions_logic,priority:2;size:64" json:"resource_type,omitempty"`
+	ResourceID   string    `gorm:"index;index:idx_permissions_action_resource,priority:3;uniqueIndex:idx_permissions_logic,priority:3;size:64" json:"resource_id,omitempty"`
+	Effect       string    `gorm:"index:idx_permissions_action_resource,priority:4;uniqueIndex:idx_permissions_logic,priority:4;size:16;not null;default:allow" json:"effect"`
 	Description  string    `gorm:"type:text" json:"description,omitempty"`
 	CreatedAt    time.Time `json:"created_at"`
 	UpdatedAt    time.Time `json:"updated_at"`

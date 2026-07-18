@@ -2,14 +2,23 @@ package admin
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 
-	"jianmen/internal/model"
 	"jianmen/internal/rbac"
+	"jianmen/internal/service"
 )
 
-// handleUserGroups handles user group CRUD operations
+type userGroupRequest struct {
+	Name        *string `json:"name"`
+	Description *string `json:"description"`
+}
+
+type userGroupMemberRequest struct {
+	UserID string `json:"user_id"`
+}
+
 func (s *Server) handleUserGroups(w http.ResponseWriter, r *http.Request) {
 	if !s.requirePermission(r, rbac.ActionRBACManage) {
 		s.forbidden(w, r)
@@ -21,19 +30,17 @@ func (s *Server) handleUserGroups(w http.ResponseWriter, r *http.Request) {
 	case http.MethodPost:
 		s.createUserGroup(w, r)
 	default:
+		w.Header().Set("Allow", "GET, POST")
 		s.writeErrorText(w, r, http.StatusMethodNotAllowed, "method not allowed")
 	}
 }
 
-// handleUserGroupOrMembers handles user group and member operations
 func (s *Server) handleUserGroupOrMembers(w http.ResponseWriter, r *http.Request) {
 	if !s.requirePermission(r, rbac.ActionRBACManage) {
 		s.forbidden(w, r)
 		return
 	}
 	path := strings.TrimPrefix(r.URL.Path, "/api/user-groups/")
-
-	// Check if this is a member operation: /api/user-groups/{id}/members/...
 	if strings.Contains(path, "/members/") {
 		s.handleUserGroupMember(w, r)
 	} else if strings.HasSuffix(path, "/members") {
@@ -43,14 +50,12 @@ func (s *Server) handleUserGroupOrMembers(w http.ResponseWriter, r *http.Request
 	}
 }
 
-// handleUserGroupRoute handles single user group operations
 func (s *Server) handleUserGroupRoute(w http.ResponseWriter, r *http.Request) {
 	id := strings.TrimPrefix(r.URL.Path, "/api/user-groups/")
 	if id == "" {
 		s.writeErrorText(w, r, http.StatusBadRequest, "id is required")
 		return
 	}
-
 	switch r.Method {
 	case http.MethodGet:
 		s.getUserGroup(w, r, id)
@@ -59,11 +64,11 @@ func (s *Server) handleUserGroupRoute(w http.ResponseWriter, r *http.Request) {
 	case http.MethodDelete:
 		s.deleteUserGroup(w, r, id)
 	default:
+		w.Header().Set("Allow", "GET, PUT, DELETE")
 		s.writeErrorText(w, r, http.StatusMethodNotAllowed, "method not allowed")
 	}
 }
 
-// handleUserGroupMembers handles user group member operations
 func (s *Server) handleUserGroupMembers(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimPrefix(r.URL.Path, "/api/user-groups/")
 	groupID := strings.TrimSuffix(path, "/members")
@@ -71,201 +76,197 @@ func (s *Server) handleUserGroupMembers(w http.ResponseWriter, r *http.Request) 
 		s.writeErrorText(w, r, http.StatusBadRequest, "group id is required")
 		return
 	}
-
 	switch r.Method {
 	case http.MethodGet:
 		s.listUserGroupMembers(w, r, groupID)
 	case http.MethodPost:
 		s.addUserGroupMember(w, r, groupID)
 	default:
+		w.Header().Set("Allow", "GET, POST")
 		s.writeErrorText(w, r, http.StatusMethodNotAllowed, "method not allowed")
 	}
 }
 
-// handleUserGroupMember handles single user group member operations
 func (s *Server) handleUserGroupMember(w http.ResponseWriter, r *http.Request) {
-	path := strings.TrimPrefix(r.URL.Path, "/api/user-groups/")
-	parts := strings.Split(path, "/")
-	if len(parts) < 3 || parts[1] != "members" {
+	parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/api/user-groups/"), "/")
+	if len(parts) != 3 || parts[0] == "" || parts[1] != "members" || parts[2] == "" {
 		s.writeErrorText(w, r, http.StatusBadRequest, "invalid path")
 		return
 	}
-	groupID := parts[0]
-	userID := parts[2]
-
-	switch r.Method {
-	case http.MethodDelete:
-		s.removeUserGroupMember(w, r, groupID, userID)
-	default:
+	if r.Method != http.MethodDelete {
+		w.Header().Set("Allow", "DELETE")
 		s.writeErrorText(w, r, http.StatusMethodNotAllowed, "method not allowed")
+		return
 	}
+	s.removeUserGroupMember(w, r, parts[0], parts[2])
 }
 
 func (s *Server) listUserGroups(w http.ResponseWriter, r *http.Request) {
-	if s.db == nil {
-		s.writeErrorText(w, r, http.StatusInternalServerError, "database not available")
+	groups, err := s.userGroupManagementService()
+	if err != nil {
+		logAdminServiceError(s, "user group management service unavailable", err)
+		s.writeErrorText(w, r, http.StatusServiceUnavailable, "user group management service unavailable")
 		return
 	}
-
-	q := strings.TrimSpace(r.URL.Query().Get("q"))
-	tx := s.db.Model(&model.UserGroup{})
-	if q != "" {
-		like := "%" + q + "%"
-		tx = tx.Where("name LIKE ? OR description LIKE ?", like, like)
-	}
-
-	var total int64
-	tx.Count(&total)
-
-	page := positiveIntRequestQuery(r, "page", 1)
-	pageSize := positiveIntRequestQuery(r, "page_size", defaultPageSize)
-	if pageSize > 200 {
-		pageSize = 200
-	}
-
-	var groups []model.UserGroup
-	if err := tx.Order("created_at DESC").Offset((page - 1) * pageSize).Limit(pageSize).Find(&groups).Error; err != nil {
-		s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
+	items, total, params, err := groups.List(r.Context(), service.UserGroupListParams{
+		Query: r.URL.Query().Get("q"), Page: positiveIntRequestQuery(r, "page", 1), PageSize: positiveIntRequestQuery(r, "page_size", defaultPageSize),
+	})
+	if err != nil {
+		s.writeUserGroupServiceError(w, r, err)
 		return
 	}
-
-	s.writeJSON(w, r, http.StatusOK, pageResponse{Items: groups, Total: int(total), Page: page, PageSize: pageSize})
+	s.writeJSON(w, r, http.StatusOK, pageResponse{Items: items, Total: int(total), Page: params.Page, PageSize: params.PageSize})
 }
 
 func (s *Server) createUserGroup(w http.ResponseWriter, r *http.Request) {
-	if s.db == nil {
-		s.writeErrorText(w, r, http.StatusInternalServerError, "database not available")
+	groups, err := s.userGroupManagementService()
+	if err != nil {
+		logAdminServiceError(s, "user group management service unavailable", err)
+		s.writeErrorText(w, r, http.StatusServiceUnavailable, "user group management service unavailable")
 		return
 	}
-
-	var group model.UserGroup
-	if err := json.NewDecoder(r.Body).Decode(&group); err != nil {
+	var req userGroupRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		s.writeErrorText(w, r, http.StatusBadRequest, "invalid JSON")
 		return
 	}
-
-	if group.Name == "" {
-		s.writeErrorText(w, r, http.StatusBadRequest, "name is required")
+	name := ""
+	if req.Name != nil {
+		name = *req.Name
+	}
+	description := ""
+	if req.Description != nil {
+		description = *req.Description
+	}
+	group, err := groups.Create(r.Context(), service.UserGroupCreateInput{Name: name, Description: description})
+	if err != nil {
+		s.writeUserGroupServiceError(w, r, err)
 		return
 	}
-
-	if err := s.db.Create(&group).Error; err != nil {
-		s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
-		return
-	}
-
 	s.writeJSON(w, r, http.StatusCreated, group)
 }
 
 func (s *Server) getUserGroup(w http.ResponseWriter, r *http.Request, id string) {
-	if s.db == nil {
-		s.writeErrorText(w, r, http.StatusInternalServerError, "database not available")
+	groups, err := s.userGroupManagementService()
+	if err != nil {
+		logAdminServiceError(s, "user group management service unavailable", err)
+		s.writeErrorText(w, r, http.StatusServiceUnavailable, "user group management service unavailable")
 		return
 	}
-
-	var group model.UserGroup
-	if err := s.db.First(&group, "id = ?", id).Error; err != nil {
-		s.writeErrorText(w, r, http.StatusNotFound, "user group not found")
+	group, err := groups.Get(r.Context(), id)
+	if err != nil {
+		s.writeUserGroupServiceError(w, r, err)
 		return
 	}
-
 	s.writeJSON(w, r, http.StatusOK, group)
 }
 
 func (s *Server) updateUserGroup(w http.ResponseWriter, r *http.Request, id string) {
-	if s.db == nil {
-		s.writeErrorText(w, r, http.StatusInternalServerError, "database not available")
+	groups, err := s.userGroupManagementService()
+	if err != nil {
+		logAdminServiceError(s, "user group management service unavailable", err)
+		s.writeErrorText(w, r, http.StatusServiceUnavailable, "user group management service unavailable")
 		return
 	}
-
-	var group model.UserGroup
-	if err := s.db.First(&group, "id = ?", id).Error; err != nil {
-		s.writeErrorText(w, r, http.StatusNotFound, "user group not found")
-		return
-	}
-
-	var update model.UserGroup
-	if err := json.NewDecoder(r.Body).Decode(&update); err != nil {
+	var req userGroupRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		s.writeErrorText(w, r, http.StatusBadRequest, "invalid JSON")
 		return
 	}
-
-	if update.Name != "" {
-		group.Name = update.Name
-	}
-	if update.Description != "" {
-		group.Description = update.Description
-	}
-
-	if err := s.db.Save(&group).Error; err != nil {
-		s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
+	group, err := groups.Update(r.Context(), id, service.UserGroupUpdateInput{Name: req.Name, Description: req.Description})
+	if err != nil {
+		s.writeUserGroupServiceError(w, r, err)
 		return
 	}
-
 	s.writeJSON(w, r, http.StatusOK, group)
 }
 
 func (s *Server) deleteUserGroup(w http.ResponseWriter, r *http.Request, id string) {
-	if s.db == nil {
-		s.writeErrorText(w, r, http.StatusInternalServerError, "database not available")
+	groups, err := s.userGroupManagementService()
+	if err != nil {
+		logAdminServiceError(s, "user group management service unavailable", err)
+		s.writeErrorText(w, r, http.StatusServiceUnavailable, "user group management service unavailable")
 		return
 	}
-
-	if err := s.db.Delete(&model.UserGroup{}, "id = ?", id).Error; err != nil {
-		s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
+	if err := groups.Delete(r.Context(), id); err != nil {
+		s.writeUserGroupServiceError(w, r, err)
 		return
 	}
-
 	s.writeJSON(w, r, http.StatusOK, map[string]string{"message": "user group deleted"})
 }
 
 func (s *Server) listUserGroupMembers(w http.ResponseWriter, r *http.Request, groupID string) {
-	if s.db == nil {
-		s.writeErrorText(w, r, http.StatusInternalServerError, "database not available")
+	groups, err := s.userGroupManagementService()
+	if err != nil {
+		logAdminServiceError(s, "user group management service unavailable", err)
+		s.writeErrorText(w, r, http.StatusServiceUnavailable, "user group management service unavailable")
 		return
 	}
-
-	var members []model.UserGroupMember
-	if err := s.db.Where("group_id = ?", groupID).Find(&members).Error; err != nil {
-		s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
+	members, err := groups.ListMembers(r.Context(), groupID)
+	if err != nil {
+		s.writeUserGroupServiceError(w, r, err)
 		return
 	}
-
 	s.writeJSON(w, r, http.StatusOK, members)
 }
 
 func (s *Server) addUserGroupMember(w http.ResponseWriter, r *http.Request, groupID string) {
-	if s.db == nil {
-		s.writeErrorText(w, r, http.StatusInternalServerError, "database not available")
+	groups, err := s.userGroupManagementService()
+	if err != nil {
+		logAdminServiceError(s, "user group management service unavailable", err)
+		s.writeErrorText(w, r, http.StatusServiceUnavailable, "user group management service unavailable")
 		return
 	}
-
-	var member model.UserGroupMember
-	if err := json.NewDecoder(r.Body).Decode(&member); err != nil {
+	var req userGroupMemberRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		s.writeErrorText(w, r, http.StatusBadRequest, "invalid JSON")
 		return
 	}
-
-	member.GroupID = groupID
-
-	if err := s.db.Create(&member).Error; err != nil {
-		s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
+	if strings.TrimSpace(req.UserID) == "" {
+		s.writeErrorText(w, r, http.StatusBadRequest, "user_id is required")
 		return
 	}
-
-	s.writeJSON(w, r, http.StatusCreated, member)
+	member, created, err := groups.AddMember(r.Context(), groupID, req.UserID)
+	if err != nil {
+		s.writeUserGroupServiceError(w, r, err)
+		return
+	}
+	status := http.StatusOK
+	if created {
+		status = http.StatusCreated
+	}
+	s.writeJSON(w, r, status, member)
 }
 
 func (s *Server) removeUserGroupMember(w http.ResponseWriter, r *http.Request, groupID, userID string) {
-	if s.db == nil {
-		s.writeErrorText(w, r, http.StatusInternalServerError, "database not available")
+	groups, err := s.userGroupManagementService()
+	if err != nil {
+		logAdminServiceError(s, "user group management service unavailable", err)
+		s.writeErrorText(w, r, http.StatusServiceUnavailable, "user group management service unavailable")
 		return
 	}
-
-	if err := s.db.Delete(&model.UserGroupMember{}, "group_id = ? AND user_id = ?", groupID, userID).Error; err != nil {
-		s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
+	if err := groups.RemoveMember(r.Context(), groupID, userID); err != nil {
+		s.writeUserGroupServiceError(w, r, err)
 		return
 	}
-
 	s.writeJSON(w, r, http.StatusOK, map[string]string{"message": "member removed"})
+}
+
+func (s *Server) writeUserGroupServiceError(w http.ResponseWriter, r *http.Request, err error) {
+	switch {
+	case errors.Is(err, service.ErrUserGroupNotFound), errors.Is(err, service.ErrUserNotFound):
+		s.writeErrorText(w, r, http.StatusNotFound, "not found")
+	case errors.Is(err, service.ErrUserGroupConflict):
+		logAdminServiceError(s, "user group conflict", err)
+		s.writeErrorText(w, r, http.StatusConflict, "user group already exists")
+	case errors.Is(err, service.ErrInvalidUser):
+		logAdminServiceError(s, "invalid user group member request", err)
+		s.writeErrorText(w, r, http.StatusBadRequest, "invalid user group member request")
+	case errors.Is(err, service.ErrInvalidUserGroup):
+		logAdminServiceError(s, "invalid user group request", err)
+		s.writeErrorText(w, r, http.StatusBadRequest, "invalid user group request")
+	default:
+		logAdminServiceError(s, "user group operation failed", err)
+		s.writeErrorText(w, r, http.StatusInternalServerError, "user group operation failed")
+	}
 }

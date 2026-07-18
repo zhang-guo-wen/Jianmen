@@ -58,9 +58,10 @@ func TestRBACReplaceRoleActionsPreservesResourceAndDenyPermissions(t *testing.T)
 	deny := createBoundPermission(t, db, role.ID, model.Permission{
 		Action: rbac.ActionAppView, Effect: model.PermissionEffectDeny,
 	})
-	otherAction := createBoundPermission(t, db, otherRole.ID, model.Permission{
-		Action: rbac.ActionSessionConnect, Effect: model.PermissionEffectAllow,
-	})
+	otherAction := oldAction
+	if err := db.Create(&model.RolePermission{RoleID: otherRole.ID, PermissionID: otherAction.ID}).Error; err != nil {
+		t.Fatalf("bind shared action permission: %v", err)
+	}
 
 	target := fmt.Sprintf("/api/rbac/roles/%s/actions", role.ID)
 	rec := requestRBAC(t, server.handleRBACRole, http.MethodPut, target,

@@ -473,15 +473,21 @@ func seedResourceActionPolicy(t *testing.T, db *gorm.DB, userID, action, resourc
 	t.Helper()
 	key := strings.NewReplacer(":", "-", "/", "-").Replace(userID + "-" + action + "-" + resourceID)
 	role := model.Role{ID: "role-" + key, Name: "role-" + key, Status: "active"}
-	allow := model.Permission{ID: "allow-" + key, Action: action, Effect: model.PermissionEffectAllow}
+	allow := model.Permission{Action: action, Effect: model.PermissionEffectAllow}
 	deny := model.Permission{ID: "deny-" + key, Action: action, ResourceType: resourceType, ResourceID: resourceID, Effect: model.PermissionEffectDeny}
-	for _, value := range []any{&role, &allow, &deny, &model.UserRole{ID: "user-role-" + key, UserID: userID, RoleID: role.ID}} {
+	if err := db.Where(
+		"action = ? AND resource_type = '' AND resource_id = '' AND effect = ?",
+		action, model.PermissionEffectAllow,
+	).FirstOrCreate(&allow).Error; err != nil {
+		t.Fatalf("create shared action permission: %v", err)
+	}
+	for _, value := range []any{&role, &deny, &model.UserRole{ID: "user-role-" + key, UserID: userID, RoleID: role.ID}} {
 		if err := db.Create(value).Error; err != nil {
 			t.Fatalf("create resource action policy: %v", err)
 		}
 	}
 	for _, permission := range []model.Permission{allow, deny} {
-		if err := db.Create(&model.RolePermission{ID: "role-permission-" + permission.ID, RoleID: role.ID, PermissionID: permission.ID}).Error; err != nil {
+		if err := db.Create(&model.RolePermission{ID: "role-permission-" + key + "-" + permission.ID, RoleID: role.ID, PermissionID: permission.ID}).Error; err != nil {
 			t.Fatalf("create role permission: %v", err)
 		}
 	}

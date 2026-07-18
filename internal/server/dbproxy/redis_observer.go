@@ -5,12 +5,13 @@ import (
 )
 
 type redisObserver struct {
-	sink      querySink
-	buf       []byte
-	serverBuf []byte
-	slots     []redisResponseSlot
-	fatal     *queryDecision
-	deferred  *queryDecision
+	sink         querySink
+	buf          []byte
+	serverBuf    []byte
+	serverStream *redisResponseStream
+	slots        []redisResponseSlot
+	fatal        *queryDecision
+	deferred     *queryDecision
 }
 
 type redisResponseSlot struct {
@@ -184,6 +185,24 @@ func (o *redisObserver) observeServerRelayBytes(data []byte) ([]byte, *queryDeci
 	}
 	var forward []byte
 	for {
+		if o.serverStream != nil {
+			chunk, consumed, complete, decision := o.consumeRedisResponseStream(data)
+			forward = append(forward, chunk...)
+			data = data[consumed:]
+			if decision != nil {
+				return forward, o.failDecision(decision)
+			}
+			if complete {
+				if decision := o.completeRedisResponseStream(); decision != nil {
+					return forward, decision
+				}
+				continue
+			}
+			if len(data) == 0 {
+				return forward, nil
+			}
+			continue
+		}
 		if len(o.serverBuf) == 0 {
 			if len(data) == 0 {
 				return forward, nil
@@ -200,11 +219,20 @@ func (o *redisObserver) observeServerRelayBytes(data []byte) ([]byte, *queryDeci
 				return forward, nil
 			}
 			if !appendObserverBufferChunk(&o.serverBuf, &data, maxRedisObserverBufferBytes) {
-				return forward, o.fail(observerErrorBufferLimit, "Redis observer response exceeds the audit limit")
+				chunk, decision := o.promoteRedisResponseStream()
+				forward = append(forward, chunk...)
+				if decision != nil {
+					return forward, decision
+				}
 			}
 			continue
 		case redisRESPLimitExceeded:
-			return forward, o.fail(observerErrorBufferLimit, "Redis observer response exceeds the audit limit")
+			chunk, decision := o.promoteRedisResponseStream()
+			forward = append(forward, chunk...)
+			if decision != nil {
+				return forward, decision
+			}
+			continue
 		case redisRESPMalformed:
 			return forward, o.fail(observerErrorProtocol, "malformed Redis response")
 		}
@@ -240,8 +268,12 @@ func (o *redisObserver) consumeOrdinaryResponse(frame []byte) {
 }
 
 func (o *redisObserver) finishSlot(slot *redisResponseSlot, frame []byte) bool {
+	return o.finishSlotWithResult(slot, redisResponseFinish(frame))
+}
+
+func (o *redisObserver) finishSlotWithResult(slot *redisResponseSlot, finish queryFinish) bool {
 	if slot.recorded && o.sink != nil {
-		return finishObservedQuery(o.sink, slot.record, redisResponseFinish(frame))
+		return finishObservedQuery(o.sink, slot.record, finish)
 	}
 	return true
 }
@@ -283,6 +315,7 @@ func (o *redisObserver) failDecision(decision *queryDecision) *queryDecision {
 	}
 	o.buf = nil
 	o.serverBuf = nil
+	o.serverStream = nil
 	o.slots = nil
 	o.deferred = nil
 	return o.fatal

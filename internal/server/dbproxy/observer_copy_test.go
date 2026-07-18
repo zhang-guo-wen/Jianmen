@@ -89,9 +89,12 @@ func TestCopyUpstreamToClientStopsOnObserverFatal(t *testing.T) {
 			name:     "PostgreSQL",
 			observer: &postgresObserver{sink: &captureSink{}, startupDone: true, pending: []queryRecord{{seq: 1}}},
 			input:    postgresHeader,
-			want: (&postgresObserver{}).ErrorResponse(queryDecision{
-				ErrorMessage: "PostgreSQL observer frame exceeds the audit limit",
-			}),
+			want: append(
+				append([]byte(nil), postgresHeader...),
+				(&postgresObserver{}).ErrorResponse(queryDecision{
+					ErrorMessage: "PostgreSQL relay ended during a streamed frame",
+				})...,
+			),
 		},
 		{
 			name: "Redis",
@@ -99,7 +102,7 @@ func TestCopyUpstreamToClientStopsOnObserverFatal(t *testing.T) {
 				record: queryRecord{seq: 1}, recorded: true,
 			}}},
 			input: []byte("$536870912\r\n"),
-			want:  []byte("-ERR database proxy rejected command\r\n"),
+			want:  []byte("$536870912\r\n-ERR database proxy rejected command\r\n"),
 		},
 	}
 

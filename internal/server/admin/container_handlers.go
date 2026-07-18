@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -33,7 +34,7 @@ type containerEndpointPayload struct {
 func (s *Server) handleContainerEndpoints(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
-		if !s.requirePermission(r, rbac.ActionContainerView) && !s.requirePermission(r, rbac.ActionContainerConnect) {
+		if !s.requireAnyPermission(r, rbac.ActionContainerView, rbac.ActionContainerConnect) {
 			s.forbidden(w, r)
 			return
 		}
@@ -42,18 +43,36 @@ func (s *Server) handleContainerEndpoints(w http.ResponseWriter, r *http.Request
 		if pageSize > 200 {
 			pageSize = 200
 		}
-		items, total, err := s.store.ListContainerEndpoints(r.Context(), store.ContainerEndpointListParams{
-			Page: pageNumber, Size: pageSize, Query: r.URL.Query().Get("q"), Status: r.URL.Query().Get("status"),
-		})
+		items, err := s.listContainerEndpoints(r)
 		if err != nil {
 			s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
 			return
 		}
-		canManage := isSuperAdminRequest(r) || s.requirePermission(r, rbac.ActionContainerUpdate) || s.requirePermission(r, rbac.ActionContainerDelete)
-		for i := range items {
-			items[i].CanManage = canManage
+		authorized := make([]store.ContainerEndpointView, 0, len(items))
+		authorizationCache := make(map[string]bool)
+		for _, item := range items {
+			key := item.ID + "\x00view-connect"
+			allowed, ok := authorizationCache[key]
+			if !ok {
+				allowed = s.authorizeContainerEndpoint(r, []string{rbac.ActionContainerView, rbac.ActionContainerConnect}, item.ID)
+				authorizationCache[key] = allowed
+			}
+			if !allowed {
+				continue
+			}
+			item.CanManage = s.authorizeContainerEndpoint(r, []string{rbac.ActionContainerUpdate}, item.ID) ||
+				s.authorizeContainerEndpoint(r, []string{rbac.ActionContainerDelete}, item.ID)
+			authorized = append(authorized, item)
 		}
-		s.writeJSON(w, r, http.StatusOK, pageResponse{Items: items, Total: int(total), Page: pageNumber, PageSize: pageSize})
+		start := (pageNumber - 1) * pageSize
+		if start > len(authorized) {
+			start = len(authorized)
+		}
+		end := start + pageSize
+		if end > len(authorized) {
+			end = len(authorized)
+		}
+		s.writeJSON(w, r, http.StatusOK, pageResponse{Items: authorized[start:end], Total: len(authorized), Page: pageNumber, PageSize: pageSize})
 	case http.MethodPost:
 		if !s.requirePermission(r, rbac.ActionContainerCreate) {
 			s.forbidden(w, r)
@@ -61,6 +80,9 @@ func (s *Server) handleContainerEndpoints(w http.ResponseWriter, r *http.Request
 		}
 		payload, ok := s.decodeContainerEndpointPayload(w, r)
 		if !ok {
+			return
+		}
+		if !s.requireContainerHostAccount(w, r, payload.HostID, payload.HostAccountID) {
 			return
 		}
 		view, err := s.store.AddContainerEndpoint(containerEndpointInput(payload))
@@ -92,7 +114,7 @@ func (s *Server) handleContainerEndpoint(w http.ResponseWriter, r *http.Request)
 	}
 	switch r.Method {
 	case http.MethodGet:
-		if !s.requirePermission(r, rbac.ActionContainerView) {
+		if !s.authorizeContainerEndpoint(r, []string{rbac.ActionContainerView}, id) {
 			s.forbidden(w, r)
 			return
 		}
@@ -101,15 +123,19 @@ func (s *Server) handleContainerEndpoint(w http.ResponseWriter, r *http.Request)
 			writeContainerStoreError(w, r, err)
 			return
 		}
-		view.CanManage = isSuperAdminRequest(r) || s.requirePermission(r, rbac.ActionContainerUpdate) || s.requirePermission(r, rbac.ActionContainerDelete)
+		view.CanManage = s.authorizeContainerEndpoint(r, []string{rbac.ActionContainerUpdate}, id) ||
+			s.authorizeContainerEndpoint(r, []string{rbac.ActionContainerDelete}, id)
 		s.writeJSON(w, r, http.StatusOK, view)
 	case http.MethodPut:
-		if !s.requirePermission(r, rbac.ActionContainerUpdate) {
+		if !s.authorizeContainerEndpoint(r, []string{rbac.ActionContainerUpdate}, id) {
 			s.forbidden(w, r)
 			return
 		}
 		payload, ok := s.decodeContainerEndpointPayload(w, r)
 		if !ok {
+			return
+		}
+		if !s.requireContainerHostAccount(w, r, payload.HostID, payload.HostAccountID) {
 			return
 		}
 		view, err := s.store.UpdateContainerEndpoint(id, containerEndpointInput(payload))
@@ -120,7 +146,7 @@ func (s *Server) handleContainerEndpoint(w http.ResponseWriter, r *http.Request)
 		view.CanManage = true
 		s.writeJSON(w, r, http.StatusOK, view)
 	case http.MethodDelete:
-		if !s.requirePermission(r, rbac.ActionContainerDelete) {
+		if !s.authorizeContainerEndpoint(r, []string{rbac.ActionContainerDelete}, id) {
 			s.forbidden(w, r)
 			return
 		}
@@ -149,6 +175,9 @@ func (s *Server) handleContainerConnectionTest(w http.ResponseWriter, r *http.Re
 	if !ok {
 		return
 	}
+	if !s.requireContainerHostAccount(w, r, payload.HostID, payload.HostAccountID) {
+		return
+	}
 	config, err := s.containerServiceConfig(containerEndpointInput(payload))
 	if err != nil {
 		writeContainerStoreError(w, r, err)
@@ -161,7 +190,7 @@ func (s *Server) handleContainerConnectionTest(w http.ResponseWriter, r *http.Re
 }
 
 func (s *Server) handleContainerRuntime(w http.ResponseWriter, r *http.Request, endpointID, containerID string) {
-	if !s.requirePermission(r, rbac.ActionContainerConnect) {
+	if !s.authorizeContainerEndpoint(r, []string{rbac.ActionContainerConnect}, endpointID) {
 		s.forbidden(w, r)
 		return
 	}
@@ -211,6 +240,36 @@ func (s *Server) handleContainerRuntime(w http.ResponseWriter, r *http.Request, 
 	s.writeJSON(w, r, http.StatusOK, map[string]string{"logs": logs})
 }
 
+func (s *Server) listContainerEndpoints(r *http.Request) ([]store.ContainerEndpointView, error) {
+	const fetchPageSize = 200
+	params := store.ContainerEndpointListParams{
+		Page: 1, Size: fetchPageSize, Query: r.URL.Query().Get("q"), Status: r.URL.Query().Get("status"),
+	}
+	items := make([]store.ContainerEndpointView, 0)
+	for {
+		pageItems, total, err := s.store.ListContainerEndpoints(r.Context(), params)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, pageItems...)
+		if len(items) >= int(total) || len(pageItems) == 0 {
+			return items, nil
+		}
+		params.Page++
+	}
+}
+
+func (s *Server) authorizeContainerEndpoint(r *http.Request, actions []string, endpointID string) bool {
+	allowed, err := s.authorizeAnyConnection(
+		r.Context(), userIDFromRequest(r), actions, model.ResourceTypeContainerEndpoint, endpointID,
+	)
+	if err != nil {
+		s.logger.Warn("container endpoint authorization failed", "endpoint_id", endpointID, "actions", actions, "error", err)
+		return false
+	}
+	return allowed
+}
+
 func (s *Server) decodeContainerEndpointPayload(w http.ResponseWriter, r *http.Request) (containerEndpointPayload, bool) {
 	defer r.Body.Close()
 	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
@@ -241,6 +300,9 @@ func (s *Server) containerServiceConfig(input store.ContainerEndpointInput) (ser
 		if err != nil {
 			return service.ContainerEndpointConfig{}, err
 		}
+		if strings.TrimSpace(target.HostID) != strings.TrimSpace(input.HostID) {
+			return service.ContainerEndpointConfig{}, fmt.Errorf("host account %q does not belong to host %q", input.HostAccountID, input.HostID)
+		}
 		sshConfig, err := store.ClientConfigForTarget(target)
 		if err != nil {
 			return service.ContainerEndpointConfig{}, err
@@ -251,6 +313,46 @@ func (s *Server) containerServiceConfig(input store.ContainerEndpointInput) (ser
 		config.Unavailable = target.Disabled || target.Expired(time.Now().UTC())
 	}
 	return config, nil
+}
+
+// requireContainerHostAccount validates the host/account relationship and
+// requires session:connect on the concrete host account. Container SSH and
+// containerd connections execute commands through that account, so the
+// account-level session action is the least privilege needed to use it.
+func (s *Server) requireContainerHostAccount(w http.ResponseWriter, r *http.Request, hostID, hostAccountID string) bool {
+	hostID = strings.TrimSpace(hostID)
+	hostAccountID = strings.TrimSpace(hostAccountID)
+	if hostID == "" && hostAccountID == "" {
+		return true
+	}
+	if hostID == "" || hostAccountID == "" {
+		s.writeErrorText(w, r, http.StatusBadRequest, "host_id and host_account_id must be provided together")
+		return false
+	}
+	if _, err := s.store.Host(hostID); err != nil {
+		writeContainerStoreError(w, r, err)
+		return false
+	}
+	target, err := s.store.TargetConfig(hostAccountID)
+	if err != nil {
+		writeContainerStoreError(w, r, err)
+		return false
+	}
+	if strings.TrimSpace(target.HostID) != hostID {
+		s.writeErrorText(w, r, http.StatusBadRequest, fmt.Sprintf("host account %q does not belong to host %q", hostAccountID, hostID))
+		return false
+	}
+	allowed, err := s.authorizeConnection(r.Context(), userIDFromRequest(r), rbac.ActionSessionConnect, model.ResourceTypeHostAccount, hostAccountID)
+	if err != nil {
+		s.logger.Warn("container host account authorization failed", "host_account_id", hostAccountID, "error", err)
+		s.forbidden(w, r)
+		return false
+	}
+	if !allowed {
+		s.forbidden(w, r)
+		return false
+	}
+	return true
 }
 
 func containerEndpointPathParts(path string) (endpointID, child, containerID string, ok bool) {

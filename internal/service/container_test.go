@@ -4,9 +4,13 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"crypto/tls"
+	"crypto/x509"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -52,11 +56,140 @@ func TestContainerServiceDockerAPI(t *testing.T) {
 	}
 }
 
+func TestContainerServiceDockerAPISupportsUnixSocket(t *testing.T) {
+	// Windows has a shorter Unix-domain socket path limit than the full test
+	// temp directory path, so keep this regression socket under the OS temp root.
+	socketPath := filepath.Join(os.TempDir(), "jianmen-docker-test.sock")
+	_ = os.Remove(socketPath)
+	t.Cleanup(func() { _ = os.Remove(socketPath) })
+	listener, err := net.Listen("unix", socketPath)
+	if err != nil {
+		t.Fatalf("listen on Docker unix socket: %v", err)
+	}
+	defer listener.Close()
+	server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/_ping" {
+			http.NotFound(w, r)
+			return
+		}
+		_, _ = w.Write([]byte("OK"))
+	})}
+	serverDone := make(chan error, 1)
+	go func() { serverDone <- server.Serve(listener) }()
+	defer func() {
+		_ = server.Close()
+		<-serverDone
+	}()
+
+	result, err := NewContainerService().Test(context.Background(), ContainerEndpointConfig{
+		ConnectionMode: model.ContainerConnectionDockerAPI,
+		Address:        "unix://" + socketPath,
+	})
+	if err != nil || !result.OK {
+		t.Fatalf("Docker unix socket result = %#v, err=%v", result, err)
+	}
+}
+
 func TestContainerServiceRejectsUnsafeContainerID(t *testing.T) {
 	svc := NewContainerService()
 	_, err := svc.Logs(context.Background(), ContainerEndpointConfig{ConnectionMode: model.ContainerConnectionDockerAPI, Address: "http://127.0.0.1:2375"}, "bad/id", 20)
 	if err == nil {
 		t.Fatal("unsafe container id was accepted")
+	}
+}
+
+func TestContainerServiceRejectsNonLoopbackDockerHTTP(t *testing.T) {
+	svc := NewContainerService()
+	result, err := svc.Test(context.Background(), ContainerEndpointConfig{
+		ConnectionMode: model.ContainerConnectionDockerAPI,
+		Address:        "http://192.0.2.10:2375",
+	})
+	if err != nil || result.OK || !strings.Contains(result.Message, "loopback") {
+		t.Fatalf("non-loopback Docker HTTP result = %#v, err=%v, want loopback rejection", result, err)
+	}
+}
+
+func TestContainerServiceAcceptsValidatedDockerHTTPS(t *testing.T) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/_ping" {
+			http.NotFound(w, r)
+			return
+		}
+		_, _ = w.Write([]byte("OK"))
+	}))
+	defer server.Close()
+
+	pool := x509.NewCertPool()
+	pool.AddCert(server.Certificate())
+	svc := NewContainerService()
+	svc.HTTPClient = &http.Client{
+		Transport: &http.Transport{TLSClientConfig: &tls.Config{RootCAs: pool}},
+	}
+	result, err := svc.Test(context.Background(), ContainerEndpointConfig{
+		ConnectionMode: model.ContainerConnectionDockerAPI,
+		Address:        server.URL,
+	})
+	if err != nil || !result.OK {
+		t.Fatalf("validated Docker HTTPS = %#v, err=%v", result, err)
+	}
+}
+
+func TestContainerServiceRejectsInsecureDockerTLS(t *testing.T) {
+	svc := NewContainerService()
+	svc.HTTPClient = &http.Client{
+		Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}, //nolint:gosec -- regression input
+	}
+	result, err := svc.Test(context.Background(), ContainerEndpointConfig{
+		ConnectionMode: model.ContainerConnectionDockerAPI,
+		Address:        "https://docker.example.test:2376",
+	})
+	if err != nil || result.OK || !strings.Contains(result.Message, "InsecureSkipVerify") {
+		t.Fatalf("insecure Docker TLS result = %#v, err=%v, want InsecureSkipVerify rejection", result, err)
+	}
+}
+
+func TestContainerServiceRejectsDockerHTTPRedirectToRemoteHTTP(t *testing.T) {
+	remote := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("remote Docker HTTP endpoint was contacted through redirect")
+	}))
+	defer remote.Close()
+	redirect := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, remote.URL+"/_ping", http.StatusTemporaryRedirect)
+	}))
+	defer redirect.Close()
+
+	svc := NewContainerService()
+	result, err := svc.Test(context.Background(), ContainerEndpointConfig{
+		ConnectionMode: model.ContainerConnectionDockerAPI,
+		Address:        redirect.URL,
+	})
+	if err != nil || result.OK {
+		t.Fatalf("Docker HTTP redirect result = %#v, err=%v, want redirect rejection", result, err)
+	}
+}
+
+func TestContainerServiceRejectsDockerHTTPSRedirectToHTTP(t *testing.T) {
+	remote := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("Docker HTTPS endpoint downgraded to HTTP through redirect")
+	}))
+	defer remote.Close()
+	redirect := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, remote.URL+"/_ping", http.StatusTemporaryRedirect)
+	}))
+	defer redirect.Close()
+
+	pool := x509.NewCertPool()
+	pool.AddCert(redirect.Certificate())
+	svc := NewContainerService()
+	svc.HTTPClient = &http.Client{
+		Transport: &http.Transport{TLSClientConfig: &tls.Config{RootCAs: pool}},
+	}
+	result, err := svc.Test(context.Background(), ContainerEndpointConfig{
+		ConnectionMode: model.ContainerConnectionDockerAPI,
+		Address:        redirect.URL,
+	})
+	if err != nil || result.OK {
+		t.Fatalf("Docker HTTPS downgrade result = %#v, err=%v, want redirect rejection", result, err)
 	}
 }
 

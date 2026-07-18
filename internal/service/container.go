@@ -329,19 +329,86 @@ func (s *ContainerService) dockerRequest(ctx context.Context, endpoint Container
 	}
 	if strings.HasPrefix(base, "unix://") {
 		socketPath := strings.TrimPrefix(base, "unix://")
+		if socketPath == "" {
+			return nil, errors.New("docker unix socket path is required")
+		}
 		transport := &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 			return (&net.Dialer{Timeout: 5 * time.Second}).DialContext(ctx, "unix", socketPath)
 		}}
-		client := &http.Client{Transport: transport, Timeout: 12 * time.Second}
+		client := &http.Client{Transport: transport, Timeout: 12 * time.Second, CheckRedirect: rejectDockerRedirect}
 		return doHTTP(ctx, client, "http://docker"+path, method, body)
 	}
-	if !strings.HasPrefix(base, "http://") && !strings.HasPrefix(base, "https://") {
+	if !strings.Contains(base, "://") {
 		base = "http://" + base
 	}
-	if endpoint.Port > 0 && !strings.Contains(strings.TrimPrefix(strings.TrimPrefix(base, "http://"), "https://"), ":") {
-		base = strings.TrimRight(base, "/") + ":" + strconv.Itoa(endpoint.Port)
+	parsed, err := url.Parse(base)
+	if err != nil || parsed.Host == "" {
+		return nil, fmt.Errorf("invalid docker api address: %q", endpoint.Address)
 	}
-	return doHTTP(ctx, s.HTTPClient, strings.TrimRight(base, "/")+path, method, body)
+	scheme := strings.ToLower(parsed.Scheme)
+	switch scheme {
+	case "http":
+		if !isLoopbackHost(parsed.Hostname()) {
+			return nil, errors.New("non-loopback Docker HTTP API is not allowed")
+		}
+	case "https":
+		// HTTPS is allowed for remote Docker endpoints, but never with a
+		// transport that disables certificate verification.
+	default:
+		return nil, fmt.Errorf("unsupported docker api scheme %q", parsed.Scheme)
+	}
+	if endpoint.Port > 0 && parsed.Port() == "" {
+		parsed.Host = net.JoinHostPort(parsed.Hostname(), strconv.Itoa(endpoint.Port))
+	}
+	client, err := s.dockerHTTPClient(scheme == "https")
+	if err != nil {
+		return nil, err
+	}
+	return doHTTP(ctx, client, strings.TrimRight(parsed.String(), "/")+path, method, body)
+}
+
+func isLoopbackHost(host string) bool {
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
+func (s *ContainerService) dockerHTTPClient(requireTLSValidation bool) (*http.Client, error) {
+	base := s.HTTPClient
+	if base == nil {
+		base = http.DefaultClient
+	}
+	client := *base
+	client.CheckRedirect = rejectDockerRedirect
+	transport := base.Transport
+	if transport == nil {
+		return &client, nil
+	}
+	standard, ok := transport.(*http.Transport)
+	if !ok {
+		if requireTLSValidation {
+			return nil, errors.New("docker api HTTPS requires a standard TLS-validating transport")
+		}
+		return &client, nil
+	}
+	clone := standard.Clone()
+	if clone.TLSClientConfig != nil {
+		if clone.TLSClientConfig.InsecureSkipVerify {
+			return nil, errors.New("docker api HTTPS cannot use InsecureSkipVerify")
+		}
+		clone.TLSClientConfig = clone.TLSClientConfig.Clone()
+		clone.TLSClientConfig.InsecureSkipVerify = false
+	}
+	client.Transport = clone
+	return &client, nil
+}
+
+// Docker Engine endpoints do not need redirects. Refusing them avoids
+// redirecting a loopback HTTP client to another host or downgrading HTTPS.
+func rejectDockerRedirect(_ *http.Request, _ []*http.Request) error {
+	return http.ErrUseLastResponse
 }
 
 func doHTTP(ctx context.Context, client *http.Client, endpoint, method string, body io.Reader) ([]byte, error) {

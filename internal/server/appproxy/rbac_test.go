@@ -10,14 +10,30 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/glebarez/sqlite"
-	"gorm.io/gorm"
-
 	"jianmen/internal/config"
 	"jianmen/internal/model"
 	"jianmen/internal/rbac"
 	"jianmen/internal/service"
 )
+
+type fakeTokenAuthenticator struct {
+	subject   service.IdentitySubject
+	found     bool
+	err       error
+	calls     int
+	ctx       context.Context
+	tokenHash string
+}
+
+func (f *fakeTokenAuthenticator) FindIdentitySubjectByTokenHash(
+	ctx context.Context,
+	tokenHash string,
+) (service.IdentitySubject, bool, error) {
+	f.calls++
+	f.ctx = ctx
+	f.tokenHash = tokenHash
+	return f.subject, f.found, f.err
+}
 
 type fakeConnectionAuthorizer struct {
 	decision service.AuthorizationDecision
@@ -34,49 +50,198 @@ func (f *fakeConnectionAuthorizer) Authorize(ctx context.Context, request servic
 	return f.decision, f.err
 }
 
-func TestAuthorizeAppUsesUnifiedAuthorizerForAllowAndDeny(t *testing.T) {
+func TestApplicationMiddlewareAuthenticatesOnceAndAuthorizesCanonicalUser(t *testing.T) {
+	authenticator := &fakeTokenAuthenticator{
+		subject: service.IdentitySubject{ID: "canonical-user", Status: "active"},
+		found:   true,
+	}
+	authorizer := &fakeConnectionAuthorizer{
+		decision: service.AuthorizationDecision{Allowed: true},
+	}
+	s := &Server{authenticator: authenticator, authorizer: authorizer}
+	app := model.Application{ID: "app1"}
+	nextCalled := false
+	handler := applicationMiddleware(s, app, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		nextCalled = true
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	req := httptest.NewRequest(http.MethodGet, "http://127.0.0.1/app", nil)
+	req.Header.Set("Authorization", "Bearer raw-token")
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusNoContent || !nextCalled {
+		t.Fatalf("status = %d, nextCalled = %v", recorder.Code, nextCalled)
+	}
+	if authenticator.calls != 1 {
+		t.Fatalf("authenticator calls = %d, want 1", authenticator.calls)
+	}
+	sum := sha256.Sum256([]byte("raw-token"))
+	if authenticator.tokenHash != hex.EncodeToString(sum[:]) {
+		t.Fatalf("token hash = %q", authenticator.tokenHash)
+	}
+	if authorizer.calls != 1 || authorizer.request.UserID != "canonical-user" {
+		t.Fatalf("authorizer calls = %d, request = %#v", authorizer.calls, authorizer.request)
+	}
+	assertApplicationAuthorizationRequest(t, authorizer.request, "canonical-user")
+}
+
+func TestApplicationMiddlewareRejectsAuthenticationFailures(t *testing.T) {
+	authenticationErr := errors.New("identity store unavailable")
 	tests := []struct {
-		name    string
-		allowed bool
+		name          string
+		token         string
+		authenticator tokenAuthenticator
 	}{
-		{name: "allow", allowed: true},
-		{name: "deny", allowed: false},
+		{name: "missing token"},
+		{name: "nil authenticator", token: "token"},
+		{
+			name:          "unknown token",
+			token:         "token",
+			authenticator: &fakeTokenAuthenticator{},
+		},
+		{
+			name:  "authentication error",
+			token: "token",
+			authenticator: &fakeTokenAuthenticator{
+				err: authenticationErr,
+			},
+		},
+		{
+			name:  "empty canonical identity",
+			token: "token",
+			authenticator: &fakeTokenAuthenticator{
+				subject: service.IdentitySubject{Status: "active"},
+				found:   true,
+			},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			authorizer := &fakeConnectionAuthorizer{
-				decision: service.AuthorizationDecision{Allowed: tt.allowed, Reason: service.AuthorizationReasonAllowed},
+				decision: service.AuthorizationDecision{Allowed: true},
 			}
-			s := &Server{authorizer: authorizer}
+			s := &Server{authenticator: tt.authenticator, authorizer: authorizer}
+			nextCalled := false
+			handler := applicationMiddleware(s, model.Application{ID: "app1"}, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+				nextCalled = true
+			}))
+			req := httptest.NewRequest(http.MethodGet, "http://127.0.0.1/app", nil)
+			if tt.token != "" {
+				req.Header.Set("Authorization", "Bearer "+tt.token)
+			}
+			recorder := httptest.NewRecorder()
 
-			err := s.authorizeApp(context.Background(), "u1", "app1")
-			if (err == nil) != tt.allowed {
-				t.Fatalf("authorizeApp error = %v, allowed = %v", err, tt.allowed)
+			handler.ServeHTTP(recorder, req)
+
+			if recorder.Code != http.StatusUnauthorized {
+				t.Fatalf("status = %d, want %d", recorder.Code, http.StatusUnauthorized)
 			}
-			if authorizer.calls != 1 {
-				t.Fatalf("authorizer calls = %d, want 1", authorizer.calls)
+			if nextCalled {
+				t.Fatal("downstream handler was called")
 			}
-			assertApplicationAuthorizationRequest(t, authorizer.request)
+			if authorizer.calls != 0 {
+				t.Fatalf("authorizer calls = %d, want 0", authorizer.calls)
+			}
 		})
 	}
 }
 
-func TestAuthorizeAppUsesUnifiedSuperAdminDecision(t *testing.T) {
-	authorizer := &fakeConnectionAuthorizer{
-		decision: service.AuthorizationDecision{
-			Allowed: true,
-			Reason:  service.AuthorizationReasonSuperAdmin,
+func TestApplicationMiddlewareRejectsAuthorizationFailures(t *testing.T) {
+	authorizationErr := errors.New("authorization backend unavailable")
+	tests := []struct {
+		name       string
+		authorizer connectionAuthorizer
+		cancel     bool
+	}{
+		{
+			name: "deny",
+			authorizer: &fakeConnectionAuthorizer{
+				decision: service.AuthorizationDecision{Reason: service.AuthorizationReasonActionDenied},
+			},
+		},
+		{
+			name:       "error",
+			authorizer: &fakeConnectionAuthorizer{err: authorizationErr},
+		},
+		{
+			name: "nil authorizer",
+		},
+		{
+			name:       "cancelled request",
+			authorizer: &fakeConnectionAuthorizer{err: context.Canceled},
+			cancel:     true,
 		},
 	}
-	s := &Server{authorizer: authorizer}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			authenticator := &fakeTokenAuthenticator{
+				subject: service.IdentitySubject{ID: "u1", Status: "active"},
+				found:   true,
+			}
+			s := &Server{authenticator: authenticator, authorizer: tt.authorizer}
+			nextCalled := false
+			handler := applicationMiddleware(s, model.Application{ID: "app1"}, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+				nextCalled = true
+			}))
+			ctx := context.Background()
+			if tt.cancel {
+				var cancel context.CancelFunc
+				ctx, cancel = context.WithCancel(ctx)
+				cancel()
+			}
+			req := httptest.NewRequestWithContext(ctx, http.MethodGet, "http://127.0.0.1/app", nil)
+			req.Header.Set("Authorization", "Bearer token")
+			recorder := httptest.NewRecorder()
 
-	if err := s.authorizeApp(context.Background(), "admin", "app1"); err != nil {
-		t.Fatalf("authorizeApp super admin: %v", err)
+			handler.ServeHTTP(recorder, req)
+
+			if recorder.Code != http.StatusForbidden {
+				t.Fatalf("status = %d, want %d", recorder.Code, http.StatusForbidden)
+			}
+			if nextCalled {
+				t.Fatal("downstream handler was called")
+			}
+			if authenticator.calls != 1 {
+				t.Fatalf("authenticator calls = %d, want 1", authenticator.calls)
+			}
+			if tt.authorizer != nil {
+				fake := tt.authorizer.(*fakeConnectionAuthorizer)
+				if fake.calls != 1 {
+					t.Fatalf("authorizer calls = %d, want 1", fake.calls)
+				}
+			}
+			if tt.cancel {
+				fake := tt.authorizer.(*fakeConnectionAuthorizer)
+				if !errors.Is(fake.ctx.Err(), context.Canceled) {
+					t.Fatalf("authorizer context error = %v, want context canceled", fake.ctx.Err())
+				}
+			}
+		})
 	}
-	if authorizer.calls != 1 {
-		t.Fatalf("authorizer calls = %d, want 1", authorizer.calls)
+}
+
+func TestRBACMiddlewareRejectsMissingAuthenticatedIdentity(t *testing.T) {
+	s := &Server{
+		authorizer: &fakeConnectionAuthorizer{
+			decision: service.AuthorizationDecision{Allowed: true},
+		},
 	}
-	assertApplicationAuthorizationRequest(t, authorizer.request)
+	nextCalled := false
+	handler := s.rbacMiddleware(model.Application{ID: "app1"}, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		nextCalled = true
+	}))
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "http://127.0.0.1/app", nil))
+
+	if recorder.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusUnauthorized)
+	}
+	if nextCalled {
+		t.Fatal("downstream handler was called")
+	}
 }
 
 func TestAuthorizeAppPropagatesAuthorizerError(t *testing.T) {
@@ -89,69 +254,31 @@ func TestAuthorizeAppPropagatesAuthorizerError(t *testing.T) {
 	}
 }
 
-func TestAuthorizeAppPropagatesCancelledContext(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	authorizer := &fakeConnectionAuthorizer{
-		decision: service.AuthorizationDecision{Allowed: true},
-	}
-	s := &Server{authorizer: authorizer}
-
-	if err := s.authorizeApp(ctx, "u1", "app1"); err != nil {
-		t.Fatalf("authorizeApp: %v", err)
-	}
-	if !errors.Is(authorizer.ctx.Err(), context.Canceled) {
-		t.Fatalf("authorizer context error = %v, want context canceled", authorizer.ctx.Err())
-	}
-}
-
-func TestRBACMiddlewarePassesRequestContextToAuthorizer(t *testing.T) {
-	db := openAppProxyTestDB(t)
-	token := "test-token"
-	hash := sha256.Sum256([]byte(token))
-	if err := db.Create(&model.User{
-		ID:        "u1",
-		Username:  "user",
-		TokenHash: hex.EncodeToString(hash[:]),
-		Status:    "active",
-	}).Error; err != nil {
-		t.Fatalf("create user: %v", err)
-	}
-
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	authorizer := &fakeConnectionAuthorizer{decision: service.AuthorizationDecision{Allowed: true}}
-	s := &Server{db: db, authorizer: authorizer}
+func TestNewWithNilDependenciesFailsClosed(t *testing.T) {
+	s := New(config.ApplicationGatewayConfig{}, config.AdminConfig{}, nil, nil, nil, slog.Default())
 	nextCalled := false
-	handler := s.rbacMiddleware(model.Application{ID: "app1"}, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	handler := applicationMiddleware(s, model.Application{ID: "app1"}, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
 		nextCalled = true
-		w.WriteHeader(http.StatusNoContent)
 	}))
-	req := httptest.NewRequestWithContext(ctx, http.MethodGet, "http://127.0.0.1/app", nil)
-	req.Header.Set("Authorization", "Bearer "+token)
+	req := httptest.NewRequest(http.MethodGet, "http://127.0.0.1/app", nil)
+	req.Header.Set("Authorization", "Bearer token")
 	recorder := httptest.NewRecorder()
 
 	handler.ServeHTTP(recorder, req)
 
-	if recorder.Code != http.StatusNoContent || !nextCalled {
+	if recorder.Code != http.StatusUnauthorized || nextCalled {
 		t.Fatalf("status = %d, nextCalled = %v", recorder.Code, nextCalled)
 	}
-	if !errors.Is(authorizer.ctx.Err(), context.Canceled) {
-		t.Fatalf("authorizer context error = %v, want context canceled", authorizer.ctx.Err())
-	}
 }
 
-func TestNewWithNilAuthorizerFailsClosed(t *testing.T) {
-	s := New(config.ApplicationGatewayConfig{}, config.AdminConfig{}, nil, nil, slog.Default())
-	if err := s.authorizeApp(context.Background(), "u1", "app1"); err == nil {
-		t.Fatal("authorizeApp with nil authorizer succeeded")
-	}
+func applicationMiddleware(s *Server, app model.Application, next http.Handler) http.Handler {
+	return s.authMiddleware(app, s.rbacMiddleware(app, next))
 }
 
-func assertApplicationAuthorizationRequest(t *testing.T, request service.AuthorizationRequest) {
+func assertApplicationAuthorizationRequest(t *testing.T, request service.AuthorizationRequest, wantUserID string) {
 	t.Helper()
-	if request.UserID != "u1" && request.UserID != "admin" {
-		t.Fatalf("user ID = %q", request.UserID)
+	if request.UserID != wantUserID {
+		t.Fatalf("user ID = %q, want %q", request.UserID, wantUserID)
 	}
 	if len(request.Actions) != 1 || request.Actions[0] != rbac.ActionAppConnect {
 		t.Fatalf("actions = %#v, want [%q]", request.Actions, rbac.ActionAppConnect)
@@ -159,16 +286,4 @@ func assertApplicationAuthorizationRequest(t *testing.T, request service.Authori
 	if request.ResourceType != model.ResourceTypeApplication || request.ResourceID != "app1" {
 		t.Fatalf("resource = %q/%q", request.ResourceType, request.ResourceID)
 	}
-}
-
-func openAppProxyTestDB(t *testing.T) *gorm.DB {
-	t.Helper()
-	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
-	if err != nil {
-		t.Fatalf("open sqlite: %v", err)
-	}
-	if err := db.AutoMigrate(&model.User{}); err != nil {
-		t.Fatalf("migrate user: %v", err)
-	}
-	return db
 }

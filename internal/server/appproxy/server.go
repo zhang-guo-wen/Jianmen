@@ -24,19 +24,26 @@ import (
 )
 
 type Server struct {
-	cfg        config.ApplicationGatewayConfig
-	adminCfg   config.AdminConfig
-	db         *gorm.DB
-	authorizer connectionAuthorizer
-	logger     *slog.Logger
+	cfg           config.ApplicationGatewayConfig
+	adminCfg      config.AdminConfig
+	db            *gorm.DB
+	authenticator tokenAuthenticator
+	authorizer    connectionAuthorizer
+	logger        *slog.Logger
 
 	mu      sync.Mutex
 	proxies map[int]*proxyEntry
 }
 
+type tokenAuthenticator interface {
+	FindIdentitySubjectByTokenHash(context.Context, string) (service.IdentitySubject, bool, error)
+}
+
 type connectionAuthorizer interface {
 	Authorize(context.Context, service.AuthorizationRequest) (service.AuthorizationDecision, error)
 }
+
+type authenticatedUserIDContextKey struct{}
 
 type proxyEntry struct {
 	app    model.Application
@@ -44,17 +51,25 @@ type proxyEntry struct {
 	proxy  *httputil.ReverseProxy
 }
 
-func New(cfg config.ApplicationGatewayConfig, adminCfg config.AdminConfig, db *gorm.DB, authorizer connectionAuthorizer, logger *slog.Logger) *Server {
+func New(
+	cfg config.ApplicationGatewayConfig,
+	adminCfg config.AdminConfig,
+	db *gorm.DB,
+	authenticator tokenAuthenticator,
+	authorizer connectionAuthorizer,
+	logger *slog.Logger,
+) *Server {
 	if logger == nil {
 		logger = slog.Default()
 	}
 	return &Server{
-		cfg:        cfg,
-		adminCfg:   adminCfg,
-		db:         db,
-		authorizer: authorizer,
-		logger:     logger,
-		proxies:    make(map[int]*proxyEntry),
+		cfg:           cfg,
+		adminCfg:      adminCfg,
+		db:            db,
+		authenticator: authenticator,
+		authorizer:    authorizer,
+		logger:        logger,
+		proxies:       make(map[int]*proxyEntry),
 	}
 }
 
@@ -151,17 +166,24 @@ func (s *Server) entryRedirectMiddleware(app model.Application, next http.Handle
 func (s *Server) authMiddleware(app model.Application, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		token := requestToken(r)
-		if token == "" || !s.validateToken(token) {
+		if token == "" || s.authenticator == nil {
 			s.writeUnauthorizedForApp(w, r, app)
 			return
 		}
-		next.ServeHTTP(w, r)
+		subject, found, err := s.authenticator.FindIdentitySubjectByTokenHash(r.Context(), tokenHash(token))
+		userID := strings.TrimSpace(subject.ID)
+		if err != nil || !found || userID == "" {
+			s.writeUnauthorizedForApp(w, r, app)
+			return
+		}
+		ctx := context.WithValue(r.Context(), authenticatedUserIDContextKey{}, userID)
+		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
 
 func (s *Server) rbacMiddleware(app model.Application, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		userID := s.getUserID(r)
+		userID := authenticatedUserID(r.Context())
 		if userID == "" {
 			s.writeUnauthorizedForApp(w, r, app)
 			return
@@ -197,16 +219,9 @@ func (s *Server) authorizeApp(ctx context.Context, userID, appID string) error {
 	return nil
 }
 
-func (s *Server) validateToken(token string) bool {
-	var user model.User
+func tokenHash(token string) string {
 	hash := sha256.Sum256([]byte(token))
-	tokenHash := hex.EncodeToString(hash[:])
-	err := s.db.Where("token_hash = ? AND status = ?", tokenHash, "active").First(&user).Error
-	return err == nil
-}
-
-func (s *Server) getUserID(r *http.Request) string {
-	return s.userIDForToken(requestToken(r))
+	return hex.EncodeToString(hash[:])
 }
 
 func requestToken(r *http.Request) string {
@@ -221,14 +236,9 @@ func requestToken(r *http.Request) string {
 	return token
 }
 
-func (s *Server) userIDForToken(token string) string {
-	var user model.User
-	hash := sha256.Sum256([]byte(token))
-	tokenHash := hex.EncodeToString(hash[:])
-	if err := s.db.Where("token_hash = ? AND status = ?", tokenHash, "active").First(&user).Error; err != nil {
-		return ""
-	}
-	return user.ID
+func authenticatedUserID(ctx context.Context) string {
+	userID, _ := ctx.Value(authenticatedUserIDContextKey{}).(string)
+	return strings.TrimSpace(userID)
 }
 
 func (s *Server) shutdown() {

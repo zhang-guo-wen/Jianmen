@@ -18,6 +18,7 @@ type IdentitySubject struct {
 
 type IdentityRepository interface {
 	FindIdentitySubject(ctx context.Context, userID string) (IdentitySubject, bool, error)
+	FindIdentitySubjectByTokenHash(ctx context.Context, tokenHash string) (IdentitySubject, bool, error)
 }
 
 type IdentityService struct {
@@ -47,6 +48,28 @@ func (s *IdentityService) FindIdentitySubject(
 	if err != nil {
 		return IdentitySubject{}, false, fmt.Errorf("find identity subject: %w", err)
 	}
+	return s.activeSubject(subject, found)
+}
+
+func (s *IdentityService) FindIdentitySubjectByTokenHash(
+	ctx context.Context,
+	tokenHash string,
+) (IdentitySubject, bool, error) {
+	tokenHash = strings.TrimSpace(tokenHash)
+	if tokenHash == "" {
+		return IdentitySubject{}, false, nil
+	}
+	subject, found, err := s.repository.FindIdentitySubjectByTokenHash(ctx, tokenHash)
+	if err != nil {
+		return IdentitySubject{}, false, fmt.Errorf("find identity subject by token hash: %w", err)
+	}
+	return s.activeSubject(subject, found)
+}
+
+func (s *IdentityService) activeSubject(
+	subject IdentitySubject,
+	found bool,
+) (IdentitySubject, bool, error) {
 	if !found || subject.Status != "active" {
 		return IdentitySubject{}, false, nil
 	}

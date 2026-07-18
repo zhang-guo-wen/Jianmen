@@ -17,8 +17,8 @@ func provisioningProtectionInput(instance model.DatabaseInstance, admin model.Da
 	return service.DatabaseProvisioningOperationInput{
 		ID: "jmo_abcdefghijklmnopqrst", InstanceID: instance.ID, AdminAccountID: admin.ID,
 		Username: "jm_abcdefghijklmnopqrst", Password: "generated-secret", Host: "10.0.0.8",
-		GrantsJSON: `[{"database":"orders","privilege":"read"}]`,
-		Lease: service.DatabaseProvisioningLease{Owner: "worker", Token: "lease", Duration: time.Minute},
+		GrantsJSON:            `[{"database":"orders","privilege":"read"}]`,
+		Lease:                 service.DatabaseProvisioningLease{Owner: "worker", Token: "lease", Duration: time.Minute},
 		AdministratorUsername: admin.Username, AdministratorPassword: admin.Password.GetPlaintext(),
 		InstanceProof: databaseProvisioningInstanceProof(instance),
 	}

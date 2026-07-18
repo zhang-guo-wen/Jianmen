@@ -84,7 +84,7 @@ func protectReferencedInstance(tx *gorm.DB, instanceID string) error {
 func databaseProvisioningInstanceProof(instance model.DatabaseInstance) string {
 	payload, _ := json.Marshal(struct {
 		Protocol, Address, TLSMode, TLSServerName, TLSCAPEM string
-		Port                                          int
+		Port                                                int
 	}{
 		Protocol: instance.Protocol, Address: instance.Address, Port: instance.Port,
 		TLSMode: instance.TLSMode, TLSServerName: instance.TLSServerName, TLSCAPEM: instance.TLSCAPEM,

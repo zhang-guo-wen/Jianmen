@@ -42,13 +42,13 @@
 ```bash
 docker pull ghcr.io/zhang-guo-wen/jianmen:latest
 ```
-启动容器：
+本机评估启动（管理端 HTTP 仅映射到宿主机回环地址）：
 
 ```bash
 docker run -d \
   --name jianmen \
   --restart unless-stopped \
-  -p 47100:47100 \
+  -p 127.0.0.1:47100:47100 \
   -p 47102:47102 \
   -p 33060:33060 \
   -p 47110-47199:47110-47199 \
@@ -68,15 +68,20 @@ docker run -d \
 浏览器访问：
 
 ```text
-http://服务器IP:47100
+http://127.0.0.1:47100
 ```
 
-应用代理在用户未登录时会自动跳转到 Jianmen 登录页。默认会使用当前访问的主机名和 `admin.listen_addr` 的端口生成登录地址。如果通过域名、HTTPS 反向代理或开发服务访问，请显式配置对外管理地址：
+应用代理在用户未登录时会自动跳转到 Jianmen 登录页。默认会使用当前访问的主机名和 `admin.listen_addr` 的端口生成登录地址。如果通过隔离网络内的 HTTPS 反向代理终止 TLS，请显式配置对外管理地址，并显式允许代理到容器内的 HTTP：
 
 ```json
 "admin": {
   "listen_addr": "0.0.0.0:47100",
-  "public_url": "https://jianmen.example.com"
+  "public_url": "https://jianmen.example.com",
+  "tls": {
+    "cert_file": "",
+    "key_file": "",
+    "allow_insecure_http": true
+  }
 }
 ```
 
@@ -96,7 +101,7 @@ Admin 管理端默认仅允许回环地址使用 HTTP，适合本机开发。非
 }
 ```
 
-Docker 示例配置默认监听容器内的 HTTP 端口，并明确打开了 `allow_insecure_http`，这只表示由外部反向代理（如 Nginx、Caddy 或 Traefik）负责终止 TLS；如果没有反向代理，请改为同时配置 `cert_file` 和 `key_file`，不要把该开发开关当作安全传输。
+Docker 示例配置默认监听容器内的 HTTP 端口，并明确打开了 `allow_insecure_http`。上面的本机评估命令只把管理端映射到 `127.0.0.1`；生产环境必须由同一受控网络中的反向代理（如 Nginx、Caddy 或 Traefik）终止 TLS，且不得把容器的 `47100` 直接发布到公网。如果没有反向代理，请改为同时配置 `cert_file` 和 `key_file`，不要把该开关当作安全传输。
 
 新增或编辑应用时，只需填写完整应用地址，例如 `http://47.121.184.68:18848/nacos/#/login`。系统会自动解析协议、主机、端口和默认访问路径，并在应用列表中生成可复制、可直接打开的代理访问地址。
 
@@ -106,7 +111,7 @@ Docker 示例配置默认监听容器内的 HTTP 端口，并明确打开了 `al
 docker run -d \
   --name jianmen \
   --restart unless-stopped \
-  -p 47100:47100 \
+  -p 127.0.0.1:47100:47100 \
   -p 47102:47102 \
   -p 33060:33060 \
   -p 47110-47199:47110-47199 \

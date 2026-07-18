@@ -8,7 +8,6 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
-	"fmt"
 	"io"
 	"log/slog"
 	"math/big"
@@ -25,14 +24,17 @@ import (
 func TestListenAndServeUsesTLSWhenCertificateConfigured(t *testing.T) {
 	tlsDir := t.TempDir()
 	certFile, keyFile := writeTestCertificate(t, tlsDir)
-	port := reserveTCPPort(t)
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen for TLS test: %v", err)
+	}
 
 	server := &Server{
 		cfg: &config.Config{
 			ListenAddr: "127.0.0.1:47102",
 			Admin: config.AdminConfig{
 				Enabled:    true,
-				ListenAddr: "127.0.0.1:" + port,
+				ListenAddr: listener.Addr().String(),
 				Dev:        true,
 				TLS: config.AdminTLSConfig{
 					CertFile: certFile,
@@ -46,12 +48,12 @@ func TestListenAndServeUsesTLSWhenCertificateConfigured(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	errCh := make(chan error, 1)
-	go func() { errCh <- server.ListenAndServe(ctx) }()
+	go func() { errCh <- server.serveAdmin(ctx, listener) }()
 
 	client := &http.Client{Transport: &http.Transport{TLSClientConfig: insecureTLSConfigForTest()}}
 	var response *http.Response
 	for deadline := time.Now().Add(3 * time.Second); time.Now().Before(deadline); {
-		response, _ = client.Get("https://127.0.0.1:" + port + "/")
+		response, _ = client.Get("https://" + listener.Addr().String() + "/")
 		if response != nil {
 			break
 		}
@@ -111,16 +113,6 @@ func writeTestCertificate(t *testing.T, dir string) (string, string) {
 		t.Fatalf("write test key: %v", err)
 	}
 	return certFile, keyFile
-}
-
-func reserveTCPPort(t *testing.T) string {
-	t.Helper()
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("reserve TCP port: %v", err)
-	}
-	defer listener.Close()
-	return fmt.Sprintf("%d", listener.Addr().(*net.TCPAddr).Port)
 }
 
 func insecureTLSConfigForTest() *tls.Config {

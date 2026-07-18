@@ -1,391 +1,487 @@
 package service
 
 import (
+	"context"
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"io"
 	"net"
-	"strings"
 	"time"
 
+	"jianmen/internal/dbtls"
 	"jianmen/internal/model"
-	"jianmen/internal/server/dbproxy"
+	"jianmen/internal/proxy/mysqlwire"
 )
 
 type DBGrant struct {
 	Database  string `json:"database"`
-	Privilege string `json:"privilege"` // "read" | "readwrite"
+	Privilege string `json:"privilege"`
 }
 
-func grantSQL(db, privilege, user, host string) string {
-	switch privilege {
-	case "read":
-		return fmt.Sprintf("GRANT SELECT ON `%s`.* TO '%s'@'%s'", db, user, host)
-	case "readwrite":
-		return fmt.Sprintf("GRANT SELECT, INSERT, UPDATE, DELETE ON `%s`.* TO '%s'@'%s'", db, user, host)
-	default:
-		return ""
+const (
+	maxMySQLAuthPacketBytes     = 1 << 20
+	maxMySQLProvisionPacketSize = mysqlwire.MaxPacketPayloadBytes
+	mysqlProvisionTimeout       = 5 * time.Second
+)
+
+var errMySQLStatementRejected = errors.New("mysql statement rejected")
+
+type mysqlTLSHandshakeError struct {
+	cause error
+}
+
+func (e *mysqlTLSHandshakeError) Error() string { return "mysql TLS handshake failed" }
+func (e *mysqlTLSHandshakeError) Unwrap() error { return e.cause }
+
+type MySQLDatabaseProvisioner struct{}
+
+func (MySQLDatabaseProvisioner) ListDatabases(
+	ctx context.Context,
+	instance model.DatabaseInstance,
+	account model.DatabaseAccount,
+) ([]string, error) {
+	return ListMySQLDatabases(ctx, instance, account)
+}
+
+func (MySQLDatabaseProvisioner) CreateAccount(
+	ctx context.Context,
+	instance model.DatabaseInstance,
+	admin model.DatabaseAccount,
+	username, password, host string,
+) (DatabaseAccountCreateResult, error) {
+	return CreateMySQLAccount(ctx, instance, admin, username, password, host)
+}
+
+func (MySQLDatabaseProvisioner) GrantAccount(
+	ctx context.Context,
+	instance model.DatabaseInstance,
+	admin model.DatabaseAccount,
+	username, host string,
+	grants []DBGrant,
+) error {
+	return GrantMySQLAccount(ctx, instance, admin, username, host, grants)
+}
+
+func (MySQLDatabaseProvisioner) DropAccount(
+	ctx context.Context,
+	instance model.DatabaseInstance,
+	admin model.DatabaseAccount,
+	username, host string,
+) error {
+	return DropMySQLAccount(ctx, instance, admin, username, host)
+}
+
+func databaseInstancePort(instance model.DatabaseInstance) int {
+	if instance.Port > 0 {
+		return instance.Port
 	}
+	return 3306
 }
 
-// mysqlConnect connects to the target MySQL and completes authentication, returning the authenticated connection.
-func mysqlConnect(addr string, username, password string) (net.Conn, error) {
-	conn, err := net.DialTimeout("tcp", addr, 10*time.Second)
+func mysqlConnect(
+	ctx context.Context,
+	instance model.DatabaseInstance,
+	username, password string,
+) (net.Conn, error) {
+	if ctx == nil {
+		return nil, errors.New("connect mysql upstream: nil context")
+	}
+	address := net.JoinHostPort(
+		instance.Address,
+		fmt.Sprintf("%d", databaseInstancePort(instance)),
+	)
+	conn, err := (&net.Dialer{Timeout: mysqlProvisionTimeout}).DialContext(ctx, "tcp", address)
 	if err != nil {
-		return nil, fmt.Errorf("connect: %w", err)
+		return nil, errors.New("connect mysql upstream")
 	}
-	conn.SetDeadline(time.Now().Add(10 * time.Second))
-	buf := make([]byte, 4096)
-	n, err := conn.Read(buf)
-	if err != nil || n < 4 {
-		conn.Close()
-		return nil, fmt.Errorf("read handshake: %w", err)
+	closeWithError := func(result error) (net.Conn, error) {
+		_ = conn.Close()
+		return nil, result
 	}
-	hsPayloadLen := int(buf[0]) | int(buf[1])<<8 | int(buf[2])<<16
-	if 4+hsPayloadLen > n {
-		remaining := make([]byte, 4+hsPayloadLen-n)
-		if _, err := io.ReadFull(conn, remaining); err != nil {
-			conn.Close()
-			return nil, fmt.Errorf("read handshake payload: %w", err)
-		}
-		buf = append(buf[:n], remaining...)
+	deadline := time.Now().Add(mysqlProvisionTimeout)
+	if contextDeadline, ok := ctx.Deadline(); ok && contextDeadline.Before(deadline) {
+		deadline = contextDeadline
 	}
-	hsPayload := buf[4 : 4+hsPayloadLen]
-	hs, err := dbproxy.ParseMySQLHandshake(hsPayload)
+	if err := conn.SetDeadline(deadline); err != nil {
+		return closeWithError(errors.New("set mysql authentication deadline"))
+	}
+	greeting, err := mysqlwire.ReadPacket(ctx, conn, maxMySQLAuthPacketBytes)
 	if err != nil {
-		conn.Close()
-		return nil, fmt.Errorf("parse handshake: %w", err)
+		return closeWithError(errors.New("read mysql handshake"))
 	}
-	loginPkt := dbproxy.BuildMySQLUpstreamLogin(hs, username, password, hs.AuthPluginName, 1)
-	if _, err := conn.Write(loginPkt); err != nil {
-		conn.Close()
-		return nil, fmt.Errorf("write login: %w", err)
-	}
-	return readMySQLAuthResult(conn, hs, password, buf)
-}
-
-// readMySQLAuthResult reads the MySQL login response, handling OK/ERR/AuthSwitch/caching_sha2 fast auth.
-func readMySQLAuthResult(conn net.Conn, hs *dbproxy.MySQLHandshake, password string, buf []byte) (net.Conn, error) {
-	n, err := conn.Read(buf)
-	if err != nil || n < 4 {
-		conn.Close()
-		return nil, fmt.Errorf("read auth response: %w", err)
-	}
-	payloadLen := int(buf[0]) | int(buf[1])<<8 | int(buf[2])<<16
-	// OK
-	if len(buf) >= 4+payloadLen && buf[4] == 0x00 {
-		return conn, nil
-	}
-	// ERR
-	if len(buf) >= 4+payloadLen && buf[4] == 0xff {
-		conn.Close()
-		return nil, fmt.Errorf("auth denied: %s", dbproxy.ParseMySQLErrorMessage(buf[4:4+payloadLen]))
-	}
-	// AuthSwitchRequest (0xfe) — payload[1:] contains plugin name + auth data
-	if len(buf) > 1 && buf[4] == 0xfe {
-		payload := buf[5 : 4+payloadLen]
-		nullPos := 0
-		for nullPos < len(payload) && payload[nullPos] != 0 {
-			nullPos++
-		}
-		newPlugin := string(payload[:nullPos])
-		authData := payload[nullPos+1:]
-		if len(authData) > 0 {
-			hs.AuthData = authData
-		}
-		authRespBytes := dbproxy.BuildMySQLAuthResponse(newPlugin, password, authData)
-		if authRespBytes == nil {
-			conn.Close()
-			return nil, fmt.Errorf("unsupported auth switch plugin: %s", newPlugin)
-		}
-		resp := make([]byte, 4+len(authRespBytes))
-		resp[0] = byte(len(authRespBytes))
-		resp[1] = byte(len(authRespBytes) >> 8)
-		resp[2] = byte(len(authRespBytes) >> 16)
-		resp[3] = 3 // seq after login
-		copy(resp[4:], authRespBytes)
-		if _, err := conn.Write(resp); err != nil {
-			conn.Close()
-			return nil, fmt.Errorf("write auth switch: %w", err)
-		}
-		return readSimpleAuthResult(conn, buf)
-	}
-	// caching_sha2_password fast auth phase 2: 0x01 -> read again for 0x03 (fast auth success) or 0x04 (full auth)
-	if len(buf) >= 4+payloadLen && buf[4] == 0x01 {
-		n2, err := conn.Read(buf)
-		if err != nil || n2 < 4 {
-			conn.Close()
-			return nil, fmt.Errorf("read auth phase 2: %w", err)
-		}
-		payloadLen2 := int(buf[0]) | int(buf[1])<<8 | int(buf[2])<<16
-		if len(buf) >= 4+payloadLen2 && buf[4] == 0x04 {
-			// Server requests full auth: send password in cleartext (assumes non-TLS cleartext for now)
-			pwdBytes := []byte(password)
-			pwdPkt := make([]byte, 4+len(pwdBytes)+1)
-			pwdPkt[0] = byte(len(pwdBytes) + 1)
-			pwdPkt[1] = byte((len(pwdBytes) + 1) >> 8)
-			pwdPkt[2] = byte((len(pwdBytes) + 1) >> 16)
-			pwdPkt[3] = 3
-			copy(pwdPkt[4:], pwdBytes)
-			if _, err := conn.Write(pwdPkt); err != nil {
-				conn.Close()
-				return nil, fmt.Errorf("write full auth password: %w", err)
-			}
-			return readSimpleAuthResult(conn, buf)
-		}
-		if len(buf) >= 4+payloadLen2 && (buf[4] == 0x03 || buf[4] == 0x00) {
-			return conn, nil
-		}
-		conn.Close()
-		return nil, fmt.Errorf("auth phase 2 failed: payload[4]=0x%02x", buf[4])
-	}
-	conn.Close()
-	return nil, fmt.Errorf("unexpected auth result: payload[4]=0x%02x", buf[4])
-}
-
-func readSimpleAuthResult(conn net.Conn, buf []byte) (net.Conn, error) {
-	n, err := conn.Read(buf)
-	if err != nil || n < 4 {
-		conn.Close()
-		return nil, fmt.Errorf("read auth result: %w", err)
-	}
-	payloadLen := int(buf[0]) | int(buf[1])<<8 | int(buf[2])<<16
-	if len(buf) >= 4+payloadLen && buf[4] == 0x00 {
-		return conn, nil
-	}
-	if len(buf) >= 4+payloadLen && buf[4] == 0xff {
-		conn.Close()
-		return nil, fmt.Errorf("auth denied: %s", dbproxy.ParseMySQLErrorMessage(buf[4:4+payloadLen]))
-	}
-	conn.Close()
-	return nil, fmt.Errorf("unexpected result: payload[4]=0x%02x", buf[4])
-}
-
-// mysqlQuery sends a SQL query and reads the complete result set (for simple queries like SHOW DATABASES).
-func mysqlQuery(conn net.Conn, query string) ([][]string, error) {
-	payload := make([]byte, 1+len(query))
-	payload[0] = 0x03 // COM_QUERY
-	copy(payload[1:], query)
-	pkt := mysqlPacketWithSeq(0, payload)
-	if _, err := conn.Write(pkt); err != nil {
-		return nil, fmt.Errorf("write query: %w", err)
-	}
-
-	// Read MySQL packet with proper header/payload separation
-	pkt2, err := readMySQLPacketFromConn(conn)
+	handshake, err := mysqlwire.ParseHandshake(greeting.Payload)
 	if err != nil {
-		return nil, fmt.Errorf("read query response: %w", err)
+		return closeWithError(err)
 	}
-	if len(pkt2.payload) > 0 && pkt2.payload[0] == 0xff {
-		return nil, fmt.Errorf("query error: %s", dbproxy.ParseMySQLErrorMessage(pkt2.payload))
+	mode, err := dbtls.NormalizeMode(instance.TLSMode)
+	if err != nil {
+		return closeWithError(errors.New("invalid mysql TLS policy"))
 	}
+	loginSequence := byte(1)
+	if mode != dbtls.ModeDisable {
+		if err := writeMySQLTLSRequest(ctx, conn, handshake); err != nil {
+			return closeWithError(err)
+		}
+		secured, err := dbtls.HandshakeClient(
+			ctx,
+			conn,
+			dbtls.Config{
+				Mode: mode, ServerName: instance.TLSServerName, CAPEM: instance.TLSCAPEM,
+			},
+			address,
+		)
+		if err != nil {
+			return closeWithError(&mysqlTLSHandshakeError{cause: err})
+		}
+		conn = secured
+		loginSequence = 2
+	}
+	loginPacket, err := mysqlwire.BuildHandshakeResponse41(
+		handshake,
+		mysqlwire.LoginOptions{
+			Username: username, Password: password, AuthPlugin: handshake.AuthPluginName,
+			Sequence: loginSequence, TLS: mode != dbtls.ModeDisable,
+		},
+	)
+	if err != nil {
+		return closeWithError(err)
+	}
+	if err := writeMySQLRawPacket(ctx, conn, loginPacket); err != nil {
+		return closeWithError(err)
+	}
+	if err := mysqlwire.ContinueAuthentication(
+		ctx,
+		conn,
+		mysqlwire.AuthenticationOptions{
+			Password: password, VerifiedTLS: dbtls.IsVerified(conn),
+			MaxPacketBytes: maxMySQLAuthPacketBytes,
+		},
+	); err != nil {
+		return closeWithError(err)
+	}
+	if err := mysqlwire.ClearDeadline(conn); err != nil {
+		return closeWithError(err)
+	}
+	return conn, nil
+}
 
-	colCount, _ := readLenEncInt(pkt2.payload)
-	if colCount == 0 {
+func writeMySQLTLSRequest(
+	ctx context.Context,
+	conn net.Conn,
+	handshake mysqlwire.Handshake,
+) error {
+	if handshake.CapabilityFlags&mysqlwire.ClientSSL == 0 {
+		return errors.New("mysql upstream does not support TLS")
+	}
+	capabilities := mysqlwire.ClientProtocol41 | mysqlwire.ClientSSL
+	if handshake.CapabilityFlags&mysqlwire.ClientSecureConnection != 0 {
+		capabilities |= mysqlwire.ClientSecureConnection
+	}
+	if handshake.CapabilityFlags&mysqlwire.ClientPluginAuth != 0 {
+		capabilities |= mysqlwire.ClientPluginAuth
+	}
+	payload := make([]byte, 32)
+	binary.LittleEndian.PutUint32(payload[:4], capabilities)
+	binary.LittleEndian.PutUint32(payload[4:8], 1<<24)
+	payload[8] = handshake.CharacterSet
+	if payload[8] == 0 {
+		payload[8] = 45
+	}
+	return mysqlwire.WritePacket(ctx, conn, 1, payload)
+}
+
+func writeMySQLRawPacket(ctx context.Context, conn net.Conn, packet []byte) error {
+	return mysqlwire.WriteRawPacket(ctx, conn, packet)
+}
+
+func mysqlQuery(ctx context.Context, conn net.Conn, query string) ([][]string, error) {
+	return mysqlQueryWithTimeout(ctx, conn, query, mysqlProvisionTimeout)
+}
+
+func mysqlQueryWithTimeout(
+	ctx context.Context,
+	conn net.Conn,
+	query string,
+	timeout time.Duration,
+) ([][]string, error) {
+	if ctx == nil || timeout <= 0 {
+		return nil, errors.New("invalid mysql query context")
+	}
+	commandContext, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	payload := append([]byte{0x03}, query...)
+	if err := mysqlwire.WritePacket(commandContext, conn, 0, payload); err != nil {
+		return nil, errors.New("write mysql query")
+	}
+	response, err := mysqlwire.ReadPacket(
+		commandContext,
+		conn,
+		maxMySQLProvisionPacketSize,
+	)
+	if err != nil {
+		return nil, errors.New("read mysql query response")
+	}
+	if len(response.Payload) == 0 {
+		return nil, errors.New("empty mysql query response")
+	}
+	if response.Payload[0] == 0xff {
+		return nil, errors.New("mysql query rejected")
+	}
+	columnCount, _ := readLenEncInt(response.Payload)
+	if columnCount == 0 {
 		return nil, nil
 	}
-
-	// Read column definitions + EOF
-	for i := uint64(0); i < colCount; i++ {
-		if _, err := readMySQLPacketFromConn(conn); err != nil {
-			return nil, fmt.Errorf("read column def %d: %w", i, err)
+	for index := uint64(0); index < columnCount+1; index++ {
+		if _, err := mysqlwire.ReadPacket(
+			commandContext,
+			conn,
+			maxMySQLProvisionPacketSize,
+		); err != nil {
+			return nil, errors.New("read mysql result metadata")
 		}
 	}
-	if _, err := readMySQLPacketFromConn(conn); err != nil {
-		return nil, fmt.Errorf("read columns EOF: %w", err)
-	}
-
-	// Read row data
 	var rows [][]string
 	for {
-		rpkt, err := readMySQLPacketFromConn(conn)
+		packet, err := mysqlwire.ReadPacket(
+			commandContext,
+			conn,
+			maxMySQLProvisionPacketSize,
+		)
 		if err != nil {
-			return nil, fmt.Errorf("read row: %w", err)
+			return nil, errors.New("read mysql result row")
 		}
-		if len(rpkt.payload) > 0 && rpkt.payload[0] == 0xfe {
-			break // EOF
+		if len(packet.Payload) == 0 {
+			return nil, errors.New("empty mysql result row")
 		}
-		if len(rpkt.payload) > 0 && rpkt.payload[0] == 0xff {
-			return nil, fmt.Errorf("query error: %s", dbproxy.ParseMySQLErrorMessage(rpkt.payload))
+		if packet.Payload[0] == 0xfe && len(packet.Payload) < 9 {
+			return rows, nil
 		}
-		rows = append(rows, parseMySQLTextRow(rpkt.payload))
+		if packet.Payload[0] == 0xff {
+			return nil, errors.New("mysql query rejected")
+		}
+		rows = append(rows, parseMySQLTextRow(packet.Payload))
 	}
-	return rows, nil
 }
 
-// mysqlExec sends a non-query SQL statement (CREATE USER, GRANT, etc.).
-func mysqlExec(conn net.Conn, stmt string) error {
-	payload := make([]byte, 1+len(stmt))
-	payload[0] = 0x03
-	copy(payload[1:], stmt)
-	pkt := mysqlPacketWithSeq(0, payload)
-	if _, err := conn.Write(pkt); err != nil {
-		return fmt.Errorf("write exec: %w", err)
-	}
+func mysqlExec(ctx context.Context, conn net.Conn, statement string) error {
+	return mysqlExecWithTimeout(ctx, conn, statement, mysqlProvisionTimeout)
+}
 
-	buf := make([]byte, 4096)
-	_, err := conn.Read(buf)
+func mysqlExecWithTimeout(
+	ctx context.Context,
+	conn net.Conn,
+	statement string,
+	timeout time.Duration,
+) error {
+	if ctx == nil || timeout <= 0 {
+		return errMySQLStatementNotSent
+	}
+	commandContext, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	payload := append([]byte{0x03}, statement...)
+	if err := mysqlwire.WritePacket(commandContext, conn, 0, payload); err != nil {
+		if mysqlwire.WrittenBytes(err) == 0 {
+			return errMySQLStatementNotSent
+		}
+		return errMySQLStatementOutcomeUncertain
+	}
+	response, err := mysqlwire.ReadPacket(
+		commandContext,
+		conn,
+		maxMySQLProvisionPacketSize,
+	)
 	if err != nil {
-		return fmt.Errorf("read exec response: %w", err)
+		return errMySQLStatementOutcomeUncertain
 	}
-	payloadLen := int(buf[0]) | int(buf[1])<<8 | int(buf[2])<<16
-	if len(buf) >= 4+payloadLen && buf[4] == 0xff {
-		return fmt.Errorf("%s", dbproxy.ParseMySQLErrorMessage(buf[4:4+payloadLen]))
+	if len(response.Payload) == 0 {
+		return errMySQLStatementOutcomeUncertain
 	}
-	// OK packet always starts with 0x00
-	if len(buf) >= 4+payloadLen && buf[4] == 0x00 {
+	switch response.Payload[0] {
+	case 0x00:
 		return nil
+	case 0xff:
+		return errMySQLStatementRejected
+	default:
+		return errMySQLStatementOutcomeUncertain
 	}
-	return fmt.Errorf("unexpected exec result: payload[4]=0x%02x", buf[4])
 }
 
-// ListMySQLDatabases connects to the MySQL instance and executes SHOW DATABASES.
-func ListMySQLDatabases(instance model.DatabaseInstance, adminAccount model.DatabaseAccount) ([]string, error) {
-	addr := instance.Address
-	if instance.Port > 0 {
-		addr = fmt.Sprintf("%s:%d", instance.Address, instance.Port)
+func ListMySQLDatabases(
+	ctx context.Context,
+	instance model.DatabaseInstance,
+	admin model.DatabaseAccount,
+) ([]string, error) {
+	password := admin.Password.GetPlaintext()
+	if password == "" {
+		return nil, errors.New("database provisioning credential is unavailable")
 	}
-	plainPwd := adminAccount.Password.GetPlaintext()
-	if plainPwd == "" {
-		return nil, errors.New("admin account password is empty")
-	}
-	conn, err := mysqlConnect(addr, adminAccount.Username, plainPwd)
+	conn, err := mysqlConnect(ctx, instance, admin.Username, password)
 	if err != nil {
 		return nil, err
 	}
 	defer conn.Close()
-
-	rows, err := mysqlQuery(conn, "SHOW DATABASES")
+	rows, err := mysqlQuery(ctx, conn, "SHOW DATABASES")
 	if err != nil {
 		return nil, err
 	}
-	dbs := make([]string, 0, len(rows))
+	databases := make([]string, 0, len(rows))
 	for _, row := range rows {
 		if len(row) > 0 && row[0] != "" {
-			dbs = append(dbs, row[0])
+			databases = append(databases, row[0])
 		}
 	}
-	return dbs, nil
+	return databases, nil
 }
 
-// ProvisionMySQLAccount connects to MySQL, creates user, and grants privileges.
-func ProvisionMySQLAccount(instance model.DatabaseInstance, adminAccount model.DatabaseAccount, newUser, password, host string, grants []DBGrant) error {
-	addr := instance.Address
-	if instance.Port > 0 {
-		addr = fmt.Sprintf("%s:%d", instance.Address, instance.Port)
+func CreateMySQLAccount(
+	ctx context.Context,
+	instance model.DatabaseInstance,
+	admin model.DatabaseAccount,
+	username, password, host string,
+) (DatabaseAccountCreateResult, error) {
+	conn, err := connectWithProvisioningAdmin(ctx, instance, admin)
+	if err != nil {
+		return DatabaseAccountCreateResult{
+			Disposition: DatabaseAccountCreateNotSent,
+		}, err
 	}
-	plainPwd := adminAccount.Password.GetPlaintext()
-	if plainPwd == "" {
-		return errors.New("admin account password is empty")
+	defer conn.Close()
+	return runMySQLCreateStatements(
+		func(statement string) error {
+			return mysqlExec(ctx, conn, statement)
+		},
+		username,
+		password,
+		host,
+	)
+}
+
+func GrantMySQLAccount(
+	ctx context.Context,
+	instance model.DatabaseInstance,
+	admin model.DatabaseAccount,
+	username, host string,
+	grants []DBGrant,
+) error {
+	statements, err := buildMySQLGrantStatements(username, host, grants)
+	if err != nil {
+		return err
 	}
-	conn, err := mysqlConnect(addr, adminAccount.Username, plainPwd)
+	conn, err := connectWithProvisioningAdmin(ctx, instance, admin)
 	if err != nil {
 		return err
 	}
 	defer conn.Close()
-
-	createSQL := fmt.Sprintf("CREATE USER '%s'@'%s' IDENTIFIED BY '%s'",
-		escapeMySQLString(newUser), escapeMySQLString(host), escapeMySQLString(password))
-	if err := mysqlExec(conn, createSQL); err != nil {
-		return fmt.Errorf("CREATE USER: %w", err)
-	}
-
-	for _, g := range grants {
-		sql := grantSQL(g.Database, g.Privilege, newUser, host)
-		if sql == "" {
-			continue
-		}
-		if err := mysqlExec(conn, sql); err != nil {
-			return fmt.Errorf("GRANT %s on %s: %w", g.Privilege, g.Database, err)
+	for _, statement := range statements {
+		if err := mysqlExec(ctx, conn, statement); err != nil {
+			return errors.New("grant mysql account privileges")
 		}
 	}
-	_ = mysqlExec(conn, "FLUSH PRIVILEGES")
 	return nil
 }
 
-func escapeMySQLString(s string) string {
-	var b strings.Builder
-	b.Grow(len(s) + 4)
-	for _, c := range s {
-		switch c {
-		case '\'', '"', '\\':
-			b.WriteByte('\\')
-			b.WriteRune(c)
-		default:
-			b.WriteRune(c)
+func ProvisionMySQLAccount(
+	ctx context.Context,
+	instance model.DatabaseInstance,
+	admin model.DatabaseAccount,
+	username, password, host string,
+	grants []DBGrant,
+) error {
+	result, err := CreateMySQLAccount(ctx, instance, admin, username, password, host)
+	if err != nil {
+		return err
+	}
+	if result.Disposition != DatabaseAccountCreateApplied {
+		return errors.New("create mysql account did not complete")
+	}
+	return GrantMySQLAccount(ctx, instance, admin, username, host, grants)
+}
+
+func DropMySQLAccount(
+	ctx context.Context,
+	instance model.DatabaseInstance,
+	admin model.DatabaseAccount,
+	username, host string,
+) error {
+	if err := validateMySQLAccountName(username); err != nil {
+		return err
+	}
+	if err := validateMySQLAccountHost(host); err != nil {
+		return err
+	}
+	conn, err := connectWithProvisioningAdmin(ctx, instance, admin)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	for _, statement := range []string{
+		mysqlNoBackslashEscapesSQL,
+		dropMySQLUserStatement(username, host),
+	} {
+		if err := mysqlExec(ctx, conn, statement); err != nil {
+			return errors.New("drop mysql account")
 		}
 	}
-	return b.String()
+	return nil
 }
 
-// --- MySQL protocol helpers ---
-
-func mysqlPacketWithSeq(seq byte, payload []byte) []byte {
-	packet := make([]byte, 4+len(payload))
-	packet[0] = byte(len(payload))
-	packet[1] = byte(len(payload) >> 8)
-	packet[2] = byte(len(payload) >> 16)
-	packet[3] = seq
-	copy(packet[4:], payload)
-	return packet
-}
-
-type mysqlPkt struct {
-	payload []byte
-	seq     byte
-}
-
-func readMySQLPacketFromConn(conn net.Conn) (*mysqlPkt, error) {
-	header := make([]byte, 4)
-	if _, err := io.ReadFull(conn, header); err != nil {
-		return nil, err
+func connectWithProvisioningAdmin(
+	ctx context.Context,
+	instance model.DatabaseInstance,
+	admin model.DatabaseAccount,
+) (net.Conn, error) {
+	password := admin.Password.GetPlaintext()
+	if password == "" {
+		return nil, errors.New("database provisioning credential is unavailable")
 	}
-	payloadLen := int(header[0]) | int(header[1])<<8 | int(header[2])<<16
-	payload := make([]byte, payloadLen)
-	if _, err := io.ReadFull(conn, payload); err != nil {
-		return nil, err
-	}
-	return &mysqlPkt{payload: payload, seq: header[3]}, nil
+	return mysqlConnect(ctx, instance, admin.Username, password)
 }
 
 func readLenEncInt(data []byte) (uint64, int) {
 	if len(data) == 0 {
 		return 0, 0
 	}
-	v := data[0]
-	if v < 0xfb {
-		return uint64(v), 1
-	}
-	if v == 0xfc && len(data) >= 3 {
-		return uint64(data[1]) | uint64(data[2])<<8, 3
-	}
-	if v == 0xfd && len(data) >= 4 {
-		return uint64(data[1]) | uint64(data[2])<<8 | uint64(data[3])<<16, 4
-	}
-	if v == 0xfe && len(data) >= 9 {
-		return binary.LittleEndian.Uint64(data[1:9]), 9
+	switch data[0] {
+	case 0xfc:
+		if len(data) >= 3 {
+			return uint64(data[1]) | uint64(data[2])<<8, 3
+		}
+	case 0xfd:
+		if len(data) >= 4 {
+			return uint64(data[1]) | uint64(data[2])<<8 | uint64(data[3])<<16, 4
+		}
+	case 0xfe:
+		if len(data) >= 9 {
+			return binary.LittleEndian.Uint64(data[1:9]), 9
+		}
+	default:
+		if data[0] < 0xfb {
+			return uint64(data[0]), 1
+		}
 	}
 	return 0, 0
 }
 
 func parseMySQLTextRow(payload []byte) []string {
-	pos := 0
-	var cols []string
-	for pos < len(payload) {
-		if payload[pos] == 0xfb {
-			cols = append(cols, "")
-			pos++
+	position := 0
+	var columns []string
+	for position < len(payload) {
+		if payload[position] == 0xfb {
+			columns = append(columns, "")
+			position++
 			continue
 		}
-		strLen, offset := readLenEncInt(payload[pos:])
-		pos += offset
-		end := pos + int(strLen)
-		if end > len(payload) {
-			end = len(payload)
+		length, offset := readLenEncInt(payload[position:])
+		if offset == 0 {
+			return columns
 		}
-		cols = append(cols, string(payload[pos:end]))
-		pos = end
+		position += offset
+		end := position + int(length)
+		if end > len(payload) {
+			return columns
+		}
+		columns = append(columns, string(payload[position:end]))
+		position = end
 	}
-	return cols
+	return columns
 }

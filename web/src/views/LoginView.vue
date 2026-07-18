@@ -63,7 +63,7 @@ import 'altcha';
 import 'altcha/i18n/zh-cn';
 import 'altcha/altcha.css';
 
-import { apiClient, setToken } from '@/api/client';
+import { apiClient, setCSRFToken } from '@/api/client';
 import { useI18n } from '@/i18n';
 import { usePreferencesStore } from '@/stores/preferences';
 import { resolveLoginRedirect } from '@/utils/loginRedirect';
@@ -124,13 +124,13 @@ async function submit() {
   loginError.value = '';
   try {
     const resp = await apiClient.login(form.username.trim(), form.password, captchaPayload.value);
-    const token = resp.token;
-    if (!token) {
+	const csrfToken = resp.csrf_token;
+	if (!csrfToken) {
       loginError.value = t('login.tokenMissing');
       resetCaptcha();
       return;
     }
-    setToken(token);
+	setCSRFToken(csrfToken);
     await preferences.fetch({ force: true }).catch(() => undefined);
     const redirect = resolveLoginRedirect(route.query.redirect);
     if (redirect.external) {

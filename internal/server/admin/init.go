@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -41,7 +42,7 @@ type SetupRequest struct {
 
 // SetupResponse 初始化设置响应
 type SetupResponse struct {
-	Token string `json:"token"`
+	CSRFToken string `json:"csrf_token"`
 }
 
 // EncryptionKeyResponse 加密密钥响应
@@ -196,32 +197,47 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	token, tokenHashStr, err := newAPIToken()
-	if err != nil {
-		s.writeErrorText(w, r, http.StatusInternalServerError, "failed to generate token")
-		return
-	}
-
-	// Store token hash and update last login time
-	user.TokenHash = tokenHashStr
+	// Browser logins use an HttpOnly server-side session.  User token hashes are
+	// retained exclusively for CLI and protocol identities.
 	user.LastLoginAt = &now
 	if err := s.db.Save(&user).Error; err != nil {
-		s.writeErrorText(w, r, http.StatusInternalServerError, "failed to save token")
+		s.writeErrorText(w, r, http.StatusInternalServerError, "failed to save login state")
+		return
+	}
+	session, err := s.browserSessions.Create(r.Context(), user.ID)
+	if err != nil {
+		s.writeErrorText(w, r, http.StatusInternalServerError, "failed to create browser session")
 		return
 	}
 
 	limiter.reset(limitKey)
 	s.logLogin(r, username, user.ID, "success", "")
-	// Set jianmen_token cookie so proxy ports can authenticate via cookie
+	setBrowserSessionCookie(w, r, session.Secret, session.ExpiresAt, s.cfg.Admin.PublicURL)
+	s.writeJSON(w, r, http.StatusOK, map[string]string{"csrf_token": session.CSRFToken})
+}
+
+func setBrowserSessionCookie(w http.ResponseWriter, r *http.Request, secret string, expiresAt time.Time, publicURL string) {
 	http.SetCookie(w, &http.Cookie{
-		Name:     "jianmen_token",
-		Value:    token,
+		Name:     "jianmen_session",
+		Value:    secret,
 		Path:     "/",
-		HttpOnly: false,
-		Secure:   false,
+		HttpOnly: true,
+		Secure:   secureRequest(r, publicURL),
 		SameSite: http.SameSiteLaxMode,
+		Expires:  expiresAt,
 	})
-	s.writeJSON(w, r, http.StatusOK, map[string]string{"token": token})
+}
+
+func clearBrowserSessionCookie(w http.ResponseWriter, r *http.Request, publicURL string) {
+	http.SetCookie(w, &http.Cookie{Name: "jianmen_session", Value: "", Path: "/", HttpOnly: true, Secure: secureRequest(r, publicURL), SameSite: http.SameSiteLaxMode, MaxAge: -1, Expires: time.Unix(1, 0)})
+}
+
+func secureRequest(r *http.Request, publicURL string) bool {
+	if r != nil && r.TLS != nil {
+		return true
+	}
+	parsed, err := url.Parse(strings.TrimSpace(publicURL))
+	return err == nil && strings.EqualFold(parsed.Scheme, "https")
 }
 
 // handleInitSetup 创建超级管理员用户（事务保护 TOCTOU）
@@ -264,12 +280,6 @@ func (s *Server) handleInitSetup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	token, tokenHashStr, err := newAPIToken()
-	if err != nil {
-		s.writeErrorText(w, r, http.StatusInternalServerError, "failed to generate token")
-		return
-	}
-
 	releaseSetup, err := s.acquireSetupSlot(r.Context())
 	if err != nil {
 		s.writeErrorText(w, r, http.StatusRequestTimeout, "setup request canceled")
@@ -279,6 +289,7 @@ func (s *Server) handleInitSetup(w http.ResponseWriter, r *http.Request) {
 
 	var created bool
 	var alreadyInitialized bool
+	var createdUserID string
 	err = runSetupTransaction(r.Context(), s.db, func(tx *gorm.DB) error {
 		created = false
 		alreadyInitialized = false
@@ -309,7 +320,6 @@ func (s *Server) handleInitSetup(w http.ResponseWriter, r *http.Request) {
 			PasswordHash:    string(passwordHash),
 			MySQLNativeHash: util.MySQLNativePasswordHash(password),
 			DisplayName:     strings.TrimSpace(req.DisplayName),
-			TokenHash:       tokenHashStr,
 			Email:           email,
 			Status:          "active",
 			IsSuperAdmin:    true,
@@ -320,6 +330,7 @@ func (s *Server) handleInitSetup(w http.ResponseWriter, r *http.Request) {
 		}
 
 		created = true
+		createdUserID = user.ID
 		return nil
 	})
 	if err != nil {
@@ -341,13 +352,19 @@ func (s *Server) handleInitSetup(w http.ResponseWriter, r *http.Request) {
 		os.Remove(filepath.Join(s.dataDir, ".encryption_key_shown"))
 	}
 
-	s.writeJSON(w, r, http.StatusCreated, SetupResponse{Token: token})
+	userSession, err := s.browserSessions.Create(r.Context(), createdUserID)
+	if err != nil {
+		s.writeErrorText(w, r, http.StatusInternalServerError, "failed to create browser session")
+		return
+	}
+	setBrowserSessionCookie(w, r, userSession.Secret, userSession.ExpiresAt, s.cfg.Admin.PublicURL)
+	s.writeJSON(w, r, http.StatusCreated, SetupResponse{CSRFToken: userSession.CSRFToken})
 }
 
 // handleInitEncryptionKey 返回加密密钥（一次性读取，原子标记防并发）
 func (s *Server) handleInitEncryptionKey(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		w.Header().Set("Allow", http.MethodGet)
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", http.MethodPost)
 		s.writeErrorText(w, r, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}

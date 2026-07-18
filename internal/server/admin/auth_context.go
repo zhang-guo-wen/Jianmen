@@ -4,14 +4,25 @@ import (
 	"context"
 	"net/http"
 	"strings"
+
+	"jianmen/internal/service"
 )
 
 func (s *Server) withAuthAndUser(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		auth := r.Header.Get("Authorization")
-		token := strings.TrimPrefix(auth, "Bearer ")
-		if token == "" || token == auth {
-			s.writeErrorText(w, r, http.StatusUnauthorized, "missing or invalid bearer token")
+		cookie, err := r.Cookie("jianmen_session")
+		if err != nil || strings.TrimSpace(cookie.Value) == "" || s.browserSessions == nil {
+			s.writeErrorText(w, r, http.StatusUnauthorized, "missing or invalid browser session")
+			return
+		}
+		session, found, err := s.browserSessions.Authenticate(r.Context(), cookie.Value)
+		if err != nil {
+			s.logger.Error("admin session authentication failed", "error", err)
+			s.writeErrorText(w, r, http.StatusInternalServerError, "authentication failed")
+			return
+		}
+		if !found {
+			s.writeErrorText(w, r, http.StatusUnauthorized, "invalid browser session")
 			return
 		}
 		if s.identity == nil {
@@ -19,7 +30,7 @@ func (s *Server) withAuthAndUser(next http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 
-		subject, found, err := s.identity.FindIdentitySubjectByTokenHash(r.Context(), hashToken(token))
+		subject, found, err := s.identity.FindIdentitySubject(r.Context(), session.UserID)
 		if err != nil {
 			s.logger.Error("admin authentication failed", "error", err)
 			s.writeErrorText(w, r, http.StatusInternalServerError, "authentication failed")
@@ -33,7 +44,14 @@ func (s *Server) withAuthAndUser(next http.HandlerFunc) http.HandlerFunc {
 		ctx := context.WithValue(r.Context(), ctxKeyUserID, subject.ID)
 		ctx = context.WithValue(ctx, ctxKeyUsername, subject.Username)
 		ctx = context.WithValue(ctx, ctxKeySuperAdmin, subject.SuperAdmin)
+		ctx = context.WithValue(ctx, ctxKeyBrowserSession, session)
 		authenticatedRequest := r.WithContext(ctx)
+		if requiresCSRF(authenticatedRequest) {
+			if !s.browserSessions.ValidCSRF(session, authenticatedRequest.Header.Get("X-CSRF-Token")) {
+				s.writeErrorText(w, authenticatedRequest, http.StatusForbidden, "invalid csrf token")
+				return
+			}
+		}
 		if isAuditableMutation(authenticatedRequest) {
 			aw := &auditResponseWriter{ResponseWriter: w}
 			next(aw, authenticatedRequest)
@@ -41,6 +59,20 @@ func (s *Server) withAuthAndUser(next http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 		next(w, authenticatedRequest)
+	}
+}
+
+func browserSessionFromRequest(r *http.Request) (service.BrowserSessionSubject, bool) {
+	subject, ok := r.Context().Value(ctxKeyBrowserSession).(service.BrowserSessionSubject)
+	return subject, ok
+}
+
+func requiresCSRF(r *http.Request) bool {
+	switch r.Method {
+	case http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete:
+		return true
+	default:
+		return false
 	}
 }
 

@@ -55,6 +55,11 @@ func main() {
 		logger.Error("failed to initialize authorization service", "error", err)
 		os.Exit(1)
 	}
+	browserSessionService, err := service.NewBrowserSessionService(appStore)
+	if err != nil {
+		logger.Error("failed to initialize browser session service", "error", err)
+		os.Exit(1)
+	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -82,6 +87,7 @@ func main() {
 			cfg.Admin,
 			metadataDB,
 			identityService,
+			browserSessionService,
 			authorizationService,
 			logger,
 		)
@@ -103,6 +109,7 @@ func main() {
 			appStore,
 			metadataDB,
 			identityService,
+			browserSessionService,
 			authorizationService,
 			resourceGrants,
 			resourceGroups,

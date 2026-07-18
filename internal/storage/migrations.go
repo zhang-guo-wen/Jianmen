@@ -132,6 +132,13 @@ var migrations = []Migration{
 			return tx.AutoMigrate(&model.SystemInitialization{})
 		},
 	},
+	{
+		Version: "202607180004",
+		Name:    "browser sessions and websocket tickets",
+		Run: func(tx *gorm.DB) error {
+			return tx.AutoMigrate(&model.AdminSession{}, &model.WebSocketTicket{})
+		},
+	},
 }
 
 func Migrate(db *gorm.DB) error {

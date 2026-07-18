@@ -155,47 +155,56 @@ func TestHandleUnsavedDatabaseAccountTestRequiresCreatePermission(t *testing.T) 
 	}
 }
 
-func TestAuthenticateWebTerminalReturnsActiveUser(t *testing.T) {
-	server, db := newAdminDBTestServer(t)
-	users := []model.User{
-		{ID: "active-web", Username: "alice", TokenHash: hashToken("active-token"), Status: "active"},
-		{ID: "disabled-web", Username: "bob", TokenHash: hashToken("disabled-token"), Status: "disabled"},
+func TestHandleWebTerminalRejectsLegacyBearerCredentials(t *testing.T) {
+	server, _ := newAdminDBTestServer(t)
+	tests := []struct {
+		name   string
+		url    string
+		bearer string
+	}{
+		{name: "Authorization header", url: webTerminalPath + "?target_id=web-account", bearer: "legacy-token"},
+		{name: "token query", url: webTerminalPath + "?target_id=web-account&token=legacy-token"},
+		{name: "access token query", url: webTerminalPath + "?target_id=web-account&access_token=legacy-token"},
 	}
-	if err := db.Create(&users).Error; err != nil {
-		t.Fatalf("create users: %v", err)
-	}
-
-	req := httptest.NewRequest(http.MethodGet, webTerminalPath+"?token=active-token", nil)
-	user, ok := server.authenticateWebTerminal(req)
-	if !ok || user.ID != "active-web" || user.Username != "alice" {
-		t.Fatalf("authenticated user = %#v, ok=%v", user, ok)
-	}
-	req = httptest.NewRequest(http.MethodGet, webTerminalPath+"?token=disabled-token", nil)
-	if _, ok := server.authenticateWebTerminal(req); ok {
-		t.Fatal("disabled user token was accepted")
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, test.url, nil)
+			if test.bearer != "" {
+				req.Header.Set("Authorization", "Bearer "+test.bearer)
+			}
+			rec := httptest.NewRecorder()
+			server.handleWebTerminal(rec, req)
+			if rec.Code != http.StatusUnauthorized {
+				t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusUnauthorized, rec.Body.String())
+			}
+		})
 	}
 }
 
-func TestHandleWebTerminalRequiresHostAccountGrant(t *testing.T) {
-	server, db := newAdminDBTestServer(t)
-	seedConnectionAction(t, db, "web-user", rbac.ActionSessionConnect)
-	if err := db.Model(&model.User{}).Where("id = ?", "web-user").Update("token_hash", hashToken("web-token")).Error; err != nil {
-		t.Fatalf("set web token: %v", err)
+func TestHandleWebTerminalBearerHeaderDoesNotConsumeValidTicket(t *testing.T) {
+	server, _ := newAdminDBTestServer(t)
+	created, err := server.browserSessions.Create(context.Background(), "ticket-user")
+	if err != nil {
+		t.Fatal(err)
 	}
-	host := model.Host{ID: "web-host", Name: "web-host", Address: "127.0.0.1", Port: 22, Status: "active"}
-	account := model.HostAccount{ID: "web-account", HostID: host.ID, Username: "root", Status: "active", ResourceSeq: 1, ResourceID: "H001"}
-	if err := db.Create(&host).Error; err != nil {
-		t.Fatalf("create host: %v", err)
+	subject, found, err := server.browserSessions.Authenticate(context.Background(), created.Secret)
+	if err != nil || !found {
+		t.Fatalf("authenticate browser session = found=%v err=%v", found, err)
 	}
-	if err := db.Create(&account).Error; err != nil {
-		t.Fatalf("create host account: %v", err)
+	ticket, err := server.browserSessions.CreateWebSocketTicket(context.Background(), subject, "target-1")
+	if err != nil {
+		t.Fatal(err)
 	}
 
-	req := httptest.NewRequest(http.MethodGet, webTerminalPath+"?target_id="+account.ID+"&token=web-token", nil)
+	req := httptest.NewRequest(http.MethodGet, webTerminalPath+"?target_id=target-1&ticket="+ticket, nil)
+	req.Header.Set("Authorization", "Bearer legacy-token")
 	rec := httptest.NewRecorder()
 	server.handleWebTerminal(rec, req)
-	if rec.Code != http.StatusForbidden {
-		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusForbidden, rec.Body.String())
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusUnauthorized, rec.Body.String())
+	}
+	if _, found, err := server.browserSessions.ConsumeWebSocketTicket(context.Background(), ticket, "target-1"); err != nil || !found {
+		t.Fatalf("rejected Bearer request consumed ticket: found=%v err=%v", found, err)
 	}
 }
 

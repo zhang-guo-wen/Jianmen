@@ -85,17 +85,40 @@ func (s *Server) handleWebTerminal(w http.ResponseWriter, r *http.Request) {
 		s.writeErrorText(w, r, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
-	user, ok := s.authenticateWebTerminal(r)
-	if !ok {
-		s.writeErrorText(w, r, http.StatusUnauthorized, "missing or invalid bearer token")
-		return
-	}
-
 	opts, err := webTerminalOptionsFromRequest(r)
 	if err != nil {
 		s.writeErrorText(w, r, http.StatusBadRequest, err.Error())
 		return
 	}
+	if strings.TrimSpace(r.Header.Get("Authorization")) != "" ||
+		r.URL.Query().Get("token") != "" ||
+		r.URL.Query().Get("access_token") != "" {
+		s.writeErrorText(w, r, http.StatusUnauthorized, "legacy credentials are not accepted for websocket connections")
+		return
+	}
+	if strings.TrimSpace(r.URL.Query().Get("ticket")) == "" {
+		s.writeErrorText(w, r, http.StatusUnauthorized, "missing or invalid websocket ticket")
+		return
+	}
+	if s.browserSessions == nil || s.identity == nil {
+		s.writeErrorText(w, r, http.StatusServiceUnavailable, "browser session service unavailable")
+		return
+	}
+	browserSession, found, err := s.browserSessions.ConsumeWebSocketTicket(r.Context(), r.URL.Query().Get("ticket"), opts.TargetID)
+	if err != nil {
+		s.writeErrorText(w, r, http.StatusInternalServerError, "failed to consume websocket ticket")
+		return
+	}
+	if !found {
+		s.writeErrorText(w, r, http.StatusUnauthorized, "missing or invalid websocket ticket")
+		return
+	}
+	subject, found, err := s.identity.FindIdentitySubject(r.Context(), browserSession.UserID)
+	if err != nil || !found {
+		s.writeErrorText(w, r, http.StatusUnauthorized, "invalid websocket session identity")
+		return
+	}
+	user := model.User{ID: subject.ID, Username: subject.Username, IsSuperAdmin: subject.SuperAdmin, Status: subject.Status, ExpiresAt: subject.ExpiresAt}
 	target, err := s.resolveWebTerminalTarget(r.Context(), user, opts.TargetID)
 	if err != nil {
 		s.writeErrorText(w, r, http.StatusNotFound, err.Error())
@@ -177,31 +200,6 @@ func (s *Server) handleWebTerminal(w http.ResponseWriter, r *http.Request) {
 		writeWebTerminalClose(conn, err)
 		s.logger.Warn("web terminal session ended with error", "target", target.ID, "error", err)
 	}
-}
-
-func (s *Server) authenticateWebTerminal(r *http.Request) (model.User, bool) {
-	// WebTerminal 使用与 Admin API 相同的 per-user token 认证
-	auth := r.Header.Get("Authorization")
-	token := strings.TrimPrefix(auth, "Bearer ")
-	if token == "" || token == auth {
-		// 也支持 query string 传 token
-		query := r.URL.Query()
-		token = query.Get("token")
-		if token == "" {
-			token = query.Get("access_token")
-		}
-	}
-	if token == "" {
-		return model.User{}, false
-	}
-	if s.db == nil {
-		return model.User{}, false
-	}
-	var user model.User
-	if err := s.db.Where("token_hash = ? AND status = ?", hashToken(token), "active").First(&user).Error; err != nil {
-		return model.User{}, false
-	}
-	return user, true
 }
 
 func (s *Server) resolveWebTerminalTarget(ctx context.Context, user model.User, targetID string) (store.TargetConfig, error) {

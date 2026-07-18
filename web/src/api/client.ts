@@ -1,5 +1,5 @@
 ﻿const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? '').replace(/\/$/, '');
-const TOKEN_KEY = 'jianmen_token';
+const CSRF_KEY = 'jianmen_csrf';
 
 // ── 统一响应格式 ──────────────────────────────────────────────────
 
@@ -794,33 +794,34 @@ function buildQS(params?: Record<string, string | number | boolean | undefined>)
   return s ? `?${s}` : '';
 }
 
-export function getToken(): string {
-  return localStorage.getItem(TOKEN_KEY) ?? '';
+export function getCSRFToken(): string {
+  return sessionStorage.getItem(CSRF_KEY) ?? '';
 }
 
-export function setToken(token: string): void {
-  localStorage.setItem(TOKEN_KEY, token);
+export function setCSRFToken(token: string): void {
+  sessionStorage.setItem(CSRF_KEY, token);
 }
 
-export function clearToken(): void {
-  localStorage.removeItem(TOKEN_KEY);
+export function clearCSRFToken(): void {
+  sessionStorage.removeItem(CSRF_KEY);
 }
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const token = getToken();
-  const headers = new Headers(init.headers);
+	const headers = new Headers(init.headers);
 
   if (!headers.has('Content-Type') && init.body) {
     headers.set('Content-Type', 'application/json');
   }
 
-  if (token) {
-    headers.set('Authorization', `Bearer ${token}`);
+	if (!['GET', 'HEAD', 'OPTIONS'].includes((init.method ?? 'GET').toUpperCase())) {
+		const csrfToken = getCSRFToken();
+		if (csrfToken) headers.set('X-CSRF-Token', csrfToken);
   }
 
   const response = await fetch(`${API_BASE_URL}${path}`, {
-    ...init,
-    headers
+		...init,
+		headers,
+		credentials: 'include'
   });
 
   // 204 No Content
@@ -841,7 +842,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 
   // 401 表示 token 过期或无效，清除 token 并跳转登录
   if (response.status === 401) {
-    clearToken();
+		clearCSRFToken();
     if (window.location.pathname !== '/login') {
       window.location.href = '/login';
     }
@@ -1326,15 +1327,17 @@ export const apiClient = {
   getLoginCaptchaChallenge: () =>
     request<LoginCaptchaChallenge>('/api/login/challenge'),
   login: (username: string, password: string, captchaPayload: string) =>
-    request<{ token: string }>('/api/login', {
+    request<{ csrf_token: string }>('/api/login', {
       method: 'POST',
       body: JSON.stringify({ username, password, captcha_payload: captchaPayload }),
     }),
   getInitStatus: () => request<InitStatusResponse>('/api/init/status'),
   setup: (payload: { username: string; password: string; email: string; display_name?: string }) =>
-    request<{ token: string }>('/api/init/setup', {
+    request<{ csrf_token: string }>('/api/init/setup', {
       method: 'POST',
       body: JSON.stringify(payload)
     }),
-  getEncryptionKey: () => request<{ key: string }>('/api/init/encryption-key')
+	getEncryptionKey: () => request<{ key: string }>('/api/init/encryption-key', { method: 'POST' }),
+	logout: () => request<void>('/api/logout', { method: 'POST' }),
+	createWebTerminalTicket: (targetId: string) => request<{ ticket: string; target_id: string }>('/api/web-terminal/tickets', { method: 'POST', body: JSON.stringify({ target_id: targetId }) })
 };

@@ -69,7 +69,7 @@ import { SwitchButton } from "@element-plus/icons-vue";
 import { computed, onMounted, watchEffect } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
-import { clearToken, getToken } from "@/api/client";
+import { apiClient, clearCSRFToken, getCSRFToken } from "@/api/client";
 import { APP_NAV_ITEMS } from "@/navigation";
 import { usePermissionStore } from "@/stores/permission";
 import { usePreferencesStore } from "@/stores/preferences";
@@ -94,7 +94,7 @@ const navItems = computed(() =>
 );
 
 onMounted(async () => {
-  if (!isLoginRoute.value && getToken()) {
+	if (!isLoginRoute.value && getCSRFToken()) {
     await Promise.all([permission.fetch(), preferences.fetch().catch(() => undefined)]);
   }
 });
@@ -114,10 +114,11 @@ watchEffect(() => {
   document.title = `${pageTitle.value} - Jianmen`;
 });
 
-function logout() {
+async function logout() {
   permission.reset();
   preferences.reset();
-  clearToken();
+	try { await apiClient.logout(); } catch { /* clear local anti-CSRF state even when session has expired */ }
+	clearCSRFToken();
   router.push({ name: "login" });
 }
 

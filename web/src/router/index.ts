@@ -1,6 +1,6 @@
 import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router';
 
-import { apiClient, getToken } from '@/api/client';
+import { apiClient, getCSRFToken } from '@/api/client';
 import type { TranslationKey } from '@/i18n';
 import { APP_NAV_ITEMS } from '@/navigation';
 import { usePermissionStore } from '@/stores/permission';
@@ -98,7 +98,7 @@ router.beforeEach(async (to, from) => {
   if (needsInit) return { name: 'setup' };
   if (to.meta.public) return true;
 
-  if (!getToken()) {
+	if (!getCSRFToken()) {
     return { name: 'login', query: { redirect: to.fullPath } };
   }
 

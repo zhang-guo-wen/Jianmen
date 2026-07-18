@@ -150,7 +150,7 @@ import { CircleCheckFilled } from '@element-plus/icons-vue';
 import { ElMessage } from 'element-plus';
 import type { FormInstance, FormRules } from 'element-plus';
 
-import { apiClient, clearToken, setToken } from '@/api/client';
+import { apiClient, clearCSRFToken, setCSRFToken } from '@/api/client';
 import { useI18n } from '@/i18n';
 import { writeClipboardText } from '@/utils/clipboard';
 
@@ -236,10 +236,10 @@ async function handleSetup() {
       email: form.email.trim(),
       display_name: form.display_name.trim() || undefined,
     });
-    if (!setupResult.token) {
+	if (!setupResult.csrf_token) {
       throw new Error(t('setup.error.setup'));
     }
-    setToken(setupResult.token);
+	setCSRFToken(setupResult.csrf_token);
 
     try {
       const keyResult = await apiClient.getEncryptionKey();
@@ -280,8 +280,13 @@ async function copyKey() {
   }
 }
 
-function handleFinish() {
-  clearToken();
+async function handleFinish() {
+  try {
+    await apiClient.logout();
+  } catch {
+    // The local anti-CSRF state must still be removed if the session expired.
+  }
+  clearCSRFToken();
   router.replace('/login');
 }
 </script>

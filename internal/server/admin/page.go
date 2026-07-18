@@ -109,8 +109,8 @@ const indexHTML = `<!doctype html>
   <header>
     <h1>Jianmen Admin</h1>
     <div class="toolbar">
-      <input id="token" type="password" placeholder="Bearer token">
-      <button id="saveToken">Save</button>
+      <input id="token" type="password" placeholder="CSRF token">
+      <button id="saveToken">Save CSRF</button>
       <button class="secondary" id="refresh">Refresh</button>
     </div>
   </header>
@@ -162,17 +162,17 @@ const indexHTML = `<!doctype html>
     const tokenInput = document.querySelector("#token");
     const statusEl = document.querySelector("#status");
     const detailEl = document.querySelector("#detail");
-    tokenInput.value = localStorage.getItem("jianmen_token") || "";
+    tokenInput.value = sessionStorage.getItem("jianmen_csrf") || "";
 
     document.querySelector("#saveToken").onclick = () => {
-      localStorage.setItem("jianmen_token", tokenInput.value);
+      sessionStorage.setItem("jianmen_csrf", tokenInput.value);
       refresh();
     };
     document.querySelector("#refresh").onclick = refresh;
     document.querySelector("#addTarget").onclick = addTarget;
 
     function authHeaders(extra = {}) {
-      return { "Authorization": "Bearer " + tokenInput.value, ...extra };
+      return { "X-CSRF-Token": tokenInput.value, ...extra };
     }
 
     async function api(path, options = {}) {
@@ -236,7 +236,7 @@ const indexHTML = `<!doctype html>
     async function refresh() {
       statusEl.textContent = "Loading";
       statusEl.className = "muted";
-      localStorage.setItem("jianmen_token", tokenInput.value);
+      sessionStorage.setItem("jianmen_csrf", tokenInput.value);
       try {
         const [health, users, targets, sessions, dbConnections] = await Promise.all([
           api("/api/health"),

@@ -3,6 +3,7 @@ import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
 import '@xterm/xterm/css/xterm.css';
+import { apiClient } from '@/api/client';
 
 export type TerminalStatus = 'idle' | 'connecting' | 'connected' | 'disconnected' | 'error';
 
@@ -20,13 +21,12 @@ export interface UseWebTerminalReturn {
   disconnect(): void;
 }
 
-function buildWsUrl(targetId: string, cols: number, rows: number): string {
-  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  const token = localStorage.getItem('jianmen_token') || '';
-  return (
-    `${protocol}//${window.location.host}/api/web-terminal` +
-    `?target_id=${encodeURIComponent(targetId)}` +
-    `&token=${encodeURIComponent(token)}` +
+function buildWsUrl(targetId: string, ticket: string, cols: number, rows: number): string {
+	const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+	return (
+		`${protocol}//${window.location.host}/api/web-terminal` +
+		`?target_id=${encodeURIComponent(targetId)}` +
+		`&ticket=${encodeURIComponent(ticket)}` +
     `&cols=${cols}&rows=${rows}` +
     `&term=xterm-256color`
   );
@@ -94,12 +94,13 @@ export function useWebTerminal(opts: UseWebTerminalOptions): UseWebTerminalRetur
       return false;
     });
     fitAddon.fit();
-    terminal.value = term;
+	terminal.value = term;
 
-    try {
-      await new Promise<void>((resolve, reject) => {
-        const url = buildWsUrl(opts.targetId.value, cols, rows);
-        console.debug('[WebTerminal] connecting to', url.replace(/token=[^&]+/, 'token=***'));
+	try {
+		const { ticket, target_id: ticketTargetId } = await apiClient.createWebTerminalTicket(opts.targetId.value);
+		const url = buildWsUrl(ticketTargetId, ticket, cols, rows);
+		await new Promise<void>((resolve, reject) => {
+		console.debug('[WebTerminal] connecting to', url.replace(/ticket=[^&]+/, 'ticket=***'));
         ws = new WebSocket(url);
         ws.binaryType = 'arraybuffer';
 

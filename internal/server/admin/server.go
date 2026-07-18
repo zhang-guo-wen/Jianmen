@@ -32,6 +32,7 @@ type Server struct {
 	resourceGrants   *service.ResourceGrantService
 	resourceGroups   *service.ResourceGroupService
 	temporaryAccess  *service.TemporaryAccessService
+	browserSessions  *service.BrowserSessionService
 	setupOnce        sync.Once
 	setupSlot        chan struct{}
 }
@@ -56,6 +57,7 @@ func New(
 	repository store.Store,
 	db *gorm.DB,
 	identity *service.IdentityService,
+	browserSessions *service.BrowserSessionService,
 	authorization authorizationService,
 	resourceGrants *service.ResourceGrantService,
 	resourceGroups *service.ResourceGroupService,
@@ -73,6 +75,8 @@ func New(
 		return nil, errors.New("admin metadata database is required")
 	case identity == nil:
 		return nil, errors.New("admin identity service is required")
+	case browserSessions == nil:
+		return nil, errors.New("admin browser session service is required")
 	case authorization == nil:
 		return nil, errors.New("admin authorization service is required")
 	case resourceGrants == nil:
@@ -103,5 +107,6 @@ func New(
 		onlineSessions: onlineSessions, containerService: service.NewContainerService(),
 		identity: identity, authorization: authorization,
 		resourceGrants: resourceGrants, resourceGroups: resourceGroups, temporaryAccess: temporaryAccess,
+		browserSessions: browserSessions,
 	}, nil
 }

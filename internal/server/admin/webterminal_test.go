@@ -39,17 +39,17 @@ func TestParseWebTerminalResizeMessageIgnoresTerminalText(t *testing.T) {
 	}
 }
 
-func TestHandleWebTerminalRejectsMissingToken(t *testing.T) {
+func TestHandleWebTerminalRejectsMissingTicket(t *testing.T) {
 	server := &Server{
 		cfg:    &config.Config{Admin: config.AdminConfig{}},
 		logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
 	}
-	// 无 Authorization header 且无 query token → 拒绝
+	// WebSocket 入口只接受短期一次性 ticket。
 	req := httptest.NewRequest(http.MethodGet, webTerminalPath+"?target_id=web01", nil)
 	rec := httptest.NewRecorder()
 	server.handleWebTerminal(rec, req)
 	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("status = %d, want %d (missing token should be rejected)", rec.Code, http.StatusUnauthorized)
+		t.Fatalf("status = %d, want %d (missing ticket should be rejected)", rec.Code, http.StatusUnauthorized)
 	}
 }
 

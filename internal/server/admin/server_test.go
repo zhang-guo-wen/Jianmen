@@ -659,23 +659,33 @@ func TestEncryptionKeyRequiresSuperAdminToken(t *testing.T) {
 	}
 	handler := server.withAuthAndUser(server.handleInitEncryptionKey)
 
-	missingAuthReq := httptest.NewRequest(http.MethodGet, "/api/init/encryption-key", nil)
+	missingAuthReq := httptest.NewRequest(http.MethodPost, "/api/init/encryption-key", nil)
 	missingAuthRec := httptest.NewRecorder()
 	handler(missingAuthRec, missingAuthReq)
 	if missingAuthRec.Code != http.StatusUnauthorized {
 		t.Fatalf("missing auth status = %d, want %d", missingAuthRec.Code, http.StatusUnauthorized)
 	}
 
-	regularReq := httptest.NewRequest(http.MethodGet, "/api/init/encryption-key", nil)
-	regularReq.Header.Set("Authorization", "Bearer regular-token")
+	regularReq := httptest.NewRequest(http.MethodPost, "/api/init/encryption-key", nil)
+	regularSession, err := server.browserSessions.Create(regularReq.Context(), "regular")
+	if err != nil {
+		t.Fatal(err)
+	}
+	regularReq.AddCookie(&http.Cookie{Name: "jianmen_session", Value: regularSession.Secret})
+	regularReq.Header.Set("X-CSRF-Token", regularSession.CSRFToken)
 	regularRec := httptest.NewRecorder()
 	handler(regularRec, regularReq)
 	if regularRec.Code != http.StatusForbidden {
 		t.Fatalf("regular status = %d, want %d; body=%s", regularRec.Code, http.StatusForbidden, regularRec.Body.String())
 	}
 
-	adminReq := httptest.NewRequest(http.MethodGet, "/api/init/encryption-key", nil)
-	adminReq.Header.Set("Authorization", "Bearer admin-token")
+	adminReq := httptest.NewRequest(http.MethodPost, "/api/init/encryption-key", nil)
+	adminSession, err := server.browserSessions.Create(adminReq.Context(), "admin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	adminReq.AddCookie(&http.Cookie{Name: "jianmen_session", Value: adminSession.Secret})
+	adminReq.Header.Set("X-CSRF-Token", adminSession.CSRFToken)
 	adminRec := httptest.NewRecorder()
 	handler(adminRec, adminReq)
 	if adminRec.Code != http.StatusOK {
@@ -689,8 +699,9 @@ func TestEncryptionKeyRequiresSuperAdminToken(t *testing.T) {
 		t.Fatalf("key length = %d, want 64 hex chars", len(keyResp.Key))
 	}
 
-	secondAdminReq := httptest.NewRequest(http.MethodGet, "/api/init/encryption-key", nil)
-	secondAdminReq.Header.Set("Authorization", "Bearer admin-token")
+	secondAdminReq := httptest.NewRequest(http.MethodPost, "/api/init/encryption-key", nil)
+	secondAdminReq.AddCookie(&http.Cookie{Name: "jianmen_session", Value: adminSession.Secret})
+	secondAdminReq.Header.Set("X-CSRF-Token", adminSession.CSRFToken)
 	secondAdminRec := httptest.NewRecorder()
 	handler(secondAdminRec, secondAdminReq)
 	if secondAdminRec.Code != http.StatusForbidden {
@@ -851,17 +862,22 @@ func newAdminDBTestServer(t *testing.T) (*Server, *gorm.DB) {
 	if err != nil {
 		t.Fatalf("new resource group service: %v", err)
 	}
+	browserSessions, err := service.NewBrowserSessionService(storeInst)
+	if err != nil {
+		t.Fatalf("new browser session service: %v", err)
+	}
 	return &Server{
-		cfg:            cfg,
-		store:          storeInst,
-		db:             db,
-		logger:         slog.New(slog.NewTextHandler(io.Discard, nil)),
-		dataDir:        dataDir,
-		loginCaptcha:   testLoginCaptcha{},
-		identity:       identityService,
-		authorization:  authorizationService,
-		resourceGrants: resourceGrants,
-		resourceGroups: resourceGroups,
+		cfg:             cfg,
+		store:           storeInst,
+		db:              db,
+		logger:          slog.New(slog.NewTextHandler(io.Discard, nil)),
+		dataDir:         dataDir,
+		loginCaptcha:    testLoginCaptcha{},
+		identity:        identityService,
+		authorization:   authorizationService,
+		resourceGrants:  resourceGrants,
+		resourceGroups:  resourceGroups,
+		browserSessions: browserSessions,
 	}, db
 }
 

@@ -2,8 +2,32 @@ package admin
 
 import (
 	"errors"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 )
+
+func TestWithCORSCredentialsAndCSRFPreflight(t *testing.T) {
+	handler := withCORS([]string{"https://console.example.com"}, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	req := httptest.NewRequest(http.MethodOptions, "/api/hosts", nil)
+	req.Header.Set("Origin", "https://console.example.com")
+	req.Header.Set("Access-Control-Request-Method", http.MethodPost)
+	req.Header.Set("Access-Control-Request-Headers", "Content-Type, X-CSRF-Token")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusNoContent)
+	}
+	if rec.Header().Get("Access-Control-Allow-Credentials") != "true" {
+		t.Fatal("credentials were not enabled for allowed origin")
+	}
+	if !strings.Contains(rec.Header().Get("Access-Control-Allow-Headers"), "X-CSRF-Token") {
+		t.Fatal("CSRF header is not allowed by CORS preflight")
+	}
+}
 
 func TestFriendlySSHError(t *testing.T) {
 	tests := []struct {

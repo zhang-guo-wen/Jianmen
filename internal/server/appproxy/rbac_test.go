@@ -2,8 +2,6 @@ package appproxy
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -17,22 +15,36 @@ import (
 )
 
 type fakeTokenAuthenticator struct {
-	subject   service.IdentitySubject
-	found     bool
-	err       error
-	calls     int
-	ctx       context.Context
-	tokenHash string
+	subject service.IdentitySubject
+	found   bool
+	err     error
+	calls   int
+	ctx     context.Context
+	userID  string
 }
 
-func (f *fakeTokenAuthenticator) FindIdentitySubjectByTokenHash(
+func (f *fakeTokenAuthenticator) FindIdentitySubject(
 	ctx context.Context,
-	tokenHash string,
+	userID string,
 ) (service.IdentitySubject, bool, error) {
 	f.calls++
 	f.ctx = ctx
-	f.tokenHash = tokenHash
+	f.userID = userID
 	return f.subject, f.found, f.err
+}
+
+type fakeBrowserSessions struct {
+	subject service.BrowserSessionSubject
+	found   bool
+	err     error
+}
+
+func (f *fakeBrowserSessions) Authenticate(_ context.Context, _ string) (service.BrowserSessionSubject, bool, error) {
+	return f.subject, f.found, f.err
+}
+
+func activeFakeBrowserSession() *fakeBrowserSessions {
+	return &fakeBrowserSessions{subject: service.BrowserSessionSubject{SessionID: "s1", UserID: "canonical-user"}, found: true}
 }
 
 type fakeConnectionAuthorizer struct {
@@ -58,7 +70,7 @@ func TestApplicationMiddlewareAuthenticatesOnceAndAuthorizesCanonicalUser(t *tes
 	authorizer := &fakeConnectionAuthorizer{
 		decision: service.AuthorizationDecision{Allowed: true},
 	}
-	s := &Server{authenticator: authenticator, authorizer: authorizer}
+	s := &Server{authenticator: authenticator, sessions: activeFakeBrowserSession(), authorizer: authorizer}
 	app := model.Application{ID: "app1"}
 	nextCalled := false
 	handler := applicationMiddleware(s, app, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -66,7 +78,7 @@ func TestApplicationMiddlewareAuthenticatesOnceAndAuthorizesCanonicalUser(t *tes
 		w.WriteHeader(http.StatusNoContent)
 	}))
 	req := httptest.NewRequest(http.MethodGet, "http://127.0.0.1/app", nil)
-	req.Header.Set("Authorization", "Bearer raw-token")
+	req.AddCookie(&http.Cookie{Name: "jianmen_session", Value: "session"})
 	recorder := httptest.NewRecorder()
 
 	handler.ServeHTTP(recorder, req)
@@ -77,9 +89,8 @@ func TestApplicationMiddlewareAuthenticatesOnceAndAuthorizesCanonicalUser(t *tes
 	if authenticator.calls != 1 {
 		t.Fatalf("authenticator calls = %d, want 1", authenticator.calls)
 	}
-	sum := sha256.Sum256([]byte("raw-token"))
-	if authenticator.tokenHash != hex.EncodeToString(sum[:]) {
-		t.Fatalf("token hash = %q", authenticator.tokenHash)
+	if authenticator.userID != "canonical-user" {
+		t.Fatalf("identity lookup user id = %q", authenticator.userID)
 	}
 	if authorizer.calls != 1 || authorizer.request.UserID != "canonical-user" {
 		t.Fatalf("authorizer calls = %d, request = %#v", authorizer.calls, authorizer.request)
@@ -122,14 +133,14 @@ func TestApplicationMiddlewareRejectsAuthenticationFailures(t *testing.T) {
 			authorizer := &fakeConnectionAuthorizer{
 				decision: service.AuthorizationDecision{Allowed: true},
 			}
-			s := &Server{authenticator: tt.authenticator, authorizer: authorizer}
+			s := &Server{authenticator: tt.authenticator, sessions: activeFakeBrowserSession(), authorizer: authorizer}
 			nextCalled := false
 			handler := applicationMiddleware(s, model.Application{ID: "app1"}, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
 				nextCalled = true
 			}))
 			req := httptest.NewRequest(http.MethodGet, "http://127.0.0.1/app", nil)
 			if tt.token != "" {
-				req.Header.Set("Authorization", "Bearer "+tt.token)
+				req.AddCookie(&http.Cookie{Name: "jianmen_session", Value: tt.token})
 			}
 			recorder := httptest.NewRecorder()
 
@@ -180,7 +191,7 @@ func TestApplicationMiddlewareRejectsAuthorizationFailures(t *testing.T) {
 				subject: service.IdentitySubject{ID: "u1", Status: "active"},
 				found:   true,
 			}
-			s := &Server{authenticator: authenticator, authorizer: tt.authorizer}
+			s := &Server{authenticator: authenticator, sessions: activeFakeBrowserSession(), authorizer: tt.authorizer}
 			nextCalled := false
 			handler := applicationMiddleware(s, model.Application{ID: "app1"}, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
 				nextCalled = true
@@ -192,7 +203,7 @@ func TestApplicationMiddlewareRejectsAuthorizationFailures(t *testing.T) {
 				cancel()
 			}
 			req := httptest.NewRequestWithContext(ctx, http.MethodGet, "http://127.0.0.1/app", nil)
-			req.Header.Set("Authorization", "Bearer token")
+			req.AddCookie(&http.Cookie{Name: "jianmen_session", Value: "session"})
 			recorder := httptest.NewRecorder()
 
 			handler.ServeHTTP(recorder, req)
@@ -255,13 +266,13 @@ func TestAuthorizeAppPropagatesAuthorizerError(t *testing.T) {
 }
 
 func TestNewWithNilDependenciesFailsClosed(t *testing.T) {
-	s := New(config.ApplicationGatewayConfig{}, config.AdminConfig{}, nil, nil, nil, slog.Default())
+	s := New(config.ApplicationGatewayConfig{}, config.AdminConfig{}, nil, nil, nil, nil, slog.Default())
 	nextCalled := false
 	handler := applicationMiddleware(s, model.Application{ID: "app1"}, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
 		nextCalled = true
 	}))
 	req := httptest.NewRequest(http.MethodGet, "http://127.0.0.1/app", nil)
-	req.Header.Set("Authorization", "Bearer token")
+	req.AddCookie(&http.Cookie{Name: "jianmen_session", Value: "session"})
 	recorder := httptest.NewRecorder()
 
 	handler.ServeHTTP(recorder, req)

@@ -2,8 +2,6 @@ package appproxy
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -28,6 +26,7 @@ type Server struct {
 	adminCfg      config.AdminConfig
 	db            *gorm.DB
 	authenticator tokenAuthenticator
+	sessions      browserSessionAuthenticator
 	authorizer    connectionAuthorizer
 	logger        *slog.Logger
 
@@ -36,7 +35,11 @@ type Server struct {
 }
 
 type tokenAuthenticator interface {
-	FindIdentitySubjectByTokenHash(context.Context, string) (service.IdentitySubject, bool, error)
+	FindIdentitySubject(context.Context, string) (service.IdentitySubject, bool, error)
+}
+
+type browserSessionAuthenticator interface {
+	Authenticate(context.Context, string) (service.BrowserSessionSubject, bool, error)
 }
 
 type connectionAuthorizer interface {
@@ -51,11 +54,14 @@ type proxyEntry struct {
 	proxy  *httputil.ReverseProxy
 }
 
+const browserSessionCookieName = "jianmen_session"
+
 func New(
 	cfg config.ApplicationGatewayConfig,
 	adminCfg config.AdminConfig,
 	db *gorm.DB,
 	authenticator tokenAuthenticator,
+	sessions browserSessionAuthenticator,
 	authorizer connectionAuthorizer,
 	logger *slog.Logger,
 ) *Server {
@@ -67,6 +73,7 @@ func New(
 		adminCfg:      adminCfg,
 		db:            db,
 		authenticator: authenticator,
+		sessions:      sessions,
 		authorizer:    authorizer,
 		logger:        logger,
 		proxies:       make(map[int]*proxyEntry),
@@ -128,6 +135,7 @@ func (s *Server) startProxy(app model.Application) error {
 	}
 
 	rp := httputil.NewSingleHostReverseProxy(targetURL)
+	protectManagementSession(rp)
 	rp.ErrorHandler = s.proxyErrorHandler(app)
 	handler := s.authMiddleware(app, s.rbacMiddleware(app, s.entryRedirectMiddleware(app, rp)))
 
@@ -165,20 +173,67 @@ func (s *Server) entryRedirectMiddleware(app model.Application, next http.Handle
 
 func (s *Server) authMiddleware(app model.Application, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		token := requestToken(r)
-		if token == "" || s.authenticator == nil {
+		cookie, err := r.Cookie(browserSessionCookieName)
+		if err != nil || strings.TrimSpace(cookie.Value) == "" || s.sessions == nil || s.authenticator == nil {
 			s.writeUnauthorizedForApp(w, r, app)
 			return
 		}
-		subject, found, err := s.authenticator.FindIdentitySubjectByTokenHash(r.Context(), tokenHash(token))
+		session, found, err := s.sessions.Authenticate(r.Context(), cookie.Value)
+		if err != nil || !found {
+			s.writeUnauthorizedForApp(w, r, app)
+			return
+		}
+		subject, found, err := s.authenticator.FindIdentitySubject(r.Context(), session.UserID)
 		userID := strings.TrimSpace(subject.ID)
 		if err != nil || !found || userID == "" {
 			s.writeUnauthorizedForApp(w, r, app)
 			return
 		}
+		removeRequestCookie(r, browserSessionCookieName)
 		ctx := context.WithValue(r.Context(), authenticatedUserIDContextKey{}, userID)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+func protectManagementSession(proxy *httputil.ReverseProxy) {
+	if proxy == nil {
+		return
+	}
+	previous := proxy.ModifyResponse
+	proxy.ModifyResponse = func(response *http.Response) error {
+		if previous != nil {
+			if err := previous(response); err != nil {
+				return err
+			}
+		}
+		values := response.Header.Values("Set-Cookie")
+		response.Header.Del("Set-Cookie")
+		for _, value := range values {
+			if setCookieName(value) != browserSessionCookieName {
+				response.Header.Add("Set-Cookie", value)
+			}
+		}
+		return nil
+	}
+}
+
+func removeRequestCookie(r *http.Request, name string) {
+	cookies := r.Cookies()
+	r.Header.Del("Cookie")
+	for _, cookie := range cookies {
+		if cookie.Name != name {
+			r.AddCookie(cookie)
+		}
+	}
+}
+
+func setCookieName(value string) string {
+	pair, _, _ := strings.Cut(value, ";")
+	name, _, found := strings.Cut(strings.TrimSpace(pair), "=")
+	if !found {
+		return ""
+	}
+	return strings.TrimSpace(name)
 }
 
 func (s *Server) rbacMiddleware(app model.Application, next http.Handler) http.Handler {
@@ -217,23 +272,6 @@ func (s *Server) authorizeApp(ctx context.Context, userID, appID string) error {
 		return fmt.Errorf("application authorization denied: %s", reason)
 	}
 	return nil
-}
-
-func tokenHash(token string) string {
-	hash := sha256.Sum256([]byte(token))
-	return hex.EncodeToString(hash[:])
-}
-
-func requestToken(r *http.Request) string {
-	if cookie, err := r.Cookie("jianmen_token"); err == nil && cookie.Value != "" {
-		return cookie.Value
-	}
-	auth := r.Header.Get("Authorization")
-	token := strings.TrimPrefix(auth, "Bearer ")
-	if token == "" || token == auth {
-		return ""
-	}
-	return token
 }
 
 func authenticatedUserID(ctx context.Context) string {

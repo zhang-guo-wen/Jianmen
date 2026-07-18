@@ -151,6 +151,10 @@ func (s *Server) handleSessions(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleSessionArtifact(w http.ResponseWriter, r *http.Request) {
+	if !s.requireAnyPermission(r, rbac.ActionAuditView, rbac.ActionSessionView) {
+		s.forbidden(w, r)
+		return
+	}
 	id, artifact, ok := splitArtifactPath(strings.TrimPrefix(r.URL.Path, "/api/sessions/"))
 	if !ok {
 		s.writeErrorText(w, r, http.StatusNotFound, "not found")
@@ -178,6 +182,10 @@ func (s *Server) handleSessionArtifact(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleDBConnections(w http.ResponseWriter, r *http.Request) {
+	if !s.requirePermission(r, rbac.ActionDBAuditView) {
+		s.forbidden(w, r)
+		return
+	}
 	connections, err := s.listDBConnections()
 	if err != nil {
 		s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
@@ -193,6 +201,10 @@ func (s *Server) handleDBConnections(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleDBConnectionArtifact(w http.ResponseWriter, r *http.Request) {
+	if !s.requirePermission(r, rbac.ActionDBAuditView) {
+		s.forbidden(w, r)
+		return
+	}
 	id, artifact, ok := splitArtifactPath(strings.TrimPrefix(r.URL.Path, "/api/db/connections/"))
 	if !ok {
 		s.writeErrorText(w, r, http.StatusNotFound, "not found")

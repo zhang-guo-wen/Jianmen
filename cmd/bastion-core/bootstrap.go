@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"path/filepath"
@@ -70,6 +71,10 @@ func initializeMetadata(cfg *config.Config, logger *slog.Logger) (*gorm.DB, stri
 	if err := storage.BootstrapMetadata(db, cfg); err != nil {
 		cleanup()
 		return nil, "", nil, fmt.Errorf("bootstrap metadata database: %w", err)
+	}
+	if err := storage.ImportLegacySuperAdminIDs(context.Background(), db, dataDir); err != nil {
+		cleanup()
+		return nil, "", nil, fmt.Errorf("import legacy super administrators: %w", err)
 	}
 	logger.Info("metadata database ready", "driver", cfg.Database.Driver, "migration_mode", migrationMode)
 	return db, dataDir, cleanup, nil

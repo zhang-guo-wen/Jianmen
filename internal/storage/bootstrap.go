@@ -43,9 +43,10 @@ func bootstrapConfigUsers(db *gorm.DB, users []config.User) error {
 		}
 
 		user := model.User{
-			ID:       userID,
-			Username: username,
-			Status:   "active",
+			ID:           userID,
+			Username:     username,
+			Status:       "active",
+			IsSuperAdmin: cfgUser.SuperAdmin,
 		}
 		if pw := strings.TrimSpace(cfgUser.Password); pw != "" {
 			hash, err := bcrypt.GenerateFromPassword([]byte(pw), bcrypt.DefaultCost)
@@ -68,6 +69,7 @@ func bootstrapConfigUsers(db *gorm.DB, users []config.User) error {
 				"password_hash":      user.PasswordHash,
 				"my_sql_native_hash": user.MySQLNativeHash,
 				"token_hash":         user.TokenHash,
+				"is_super_admin":     user.IsSuperAdmin,
 			}),
 		}).Create(&user).Error; err != nil {
 			return fmt.Errorf("bootstrap metadata user %q: %w", userID, err)

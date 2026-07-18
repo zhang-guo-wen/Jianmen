@@ -64,6 +64,7 @@ type User struct {
 	Username           string   `json:"username"`
 	Password           string   `json:"password"`
 	ApiToken           string   `json:"api_token"`
+	SuperAdmin         bool     `json:"super_admin"`
 	PublicKeys         []string `json:"public_keys"`
 	AuthorizedKeysPath string   `json:"authorized_keys_path"`
 }

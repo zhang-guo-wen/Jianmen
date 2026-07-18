@@ -290,6 +290,7 @@ func (s *Server) handleInitSetup(w http.ResponseWriter, r *http.Request) {
 			TokenHash:       tokenHashStr,
 			Email:           email,
 			Status:          "active",
+			IsSuperAdmin:    true,
 		}
 
 		if err := tx.Create(&user).Error; err != nil {

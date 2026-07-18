@@ -111,6 +111,13 @@ var migrations = []Migration{
 			return tx.AutoMigrate(&model.User{}, &model.TemporaryAccount{}, &model.TemporaryCredential{}, &model.TemporaryAccountGrant{}, &model.AIAccessToken{})
 		},
 	},
+	{
+		Version: "202607180001",
+		Name:    "database backed super administrator identity",
+		Run: func(tx *gorm.DB) error {
+			return tx.AutoMigrate(&model.User{})
+		},
+	},
 }
 
 func Migrate(db *gorm.DB) error {

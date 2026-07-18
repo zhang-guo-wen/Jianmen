@@ -17,6 +17,7 @@ type User struct {
 	DisplayName     string     `gorm:"size:128" json:"display_name,omitempty"`
 	Email           string     `gorm:"index;size:255" json:"email,omitempty"`
 	Status          string     `gorm:"index:idx_users_status_username,priority:1;size:32;not null;default:active" json:"status"`
+	IsSuperAdmin    bool       `gorm:"index;not null;default:false" json:"is_super_admin"`
 	ExpiresAt       *time.Time `gorm:"index" json:"expires_at,omitempty"`
 	LastLoginAt     *time.Time `json:"last_login_at,omitempty"`
 	CreatedAt       time.Time  `json:"created_at"`

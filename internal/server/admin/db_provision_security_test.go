@@ -260,6 +260,11 @@ type fakeDatabaseProvisioningService struct {
 	listCalls        int
 	provisionCalls   int
 	provisionRequest service.ProvisionDatabaseAccountRequest
+	deprovisionErr   error
+}
+
+func (f *fakeDatabaseProvisioningService) Deprovision(context.Context, string) error {
+	return f.deprovisionErr
 }
 
 func (f *fakeDatabaseProvisioningService) ListDatabases(

@@ -374,6 +374,9 @@ func (s *DBStore) UpdateDatabaseAccount(id, username, password, group, remark st
 		}
 		return DatabaseAccountView{}, err
 	}
+	if acct.Managed && ((username != "" && username != acct.Username) || password != "") {
+		return DatabaseAccountView{}, errors.New("managed database account identity is immutable")
+	}
 	if username != "" {
 		if err := s.ensureDatabaseAccountUsernameAvailable(acct.InstanceID, username, acct.ID); err != nil {
 			return DatabaseAccountView{}, err
@@ -426,6 +429,9 @@ func (s *DBStore) DeleteDatabaseAccount(id string) error {
 				return fmt.Errorf("%w: %q", ErrDBAccountNotFound, id)
 			}
 			return err
+		}
+		if account.Managed {
+			return errors.New("managed database account requires deprovisioning")
 		}
 		if err := s.deleteResourceTx(tx, model.ResourceTypeDatabaseAccount, account.ID); err != nil {
 			return err

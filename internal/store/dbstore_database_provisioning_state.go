@@ -47,6 +47,13 @@ func validProvisioningTransition(from, to, cleanup string) bool {
 			from == service.ProvisioningStageCleanupInProgress ||
 			from == service.ProvisioningStageNotCreated) &&
 			cleanup == service.ProvisioningCleanupNone
+	case service.ProvisioningStageDropStarted:
+		return (from == service.ProvisioningStageDeprovisionRequested ||
+			from == service.ProvisioningStageDropUncertain) &&
+			cleanup == service.ProvisioningCleanupInProgress
+	case service.ProvisioningStageDropUncertain:
+		return from == service.ProvisioningStageDropStarted &&
+			cleanup == service.ProvisioningCleanupRequired
 	case service.ProvisioningStageCleanupRequired:
 		return databaseProvisioningCleanupSource(from) &&
 			(cleanup == service.ProvisioningCleanupRequired ||
@@ -117,5 +124,14 @@ func provisionedDatabaseAccountFromModel(
 		Username: view.Username, Group: view.Group, Remark: view.Remark,
 		ExpiresAt: view.ExpiresAt, Status: view.Status, ResourceID: view.ResourceID,
 		ResourceSeq: view.ResourceSeq, CreatedAt: view.CreatedAt, UpdatedAt: view.UpdatedAt,
+		Managed: account.Managed, UpstreamHost: account.UpstreamHost,
+		ProvisioningOperationID: provisioningOperationID(account.ProvisioningOperationID),
 	}
+}
+
+func provisioningOperationID(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
 }

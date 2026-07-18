@@ -2,6 +2,7 @@ package admin
 
 import (
 	"encoding/json"
+	"errors"
 	"net"
 	"net/http"
 	"strconv"
@@ -10,6 +11,7 @@ import (
 
 	"jianmen/internal/model"
 	"jianmen/internal/rbac"
+	"jianmen/internal/service"
 	"jianmen/internal/store"
 )
 
@@ -364,9 +366,15 @@ func (s *Server) handleDBAccount(w http.ResponseWriter, r *http.Request) {
 		if !s.requireResourceAction(w, r, rbac.ActionDBProxyDelete, model.ResourceTypeDatabaseAccount, id) {
 			return
 		}
-		if err := s.store.DeleteDatabaseAccount(id); err != nil {
-			writeDBStoreError(w, r, err)
-			return
+		if err := s.databaseProvisioning.Deprovision(r.Context(), id); err != nil {
+			if !errors.Is(err, service.ErrDatabaseAccountNotManaged) {
+				s.writeDatabaseDeprovisionServiceError(w, r, err)
+				return
+			}
+			if err := s.store.DeleteDatabaseAccount(id); err != nil {
+				writeDBStoreError(w, r, err)
+				return
+			}
 		}
 		w.WriteHeader(http.StatusNoContent)
 	default:

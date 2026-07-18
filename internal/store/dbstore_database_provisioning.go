@@ -233,7 +233,7 @@ func (s *DBStore) ListExecutableDatabaseProvisioningOperations(
 		Where(
 			`(stage = ? OR
 			 (stage = ? AND created_at <= ?) OR
-			 (stage IN (?, ?, ?, ?, ?, ?) AND
+			 (stage IN (?, ?, ?, ?, ?, ?, ?, ?, ?) AND
 			  COALESCE(last_attempt_at, updated_at) <= ?))`,
 			service.ProvisioningStageActivationPending,
 			service.ProvisioningStageReserved,
@@ -244,6 +244,9 @@ func (s *DBStore) ListExecutableDatabaseProvisioningOperations(
 			service.ProvisioningStageGrantStarted,
 			service.ProvisioningStageCleanupRequired,
 			service.ProvisioningStageCleanupInProgress,
+			service.ProvisioningStageDeprovisionRequested,
+			service.ProvisioningStageDropStarted,
+			service.ProvisioningStageDropUncertain,
 			staleBefore,
 		).
 		Order("updated_at ASC").

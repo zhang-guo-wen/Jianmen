@@ -355,6 +355,47 @@ func (f *provisioningRepositoryFake) DeleteDatabaseProvisioningOperation(
 	return true, nil
 }
 
+func (f *provisioningRepositoryFake) BeginDatabaseDeprovision(
+	_ context.Context, accountID string, lease DatabaseProvisioningLease,
+) (DatabaseProvisioningOperation, bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for id, account := range f.activated {
+		if account.ID != accountID {
+			continue
+		}
+		op := f.operations[id]
+		if op.Stage != ProvisioningStageActiveManaged {
+			return DatabaseProvisioningOperation{}, true, nil
+		}
+		expires := time.Now().UTC().Add(lease.Duration)
+		op.Stage, op.CleanupStatus = ProvisioningStageDeprovisionRequested, ProvisioningCleanupNone
+		op.LeaseOwner, op.LeaseToken, op.LeaseExpiresAt = lease.Owner, lease.Token, &expires
+		op.Revision++
+		f.operations[id] = op
+		return op, true, nil
+	}
+	return DatabaseProvisioningOperation{}, false, nil
+}
+
+func (f *provisioningRepositoryFake) CompleteDatabaseDeprovision(
+	_ context.Context, expected DatabaseProvisioningFence, accountID string,
+) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	op, ok := f.operations[expected.ID]
+	if !ok || !fakeFenceMatches(op, expected) || op.Stage != ProvisioningStageDropStarted {
+		return false, nil
+	}
+	account, ok := f.activated[op.ID]
+	if !ok || account.ID != accountID {
+		return false, nil
+	}
+	delete(f.activated, op.ID)
+	delete(f.operations, op.ID)
+	return true, nil
+}
+
 func (f *provisioningRepositoryFake) BeginDatabaseProvisioningAudit(
 	_ context.Context,
 	audit DatabaseProvisioningAudit,
@@ -524,7 +565,8 @@ func fakeProvisionedAccount(
 	return ProvisionedDatabaseAccount{
 		ID: "account-" + operation.ID, InstanceID: operation.InstanceID,
 		UniqueName: "db-generated", Username: operation.Username,
-		Status: "active", ResourceID: "D001",
+		Status: "active", ResourceID: "D001", Managed: true,
+		UpstreamHost: operation.Host, ProvisioningOperationID: operation.ID,
 	}
 }
 

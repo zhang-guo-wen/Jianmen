@@ -23,6 +23,7 @@ type databaseProvisioningService interface {
 		context.Context,
 		service.ProvisionDatabaseAccountRequest,
 	) (service.ProvisionDatabaseAccountResult, error)
+	Deprovision(context.Context, string) error
 }
 
 type provisionDatabaseAccountPayload struct {
@@ -173,5 +174,14 @@ func (s *Server) writeDatabaseProvisioningServiceError(
 		)
 	default:
 		s.writeErrorText(w, r, http.StatusBadGateway, "database account provisioning failed")
+	}
+}
+
+func (s *Server) writeDatabaseDeprovisionServiceError(w http.ResponseWriter, r *http.Request, err error) {
+	switch {
+	case errors.Is(err, service.ErrDatabaseDeprovisionInProgress):
+		s.writeErrorText(w, r, http.StatusConflict, "database account deletion is in progress")
+	default:
+		s.writeErrorText(w, r, http.StatusBadGateway, "database account deletion failed")
 	}
 }

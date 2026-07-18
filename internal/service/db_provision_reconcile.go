@@ -64,6 +64,12 @@ func (s *DatabaseProvisioningService) Reconcile(
 			} else {
 				result.Activated++
 			}
+		case ProvisioningStageDeprovisionRequested, ProvisioningStageDropStarted, ProvisioningStageDropUncertain:
+			if s.reconcileDeprovision(ctx, claimed) {
+				result.Cleaned++
+			} else {
+				result.Failed++
+			}
 		default:
 			if !databaseProvisioningStageRequiresCleanup(claimed.Stage) {
 				result.Failed++

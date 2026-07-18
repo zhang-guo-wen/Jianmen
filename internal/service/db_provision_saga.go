@@ -14,16 +14,19 @@ import (
 )
 
 const (
-	ProvisioningStageReserved          = "reserved"
-	ProvisioningStageCreateStarted     = "create_started"
-	ProvisioningStageCreateUncertain   = "create_uncertain"
-	ProvisioningStageUpstreamCreated   = "upstream_created"
-	ProvisioningStageGrantStarted      = "grant_started"
-	ProvisioningStageActivationPending = "activation_pending"
-	ProvisioningStageCleanupRequired   = "cleanup_required"
-	ProvisioningStageCleanupInProgress = "cleanup_in_progress"
-	ProvisioningStageNotCreated        = "not_created"
-	ProvisioningStageActiveManaged     = "active_managed"
+	ProvisioningStageReserved             = "reserved"
+	ProvisioningStageCreateStarted        = "create_started"
+	ProvisioningStageCreateUncertain      = "create_uncertain"
+	ProvisioningStageUpstreamCreated      = "upstream_created"
+	ProvisioningStageGrantStarted         = "grant_started"
+	ProvisioningStageActivationPending    = "activation_pending"
+	ProvisioningStageCleanupRequired      = "cleanup_required"
+	ProvisioningStageCleanupInProgress    = "cleanup_in_progress"
+	ProvisioningStageNotCreated           = "not_created"
+	ProvisioningStageActiveManaged        = "active_managed"
+	ProvisioningStageDeprovisionRequested = "deprovision_requested"
+	ProvisioningStageDropStarted          = "drop_started"
+	ProvisioningStageDropUncertain        = "drop_uncertain"
 
 	ProvisioningCleanupNone       = "none"
 	ProvisioningCleanupRequired   = "required"
@@ -42,6 +45,9 @@ var (
 	ErrInvalidDatabaseProvisioningRequest      = errors.New("invalid database provisioning request")
 	ErrDatabaseProvisioningIdempotencyConflict = errors.New("database account provisioning idempotency conflict")
 	ErrDatabaseProvisioningInProgress          = errors.New("database account provisioning is in progress")
+	ErrDatabaseAccountNotManaged               = errors.New("database account is not managed")
+	ErrDatabaseDeprovisionFailed               = errors.New("database account deprovision failed")
+	ErrDatabaseDeprovisionInProgress           = errors.New("database account deprovision is in progress")
 )
 
 type DatabaseAccountCreateDisposition string
@@ -136,18 +142,21 @@ type DatabaseProvisioningLeaseWindow struct {
 }
 
 type ProvisionedDatabaseAccount struct {
-	ID          string     `json:"id"`
-	InstanceID  string     `json:"instance_id"`
-	UniqueName  string     `json:"unique_name"`
-	Username    string     `json:"username"`
-	Group       string     `json:"group,omitempty"`
-	Remark      string     `json:"remark,omitempty"`
-	ExpiresAt   *time.Time `json:"expires_at,omitempty"`
-	Status      string     `json:"status"`
-	ResourceID  string     `json:"resource_id,omitempty"`
-	ResourceSeq int        `json:"resource_seq,omitempty"`
-	CreatedAt   string     `json:"created_at,omitempty"`
-	UpdatedAt   string     `json:"updated_at,omitempty"`
+	ID                      string     `json:"id"`
+	InstanceID              string     `json:"instance_id"`
+	UniqueName              string     `json:"unique_name"`
+	Username                string     `json:"username"`
+	Group                   string     `json:"group,omitempty"`
+	Remark                  string     `json:"remark,omitempty"`
+	ExpiresAt               *time.Time `json:"expires_at,omitempty"`
+	Status                  string     `json:"status"`
+	ResourceID              string     `json:"resource_id,omitempty"`
+	ResourceSeq             int        `json:"resource_seq,omitempty"`
+	CreatedAt               string     `json:"created_at,omitempty"`
+	UpdatedAt               string     `json:"updated_at,omitempty"`
+	Managed                 bool       `json:"-"`
+	UpstreamHost            string     `json:"-"`
+	ProvisioningOperationID string     `json:"-"`
 }
 
 type ProvisionDatabaseAccountRequest struct {
@@ -231,6 +240,16 @@ type DatabaseProvisioningRepository interface {
 	DeleteDatabaseProvisioningOperation(
 		context.Context,
 		DatabaseProvisioningFence,
+	) (bool, error)
+	BeginDatabaseDeprovision(
+		context.Context,
+		string,
+		DatabaseProvisioningLease,
+	) (DatabaseProvisioningOperation, bool, error)
+	CompleteDatabaseDeprovision(
+		context.Context,
+		DatabaseProvisioningFence,
+		string,
 	) (bool, error)
 	BeginDatabaseProvisioningAudit(
 		context.Context,

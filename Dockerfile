@@ -54,7 +54,9 @@ VOLUME ["/app/data"]
 EXPOSE 47100 47102 33060
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD wget -q -O /dev/null http://127.0.0.1:47100/api/init/status || exit 1
+    CMD wget -q --no-check-certificate -O /dev/null https://127.0.0.1:47100/api/init/status \
+        || wget -q -O /dev/null http://127.0.0.1:47100/api/init/status \
+        || exit 1
 
 STOPSIGNAL SIGTERM
 

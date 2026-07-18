@@ -78,6 +78,39 @@ func TestListenAndServeUsesTLSWhenCertificateConfigured(t *testing.T) {
 	}
 }
 
+func TestServeAdminClosesListenerWhenTLSCertificateLoadingFails(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen for TLS failure test: %v", err)
+	}
+	addr := listener.Addr().String()
+	server := &Server{
+		cfg: &config.Config{
+			ListenAddr: "127.0.0.1:47102",
+			Admin: config.AdminConfig{
+				Enabled:    true,
+				ListenAddr: addr,
+				Dev:        true,
+				TLS: config.AdminTLSConfig{
+					CertFile: filepath.Join(t.TempDir(), "missing.crt"),
+					KeyFile:  filepath.Join(t.TempDir(), "missing.key"),
+				},
+			},
+		},
+		logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+	}
+
+	if err := server.serveAdmin(context.Background(), listener); err == nil {
+		t.Fatal("serveAdmin() error = nil, want certificate loading failure")
+	}
+
+	rebound, err := net.Listen("tcp", addr)
+	if err != nil {
+		t.Fatalf("listener remained open after TLS loading failure: %v", err)
+	}
+	_ = rebound.Close()
+}
+
 func writeTestCertificate(t *testing.T, dir string) (string, string) {
 	t.Helper()
 	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)

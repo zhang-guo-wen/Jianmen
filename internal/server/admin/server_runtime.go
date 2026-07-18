@@ -25,6 +25,12 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 }
 
 func (s *Server) serveAdmin(ctx context.Context, listener net.Listener) error {
+	// http.Server.Serve closes the listener after it starts serving, but
+	// ServeTLS can fail while loading the certificate before Serve takes
+	// ownership. Keep the lifecycle explicit so every startup error releases
+	// the bound port.
+	defer listener.Close()
+
 	server := &http.Server{
 		Addr:              listener.Addr().String(),
 		Handler:           s.routes(),

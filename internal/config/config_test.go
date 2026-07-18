@@ -1,6 +1,9 @@
 package config
 
 import (
+	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -99,5 +102,25 @@ func TestAdminTLSValidation(t *testing.T) {
 				t.Fatalf("Validate() error = %v, want containing %q", err, tt.wantErr)
 			}
 		})
+	}
+}
+
+func TestDockerImageAdminTransportIsSecureByDefault(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "..", "config.docker.json"))
+	if err != nil {
+		t.Fatalf("read config.docker.json: %v", err)
+	}
+	var cfg Config
+	if err := json.Unmarshal(raw, &cfg); err != nil {
+		t.Fatalf("decode config.docker.json: %v", err)
+	}
+	if cfg.Admin.TLS.AllowInsecureHTTP {
+		t.Fatal("Docker image must not enable insecure Admin HTTP by default")
+	}
+	if strings.TrimSpace(cfg.Admin.TLS.CertFile) == "" || strings.TrimSpace(cfg.Admin.TLS.KeyFile) == "" {
+		t.Fatal("Docker image must require a mounted Admin certificate and key by default")
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("secure Docker configuration must validate: %v", err)
 	}
 }

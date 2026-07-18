@@ -42,7 +42,25 @@
 ```bash
 docker pull ghcr.io/zhang-guo-wen/jianmen:latest
 ```
-本机评估启动（管理端 HTTP 仅映射到宿主机回环地址）：
+默认容器配置要求管理端使用 TLS；缺少 `/app/certs/admin.crt` 或
+`/app/certs/admin.key` 时会安全退出，不会自动降级为明文 HTTP。首次本机评估可先在
+Docker 数据卷中生成一套临时自签名证书：
+
+```bash
+docker volume create jianmen-certs
+docker run --rm --user 0 \
+  -v jianmen-certs:/certs \
+  alpine:3.23 sh -c \
+  'apk add --no-cache openssl &&
+   openssl req -x509 -newkey rsa:3072 -nodes -days 30 \
+     -keyout /certs/admin.key -out /certs/admin.crt \
+     -subj "/CN=localhost" \
+     -addext "subjectAltName=DNS:localhost,IP:127.0.0.1" &&
+   chown 10001:10001 /certs/admin.key /certs/admin.crt &&
+   chmod 600 /certs/admin.key && chmod 644 /certs/admin.crt'
+```
+
+随后启动容器；管理端仍只映射到宿主机回环地址：
 
 ```bash
 docker run -d \
@@ -53,6 +71,7 @@ docker run -d \
   -p 33060:33060 \
   -p 47110-47199:47110-47199 \
   -v jianmen-data:/app/data \
+  -v jianmen-certs:/app/certs:ro \
   ghcr.io/zhang-guo-wen/jianmen:latest
 ```
 
@@ -68,21 +87,45 @@ docker run -d \
 浏览器访问：
 
 ```text
-http://127.0.0.1:47100
+https://127.0.0.1:47100
 ```
 
-应用代理在用户未登录时会自动跳转到 Jianmen 登录页。默认会使用当前访问的主机名和 `admin.listen_addr` 的端口生成登录地址。如果通过隔离网络内的 HTTPS 反向代理终止 TLS，请显式配置对外管理地址，并显式允许代理到容器内的 HTTP：
+自签名证书只适合本机评估，浏览器会提示该证书不受信任；生产环境应挂载由受信任 CA
+签发的证书。应用代理在用户未登录时会自动跳转到 Jianmen 登录页。默认会使用当前访问的
+主机名和 `admin.listen_addr` 的端口生成登录地址。
 
-```json
-"admin": {
-  "listen_addr": "0.0.0.0:47100",
-  "public_url": "https://jianmen.example.com",
-  "tls": {
-    "cert_file": "",
-    "key_file": "",
-    "allow_insecure_http": true
-  }
-}
+如在隔离 Docker 网络内由 Caddy 等反向代理终止 TLS，可使用仓库提供的
+`config.docker.proxy.example.json`。下面的完整示例不会把容器内的明文 `47100` 发布到
+宿主机；使用前请把示例域名替换为真实域名并完成 DNS 解析：
+
+```bash
+mkdir -p /opt/jianmen
+cp config.docker.proxy.example.json /opt/jianmen/config.json
+sed -i 's/jianmen\.example\.com/your.real.domain/g' /opt/jianmen/config.json
+printf '%s\n' \
+  'your.real.domain {' \
+  '  reverse_proxy jianmen:47100' \
+  '}' > /opt/jianmen/Caddyfile
+
+docker network create jianmen-internal
+docker run -d \
+  --name jianmen \
+  --restart unless-stopped \
+  --network jianmen-internal \
+  -p 47102:47102 \
+  -p 33060:33060 \
+  -p 47110-47199:47110-47199 \
+  -v jianmen-data:/app/data \
+  -v /opt/jianmen/config.json:/app/config.json:ro \
+  ghcr.io/zhang-guo-wen/jianmen:latest
+docker run -d \
+  --name jianmen-caddy \
+  --restart unless-stopped \
+  --network jianmen-internal \
+  -p 80:80 -p 443:443 \
+  -v /opt/jianmen/Caddyfile:/etc/caddy/Caddyfile:ro \
+  -v jianmen-caddy-data:/data \
+  caddy:2-alpine
 ```
 
 `admin.public_url` 只允许 HTTP/HTTPS 的站点根地址，不能包含路径、查询参数或片段。为了让登录 Cookie 在管理端口和应用代理端口之间共享，建议使用相同主机名。
@@ -101,7 +144,9 @@ Admin 管理端默认仅允许回环地址使用 HTTP，适合本机开发。非
 }
 ```
 
-Docker 示例配置默认监听容器内的 HTTP 端口，并明确打开了 `allow_insecure_http`。上面的本机评估命令只把管理端映射到 `127.0.0.1`；生产环境必须由同一受控网络中的反向代理（如 Nginx、Caddy 或 Traefik）终止 TLS，且不得把容器的 `47100` 直接发布到公网。如果没有反向代理，请改为同时配置 `cert_file` 和 `key_file`，不要把该开关当作安全传输。
+镜像内置的 `config.docker.json` 默认要求证书，且不会启用
+`allow_insecure_http`。只有类似上述代理示例、容器明文端口不离开受控内部网络时，才可在
+挂载的自定义配置中显式打开该开关；不得把这种配置下的 `47100` 发布到公网。
 
 新增或编辑应用时，只需填写完整应用地址，例如 `http://47.121.184.68:18848/nacos/#/login`。系统会自动解析协议、主机、端口和默认访问路径，并在应用列表中生成可复制、可直接打开的代理访问地址。
 
@@ -116,6 +161,7 @@ docker run -d \
   -p 33060:33060 \
   -p 47110-47199:47110-47199 \
   -v jianmen-data:/app/data \
+  -v jianmen-certs:/app/certs:ro \
   -v /opt/jianmen/config.json:/app/config.json:ro \
   ghcr.io/zhang-guo-wen/jianmen:latest
 ```

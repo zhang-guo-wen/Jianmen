@@ -10,6 +10,7 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"database/sql"
+	"encoding/json"
 	"encoding/pem"
 	"errors"
 	"fmt"
@@ -61,6 +62,7 @@ func TestDatabaseGatewayMySQLAgainstDocker(t *testing.T) {
 			const upstreamUser = "app"
 			const upstreamPassword = "app-password"
 			const auditSQL = "SELECT 42 AS audit_probe"
+			const expectedAuditSQL = "SELECT [REDACTED] AS audit_probe"
 
 			containerArgs := []string{
 				"-e", "MYSQL_ROOT_PASSWORD=root-password",
@@ -129,7 +131,7 @@ func TestDatabaseGatewayMySQLAgainstDocker(t *testing.T) {
 			if !strings.Contains(mysqlImage, ":5.7") {
 				assertMySQLFullAuthObserved(t, gatewayLogs.String(), upstreamPassword)
 			}
-			assertDBAuditContains(t, fixture.replayDir, auditSQL)
+			assertDBAuditSQLContains(t, fixture.replayDir, expectedAuditSQL)
 		})
 	}
 }
@@ -209,7 +211,7 @@ func TestDatabaseGatewayPostgresAgainstDocker(t *testing.T) {
 		url.QueryEscape(gateway.caFile),
 	)
 	assertPostgresGatewayTLSFailure(t, wrongHostnameDSN, "wrong hostname", postgresTLSHostname)
-	assertDBAuditContains(t, fixture.replayDir, "select 1")
+	assertDBAuditSQLContains(t, fixture.replayDir, "SELECT [REDACTED]")
 }
 
 func mysqlImages() []string {
@@ -558,7 +560,7 @@ func postgresHBARequiresSCRAM(config string) bool {
 	return false
 }
 
-func assertDBAuditContains(t *testing.T, replayDir, query string) {
+func assertDBAuditSQLContains(t *testing.T, replayDir, query string) {
 	t.Helper()
 	query = strings.ToLower(query)
 	waitFor(t, 5*time.Second, 100*time.Millisecond, func() error {
@@ -571,11 +573,23 @@ func assertDBAuditContains(t *testing.T, replayDir, query string) {
 			if err != nil {
 				return err
 			}
-			if strings.Contains(strings.ToLower(string(raw)), query) {
-				return nil
+			for lineNumber, line := range bytes.Split(raw, []byte{'\n'}) {
+				line = bytes.TrimSpace(line)
+				if len(line) == 0 {
+					continue
+				}
+				var event struct {
+					SQL string `json:"sql"`
+				}
+				if err := json.Unmarshal(line, &event); err != nil {
+					return fmt.Errorf("decode database audit %s line %d: %w", path, lineNumber+1, err)
+				}
+				if strings.Contains(strings.ToLower(event.SQL), query) {
+					return nil
+				}
 			}
 		}
-		return fmt.Errorf("query %q not found in %d db audit files", query, len(paths))
+		return fmt.Errorf("audit sql %q not found in %d db audit files", query, len(paths))
 	})
 }
 

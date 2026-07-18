@@ -51,11 +51,11 @@ jobs:
       - name: Vet backend
         run: go vet ./...
 
-  release:
+  package:
     needs: quality-gates
     runs-on: ubuntu-latest
     permissions:
-      contents: write
+      contents: read
 
     steps:
       - name: Checkout repository
@@ -82,9 +82,31 @@ jobs:
       - name: Build release packages
         run: ./scripts/package-release.sh "${GITHUB_REF_NAME}"
 
+      - name: Upload release packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-packages
+          path: dist/release/
+          if-no-files-found: error
+          retention-days: 1
+
+  release:
+    needs: package
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download release packages
+        uses: actions/download-artifact@v4
+        with:
+          name: release-packages
+          path: dist/release
+
       - name: Create or update GitHub release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
         run: |
           if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
             gh release upload "${GITHUB_REF_NAME}" dist/release/* --clobber

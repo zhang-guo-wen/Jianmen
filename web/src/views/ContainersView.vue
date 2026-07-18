@@ -168,6 +168,10 @@
         <el-form-item label="SSH 端口"><el-input-number v-model="quickAccount.port" :min="1" :max="65535" controls-position="right" style="width: 100%" /></el-form-item>
         <el-form-item label="登录账号" required><el-input v-model="quickAccount.username" placeholder="root" /></el-form-item>
         <el-form-item label="登录密码" required><el-input v-model="quickAccount.password" type="password" show-password /></el-form-item>
+        <el-form-item label="主机指纹" required>
+          <el-input v-model="quickAccount.host_key_fingerprint" placeholder="SHA256:..." />
+          <div class="field-hint">请输入目标 SSH 服务端的主机密钥 SHA256 指纹，用于校验服务器身份。</div>
+        </el-form-item>
       </el-form>
       <template #footer><el-button @click="quickAccountVisible = false">取消</el-button><el-button type="primary" :loading="quickSaving" @click="createQuickAccount">创建并选择</el-button></template>
     </el-dialog>
@@ -221,7 +225,7 @@ const testResult = ref<{ ok: boolean; message: string } | null>(null)
 
 const emptyForm = () => ({ name: '', group: '', runtime: 'docker', connection_mode: 'ssh', address: '', port: 0, host_id: '', host_account_id: '', remark: '' })
 const form = reactive(emptyForm())
-const quickAccount = reactive({ host_name: '', address: '', port: 22, username: '', password: '' })
+const quickAccount = reactive({ host_name: '', address: '', port: 22, username: '', password: '', host_key_fingerprint: '' })
 
 const filteredLogs = computed(() => {
   const keyword = logSearch.value.trim().toLowerCase()
@@ -565,6 +569,8 @@ async function removeEndpoint(endpoint: ContainerEndpointView) {
 
 async function createQuickAccount() {
   if (!quickAccount.address.trim() || !quickAccount.username.trim() || !quickAccount.password) return ElMessage.warning('请填写主机地址、登录账号和密码')
+  const hostKeyFingerprint = quickAccount.host_key_fingerprint.trim()
+  if (!hostKeyFingerprint) return ElMessage.warning('请输入 SSH 主机密钥指纹')
   quickSaving.value = true
   try {
     const hostPayload: HostPayload = { name: quickAccount.host_name.trim(), address: quickAccount.address.trim(), port: quickAccount.port, group: form.group.trim(), remark: '' }
@@ -580,7 +586,7 @@ async function createQuickAccount() {
       username: quickAccount.username.trim(),
       password: quickAccount.password,
       private_key_path: '', private_key_pem: '', passphrase: '',
-      insecure_ignore_host_key: true, host_key_fingerprint: '', known_hosts_path: '',
+      insecure_ignore_host_key: false, host_key_fingerprint: hostKeyFingerprint, known_hosts_path: '',
     }
     const account = await apiClient.createTarget(targetPayload)
     form.host_id = String(host.id || '')

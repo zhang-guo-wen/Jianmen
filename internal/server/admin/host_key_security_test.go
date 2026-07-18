@@ -13,8 +13,24 @@ import (
 
 func TestHandleTestConnectionRequiresExplicitHostKeyVerification(t *testing.T) {
 	server := newTargetTestServer(t)
-	sshAddr := startTestPasswordSSHServer(t, "root", "secret")
-	host, portText, err := net.SplitHostPort(sshAddr)
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen for unexpected SSH dial: %v", err)
+	}
+	t.Cleanup(func() { _ = listener.Close() })
+
+	accepted := make(chan bool, 1)
+	go func() {
+		conn, acceptErr := listener.Accept()
+		if acceptErr != nil {
+			accepted <- false
+			return
+		}
+		accepted <- true
+		_ = conn.Close()
+	}()
+
+	host, portText, err := net.SplitHostPort(listener.Addr().String())
 	if err != nil {
 		t.Fatalf("split ssh address: %v", err)
 	}
@@ -33,6 +49,10 @@ func TestHandleTestConnectionRequiresExplicitHostKeyVerification(t *testing.T) {
 	rec := httptest.NewRecorder()
 	server.handleTestConnection(rec, req)
 
+	_ = listener.Close()
+	if <-accepted {
+		t.Fatal("SSH dial occurred before host key verification configuration was validated")
+	}
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusOK, rec.Body.String())
 	}

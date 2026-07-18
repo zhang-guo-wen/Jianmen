@@ -13,7 +13,7 @@
     "enabled": true,
     "driver": "sqlite",
     "dsn": "/app/data/bastion.db",
-    "auto_migrate": true,
+    "auto_migrate": false,
     "max_open_conns": 1,
     "max_idle_conns": 1,
     "conn_max_lifetime_seconds": 0

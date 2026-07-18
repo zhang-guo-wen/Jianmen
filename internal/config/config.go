@@ -154,7 +154,6 @@ func (c *Config) applyDefaults() {
 		c.Database.Enabled = true
 		c.Database.Driver = "sqlite"
 		c.Database.DSN = "data/bastion.db"
-		c.Database.AutoMigrate = true
 	}
 	if !c.DatabaseGateway.Enabled && c.DatabaseGateway.ListenAddr == "" {
 		c.DatabaseGateway.Enabled = true

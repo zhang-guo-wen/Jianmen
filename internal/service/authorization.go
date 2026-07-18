@@ -131,6 +131,28 @@ func (s *AuthorizationService) Authorize(
 	}, nil
 }
 
+// AuthorizeConnection is the protocol-adapter boundary. Its primitive signature
+// lets protocol packages depend on the authorization contract without importing
+// service-owned DTOs (some service code also reuses protocol helpers).
+func (s *AuthorizationService) AuthorizeConnection(
+	ctx context.Context,
+	userID string,
+	actions []string,
+	resourceType string,
+	resourceID string,
+) (bool, error) {
+	decision, err := s.Authorize(ctx, AuthorizationRequest{
+		UserID:       userID,
+		Actions:      actions,
+		ResourceType: resourceType,
+		ResourceID:   resourceID,
+	})
+	if err != nil {
+		return false, err
+	}
+	return decision.Allowed, nil
+}
+
 func normalizedActions(actions []string) []string {
 	normalized := make([]string, 0, len(actions))
 	seen := make(map[string]struct{}, len(actions))

@@ -332,3 +332,27 @@ func TestNewAuthorizationServiceRejectsNilDependencies(t *testing.T) {
 		})
 	}
 }
+
+func TestAuthorizationServiceAuthorizeConnectionUsesUnifiedDecision(t *testing.T) {
+	identity := &fakeAuthorizationIdentity{
+		subject: IdentitySubject{ID: "u1", Status: "active"},
+		found:   true,
+	}
+	actions := &fakeActionAuthorizer{allowed: map[string]bool{"db:connect": true}}
+	resources := &fakeResourceAuthorizer{allowed: true}
+	authorizer := newAuthorizationTestService(t, identity, actions, resources)
+
+	allowed, err := authorizer.AuthorizeConnection(
+		context.Background(),
+		"u1",
+		[]string{"db:connect"},
+		"database_account",
+		"account-1",
+	)
+	if err != nil {
+		t.Fatalf("authorize connection: %v", err)
+	}
+	if !allowed {
+		t.Fatal("unified connection decision was denied")
+	}
+}

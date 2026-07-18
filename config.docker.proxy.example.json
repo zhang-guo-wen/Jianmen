@@ -25,7 +25,30 @@
   },
   "database_gateway": {
     "enabled": true,
-    "listen_addr": "0.0.0.0:33060"
+    "mysql": {
+      "enabled": true,
+      "listen_addr": "0.0.0.0:33060",
+      "cert_file": "/app/certs/database.crt",
+      "key_file": "/app/certs/database.key",
+      "ca_file": "/app/certs/database-ca.crt",
+      "server_name": "localhost"
+    },
+    "postgresql": {
+      "enabled": true,
+      "listen_addr": "0.0.0.0:54330",
+      "cert_file": "/app/certs/database.crt",
+      "key_file": "/app/certs/database.key",
+      "ca_file": "/app/certs/database-ca.crt",
+      "server_name": "localhost"
+    },
+    "redis": {
+      "enabled": true,
+      "listen_addr": "0.0.0.0:63790",
+      "cert_file": "/app/certs/database.crt",
+      "key_file": "/app/certs/database.key",
+      "ca_file": "/app/certs/database-ca.crt",
+      "server_name": "localhost"
+    }
   },
   "application_gateway": {
     "enabled": true,

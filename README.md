@@ -56,8 +56,26 @@ docker run --rm --user 0 \
      -keyout /certs/admin.key -out /certs/admin.crt \
      -subj "/CN=localhost" \
      -addext "subjectAltName=DNS:localhost,IP:127.0.0.1" &&
-   chown 10001:10001 /certs/admin.key /certs/admin.crt &&
-   chmod 600 /certs/admin.key && chmod 644 /certs/admin.crt'
+   openssl req -x509 -newkey rsa:3072 -nodes -days 30 \
+     -keyout /tmp/database-ca.key -out /certs/database-ca.crt \
+     -subj "/CN=Jianmen local database CA" \
+     -addext "basicConstraints=critical,CA:TRUE" \
+     -addext "keyUsage=critical,keyCertSign,cRLSign" &&
+   openssl req -new -newkey rsa:3072 -nodes \
+     -keyout /certs/database.key -out /tmp/database.csr \
+     -subj "/CN=localhost" &&
+   printf "%s\n" \
+     "basicConstraints=critical,CA:FALSE" \
+     "keyUsage=critical,digitalSignature,keyEncipherment" \
+     "extendedKeyUsage=serverAuth" \
+     "subjectAltName=DNS:localhost,IP:127.0.0.1" >/tmp/database.ext &&
+   openssl x509 -req -in /tmp/database.csr \
+     -CA /certs/database-ca.crt -CAkey /tmp/database-ca.key -CAcreateserial \
+     -out /certs/database.crt -days 30 -sha256 -extfile /tmp/database.ext &&
+   rm -f /certs/database-ca.srl /tmp/database-ca.key /tmp/database.csr /tmp/database.ext &&
+   chown 10001:10001 /certs/admin.key /certs/admin.crt /certs/database.key /certs/database.crt /certs/database-ca.crt &&
+   chmod 600 /certs/admin.key /certs/database.key &&
+   chmod 644 /certs/admin.crt /certs/database.crt /certs/database-ca.crt'
 ```
 
 随后启动容器；管理端仍只映射到宿主机回环地址：
@@ -69,6 +87,8 @@ docker run -d \
   -p 127.0.0.1:47100:47100 \
   -p 47102:47102 \
   -p 33060:33060 \
+  -p 54330:54330 \
+  -p 63790:63790 \
   -p 47110-47199:47110-47199 \
   -v jianmen-data:/app/data \
   -v jianmen-certs:/app/certs:ro \
@@ -81,8 +101,29 @@ docker run -d \
 |---|---|
 | `47100` | Web 管理页面和管理 API |
 | `47102` | SSH/SFTP 堡垒机入口 |
-| `33060` | MySQL、PostgreSQL、Redis 数据库网关 |
+| `33060` | MySQL 数据库网关 |
+| `54330` | PostgreSQL 数据库网关（TLS 必须） |
+| `63790` | Redis 数据库网关（远程 AUTH 必须使用 TLS） |
 | `47110-47199` | 内网应用动态代理端口范围 |
+
+### 数据库网关 TLS 身份校验
+
+MySQL 和 PostgreSQL 网关应同时配置服务端证书、私钥、公共 CA 文件与客户端验证名称。`server_name` 必须是证书 SAN 中的 DNS 名称或 IP；客户端连接命令使用该名称，而不是监听地址。`ca_file` 仅保存可公开分发的 CA PEM。只有单张、当前有效且可验证的自签名叶证书才允许省略 `ca_file`，此时按证书固定（pin）语义分发；普通 CA 签发的叶证书不能被当作根证书。`key_file` 永不会通过 API 返回。
+
+```json
+"postgresql": {
+  "enabled": true,
+  "listen_addr": "0.0.0.0:54330",
+  "cert_file": "/app/certs/database.crt",
+  "key_file": "/app/certs/database.key",
+  "ca_file": "/app/certs/database-ca.crt",
+  "server_name": "localhost"
+}
+```
+
+快速连接会提供 CA 下载、CA 内容和证书 SHA-256 指纹，并且只生成强校验命令：PostgreSQL 使用 `sslmode=verify-full sslrootcert=...`，MySQL 使用 `--ssl-mode=VERIFY_IDENTITY --ssl-ca=...`。TLS 身份材料不完整时不会降级为 `require` 或 `REQUIRED` 命令。
+
+上面的本机评估流程生成的数据库叶证书 SAN 包含 `localhost` 和 `127.0.0.1`，与默认配置的 `server_name: "localhost"` 一致。生产环境使用其他网关域名时，必须同时替换 `server_name`，并重新签发包含该 DNS 名称 SAN 的数据库叶证书。
 
 浏览器访问：
 
@@ -114,8 +155,11 @@ docker run -d \
   --network jianmen-internal \
   -p 47102:47102 \
   -p 33060:33060 \
+  -p 54330:54330 \
+  -p 63790:63790 \
   -p 47110-47199:47110-47199 \
   -v jianmen-data:/app/data \
+  -v jianmen-certs:/app/certs:ro \
   -v /opt/jianmen/config.json:/app/config.json:ro \
   ghcr.io/zhang-guo-wen/jianmen:latest
 docker run -d \
@@ -159,6 +203,8 @@ docker run -d \
   -p 127.0.0.1:47100:47100 \
   -p 47102:47102 \
   -p 33060:33060 \
+  -p 54330:54330 \
+  -p 63790:63790 \
   -p 47110-47199:47110-47199 \
   -v jianmen-data:/app/data \
   -v jianmen-certs:/app/certs:ro \

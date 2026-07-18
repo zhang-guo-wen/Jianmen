@@ -10,7 +10,12 @@
     "cors_allowed_origins": [
       "http://127.0.0.1:47101",
       "http://localhost:47101"
-    ]
+    ],
+    "tls": {
+      "cert_file": "",
+      "key_file": "",
+      "allow_insecure_http": false
+    }
   },
   "database": {
     "enabled": true,

@@ -25,11 +25,18 @@ type Config struct {
 }
 
 type AdminConfig struct {
-	Enabled            bool     `json:"enabled"`
-	ListenAddr         string   `json:"listen_addr"`
-	PublicURL          string   `json:"public_url"`
-	CORSAllowedOrigins []string `json:"cors_allowed_origins"`
-	Dev                bool     `json:"dev"`
+	Enabled            bool           `json:"enabled"`
+	ListenAddr         string         `json:"listen_addr"`
+	PublicURL          string         `json:"public_url"`
+	CORSAllowedOrigins []string       `json:"cors_allowed_origins"`
+	Dev                bool           `json:"dev"`
+	TLS                AdminTLSConfig `json:"tls"`
+}
+
+type AdminTLSConfig struct {
+	CertFile          string `json:"cert_file"`
+	KeyFile           string `json:"key_file"`
+	AllowInsecureHTTP bool   `json:"allow_insecure_http"`
 }
 
 type DatabaseConfig struct {
@@ -188,6 +195,9 @@ func (c *Config) Validate() error {
 		if err := validatePublicURL(c.Admin.PublicURL); err != nil {
 			return fmt.Errorf("invalid admin.public_url: %w", err)
 		}
+		if err := validateAdminTransport(c.Admin); err != nil {
+			return fmt.Errorf("invalid admin transport: %w", err)
+		}
 	}
 	if c.Database.Enabled {
 		switch c.Database.Driver {
@@ -222,6 +232,34 @@ func (c *Config) Validate() error {
 		// No hard error; admin user is created via the setup wizard at /api/init/setup
 	}
 	return nil
+}
+
+func validateAdminTransport(admin AdminConfig) error {
+	certConfigured := strings.TrimSpace(admin.TLS.CertFile) != ""
+	keyConfigured := strings.TrimSpace(admin.TLS.KeyFile) != ""
+	if certConfigured != keyConfigured {
+		return fmt.Errorf("cert_file and key_file must be configured together")
+	}
+	if certConfigured {
+		return nil
+	}
+	if admin.TLS.AllowInsecureHTTP || isLoopbackListenAddr(admin.ListenAddr) {
+		return nil
+	}
+	return fmt.Errorf("insecure HTTP on non-loopback admin.listen_addr requires tls.allow_insecure_http=true")
+}
+
+func isLoopbackListenAddr(addr string) bool {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		return false
+	}
+	host = strings.Trim(host, "[]")
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 func validatePublicURL(raw string) error {

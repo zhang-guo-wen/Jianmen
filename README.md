@@ -82,6 +82,22 @@ http://服务器IP:47100
 
 `admin.public_url` 只允许 HTTP/HTTPS 的站点根地址，不能包含路径、查询参数或片段。为了让登录 Cookie 在管理端口和应用代理端口之间共享，建议使用相同主机名。
 
+Admin 管理端默认仅允许回环地址使用 HTTP，适合本机开发。非回环监听必须配置证书和私钥，或显式设置 `admin.tls.allow_insecure_http: true`；后者只适用于受控的开发环境，不应作为生产部署方案。启用内置 TLS 的配置示例：
+
+```json
+"admin": {
+  "listen_addr": "0.0.0.0:47100",
+  "public_url": "https://jianmen.example.com",
+  "tls": {
+    "cert_file": "/app/certs/admin.crt",
+    "key_file": "/app/certs/admin.key",
+    "allow_insecure_http": false
+  }
+}
+```
+
+Docker 示例配置默认监听容器内的 HTTP 端口，并明确打开了 `allow_insecure_http`，这只表示由外部反向代理（如 Nginx、Caddy 或 Traefik）负责终止 TLS；如果没有反向代理，请改为同时配置 `cert_file` 和 `key_file`，不要把该开发开关当作安全传输。
+
 新增或编辑应用时，只需填写完整应用地址，例如 `http://47.121.184.68:18848/nacos/#/login`。系统会自动解析协议、主机、端口和默认访问路径，并在应用列表中生成可复制、可直接打开的代理访问地址。
 
 容器默认使用仓库中的 `config.docker.json`。如需自定义数据库、监听地址或端口，可以挂载自己的配置文件：

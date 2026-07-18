@@ -915,12 +915,21 @@ export const apiClient = {
 
   // AI access tokens
   getAITokens: () => request<AIAccessTokenRecord[]>('/api/ai/tokens'),
-  getAIToken: (id: string) => request<IssuedAIAccessToken>(`/api/ai/tokens/${encodeURIComponent(id)}`),
+  getAIToken: (id: string) => request<AIAccessTokenRecord>(`/api/ai/tokens/${encodeURIComponent(id)}`),
   getAIDocs: () => request<string>('/api/ai/docs'),
   createAIToken: (payload: { name?: string; access_ttl_seconds?: number; refresh_ttl_seconds?: number; expires_at?: string; permanent?: boolean; remark?: string }) =>
     request<IssuedAIAccessToken>('/api/ai/tokens', {
       method: 'POST',
       body: JSON.stringify(payload),
+    }),
+  refreshAIToken: (refreshToken: string) =>
+    request<IssuedAIAccessToken>('/api/ai/auth/refresh', {
+      method: 'POST',
+      body: JSON.stringify({ refresh_token: refreshToken }),
+    }),
+  reissueAIToken: (id: string) =>
+    request<IssuedAIAccessToken>(`/api/ai/tokens/${encodeURIComponent(id)}/reissue`, {
+      method: 'POST',
     }),
   revokeAIToken: (id: string) =>
     request<void>(`/api/ai/tokens/${encodeURIComponent(id)}`, { method: 'DELETE' }),

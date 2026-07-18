@@ -14,8 +14,6 @@ type AIAccessToken struct {
 	Name               string           `gorm:"size:128;not null" json:"name"`
 	AccessTokenHash    string           `gorm:"uniqueIndex;size:64;not null" json:"-"`
 	RefreshTokenHash   string           `gorm:"uniqueIndex;size:64;not null" json:"-"`
-	AccessToken        EncryptedField   `gorm:"type:text" json:"-"`
-	RefreshToken       EncryptedField   `gorm:"type:text" json:"-"`
 	AccessExpiresAt    time.Time        `gorm:"index;not null" json:"access_expires_at"`
 	RefreshExpiresAt   time.Time        `gorm:"index;not null" json:"refresh_expires_at"`
 	LastUsedAt         *time.Time       `json:"last_used_at,omitempty"`

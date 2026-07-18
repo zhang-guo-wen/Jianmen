@@ -139,6 +139,23 @@ var migrations = []Migration{
 			return tx.AutoMigrate(&model.AdminSession{}, &model.WebSocketTicket{})
 		},
 	},
+	{
+		Version: "202607180005",
+		Name:    "remove reversible AI token secrets",
+		Run: func(tx *gorm.DB) error {
+			if !tx.Migrator().HasTable(&model.AIAccessToken{}) {
+				return nil
+			}
+			for _, column := range []string{"access_token", "refresh_token"} {
+				if tx.Migrator().HasColumn("ai_access_tokens", column) {
+					if err := tx.Exec("ALTER TABLE ai_access_tokens DROP COLUMN " + column).Error; err != nil {
+						return fmt.Errorf("drop legacy AI token column %s: %w", column, err)
+					}
+				}
+			}
+			return nil
+		},
+	},
 }
 
 func Migrate(db *gorm.DB) error {

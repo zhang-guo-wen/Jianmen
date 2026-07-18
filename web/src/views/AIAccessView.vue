@@ -117,37 +117,33 @@
       />
     </el-card>
     <el-dialog
-      v-model="secretVisible"
-      :title="C.secret_title"
+      v-model="tokenDialogVisible"
+      :title="issuedToken ? C.secret_title : C.detail_title"
       width="min(760px, 92vw)"
-      ><el-alert
-        type="info"
-        :closable="false"
-        :title="C.secret_hint"
-      /><el-alert
-        v-if="secret && !secret.has_secret"
-        type="warning"
-        :closable="false"
-        class="secret-alert"
-        :title="C.only_once"
-      /><template v-if="secret && secret.has_secret"
-        ><div class="secret-row">
+      destroy-on-close
+      @closed="clearTokenDialog"
+      ><template v-if="issuedToken"
+        ><el-alert
+          type="warning"
+          :closable="false"
+          :title="C.one_time_secret"
+        /><div class="secret-row">
           <span>{{ C.access_token }}</span
           ><el-input
-            :model-value="secret.access_token"
+            :model-value="issuedToken.access_token"
             readonly
             show-password
-          /><el-button @click="copy(secret.access_token || '')">{{
+          /><el-button @click="copy(issuedToken.access_token)">{{
             C.copy
           }}</el-button>
         </div>
         <div class="secret-row">
           <span>{{ C.refresh_token }}</span
           ><el-input
-            :model-value="secret.refresh_token"
+            :model-value="issuedToken.refresh_token"
             readonly
             show-password
-          /><el-button @click="copy(secret.refresh_token || '')">{{
+          /><el-button @click="copy(issuedToken.refresh_token)">{{
             C.copy
           }}</el-button>
         </div>
@@ -157,9 +153,37 @@
           plain
           @click="copyConfig"
           >{{ C.copy_config }}</el-button
-        ></template
+        ></template><template v-else-if="tokenDetail"
+        ><el-alert
+          type="info"
+          :closable="false"
+          :title="C.detail_hint"
+        /><el-descriptions :column="1" border class="token-details">
+          <el-descriptions-item :label="C.name">{{
+            tokenDetail.name
+          }}</el-descriptions-item>
+          <el-descriptions-item :label="C.access_exp">{{
+            formatDate(tokenDetail.access_expires_at)
+          }}</el-descriptions-item>
+          <el-descriptions-item :label="C.refresh_exp">{{
+            formatDate(tokenDetail.refresh_expires_at)
+          }}</el-descriptions-item>
+          <el-descriptions-item :label="C.last_used">{{
+            formatDate(tokenDetail.last_used_at)
+          }}</el-descriptions-item>
+        </el-descriptions></template
       ><template #footer
-        ><el-button @click="secretVisible = false">{{
+        ><el-button
+          v-if="tokenDetail && !tokenDetail.revoked_at"
+          type="primary"
+          @click="reissueToken"
+          >{{ C.reissue }}</el-button
+        ><el-button
+          v-if="tokenDetail && !tokenDetail.revoked_at"
+          type="danger"
+          @click="revoke(tokenDetail.id)"
+          >{{ C.revoke }}</el-button
+        ><el-button @click="tokenDialogVisible = false">{{
           C.close
         }}</el-button></template
       ></el-dialog
@@ -186,6 +210,11 @@ import {
 } from "@/api/client";
 import { writeClipboardText } from "@/utils/clipboard";
 const C = {
+  detail_title: "令牌详情",
+  detail_hint: "令牌秘密仅在创建或刷新后显示一次，无法再次查看。",
+  one_time_secret: "请立即保存这些令牌秘密；关闭此窗口后将无法再次查看。",
+  reissue: "重新签发",
+  reissued: "已重新签发令牌，旧令牌已撤销",
   warning: "AI 只会获得当前用户已授权的资源。令牌和临时密码都不要写入日志。",
   docs: "AI 连接文档",
   docs_hint: "这里显示完整Markdown文档。可以直接复制全文或在弹窗中阅读。",
@@ -237,8 +266,9 @@ const tokens = ref<AIAccessTokenRecord[]>([]),
   docsLoading = ref(false),
   docsContent = ref(""),
   docsVisible = ref(false),
-  secretVisible = ref(false),
-  secret = ref<IssuedAIAccessToken | null>(null);
+  tokenDialogVisible = ref(false),
+  tokenDetail = ref<AIAccessTokenRecord | null>(null),
+  issuedToken = ref<IssuedAIAccessToken | null>(null);
 const form = reactive({ name: "", accessTTL: 3600, refreshTTL: 2592000 });
 const docsURL = `${window.location.origin}/api/ai/docs`;
 async function loadTokens() {
@@ -270,8 +300,10 @@ async function createToken() {
       refresh_ttl_seconds: form.refreshTTL,
     });
     form.name = "";
+    issuedToken.value = created;
+    tokenDetail.value = null;
+    tokenDialogVisible.value = true;
     await loadTokens();
-    await openToken(created.id);
     ElMessage.success(C.created);
   } catch (e: any) {
     ElMessage.error(e.message || C.create_error);
@@ -281,11 +313,31 @@ async function createToken() {
 }
 async function openToken(id: string) {
   try {
-    secret.value = await apiClient.getAIToken(id);
-    secretVisible.value = true;
+    issuedToken.value = null;
+    tokenDetail.value = await apiClient.getAIToken(id);
+    tokenDialogVisible.value = true;
   } catch (e: any) {
     ElMessage.error(e.message || C.load_error);
   }
+}
+async function reissueToken() {
+  if (!tokenDetail.value) return;
+  creating.value = true;
+  try {
+    const reissued = await apiClient.reissueAIToken(tokenDetail.value.id);
+    issuedToken.value = reissued;
+    tokenDetail.value = null;
+    await loadTokens();
+    ElMessage.success(C.reissued);
+  } catch (e: any) {
+    ElMessage.error(e.message || C.create_error);
+  } finally {
+    creating.value = false;
+  }
+}
+function clearTokenDialog() {
+  issuedToken.value = null;
+  tokenDetail.value = null;
 }
 async function revoke(id: string) {
   try {
@@ -293,6 +345,10 @@ async function revoke(id: string) {
       type: "warning",
     });
     await apiClient.revokeAIToken(id);
+    if (tokenDetail.value?.id === id) {
+      tokenDialogVisible.value = false;
+      tokenDetail.value = null;
+    }
     ElMessage.success(C.revoked_ok);
     await loadTokens();
   } catch (e: any) {
@@ -310,12 +366,12 @@ async function copy(value: string) {
   }
 }
 async function copyConfig() {
-  if (!secret.value) return;
+  if (!issuedToken.value) return;
   await copy(
     JSON.stringify(
       {
-        access_token: secret.value.access_token,
-        refresh_token: secret.value.refresh_token,
+        access_token: issuedToken.value.access_token,
+        refresh_token: issuedToken.value.refresh_token,
       },
       null,
       2,
@@ -418,6 +474,9 @@ onMounted(() => {
 }
 .config-button {
   margin-top: 16px;
+}
+.token-details {
+  margin-top: 14px;
 }
 .top-grid :deep(.el-card__body),
 .token-card :deep(.el-card__body) {

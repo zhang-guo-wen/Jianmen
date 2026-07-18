@@ -59,11 +59,9 @@ func initializeMetadata(cfg *config.Config, logger *slog.Logger) (*gorm.DB, stri
 
 	migrationMode := "versioned"
 	if cfg.Database.AutoMigrate {
-		migrationMode = "automigrate"
-		err = storage.AutoMigrate(db)
-	} else {
-		err = storage.Migrate(db)
+		logger.Warn("database.auto_migrate is deprecated; using versioned migrations")
 	}
+	err = storage.Migrate(db)
 	if err != nil {
 		cleanup()
 		return nil, "", nil, fmt.Errorf("migrate metadata database: %w", err)

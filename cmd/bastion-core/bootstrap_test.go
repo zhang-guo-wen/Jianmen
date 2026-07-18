@@ -34,6 +34,55 @@ func TestInitializeMetadataBootstrapsSQLite(t *testing.T) {
 	}
 }
 
+func TestInitializeMetadataAutoMigrateFlagStillRemovesLegacyAITokenSecrets(t *testing.T) {
+	dataDir := t.TempDir()
+	dsn := filepath.Join(dataDir, "metadata.db")
+	legacyDB, err := storage.Open(storage.Config{Driver: storage.DriverSQLite, DSN: dsn})
+	if err != nil {
+		t.Fatalf("open legacy database: %v", err)
+	}
+	if err := legacyDB.Exec(`CREATE TABLE ai_access_tokens (
+		id text primary key,
+		user_id text,
+		name text,
+		access_token_hash text,
+		refresh_token_hash text,
+		access_token text,
+		refresh_token text,
+		access_expires_at datetime,
+		refresh_expires_at datetime,
+		created_at datetime,
+		updated_at datetime
+	)`).Error; err != nil {
+		t.Fatalf("create legacy AI token table: %v", err)
+	}
+	sqlDB, err := legacyDB.DB()
+	if err != nil {
+		t.Fatalf("legacy sql database: %v", err)
+	}
+	if err := sqlDB.Close(); err != nil {
+		t.Fatalf("close legacy database: %v", err)
+	}
+
+	cfg := &config.Config{}
+	cfg.Database.Enabled = true
+	cfg.Database.Driver = "sqlite"
+	cfg.Database.DSN = dsn
+	cfg.Database.AutoMigrate = true
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+
+	db, _, cleanup, err := initializeMetadata(cfg, logger)
+	if err != nil {
+		t.Fatalf("initialize metadata: %v", err)
+	}
+	t.Cleanup(cleanup)
+	for _, column := range []string{"access_token", "refresh_token"} {
+		if db.Migrator().HasColumn("ai_access_tokens", column) {
+			t.Fatalf("legacy reversible AI secret column %q still exists", column)
+		}
+	}
+}
+
 func TestInitializeMetadataRequiresEnabledDatabase(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	if _, _, _, err := initializeMetadata(&config.Config{}, logger); err == nil {

@@ -112,7 +112,7 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="aiDialogVisible" title="AI &#x6388;&#x6743;" width="640px" class="ai-result-dialog" destroy-on-close>
+    <el-dialog v-model="aiDialogVisible" title="AI &#x6388;&#x6743;" width="640px" class="ai-result-dialog" destroy-on-close @closed="clearAIResult">
       <template v-if="!aiResult">
         <el-alert title="&#x6388;&#x6743; AI &#x4F7F;&#x7528;&#x5F53;&#x524D;&#x7528;&#x6237;&#x7684;&#x8D44;&#x6E90;&#x7684;&#x6743;&#x9650;&#xFF0C;&#x8BBF;&#x95EE;&#x4EE4;&#x724C;&#x9ED8;&#x8BA4; 48 &#x5C0F;&#x65F6;&#xFF0C;&#x5237;&#x65B0;&#x4EE4;&#x724C;&#x9ED8;&#x8BA4; 30 &#x5929;&#x3002;" type="warning" show-icon :closable="false" />
         <el-form label-width="100px" class="dialog-form">
@@ -130,7 +130,19 @@
         </el-form>
       </template>
       <template v-else>
-        <el-result icon="success" title="AI &#x6388;&#x6743;&#x6210;&#x529F;" sub-title="&#x4EE4;&#x724C;&#x4E0D;&#x4F1A;&#x5728;&#x9875;&#x9762;&#x4E2D;&#x660E;&#x6587;&#x5C55;&#x793A;&#xFF0C;&#x8BF7;&#x7ACB;&#x5373;&#x590D;&#x5236;&#x5E76;&#x59A5;&#x5584;&#x4FDD;&#x5B58;&#x3002;" />
+        <el-result icon="success" title="AI &#x6388;&#x6743;&#x6210;&#x529F;" sub-title="&#x4EE4;&#x724C;&#x4EC5;&#x5728;&#x672C;&#x6B21;&#x7B7E;&#x53D1;&#x540E;&#x663E;&#x793A;&#xFF0C;&#x5173;&#x95ED;&#x7A97;&#x53E3;&#x540E;&#x65E0;&#x6CD5;&#x518D;&#x6B21;&#x67E5;&#x770B;&#x3002;" />
+        <div class="credential-card">
+          <div class="credential-row">
+            <span>&#x8BBF;&#x95EE;&#x4EE4;&#x724C;</span>
+            <code>{{ aiResult.access_token }}</code>
+            <el-button @click="copyAIText(aiResult.access_token)">&#x590D;&#x5236;</el-button>
+          </div>
+          <div class="credential-row">
+            <span>&#x5237;&#x65B0;&#x4EE4;&#x724C;</span>
+            <code>{{ aiResult.refresh_token }}</code>
+            <el-button @click="copyAIText(aiResult.refresh_token)">&#x590D;&#x5236;</el-button>
+          </div>
+        </div>
         <div class="ai-docs-card">
           <div class="ai-docs-header">
             <div>
@@ -151,8 +163,9 @@
           </div>
         </div>
         <div class="copy-actions">
-          <el-button type="primary" @click="copyAIText(aiResult.copy_prompt || '')">&#x590D;&#x5236;&#x6587;&#x6863;&#x8DEF;&#x5F84;&#x548C;&#x4EE4;&#x724C;</el-button>
-          <el-button type="success" plain @click="copyAIText(aiResult.full_prompt || '')">&#x590D;&#x5236;&#x5B8C;&#x6574;&#x63D0;&#x793A;&#x8BCD;&#x548C;&#x4EE4;&#x724C;</el-button>
+          <el-button type="primary" @click="copyAISecrets">&#x590D;&#x5236;&#x4EE4;&#x724C;&#x914D;&#x7F6E;</el-button>
+          <el-button @click="copyAIText(aiResult.copy_prompt || '')">&#x590D;&#x5236;&#x6587;&#x6863;&#x8DEF;&#x5F84;</el-button>
+          <el-button type="success" plain @click="copyAIText(aiResult.full_prompt || '')">&#x590D;&#x5236;&#x5B8C;&#x6574;&#x63D0;&#x793A;&#x8BCD;</el-button>
         </div>
       </template>
       <template #footer>
@@ -338,7 +351,15 @@ async function copyAIText(value: string) {
   await writeClipboardText(value)
   ElMessage.success('已复制，请妥善保管令牌')
 }
-function closeAIDialog() { aiDialogVisible.value = false; aiResult.value = null }
+async function copyAISecrets() {
+  if (!aiResult.value) return
+  await copyAIText(JSON.stringify({
+    access_token: aiResult.value.access_token,
+    refresh_token: aiResult.value.refresh_token,
+  }, null, 2))
+}
+function clearAIResult() { aiResult.value = null }
+function closeAIDialog() { aiDialogVisible.value = false }
 function openExtendDialog(row: TemporaryAccountRecord) {
   extendTarget.value = row
   extendExpiresAt.value = addDuration('1d')

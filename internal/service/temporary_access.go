@@ -184,7 +184,6 @@ func (s *TemporaryAccessService) CreateAI(ctx context.Context, input CreateTempo
 	input.Token = model.AIAccessToken{
 		ID: model.NewID(), UserID: input.UserID, Name: input.Name,
 		AccessTokenHash: issued.AccessTokenHash, RefreshTokenHash: issued.RefreshTokenHash,
-		AccessToken: model.NewEncryptedField(issued.AccessToken), RefreshToken: model.NewEncryptedField(issued.RefreshToken),
 		AccessExpiresAt: issued.AccessExpiresAt, RefreshExpiresAt: issued.RefreshExpiresAt,
 	}
 	result, err := s.repository.CreateTemporaryAIAccess(ctx, input)

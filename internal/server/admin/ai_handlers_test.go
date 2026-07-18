@@ -13,7 +13,7 @@ import (
 	"jianmen/internal/service"
 )
 
-func TestHandleAITokensIssueRotateAndRevoke(t *testing.T) {
+func TestAIAccessTokenIssueRotateAndRevoke(t *testing.T) {
 	server, db := newAdminDBTestServer(t)
 	if err := db.Create(&model.User{ID: "ai-user", Username: "ai-user", Status: "active"}).Error; err != nil {
 		t.Fatalf("create user: %v", err)
@@ -45,10 +45,10 @@ func TestHandleAITokensIssueRotateAndRevoke(t *testing.T) {
 	if issued.Prompt != "\u6388\u6743 AI \u4f7f\u7528\u5f53\u524d\u7528\u6237\u7684\u8d44\u6e90\u7684\u6743\u9650\u3002" {
 		t.Fatalf("unexpected prompt: %q", issued.Prompt)
 	}
-	if !strings.Contains(issued.CopyPrompt, issued.AccessToken) || !strings.Contains(issued.CopyPrompt, issued.RefreshToken) || !strings.Contains(issued.CopyPrompt, "[https://public.example.test/api/ai/docs](https://public.example.test/api/ai/docs)") {
+	if strings.Contains(issued.CopyPrompt, issued.AccessToken) || strings.Contains(issued.CopyPrompt, issued.RefreshToken) || !strings.Contains(issued.CopyPrompt, "<access_token>") || !strings.Contains(issued.CopyPrompt, "<refresh_token>") || !strings.Contains(issued.CopyPrompt, "[https://public.example.test/api/ai/docs](https://public.example.test/api/ai/docs)") {
 		t.Fatalf("unexpected copy prompt: %q", issued.CopyPrompt)
 	}
-	if !strings.Contains(issued.FullPrompt, "# Jianmen AI Bastion API") || !strings.Contains(issued.FullPrompt, "Base URL: https://public.example.test") {
+	if strings.Contains(issued.FullPrompt, issued.AccessToken) || strings.Contains(issued.FullPrompt, issued.RefreshToken) || !strings.Contains(issued.FullPrompt, "# Jianmen AI Bastion API") || !strings.Contains(issued.FullPrompt, "Base URL: https://public.example.test") {
 		t.Fatalf("full prompt does not contain AI documentation: %q", issued.FullPrompt)
 	}
 	if issued.DocsURL != "https://public.example.test/api/ai/docs" || !strings.Contains(issued.DocsContent, "# Jianmen AI Bastion API") {
@@ -71,8 +71,8 @@ func TestHandleAITokensIssueRotateAndRevoke(t *testing.T) {
 	if strings.Contains(response.Body.String(), saved.AccessTokenHash) || strings.Contains(response.Body.String(), saved.RefreshTokenHash) {
 		t.Fatal("response exposed token hashes")
 	}
-	if saved.AccessToken.GetPlaintext() != issued.AccessToken || saved.RefreshToken.GetPlaintext() != issued.RefreshToken {
-		t.Fatal("database did not retain encrypted token values")
+	if saved.AccessTokenHash == "" || saved.RefreshTokenHash == "" {
+		t.Fatal("database did not retain token hashes")
 	}
 
 	listRequest := withTestUser(httptest.NewRequest(http.MethodGet, "/api/ai/tokens", nil), "ai-user", "ai-user")
@@ -92,15 +92,13 @@ func TestHandleAITokensIssueRotateAndRevoke(t *testing.T) {
 			t.Fatalf("detail attempt %d status = %d; body=%s", attempt, detailResponse.Code, detailResponse.Body.String())
 		}
 		var detail struct {
-			AccessToken  string `json:"access_token"`
-			RefreshToken string `json:"refresh_token"`
-			HasSecret    bool   `json:"has_secret"`
+			HasSecret bool `json:"has_secret"`
 		}
 		if err := decodeTestData(t, detailResponse.Body.Bytes(), &detail); err != nil {
 			t.Fatalf("decode detail: %v", err)
 		}
-		if !detail.HasSecret || detail.AccessToken != issued.AccessToken || detail.RefreshToken != issued.RefreshToken {
-			t.Fatalf("unexpected repeatable token detail: %#v", detail)
+		if detail.HasSecret || strings.Contains(detailResponse.Body.String(), "access_token") || strings.Contains(detailResponse.Body.String(), "refresh_token") || strings.Contains(detailResponse.Body.String(), issued.AccessToken) || strings.Contains(detailResponse.Body.String(), issued.RefreshToken) {
+			t.Fatalf("token detail exposed a secret: %s", detailResponse.Body.String())
 		}
 	}
 
@@ -123,8 +121,8 @@ func TestHandleAITokensIssueRotateAndRevoke(t *testing.T) {
 	if err := db.First(&saved, "id = ?", issued.ID).Error; err != nil {
 		t.Fatalf("reload refreshed token: %v", err)
 	}
-	if saved.AccessToken.GetPlaintext() != refreshed.AccessToken || saved.RefreshToken.GetPlaintext() != refreshed.RefreshToken {
-		t.Fatal("refreshed plaintext credentials were not retained")
+	if saved.AccessTokenHash == service.HashAIAccessToken(issued.AccessToken) || saved.RefreshTokenHash == service.HashAIAccessToken(issued.RefreshToken) {
+		t.Fatal("database did not replace token hashes")
 	}
 	oldRefresh := httptest.NewRecorder()
 	server.handleAIRefresh(oldRefresh, httptest.NewRequest(http.MethodPost, "/api/ai/auth/refresh", bytes.NewBufferString(`{"refresh_token":"`+issued.RefreshToken+`"}`)))
@@ -223,6 +221,79 @@ func TestAIResourcesRequireCurrentRBACGrantAndIssueSessionCredential(t *testing.
 	server.withAIToken(server.handleAIResources)(sessionResponse, sessionRequest)
 	if sessionResponse.Code != http.StatusCreated || !strings.Contains(sessionResponse.Body.String(), "compact_username") {
 		t.Fatalf("session response = %d; body=%s", sessionResponse.Code, sessionResponse.Body.String())
+	}
+}
+
+func TestAIAccessTokenReissueRotatesExistingTokenInPlace(t *testing.T) {
+	server, db := newAdminDBTestServer(t)
+	if err := db.Create(&model.User{ID: "ai-reissue-user", Username: "ai-reissue-user", Status: "active"}).Error; err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+
+	issueRequest := withTestUser(
+		httptest.NewRequest(http.MethodPost, "/api/ai/tokens", bytes.NewBufferString(`{"name":"reissue-agent","permanent":true}`)),
+		"ai-reissue-user",
+		"ai-reissue-user",
+	)
+	issueResponse := httptest.NewRecorder()
+	server.handleAITokens(issueResponse, issueRequest)
+	if issueResponse.Code != http.StatusCreated {
+		t.Fatalf("issue status = %d; body=%s", issueResponse.Code, issueResponse.Body.String())
+	}
+	var original struct {
+		ID           string `json:"id"`
+		AccessToken  string `json:"access_token"`
+		RefreshToken string `json:"refresh_token"`
+	}
+	if err := decodeTestData(t, issueResponse.Body.Bytes(), &original); err != nil {
+		t.Fatalf("decode issued token: %v", err)
+	}
+
+	reissueRequest := withTestUser(
+		httptest.NewRequest(http.MethodPost, "/api/ai/tokens/"+original.ID+"/reissue", nil),
+		"ai-reissue-user",
+		"ai-reissue-user",
+	)
+	reissueResponse := httptest.NewRecorder()
+	server.handleAIToken(reissueResponse, reissueRequest)
+	if reissueResponse.Code != http.StatusOK {
+		t.Fatalf("reissue status = %d; body=%s", reissueResponse.Code, reissueResponse.Body.String())
+	}
+	var reissued struct {
+		ID           string `json:"id"`
+		AccessToken  string `json:"access_token"`
+		RefreshToken string `json:"refresh_token"`
+	}
+	if err := decodeTestData(t, reissueResponse.Body.Bytes(), &reissued); err != nil {
+		t.Fatalf("decode reissued token: %v", err)
+	}
+	if reissued.ID != original.ID || reissued.AccessToken == "" || reissued.RefreshToken == "" ||
+		reissued.AccessToken == original.AccessToken || reissued.RefreshToken == original.RefreshToken {
+		t.Fatalf("unexpected reissued credentials: %#v", reissued)
+	}
+	if _, err := server.store.AuthenticateAIAccessToken(
+		reissueRequest.Context(),
+		service.HashAIAccessToken(original.AccessToken),
+		time.Now().UTC(),
+	); err == nil {
+		t.Fatal("old access token remained valid after reissue")
+	}
+	oldRefreshRequest := httptest.NewRequest(
+		http.MethodPost,
+		"/api/ai/auth/refresh",
+		bytes.NewBufferString(`{"refresh_token":"`+original.RefreshToken+`"}`),
+	)
+	oldRefreshResponse := httptest.NewRecorder()
+	server.handleAIRefresh(oldRefreshResponse, oldRefreshRequest)
+	if oldRefreshResponse.Code != http.StatusUnauthorized {
+		t.Fatalf("old refresh status = %d, want 401; body=%s", oldRefreshResponse.Code, oldRefreshResponse.Body.String())
+	}
+	var count int64
+	if err := db.Model(&model.AIAccessToken{}).Where("user_id = ?", "ai-reissue-user").Count(&count).Error; err != nil {
+		t.Fatalf("count AI tokens: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("AI token count = %d, want one in-place rotated token", count)
 	}
 }
 

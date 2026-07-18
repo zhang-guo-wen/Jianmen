@@ -156,7 +156,7 @@ func (s *Server) handleAITokens(w http.ResponseWriter, r *http.Request) {
 		}
 		views := make([]map[string]any, 0, len(tokens))
 		for _, token := range tokens {
-			views = append(views, aiTokenResponse(token, false))
+			views = append(views, aiTokenResponse(token))
 		}
 		s.writeJSON(w, r, http.StatusOK, views)
 	case http.MethodPost:
@@ -215,7 +215,7 @@ func (s *Server) handleAITokens(w http.ResponseWriter, r *http.Request) {
 		docsURL := s.aiBaseURL(r) + "/api/ai/docs"
 		docsContent := s.aiDocsContent(r)
 		prompt := "\u6388\u6743 AI \u4f7f\u7528\u5f53\u524d\u7528\u6237\u7684\u8d44\u6e90\u7684\u6743\u9650\u3002"
-		copyPrompt := fmt.Sprintf("\u4f60\u53ef\u4ee5\u4f7f\u7528\u6211\u7684\u6743\u9650\u8bbf\u95ee\u6211\u7684\u670d\u52a1\u5668\u3001\u6570\u636e\u5e93\u7b49\u8d44\u6e90\uff0c\n\u8bbf\u95ee\u4ee4\u724c\uff1a%s\n\u5237\u65b0\u4ee4\u724c\uff1a%s\n\u5177\u4f53\u89c1\u6587\u6863\uff1a[%s](%s)", result.AccessToken, result.RefreshToken, docsURL, docsURL)
+		copyPrompt := fmt.Sprintf("\u4f60\u53ef\u4ee5\u4f7f\u7528\u6211\u7684\u6743\u9650\u8bbf\u95ee\u6211\u7684\u670d\u52a1\u5668\u3001\u6570\u636e\u5e93\u7b49\u8d44\u6e90\uff0c\n\u8bbf\u95ee\u4ee4\u724c\uff1a<access_token>\n\u5237\u65b0\u4ee4\u724c\uff1a<refresh_token>\n\u5177\u4f53\u89c1\u6587\u6863\uff1a[%s](%s)", docsURL, docsURL)
 		fullPrompt := copyPrompt + "\n\n\u5b8c\u6574\u63d0\u793a\u8bcd\uff1a\n" + docsContent
 		s.writeJSON(w, r, http.StatusCreated, map[string]any{
 			"id": token.ID, "name": token.Name, "temporary_account_id": token.TemporaryAccountID,
@@ -231,11 +231,17 @@ func (s *Server) handleAITokens(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAIToken(w http.ResponseWriter, r *http.Request) {
-	id := strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/ai/tokens/"), "/")
-	if id == "" || strings.Contains(id, "/") {
+	path := strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/ai/tokens/"), "/")
+	parts := strings.Split(path, "/")
+	if len(parts) == 2 && parts[0] != "" && parts[1] == "reissue" {
+		s.handleAIReissue(w, r, parts[0])
+		return
+	}
+	if len(parts) != 1 || parts[0] == "" {
 		s.writeErrorText(w, r, http.StatusNotFound, "token not found")
 		return
 	}
+	id := parts[0]
 	switch r.Method {
 	case http.MethodGet:
 		token, err := s.store.AIAccessToken(r.Context(), userIDFromRequest(r), id)
@@ -247,7 +253,7 @@ func (s *Server) handleAIToken(w http.ResponseWriter, r *http.Request) {
 			s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
 			return
 		}
-		s.writeJSON(w, r, http.StatusOK, aiTokenResponse(token, true))
+		s.writeJSON(w, r, http.StatusOK, aiTokenResponse(token))
 	case http.MethodDelete:
 		if err := s.store.RevokeAIAccessToken(r.Context(), userIDFromRequest(r), id, time.Now().UTC()); err != nil {
 			if errors.Is(err, store.ErrAIAccessTokenNotFound) {
@@ -263,6 +269,55 @@ func (s *Server) handleAIToken(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Allow", "GET, DELETE")
 		s.writeErrorText(w, r, http.StatusMethodNotAllowed, "method not allowed")
 	}
+}
+
+func (s *Server) handleAIReissue(w http.ResponseWriter, r *http.Request, tokenID string) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", http.MethodPost)
+		s.writeErrorText(w, r, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	now := time.Now().UTC()
+	tokenService, err := s.aiAccessTokenService()
+	if err != nil {
+		s.writeErrorText(w, r, http.StatusInternalServerError, "AI access token service is unavailable")
+		return
+	}
+	result, err := tokenService.Reissue(
+		r.Context(),
+		userIDFromRequest(r),
+		tokenID,
+		now,
+		aiAccessTokenDefaultTTL,
+		aiRefreshTokenDefaultTTL,
+	)
+	if err != nil {
+		if errors.Is(err, store.ErrAIAccessTokenNotFound) {
+			s.writeErrorText(w, r, http.StatusNotFound, "token not found")
+			return
+		}
+		if errors.Is(err, store.ErrAIAccessTokenInvalid) {
+			s.writeErrorText(w, r, http.StatusConflict, "token cannot be reissued")
+			return
+		}
+		s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
+		return
+	}
+	rotated := result.Token
+	s.logger.Info("AI access token reissued", "user_id", rotated.UserID, "token_id", rotated.ID)
+	s.writeJSON(w, r, http.StatusOK, map[string]any{
+		"id": rotated.ID, "name": rotated.Name,
+		"access_token": result.AccessToken, "refresh_token": result.RefreshToken,
+		"access_expires_at": rotated.AccessExpiresAt, "refresh_expires_at": rotated.RefreshExpiresAt,
+	})
+}
+
+func (s *Server) aiAccessTokenService() (*service.AIAccessTokenService, error) {
+	repository, ok := s.store.(service.AIAccessTokenRepository)
+	if !ok {
+		return nil, errors.New("ai access token repository is unavailable")
+	}
+	return service.NewAIAccessTokenService(repository)
 }
 
 func (s *Server) handleAIRefresh(w http.ResponseWriter, r *http.Request) {
@@ -285,7 +340,6 @@ func (s *Server) handleAIRefresh(w http.ResponseWriter, r *http.Request) {
 	}
 	rotated, err := s.store.RotateAIAccessToken(r.Context(), service.HashAIAccessToken(request.RefreshToken), model.AIAccessToken{
 		AccessTokenHash: issued.AccessTokenHash, RefreshTokenHash: issued.RefreshTokenHash,
-		AccessToken: model.NewEncryptedField(issued.AccessToken), RefreshToken: model.NewEncryptedField(issued.RefreshToken),
 		AccessExpiresAt: issued.AccessExpiresAt, RefreshExpiresAt: issued.RefreshExpiresAt,
 	}, time.Now().UTC())
 	if err != nil {
@@ -304,16 +358,12 @@ func (s *Server) handleAIRefresh(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func aiTokenResponse(token model.AIAccessToken, includeSecrets bool) map[string]any {
+func aiTokenResponse(token model.AIAccessToken) map[string]any {
 	response := map[string]any{
 		"id": token.ID, "name": token.Name,
 		"access_expires_at": token.AccessExpiresAt, "refresh_expires_at": token.RefreshExpiresAt,
 		"last_used_at": token.LastUsedAt, "revoked_at": token.RevokedAt, "created_at": token.CreatedAt,
-		"has_secret": token.AccessToken.GetPlaintext() != "" && token.RefreshToken.GetPlaintext() != "",
-	}
-	if includeSecrets {
-		response["access_token"] = token.AccessToken.GetPlaintext()
-		response["refresh_token"] = token.RefreshToken.GetPlaintext()
+		"has_secret": false,
 	}
 	return response
 }

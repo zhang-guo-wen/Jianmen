@@ -41,6 +41,20 @@ func main() {
 
 	appStore := store.NewDBStore(metadataDB)
 	logger.Info("using database-backed store")
+	identityService, err := service.NewIdentityService(appStore)
+	if err != nil {
+		logger.Error("failed to initialize identity service", "error", err)
+		os.Exit(1)
+	}
+	authorizationService, err := service.NewAuthorizationService(
+		identityService,
+		rbac.NewChecker(metadataDB),
+		rbac.NewResourceGrantChecker(metadataDB),
+	)
+	if err != nil {
+		logger.Error("failed to initialize authorization service", "error", err)
+		os.Exit(1)
+	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -65,7 +79,7 @@ func main() {
 	dbGateway := dbproxy.NewGateway(cfg.DatabaseGateway, appStore, cfg.ReplayDir, logger, metadataDB, superAdminIDs, onlineSessions, appStore)
 
 	if cfg.Admin.Enabled {
-		appProxy := appproxy.New(cfg.ApplicationGateway, cfg.Admin, metadataDB, superAdminIDs, logger)
+		appProxy := appproxy.New(cfg.ApplicationGateway, cfg.Admin, metadataDB, authorizationService, logger)
 		go func() {
 			errCh <- appProxy.ListenAndServe(ctx)
 		}()

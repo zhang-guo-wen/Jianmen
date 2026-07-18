@@ -23,6 +23,7 @@ type Gateway struct {
 	logger         *slog.Logger
 	authorizer     connectionAuthorizer
 	audit          auditWriter
+	auditRequired  bool
 	onlineSessions *online.Registry
 }
 
@@ -45,7 +46,7 @@ func NewGateway(cfg config.DatabaseGatewayConfig, store databaseAccountResolver,
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Gateway{cfg: cfg, store: store, db: db, replayDir: replayDir, logger: logger, authorizer: authorizer, audit: auditStore, onlineSessions: onlineSessions}
+	return &Gateway{cfg: cfg, store: store, db: db, replayDir: replayDir, logger: logger, authorizer: authorizer, audit: auditStore, auditRequired: true, onlineSessions: onlineSessions}
 }
 
 func (g *Gateway) Enabled() bool {
@@ -123,8 +124,17 @@ func (g *Gateway) handleGatewayConn(client net.Conn, conn *gatewayConn) {
 		auditSession.UserSessionID = conn.userSessionID
 	}
 	auditSession.BeforeCreate(nil)
+	if g.auditRequired && g.audit == nil {
+		g.logger.Warn("db gateway audit writer unavailable")
+		g.writeAuditUnavailableResponse(client, conn.protocol)
+		return
+	}
 	if g.audit != nil {
-		g.audit.CreateAuditSession(auditSession)
+		if err := g.audit.CreateAuditSession(auditSession); err != nil {
+			g.logger.Warn("db gateway audit session creation failed", "error", err)
+			g.writeAuditUnavailableResponse(client, conn.protocol)
+			return
+		}
 		defer g.audit.EndAuditSession(auditSession.ID)
 	}
 
@@ -155,6 +165,16 @@ func (g *Gateway) handleGatewayConn(client net.Conn, conn *gatewayConn) {
 
 	observer := newQueryObserver(conn.protocol, recorder)
 	relayGatewayConnection(client, conn.upstream, observer)
+}
+
+func (g *Gateway) writeAuditUnavailableResponse(client net.Conn, protocol string) {
+	decision := newObserverFatalDecision(observerErrorAuditFailure, "database gateway audit unavailable")
+	response := newQueryObserver(protocol, nil).ErrorResponse(*decision)
+	if len(response) > 0 {
+		if _, err := client.Write(response); err != nil {
+			g.logger.Warn("db gateway failed to write audit unavailable response", "error", err)
+		}
+	}
 }
 
 // handlePG implements two-layer PostgreSQL authentication:

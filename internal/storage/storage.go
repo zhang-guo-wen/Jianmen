@@ -3,9 +3,11 @@ package storage
 import (
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/glebarez/sqlite"
@@ -15,6 +17,8 @@ import (
 
 	"jianmen/internal/model"
 )
+
+var sqliteMemoryDSNSequence atomic.Uint64
 
 type Driver string
 
@@ -80,7 +84,7 @@ func dialectorFor(driver Driver, dsn string) (gorm.Dialector, error) {
 		if err := ensureSQLiteDir(dsn); err != nil {
 			return nil, err
 		}
-		return sqlite.Open(dsn), nil
+		return sqlite.Open(sqliteDSNWithForeignKeys(dsn)), nil
 	case DriverMySQL:
 		if dsn == "" {
 			return nil, errors.New("storage: mysql dsn is required")
@@ -94,6 +98,45 @@ func dialectorFor(driver Driver, dsn string) (gorm.Dialector, error) {
 	default:
 		return nil, fmt.Errorf("storage: unsupported driver %q", driver)
 	}
+}
+
+func sqliteDSNWithForeignKeys(dsn string) string {
+	if strings.TrimSpace(dsn) == ":memory:" {
+		dsn = fmt.Sprintf("file:jianmen-memory-%d?mode=memory&cache=shared", sqliteMemoryDSNSequence.Add(1))
+	}
+
+	base, query, hasQuery := strings.Cut(dsn, "?")
+	parts := make([]string, 0, 4)
+	if hasQuery && query != "" {
+		parts = strings.Split(query, "&")
+	}
+	filtered := parts[:0]
+	for _, part := range parts {
+		if isSQLiteForeignKeysPragma(part) {
+			continue
+		}
+		filtered = append(filtered, part)
+	}
+	parts = append(filtered, "_pragma=foreign_keys(1)")
+	return base + "?" + strings.Join(parts, "&")
+}
+
+func isSQLiteForeignKeysPragma(part string) bool {
+	key, value, hasValue := strings.Cut(part, "=")
+	if !hasValue {
+		return false
+	}
+	decodedKey, err := url.QueryUnescape(key)
+	if err != nil || !strings.EqualFold(decodedKey, "_pragma") {
+		return false
+	}
+	decodedValue, err := url.QueryUnescape(value)
+	if err != nil {
+		return false
+	}
+	return len(decodedValue) >= len("foreign_keys()") &&
+		strings.EqualFold(decodedValue[:len("foreign_keys(")], "foreign_keys(") &&
+		decodedValue[len(decodedValue)-1] == ')'
 }
 
 func ensureSQLiteDir(dsn string) error {

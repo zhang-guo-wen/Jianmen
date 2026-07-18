@@ -70,9 +70,10 @@ func TestConnectionPasswordExpiresAndCompactSSHIsReusable(t *testing.T) {
 		t.Fatalf("automigrate: %v", err)
 	}
 	user := model.User{ID: "user-ssh", Username: "alice", PasswordHash: "invalid", Status: "active"}
+	host := model.Host{ID: "host-1", Name: "host-1", Address: "127.0.0.1", Port: 22, Status: "active"}
 	session := model.UserSession{ID: "session-ssh", UserID: user.ID, SessionID: "abcde", Type: "permanent", Status: "active"}
 	account := model.HostAccount{ID: "host-account-ssh", HostID: "host-1", ResourceID: "1234", Username: "root", Status: "active"}
-	for _, value := range []any{&user, &session, &account} {
+	for _, value := range []any{&user, &host, &session, &account} {
 		if err := db.Create(value).Error; err != nil {
 			t.Fatalf("seed compact auth: %v", err)
 		}

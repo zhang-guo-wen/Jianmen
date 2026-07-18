@@ -1,12 +1,222 @@
 package storage
 
 import (
+	"context"
+	"database/sql"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"jianmen/internal/config"
 	"jianmen/internal/model"
 	"jianmen/internal/util"
 )
+
+func TestSQLiteDSNWithForeignKeysNormalizesMemoryDSNs(t *testing.T) {
+	tests := []struct {
+		name string
+		dsn  string
+	}{
+		{name: "bare memory", dsn: ":memory:"},
+		{name: "shared anonymous memory", dsn: "file::memory:?cache=shared"},
+		{name: "shared named memory", dsn: "file:name?mode=memory&cache=shared"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := sqliteDSNWithForeignKeys(tt.dsn)
+			if !strings.Contains(got, "_pragma=foreign_keys(1)") {
+				t.Fatalf("sqlite dsn = %q, want foreign key pragma", got)
+			}
+			if strings.Count(got, "_pragma=foreign_keys(1)") != 1 {
+				t.Fatalf("sqlite dsn = %q, want one foreign key pragma", got)
+			}
+			if tt.dsn == ":memory:" && got == tt.dsn {
+				t.Fatalf("bare memory dsn was not normalized: %q", got)
+			}
+		})
+	}
+
+	for _, tc := range []struct {
+		name string
+		dsn  string
+		want string
+	}{
+		{name: "one to zero", dsn: "file:existing?mode=memory&_pragma=foreign_keys(0)", want: "file:existing?mode=memory&_pragma=foreign_keys(1)"},
+		{name: "zero to one", dsn: "file:existing?mode=memory&_pragma=foreign_keys(1)", want: "file:existing?mode=memory&_pragma=foreign_keys(1)"},
+		{name: "duplicate and mixed case", dsn: "file:existing?_pragma=FOREIGN_KEYS(OFF)&x=1&_PRAGMA=foreign_keys(ON)&_pragma=foreign_keys(0)", want: "file:existing?x=1&_pragma=foreign_keys(1)"},
+		{name: "encoded", dsn: "file:existing?keep=a%2Bb&_pragma=foreign_keys%28OFF%29&other=2", want: "file:existing?keep=a%2Bb&other=2&_pragma=foreign_keys(1)"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := sqliteDSNWithForeignKeys(tc.dsn); got != tc.want {
+				t.Fatalf("sqlite dsn = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestOpenSQLiteNormalizesForeignKeyPragmaPerConnection(t *testing.T) {
+	for _, dsn := range []string{
+		"file:pragma-0?mode=memory&cache=shared&_pragma=foreign_keys(0)",
+		"file:pragma-1?mode=memory&cache=shared&_pragma=foreign_keys(1)",
+		"file:pragma-duplicates?mode=memory&_pragma=FOREIGN_KEYS(OFF)&_pragma=foreign_keys%28ON%29",
+		"file:pragma-encoded?mode=memory&_pragma=foreign_keys%28OFF%29",
+	} {
+		t.Run(dsn, func(t *testing.T) {
+			db, err := Open(Config{Driver: DriverSQLite, DSN: dsn, MaxOpenConns: 2, MaxIdleConns: 2})
+			if err != nil {
+				t.Fatalf("open sqlite: %v", err)
+			}
+			sqlDB, err := db.DB()
+			if err != nil {
+				t.Fatalf("get SQL database: %v", err)
+			}
+			defer sqlDB.Close()
+			for i := 0; i < 2; i++ {
+				conn, err := sqlDB.Conn(context.Background())
+				if err != nil {
+					t.Fatalf("acquire connection: %v", err)
+				}
+				var enabled int
+				err = conn.QueryRowContext(context.Background(), "PRAGMA foreign_keys").Scan(&enabled)
+				_ = conn.Close()
+				if err != nil {
+					t.Fatalf("read foreign key pragma: %v", err)
+				}
+				if enabled != 1 {
+					t.Fatalf("foreign_keys = %d, want 1", enabled)
+				}
+			}
+		})
+	}
+}
+
+func TestOpenSQLiteMemoryForeignKeysWorkAcrossConnections(t *testing.T) {
+	for _, dsn := range []string{
+		":memory:",
+		"file::memory:?cache=shared",
+		"file:name?mode=memory&cache=shared",
+	} {
+		t.Run(dsn, func(t *testing.T) {
+			db, err := Open(Config{
+				Driver:       DriverSQLite,
+				DSN:          dsn,
+				MaxOpenConns: 2,
+				MaxIdleConns: 2,
+			})
+			if err != nil {
+				t.Fatalf("open sqlite: %v", err)
+			}
+			sqlDB, err := db.DB()
+			if err != nil {
+				t.Fatalf("get SQL database: %v", err)
+			}
+			defer sqlDB.Close()
+
+			ctx := context.Background()
+			connections := make([]*sql.Conn, 0, 2)
+			for index := 0; index < 2; index++ {
+				conn, err := sqlDB.Conn(ctx)
+				if err != nil {
+					t.Fatalf("acquire sqlite connection %d: %v", index, err)
+				}
+				connections = append(connections, conn)
+			}
+			defer func() {
+				for _, conn := range connections {
+					_ = conn.Close()
+				}
+			}()
+
+			for index, conn := range connections {
+				var enabled int
+				if err := conn.QueryRowContext(ctx, "PRAGMA foreign_keys").Scan(&enabled); err != nil {
+					t.Fatalf("read foreign key pragma on connection %d: %v", index, err)
+				}
+				if enabled != 1 {
+					t.Fatalf("foreign_keys on connection %d = %d, want 1", index, enabled)
+				}
+			}
+
+			conn := connections[0]
+			if _, err := conn.ExecContext(ctx, "CREATE TABLE fk_parent (id integer primary key)"); err != nil {
+				t.Fatalf("create parent table: %v", err)
+			}
+			if _, err := conn.ExecContext(ctx, "CREATE TABLE fk_child (parent_id integer references fk_parent(id) ON DELETE RESTRICT)"); err != nil {
+				t.Fatalf("create child table: %v", err)
+			}
+			if _, err := conn.ExecContext(ctx, "INSERT INTO fk_child (parent_id) VALUES (999)"); err == nil {
+				t.Fatal("foreign key violation succeeded")
+			}
+			if _, err := conn.ExecContext(ctx, "INSERT INTO fk_parent (id) VALUES (1)"); err != nil {
+				t.Fatalf("insert parent row: %v", err)
+			}
+			if _, err := conn.ExecContext(ctx, "INSERT INTO fk_child (parent_id) VALUES (1)"); err != nil {
+				t.Fatalf("insert child row: %v", err)
+			}
+			if _, err := conn.ExecContext(ctx, "DELETE FROM fk_parent WHERE id = 1"); err == nil {
+				t.Fatal("restricted parent delete succeeded")
+			}
+		})
+	}
+}
+
+func TestOpenSQLiteEnablesForeignKeysForEveryConnection(t *testing.T) {
+	db, err := Open(Config{
+		Driver:       DriverSQLite,
+		DSN:          filepath.Join(t.TempDir(), "foreign-keys.db"),
+		MaxOpenConns: 2,
+		MaxIdleConns: 2,
+	})
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	sqlDB, err := db.DB()
+	if err != nil {
+		t.Fatalf("get SQL database: %v", err)
+	}
+	defer sqlDB.Close()
+	ctx := context.Background()
+	connections := make([]*sql.Conn, 0, 2)
+	for index := 0; index < 2; index++ {
+		conn, err := sqlDB.Conn(ctx)
+		if err != nil {
+			t.Fatalf("acquire sqlite connection %d: %v", index, err)
+		}
+		connections = append(connections, conn)
+	}
+	for index, conn := range connections {
+		var enabled int
+		err = conn.QueryRowContext(ctx, "PRAGMA foreign_keys").Scan(&enabled)
+		if err != nil {
+			t.Fatalf("read foreign key pragma on connection %d: %v", index, err)
+		}
+		if enabled != 1 {
+			t.Fatalf("foreign_keys on connection %d = %d, want 1", index, enabled)
+		}
+	}
+	for _, conn := range connections {
+		_ = conn.Close()
+	}
+	if err := db.Exec("CREATE TABLE fk_parent (id integer primary key)").Error; err != nil {
+		t.Fatalf("create parent table: %v", err)
+	}
+	if err := db.Exec("CREATE TABLE fk_child (parent_id integer references fk_parent(id) ON DELETE RESTRICT)").Error; err != nil {
+		t.Fatalf("create child table: %v", err)
+	}
+	if err := db.Exec("INSERT INTO fk_child (parent_id) VALUES (999)").Error; err == nil {
+		t.Fatal("foreign key violation succeeded")
+	}
+	if err := db.Exec("INSERT INTO fk_parent (id) VALUES (1)").Error; err != nil {
+		t.Fatalf("insert parent row: %v", err)
+	}
+	if err := db.Exec("INSERT INTO fk_child (parent_id) VALUES (1)").Error; err != nil {
+		t.Fatalf("insert child row: %v", err)
+	}
+	if err := db.Exec("DELETE FROM fk_parent WHERE id = 1").Error; err == nil {
+		t.Fatal("restricted parent delete succeeded")
+	}
+}
 
 func TestOpenAndAutoMigrateSQLite(t *testing.T) {
 	db, err := Open(Config{
@@ -84,6 +294,17 @@ func TestMigrateRepairsDuplicateUserSessionsBeforeIndexes(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
+	}
+	if err := db.AutoMigrate(&model.User{}); err != nil {
+		t.Fatalf("create legacy session parent table: %v", err)
+	}
+	for _, user := range []model.User{
+		{ID: "u1", Username: "legacy-user-1", Status: "active"},
+		{ID: "u2", Username: "legacy-user-2", Status: "active"},
+	} {
+		if err := db.Create(&user).Error; err != nil {
+			t.Fatalf("insert legacy session parent user %s: %v", user.ID, err)
+		}
 	}
 	if err := db.Exec(`CREATE TABLE user_sessions (
 		id text primary key,

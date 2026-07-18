@@ -46,7 +46,7 @@ var migrations = []Migration{
 		Version: "202606290002",
 		Name:    "core metadata schema",
 		Run: func(tx *gorm.DB) error {
-			return tx.AutoMigrate(model.AllModels()...)
+			return tx.AutoMigrate(metadataModelsBeforeDatabaseProvisioning()...)
 		},
 	},
 	{
@@ -73,7 +73,7 @@ var migrations = []Migration{
 		Version: "202606290005",
 		Name:    "metadata query indexes",
 		Run: func(tx *gorm.DB) error {
-			return tx.AutoMigrate(model.AllModels()...)
+			return tx.AutoMigrate(metadataModelsBeforeDatabaseProvisioning()...)
 		},
 	},
 	{
@@ -157,12 +157,48 @@ var migrations = []Migration{
 		},
 	},
 	{
+		Version: "202607180006",
+		Name:    "database instance upstream TLS policy",
+		Run: func(tx *gorm.DB) error {
+			return tx.AutoMigrate(&model.DatabaseInstance{})
+		},
+	},
+	{
 		Version: "202607180007",
 		Name:    "permission logical uniqueness",
 		Run: func(tx *gorm.DB) error {
 			return tx.AutoMigrate(&model.Permission{})
 		},
 	},
+	{
+		Version: "202607180008",
+		Name:    "database account instance username uniqueness",
+		Run:     migrateDatabaseAccountInstanceUsernameUniqueness,
+	},
+	{
+		Version: "202607180009",
+		Name:    "database provisioning saga recovery state",
+		Run:     migrateDatabaseProvisioningSaga,
+	},
+}
+
+func rejectDuplicateDatabaseAccounts(tx *gorm.DB) error {
+	var duplicateGroups []struct {
+		InstanceID string `gorm:"column:instance_id"`
+	}
+	result := tx.Model(&model.DatabaseAccount{}).
+		Select("instance_id").
+		Group("instance_id, username").
+		Having("COUNT(*) > ?", 1).
+		Limit(1).
+		Scan(&duplicateGroups)
+	if result.Error != nil {
+		return fmt.Errorf("check duplicate database accounts: %w", result.Error)
+	}
+	if len(duplicateGroups) > 0 {
+		return errors.New("database account uniqueness migration blocked: duplicate database accounts share the same instance_id and username; delete or rename duplicate accounts before retrying")
+	}
+	return nil
 }
 
 func Migrate(db *gorm.DB) error {

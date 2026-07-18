@@ -4,6 +4,7 @@ package integration
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -79,6 +80,105 @@ func runContainer(t *testing.T, namePrefix string, args ...string) string {
 		_ = exec.CommandContext(ctx, cli.name, rmArgs...).Run()
 	})
 	return id
+}
+
+func dockerBindPath(t *testing.T, path string) string {
+	t.Helper()
+	cli, err := findDockerCLI()
+	if err != nil || cli.name != "wsl.exe" {
+		return path
+	}
+	output, err := exec.Command("wsl.exe", "-e", "wslpath", "-a", path).Output()
+	if err != nil {
+		t.Fatalf("convert Docker bind path %q for WSL: %v", path, err)
+	}
+	return strings.TrimSpace(string(output))
+}
+
+func dockerBindHost(t *testing.T) string {
+	t.Helper()
+	cli, err := findDockerCLI()
+	if err != nil {
+		t.Fatalf("find Docker CLI: %v", err)
+	}
+	if cli.name != "wsl.exe" {
+		return "127.0.0.1"
+	}
+
+	modeOutput, err := exec.Command("wsl.exe", "-e", "wslinfo", "--networking-mode").Output()
+	if err != nil || strings.TrimSpace(string(modeOutput)) != "nat" {
+		return "127.0.0.1"
+	}
+
+	routeOutput, err := exec.Command("wsl.exe", "-e", "ip", "route", "show", "default").Output()
+	if err != nil {
+		t.Fatalf("resolve WSL default route: %v", err)
+	}
+	iface, err := parseDefaultRouteInterface(string(routeOutput))
+	if err != nil {
+		t.Fatal(err)
+	}
+	addrOutput, err := exec.Command("wsl.exe", "-e", "ip", "-4", "-o", "addr", "show", "dev", iface, "scope", "global").Output()
+	if err != nil {
+		t.Fatalf("resolve WSL NAT interface address: %v", err)
+	}
+	address, err := parsePrivateInterfaceAddress(string(addrOutput), iface)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return address
+}
+
+func parseDefaultRouteInterface(output string) (string, error) {
+	var iface string
+	for _, line := range strings.Split(output, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) == 0 || fields[0] != "default" {
+			continue
+		}
+		candidate := ""
+		for index := 1; index+1 < len(fields); index++ {
+			if fields[index] == "dev" {
+				candidate = fields[index+1]
+				break
+			}
+		}
+		if candidate == "" {
+			return "", fmt.Errorf("WSL default route has no interface")
+		}
+		if iface != "" && iface != candidate {
+			return "", fmt.Errorf("WSL default route has ambiguous interfaces")
+		}
+		iface = candidate
+	}
+	if iface == "" {
+		return "", fmt.Errorf("WSL default route is missing")
+	}
+	return iface, nil
+}
+
+func parsePrivateInterfaceAddress(output, iface string) (string, error) {
+	var address string
+	for _, line := range strings.Split(output, "\n") {
+		fields := strings.Fields(line)
+		for index := 0; index+1 < len(fields); index++ {
+			if fields[index] != "inet" {
+				continue
+			}
+			ip, _, err := net.ParseCIDR(fields[index+1])
+			if err != nil || ip.To4() == nil || !ip.IsPrivate() {
+				return "", fmt.Errorf("WSL NAT interface %s has an invalid private IPv4 address", iface)
+			}
+			if address != "" {
+				return "", fmt.Errorf("WSL NAT interface %s has ambiguous private IPv4 addresses", iface)
+			}
+			address = ip.To4().String()
+		}
+	}
+	if address == "" {
+		return "", fmt.Errorf("WSL NAT interface %s has no private IPv4 address", iface)
+	}
+	return address, nil
 }
 
 func dockerContainerID(t *testing.T, output string) string {
@@ -167,6 +267,17 @@ func waitTCP(t *testing.T, addr string, timeout time.Duration) {
 			return err
 		}
 		return conn.Close()
+	})
+}
+
+func waitMySQLContainerInitialized(t *testing.T, containerID string) {
+	t.Helper()
+	waitFor(t, 2*time.Minute, time.Second, func() error {
+		logs := dockerOutput(t, 30*time.Second, "logs", containerID)
+		if strings.Contains(logs, "MySQL init process done. Ready for start up.") {
+			return nil
+		}
+		return errors.New("MySQL container initialization is not complete")
 	})
 }
 

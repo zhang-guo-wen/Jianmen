@@ -20,10 +20,19 @@ func TestAIAccessTokenPersistsOnlyHashes(t *testing.T) {
 	if err := db.Create(&model.User{ID: "ai-user", Username: "ai-user", Status: "active"}).Error; err != nil {
 		t.Fatalf("create user: %v", err)
 	}
+	if err := db.Create(&model.TemporaryAccount{
+		ID:        "ai-temporary",
+		SessionID: "ai-session",
+		Type:      model.TemporaryAccountTypeAI,
+		Username:  "ai-agent",
+		Status:    "active",
+	}).Error; err != nil {
+		t.Fatalf("create temporary account: %v", err)
+	}
 
 	now := time.Now().UTC()
 	token := model.AIAccessToken{
-		ID: "ai-token", UserID: "ai-user", Name: "agent",
+		ID: "ai-token", UserID: "ai-user", TemporaryAccountID: "ai-temporary", Name: "agent",
 		AccessTokenHash: "access-hash", RefreshTokenHash: "refresh-hash",
 		AccessExpiresAt: now.Add(time.Hour), RefreshExpiresAt: now.Add(24 * time.Hour),
 	}

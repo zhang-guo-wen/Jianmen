@@ -174,6 +174,9 @@ func TestAIResourcesRequireCurrentRBACGrantAndIssueSessionCredential(t *testing.
 	if err := db.Create(&model.ResourceGrant{PrincipalType: "user", PrincipalID: "ai-resource-user", ResourceType: model.ResourceTypeHostAccount, ResourceID: "ai-account", Effect: model.PermissionEffectAllow}).Error; err != nil {
 		t.Fatalf("create grant: %v", err)
 	}
+	if err := db.Create(&model.TemporaryAccount{ID: "ai-temporary", SessionID: "ai001", Type: "ai", Username: "ai-resource-user", AuthorizedUserID: "ai-resource-user", Status: "active", StartsAt: time.Now().UTC()}).Error; err != nil {
+		t.Fatalf("create AI temporary account: %v", err)
+	}
 	host := model.Host{ID: "ai-host", Name: "ai-host", Address: "10.0.0.10", Port: 22, Status: "active"}
 	account := model.HostAccount{ID: "ai-account", HostID: host.ID, Name: "root account", Username: "root", AuthType: "password", Password: model.NewEncryptedField("target-secret"), Status: "active", ResourceID: "A001"}
 	if err := db.Create(&host).Error; err != nil {
@@ -186,7 +189,7 @@ func TestAIResourcesRequireCurrentRBACGrantAndIssueSessionCredential(t *testing.
 	if err != nil {
 		t.Fatalf("issue token: %v", err)
 	}
-	if err := db.Create(&model.AIAccessToken{ID: "ai-token", UserID: "ai-resource-user", Name: "agent", AccessTokenHash: issued.AccessTokenHash, RefreshTokenHash: issued.RefreshTokenHash, AccessExpiresAt: issued.AccessExpiresAt, RefreshExpiresAt: issued.RefreshExpiresAt}).Error; err != nil {
+	if err := db.Create(&model.AIAccessToken{ID: "ai-token", UserID: "ai-resource-user", TemporaryAccountID: "ai-temporary", Name: "agent", AccessTokenHash: issued.AccessTokenHash, RefreshTokenHash: issued.RefreshTokenHash, AccessExpiresAt: issued.AccessExpiresAt, RefreshExpiresAt: issued.RefreshExpiresAt}).Error; err != nil {
 		t.Fatalf("create AI token: %v", err)
 	}
 

@@ -94,6 +94,9 @@ func TestDBStoreDeleteUserRollsBackRolesWhenUserDeleteFails(t *testing.T) {
 	if err := db.Create(&user).Error; err != nil {
 		t.Fatalf("create user: %v", err)
 	}
+	if err := db.Create(&model.Role{ID: "role-1", Name: "operators", Status: "active"}).Error; err != nil {
+		t.Fatalf("create role: %v", err)
+	}
 	if err := db.Create(&model.UserRole{ID: "ur1", UserID: user.ID, RoleID: "role-1"}).Error; err != nil {
 		t.Fatalf("create user role: %v", err)
 	}

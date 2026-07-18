@@ -37,6 +37,9 @@ func TestEffectiveGlobalActionsExcludesResourcePermissionsAndHonorsDeny(t *testi
 	if err := db.Create(&role).Error; err != nil {
 		t.Fatalf("create role: %v", err)
 	}
+	if err := db.Create(&model.User{ID: "u1", Username: "u1", Status: "active"}).Error; err != nil {
+		t.Fatalf("create user: %v", err)
+	}
 	if err := db.Create(&model.UserRole{ID: "ur", UserID: "u1", RoleID: role.ID}).Error; err != nil {
 		t.Fatalf("create user role: %v", err)
 	}

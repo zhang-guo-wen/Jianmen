@@ -164,7 +164,7 @@ func (g *Gateway) handleRedis(ctx context.Context, client net.Conn, firstByte by
 	acct := resolved.account
 
 	// Validate bastion user password
-	if err := g.validateUserPassword(resolved.user, resolved.account.ID, bastionPassword); err != nil {
+	if err := g.validateUserPassword(ctx, resolved.user, resolved.account.ID, bastionPassword); err != nil {
 		g.logger.Warn("redis gateway auth failed", "user", resolved.rawName, "error", err)
 		writeRESPError(client, "WRONGPASS invalid username-password pair or user is disabled.")
 		return nil
@@ -173,7 +173,7 @@ func (g *Gateway) handleRedis(ctx context.Context, client net.Conn, firstByte by
 
 	// RBAC check
 	resourceID := acct.ID
-	if err := g.authorizeConnect(userID, resolved.rawName, resourceID); err != nil {
+	if err := g.authorizeConnect(ctx, userID, resourceID); err != nil {
 		g.logger.Warn("redis gateway rbac denied", "user", userID, "resource", resourceID, "error", err)
 		writeRESPError(client, "NOPERM this user has no permissions to run the command")
 		return nil

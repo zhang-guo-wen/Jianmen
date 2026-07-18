@@ -166,7 +166,7 @@ func (g *Gateway) handleMySQL(ctx context.Context, client net.Conn) *gatewayConn
 	// RBAC check
 	rbacUserID := resolved.user.ID
 	resourceID := acct.ID
-	if err := g.authorizeConnect(rbacUserID, resolved.rawName, resourceID); err != nil {
+	if err := g.authorizeConnect(ctx, rbacUserID, resourceID); err != nil {
 		g.logger.Warn("mysql gateway rbac denied", "resource", resourceID, "error", err)
 		return nil
 	}

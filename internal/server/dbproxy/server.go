@@ -18,20 +18,17 @@ import (
 	"jianmen/internal/config"
 	"jianmen/internal/model"
 	"jianmen/internal/online"
-	rbaccheck "jianmen/internal/rbac"
 )
 
 type Gateway struct {
-	cfg               config.DatabaseGatewayConfig
-	store             databaseAccountResolver
-	db                *gorm.DB
-	replayDir         string
-	logger            *slog.Logger
-	permissionChecker permissionChecker
-	resourceChecker   resourceGrantChecker
-	superAdminIDs     map[string]bool
-	audit             auditWriter
-	onlineSessions    *online.Registry
+	cfg            config.DatabaseGatewayConfig
+	store          databaseAccountResolver
+	db             *gorm.DB
+	replayDir      string
+	logger         *slog.Logger
+	authorizer     connectionAuthorizer
+	audit          auditWriter
+	onlineSessions *online.Registry
 }
 
 type databaseAccountResolver interface {
@@ -45,25 +42,15 @@ type auditWriter interface {
 	CreateAuditDBQuery(query *model.AuditDBQuery) error
 }
 
-type permissionChecker interface {
-	HasPermission(userID, action, resourceType, resourceID string) (bool, error)
+type connectionAuthorizer interface {
+	Authorize(ctx context.Context, userID string, actions []string, resourceType, resourceID string) (bool, error)
 }
 
-type resourceGrantChecker interface {
-	HasGrant(userID, resourceType, resourceID string) (bool, error)
-}
-
-func NewGateway(cfg config.DatabaseGatewayConfig, store databaseAccountResolver, replayDir string, logger *slog.Logger, db *gorm.DB, superAdminIDs map[string]bool, onlineSessions *online.Registry, auditStore auditWriter) *Gateway {
+func NewGateway(cfg config.DatabaseGatewayConfig, store databaseAccountResolver, replayDir string, logger *slog.Logger, db *gorm.DB, authorizer connectionAuthorizer, onlineSessions *online.Registry, auditStore auditWriter) *Gateway {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	var checker permissionChecker
-	var resourceChecker resourceGrantChecker
-	if db != nil {
-		checker = rbaccheck.NewChecker(db)
-		resourceChecker = rbaccheck.NewResourceGrantChecker(db)
-	}
-	return &Gateway{cfg: cfg, store: store, db: db, replayDir: replayDir, logger: logger, permissionChecker: checker, resourceChecker: resourceChecker, superAdminIDs: superAdminIDs, audit: auditStore, onlineSessions: onlineSessions}
+	return &Gateway{cfg: cfg, store: store, db: db, replayDir: replayDir, logger: logger, authorizer: authorizer, audit: auditStore, onlineSessions: onlineSessions}
 }
 
 func (g *Gateway) Enabled() bool {
@@ -350,7 +337,7 @@ func (g *Gateway) handlePG(ctx context.Context, client net.Conn, firstByte byte)
 	password := strings.TrimRight(string(pwdBuf[5:5+pwdLen]), "\x00")
 
 	// 验证堡垒机用户密码
-	if err := g.validateUserPassword(resolved.user, resolved.account.ID, password); err != nil {
+	if err := g.validateUserPassword(ctx, resolved.user, resolved.account.ID, password); err != nil {
 		g.logger.Warn("db gateway auth failed", "user", resolved.rawName, "error", err)
 		return nil
 	}
@@ -358,7 +345,7 @@ func (g *Gateway) handlePG(ctx context.Context, client net.Conn, firstByte byte)
 
 	// RBAC check
 	resourceID := acct.ID
-	if err := g.authorizeConnect(userID, resolved.rawName, resourceID); err != nil {
+	if err := g.authorizeConnect(ctx, userID, resourceID); err != nil {
 		g.logger.Warn("db gateway rbac denied", "user", userID, "resource", resourceID, "error", err)
 		return nil
 	}

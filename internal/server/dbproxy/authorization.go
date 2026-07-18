@@ -13,26 +13,22 @@ import (
 	"jianmen/internal/util"
 )
 
-func (g *Gateway) authorizeConnect(userID, uniqueName, resourceID string) error {
-	if g.superAdminIDs[userID] {
-		return nil
-	}
-	if g.permissionChecker == nil || g.resourceChecker == nil {
+func (g *Gateway) authorizeConnect(ctx context.Context, userID, resourceID string) error {
+	if g.authorizer == nil {
 		return errors.New("database authorization unavailable")
 	}
-	allowed, err := g.permissionChecker.HasPermission(userID, rbaccheck.ActionDBConnect, "", "")
+	allowed, err := g.authorizer.Authorize(
+		ctx,
+		userID,
+		[]string{rbaccheck.ActionDBConnect},
+		model.ResourceTypeDatabaseAccount,
+		resourceID,
+	)
 	if err != nil {
-		return fmt.Errorf("rbac check failed: %w", err)
+		return fmt.Errorf("authorize database connection: %w", err)
 	}
 	if !allowed {
 		return fmt.Errorf("user %q lacks %s", userID, rbaccheck.ActionDBConnect)
-	}
-	granted, err := g.resourceChecker.HasGrant(userID, model.ResourceTypeDatabaseAccount, resourceID)
-	if err != nil {
-		return fmt.Errorf("resource grant check failed: %w", err)
-	}
-	if !granted {
-		return fmt.Errorf("user %q not permitted to connect to %s", userID, resourceID)
 	}
 	return nil
 }
@@ -118,12 +114,12 @@ func (g *Gateway) resolveCompactAccount(username string) (*resolvedDBAccount, er
 }
 
 // validateUserPassword 验证堡垒机用户密码（仅 compact username 路径使用）
-func (g *Gateway) validateUserPassword(user *model.User, accountID, password string) error {
+func (g *Gateway) validateUserPassword(ctx context.Context, user *model.User, accountID, password string) error {
 	if g.store == nil {
 		return errors.New("authentication unavailable")
 	}
-	if err := g.store.AuthenticateConnectionPassword(context.Background(), user.ID, model.ResourceTypeDatabaseAccount, accountID, password); err != nil {
-		return errors.New("authentication failed")
+	if err := g.store.AuthenticateConnectionPassword(ctx, user.ID, model.ResourceTypeDatabaseAccount, accountID, password); err != nil {
+		return fmt.Errorf("authenticate connection password: %w", err)
 	}
 	return nil
 }

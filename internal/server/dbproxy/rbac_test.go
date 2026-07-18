@@ -1,132 +1,147 @@
 package dbproxy
 
 import (
+	"context"
 	"errors"
 	"testing"
 
+	"jianmen/internal/config"
 	"jianmen/internal/model"
-	rbaccheck "jianmen/internal/rbac"
+	"jianmen/internal/rbac"
 )
 
-type capturedPermissionCheck struct {
+type connectionAuthorizationCall struct {
+	ctx          context.Context
 	userID       string
-	action       string
+	actions      []string
 	resourceType string
 	resourceID   string
 }
 
-type capturePermissionChecker struct {
+type captureConnectionAuthorizer struct {
 	allowed bool
 	err     error
-	calls   []capturedPermissionCheck
+	calls   []connectionAuthorizationCall
 }
 
-type capturedResourceCheck struct {
-	userID       string
-	resourceType string
-	resourceID   string
-}
-
-type captureResourceGrantChecker struct {
-	allowed bool
-	err     error
-	calls   []capturedResourceCheck
-}
-
-func (c *captureResourceGrantChecker) HasGrant(userID, resourceType, resourceID string) (bool, error) {
-	c.calls = append(c.calls, capturedResourceCheck{userID: userID, resourceType: resourceType, resourceID: resourceID})
-	return c.allowed, c.err
-}
-
-func (c *capturePermissionChecker) HasPermission(userID, action, resourceType, resourceID string) (bool, error) {
-	c.calls = append(c.calls, capturedPermissionCheck{
+func (c *captureConnectionAuthorizer) Authorize(ctx context.Context, userID string, actions []string, resourceType, resourceID string) (bool, error) {
+	c.calls = append(c.calls, connectionAuthorizationCall{
+		ctx:          ctx,
 		userID:       userID,
-		action:       action,
+		actions:      actions,
 		resourceType: resourceType,
 		resourceID:   resourceID,
 	})
 	return c.allowed, c.err
 }
 
-func TestGatewayAuthorizeConnectChecksDatabaseAccountPermission(t *testing.T) {
-	checker := &capturePermissionChecker{allowed: true}
-	grants := &captureResourceGrantChecker{allowed: true}
-	gateway := &Gateway{
-		permissionChecker: checker,
-		resourceChecker:   grants,
-		superAdminIDs:     map[string]bool{},
-	}
+func TestGatewayNewGatewayInjectsConnectionAuthorizer(t *testing.T) {
+	authorizer := &captureConnectionAuthorizer{}
+	gateway := NewGateway(config.DatabaseGatewayConfig{}, nil, "", nil, nil, authorizer, nil, nil)
 
-	if err := gateway.authorizeConnect("user-1", "D000100001", "dbacct-app"); err != nil {
-		t.Fatalf("authorizeConnect returned error: %v", err)
-	}
-
-	if len(checker.calls) != 1 {
-		t.Fatalf("permission checks = %d, want 1", len(checker.calls))
-	}
-	call := checker.calls[0]
-	if call.userID != "user-1" ||
-		call.action != rbaccheck.ActionDBConnect ||
-		call.resourceType != "" ||
-		call.resourceID != "" {
-		t.Fatalf("unexpected permission check: %#v", call)
-	}
-	if len(grants.calls) != 1 || grants.calls[0].resourceType != model.ResourceTypeDatabaseAccount || grants.calls[0].resourceID != "dbacct-app" {
-		t.Fatalf("unexpected resource grant check: %#v", grants.calls)
+	if gateway.authorizer != authorizer {
+		t.Fatal("NewGateway did not retain the injected connection authorizer")
 	}
 }
 
-func TestGatewayAuthorizeConnectRejectsDeniedPermission(t *testing.T) {
-	checker := &capturePermissionChecker{allowed: false}
-	gateway := &Gateway{
-		permissionChecker: checker,
-		resourceChecker:   &captureResourceGrantChecker{allowed: true},
-		superAdminIDs:     map[string]bool{},
-	}
+func TestGatewayAuthorizeConnectUsesUnifiedDatabaseAuthorization(t *testing.T) {
+	authorizer := &captureConnectionAuthorizer{allowed: true}
+	gateway := &Gateway{authorizer: authorizer}
+	ctx := context.Background()
 
-	if err := gateway.authorizeConnect("user-1", "D000100001", "dbacct-app"); err == nil {
+	if err := gateway.authorizeConnect(ctx, "user-1", "dbacct-app"); err != nil {
+		t.Fatalf("authorizeConnect returned error: %v", err)
+	}
+	if len(authorizer.calls) != 1 {
+		t.Fatalf("authorization calls = %d, want 1", len(authorizer.calls))
+	}
+	call := authorizer.calls[0]
+	if call.ctx != ctx {
+		t.Fatal("authorizeConnect did not pass through the connection context")
+	}
+	if call.userID != "user-1" || len(call.actions) != 1 || call.actions[0] != rbac.ActionDBConnect || call.resourceType != model.ResourceTypeDatabaseAccount || call.resourceID != "dbacct-app" {
+		t.Fatalf("unexpected authorization request: %#v", call)
+	}
+}
+
+func TestGatewayAuthorizeConnectRejectsDeniedDecision(t *testing.T) {
+	gateway := &Gateway{authorizer: &captureConnectionAuthorizer{allowed: false}}
+
+	if err := gateway.authorizeConnect(context.Background(), "user-1", "dbacct-app"); err == nil {
 		t.Fatal("expected authorization denial")
 	}
 }
 
-func TestGatewayAuthorizeConnectPropagatesCheckerError(t *testing.T) {
-	checkerErr := errors.New("checker unavailable")
-	checker := &capturePermissionChecker{err: checkerErr}
-	gateway := &Gateway{
-		permissionChecker: checker,
-		resourceChecker:   &captureResourceGrantChecker{allowed: true},
-		superAdminIDs:     map[string]bool{},
-	}
+func TestGatewayAuthorizeConnectDelegatesSuperAdminToUnifiedService(t *testing.T) {
+	authorizer := &captureConnectionAuthorizer{allowed: true}
+	gateway := &Gateway{authorizer: authorizer}
 
-	err := gateway.authorizeConnect("user-1", "D000100001", "dbacct-app")
-	if err == nil || !errors.Is(err, checkerErr) {
-		t.Fatalf("authorizeConnect error = %v, want checker error", err)
-	}
-}
-
-func TestGatewayAuthorizeConnectSkipsSuperAdmin(t *testing.T) {
-	checker := &capturePermissionChecker{allowed: false}
-	gateway := &Gateway{
-		permissionChecker: checker,
-		resourceChecker:   &captureResourceGrantChecker{allowed: false},
-		superAdminIDs:     map[string]bool{"admin-1": true},
-	}
-
-	if err := gateway.authorizeConnect("admin-1", "D000100001", "dbacct-app"); err != nil {
+	if err := gateway.authorizeConnect(context.Background(), "super-admin-1", "dbacct-app"); err != nil {
 		t.Fatalf("authorizeConnect returned error for super admin: %v", err)
 	}
-	if len(checker.calls) != 0 {
-		t.Fatalf("permission checks = %d, want 0 for super admin", len(checker.calls))
+	if len(authorizer.calls) != 1 || authorizer.calls[0].userID != "super-admin-1" {
+		t.Fatal("super administrator authorization must be delegated to the unified authorizer")
 	}
 }
 
-func TestGatewayAuthorizeConnectRejectsMissingResourceGrant(t *testing.T) {
-	gateway := &Gateway{
-		permissionChecker: &capturePermissionChecker{allowed: true},
-		resourceChecker:   &captureResourceGrantChecker{allowed: false},
-		superAdminIDs:     map[string]bool{},
+func TestGatewayAuthorizeConnectPropagatesUnifiedAuthorizationError(t *testing.T) {
+	authorizationErr := errors.New("authorization backend unavailable")
+	gateway := &Gateway{authorizer: &captureConnectionAuthorizer{err: authorizationErr}}
+
+	err := gateway.authorizeConnect(context.Background(), "user-1", "dbacct-app")
+	if !errors.Is(err, authorizationErr) {
+		t.Fatalf("authorizeConnect error = %v, want wrapped authorization error", err)
 	}
-	if err := gateway.authorizeConnect("user-1", "D000100001", "dbacct-app"); err == nil {
-		t.Fatal("expected resource grant denial")
+}
+
+func TestGatewayAuthorizeConnectFailsClosedWithoutAuthorizer(t *testing.T) {
+	gateway := &Gateway{}
+
+	if err := gateway.authorizeConnect(context.Background(), "user-1", "dbacct-app"); err == nil {
+		t.Fatal("expected missing authorizer to deny the connection")
+	}
+}
+
+func TestGatewayAuthorizeConnectPropagatesCancelledConnectionContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	authorizer := &captureConnectionAuthorizer{err: ctx.Err()}
+	gateway := &Gateway{authorizer: authorizer}
+
+	err := gateway.authorizeConnect(ctx, "user-1", "dbacct-app")
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("authorizeConnect error = %v, want context cancellation", err)
+	}
+	if len(authorizer.calls) != 1 || authorizer.calls[0].ctx != ctx {
+		t.Fatal("cancelled connection context was not passed to the unified authorizer")
+	}
+}
+
+type captureDatabaseAccountResolver struct {
+	ctx context.Context
+	err error
+}
+
+func (c *captureDatabaseAccountResolver) AuthenticateConnectionPassword(ctx context.Context, _, _, _, _ string) error {
+	c.ctx = ctx
+	return c.err
+}
+
+func (c *captureDatabaseAccountResolver) AuthenticateMySQLConnectionPassword(context.Context, string, string, []byte, []byte) error {
+	return nil
+}
+
+func TestGatewayValidateUserPasswordPropagatesCancelledConnectionContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	resolver := &captureDatabaseAccountResolver{err: ctx.Err()}
+	gateway := &Gateway{store: resolver}
+
+	err := gateway.validateUserPassword(ctx, &model.User{ID: "user-1"}, "dbacct-app", "password")
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("validateUserPassword error = %v, want context cancellation", err)
+	}
+	if resolver.ctx != ctx {
+		t.Fatal("validateUserPassword did not pass through the connection context")
 	}
 }

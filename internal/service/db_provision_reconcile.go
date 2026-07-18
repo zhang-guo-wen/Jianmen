@@ -49,7 +49,7 @@ func (s *DatabaseProvisioningService) Reconcile(
 		}
 		result.Claimed++
 		switch claimed.Stage {
-		case ProvisioningStageReserved, ProvisioningStageNotCreated:
+		case ProvisioningStageReserved:
 			deleted, deleteErr := s.deleteClaimedOperation(ctx, claimed)
 			if deleteErr != nil || !deleted {
 				result.Failed++

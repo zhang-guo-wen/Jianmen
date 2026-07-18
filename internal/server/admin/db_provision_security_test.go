@@ -104,6 +104,30 @@ func TestHandleDBProvisionAccountRejectsClientSuppliedPassword(t *testing.T) {
 	}
 }
 
+func TestHandleDBProvisionAccountRequiresValidIdempotencyKey(t *testing.T) {
+	server, db := newAdminDBTestServer(t)
+	instance, adminAccount := seedDatabaseProvisioningSecurityFixture(t, db, "db-create-user")
+	seedGlobalAction(t, db, "db-create-user", rbac.ActionDBProxyCreate)
+	grantDatabaseAccountConnection(t, db, "db-create-user", adminAccount.ID)
+	provisioning := &fakeDatabaseProvisioningService{}
+	server.databaseProvisioning = provisioning
+	body := `{"admin_account_id":"` + adminAccount.ID + `","host":"10.0.0.8","grants":[{"database":"app","privilege":"read"}]}`
+	for _, key := range []string{"", "short", "valid-key-but-has-space 001", "valid-key-but-has/slash"} {
+		request := asTestUser(httptest.NewRequest(http.MethodPost, "/api/db/instances/"+instance.ID+"/provision-account", bytes.NewBufferString(body)), "db-create-user", "operator")
+		if key != "" {
+			request.Header.Set("Idempotency-Key", key)
+		}
+		recorder := httptest.NewRecorder()
+		server.handleDBProvisionAccount(recorder, request, instance.ID)
+		if recorder.Code != http.StatusBadRequest {
+			t.Fatalf("key %q status = %d, want 400; body=%s", key, recorder.Code, recorder.Body.String())
+		}
+	}
+	if provisioning.provisionCalls != 0 {
+		t.Fatalf("invalid key reached service: %d", provisioning.provisionCalls)
+	}
+}
+
 func TestHandleDBProvisionAccountRejectsClientSuppliedUpstreamUsername(t *testing.T) {
 	server, db := newAdminDBTestServer(t)
 	instance, adminAccount := seedDatabaseProvisioningSecurityFixture(t, db, "db-create-user")
@@ -161,6 +185,7 @@ func TestHandleDBProvisionAccountReturnsOnlyLocalAccountResource(t *testing.T) {
 		"db-create-user",
 		"operator",
 	)
+	request.Header.Set("Idempotency-Key", "create-account-response-001")
 	recorder := httptest.NewRecorder()
 	server.handleDBProvisionAccount(recorder, request, instance.ID)
 	if recorder.Code != http.StatusCreated {
@@ -204,6 +229,7 @@ func TestHandleDBProvisionAccountReportsPersistentCleanupWithoutDetails(t *testi
 		"db-create-user",
 		"operator",
 	)
+	request.Header.Set("Idempotency-Key", "create-account-cleanup-001")
 	recorder := httptest.NewRecorder()
 	server.handleDBProvisionAccount(recorder, request, instance.ID)
 	if recorder.Code != http.StatusInternalServerError ||

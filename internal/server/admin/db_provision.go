@@ -91,6 +91,13 @@ func (s *Server) handleDBProvisionAccount(w http.ResponseWriter, r *http.Request
 		s.writeErrorText(w, r, http.StatusBadRequest, "invalid database provisioning request")
 		return
 	}
+	idempotencyKey, err := service.ValidateDatabaseProvisioningIdempotencyKey(
+		r.Header.Get("Idempotency-Key"),
+	)
+	if err != nil {
+		s.writeErrorText(w, r, http.StatusBadRequest, "invalid idempotency key")
+		return
+	}
 	if !s.requireResourceAction(
 		w,
 		r,
@@ -110,7 +117,8 @@ func (s *Server) handleDBProvisionAccount(w http.ResponseWriter, r *http.Request
 			InstanceID: instanceID, AdminAccountID: payload.AdminAccountID,
 			Host: payload.Host, Grants: payload.Grants,
 			Group: payload.Group, Remark: payload.Remark, ExpiresAt: payload.ExpiresAt,
-			Actor: databaseProvisioningActorFromRequest(r),
+			Actor:          databaseProvisioningActorFromRequest(r),
+			IdempotencyKey: idempotencyKey,
 		},
 	)
 	if err != nil {
@@ -118,7 +126,7 @@ func (s *Server) handleDBProvisionAccount(w http.ResponseWriter, r *http.Request
 		return
 	}
 	s.writeJSON(w, r, http.StatusCreated, map[string]any{
-		"ok": true, "account": result.Account,
+		"ok": true, "account": result.Account, "operation_id": result.OperationID,
 	})
 }
 
@@ -152,6 +160,10 @@ func (s *Server) writeDatabaseProvisioningServiceError(
 	switch {
 	case errors.Is(err, service.ErrInvalidDatabaseProvisioningRequest):
 		s.writeErrorText(w, r, http.StatusBadRequest, "invalid database provisioning request")
+	case errors.Is(err, service.ErrDatabaseProvisioningIdempotencyConflict):
+		s.writeErrorText(w, r, http.StatusConflict, "database provisioning request conflicts with idempotency key")
+	case errors.Is(err, service.ErrDatabaseProvisioningInProgress):
+		s.writeErrorText(w, r, http.StatusConflict, "database account provisioning is in progress")
 	case errors.Is(err, service.ErrDatabaseProvisioningCleanupRequired):
 		s.writeErrorText(
 			w,

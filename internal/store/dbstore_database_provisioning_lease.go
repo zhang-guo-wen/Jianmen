@@ -44,6 +44,9 @@ func (s *DBStore) TransitionDatabaseProvisioningOperation(
 		updates["lease_token"] = ""
 		updates["lease_expires_at"] = nil
 	}
+	if transition.Stage == service.ProvisioningStageNotCreated {
+		updates["terminal_at"] = clock.currentTimestampExpression()
+	}
 	result := s.db.WithContext(ctx).Model(&model.DatabaseProvisioningOperation{}).
 		Where(provisioningFenceCondition(), provisioningFenceArguments(expected)...).
 		Where(clock.validLeaseCondition()).

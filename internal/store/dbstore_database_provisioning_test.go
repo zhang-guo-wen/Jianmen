@@ -2,8 +2,10 @@ package store
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -62,6 +64,80 @@ func TestDatabaseProvisioningOperationPersistsEncryptedIntentWithoutResource(t *
 	}
 	if resources != 0 {
 		t.Fatalf("pending operation created ordinary resource rows: %d", resources)
+	}
+}
+
+func TestDatabaseProvisioningCreateOrGetUsesActorScopedIdempotencyIdentity(t *testing.T) {
+	repository, db := newDatabaseProvisioningStoreTest(t)
+	migrateProvisioningOperationsForStoreTest(t, db)
+	instance, admin := seedProvisioningStoreAdministrator(t, db)
+	input := service.DatabaseProvisioningOperationInput{
+		ID: "jmo_idempotency000000001", InstanceID: instance.ID, AdminAccountID: admin.ID,
+		Username: "jm_idempotency000000001", Password: "generated-top-secret", Host: "10.0.0.8",
+		GrantsJSON: `[ {"database":"orders","privilege":"read"} ]`, ActorID: "operator-1",
+		IdempotencyKey: "sqlite-idempotency-key-001", RequestHash: strings.Repeat("a", 64),
+		Lease: service.DatabaseProvisioningLease{Owner: "request", Token: "request-lease", Duration: time.Minute},
+	}
+	first, _, created, err := repository.CreateOrGetDatabaseProvisioningOperation(context.Background(), input)
+	if err != nil || !created {
+		t.Fatalf("first create-or-get = %#v, %t, %v", first, created, err)
+	}
+	input.ID = "jmo_idempotency000000002"
+	input.Username = "jm_idempotency000000002"
+	second, _, created, err := repository.CreateOrGetDatabaseProvisioningOperation(context.Background(), input)
+	if err != nil || created || second.ID != first.ID {
+		t.Fatalf("same unique identity was not atomically reused: %#v, %t, %v", second, created, err)
+	}
+	input.RequestHash = strings.Repeat("b", 64)
+	if _, _, _, err := repository.CreateOrGetDatabaseProvisioningOperation(context.Background(), input); !errors.Is(err, service.ErrDatabaseProvisioningIdempotencyConflict) {
+		t.Fatalf("same idempotency identity with different request = %v, want conflict", err)
+	}
+}
+
+func TestDatabaseProvisioningCreateOrGetSQLiteConcurrentUniqueIdentity(t *testing.T) {
+	repository, db := newDatabaseProvisioningStoreTest(t)
+	migrateProvisioningOperationsForStoreTest(t, db)
+	instance, admin := seedProvisioningStoreAdministrator(t, db)
+	input := service.DatabaseProvisioningOperationInput{
+		ID: "jmo_concurrent0000000001", InstanceID: instance.ID, AdminAccountID: admin.ID,
+		Username: "jm_concurrent0000000001", Password: "generated-top-secret", Host: "10.0.0.8",
+		GrantsJSON: `[{"database":"orders","privilege":"read"}]`, ActorID: "operator-1",
+		IdempotencyKey: "sqlite-concurrent-key-001", RequestHash: strings.Repeat("a", 64),
+		Lease: service.DatabaseProvisioningLease{Owner: "request", Token: "request-lease", Duration: time.Minute},
+	}
+	const callers = 8
+	start := make(chan struct{})
+	results := make(chan service.DatabaseProvisioningOperation, callers)
+	errorsSeen := make(chan error, callers)
+	var wait sync.WaitGroup
+	for index := 0; index < callers; index++ {
+		wait.Add(1)
+		go func() {
+			defer wait.Done()
+			<-start
+			operation, _, _, err := repository.CreateOrGetDatabaseProvisioningOperation(context.Background(), input)
+			if err != nil {
+				errorsSeen <- err
+				return
+			}
+			results <- operation
+		}()
+	}
+	close(start)
+	wait.Wait()
+	close(results)
+	close(errorsSeen)
+	for err := range errorsSeen {
+		t.Fatalf("concurrent create-or-get: %v", err)
+	}
+	for operation := range results {
+		if operation.ID == "" {
+			t.Fatal("concurrent create-or-get returned an empty operation")
+		}
+	}
+	var count int64
+	if err := db.Model(&model.DatabaseProvisioningOperation{}).Count(&count).Error; err != nil || count != 1 {
+		t.Fatalf("SQLite idempotency unique identity count = %d, %v", count, err)
 	}
 }
 

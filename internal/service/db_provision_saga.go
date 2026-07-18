@@ -23,6 +23,7 @@ const (
 	ProvisioningStageCleanupRequired   = "cleanup_required"
 	ProvisioningStageCleanupInProgress = "cleanup_in_progress"
 	ProvisioningStageNotCreated        = "not_created"
+	ProvisioningStageActiveManaged     = "active_managed"
 
 	ProvisioningCleanupNone       = "none"
 	ProvisioningCleanupRequired   = "required"
@@ -36,9 +37,11 @@ const (
 )
 
 var (
-	ErrDatabaseProvisioningFailed          = errors.New("database account provisioning failed")
-	ErrDatabaseProvisioningCleanupRequired = errors.New("database account provisioning cleanup is required")
-	ErrInvalidDatabaseProvisioningRequest  = errors.New("invalid database provisioning request")
+	ErrDatabaseProvisioningFailed              = errors.New("database account provisioning failed")
+	ErrDatabaseProvisioningCleanupRequired     = errors.New("database account provisioning cleanup is required")
+	ErrInvalidDatabaseProvisioningRequest      = errors.New("invalid database provisioning request")
+	ErrDatabaseProvisioningIdempotencyConflict = errors.New("database account provisioning idempotency conflict")
+	ErrDatabaseProvisioningInProgress          = errors.New("database account provisioning is in progress")
 )
 
 type DatabaseAccountCreateDisposition string
@@ -65,6 +68,9 @@ type DatabaseProvisioningOperationInput struct {
 	Group          string
 	Remark         string
 	ExpiresAt      *time.Time
+	ActorID        string
+	IdempotencyKey string
+	RequestHash    string
 	Lease          DatabaseProvisioningLease
 }
 
@@ -79,6 +85,9 @@ type DatabaseProvisioningOperation struct {
 	Group          string
 	Remark         string
 	ExpiresAt      *time.Time
+	ActorID        string
+	IdempotencyKey string
+	RequestHash    string
 	Stage          string
 	CleanupStatus  string
 	LastError      string
@@ -150,10 +159,12 @@ type ProvisionDatabaseAccountRequest struct {
 	Remark         string
 	ExpiresAt      *time.Time
 	Actor          DatabaseProvisioningActor
+	IdempotencyKey string
 }
 
 type ProvisionDatabaseAccountResult struct {
-	Account ProvisionedDatabaseAccount `json:"account"`
+	Account     ProvisionedDatabaseAccount `json:"account"`
+	OperationID string                     `json:"operation_id"`
 }
 
 type DatabaseProvisioningOptions struct {
@@ -176,6 +187,19 @@ type DatabaseProvisioningRepository interface {
 		context.Context,
 		DatabaseProvisioningOperationInput,
 	) (DatabaseProvisioningOperation, DatabaseProvisioningLeaseWindow, error)
+	CreateOrGetDatabaseProvisioningOperation(
+		context.Context,
+		DatabaseProvisioningOperationInput,
+	) (DatabaseProvisioningOperation, DatabaseProvisioningLeaseWindow, bool, error)
+	DatabaseProvisioningOperationByIdempotency(
+		context.Context,
+		string,
+		string,
+	) (DatabaseProvisioningOperation, bool, error)
+	ProvisionedDatabaseAccountByOperation(
+		context.Context,
+		string,
+	) (ProvisionedDatabaseAccount, bool, error)
 	DatabaseProvisioningOperation(
 		context.Context,
 		string,

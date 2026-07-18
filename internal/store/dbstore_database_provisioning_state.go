@@ -44,6 +44,7 @@ func validProvisioningTransition(from, to, cleanup string) bool {
 	case service.ProvisioningStageNotCreated:
 		return (from == service.ProvisioningStageReserved ||
 			from == service.ProvisioningStageCreateStarted ||
+			from == service.ProvisioningStageCleanupInProgress ||
 			from == service.ProvisioningStageNotCreated) &&
 			cleanup == service.ProvisioningCleanupNone
 	case service.ProvisioningStageCleanupRequired:
@@ -87,8 +88,13 @@ func safeProvisioningErrorCode(value string) bool {
 func databaseProvisioningOperationFromModel(
 	record model.DatabaseProvisioningOperation,
 ) service.DatabaseProvisioningOperation {
+	key := ""
+	if record.IdempotencyKey != nil {
+		key = *record.IdempotencyKey
+	}
 	return service.DatabaseProvisioningOperation{
 		ID: record.ID, InstanceID: record.InstanceID,
+		ActorID: record.ActorID, IdempotencyKey: key, RequestHash: record.CanonicalRequestHash,
 		AdminAccountID: record.AdminAccountID, Username: record.UpstreamUsername,
 		Password: record.Password.GetPlaintext(), Host: record.Host,
 		GrantsJSON: record.GrantsJSON, Group: record.GroupName, Remark: record.Remark,

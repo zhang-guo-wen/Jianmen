@@ -185,8 +185,11 @@ func TestDatabaseProvisioningServiceDoesNotDropWhenCreateWasNotSent(t *testing.T
 	if provisioner.dropCalls != 0 {
 		t.Fatalf("CREATE-not-sent result triggered DROP: %d", provisioner.dropCalls)
 	}
-	if len(repository.operationsSnapshot()) != 0 {
-		t.Fatalf("deterministically uncreated operation was retained: %#v", repository.operationsSnapshot())
+	operations := repository.operationsSnapshot()
+	if len(operations) != 1 ||
+		operations[0].Stage != ProvisioningStageNotCreated ||
+		operations[0].LeaseToken != "" {
+		t.Fatalf("deterministically uncreated operation was not retained as a terminal tombstone: %#v", operations)
 	}
 }
 

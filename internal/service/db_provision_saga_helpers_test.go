@@ -104,6 +104,7 @@ func (f *provisioningRepositoryFake) CreateDatabaseProvisioningOperation(
 	expires := time.Now().UTC().Add(input.Lease.Duration)
 	operation := DatabaseProvisioningOperation{
 		ID: input.ID, InstanceID: input.InstanceID, AdminAccountID: input.AdminAccountID,
+		ActorID: input.ActorID, IdempotencyKey: input.IdempotencyKey, RequestHash: input.RequestHash,
 		Username: input.Username, Password: input.Password, Host: input.Host,
 		GrantsJSON: input.GrantsJSON, Group: input.Group, Remark: input.Remark,
 		ExpiresAt: input.ExpiresAt, Stage: ProvisioningStageReserved,
@@ -113,6 +114,62 @@ func (f *provisioningRepositoryFake) CreateDatabaseProvisioningOperation(
 	}
 	f.operations[operation.ID] = operation
 	return operation, DatabaseProvisioningLeaseWindow{Remaining: input.Lease.Duration}, nil
+}
+
+func (f *provisioningRepositoryFake) CreateOrGetDatabaseProvisioningOperation(
+	_ context.Context,
+	input DatabaseProvisioningOperationInput,
+) (DatabaseProvisioningOperation, DatabaseProvisioningLeaseWindow, bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, operation := range f.operations {
+		if operation.ActorID != input.ActorID || operation.IdempotencyKey != input.IdempotencyKey {
+			continue
+		}
+		if operation.RequestHash != input.RequestHash {
+			return DatabaseProvisioningOperation{}, DatabaseProvisioningLeaseWindow{}, false, ErrDatabaseProvisioningIdempotencyConflict
+		}
+		return operation, DatabaseProvisioningLeaseWindow{}, false, nil
+	}
+	f.createCalls++
+	f.createInput = input
+	f.events = append(f.events, "operation_create")
+	expires := time.Now().UTC().Add(input.Lease.Duration)
+	operation := DatabaseProvisioningOperation{
+		ID: input.ID, InstanceID: input.InstanceID, AdminAccountID: input.AdminAccountID,
+		ActorID: input.ActorID, IdempotencyKey: input.IdempotencyKey, RequestHash: input.RequestHash,
+		Username: input.Username, Password: input.Password, Host: input.Host, GrantsJSON: input.GrantsJSON,
+		Group: input.Group, Remark: input.Remark, ExpiresAt: input.ExpiresAt,
+		Stage: ProvisioningStageReserved, CleanupStatus: ProvisioningCleanupNone, Revision: 1,
+		LeaseOwner: input.Lease.Owner, LeaseToken: input.Lease.Token, LeaseExpiresAt: &expires,
+		CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
+	}
+	f.operations[operation.ID] = operation
+	return operation, DatabaseProvisioningLeaseWindow{Remaining: input.Lease.Duration}, true, nil
+}
+
+func (f *provisioningRepositoryFake) DatabaseProvisioningOperationByIdempotency(
+	_ context.Context,
+	actorID, key string,
+) (DatabaseProvisioningOperation, bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, operation := range f.operations {
+		if operation.ActorID == actorID && operation.IdempotencyKey == key {
+			return operation, true, nil
+		}
+	}
+	return DatabaseProvisioningOperation{}, false, nil
+}
+
+func (f *provisioningRepositoryFake) ProvisionedDatabaseAccountByOperation(
+	_ context.Context,
+	id string,
+) (ProvisionedDatabaseAccount, bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	account, ok := f.activated[id]
+	return account, ok, nil
 }
 
 func (f *provisioningRepositoryFake) DatabaseProvisioningOperation(
@@ -329,7 +386,15 @@ func (f *provisioningRepositoryFake) recordActivated(
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.activated[id] = account
-	delete(f.operations, id)
+	if operation, ok := f.operations[id]; ok {
+		operation.Stage = "active_managed"
+		operation.CleanupStatus = ProvisioningCleanupNone
+		operation.LeaseOwner = ""
+		operation.LeaseToken = ""
+		operation.LeaseExpiresAt = nil
+		operation.Revision++
+		f.operations[id] = operation
+	}
 }
 
 func (f *provisioningRepositoryFake) putOperation(operation DatabaseProvisioningOperation) {

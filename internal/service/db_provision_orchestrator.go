@@ -21,6 +21,30 @@ func (s *DatabaseProvisioningService) Provision(
 	request.InstanceID = strings.TrimSpace(request.InstanceID)
 	request.AdminAccountID = strings.TrimSpace(request.AdminAccountID)
 	request.Host = strings.TrimSpace(request.Host)
+	key, err := normalizeDatabaseProvisioningIdempotencyKey(request.IdempotencyKey)
+	if err != nil {
+		return ProvisionDatabaseAccountResult{}, err
+	}
+	request.IdempotencyKey = key
+	requestHash := ""
+	if key != "" {
+		var grants []DBGrant
+		requestHash, grants, err = canonicalProvisioningRequestHash(request)
+		if err != nil {
+			return ProvisionDatabaseAccountResult{}, err
+		}
+		request.Grants = grants
+		if operation, found, err := s.repository.DatabaseProvisioningOperationByIdempotency(
+			ctx, request.Actor.UserID, key,
+		); err != nil {
+			return ProvisionDatabaseAccountResult{}, ErrDatabaseProvisioningFailed
+		} else if found {
+			if operation.RequestHash != requestHash {
+				return ProvisionDatabaseAccountResult{}, ErrDatabaseProvisioningIdempotencyConflict
+			}
+			return s.idempotentProvisioningResult(ctx, operation)
+		}
+	}
 	instance, admin, err := s.repository.DatabaseProvisioningAdmin(
 		ctx, request.InstanceID, request.AdminAccountID,
 	)
@@ -61,17 +85,28 @@ func (s *DatabaseProvisioningService) Provision(
 	if err != nil {
 		return ProvisionDatabaseAccountResult{}, errors.New("encode database grants")
 	}
-	operation, _, err := s.repository.CreateDatabaseProvisioningOperation(
-		ctx,
-		DatabaseProvisioningOperationInput{
-			ID: "jmo_" + token, InstanceID: request.InstanceID, AdminAccountID: request.AdminAccountID,
-			Username: username, Password: password, Host: request.Host, GrantsJSON: string(grantsJSON),
-			Group: request.Group, Remark: request.Remark, ExpiresAt: request.ExpiresAt,
-			Lease: DatabaseProvisioningLease{Owner: s.workerID, Token: leaseToken, Duration: s.leaseDuration},
-		},
-	)
+	input := DatabaseProvisioningOperationInput{
+		ID: "jmo_" + token, InstanceID: request.InstanceID, AdminAccountID: request.AdminAccountID,
+		Username: username, Password: password, Host: request.Host, GrantsJSON: string(grantsJSON),
+		Group: request.Group, Remark: request.Remark, ExpiresAt: request.ExpiresAt,
+		ActorID: request.Actor.UserID, IdempotencyKey: key, RequestHash: requestHash,
+		Lease: DatabaseProvisioningLease{Owner: s.workerID, Token: leaseToken, Duration: s.leaseDuration},
+	}
+	var operation DatabaseProvisioningOperation
+	created := true
+	if key == "" {
+		operation, _, err = s.repository.CreateDatabaseProvisioningOperation(ctx, input)
+	} else {
+		operation, _, created, err = s.repository.CreateOrGetDatabaseProvisioningOperation(ctx, input)
+	}
 	if err != nil {
+		if errors.Is(err, ErrDatabaseProvisioningIdempotencyConflict) {
+			return ProvisionDatabaseAccountResult{}, err
+		}
 		return ProvisionDatabaseAccountResult{}, ErrDatabaseProvisioningFailed
+	}
+	if !created {
+		return s.idempotentProvisioningResult(ctx, operation)
 	}
 	if ctx.Err() != nil {
 		s.discardNotCreatedOperation(ctx, operation)
@@ -153,7 +188,30 @@ func (s *DatabaseProvisioningService) Provision(
 		return ProvisionDatabaseAccountResult{}, ErrDatabaseProvisioningFailed
 	}
 	auditResult = "success"
-	return ProvisionDatabaseAccountResult{Account: account}, nil
+	return ProvisionDatabaseAccountResult{Account: account, OperationID: operation.ID}, nil
+}
+
+func (s *DatabaseProvisioningService) idempotentProvisioningResult(
+	ctx context.Context,
+	operation DatabaseProvisioningOperation,
+) (ProvisionDatabaseAccountResult, error) {
+	switch operation.Stage {
+	case ProvisioningStageActiveManaged:
+		account, found, err := s.repository.ProvisionedDatabaseAccountByOperation(ctx, operation.ID)
+		if err != nil || !found {
+			return ProvisionDatabaseAccountResult{}, ErrDatabaseProvisioningFailed
+		}
+		return ProvisionDatabaseAccountResult{Account: account, OperationID: operation.ID}, nil
+	case ProvisioningStageCleanupRequired, ProvisioningStageCleanupInProgress, ProvisioningStageCreateUncertain:
+		return ProvisionDatabaseAccountResult{}, ErrDatabaseProvisioningCleanupRequired
+	case ProvisioningStageNotCreated:
+		// Tombstones intentionally retain the idempotency identity after a failed
+		// request. Retrying the same key must never allocate a new password or
+		// repeat a potentially completed upstream operation.
+		return ProvisionDatabaseAccountResult{}, ErrDatabaseProvisioningFailed
+	default:
+		return ProvisionDatabaseAccountResult{}, ErrDatabaseProvisioningInProgress
+	}
 }
 
 func (s *DatabaseProvisioningService) cleanupUncertainCreate(
@@ -176,15 +234,10 @@ func (s *DatabaseProvisioningService) discardNotCreatedOperation(
 	parent context.Context,
 	operation DatabaseProvisioningOperation,
 ) {
-	updated, ok, err := s.transitionDetached(parent, operation, DatabaseProvisioningTransition{
+	_, _, _ = s.transitionDetached(parent, operation, DatabaseProvisioningTransition{
 		Stage: ProvisioningStageNotCreated, CleanupStatus: ProvisioningCleanupNone,
+		ReleaseLease: true,
 	})
-	if err != nil || !ok {
-		return
-	}
-	ctx, cancel := s.detachedContext(parent)
-	defer cancel()
-	_, _ = s.repository.DeleteDatabaseProvisioningOperation(ctx, updated.Fence())
 }
 
 func (s *DatabaseProvisioningService) cleanupOperation(
@@ -224,10 +277,11 @@ func (s *DatabaseProvisioningService) cleanupOperation(
 		s.persistCleanupFailure(parent, updated)
 		return ErrDatabaseProvisioningCleanupRequired
 	}
-	ctx, cancel := s.detachedContext(parent)
-	defer cancel()
-	deleted, err := s.repository.DeleteDatabaseProvisioningOperation(ctx, updated.Fence())
-	if err != nil || !deleted {
+	_, ok, err = s.transitionDetached(parent, updated, DatabaseProvisioningTransition{
+		Stage: ProvisioningStageNotCreated, CleanupStatus: ProvisioningCleanupNone,
+		LastError: reason, ReleaseLease: true,
+	})
+	if err != nil || !ok {
 		return ErrDatabaseProvisioningCleanupRequired
 	}
 	return ErrDatabaseProvisioningFailed

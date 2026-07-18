@@ -118,6 +118,13 @@ var migrations = []Migration{
 			return tx.AutoMigrate(&model.User{})
 		},
 	},
+	{
+		Version: "202607180002",
+		Name:    "temporary access connection password lifecycle",
+		Run: func(tx *gorm.DB) error {
+			return tx.AutoMigrate(&model.ConnectionPassword{})
+		},
+	},
 }
 
 func Migrate(db *gorm.DB) error {

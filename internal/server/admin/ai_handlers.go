@@ -197,40 +197,30 @@ func (s *Server) handleAITokens(w http.ResponseWriter, r *http.Request) {
 			s.writeErrorText(w, r, http.StatusBadRequest, "AI authorization must last at least 5 minutes")
 			return
 		}
-		issued, err := service.IssueAIAccessToken(now, accessTTL, refreshTTL)
+		temporaryAccess, err := s.temporaryAccessService()
+		if err != nil {
+			s.writeErrorText(w, r, http.StatusInternalServerError, "temporary access service is unavailable")
+			return
+		}
+		result, err := temporaryAccess.CreateAI(r.Context(), service.CreateTemporaryAIAccessInput{
+			UserID: userID, Name: name, Remark: request.Remark, CreatedBy: userID,
+			ExpiresAt: temporaryExpiresAt, Now: now, AccessTTL: accessTTL, RefreshTTL: refreshTTL,
+		})
 		if err != nil {
 			s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
 			return
 		}
-		var temporaryAccount model.TemporaryAccount
-		if s.db != nil {
-			created, createErr := s.createTemporaryAccount(model.TemporaryAccountTypeAI, userID, temporaryExpiresAt, request.Remark, userID, "")
-			if createErr != nil {
-				s.writeErrorText(w, r, http.StatusInternalServerError, createErr.Error())
-				return
-			}
-			temporaryAccount = created
-		}
-		token := model.AIAccessToken{
-			ID: model.NewID(), UserID: userID, TemporaryAccountID: temporaryAccount.ID, Name: name,
-			AccessTokenHash: issued.AccessTokenHash, RefreshTokenHash: issued.RefreshTokenHash,
-			AccessToken: model.NewEncryptedField(issued.AccessToken), RefreshToken: model.NewEncryptedField(issued.RefreshToken),
-			AccessExpiresAt: issued.AccessExpiresAt, RefreshExpiresAt: issued.RefreshExpiresAt,
-		}
-		if err := s.store.CreateAIAccessToken(r.Context(), token); err != nil {
-			s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
-			return
-		}
+		token := result.Token
 		s.logger.Info("AI access token issued", "user_id", userID, "token_id", token.ID, "name", token.Name, "access_expires_at", token.AccessExpiresAt, "refresh_expires_at", token.RefreshExpiresAt)
 		docsURL := s.aiBaseURL(r) + "/api/ai/docs"
 		docsContent := s.aiDocsContent(r)
 		prompt := "\u6388\u6743 AI \u4f7f\u7528\u5f53\u524d\u7528\u6237\u7684\u8d44\u6e90\u7684\u6743\u9650\u3002"
-		copyPrompt := fmt.Sprintf("\u4f60\u53ef\u4ee5\u4f7f\u7528\u6211\u7684\u6743\u9650\u8bbf\u95ee\u6211\u7684\u670d\u52a1\u5668\u3001\u6570\u636e\u5e93\u7b49\u8d44\u6e90\uff0c\n\u8bbf\u95ee\u4ee4\u724c\uff1a%s\n\u5237\u65b0\u4ee4\u724c\uff1a%s\n\u5177\u4f53\u89c1\u6587\u6863\uff1a[%s](%s)", issued.AccessToken, issued.RefreshToken, docsURL, docsURL)
+		copyPrompt := fmt.Sprintf("\u4f60\u53ef\u4ee5\u4f7f\u7528\u6211\u7684\u6743\u9650\u8bbf\u95ee\u6211\u7684\u670d\u52a1\u5668\u3001\u6570\u636e\u5e93\u7b49\u8d44\u6e90\uff0c\n\u8bbf\u95ee\u4ee4\u724c\uff1a%s\n\u5237\u65b0\u4ee4\u724c\uff1a%s\n\u5177\u4f53\u89c1\u6587\u6863\uff1a[%s](%s)", result.AccessToken, result.RefreshToken, docsURL, docsURL)
 		fullPrompt := copyPrompt + "\n\n\u5b8c\u6574\u63d0\u793a\u8bcd\uff1a\n" + docsContent
 		s.writeJSON(w, r, http.StatusCreated, map[string]any{
 			"id": token.ID, "name": token.Name, "temporary_account_id": token.TemporaryAccountID,
-			"access_token": issued.AccessToken, "refresh_token": issued.RefreshToken,
-			"access_expires_at": issued.AccessExpiresAt, "refresh_expires_at": issued.RefreshExpiresAt,
+			"access_token": result.AccessToken, "refresh_token": result.RefreshToken,
+			"access_expires_at": token.AccessExpiresAt, "refresh_expires_at": token.RefreshExpiresAt,
 			"temporary_expires_at": temporaryExpiresAt, "prompt": prompt, "copy_prompt": copyPrompt, "full_prompt": fullPrompt,
 			"docs_url": docsURL, "docs_content": docsContent,
 		})

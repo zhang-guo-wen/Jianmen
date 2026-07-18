@@ -140,6 +140,36 @@ func TestHandleAITokensIssueRotateAndRevoke(t *testing.T) {
 	}
 }
 
+func TestHandleAITokenCreationRollsBackTemporaryAccountWhenTokenInsertFails(t *testing.T) {
+	server, db := newAdminDBTestServer(t)
+	if err := db.Create(&model.User{ID: "ai-user", Username: "ai-user", Status: "active"}).Error; err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	if err := db.Exec(`CREATE TRIGGER fail_ai_token_insert BEFORE INSERT ON ai_access_tokens BEGIN SELECT RAISE(ABORT, 'injected AI token failure'); END;`).Error; err != nil {
+		t.Fatalf("create failure trigger: %v", err)
+	}
+
+	request := withTestUser(httptest.NewRequest(
+		http.MethodPost,
+		"/api/ai/tokens",
+		bytes.NewBufferString(`{"name":"atomic agent","access_ttl_seconds":3600,"refresh_ttl_seconds":86400,"permanent":true}`),
+	), "ai-user", "ai-user")
+	response := httptest.NewRecorder()
+	server.handleAITokens(response, request)
+	if response.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500; body=%s", response.Code, response.Body.String())
+	}
+	for _, table := range []string{"temporary_accounts", "ai_access_tokens"} {
+		var count int64
+		if err := db.Table(table).Count(&count).Error; err != nil {
+			t.Fatalf("count %s: %v", table, err)
+		}
+		if count != 0 {
+			t.Fatalf("%s rows after token insert failure = %d, want 0", table, count)
+		}
+	}
+}
+
 func TestAIResourcesRequireCurrentRBACGrantAndIssueSessionCredential(t *testing.T) {
 	server, db := newAdminDBTestServer(t)
 	seedConnectionAction(t, db, "ai-resource-user", rbac.ActionSessionConnect)

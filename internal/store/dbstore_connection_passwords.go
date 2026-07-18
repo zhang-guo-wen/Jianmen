@@ -74,6 +74,7 @@ func (s *DBStore) activeConnectionPasswords(ctx context.Context, userID, resourc
 	var credentials []model.ConnectionPassword
 	if err := s.db.WithContext(ctx).
 		Where("user_id = ? AND resource_type = ? AND resource_id = ?", userID, resourceType, resourceID).
+		Where("revoked_at IS NULL").
 		Where("expires_at > ?", now).
 		Order("created_at DESC").
 		Limit(50).

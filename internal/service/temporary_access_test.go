@@ -57,7 +57,42 @@ func TestTemporaryAccessServiceExtendMapsNotFound(t *testing.T) {
 	}
 
 	now := time.Now().UTC()
-	err = service.Extend(context.Background(), "missing", now.Add(time.Hour), now)
+	_, err = service.Extend(context.Background(), "missing", now.Add(time.Hour), now)
+	if !errors.Is(err, ErrTemporaryAccessNotFound) {
+		t.Fatalf("error = %v, want temporary access not found", err)
+	}
+}
+
+func TestTemporaryAccessServiceListNormalizesQueryAndPagination(t *testing.T) {
+	repository := &temporaryAccessRepositoryStub{
+		listResult: TemporaryAccessPage{
+			Items: []TemporaryAccessDetails{{ID: "temporary-1"}},
+			Total: 1,
+		},
+	}
+	temporaryAccess, err := NewTemporaryAccessService(repository)
+	if err != nil {
+		t.Fatalf("new service: %v", err)
+	}
+	page, err := temporaryAccess.List(context.Background(), "  incident  ", 0, 500, time.Time{})
+	if err != nil {
+		t.Fatalf("list temporary access: %v", err)
+	}
+	if repository.listParams.Query != "incident" || repository.listParams.Page != 1 || repository.listParams.PageSize != 200 || repository.listParams.Now.IsZero() {
+		t.Fatalf("unexpected normalized list params: %#v", repository.listParams)
+	}
+	if page.Page != 1 || page.PageSize != 200 || len(page.Items) != 1 {
+		t.Fatalf("unexpected page: %#v", page)
+	}
+}
+
+func TestTemporaryAccessServiceConnectionTargetRejectsMissingResource(t *testing.T) {
+	repository := &temporaryAccessRepositoryStub{targetErr: ErrTemporaryAccessNotFound}
+	temporaryAccess, err := NewTemporaryAccessService(repository)
+	if err != nil {
+		t.Fatalf("new service: %v", err)
+	}
+	_, err = temporaryAccess.ConnectionTarget(context.Background(), model.ResourceTypeHostAccount, "missing")
 	if !errors.Is(err, ErrTemporaryAccessNotFound) {
 		t.Fatalf("error = %v, want temporary access not found", err)
 	}
@@ -68,6 +103,9 @@ type temporaryAccessRepositoryStub struct {
 	createErr   error
 	extendErr   error
 	disableErr  error
+	listParams  TemporaryAccessListParams
+	listResult  TemporaryAccessPage
+	targetErr   error
 }
 
 func (s *temporaryAccessRepositoryStub) CreateTemporaryAccess(_ context.Context, input CreateTemporaryAccessInput) (TemporaryAccessResult, error) {
@@ -78,10 +116,27 @@ func (s *temporaryAccessRepositoryStub) CreateTemporaryAccess(_ context.Context,
 	return TemporaryAccessResult{Account: model.TemporaryAccount{ID: "temporary-1"}}, nil
 }
 
+func (s *temporaryAccessRepositoryStub) CreateTemporaryAIAccess(_ context.Context, input CreateTemporaryAIAccessInput) (TemporaryAIAccessResult, error) {
+	return TemporaryAIAccessResult{Token: input.Token}, nil
+}
+
 func (s *temporaryAccessRepositoryStub) ExtendTemporaryAccess(_ context.Context, _ string, _ time.Time) error {
 	return s.extendErr
 }
 
 func (s *temporaryAccessRepositoryStub) DisableTemporaryAccess(_ context.Context, _ string, _ time.Time) error {
 	return s.disableErr
+}
+
+func (s *temporaryAccessRepositoryStub) ListTemporaryAccess(_ context.Context, params TemporaryAccessListParams) (TemporaryAccessPage, error) {
+	s.listParams = params
+	return s.listResult, nil
+}
+
+func (s *temporaryAccessRepositoryStub) GetTemporaryAccess(_ context.Context, id string) (TemporaryAccessDetails, error) {
+	return TemporaryAccessDetails{ID: id}, nil
+}
+
+func (s *temporaryAccessRepositoryStub) TemporaryConnectionTarget(_ context.Context, _, _ string) (TemporaryConnectionTarget, error) {
+	return TemporaryConnectionTarget{}, s.targetErr
 }

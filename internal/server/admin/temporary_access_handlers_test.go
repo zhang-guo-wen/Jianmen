@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -12,6 +13,18 @@ import (
 	"jianmen/internal/model"
 	"jianmen/internal/rbac"
 )
+
+func TestTemporaryAccessHandlerHasNoDirectDatabaseOrBackgroundContext(t *testing.T) {
+	source, err := os.ReadFile("temporary_access_handlers.go")
+	if err != nil {
+		t.Fatalf("read handler source: %v", err)
+	}
+	for _, forbidden := range []string{"s.db", "context.Background("} {
+		if strings.Contains(string(source), forbidden) {
+			t.Fatalf("temporary access handler still contains forbidden dependency %q", forbidden)
+		}
+	}
+}
 
 func TestTemporaryAuthorizationCreatesBoundedGrant(t *testing.T) {
 	server, db := newAdminDBTestServer(t)

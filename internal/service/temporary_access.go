@@ -15,18 +15,19 @@ const maxTemporaryAccessDuration = 7 * 24 * time.Hour
 var (
 	ErrInvalidTemporaryAccess  = errors.New("invalid temporary access")
 	ErrTemporaryAccessNotFound = errors.New("temporary access not found")
+	ErrTemporaryAccessInactive = errors.New("temporary access is not active")
+	ErrTemporaryAccessExpiry   = fmt.Errorf("%w: expiry must be within seven days", ErrInvalidTemporaryAccess)
 )
 
 // TemporaryAccessRepository atomically persists a temporary-access aggregate.
 type TemporaryAccessRepository interface {
 	CreateTemporaryAccess(ctx context.Context, input CreateTemporaryAccessInput) (TemporaryAccessResult, error)
+	CreateTemporaryAIAccess(ctx context.Context, input CreateTemporaryAIAccessInput) (TemporaryAIAccessResult, error)
 	ExtendTemporaryAccess(ctx context.Context, id string, expiresAt time.Time) error
 	DisableTemporaryAccess(ctx context.Context, id string, now time.Time) error
-}
-
-// TemporaryAccountRepository preserves the existing AI temporary-account path.
-type TemporaryAccountRepository interface {
-	CreateTemporaryAccount(ctx context.Context, input CreateTemporaryAccountInput) (model.TemporaryAccount, error)
+	ListTemporaryAccess(ctx context.Context, params TemporaryAccessListParams) (TemporaryAccessPage, error)
+	GetTemporaryAccess(ctx context.Context, id string) (TemporaryAccessDetails, error)
+	TemporaryConnectionTarget(ctx context.Context, resourceType, resourceID string) (TemporaryConnectionTarget, error)
 }
 
 type CreateTemporaryAccessInput struct {
@@ -40,36 +41,88 @@ type CreateTemporaryAccessInput struct {
 	ConnectionPassword model.ConnectionPassword
 }
 
-type CreateTemporaryAccountInput struct {
-	AccountType      string
-	AuthorizedUserID string
-	ExpiresAt        *time.Time
-	Remark           string
-	CreatedBy        string
-	SessionID        string
-	Now              time.Time
+type CreateTemporaryAIAccessInput struct {
+	UserID     string
+	Name       string
+	Remark     string
+	CreatedBy  string
+	ExpiresAt  *time.Time
+	Now        time.Time
+	AccessTTL  time.Duration
+	RefreshTTL time.Duration
+	Token      model.AIAccessToken
 }
 
 type TemporaryAccessResult struct {
 	Account            model.TemporaryAccount
 	Grant              model.TemporaryAccountGrant
 	ConnectionPassword string
+	Details            TemporaryAccessDetails
+	ConnectionTarget   TemporaryConnectionTarget
+}
+
+type TemporaryAccessListParams struct {
+	Query    string
+	Page     int
+	PageSize int
+	Now      time.Time
+}
+
+type TemporaryAccessPage struct {
+	Items    []TemporaryAccessDetails
+	Total    int
+	Page     int
+	PageSize int
+}
+
+type TemporaryAccessDetails struct {
+	ID               string
+	SessionID        string
+	Type             string
+	AuthorizedUserID string
+	AuthorizedUser   string
+	Status           string
+	StartsAt         time.Time
+	ExpiresAt        *time.Time
+	ResourceType     string
+	ResourceID       string
+	ResourceName     string
+	AccountName      string
+	Remark           string
+	CreatedBy        string
+	CreatedAt        time.Time
+}
+
+const (
+	TemporaryGatewaySSH      = "ssh"
+	TemporaryGatewayDatabase = "database"
+)
+
+type TemporaryConnectionTarget struct {
+	ResourceType      string
+	ResourceID        string
+	UsernamePrefix    string
+	CompactResourceID string
+	Protocol          string
+	Gateway           string
+}
+
+type TemporaryAIAccessResult struct {
+	Account      model.TemporaryAccount
+	Token        model.AIAccessToken
+	AccessToken  string
+	RefreshToken string
 }
 
 type TemporaryAccessService struct {
-	repository     TemporaryAccessRepository
-	accountCreator TemporaryAccountRepository
+	repository TemporaryAccessRepository
 }
 
 func NewTemporaryAccessService(repository TemporaryAccessRepository) (*TemporaryAccessService, error) {
 	if repository == nil {
 		return nil, errors.New("temporary access repository is required")
 	}
-	service := &TemporaryAccessService{repository: repository}
-	if creator, ok := repository.(TemporaryAccountRepository); ok {
-		service.accountCreator = creator
-	}
-	return service, nil
+	return &TemporaryAccessService{repository: repository}, nil
 }
 
 func (s *TemporaryAccessService) Create(ctx context.Context, input CreateTemporaryAccessInput) (TemporaryAccessResult, error) {
@@ -89,57 +142,145 @@ func (s *TemporaryAccessService) Create(ctx context.Context, input CreateTempora
 	if err != nil {
 		return TemporaryAccessResult{}, fmt.Errorf("create temporary access aggregate: %w", err)
 	}
+	result.Details, err = s.repository.GetTemporaryAccess(ctx, result.Account.ID)
+	if err != nil {
+		return TemporaryAccessResult{}, fmt.Errorf("load created temporary access: %w", err)
+	}
+	result.ConnectionTarget, err = s.repository.TemporaryConnectionTarget(ctx, result.Grant.ResourceType, result.Grant.ResourceID)
+	if err != nil {
+		return TemporaryAccessResult{}, fmt.Errorf("load temporary connection target: %w", err)
+	}
 	result.ConnectionPassword = issued.Plaintext
 	return result, nil
 }
 
-func (s *TemporaryAccessService) Extend(ctx context.Context, id string, expiresAt, now time.Time) error {
+func (s *TemporaryAccessService) CreateAI(ctx context.Context, input CreateTemporaryAIAccessInput) (TemporaryAIAccessResult, error) {
+	input.UserID = strings.TrimSpace(input.UserID)
+	input.Name = strings.TrimSpace(input.Name)
+	input.Remark = strings.TrimSpace(input.Remark)
+	input.CreatedBy = strings.TrimSpace(input.CreatedBy)
+	if input.Now.IsZero() {
+		input.Now = time.Now().UTC()
+	} else {
+		input.Now = input.Now.UTC()
+	}
+	if input.UserID == "" {
+		return TemporaryAIAccessResult{}, fmt.Errorf("%w: user_id is required", ErrInvalidTemporaryAccess)
+	}
+	if input.Name == "" {
+		input.Name = "AI client"
+	}
+	if input.ExpiresAt != nil {
+		expiresAt := input.ExpiresAt.UTC()
+		if !expiresAt.After(input.Now) {
+			return TemporaryAIAccessResult{}, fmt.Errorf("%w: AI authorization expiry must be in the future", ErrInvalidTemporaryAccess)
+		}
+		input.ExpiresAt = &expiresAt
+	}
+	issued, err := IssueAIAccessToken(input.Now, input.AccessTTL, input.RefreshTTL)
+	if err != nil {
+		return TemporaryAIAccessResult{}, fmt.Errorf("issue AI access token: %w", err)
+	}
+	input.Token = model.AIAccessToken{
+		ID: model.NewID(), UserID: input.UserID, Name: input.Name,
+		AccessTokenHash: issued.AccessTokenHash, RefreshTokenHash: issued.RefreshTokenHash,
+		AccessToken: model.NewEncryptedField(issued.AccessToken), RefreshToken: model.NewEncryptedField(issued.RefreshToken),
+		AccessExpiresAt: issued.AccessExpiresAt, RefreshExpiresAt: issued.RefreshExpiresAt,
+	}
+	result, err := s.repository.CreateTemporaryAIAccess(ctx, input)
+	if err != nil {
+		return TemporaryAIAccessResult{}, fmt.Errorf("create temporary AI access aggregate: %w", err)
+	}
+	result.AccessToken = issued.AccessToken
+	result.RefreshToken = issued.RefreshToken
+	return result, nil
+}
+
+func (s *TemporaryAccessService) Extend(ctx context.Context, id string, expiresAt, now time.Time) (TemporaryAccessDetails, error) {
 	id = strings.TrimSpace(id)
 	expiresAt = expiresAt.UTC()
 	now = now.UTC()
 	if id == "" {
-		return fmt.Errorf("%w: id is required", ErrInvalidTemporaryAccess)
+		return TemporaryAccessDetails{}, fmt.Errorf("%w: id is required", ErrInvalidTemporaryAccess)
 	}
 	if err := validateTemporaryAccessExpiry(expiresAt, now); err != nil {
-		return err
+		return TemporaryAccessDetails{}, err
 	}
 	if err := s.repository.ExtendTemporaryAccess(ctx, id, expiresAt); err != nil {
-		return fmt.Errorf("extend temporary access aggregate: %w", err)
+		return TemporaryAccessDetails{}, fmt.Errorf("extend temporary access aggregate: %w", err)
 	}
-	return nil
+	details, err := s.repository.GetTemporaryAccess(ctx, id)
+	if err != nil {
+		return TemporaryAccessDetails{}, fmt.Errorf("load extended temporary access: %w", err)
+	}
+	return details, nil
 }
 
-func (s *TemporaryAccessService) Disable(ctx context.Context, id string, now time.Time) error {
+func (s *TemporaryAccessService) Disable(ctx context.Context, id string, now time.Time) (TemporaryAccessDetails, error) {
 	id = strings.TrimSpace(id)
 	if id == "" {
-		return fmt.Errorf("%w: id is required", ErrInvalidTemporaryAccess)
+		return TemporaryAccessDetails{}, fmt.Errorf("%w: id is required", ErrInvalidTemporaryAccess)
 	}
 	if err := s.repository.DisableTemporaryAccess(ctx, id, now.UTC()); err != nil {
-		return fmt.Errorf("disable temporary access aggregate: %w", err)
+		return TemporaryAccessDetails{}, fmt.Errorf("disable temporary access aggregate: %w", err)
 	}
-	return nil
+	details, err := s.repository.GetTemporaryAccess(ctx, id)
+	if err != nil {
+		return TemporaryAccessDetails{}, fmt.Errorf("load disabled temporary access: %w", err)
+	}
+	return details, nil
 }
 
-func (s *TemporaryAccessService) CreateAccount(ctx context.Context, input CreateTemporaryAccountInput) (model.TemporaryAccount, error) {
-	if s.accountCreator == nil {
-		return model.TemporaryAccount{}, errors.New("temporary account creation is not supported")
+func (s *TemporaryAccessService) List(ctx context.Context, query string, page, pageSize int, now time.Time) (TemporaryAccessPage, error) {
+	query = strings.TrimSpace(query)
+	if page <= 0 {
+		page = 1
 	}
-	input.AccountType = strings.TrimSpace(input.AccountType)
-	input.AuthorizedUserID = strings.TrimSpace(input.AuthorizedUserID)
-	input.CreatedBy = strings.TrimSpace(input.CreatedBy)
-	input.Remark = strings.TrimSpace(input.Remark)
-	input.SessionID = strings.TrimSpace(input.SessionID)
-	if input.Now.IsZero() {
-		input.Now = time.Now().UTC()
+	if pageSize <= 0 {
+		pageSize = 20
 	}
-	if input.AccountType == "" {
-		return model.TemporaryAccount{}, fmt.Errorf("%w: account type is required", ErrInvalidTemporaryAccess)
+	if pageSize > 200 {
+		pageSize = 200
 	}
-	account, err := s.accountCreator.CreateTemporaryAccount(ctx, input)
+	if now.IsZero() {
+		now = time.Now().UTC()
+	} else {
+		now = now.UTC()
+	}
+	result, err := s.repository.ListTemporaryAccess(ctx, TemporaryAccessListParams{
+		Query: query, Page: page, PageSize: pageSize, Now: now,
+	})
 	if err != nil {
-		return model.TemporaryAccount{}, fmt.Errorf("create temporary account: %w", err)
+		return TemporaryAccessPage{}, fmt.Errorf("list temporary access: %w", err)
 	}
-	return account, nil
+	result.Page = page
+	result.PageSize = pageSize
+	return result, nil
+}
+
+func (s *TemporaryAccessService) Get(ctx context.Context, id string) (TemporaryAccessDetails, error) {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return TemporaryAccessDetails{}, fmt.Errorf("%w: id is required", ErrInvalidTemporaryAccess)
+	}
+	result, err := s.repository.GetTemporaryAccess(ctx, id)
+	if err != nil {
+		return TemporaryAccessDetails{}, fmt.Errorf("get temporary access: %w", err)
+	}
+	return result, nil
+}
+
+func (s *TemporaryAccessService) ConnectionTarget(ctx context.Context, resourceType, resourceID string) (TemporaryConnectionTarget, error) {
+	resourceType = strings.TrimSpace(resourceType)
+	resourceID = strings.TrimSpace(resourceID)
+	if resourceType == "" || resourceID == "" {
+		return TemporaryConnectionTarget{}, fmt.Errorf("%w: resource_type and resource_id are required", ErrInvalidTemporaryAccess)
+	}
+	result, err := s.repository.TemporaryConnectionTarget(ctx, resourceType, resourceID)
+	if err != nil {
+		return TemporaryConnectionTarget{}, fmt.Errorf("get temporary connection target: %w", err)
+	}
+	return result, nil
 }
 
 func normalizeTemporaryAccessInput(input CreateTemporaryAccessInput) CreateTemporaryAccessInput {
@@ -169,7 +310,7 @@ func validateTemporaryAccessInput(input CreateTemporaryAccessInput) error {
 
 func validateTemporaryAccessExpiry(expiresAt, now time.Time) error {
 	if !expiresAt.After(now) || expiresAt.After(now.Add(maxTemporaryAccessDuration)) {
-		return fmt.Errorf("%w: expiry must be within seven days", ErrInvalidTemporaryAccess)
+		return ErrTemporaryAccessExpiry
 	}
 	return nil
 }

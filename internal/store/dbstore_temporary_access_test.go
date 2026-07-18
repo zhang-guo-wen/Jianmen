@@ -2,7 +2,11 @@ package store
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -64,10 +68,148 @@ func TestDBStoreCreateTemporaryAccessAllocatesUniqueSessionSequence(t *testing.T
 	}
 }
 
+func TestDBStoreDisableTemporaryAccessRevokesItsConnectionPassword(t *testing.T) {
+	db := newTemporaryAccessTestDB(t)
+	seedTemporaryAccessUserAndHostAccount(t, db)
+	repository := NewDBStore(db)
+	temporaryAccess, err := service.NewTemporaryAccessService(repository)
+	if err != nil {
+		t.Fatalf("new temporary access service: %v", err)
+	}
+	now := time.Now().UTC()
+	result, err := temporaryAccess.Create(context.Background(), service.CreateTemporaryAccessInput{
+		AuthorizedUserID: "user-1", ResourceType: model.ResourceTypeHostAccount, ResourceID: "host-account-1",
+		ExpiresAt: now.Add(time.Hour), Now: now,
+	})
+	if err != nil {
+		t.Fatalf("create temporary access: %v", err)
+	}
+	if err := repository.AuthenticateConnectionPassword(context.Background(), "user-1", model.ResourceTypeHostAccount, "host-account-1", result.ConnectionPassword); err != nil {
+		t.Fatalf("authenticate before disable: %v", err)
+	}
+	if err := repository.DisableTemporaryAccess(context.Background(), result.Account.ID, now.Add(time.Minute)); err != nil {
+		t.Fatalf("disable temporary access: %v", err)
+	}
+	if err := repository.AuthenticateConnectionPassword(context.Background(), "user-1", model.ResourceTypeHostAccount, "host-account-1", result.ConnectionPassword); err == nil {
+		t.Fatal("disabled temporary access connection password still authenticated")
+	}
+}
+
+func TestDBStoreExtendDisabledTemporaryAccessIsRejected(t *testing.T) {
+	db := newTemporaryAccessTestDB(t)
+	seedTemporaryAccessUserAndHostAccount(t, db)
+	repository := NewDBStore(db)
+	temporaryAccess, err := service.NewTemporaryAccessService(repository)
+	if err != nil {
+		t.Fatalf("new temporary access service: %v", err)
+	}
+	now := time.Now().UTC()
+	result, err := temporaryAccess.Create(context.Background(), service.CreateTemporaryAccessInput{
+		AuthorizedUserID: "user-1", ResourceType: model.ResourceTypeHostAccount, ResourceID: "host-account-1",
+		ExpiresAt: now.Add(time.Hour), Now: now,
+	})
+	if err != nil {
+		t.Fatalf("create temporary access: %v", err)
+	}
+	if err := repository.DisableTemporaryAccess(context.Background(), result.Account.ID, now.Add(time.Minute)); err != nil {
+		t.Fatalf("disable temporary access: %v", err)
+	}
+	if err := repository.ExtendTemporaryAccess(context.Background(), result.Account.ID, now.Add(2*time.Hour)); err == nil {
+		t.Fatal("disabled temporary access was extended and reactivated")
+	}
+}
+
+func TestDBStoreExtendActiveTemporaryAccessExtendsBoundPassword(t *testing.T) {
+	db := newTemporaryAccessTestDB(t)
+	seedTemporaryAccessUserAndHostAccount(t, db)
+	repository := NewDBStore(db)
+	temporaryAccess, err := service.NewTemporaryAccessService(repository)
+	if err != nil {
+		t.Fatalf("new temporary access service: %v", err)
+	}
+	now := time.Now().UTC().Truncate(time.Second)
+	result, err := temporaryAccess.Create(context.Background(), service.CreateTemporaryAccessInput{
+		AuthorizedUserID: "user-1", ResourceType: model.ResourceTypeHostAccount, ResourceID: "host-account-1",
+		ExpiresAt: now.Add(time.Hour), Now: now,
+	})
+	if err != nil {
+		t.Fatalf("create temporary access: %v", err)
+	}
+	extendedExpiry := now.Add(2 * time.Hour)
+	if err := repository.ExtendTemporaryAccess(context.Background(), result.Account.ID, extendedExpiry); err != nil {
+		t.Fatalf("extend temporary access: %v", err)
+	}
+	var passwordExpiry time.Time
+	if err := db.Raw("SELECT expires_at FROM connection_passwords WHERE temporary_account_id = ?", result.Account.ID).Scan(&passwordExpiry).Error; err != nil {
+		t.Fatalf("load bound connection password: %v", err)
+	}
+	if !passwordExpiry.Equal(extendedExpiry) {
+		t.Fatalf("connection password expiry = %v, want %v", passwordExpiry, extendedExpiry)
+	}
+	if err := repository.AuthenticateConnectionPassword(context.Background(), "user-1", model.ResourceTypeHostAccount, "host-account-1", result.ConnectionPassword); err != nil {
+		t.Fatalf("extended connection password no longer authenticates: %v", err)
+	}
+}
+
+func TestDBStoreCreateTemporaryAccessConcurrentSessionsAreUnique(t *testing.T) {
+	db := newConcurrentTemporaryAccessTestDB(t)
+	seedTemporaryAccessUserAndHostAccount(t, db)
+	repository := NewDBStore(db)
+	const workers = 12
+	start := make(chan struct{})
+	errs := make(chan error, workers)
+	var wg sync.WaitGroup
+	now := time.Now().UTC()
+	for index := 0; index < workers; index++ {
+		wg.Add(1)
+		go func(index int) {
+			defer wg.Done()
+			<-start
+			temporaryAccess, err := service.NewTemporaryAccessService(repository)
+			if err != nil {
+				errs <- err
+				return
+			}
+			_, err = temporaryAccess.Create(context.Background(), service.CreateTemporaryAccessInput{
+				AuthorizedUserID: "user-1", ResourceType: model.ResourceTypeHostAccount, ResourceID: "host-account-1",
+				ExpiresAt: now.Add(time.Hour), Now: now, Remark: fmt.Sprintf("worker-%d", index),
+			})
+			errs <- err
+		}(index)
+	}
+	close(start)
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if errors.Is(err, service.ErrTemporaryAccessNotFound) {
+			t.Fatalf("sequence contention was misclassified as not found: %v", err)
+		}
+		if err != nil {
+			t.Fatalf("concurrent create failed: %v", err)
+		}
+	}
+	var sessions []model.UserSession
+	if err := db.Order("session_seq").Find(&sessions).Error; err != nil {
+		t.Fatalf("load concurrent sessions: %v", err)
+	}
+	if len(sessions) != workers {
+		t.Fatalf("session count = %d, want %d", len(sessions), workers)
+	}
+	seenSequences := make(map[int]bool, workers)
+	seenIDs := make(map[string]bool, workers)
+	for _, session := range sessions {
+		if seenSequences[session.SessionSeq] || seenIDs[session.SessionID] {
+			t.Fatalf("duplicate session identity: seq=%d id=%q", session.SessionSeq, session.SessionID)
+		}
+		seenSequences[session.SessionSeq] = true
+		seenIDs[session.SessionID] = true
+	}
+}
+
 func TestDBStoreExtendTemporaryAccessRejectsMissingAggregateRecords(t *testing.T) {
 	db := newTemporaryAccessTestDB(t)
 	now := time.Now().UTC()
-	if err := db.Create(&model.TemporaryAccount{ID: "temporary-1", SessionID: "ABCDE", Type: model.TemporaryAccountTypeUser, Username: "tmp_ABCDE", Status: "disabled", StartsAt: now}).Error; err != nil {
+	if err := db.Create(&model.TemporaryAccount{ID: "temporary-1", SessionID: "ABCDE", Type: model.TemporaryAccountTypeUser, Username: "tmp_ABCDE", Status: "active", StartsAt: now}).Error; err != nil {
 		t.Fatalf("create account: %v", err)
 	}
 
@@ -79,7 +221,7 @@ func TestDBStoreExtendTemporaryAccessRejectsMissingAggregateRecords(t *testing.T
 	if err := db.First(&account, "id = ?", "temporary-1").Error; err != nil {
 		t.Fatalf("load account: %v", err)
 	}
-	if account.Status != "disabled" || account.ExpiresAt != nil {
+	if account.Status != "active" || account.ExpiresAt != nil {
 		t.Fatalf("account was partially updated: %#v", account)
 	}
 }
@@ -118,19 +260,24 @@ func TestDBStoreDisableTemporaryAccessRollsBackWhenSessionUpdateFails(t *testing
 	}
 }
 
-func TestDBStoreCreateTemporaryAccountAllocatesUniqueUsername(t *testing.T) {
+func TestDBStoreDisableOrphanAIAccessConverges(t *testing.T) {
 	db := newTemporaryAccessTestDB(t)
-	store := NewDBStore(db)
-	first, err := store.CreateTemporaryAccount(context.Background(), service.CreateTemporaryAccountInput{AccountType: model.TemporaryAccountTypeAI, Now: time.Now().UTC()})
-	if err != nil {
-		t.Fatalf("create first temporary account: %v", err)
+	now := time.Now().UTC()
+	account := model.TemporaryAccount{
+		ID: "orphan-ai", SessionID: "AIA01", Type: model.TemporaryAccountTypeAI,
+		Username: "tmp_AIA01", Status: "active", StartsAt: now,
 	}
-	second, err := store.CreateTemporaryAccount(context.Background(), service.CreateTemporaryAccountInput{AccountType: model.TemporaryAccountTypeAI, Now: time.Now().UTC()})
-	if err != nil {
-		t.Fatalf("create second temporary account: %v", err)
+	if err := db.Create(&account).Error; err != nil {
+		t.Fatalf("create orphan AI account: %v", err)
 	}
-	if first.Username == second.Username || first.SessionID == second.SessionID {
-		t.Fatalf("temporary accounts are not unique: first=%#v second=%#v", first, second)
+	if err := NewDBStore(db).DisableTemporaryAccess(context.Background(), account.ID, now); err != nil {
+		t.Fatalf("disable orphan AI account: %v", err)
+	}
+	if err := db.First(&account, "id = ?", account.ID).Error; err != nil {
+		t.Fatalf("reload orphan AI account: %v", err)
+	}
+	if account.Status != "disabled" {
+		t.Fatalf("orphan AI account status = %q, want disabled", account.Status)
 	}
 }
 
@@ -143,6 +290,31 @@ func newTemporaryAccessTestDB(t *testing.T) *gorm.DB {
 	if err := storage.AutoMigrate(db); err != nil {
 		t.Fatalf("automigrate: %v", err)
 	}
+	return db
+}
+
+func newConcurrentTemporaryAccessTestDB(t *testing.T) *gorm.DB {
+	t.Helper()
+	path := filepath.ToSlash(filepath.Join(t.TempDir(), "temporary-access.db"))
+	dsn := "file:" + path + "?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)"
+	db, err := storage.Open(storage.Config{
+		Driver: storage.DriverSQLite, DSN: dsn, MaxOpenConns: 16, MaxIdleConns: 16,
+	})
+	if err != nil {
+		t.Fatalf("open concurrent sqlite: %v", err)
+	}
+	if err := storage.AutoMigrate(db); err != nil {
+		t.Fatalf("automigrate concurrent sqlite: %v", err)
+	}
+	sqlDB, err := db.DB()
+	if err != nil {
+		t.Fatalf("get concurrent sql db: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := sqlDB.Close(); err != nil {
+			t.Errorf("close concurrent sqlite: %v", err)
+		}
+	})
 	return db
 }
 

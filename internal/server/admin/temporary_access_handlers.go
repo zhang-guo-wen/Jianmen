@@ -1,7 +1,9 @@
 package admin
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -13,7 +15,6 @@ import (
 	"jianmen/internal/model"
 	"jianmen/internal/rbac"
 	"jianmen/internal/service"
-	"jianmen/internal/storage"
 	"jianmen/internal/util"
 )
 
@@ -145,27 +146,6 @@ func (s *Server) createTemporaryAuthorization(w http.ResponseWriter, r *http.Req
 	}
 	req.ResourceType = strings.TrimSpace(req.ResourceType)
 	req.ResourceID = strings.TrimSpace(req.ResourceID)
-	if req.AuthorizedUserID == "" || req.ResourceID == "" {
-		s.writeErrorText(w, r, http.StatusBadRequest, "resource_id is required")
-		return
-	}
-	if req.ResourceType != model.ResourceTypeHostAccount && req.ResourceType != model.ResourceTypeDatabaseAccount {
-		s.writeErrorText(w, r, http.StatusBadRequest, "resource_type must be host_account or database_account")
-		return
-	}
-	var user model.User
-	if err := s.db.Where("id = ? AND status = ?", req.AuthorizedUserID, "active").First(&user).Error; err != nil {
-		s.writeErrorText(w, r, http.StatusBadRequest, "authorized user not found or disabled")
-		return
-	}
-	if user.IsExpired(time.Now().UTC()) {
-		s.writeErrorText(w, r, http.StatusBadRequest, "authorized user account expired")
-		return
-	}
-	if !s.resourceExists(req.ResourceType, req.ResourceID) {
-		s.writeErrorText(w, r, http.StatusBadRequest, "resource not found")
-		return
-	}
 	now := time.Now().UTC()
 	expiresAt := now.Add(24 * time.Hour)
 	if req.ExpiresAt != nil {
@@ -175,82 +155,41 @@ func (s *Server) createTemporaryAuthorization(w http.ResponseWriter, r *http.Req
 		s.writeErrorText(w, r, http.StatusBadRequest, "\u4e34\u65f6\u6388\u6743\u6709\u6548\u671f\u4e0d\u80fd\u8d85\u8fc7 7 \u5929\uff0c\u8bf7\u9009\u62e9 7 \u5929\u4ee5\u5185\u7684\u65f6\u95f4")
 		return
 	}
-	userSession, err := s.store.CreateUserSession(model.UserSession{
-		UserID: req.AuthorizedUserID, Type: "temporary", Status: "active",
-		ExpiresAt: &expiresAt, CreatedBy: userIDFromRequest(r),
+	temporaryAccess, err := s.temporaryAccessService()
+	if err != nil {
+		s.writeErrorText(w, r, http.StatusInternalServerError, "temporary access service is unavailable")
+		return
+	}
+	result, err := temporaryAccess.Create(r.Context(), service.CreateTemporaryAccessInput{
+		AuthorizedUserID: req.AuthorizedUserID, ResourceType: req.ResourceType, ResourceID: req.ResourceID,
+		ExpiresAt: expiresAt, Remark: req.Remark, CreatedBy: userIDFromRequest(r), Now: now,
 	})
 	if err != nil {
-		s.writeErrorText(w, r, http.StatusInternalServerError, "failed to create temporary session")
+		s.writeTemporaryAccessError(w, r, err, http.StatusBadRequest)
 		return
 	}
-	account, err := s.createTemporaryAccount(model.TemporaryAccountTypeUser, req.AuthorizedUserID, &expiresAt, req.Remark, userIDFromRequest(r), userSession.SessionID)
+	connection, err := s.issueTemporaryConnection(r, result.Grant.ResourceType, result.Grant.ResourceID, result.Account.SessionID, result.ConnectionPassword, expiresAt)
 	if err != nil {
-		s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
+		s.writeErrorText(w, r, http.StatusInternalServerError, "build temporary connection details")
 		return
 	}
-	grant := model.TemporaryAccountGrant{
-		TemporaryAccountID: account.ID, UserID: req.AuthorizedUserID,
-		Action: rbac.ActionSessionConnect, ResourceType: req.ResourceType, ResourceID: req.ResourceID,
-		StartsAt: &now, ExpiresAt: &expiresAt, CreatedBy: userIDFromRequest(r),
-	}
-	if err := s.db.Create(&grant).Error; err != nil {
-		s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
-		return
-	}
-	connection, err := s.issueTemporaryConnection(r, req.AuthorizedUserID, req.ResourceType, req.ResourceID, userSession.SessionID, expiresAt)
-	if err != nil {
-		s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
-		return
-	}
-	view := s.temporaryAccountView(account)
+	view := s.temporaryAccountView(result.Account)
 	view.Connection = &connection
 	s.writeJSON(w, r, http.StatusCreated, view)
 }
 
 func (s *Server) createTemporaryAccount(accountType, authorizedUserID string, expiresAt *time.Time, remark, createdBy, sessionID string) (model.TemporaryAccount, error) {
-	if strings.TrimSpace(sessionID) == "" {
-		var maxSessionSeq int
-		if err := s.db.Model(&model.UserSession{}).Select("COALESCE(MAX(session_seq), 0)").Scan(&maxSessionSeq).Error; err != nil {
-			return model.TemporaryAccount{}, fmt.Errorf("read session sequence floor: %w", err)
-		}
-		if err := storage.EnsureSequenceNextValue(s.db, storage.SequenceUserSession, maxSessionSeq+1); err != nil {
-			return model.TemporaryAccount{}, fmt.Errorf("ensure session sequence floor: %w", err)
-		}
-		seq, err := storage.NextSequenceValue(s.db, storage.SequenceUserSession, storage.MaxCompactSessionSeq)
-		if err != nil {
-			return model.TemporaryAccount{}, fmt.Errorf("allocate temporary session id: %w", err)
-		}
-		sessionID = util.EncodeBase62Padded(uint64(seq), 5)
-	}
-	usernameSuffix := sessionID
-	if len(usernameSuffix) > 12 {
-		usernameSuffix = usernameSuffix[:12]
-	}
-	account := model.TemporaryAccount{
-		ID: model.NewID(), SessionID: sessionID, Type: accountType,
-		Username: "tmp_" + usernameSuffix, AuthorizedUserID: authorizedUserID,
-		Status: "active", StartsAt: time.Now().UTC(), ExpiresAt: expiresAt,
-		Remark: strings.TrimSpace(remark), CreatedBy: createdBy,
-	}
-	if err := s.db.Create(&account).Error; err != nil {
+	temporaryAccess, err := s.temporaryAccessService()
+	if err != nil {
 		return model.TemporaryAccount{}, err
 	}
-	return account, nil
+	return temporaryAccess.CreateAccount(context.Background(), service.CreateTemporaryAccountInput{
+		AccountType: accountType, AuthorizedUserID: authorizedUserID, ExpiresAt: expiresAt,
+		Remark: remark, CreatedBy: createdBy, SessionID: sessionID, Now: time.Now().UTC(),
+	})
 }
 
-func (s *Server) issueTemporaryConnection(r *http.Request, userID, resourceType, resourceID, sessionID string, expiresAt time.Time) (temporaryConnectionView, error) {
-	now := time.Now().UTC()
-	issued, err := service.IssueConnectionPassword(now, expiresAt.Sub(now))
-	if err != nil {
-		return temporaryConnectionView{}, fmt.Errorf("issue temporary connection password: %w", err)
-	}
-	if err := s.store.CreateConnectionPassword(r.Context(), model.ConnectionPassword{
-		UserID: userID, ResourceType: resourceType, ResourceID: resourceID,
-		SecretHash: issued.Hash, MySQLNativeHash: issued.MySQLNativeHash, ExpiresAt: issued.ExpiresAt,
-	}); err != nil {
-		return temporaryConnectionView{}, fmt.Errorf("save temporary connection password: %w", err)
-	}
-
+func (s *Server) issueTemporaryConnection(r *http.Request, resourceType, resourceID, sessionID, password string, expiresAt time.Time) (temporaryConnectionView, error) {
 	publicHost := requestHostnameFromPage(r, s.aiBaseURL(r))
 	prefix, compactResourceID, protocol, port, err := s.temporaryConnectionTarget(resourceType, resourceID)
 	if err != nil {
@@ -258,8 +197,8 @@ func (s *Server) issueTemporaryConnection(r *http.Request, userID, resourceType,
 	}
 	return temporaryConnectionView{
 		Address: net.JoinHostPort(publicHost, strconv.Itoa(port)), Host: publicHost, Port: port,
-		Username: prefix + compactResourceID + sessionID, Password: issued.Plaintext,
-		Protocol: protocol, ExpiresAt: issued.ExpiresAt,
+		Username: prefix + compactResourceID + sessionID, Password: password,
+		Protocol: protocol, ExpiresAt: expiresAt,
 	}, nil
 }
 
@@ -295,15 +234,37 @@ func requestHostnameFromPage(r *http.Request, baseURL string) string {
 	return requestHostname(r)
 }
 
+func (s *Server) temporaryAccessService() (*service.TemporaryAccessService, error) {
+	if s.temporaryAccess != nil {
+		return s.temporaryAccess, nil
+	}
+	repository, ok := s.store.(service.TemporaryAccessRepository)
+	if !ok {
+		return nil, errors.New("temporary access repository is unavailable")
+	}
+	temporaryAccess, err := service.NewTemporaryAccessService(repository)
+	if err != nil {
+		return nil, err
+	}
+	s.temporaryAccess = temporaryAccess
+	return temporaryAccess, nil
+}
+
+func (s *Server) writeTemporaryAccessError(w http.ResponseWriter, r *http.Request, err error, notFoundStatus int) {
+	switch {
+	case errors.Is(err, service.ErrInvalidTemporaryAccess):
+		s.writeErrorText(w, r, http.StatusBadRequest, "temporary access request is invalid")
+	case errors.Is(err, service.ErrTemporaryAccessNotFound):
+		s.writeErrorText(w, r, notFoundStatus, "temporary account or dependent resource not found")
+	default:
+		s.writeErrorText(w, r, http.StatusInternalServerError, "temporary access operation failed")
+	}
+}
+
 func (s *Server) extendTemporaryAccount(w http.ResponseWriter, r *http.Request, id string) {
 	var req temporaryAccountActionRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		s.writeErrorText(w, r, http.StatusBadRequest, "invalid request body")
-		return
-	}
-	var account model.TemporaryAccount
-	if err := s.db.First(&account, "id = ?", id).Error; err != nil {
-		s.writeErrorText(w, r, http.StatusNotFound, "temporary account not found")
 		return
 	}
 	now := time.Now().UTC()
@@ -315,39 +276,40 @@ func (s *Server) extendTemporaryAccount(w http.ResponseWriter, r *http.Request, 
 		s.writeErrorText(w, r, http.StatusBadRequest, "\u4e34\u65f6\u6388\u6743\u6709\u6548\u671f\u4e0d\u80fd\u8d85\u8fc7 7 \u5929\uff0c\u8bf7\u9009\u62e9 7 \u5929\u4ee5\u5185\u7684\u65f6\u95f4")
 		return
 	}
-	if err := s.db.Model(&account).Updates(map[string]any{"expires_at": expiresAt, "status": "active"}).Error; err != nil {
-		s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
+	temporaryAccess, err := s.temporaryAccessService()
+	if err != nil {
+		s.writeErrorText(w, r, http.StatusInternalServerError, "temporary access service is unavailable")
 		return
 	}
-	_ = s.db.Model(&model.TemporaryAccountGrant{}).Where("temporary_account_id = ?", account.ID).Updates(map[string]any{"expires_at": expiresAt, "revoked_at": nil}).Error
-	_ = s.db.Model(&model.UserSession{}).Where("session_id = ?", account.SessionID).Updates(map[string]any{"expires_at": expiresAt, "status": "active"}).Error
-	account.ExpiresAt = &expiresAt
-	account.Status = "active"
-	view := s.temporaryAccountView(account)
-	var grant model.TemporaryAccountGrant
-	if account.Type == model.TemporaryAccountTypeUser && s.db.Where("temporary_account_id = ? AND revoked_at IS NULL", account.ID).First(&grant).Error == nil {
-		if connection, issueErr := s.issueTemporaryConnection(r, account.AuthorizedUserID, grant.ResourceType, grant.ResourceID, account.SessionID, expiresAt); issueErr == nil {
-			view.Connection = &connection
-		}
+	if err := temporaryAccess.Extend(r.Context(), id, expiresAt, now); err != nil {
+		s.writeTemporaryAccessError(w, r, err, http.StatusNotFound)
+		return
 	}
+	var account model.TemporaryAccount
+	if err := s.db.First(&account, "id = ?", id).Error; err != nil {
+		s.writeErrorText(w, r, http.StatusInternalServerError, "load extended temporary account")
+		return
+	}
+	view := s.temporaryAccountView(account)
 	s.writeJSON(w, r, http.StatusOK, view)
 }
 
 func (s *Server) disableTemporaryAccount(w http.ResponseWriter, r *http.Request, id string) {
+	now := time.Now().UTC()
+	temporaryAccess, err := s.temporaryAccessService()
+	if err != nil {
+		s.writeErrorText(w, r, http.StatusInternalServerError, "temporary access service is unavailable")
+		return
+	}
+	if err := temporaryAccess.Disable(r.Context(), id, now); err != nil {
+		s.writeTemporaryAccessError(w, r, err, http.StatusNotFound)
+		return
+	}
 	var account model.TemporaryAccount
 	if err := s.db.First(&account, "id = ?", id).Error; err != nil {
-		s.writeErrorText(w, r, http.StatusNotFound, "temporary account not found")
+		s.writeErrorText(w, r, http.StatusInternalServerError, "load disabled temporary account")
 		return
 	}
-	now := time.Now().UTC()
-	if err := s.db.Model(&account).Update("status", "disabled").Error; err != nil {
-		s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
-		return
-	}
-	_ = s.db.Model(&model.TemporaryAccountGrant{}).Where("temporary_account_id = ?", account.ID).Update("revoked_at", now).Error
-	_ = s.db.Model(&model.UserSession{}).Where("session_id = ?", account.SessionID).Update("status", "disabled").Error
-	_ = s.db.Model(&model.AIAccessToken{}).Where("temporary_account_id = ?", account.ID).Update("revoked_at", now).Error
-	account.Status = "disabled"
 	s.writeJSON(w, r, http.StatusOK, s.temporaryAccountView(account))
 }
 

@@ -31,6 +31,7 @@ type Server struct {
 	adminAuth        *service.AdminAuthService
 	resourceGrants   *service.ResourceGrantService
 	resourceGroups   *service.ResourceGroupService
+	temporaryAccess  *service.TemporaryAccessService
 }
 
 type loginCaptchaVerifier interface {
@@ -72,12 +73,20 @@ func New(
 	if err != nil {
 		return nil, fmt.Errorf("initialize login captcha: %w", err)
 	}
+	temporaryRepository, ok := repository.(service.TemporaryAccessRepository)
+	if !ok {
+		return nil, errors.New("admin store does not support temporary access")
+	}
+	temporaryAccess, err := service.NewTemporaryAccessService(temporaryRepository)
+	if err != nil {
+		return nil, fmt.Errorf("initialize temporary access service: %w", err)
+	}
 	superAdminIDs := LoadSuperAdminIDs(cfg, dataDir)
 	return &Server{
 		cfg: cfg, store: repository, db: db, rbacChecker: rbac.NewChecker(db), logger: logger,
 		dataDir: dataDir, superAdminIDs: superAdminIDs,
 		loginLimiter: newDefaultLoginLimiter(), loginCaptcha: loginCaptcha, appProxy: appProxy,
 		onlineSessions: onlineSessions, containerService: service.NewContainerService(),
-		adminAuth: adminAuth, resourceGrants: resourceGrants, resourceGroups: resourceGroups,
+		adminAuth: adminAuth, resourceGrants: resourceGrants, resourceGroups: resourceGroups, temporaryAccess: temporaryAccess,
 	}, nil
 }

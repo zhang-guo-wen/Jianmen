@@ -95,7 +95,7 @@ func TestWriteMySQLClientAuthErrorUsesHandshakeResponseSequence(t *testing.T) {
 
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- writeMySQLClientAuthError(server)
+		errCh <- writeMySQLClientAuthError(server, 2)
 	}()
 
 	header := make([]byte, 4)
@@ -115,6 +115,25 @@ func TestWriteMySQLClientAuthErrorUsesHandshakeResponseSequence(t *testing.T) {
 	}
 	if err := <-errCh; err != nil {
 		t.Fatalf("write auth error: %v", err)
+	}
+}
+
+func TestMySQLClientAuthResponseSequenceFollowsFinalLoginPacket(t *testing.T) {
+	tests := []struct {
+		name     string
+		loginSeq byte
+		want     byte
+	}{
+		{name: "plaintext login", loginSeq: 1, want: 2},
+		{name: "TLS login after SSL request", loginSeq: 2, want: 3},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := mysqlClientAuthResponseSequence(tt.loginSeq); got != tt.want {
+				t.Fatalf("mysqlClientAuthResponseSequence(%d) = %d, want %d", tt.loginSeq, got, tt.want)
+			}
+		})
 	}
 }
 

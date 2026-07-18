@@ -2,15 +2,10 @@ package dbproxy
 
 import (
 	"context"
-	"encoding/binary"
-	"errors"
-	"io"
 	"log/slog"
 	"net"
 	"path/filepath"
 	"strconv"
-	"strings"
-	"sync"
 	"time"
 
 	"gorm.io/gorm"
@@ -61,37 +56,11 @@ func (g *Gateway) ListenAndServe(ctx context.Context) error {
 	if !g.cfg.Enabled {
 		return nil
 	}
-	listener, err := net.Listen("tcp", g.cfg.ListenAddr)
-	if err != nil {
-		return err
-	}
-	defer listener.Close()
-	g.logger.Info("database gateway listening", "addr", g.cfg.ListenAddr)
-
-	var wg sync.WaitGroup
-	go func() {
-		<-ctx.Done()
-		_ = listener.Close()
-	}()
-
-	for {
-		conn, err := listener.Accept()
-		if err != nil {
-			if ctx.Err() != nil || errors.Is(err, net.ErrClosed) || strings.Contains(err.Error(), "closed") {
-				wg.Wait()
-				return nil
-			}
-			return err
-		}
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			g.handleConn(ctx, conn)
-		}()
-	}
+	return g.listenAndServeProtocolListeners(ctx)
 }
 
 type gatewayConn struct {
+	client        net.Conn
 	protocol      string
 	accountID     string
 	instanceID    string
@@ -119,39 +88,11 @@ func upstreamAddress(inst model.DatabaseInstance) string {
 	return net.JoinHostPort(inst.Address, strconv.Itoa(port))
 }
 
-func (g *Gateway) handleConn(ctx context.Context, client net.Conn) {
+func (g *Gateway) handleGatewayConn(client net.Conn, conn *gatewayConn) {
+	if conn.client != nil {
+		client = conn.client
+	}
 	defer client.Close()
-
-	// 协议检测：MySQL 客户端会等待服务器先发握手包，不主动发数据，
-	// 因此用短超时区分协议（PG/Redis 客户端会立刻发数据）。
-	// 原来 3s 导致每个 MySQL 连接固定 3s 延迟，DBeaver 打开多连接时延迟叠加。
-	client.SetReadDeadline(time.Now().Add(200 * time.Millisecond))
-	firstByte := make([]byte, 1)
-	_, err := io.ReadFull(client, firstByte)
-	client.SetReadDeadline(time.Time{})
-
-	var conn *gatewayConn
-	if err != nil {
-		if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
-			conn = g.handleMySQL(ctx, client)
-		} else {
-			g.logger.Warn("db gateway protocol detection read error", "error", err)
-			return
-		}
-	} else {
-		switch {
-		case firstByte[0] == 0x00:
-			conn = g.handlePG(ctx, client, firstByte[0])
-		case firstByte[0] == '*':
-			conn = g.handleRedis(ctx, client, firstByte[0])
-		default:
-			g.logger.Warn("db gateway unsupported protocol", "first_byte", firstByte[0])
-			return
-		}
-	}
-	if conn == nil {
-		return
-	}
 	defer conn.upstream.Close()
 
 	g.logger.Info("db gateway connection started",
@@ -213,16 +154,7 @@ func (g *Gateway) handleConn(ctx context.Context, client net.Conn) {
 	defer unregisterOnline()
 
 	observer := newQueryObserver(conn.protocol, recorder)
-	done := make(chan struct{}, 2)
-	go func() {
-		copyClientToUpstream(client, conn.upstream, observer)
-		done <- struct{}{}
-	}()
-	go func() {
-		copyUpstreamToClient(client, conn.upstream, observer)
-		done <- struct{}{}
-	}()
-	<-done
+	relayGatewayConnection(client, conn.upstream, observer)
 }
 
 // handlePG implements two-layer PostgreSQL authentication:
@@ -233,133 +165,72 @@ func (g *Gateway) handleConn(ctx context.Context, client net.Conn) {
 // 5. Check account disabled/expiry
 // 6. Connect to upstream and relay auth with Password
 func (g *Gateway) handlePG(ctx context.Context, client net.Conn, firstByte byte) *gatewayConn {
-	buf := make([]byte, 8*1024)
-	// 协议检测已读了第1字节，放回缓冲区头部
-	buf[0] = firstByte
-	totalRead := 1
-
-	// Read StartupMessage header (4 bytes len + 4 bytes protocol)
-	for totalRead < 8 {
-		n, err := client.Read(buf[totalRead:])
-		if err != nil {
-			return nil
-		}
-		totalRead += n
+	startupMessage, err := readPostgresStartupMessage(client, firstByte)
+	if err != nil {
+		g.logger.Warn("db gateway invalid PostgreSQL StartupMessage")
+		return nil
 	}
-
-	msgLen := int(binary.BigEndian.Uint32(buf[0:4]))
-	protocol := int(binary.BigEndian.Uint32(buf[4:8]))
-
-	// Handle SSLRequest (protocol 80877103)
-	if protocol == 80877103 {
-		// Refuse SSL
-		if _, err := client.Write([]byte{'N'}); err != nil {
-			return nil
-		}
-		totalRead = 0
-		for totalRead < 8 {
-			n, err := client.Read(buf[totalRead:])
-			if err != nil {
-				return nil
-			}
-			totalRead += n
-		}
-		msgLen = int(binary.BigEndian.Uint32(buf[0:4]))
-	}
-
-	// Read the rest of the StartupMessage
-	for totalRead < msgLen && totalRead < len(buf) {
-		n, err := client.Read(buf[totalRead:])
-		if err != nil {
-			return nil
-		}
-		totalRead += n
-	}
-
-	// Parse StartupMessage key-value pairs
-	username := ""
-	database := ""
-	pos := 8
-	for pos < msgLen-1 {
-		keyEnd := pos
-		for keyEnd < msgLen && buf[keyEnd] != 0 {
-			keyEnd++
-		}
-		if keyEnd >= msgLen {
-			break
-		}
-		valEnd := keyEnd + 1
-		for valEnd < msgLen && buf[valEnd] != 0 {
-			valEnd++
-		}
-		if valEnd >= msgLen {
-			break
-		}
-		key := string(buf[pos:keyEnd])
-		value := string(buf[keyEnd+1 : valEnd])
-		if key == "user" {
-			username = value
-		}
-		if key == "database" {
-			database = value
-		}
-		pos = valEnd + 1
-	}
-	if username == "" {
+	username, database, err := parsePostgresStartupMessage(startupMessage)
+	if err != nil {
+		g.logger.Warn("db gateway failed to parse PostgreSQL StartupMessage")
+		_ = writePostgresAuthenticationError(client)
 		return nil
 	}
 
 	resolved, err := g.resolveAccount(ctx, username)
 	if err != nil {
-		g.logger.Warn("db gateway account resolution failed", "username", username, "error", err)
+		g.logger.Warn("db gateway account resolution failed")
+		_ = writePostgresAuthenticationError(client)
 		return nil
 	}
 	acct := resolved.account
-
-	// Request cleartext password from client
-	// PG AuthenticationCleartextPassword: 'R' type, int32(8) len, int32(3) auth type
-	authReq := []byte{'R', 0, 0, 0, 8, 0, 0, 0, 3}
-	if _, err := client.Write(authReq); err != nil {
+	if err := validateResolvedAccountProtocol(resolved, databaseProtocolPostgreSQL); err != nil {
+		g.logger.Warn("PostgreSQL gateway rejected cross-protocol account")
+		if writeErr := writePostgresAccountProtocolError(client); writeErr != nil {
+			g.logger.Warn("PostgreSQL gateway failed to send protocol rejection")
+		}
 		return nil
 	}
 
-	// Read password response: type 'p', int32(len), password (null-terminated)
-	pwdBuf := make([]byte, 1024)
-	n, err := client.Read(pwdBuf)
-	if err != nil || n < 6 {
+	if err := writePostgresMessage(client, 'R', []byte{0, 0, 0, 3}); err != nil {
 		return nil
 	}
-	pwdLen := int(binary.BigEndian.Uint32(pwdBuf[1:5])) - 4
-	if pwdLen <= 0 {
+	password, err := readPostgresPasswordMessage(client)
+	if err != nil {
+		g.logger.Warn("db gateway invalid PostgreSQL PasswordMessage")
+		_ = writePostgresAuthenticationError(client)
 		return nil
 	}
-	// PG 密码消息以 \x00 结尾，需截断
-	password := strings.TrimRight(string(pwdBuf[5:5+pwdLen]), "\x00")
 
 	if err := g.authenticatePostgresConnection(ctx, resolved, password); err != nil {
-		g.logger.Warn("db gateway authentication or authorization failed", "user", resolved.rawName, "error", err)
+		g.logger.Warn("db gateway authentication or authorization failed")
+		_ = writePostgresAuthenticationError(client)
 		return nil
 	}
 	userID := resolved.user.ID
 
 	// Check account disabled and expiry
 	if acct.Status == "disabled" {
-		g.logger.Warn("db gateway account disabled", "account", resolved.rawName)
+		g.logger.Warn("db gateway account disabled")
+		_ = writePostgresAuthenticationError(client)
 		return nil
 	}
 	if acct.ExpiresAt != nil && time.Now().UTC().After(*acct.ExpiresAt) {
-		g.logger.Warn("db gateway account expired", "account", resolved.rawName, "expires_at", acct.ExpiresAt)
+		g.logger.Warn("db gateway account expired")
+		_ = writePostgresAuthenticationError(client)
 		return nil
 	}
 	if acct.Instance.Status == "disabled" {
-		g.logger.Warn("db gateway instance disabled", "account", resolved.rawName, "instance", acct.InstanceID)
+		g.logger.Warn("db gateway instance disabled")
+		_ = writePostgresAuthenticationError(client)
 		return nil
 	}
 
-	// Connect to upstream
-	upstream, err := net.DialTimeout("tcp", upstreamAddress(acct.Instance), 10*time.Second)
+	// Connect to upstream and negotiate its configured TLS policy before authentication.
+	upstream, err := dialPostgresUpstream(ctx, acct.Instance)
 	if err != nil {
-		g.logger.Warn("db gateway upstream connect failed", "upstream", upstreamAddress(acct.Instance), "error", err)
+		g.logger.Warn("db gateway upstream connect failed")
+		_ = writePostgresAuthenticationError(client)
 		return nil
 	}
 
@@ -371,93 +242,11 @@ func (g *Gateway) handlePG(ctx context.Context, client net.Conn, firstByte byte)
 		return nil
 	}
 
-	// PG auth relay: handle upstream's authentication challenge
-	respBuf := make([]byte, 4096)
-	for {
-		nr, err := upstream.Read(respBuf)
-		if err != nil || nr < 1 {
-			upstream.Close()
-			return nil
-		}
-
-		// Forward only messages the client should see. Upstream authentication
-		// challenges are answered by the proxy using stored credentials; forwarding
-		// them would make the client send an extra PasswordMessage that PostgreSQL
-		// later rejects after authentication completes.
-		if shouldForwardPostgresAuthMessage(respBuf[:nr]) {
-			if _, err := client.Write(respBuf[:nr]); err != nil {
-				upstream.Close()
-				return nil
-			}
-		}
-
-		if nr >= 6 && respBuf[0] == 'R' {
-			authType := binary.BigEndian.Uint32(respBuf[5:9])
-			if authType == 0 {
-				// AuthenticationOk -- break out of auth loop
-				break
-			}
-
-			if authType == 3 {
-				// CleartextPassword: send upstream password back
-				plainPwd := acct.Password.GetPlaintext()
-				pwdMsg := make([]byte, 0, 5+len(plainPwd)+1)
-				pwdMsg = append(pwdMsg, 'p')
-				pwdLenBytes := make([]byte, 4)
-				binary.BigEndian.PutUint32(pwdLenBytes, uint32(4+len(plainPwd)+1))
-				pwdMsg = append(pwdMsg, pwdLenBytes...)
-				pwdMsg = append(pwdMsg, []byte(plainPwd)...)
-				pwdMsg = append(pwdMsg, 0)
-				if _, err := upstream.Write(pwdMsg); err != nil {
-					upstream.Close()
-					return nil
-				}
-			} else if authType == 5 {
-				plainPwd := acct.Password.GetPlaintext()
-				if nr < 13 {
-					upstream.Close()
-					return nil
-				}
-				md5Pwd := BuildPostgresPasswordResponse(authType, acct.Username, plainPwd, respBuf[9:13])
-				pwdMsg := make([]byte, 0, 5+len(md5Pwd)+1)
-				pwdMsg = append(pwdMsg, 'p')
-				pwdLenBytes := make([]byte, 4)
-				binary.BigEndian.PutUint32(pwdLenBytes, uint32(4+len(md5Pwd)+1))
-				pwdMsg = append(pwdMsg, pwdLenBytes...)
-				pwdMsg = append(pwdMsg, []byte(md5Pwd)...)
-				pwdMsg = append(pwdMsg, 0)
-				if _, err := upstream.Write(pwdMsg); err != nil {
-					upstream.Close()
-					return nil
-				}
-				continue
-			} else if authType == 10 {
-				// SASL/SCRAM-SHA-256：用存储密码完成 SCRAM 交换
-				if err := g.pgSCRAMExchange(upstream, acct.Username, acct.Password.GetPlaintext(), respBuf[:nr]); err != nil {
-					g.logger.Warn("pg scram auth failed", "error", err)
-					upstream.Close()
-					return nil
-				}
-				// SCRAM 成功后发送 AuthenticationOk 给客户端
-				okMsg := []byte{'R', 0, 0, 0, 8, 0, 0, 0, 0}
-				if _, err := client.Write(okMsg); err != nil {
-					upstream.Close()
-					return nil
-				}
-				break
-			}
-		}
-
-		// ErrorResponse from upstream -- auth failed
-		if nr >= 1 && respBuf[0] == 'E' {
-			upstream.Close()
-			return nil
-		}
-
-		// ReadyForQuery -- auth succeeded
-		if nr >= 1 && respBuf[0] == 'Z' {
-			break
-		}
+	if err := authenticatePostgresUpstream(upstream, client, acct.Username, acct.Password.GetPlaintext()); err != nil {
+		g.logger.Warn("db gateway PostgreSQL upstream authentication failed")
+		_ = writePostgresAuthenticationError(client)
+		upstream.Close()
+		return nil
 	}
 
 	return &gatewayConn{

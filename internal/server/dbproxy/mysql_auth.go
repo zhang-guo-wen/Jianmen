@@ -2,20 +2,16 @@ package dbproxy
 
 import (
 	"context"
-	"crypto/hmac"
 	"crypto/rand"
-	"crypto/rsa"
-	"crypto/sha256"
-	"crypto/x509"
-	"encoding/base64"
+	"crypto/tls"
 	"encoding/binary"
-	"encoding/pem"
 	"errors"
 	"fmt"
 	"net"
-	"strings"
 	"time"
 
+	"jianmen/internal/config"
+	"jianmen/internal/dbtls"
 	"jianmen/internal/model"
 )
 
@@ -50,12 +46,19 @@ func generateMySQLAuthSalt(size int) ([]byte, error) {
 // sendFakeMySQLHandshake 向客户端发送一个伪装 MySQL 8.0 握手包，
 // 让客户端先发送 login 包（包含用户名），以便网关解析账号。
 func sendFakeMySQLHandshake(conn net.Conn) ([]byte, error) {
+	return sendFakeMySQLHandshakeWithTLS(conn, false)
+}
+
+func sendFakeMySQLHandshakeWithTLS(conn net.Conn, tlsEnabled bool) ([]byte, error) {
 	// 生成 20 字节随机 salt
 	salt, err := generateMySQLAuthSalt(20)
 	if err != nil {
 		return nil, err
 	}
 	capFlags := uint32(mysqlClientProtocol41 | mysqlClientSecureConnection | mysqlClientPluginAuth)
+	if tlsEnabled {
+		capFlags |= mysqlClientSSL
+	}
 	serverVersion := "8.0.28"
 	authPluginName := "mysql_native_password"
 
@@ -113,19 +116,55 @@ func sendFakeMySQLHandshake(conn net.Conn) ([]byte, error) {
 // 12. Check auth OK (0x00) or ERR (0xff), forward result to client
 // 13. Return gatewayConn for data relay
 func (g *Gateway) handleMySQL(ctx context.Context, client net.Conn) *gatewayConn {
+	return g.handleMySQLWithListener(ctx, client, config.DatabaseProtocolListener{})
+}
+
+func (g *Gateway) handleMySQLWithListener(ctx context.Context, client net.Conn, listener config.DatabaseProtocolListener) *gatewayConn {
+	var tlsConfig *tls.Config
+	if listener.CertFile != "" && listener.KeyFile != "" {
+		loaded, err := databaseListenerTLSConfig(listener)
+		if err != nil {
+			g.logger.Error("load MySQL listener certificate", "error", err)
+			return nil
+		}
+		tlsConfig = loaded
+	}
 	// 发送伪装 handshake，让 MySQL 客户端先发 login 包
-	fakeSalt, err := sendFakeMySQLHandshake(client)
+	fakeSalt, err := sendFakeMySQLHandshakeWithTLS(client, tlsConfig != nil)
 	if err != nil {
-		g.logger.Warn("mysql gateway failed to send fake handshake", "error", err)
+		g.logger.Warn("mysql gateway failed to send fake handshake")
 		return nil
 	}
 
 	// Read initial login packet from client
 	clientLoginPkt, err := readMySQLPacket(client)
 	if err != nil {
-		g.logger.Warn("mysql gateway failed to read initial packet", "error", err)
+		g.logger.Warn("mysql gateway failed to read initial packet")
 		return nil
 	}
+	if tlsConfig != nil && !isMySQLTLSRequest(clientLoginPkt) {
+		g.logger.Warn("mysql gateway rejected plaintext login on TLS listener")
+		_ = writeMySQLClientAuthError(client, mysqlClientAuthResponseSequence(clientLoginPkt.seq))
+		return nil
+	}
+	if isMySQLTLSRequest(clientLoginPkt) {
+		if tlsConfig == nil {
+			g.logger.Warn("mysql client requested TLS but listener has no certificate")
+			return nil
+		}
+		secured := tls.Server(client, tlsConfig)
+		if err := secured.HandshakeContext(ctx); err != nil {
+			g.logger.Warn("mysql gateway TLS handshake failed")
+			return nil
+		}
+		client = secured
+		clientLoginPkt, err = readMySQLPacket(client)
+		if err != nil {
+			g.logger.Warn("mysql gateway failed to read TLS login packet")
+			return nil
+		}
+	}
+	clientAuthSeq := mysqlClientAuthResponseSequence(clientLoginPkt.seq)
 
 	// Parse username
 	parser := &MySQLLoginParser{}
@@ -137,7 +176,7 @@ func (g *Gateway) handleMySQL(ctx context.Context, client net.Conn) *gatewayConn
 	copy(fullPacket[4:], clientLoginPkt.payload)
 	obs, _, err := parser.Observe(fullPacket)
 	if err != nil {
-		g.logger.Warn("mysql gateway failed to parse login", "error", err)
+		g.logger.Warn("mysql gateway failed to parse login")
 		return nil
 	}
 	if obs.User == "" {
@@ -146,21 +185,29 @@ func (g *Gateway) handleMySQL(ctx context.Context, client net.Conn) *gatewayConn
 	}
 	authResponse, err := mysqlLoginAuthResponse(clientLoginPkt.payload)
 	if err != nil {
-		g.logger.Warn("mysql gateway failed to parse authentication response", "error", err)
+		g.logger.Warn("mysql gateway failed to parse authentication response")
 		return nil
 	}
 
 	resolved, err := g.resolveAccount(ctx, obs.User)
 	if err != nil {
-		g.logger.Warn("mysql gateway account resolution failed", "username", obs.User, "error", err)
+		g.logger.Warn("mysql gateway account resolution failed")
+		_ = writeMySQLClientAuthError(client, clientAuthSeq)
 		return nil
 	}
 	acct := resolved.account
+	if err := validateResolvedAccountProtocol(resolved, databaseProtocolMySQL); err != nil {
+		g.logger.Warn("mysql gateway rejected cross-protocol account")
+		if writeErr := writeMySQLClientAuthError(client, clientAuthSeq); writeErr != nil {
+			g.logger.Warn("mysql gateway failed to send protocol rejection")
+		}
+		return nil
+	}
 	if err := g.authenticateMySQLConnection(ctx, resolved, fakeSalt, authResponse); err != nil {
-		g.logger.Warn("mysql gateway authentication or authorization failed", "user", resolved.rawName, "error", err)
+		g.logger.Warn("mysql gateway authentication or authorization failed")
 		if errors.Is(err, errDatabaseAuthentication) {
-			if err := writeMySQLClientAuthError(client); err != nil {
-				g.logger.Warn("mysql gateway failed to send auth error", "error", err)
+			if err := writeMySQLClientAuthError(client, clientAuthSeq); err != nil {
+				g.logger.Warn("mysql gateway failed to send auth error")
 			}
 		}
 		return nil
@@ -170,39 +217,39 @@ func (g *Gateway) handleMySQL(ctx context.Context, client net.Conn) *gatewayConn
 
 	// Check account disabled and expiry
 	if acct.Status == "disabled" {
-		g.logger.Warn("mysql gateway account disabled", "account", resolved.rawName)
+		g.logger.Warn("mysql gateway account disabled")
+		_ = writeMySQLClientAuthError(client, clientAuthSeq)
 		return nil
 	}
 	if acct.ExpiresAt != nil && time.Now().UTC().After(*acct.ExpiresAt) {
-		g.logger.Warn("mysql gateway account expired", "account", resolved.rawName, "expires_at", acct.ExpiresAt)
+		g.logger.Warn("mysql gateway account expired")
+		_ = writeMySQLClientAuthError(client, clientAuthSeq)
 		return nil
 	}
 
-	// Connect to upstream
-	upstream, err := net.DialTimeout("tcp", upstreamAddress(acct.Instance), 10*time.Second)
+	// Connect to upstream and negotiate its configured TLS policy before sending credentials.
+	upstream, hs, err := dialMySQLUpstream(ctx, acct.Instance)
 	if err != nil {
-		g.logger.Warn("mysql gateway upstream connect failed", "upstream", upstreamAddress(acct.Instance), "error", err)
-		return nil
-	}
-
-	// Read upstream handshake — 不转发给客户端（客户端已经响应了 fake handshake）
-	hsPkt, err := readMySQLPacket(upstream)
-	if err != nil {
-		g.logger.Warn("mysql gateway failed to read upstream handshake", "error", err)
-		upstream.Close()
-		return nil
-	}
-	hs, err := ParseMySQLHandshake(hsPkt.payload)
-	if err != nil {
-		g.logger.Warn("mysql gateway failed to parse handshake", "error", err)
-		upstream.Close()
+		g.logger.Warn("mysql gateway upstream connect failed")
+		_ = writeMySQLClientAuthError(client, clientAuthSeq)
 		return nil
 	}
 
 	// 直接用存储凭据构建上游登录，不要求客户端二次认证
-	upstreamLogin := BuildMySQLUpstreamLogin(hs, acct.Username, acct.Password.GetPlaintext(), hs.AuthPluginName, 1)
+	upstreamLoginSequence := byte(1)
+	if dbtls.IsVerified(upstream) {
+		upstreamLoginSequence = 2
+	}
+	upstreamLogin, err := BuildMySQLUpstreamLogin(hs, acct.Username, acct.Password.GetPlaintext(), hs.AuthPluginName, upstreamLoginSequence)
+	if err != nil {
+		g.logger.Warn("mysql gateway failed to build upstream login")
+		_ = writeMySQLClientAuthError(client, clientAuthSeq)
+		upstream.Close()
+		return nil
+	}
 	if _, err := upstream.Write(upstreamLogin); err != nil {
-		g.logger.Warn("mysql gateway failed to send upstream login", "error", err)
+		g.logger.Warn("mysql gateway failed to send upstream login")
+		_ = writeMySQLClientAuthError(client, clientAuthSeq)
 		upstream.Close()
 		return nil
 	}
@@ -210,25 +257,26 @@ func (g *Gateway) handleMySQL(ctx context.Context, client net.Conn) *gatewayConn
 	// Read upstream auth result
 	authPkt, err := readMySQLPacket(upstream)
 	if err != nil {
-		g.logger.Warn("mysql gateway failed to read upstream auth result", "error", err)
+		g.logger.Warn("mysql gateway failed to read upstream auth result")
+		_ = writeMySQLClientAuthError(client, clientAuthSeq)
 		upstream.Close()
 		return nil
 	}
 
 	// Check auth result
 	if len(authPkt.payload) > 0 && authPkt.payload[0] == 0xff {
-		errMsg := ParseMySQLErrorMessage(authPkt.payload)
-		g.logger.Warn("mysql gateway upstream auth failed", "error", errMsg)
-		_ = writeMySQLPacketWithClientAuthSeq(client, authPkt)
+		g.logger.Warn("mysql gateway upstream auth failed")
+		_ = writeMySQLClientAuthError(client, clientAuthSeq)
 		upstream.Close()
 		return nil
 	}
 
 	// Handle AuthSwitchRequest (0xfe) — MySQL 8.0 可能要求切换 auth plugin
 	if len(authPkt.payload) > 1 && authPkt.payload[0] == 0xfe {
-		switched, err := g.handleMySQLAuthSwitch(upstream, acct, hs, authPkt.payload[1:])
+		switched, err := g.handleMySQLAuthSwitch(upstream, acct, hs, authPkt)
 		if err != nil {
-			g.logger.Warn("mysql gateway auth switch failed", "error", err)
+			g.logger.Warn("mysql gateway auth switch failed")
+			_ = writeMySQLClientAuthError(client, clientAuthSeq)
 			upstream.Close()
 			return nil
 		}
@@ -237,26 +285,40 @@ func (g *Gateway) handleMySQL(ctx context.Context, client net.Conn) *gatewayConn
 
 	// Handle caching_sha2_password full auth: 0x01 (more data) + 0x03 (fast auth success)
 	if len(authPkt.payload) > 0 && authPkt.payload[0] == 0x01 {
-		extraPkt, err := readMySQLPacket(upstream)
-		if err != nil {
-			g.logger.Warn("mysql gateway failed to read auth extra", "error", err)
+		extraPkt := authPkt
+		if len(authPkt.payload) == 1 {
+			var err error
+			extraPkt, err = readMySQLPacket(upstream)
+			if err != nil {
+				g.logger.Warn("mysql gateway failed to read auth continuation")
+				_ = writeMySQLClientAuthError(client, clientAuthSeq)
+				upstream.Close()
+				return nil
+			}
+		}
+		moreCode, ok := MySQLCachingSHA2AuthMoreData(extraPkt.payload)
+		if !ok {
+			g.logger.Warn("mysql gateway invalid caching_sha2_password more-data packet")
+			_ = writeMySQLClientAuthError(client, clientAuthSeq)
 			upstream.Close()
 			return nil
 		}
-		if len(extraPkt.payload) > 0 && extraPkt.payload[0] == 0x03 {
+		if moreCode == 0x03 {
 			finalPkt, err := readMySQLPacket(upstream)
 			if err != nil {
-				g.logger.Warn("mysql gateway failed to read final auth ok", "error", err)
+				g.logger.Warn("mysql gateway failed to read final auth ok")
+				_ = writeMySQLClientAuthError(client, clientAuthSeq)
 				upstream.Close()
 				return nil
 			}
 			authPkt = finalPkt
 		}
 		// 0x04 = full auth with public key — 实现完整认证
-		if len(extraPkt.payload) > 0 && extraPkt.payload[0] == 0x04 {
-			fullAuthPkt, err := g.handleMySQLCachingSha2FullAuth(upstream, acct.Password.GetPlaintext())
+		if moreCode == 0x04 {
+			fullAuthPkt, err := g.handleMySQLCachingSha2FullAuth(upstream, acct.Password.GetPlaintext(), extraPkt.seq)
 			if err != nil {
-				g.logger.Warn("mysql gateway caching_sha2_password full auth failed", "error", err)
+				g.logger.Warn("mysql gateway caching_sha2_password full auth failed")
+				_ = writeMySQLClientAuthError(client, clientAuthSeq)
 				upstream.Close()
 				return nil
 			}
@@ -265,24 +327,31 @@ func (g *Gateway) handleMySQL(ctx context.Context, client net.Conn) *gatewayConn
 	}
 
 	if len(authPkt.payload) > 0 && authPkt.payload[0] == 0xff {
-		errMsg := ParseMySQLErrorMessage(authPkt.payload)
-		g.logger.Warn("mysql gateway upstream auth failed", "error", errMsg)
-		_ = writeMySQLPacketWithClientAuthSeq(client, authPkt)
+		g.logger.Warn("mysql gateway upstream auth failed")
+		_ = writeMySQLClientAuthError(client, clientAuthSeq)
 		upstream.Close()
 		return nil
 	}
 	if len(authPkt.payload) == 0 || authPkt.payload[0] != 0x00 {
-		g.logger.Warn("mysql gateway unexpected upstream auth result", "payload_len", len(authPkt.payload))
+		g.logger.Warn("mysql gateway unexpected upstream auth result")
+		_ = writeMySQLClientAuthError(client, clientAuthSeq)
+		upstream.Close()
+		return nil
+	}
+	if err := upstream.SetDeadline(time.Time{}); err != nil {
+		g.logger.Warn("mysql gateway failed to clear upstream authentication deadline")
+		_ = writeMySQLClientAuthError(client, clientAuthSeq)
 		upstream.Close()
 		return nil
 	}
 
-	if err := writeMySQLClientAuthOK(client); err != nil {
+	if err := writeMySQLClientAuthOK(client, clientAuthSeq); err != nil {
 		upstream.Close()
 		return nil
 	}
 
 	return &gatewayConn{
+		client:        client,
 		protocol:      "mysql",
 		accountID:     acct.ID,
 		instanceID:    acct.InstanceID,
@@ -294,32 +363,6 @@ func (g *Gateway) handleMySQL(ctx context.Context, client net.Conn) *gatewayConn
 		instanceName:  acct.Instance.Name,
 		userSessionID: resolved.userSessionID,
 	}
-}
-
-func writeMySQLClientAuthOK(conn net.Conn) error {
-	// The fake server handshake is seq=0 and the client login packet is seq=1,
-	// so the client-side auth result must be seq=2 regardless of upstream auth
-	// switches or multi-step authentication.
-	payload := []byte{0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00}
-	_, err := conn.Write(mysqlPacketWithSeq(2, payload))
-	return err
-}
-
-func writeMySQLClientAuthError(conn net.Conn) error {
-	payload := []byte{0xff, 0x15, 0x04, '#', '2', '8', '0', '0', '0'}
-	payload = append(payload, "access denied for bastion connection"...)
-	_, err := conn.Write(mysqlPacketWithSeq(2, payload))
-	return err
-}
-
-func writeMySQLPacketWithClientAuthSeq(conn net.Conn, pkt *mysqlPacket) error {
-	if pkt == nil || len(pkt.raw) < 4 {
-		return nil
-	}
-	raw := append([]byte(nil), pkt.raw...)
-	raw[3] = 2
-	_, err := conn.Write(raw)
-	return err
 }
 
 // BuildMySQLAuthResponse 计算指定 auth plugin 的认证响应（仅 auth bytes，不含完整 login 包）
@@ -337,14 +380,14 @@ func BuildMySQLAuthResponse(plugin, password string, salt []byte) []byte {
 // handleMySQLAuthSwitch 处理 MySQL AuthSwitchRequest (0xfe)
 // payload 是 0xfe 之后的部分：plugin name (null-terminated) + auth data
 // AuthSwitch 响应只需发送 raw auth response（不是完整 login 包）
-func (g *Gateway) handleMySQLAuthSwitch(upstream net.Conn, acct *model.DatabaseAccount, hs *MySQLHandshake, payload []byte) (*mysqlPacket, error) {
-	// 解析新 auth plugin name
-	nullPos := 0
-	for nullPos < len(payload) && payload[nullPos] != 0 {
-		nullPos++
+func (g *Gateway) handleMySQLAuthSwitch(upstream net.Conn, acct *model.DatabaseAccount, _ *MySQLHandshake, request *mysqlPacket) (*mysqlPacket, error) {
+	if request == nil || len(request.payload) < 2 || request.payload[0] != 0xfe {
+		return nil, errors.New("malformed MySQL authentication switch request")
 	}
-	newPlugin := string(payload[:nullPos])
-	authData := payload[nullPos+1:]
+	newPlugin, authData, err := parseMySQLAuthSwitch(request.payload[1:])
+	if err != nil {
+		return nil, err
+	}
 
 	// 构建 raw auth response
 	authResp := BuildMySQLAuthResponse(newPlugin, acct.Password.GetPlaintext(), authData)
@@ -353,213 +396,58 @@ func (g *Gateway) handleMySQLAuthSwitch(upstream net.Conn, acct *model.DatabaseA
 	}
 
 	// 发送 auth switch 响应：仅 auth response bytes，seq=3
-	resp := make([]byte, 4+len(authResp))
-	resp[0] = byte(len(authResp))
-	resp[1] = byte(len(authResp) >> 8)
-	resp[2] = byte(len(authResp) >> 16)
-	resp[3] = 3
-	copy(resp[4:], authResp)
-	if _, err := upstream.Write(resp); err != nil {
+	if _, err := upstream.Write(mysqlPacketWithSeq(mysqlResponseSequence(request.seq), authResp)); err != nil {
 		return nil, fmt.Errorf("write auth switch: %w", err)
 	}
 
 	return readMySQLPacket(upstream)
 }
 
-// handleMySQLCachingSha2FullAuth 处理 caching_sha2_password 完整认证流程。
-// 当密码未在服务器缓存中时（0x01/0x04），执行以下步骤：
-//  1. 发送 0x02 请求服务器公钥
-//  2. 读取服务器返回的 RSA 公钥（0x01 + PEM）
-//  3. 用 RSA-OAEP 加密密码
-//  4. 发送加密后的密码
-//  5. 返回最终认证结果
-func (g *Gateway) handleMySQLCachingSha2FullAuth(upstream net.Conn, password string) (*mysqlPacket, error) {
-	// Step 1: 请求服务器公钥
-	reqKey := []byte{0x02}
-	pkt := make([]byte, 4+len(reqKey))
-	pkt[0] = byte(len(reqKey))
-	pkt[1] = byte(len(reqKey) >> 8)
-	pkt[2] = byte(len(reqKey) >> 16)
-	pkt[3] = 3
-	copy(pkt[4:], reqKey)
-	if _, err := upstream.Write(pkt); err != nil {
-		return nil, fmt.Errorf("request public key: %w", err)
+// handleMySQLCachingSha2FullAuth sends the NUL-terminated password only after
+// the configured TLS verification policy succeeds. The response sequence is
+// derived from the server's AuthMoreData packet.
+func (g *Gateway) handleMySQLCachingSha2FullAuth(upstream net.Conn, password string, serverSequences ...byte) (*mysqlPacket, error) {
+	if err := requireVerifiedMySQLTLS(upstream); err != nil {
+		return nil, err
 	}
-
-	// Step 2: 读取服务器公钥
-	keyPkt, err := readMySQLPacket(upstream)
-	if err != nil {
-		return nil, fmt.Errorf("read public key: %w", err)
+	if len(serverSequences) != 1 {
+		return nil, errors.New("mysql full authentication requires the server packet sequence")
 	}
-	if len(keyPkt.payload) < 2 || keyPkt.payload[0] != 0x01 {
-		return nil, fmt.Errorf("unexpected public key response type=%x", keyPkt.payload[0])
+	g.observeMySQLAuthEvent("caching_sha2_full_auth")
+	passwordPayload := append([]byte(password), 0)
+	if _, err := upstream.Write(mysqlPacketWithSeq(mysqlResponseSequence(serverSequences[0]), passwordPayload)); err != nil {
+		return nil, fmt.Errorf("send TLS-protected full-auth password: %w", err)
 	}
-	pubKeyPEM := keyPkt.payload[1:]
-
-	// Step 3: 解析 PEM 公钥
-	block, _ := pem.Decode(pubKeyPEM)
-	if block == nil {
-		return nil, fmt.Errorf("failed to decode PEM public key")
-	}
-	var pubKey *rsa.PublicKey
-	if parsed, err := x509.ParsePKIXPublicKey(block.Bytes); err == nil {
-		pubKey, _ = parsed.(*rsa.PublicKey)
-	}
-	if pubKey == nil {
-		if parsed, err := x509.ParsePKCS1PublicKey(block.Bytes); err == nil {
-			pubKey = parsed
-		}
-	}
-	if pubKey == nil {
-		return nil, fmt.Errorf("public key is not RSA")
-	}
-
-	// Step 4: 用 RSA-OAEP 加密密码（null-terminated，与 MySQL 协议一致）
-	plaintext := append([]byte(password), 0)
-	encrypted, err := rsa.EncryptOAEP(sha256.New(), rand.Reader, pubKey, plaintext, nil)
-	if err != nil {
-		return nil, fmt.Errorf("rsa encrypt: %w", err)
-	}
-
-	// Step 5: 发送加密后的密码
-	resp := make([]byte, 4+len(encrypted))
-	resp[0] = byte(len(encrypted))
-	resp[1] = byte(len(encrypted) >> 8)
-	resp[2] = byte(len(encrypted) >> 16)
-	resp[3] = 4
-	copy(resp[4:], encrypted)
-	if _, err := upstream.Write(resp); err != nil {
-		return nil, fmt.Errorf("send encrypted password: %w", err)
-	}
-
-	// Step 6: 读取最终认证结果
 	return readMySQLPacket(upstream)
+
 }
 
-// TODO(SCRAM): pgSCRAMExchange SASL PasswordMessage 格式有问题，上游不响应。
-// pgSCRAMExchange 用存储凭据完成 SCRAM-SHA-256 交换
-func (g *Gateway) pgSCRAMExchange(upstream net.Conn, username, password string, saslMsg []byte) error {
-	// SASLInitialResponse: 选 SCRAM-SHA-256
-	clientNonce := make([]byte, 18)
-	if _, err := rand.Read(clientNonce); err != nil {
-		return err
+func (g *Gateway) observeMySQLAuthEvent(event string) {
+	if g == nil || g.logger == nil {
+		return
 	}
-	nonceStr := base64.StdEncoding.EncodeToString(clientNonce)
-	cfm := "n,,n=" + username + ",r=" + nonceStr
-	irPayload := []byte("SCRAM-SHA-256\x00" + cfm)
-	irMsg := make([]byte, 5+len(irPayload))
-	irMsg[0] = 'p'
-	binary.BigEndian.PutUint32(irMsg[1:5], uint32(4+len(irPayload)))
-	copy(irMsg[5:], irPayload)
-	if _, err := upstream.Write(irMsg); err != nil {
-		return fmt.Errorf("scram initial: %w", err)
-	}
-
-	// 读 SASLContinue (type 11)
-	buf := make([]byte, 8192)
-	n, err := upstream.Read(buf)
-	if err != nil || n < 9 {
-		return fmt.Errorf("scram continue: %w", err)
-	}
-	if buf[0] != 'R' || binary.BigEndian.Uint32(buf[5:9]) != 11 {
-		return fmt.Errorf("expected SASLContinue, got type=%d", binary.BigEndian.Uint32(buf[5:9]))
-	}
-	sfm := string(buf[9:n])
-	attrs := ParseSCRAMAttrs(sfm)
-	salt, _ := base64.StdEncoding.DecodeString(attrs["s"])
-	iter := 4096
-	if attrs["i"] != "" {
-		fmt.Sscanf(attrs["i"], "%d", &iter)
-	}
-	combinedNonce := attrs["r"]
-
-	// 计算 SCRAM
-	saltedPwd := PBKDF2Key([]byte(password), salt, iter, 32)
-	clientKey := HMACSHA256(saltedPwd, []byte("Client Key"))
-	storedKey := SHA256Hash(clientKey)
-	authMsg := "n=" + username + ",r=" + nonceStr + "," + sfm + ",c=biws,r=" + combinedNonce
-	clientSig := HMACSHA256(storedKey, []byte(authMsg))
-	proof := XORBytes(clientKey, clientSig)
-
-	cFin := "c=biws,r=" + combinedNonce + ",p=" + base64.StdEncoding.EncodeToString(proof)
-	cfPayload := []byte(cFin + "\x00")
-	cfMsg := make([]byte, 5+len(cfPayload))
-	cfMsg[0] = 'p'
-	binary.BigEndian.PutUint32(cfMsg[1:5], uint32(4+len(cfPayload)))
-	copy(cfMsg[5:], cfPayload)
-	if _, err := upstream.Write(cfMsg); err != nil {
-		return fmt.Errorf("scram final: %w", err)
-	}
-
-	// 读最终结果
-	n2, err := upstream.Read(buf)
-	if err != nil || n2 < 5 {
-		return fmt.Errorf("scram final read: %w", err)
-	}
-	if buf[0] == 'R' && binary.BigEndian.Uint32(buf[5:9]) == 0 {
-		return nil
-	}
-	if buf[0] == 'Z' {
-		return nil
-	}
-	if buf[0] == 'R' && binary.BigEndian.Uint32(buf[5:9]) == 12 {
-		return nil // SASLFinal
-	}
-	return fmt.Errorf("scram auth denied")
+	g.logger.Debug("mysql upstream authentication event", "event", event)
 }
 
-// --- SCRAM-SHA-256 helpers ---
-
-func ParseSCRAMAttrs(s string) map[string]string {
-	m := make(map[string]string)
-	for _, part := range strings.Split(s, ",") {
-		if len(part) > 2 {
-			m[string(part[0])] = part[2:]
-		}
+func requireVerifiedMySQLTLS(conn net.Conn) error {
+	if !dbtls.IsVerified(conn) {
+		return errVerifiedTLSRequired
 	}
-	return m
+	return nil
 }
 
-func PBKDF2Key(password, salt []byte, iter, keyLen int) []byte {
-	prf := func(p, s []byte) []byte {
-		mac := hmac.New(sha256.New, p)
-		mac.Write(s)
-		return mac.Sum(nil)
+// MySQLCachingSHA2AuthMoreData recognizes the standard complete payload and
+// the continuation packet emitted by peers that split the more-data response.
+func MySQLCachingSHA2AuthMoreData(payload []byte) (byte, bool) {
+	if len(payload) == 2 && payload[0] == 0x01 && (payload[1] == 0x03 || payload[1] == 0x04) {
+		return payload[1], true
 	}
-	hLen := 32
-	blocks := (keyLen + hLen - 1) / hLen
-	result := make([]byte, 0, blocks*hLen)
-	for block := 1; block <= blocks; block++ {
-		u := append(salt, byte(block>>24), byte(block>>16), byte(block>>8), byte(block))
-		t := prf(password, u)
-		tn := make([]byte, len(t))
-		copy(tn, t)
-		for i := 2; i <= iter; i++ {
-			tn = prf(password, tn)
-			for j := range t {
-				t[j] ^= tn[j]
-			}
-		}
-		result = append(result, t...)
+	if len(payload) == 1 && (payload[0] == 0x03 || payload[0] == 0x04) {
+		return payload[0], true
 	}
-	return result[:keyLen]
+	return 0, false
 }
 
-func HMACSHA256(key, data []byte) []byte {
-	mac := hmac.New(sha256.New, key)
-	mac.Write(data)
-	return mac.Sum(nil)
-}
-
-func SHA256Hash(data []byte) []byte {
-	h := sha256.Sum256(data)
-	return h[:]
-}
-
-func XORBytes(a, b []byte) []byte {
-	r := make([]byte, len(a))
-	for i := range a {
-		r[i] = a[i] ^ b[i]
-	}
-	return r
+func mysqlResponseSequence(serverSequence byte) byte {
+	return serverSequence + 1
 }

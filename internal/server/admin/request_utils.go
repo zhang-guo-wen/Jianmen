@@ -152,9 +152,9 @@ func writeHostStoreError(w http.ResponseWriter, r *http.Request, err error) {
 func writeDBStoreError(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
 	case errors.Is(err, store.ErrDBProxyNotFound) || errors.Is(err, store.ErrDBAccountNotFound) || errors.Is(err, store.ErrDBInstanceNotFound):
-		apiresp.WriteError(w, http.StatusNotFound, apiresp.CodeNotFound, err.Error(), nil, apiresp.RequestID(r.Context()))
+		apiresp.WriteError(w, http.StatusNotFound, apiresp.CodeNotFound, "database resource not found", nil, apiresp.RequestID(r.Context()))
 	default:
-		apiresp.WriteError(w, http.StatusBadRequest, apiresp.CodeValidation, err.Error(), nil, apiresp.RequestID(r.Context()))
+		apiresp.WriteError(w, http.StatusBadRequest, apiresp.CodeValidation, "invalid database request", nil, apiresp.RequestID(r.Context()))
 	}
 }
 

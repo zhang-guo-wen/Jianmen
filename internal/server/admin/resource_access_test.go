@@ -77,6 +77,38 @@ func TestVisibleResourcesUseContainerAndAccountGrants(t *testing.T) {
 	}
 }
 
+func TestHandleDBInstancesConnectableUsesDatabaseConnectGrants(t *testing.T) {
+	server, db := newAdminDBTestServer(t)
+	seedResourceAccessTestData(t, db)
+	seedGlobalAction(t, db, "u1", rbac.ActionDBConnect)
+
+	request := asTestUser(
+		httptest.NewRequest(http.MethodGet, "/api/db/instances?connectable=true&page_size=20", nil),
+		"u1",
+		"alice",
+	)
+	recorder := httptest.NewRecorder()
+	server.handleDBInstances(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("connectable database instances status = %d, body=%s", recorder.Code, recorder.Body.String())
+	}
+	var page struct {
+		Items []store.DatabaseInstanceView `json:"items"`
+		Total int                          `json:"total"`
+	}
+	if err := decodeTestData(t, recorder.Body.Bytes(), &page); err != nil {
+		t.Fatalf("decode connectable database instances: %v", err)
+	}
+	if page.Total != 2 || len(page.Items) != 2 {
+		t.Fatalf("connectable database instances = %#v, want container/account-granted instances", page)
+	}
+	for _, instance := range page.Items {
+		if instance.ID == "db-hidden" {
+			t.Fatalf("hidden database instance appeared in connectable list: %#v", page.Items)
+		}
+	}
+}
+
 func TestHandleDBAccountsPaginatesSearchesAndFiltersVisibleResources(t *testing.T) {
 	server, db := newAdminDBTestServer(t)
 	seedResourceAccessTestData(t, db)

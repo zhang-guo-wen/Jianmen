@@ -3,6 +3,7 @@ package dbproxy
 import (
 	"encoding/binary"
 	"errors"
+	"net"
 )
 
 func mysqlLoginAuthResponse(payload []byte) ([]byte, error) {
@@ -40,4 +41,26 @@ func mysqlLoginAuthResponse(payload []byte) ([]byte, error) {
 		return nil, errors.New("truncated mysql auth response")
 	}
 	return append([]byte(nil), payload[position:position+length]...), nil
+}
+
+func isMySQLTLSRequest(packet *mysqlPacket) bool {
+	return packet != nil && len(packet.payload) == 32 &&
+		binary.LittleEndian.Uint32(packet.payload[:4])&mysqlClientSSL != 0
+}
+
+func mysqlClientAuthResponseSequence(loginSequence byte) byte {
+	return loginSequence + 1
+}
+
+func writeMySQLClientAuthOK(conn net.Conn, sequence byte) error {
+	payload := []byte{0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00}
+	_, err := conn.Write(mysqlPacketWithSeq(sequence, payload))
+	return err
+}
+
+func writeMySQLClientAuthError(conn net.Conn, sequence byte) error {
+	payload := []byte{0xff, 0x15, 0x04, '#', '2', '8', '0', '0', '0'}
+	payload = append(payload, "access denied for bastion connection"...)
+	_, err := conn.Write(mysqlPacketWithSeq(sequence, payload))
+	return err
 }

@@ -23,7 +23,7 @@ const (
 	mysqlClientPluginAuthLenencClientData = 1 << 21
 )
 
-// MySQLHandshake represents a parsed MySQL Protocol::HandshakeV10 packet.
+// MySQLHandshake is the parsed, bounded MySQL Protocol::HandshakeV10 packet.
 type MySQLHandshake struct {
 	ProtocolVersion byte
 	ServerVersion   string

@@ -3,6 +3,7 @@ package admin
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -152,6 +153,42 @@ func TestHandleUnsavedDatabaseAccountTestRequiresCreatePermission(t *testing.T) 
 	server.handleTestDBConnection(rec, req)
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusForbidden, rec.Body.String())
+	}
+}
+
+func TestHandleUnsavedDatabaseAccountTestAppliesRedisTLSPolicy(t *testing.T) {
+	server, db := newAdminDBTestServer(t)
+	seedTestSuperAdmin(t, db, "u-admin")
+	instance := model.DatabaseInstance{
+		Name: "remote-redis", Protocol: "redis", Address: "192.0.2.10", Port: 6379, Status: "active", TLSMode: "disable",
+	}
+	if err := db.Create(&instance).Error; err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/db/accounts/test", strings.NewReader(`{"instance_id":"`+instance.ID+`","username":"default","password":"secret"}`))
+	req = asTestSuperAdmin(req)
+	rec := httptest.NewRecorder()
+
+	server.handleTestDBConnection(rec, req)
+
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "requires TLS") {
+		t.Fatalf("response = status %d body %s, want TLS-policy rejection", rec.Code, rec.Body.String())
+	}
+}
+
+func TestDatabaseProbeErrorMessageDoesNotExposeUpstreamResponse(t *testing.T) {
+	const sensitive = "password=top-secret"
+	message := databaseProbeErrorMessage(errors.New("-ERR upstream rejected AUTH and echoed " + sensitive))
+	if strings.Contains(message, sensitive) {
+		t.Fatalf("probe response leaked upstream-controlled detail: %q", message)
+	}
+	if message != "database connection test failed" {
+		t.Fatalf("probe response = %q, want fixed failure message", message)
+	}
+
+	tlsMessage := databaseProbeErrorMessage(errors.New("Redis remote upstream requires TLS"))
+	if tlsMessage != "database connection requires TLS" {
+		t.Fatalf("TLS policy response = %q", tlsMessage)
 	}
 }
 

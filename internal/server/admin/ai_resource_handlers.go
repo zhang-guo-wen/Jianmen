@@ -267,7 +267,7 @@ func (s *Server) aiBastionInfo(r *http.Request) map[string]any {
 	if host == "" || host == "0.0.0.0" || host == "::" || host == "[::]" {
 		host = requestHostName
 	}
-	databaseHost, databasePort := parseListenAddr(s.cfg.DatabaseGateway.ListenAddr)
+	databaseHost, databasePort := parseListenAddr(s.cfg.DatabaseGateway.MySQL.Address)
 	if databaseHost == "" || databaseHost == "0.0.0.0" || databaseHost == "::" || databaseHost == "[::]" {
 		databaseHost = requestHostName
 	}

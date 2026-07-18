@@ -2,7 +2,7 @@ package dbproxy
 
 import "time"
 
-const (
+const ( // Stable values persisted in database gateway audit artifacts.
 	queryEventTypeStarted  = "query_started"
 	queryEventTypeFinished = "query_finished"
 

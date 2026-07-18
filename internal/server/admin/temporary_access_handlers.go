@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"jianmen/internal/config"
 	"jianmen/internal/rbac"
 	"jianmen/internal/service"
 )
@@ -166,7 +167,7 @@ func (s *Server) issueTemporaryConnection(r *http.Request, target service.Tempor
 	case service.TemporaryGatewaySSH:
 		_, port = parseListenAddr(s.cfg.ListenAddr)
 	case service.TemporaryGatewayDatabase:
-		_, port = parseListenAddr(s.cfg.DatabaseGateway.ListenAddr)
+		_, port = parseListenAddr(databaseGatewayListenerAddress(s.cfg.DatabaseGateway, target.Protocol))
 	default:
 		return temporaryConnectionView{}, fmt.Errorf("unsupported temporary gateway %q", target.Gateway)
 	}
@@ -175,6 +176,17 @@ func (s *Server) issueTemporaryConnection(r *http.Request, target service.Tempor
 		Username: target.UsernamePrefix + target.CompactResourceID + sessionID, Password: password,
 		Protocol: target.Protocol, ExpiresAt: expiresAt,
 	}, nil
+}
+
+func databaseGatewayListenerAddress(gateway config.DatabaseGatewayConfig, protocol string) string {
+	switch strings.ToLower(protocol) {
+	case "postgres", "postgresql":
+		return gateway.PostgreSQL.Address
+	case "redis":
+		return gateway.Redis.Address
+	default:
+		return gateway.MySQL.Address
+	}
 }
 
 func requestHostnameFromPage(r *http.Request, baseURL string) string {

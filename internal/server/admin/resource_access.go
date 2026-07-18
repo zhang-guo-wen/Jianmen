@@ -144,9 +144,17 @@ func (s *Server) visibleTargetsForActions(r *http.Request, targets []store.Targe
 }
 
 func (s *Server) visibleDatabaseInstances(r *http.Request, instances []store.DatabaseInstanceView) ([]store.DatabaseInstanceView, error) {
+	return s.visibleDatabaseInstancesForActions(r, instances, []string{rbac.ActionDBProxyView})
+}
+
+func (s *Server) visibleDatabaseInstancesForActions(
+	r *http.Request,
+	instances []store.DatabaseInstanceView,
+	actions []string,
+) ([]store.DatabaseInstanceView, error) {
 	result := make([]store.DatabaseInstanceView, 0, len(instances))
 	for _, instance := range instances {
-		visible, err := s.authorizeResourceActions(r, []string{rbac.ActionDBProxyView}, model.ResourceTypeDatabaseInstance, instance.ID)
+		visible, err := s.authorizeResourceActions(r, actions, model.ResourceTypeDatabaseInstance, instance.ID)
 		if err != nil {
 			return nil, err
 		}
@@ -164,7 +172,7 @@ func (s *Server) visibleDatabaseInstances(r *http.Request, instances []store.Dat
 		if err != nil {
 			return nil, err
 		}
-		accounts, err = s.visibleDatabaseAccounts(r, accounts)
+		accounts, err = s.visibleDatabaseAccountsForActions(r, accounts, actions)
 		if err != nil {
 			return nil, err
 		}

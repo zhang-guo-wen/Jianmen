@@ -93,6 +93,7 @@ type Application struct {
 func AllModels() []any {
 	return []any{
 		&User{},
+		&SystemInitialization{},
 		&UserPublicKey{},
 		&Role{},
 		&Permission{},

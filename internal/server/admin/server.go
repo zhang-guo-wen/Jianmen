@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sync"
 
 	"jianmen/internal/config"
 	"jianmen/internal/online"
@@ -32,6 +33,7 @@ type Server struct {
 	resourceGrants   *service.ResourceGrantService
 	resourceGroups   *service.ResourceGroupService
 	temporaryAccess  *service.TemporaryAccessService
+	setupMu          sync.Mutex
 }
 
 type loginCaptchaVerifier interface {

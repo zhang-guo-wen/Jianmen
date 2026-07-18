@@ -125,6 +125,13 @@ var migrations = []Migration{
 			return tx.AutoMigrate(&model.ConnectionPassword{})
 		},
 	},
+	{
+		Version: "202607180003",
+		Name:    "atomic system initialization guard",
+		Run: func(tx *gorm.DB) error {
+			return tx.AutoMigrate(&model.SystemInitialization{})
+		},
+	},
 }
 
 func Migrate(db *gorm.DB) error {

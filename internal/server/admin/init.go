@@ -15,6 +15,7 @@ import (
 	"jianmen/internal/util"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // InitStatusResponse 系统初始化状态
@@ -270,14 +271,31 @@ func (s *Server) handleInitSetup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	s.setupMu.Lock()
+	defer s.setupMu.Unlock()
+
 	var createdUserID string
 	var created bool
-	err = s.db.Transaction(func(tx *gorm.DB) error {
+	var alreadyInitialized bool
+	err = s.db.WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
+		guard := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&model.SystemInitialization{
+			Key:       model.SystemInitializationSetup,
+			CreatedAt: time.Now().UTC(),
+		})
+		if guard.Error != nil {
+			return guard.Error
+		}
+		if guard.RowsAffected == 0 {
+			alreadyInitialized = true
+			return nil
+		}
+
 		var count int64
 		if err := tx.Model(&model.User{}).Count(&count).Error; err != nil {
 			return err
 		}
 		if count > 0 {
+			alreadyInitialized = true
 			return nil // 已初始化，不创建
 		}
 
@@ -305,7 +323,7 @@ func (s *Server) handleInitSetup(w http.ResponseWriter, r *http.Request) {
 		s.writeErrorText(w, r, http.StatusInternalServerError, "failed to create user: "+err.Error())
 		return
 	}
-	if !created {
+	if alreadyInitialized || !created {
 		s.writeErrorText(w, r, http.StatusForbidden, "already initialized")
 		return
 	}

@@ -125,6 +125,15 @@ func TestDatabaseGatewayMySQLAgainstDocker(t *testing.T) {
 				_ = clientDB.Close()
 				t.Fatalf("mysql query result = %d, want 42", got)
 			}
+			var largeValue string
+			if err := clientDB.QueryRow("SELECT REPEAT('x', 300000)").Scan(&largeValue); err != nil {
+				_ = clientDB.Close()
+				t.Fatalf("query large MySQL value through gateway: %v", err)
+			}
+			if len(largeValue) != 300000 {
+				_ = clientDB.Close()
+				t.Fatalf("large MySQL value length = %d, want 300000", len(largeValue))
+			}
 			if err := clientDB.Close(); err != nil {
 				t.Fatalf("close mysql client: %v", err)
 			}
@@ -187,6 +196,13 @@ func TestDatabaseGatewayPostgresAgainstDocker(t *testing.T) {
 	}
 	if got != 1 {
 		t.Fatalf("postgres query result = %d, want 1", got)
+	}
+	var largeValue string
+	if err := clientDB.QueryRow("SELECT repeat('x', 300000)").Scan(&largeValue); err != nil {
+		t.Fatalf("query large PostgreSQL value through gateway: %v", err)
+	}
+	if len(largeValue) != 300000 {
+		t.Fatalf("large PostgreSQL value length = %d, want 300000", len(largeValue))
 	}
 	if err := clientDB.Close(); err != nil {
 		t.Fatalf("close postgres client: %v", err)
@@ -261,7 +277,7 @@ func startDatabaseGateway(t *testing.T, fixture metadataFixture, protocol string
 		fixture.db,
 		authorizer,
 		online.NewRegistry(),
-		nil,
+		fixture.store,
 	)
 	ctx, cancel := context.WithCancel(context.Background())
 	errCh := make(chan error, 1)

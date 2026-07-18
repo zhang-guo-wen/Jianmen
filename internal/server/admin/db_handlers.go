@@ -84,16 +84,23 @@ func (s *Server) handleDBAccounts(w http.ResponseWriter, r *http.Request) {
 		s.writeErrorText(w, r, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
-	if !s.requirePermission(r, rbac.ActionDBProxyView) {
-		s.forbidden(w, r)
+	if !s.requireAuthenticatedUser(w, r) {
 		return
+	}
+	actions := []string{rbac.ActionDBProxyView}
+	if connectableOnly(r) {
+		if !s.requireAnyPermission(r, rbac.ActionDBConnect) {
+			s.forbidden(w, r)
+			return
+		}
+		actions = []string{rbac.ActionDBConnect}
 	}
 	accounts, err := s.store.DatabaseAccounts()
 	if err != nil {
 		s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
 		return
 	}
-	accounts, err = s.visibleDatabaseAccounts(r, accounts)
+	accounts, err = s.visibleDatabaseAccountsForActions(r, accounts, actions)
 	if err != nil {
 		s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
 		return
@@ -124,8 +131,7 @@ func (s *Server) handleDBAccounts(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleDBInstances(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
-		if !s.requirePermission(r, rbac.ActionDBProxyView) {
-			s.forbidden(w, r)
+		if !s.requireAuthenticatedUser(w, r) {
 			return
 		}
 		instances, err := s.visibleDatabaseInstances(r, s.store.DatabaseInstances())
@@ -190,19 +196,23 @@ func (s *Server) handleDBInstance(w http.ResponseWriter, r *http.Request) {
 	if child == "accounts" {
 		switch r.Method {
 		case http.MethodGet:
-			if !s.requirePermission(r, rbac.ActionDBProxyView) {
-				s.forbidden(w, r)
+			if !s.requireAuthenticatedUser(w, r) {
 				return
+			}
+			actions := []string{rbac.ActionDBProxyView}
+			if connectableOnly(r) {
+				if !s.requireAnyPermission(r, rbac.ActionDBConnect) {
+					s.forbidden(w, r)
+					return
+				}
+				actions = []string{rbac.ActionDBConnect}
 			}
 			accounts, err := s.store.InstanceAccounts(id)
 			if err != nil {
 				writeDBStoreError(w, r, err)
 				return
 			}
-			accounts, err = s.visibleDatabaseAccounts(r, accounts)
-			if err == nil {
-				accounts, err = s.connectableDatabaseAccounts(r, accounts)
-			}
+			accounts, err = s.visibleDatabaseAccountsForActions(r, accounts, actions)
 			if err != nil {
 				s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
 				return
@@ -216,11 +226,7 @@ func (s *Server) handleDBInstance(w http.ResponseWriter, r *http.Request) {
 			})
 			s.writeJSON(w, r, http.StatusOK, resp)
 		case http.MethodPost:
-			if !s.requirePermission(r, rbac.ActionDBProxyCreate) {
-				s.forbidden(w, r)
-				return
-			}
-			if !s.requireResourceGrant(w, r, model.ResourceTypeDatabaseInstance, id) {
+			if !s.requireResourceAction(w, r, rbac.ActionDBProxyCreate, model.ResourceTypeDatabaseInstance, id) {
 				return
 			}
 			s.handleCreateDBAccount(w, r, id)
@@ -236,7 +242,7 @@ func (s *Server) handleDBInstance(w http.ResponseWriter, r *http.Request) {
 			s.writeErrorText(w, r, http.StatusMethodNotAllowed, "method not allowed")
 			return
 		}
-		if !s.requireResourceGrant(w, r, model.ResourceTypeDatabaseInstance, id) {
+		if !s.requireResourceAction(w, r, rbac.ActionDBProxyView, model.ResourceTypeDatabaseInstance, id) {
 			return
 		}
 		s.handleDBDatabases(w, r, id)
@@ -248,7 +254,7 @@ func (s *Server) handleDBInstance(w http.ResponseWriter, r *http.Request) {
 			s.writeErrorText(w, r, http.StatusMethodNotAllowed, "method not allowed")
 			return
 		}
-		if !s.requireResourceGrant(w, r, model.ResourceTypeDatabaseInstance, id) {
+		if !s.requireResourceAction(w, r, rbac.ActionDBProxyCreate, model.ResourceTypeDatabaseInstance, id) {
 			return
 		}
 		s.handleDBProvisionAccount(w, r, id)
@@ -261,10 +267,6 @@ func (s *Server) handleDBInstance(w http.ResponseWriter, r *http.Request) {
 
 	switch r.Method {
 	case http.MethodGet:
-		if !s.requirePermission(r, rbac.ActionDBProxyView) {
-			s.forbidden(w, r)
-			return
-		}
 		visible, err := s.databaseInstanceVisible(r, id)
 		if err != nil {
 			s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
@@ -281,20 +283,12 @@ func (s *Server) handleDBInstance(w http.ResponseWriter, r *http.Request) {
 		}
 		s.writeJSON(w, r, http.StatusOK, view)
 	case http.MethodPut:
-		if !s.requirePermission(r, rbac.ActionDBProxyUpdate) {
-			s.forbidden(w, r)
-			return
-		}
-		if !s.requireResourceGrant(w, r, model.ResourceTypeDatabaseInstance, id) {
+		if !s.requireResourceAction(w, r, rbac.ActionDBProxyUpdate, model.ResourceTypeDatabaseInstance, id) {
 			return
 		}
 		s.handleUpdateDBInstance(w, r, id)
 	case http.MethodDelete:
-		if !s.requirePermission(r, rbac.ActionDBProxyDelete) {
-			s.forbidden(w, r)
-			return
-		}
-		if !s.requireResourceGrant(w, r, model.ResourceTypeDatabaseInstance, id) {
+		if !s.requireResourceAction(w, r, rbac.ActionDBProxyDelete, model.ResourceTypeDatabaseInstance, id) {
 			return
 		}
 		if err := s.store.DeleteDatabaseInstance(id); err != nil {
@@ -368,11 +362,7 @@ func (s *Server) handleDBAccount(w http.ResponseWriter, r *http.Request) {
 
 	switch r.Method {
 	case http.MethodGet:
-		if !s.requirePermission(r, rbac.ActionDBProxyView) {
-			s.forbidden(w, r)
-			return
-		}
-		if !s.requireDatabaseAccountManagement(w, r, id) {
+		if !s.requireResourceAction(w, r, rbac.ActionDBProxyView, model.ResourceTypeDatabaseAccount, id) {
 			return
 		}
 		view, err := s.store.DatabaseAccount(id)
@@ -382,20 +372,12 @@ func (s *Server) handleDBAccount(w http.ResponseWriter, r *http.Request) {
 		}
 		s.writeJSON(w, r, http.StatusOK, view)
 	case http.MethodPut:
-		if !s.requirePermission(r, rbac.ActionDBProxyUpdate) {
-			s.forbidden(w, r)
-			return
-		}
-		if !s.requireDatabaseAccountManagement(w, r, id) {
+		if !s.requireResourceAction(w, r, rbac.ActionDBProxyUpdate, model.ResourceTypeDatabaseAccount, id) {
 			return
 		}
 		s.handleUpdateDBAccount(w, r, id)
 	case http.MethodDelete:
-		if !s.requirePermission(r, rbac.ActionDBProxyDelete) {
-			s.forbidden(w, r)
-			return
-		}
-		if !s.requireResourceGrant(w, r, model.ResourceTypeDatabaseAccount, id) {
+		if !s.requireResourceAction(w, r, rbac.ActionDBProxyDelete, model.ResourceTypeDatabaseAccount, id) {
 			return
 		}
 		if err := s.store.DeleteDatabaseAccount(id); err != nil {

@@ -24,8 +24,7 @@ type applicationPayload struct {
 func (s *Server) handleApplications(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
-		if !s.requirePermission(r, rbac.ActionAppView) {
-			s.forbidden(w, r)
+		if !s.requireAuthenticatedUser(w, r) {
 			return
 		}
 		apps, err := s.visibleApplications(r, s.store.Applications())
@@ -97,11 +96,7 @@ func (s *Server) handleApplication(w http.ResponseWriter, r *http.Request) {
 
 	switch r.Method {
 	case http.MethodGet:
-		if !s.requirePermission(r, rbac.ActionAppView) {
-			s.forbidden(w, r)
-			return
-		}
-		if !s.requireResourceGrant(w, r, model.ResourceTypeApplication, id) {
+		if !s.requireResourceAction(w, r, rbac.ActionAppView, model.ResourceTypeApplication, id) {
 			return
 		}
 		view, err := s.store.Application(id)
@@ -111,20 +106,12 @@ func (s *Server) handleApplication(w http.ResponseWriter, r *http.Request) {
 		}
 		s.writeJSON(w, r, http.StatusOK, view)
 	case http.MethodPut:
-		if !s.requirePermission(r, rbac.ActionAppUpdate) {
-			s.forbidden(w, r)
-			return
-		}
-		if !s.requireResourceGrant(w, r, model.ResourceTypeApplication, id) {
+		if !s.requireResourceAction(w, r, rbac.ActionAppUpdate, model.ResourceTypeApplication, id) {
 			return
 		}
 		s.handleUpdateApplication(w, r, id)
 	case http.MethodDelete:
-		if !s.requirePermission(r, rbac.ActionAppDelete) {
-			s.forbidden(w, r)
-			return
-		}
-		if !s.requireResourceGrant(w, r, model.ResourceTypeApplication, id) {
+		if !s.requireResourceAction(w, r, rbac.ActionAppDelete, model.ResourceTypeApplication, id) {
 			return
 		}
 		view, err := s.store.Application(id)

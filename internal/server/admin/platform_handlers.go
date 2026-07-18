@@ -39,10 +39,6 @@ func writePlatformStoreError(w http.ResponseWriter, r *http.Request, err error) 
 func (s *Server) handlePlatformAccounts(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
-		if !s.requirePermission(r, rbac.ActionPlatformAccountView) {
-			s.forbidden(w, r)
-			return
-		}
 		s.handleListPlatformAccounts(w, r)
 	case http.MethodPost:
 		if !s.requirePermission(r, rbac.ActionPlatformAccountCreate) {
@@ -57,6 +53,9 @@ func (s *Server) handlePlatformAccounts(w http.ResponseWriter, r *http.Request) 
 }
 
 func (s *Server) handleListPlatformAccounts(w http.ResponseWriter, r *http.Request) {
+	if !s.requireAuthenticatedUser(w, r) {
+		return
+	}
 	params := store.PlatformAccountListParams{
 		Search:   r.URL.Query().Get("q"),
 		Platform: r.URL.Query().Get("platform"),
@@ -114,11 +113,7 @@ func (s *Server) handlePlatformAccount(w http.ResponseWriter, r *http.Request) {
 
 	switch r.Method {
 	case http.MethodGet:
-		if !s.requirePermission(r, rbac.ActionPlatformAccountView) {
-			s.forbidden(w, r)
-			return
-		}
-		if !s.requireResourceGrant(w, r, model.ResourceTypePlatformAccount, id) {
+		if !s.requireResourceAction(w, r, rbac.ActionPlatformAccountView, model.ResourceTypePlatformAccount, id) {
 			return
 		}
 		view, err := s.store.PlatformAccount(id)
@@ -128,20 +123,12 @@ func (s *Server) handlePlatformAccount(w http.ResponseWriter, r *http.Request) {
 		}
 		s.writeJSON(w, r, http.StatusOK, view)
 	case http.MethodPut:
-		if !s.requirePermission(r, rbac.ActionPlatformAccountUpdate) {
-			s.forbidden(w, r)
-			return
-		}
-		if !s.requireResourceGrant(w, r, model.ResourceTypePlatformAccount, id) {
+		if !s.requireResourceAction(w, r, rbac.ActionPlatformAccountUpdate, model.ResourceTypePlatformAccount, id) {
 			return
 		}
 		s.handleUpdatePlatformAccount(w, r, id)
 	case http.MethodDelete:
-		if !s.requirePermission(r, rbac.ActionPlatformAccountDelete) {
-			s.forbidden(w, r)
-			return
-		}
-		if !s.requireResourceGrant(w, r, model.ResourceTypePlatformAccount, id) {
+		if !s.requireResourceAction(w, r, rbac.ActionPlatformAccountDelete, model.ResourceTypePlatformAccount, id) {
 			return
 		}
 		if err := s.store.DeletePlatformAccount(id); err != nil {
@@ -174,11 +161,7 @@ func (s *Server) handlePlatformAccountPassword(w http.ResponseWriter, r *http.Re
 		s.writeErrorText(w, r, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
-	if !s.requirePermission(r, rbac.ActionPlatformAccountUse) {
-		s.forbidden(w, r)
-		return
-	}
-	if !s.requireResourceGrant(w, r, model.ResourceTypePlatformAccount, id) {
+	if !s.requireResourceAction(w, r, rbac.ActionPlatformAccountUse, model.ResourceTypePlatformAccount, id) {
 		return
 	}
 	password, err := s.store.GetPlatformAccountPassword(id)

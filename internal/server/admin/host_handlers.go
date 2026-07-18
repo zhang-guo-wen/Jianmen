@@ -16,8 +16,7 @@ import (
 func (s *Server) handleHosts(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
-		if !s.requirePermission(r, rbac.ActionHostView) {
-			s.forbidden(w, r)
+		if !s.requireAuthenticatedUser(w, r) {
 			return
 		}
 		hosts, err := s.visibleHosts(r, s.store.Hosts())
@@ -71,16 +70,23 @@ func (s *Server) handleHost(w http.ResponseWriter, r *http.Request) {
 			s.writeErrorText(w, r, http.StatusMethodNotAllowed, "method not allowed")
 			return
 		}
-		if !s.requirePermission(r, rbac.ActionTargetView) {
-			s.forbidden(w, r)
+		if !s.requireAuthenticatedUser(w, r) {
 			return
+		}
+		actions := []string{rbac.ActionTargetView}
+		if connectableOnly(r) {
+			if !s.requireAnyPermission(r, rbac.ActionSessionConnect, rbac.ActionSFTPConnect) {
+				s.forbidden(w, r)
+				return
+			}
+			actions = []string{rbac.ActionSessionConnect, rbac.ActionSFTPConnect}
 		}
 		accounts, err := s.store.HostAccounts(id)
 		if err != nil {
 			writeHostStoreError(w, r, err)
 			return
 		}
-		accounts, err = s.visibleTargets(r, accounts)
+		accounts, err = s.visibleTargetsForActions(r, accounts, actions)
 		if err != nil {
 			s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
 			return
@@ -101,10 +107,6 @@ func (s *Server) handleHost(w http.ResponseWriter, r *http.Request) {
 
 	switch r.Method {
 	case http.MethodGet:
-		if !s.requirePermission(r, rbac.ActionHostView) {
-			s.forbidden(w, r)
-			return
-		}
 		visible, err := s.hostVisible(r, id)
 		if err != nil {
 			s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
@@ -121,20 +123,12 @@ func (s *Server) handleHost(w http.ResponseWriter, r *http.Request) {
 		}
 		s.writeJSON(w, r, http.StatusOK, view)
 	case http.MethodPut:
-		if !s.requirePermission(r, rbac.ActionHostUpdate) {
-			s.forbidden(w, r)
-			return
-		}
-		if !s.requireResourceGrant(w, r, model.ResourceTypeHost, id) {
+		if !s.requireResourceAction(w, r, rbac.ActionHostUpdate, model.ResourceTypeHost, id) {
 			return
 		}
 		s.handleUpdateHost(w, r, id)
 	case http.MethodDelete:
-		if !s.requirePermission(r, rbac.ActionHostDelete) {
-			s.forbidden(w, r)
-			return
-		}
-		if !s.requireResourceGrant(w, r, model.ResourceTypeHost, id) {
+		if !s.requireResourceAction(w, r, rbac.ActionHostDelete, model.ResourceTypeHost, id) {
 			return
 		}
 		if err := s.store.DeleteHost(id); err != nil {
@@ -167,19 +161,18 @@ func (s *Server) handleUpdateHost(w http.ResponseWriter, r *http.Request, id str
 func (s *Server) handleTargets(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
+		if !s.requireAuthenticatedUser(w, r) {
+			return
+		}
+		actions := []string{rbac.ActionTargetView}
 		if connectableOnly(r) {
 			if !s.requireAnyPermission(r, rbac.ActionSessionConnect, rbac.ActionSFTPConnect) {
 				s.forbidden(w, r)
 				return
 			}
-		} else if !s.requirePermission(r, rbac.ActionTargetView) {
-			s.forbidden(w, r)
-			return
+			actions = []string{rbac.ActionSessionConnect, rbac.ActionSFTPConnect}
 		}
-		targets, err := s.visibleTargets(r, s.store.Targets())
-		if err == nil {
-			targets, err = s.connectableTargets(r, targets)
-		}
+		targets, err := s.visibleTargetsForActions(r, s.store.Targets(), actions)
 		if err != nil {
 			s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
 			return
@@ -217,7 +210,7 @@ func (s *Server) handleCreateTarget(w http.ResponseWriter, r *http.Request) {
 			s.writeErrorText(w, r, http.StatusBadRequest, "host_id is required")
 			return
 		}
-	} else if !s.requireResourceGrant(w, r, model.ResourceTypeHost, target.HostID) {
+	} else if !s.requireResourceAction(w, r, rbac.ActionTargetCreate, model.ResourceTypeHost, target.HostID) {
 		return
 	}
 	view, err := s.store.AddTarget(target)
@@ -255,10 +248,10 @@ func (s *Server) handleTestConnection(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if target.ID != "" {
-		if !s.requireResourceGrant(w, r, model.ResourceTypeHostAccount, target.ID) {
+		if !s.requireResourceAction(w, r, rbac.ActionTargetCreate, model.ResourceTypeHostAccount, target.ID) {
 			return
 		}
-	} else if target.HostID != "" && !s.requireResourceGrant(w, r, model.ResourceTypeHost, target.HostID) {
+	} else if target.HostID != "" && !s.requireResourceAction(w, r, rbac.ActionTargetCreate, model.ResourceTypeHost, target.HostID) {
 		return
 	}
 	hostKeyConfigProvided := target.InsecureIgnoreHostKey || target.HostKeyFingerprint != "" || target.KnownHostsPath != ""
@@ -351,11 +344,7 @@ func (s *Server) handleTarget(w http.ResponseWriter, r *http.Request) {
 
 	switch r.Method {
 	case http.MethodGet:
-		if !s.requirePermission(r, rbac.ActionTargetView) {
-			s.forbidden(w, r)
-			return
-		}
-		if !s.requireResourceGrant(w, r, model.ResourceTypeHostAccount, id) {
+		if !s.requireResourceAction(w, r, rbac.ActionTargetView, model.ResourceTypeHostAccount, id) {
 			return
 		}
 		view, err := s.store.Target(id)
@@ -365,20 +354,12 @@ func (s *Server) handleTarget(w http.ResponseWriter, r *http.Request) {
 		}
 		s.writeJSON(w, r, http.StatusOK, view)
 	case http.MethodPut:
-		if !s.requirePermission(r, rbac.ActionTargetUpdate) {
-			s.forbidden(w, r)
-			return
-		}
-		if !s.requireHostAccountManagement(w, r, id) {
+		if !s.requireResourceAction(w, r, rbac.ActionTargetUpdate, model.ResourceTypeHostAccount, id) {
 			return
 		}
 		s.handleUpdateTarget(w, r, id)
 	case http.MethodDelete:
-		if !s.requirePermission(r, rbac.ActionTargetDelete) {
-			s.forbidden(w, r)
-			return
-		}
-		if !s.requireHostAccountManagement(w, r, id) {
+		if !s.requireResourceAction(w, r, rbac.ActionTargetDelete, model.ResourceTypeHostAccount, id) {
 			return
 		}
 		if err := s.store.DeleteTarget(id); err != nil {

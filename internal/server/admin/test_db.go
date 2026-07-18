@@ -120,7 +120,7 @@ func (s *Server) handleTestDBConnectionPayload(w http.ResponseWriter, r *http.Re
 		s.writeErrorText(w, r, http.StatusNotFound, "instance not found")
 		return
 	}
-	if !s.requireResourceGrant(w, r, model.ResourceTypeDatabaseInstance, inst.ID) {
+	if !s.requireResourceAction(w, r, rbac.ActionDBProxyCreate, model.ResourceTypeDatabaseInstance, inst.ID) {
 		return
 	}
 	if inst.Status == "disabled" {

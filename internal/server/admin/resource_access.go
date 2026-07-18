@@ -2,30 +2,34 @@ package admin
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 
 	"jianmen/internal/model"
+	"jianmen/internal/rbac"
 	"jianmen/internal/store"
 )
 
-func (s *Server) hasResourceGrant(r *http.Request, resourceType, resourceID string) (bool, error) {
-	userID := userIDFromRequest(r)
-	if userID == "" {
-		return false, nil
+func (s *Server) requireAuthenticatedUser(w http.ResponseWriter, r *http.Request) bool {
+	if userIDFromRequest(r) != "" {
+		return true
 	}
-	if isSuperAdminRequest(r) {
-		return true, nil
-	}
-	if s.resourceGrants == nil {
-		return false, errors.New("resource grant service unavailable")
-	}
-	return s.resourceGrants.Check(r.Context(), userID, resourceType, resourceID)
+	s.forbidden(w, r)
+	return false
 }
 
-func (s *Server) requireResourceGrant(w http.ResponseWriter, r *http.Request, resourceType, resourceID string) bool {
-	allowed, err := s.hasResourceGrant(r, resourceType, resourceID)
+// requireResourceAction evaluates an action and a concrete resource together.
+// Splitting these checks would allow a resource-specific permission deny to be
+// bypassed by an otherwise valid ResourceGrant.
+func (s *Server) requireResourceAction(w http.ResponseWriter, r *http.Request, action, resourceType, resourceID string) bool {
+	return s.requireResourceActions(w, r, []string{action}, resourceType, resourceID)
+}
+
+func (s *Server) requireResourceActions(w http.ResponseWriter, r *http.Request, actions []string, resourceType, resourceID string) bool {
+	allowed, err := s.authorizeResourceActions(r, actions, resourceType, resourceID)
 	if err != nil {
-		s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
+		s.logger.Warn("resource authorization failed", "user_id", userIDFromRequest(r), "actions", actions, "resource_type", resourceType, "resource_id", resourceID, "error", err)
+		s.forbidden(w, r)
 		return false
 	}
 	if !allowed {
@@ -35,36 +39,18 @@ func (s *Server) requireResourceGrant(w http.ResponseWriter, r *http.Request, re
 	return true
 }
 
-func (s *Server) requireHostAccountManagement(w http.ResponseWriter, r *http.Request, accountID string) bool {
-	if isSuperAdminRequest(r) {
-		return true
+func (s *Server) authorizeResourceActions(r *http.Request, actions []string, resourceType, resourceID string) (bool, error) {
+	if userIDFromRequest(r) == "" {
+		return false, nil
 	}
-	if s.db == nil {
-		s.writeErrorText(w, r, http.StatusInternalServerError, "database not available")
-		return false
+	if s.authorization == nil {
+		return false, errors.New("authorization service unavailable")
 	}
-	var account model.HostAccount
-	if err := s.db.Select("id", "host_id").First(&account, "id = ?", accountID).Error; err != nil {
-		s.writeErrorText(w, r, http.StatusNotFound, "host account not found")
-		return false
+	allowed, err := s.authorizeAnyConnection(r.Context(), userIDFromRequest(r), actions, resourceType, resourceID)
+	if err != nil {
+		return false, fmt.Errorf("authorize resource actions: %w", err)
 	}
-	return s.requireResourceGrant(w, r, model.ResourceTypeHost, account.HostID)
-}
-
-func (s *Server) requireDatabaseAccountManagement(w http.ResponseWriter, r *http.Request, accountID string) bool {
-	if isSuperAdminRequest(r) {
-		return true
-	}
-	if s.db == nil {
-		s.writeErrorText(w, r, http.StatusInternalServerError, "database not available")
-		return false
-	}
-	var account model.DatabaseAccount
-	if err := s.db.Select("id", "instance_id").First(&account, "id = ?", accountID).Error; err != nil {
-		s.writeErrorText(w, r, http.StatusNotFound, "database account not found")
-		return false
-	}
-	return s.requireResourceGrant(w, r, model.ResourceTypeDatabaseInstance, account.InstanceID)
+	return allowed, nil
 }
 
 func (s *Server) grantCreatedResource(r *http.Request, resourceType, resourceID string) error {
@@ -84,20 +70,20 @@ func (s *Server) grantCreatedResource(r *http.Request, resourceType, resourceID 
 func (s *Server) visibleHosts(r *http.Request, hosts []store.HostView) ([]store.HostView, error) {
 	result := make([]store.HostView, 0, len(hosts))
 	for _, host := range hosts {
-		if isSuperAdminRequest(r) {
-			host.CanManage = true
-			result = append(result, host)
-			continue
-		}
-		var err error
-		host.CanManage, err = s.hasResourceGrant(r, model.ResourceTypeHost, host.ID)
+		visible, err := s.authorizeResourceActions(r, []string{rbac.ActionHostView}, model.ResourceTypeHost, host.ID)
 		if err != nil {
 			return nil, err
 		}
-		if host.CanManage {
+		canManage, err := s.authorizeResourceActions(r, []string{rbac.ActionHostUpdate, rbac.ActionHostDelete}, model.ResourceTypeHost, host.ID)
+		if err != nil {
+			return nil, err
+		}
+		if visible {
+			host.CanManage = canManage
 			result = append(result, host)
 			continue
 		}
+
 		accounts, err := s.store.HostAccounts(host.ID)
 		if err != nil {
 			return nil, err
@@ -110,13 +96,14 @@ func (s *Server) visibleHosts(r *http.Request, hosts []store.HostView) ([]store.
 			continue
 		}
 		host.AccountCount = len(accounts)
+		host.CanManage = false
 		result = append(result, host)
 	}
 	return result, nil
 }
 
 func (s *Server) hostVisible(r *http.Request, hostID string) (bool, error) {
-	allowed, err := s.hasResourceGrant(r, model.ResourceTypeHost, hostID)
+	allowed, err := s.authorizeResourceActions(r, []string{rbac.ActionHostView}, model.ResourceTypeHost, hostID)
 	if err != nil || allowed {
 		return allowed, err
 	}
@@ -125,7 +112,7 @@ func (s *Server) hostVisible(r *http.Request, hostID string) (bool, error) {
 		return false, err
 	}
 	for _, account := range accounts {
-		allowed, err = s.hasResourceGrant(r, model.ResourceTypeHostAccount, account.ID)
+		allowed, err = s.authorizeResourceActions(r, []string{rbac.ActionTargetView}, model.ResourceTypeHostAccount, account.ID)
 		if err != nil || allowed {
 			return allowed, err
 		}
@@ -134,25 +121,22 @@ func (s *Server) hostVisible(r *http.Request, hostID string) (bool, error) {
 }
 
 func (s *Server) visibleTargets(r *http.Request, targets []store.TargetView) ([]store.TargetView, error) {
+	return s.visibleTargetsForActions(r, targets, []string{rbac.ActionTargetView})
+}
+
+func (s *Server) visibleTargetsForActions(r *http.Request, targets []store.TargetView, actions []string) ([]store.TargetView, error) {
 	result := make([]store.TargetView, 0, len(targets))
 	for _, target := range targets {
-		if isSuperAdminRequest(r) {
-			target.CanManage = true
-			result = append(result, target)
-			continue
-		}
-		allowed, err := s.hasResourceGrant(r, model.ResourceTypeHostAccount, target.ID)
+		allowed, err := s.authorizeResourceActions(r, actions, model.ResourceTypeHostAccount, target.ID)
 		if err != nil {
 			return nil, err
 		}
 		if !allowed {
 			continue
 		}
-		if target.HostID != "" {
-			target.CanManage, err = s.hasResourceGrant(r, model.ResourceTypeHost, target.HostID)
-			if err != nil {
-				return nil, err
-			}
+		target.CanManage, err = s.authorizeResourceActions(r, []string{rbac.ActionTargetUpdate, rbac.ActionTargetDelete}, model.ResourceTypeHostAccount, target.ID)
+		if err != nil {
+			return nil, err
 		}
 		result = append(result, target)
 	}
@@ -162,20 +146,20 @@ func (s *Server) visibleTargets(r *http.Request, targets []store.TargetView) ([]
 func (s *Server) visibleDatabaseInstances(r *http.Request, instances []store.DatabaseInstanceView) ([]store.DatabaseInstanceView, error) {
 	result := make([]store.DatabaseInstanceView, 0, len(instances))
 	for _, instance := range instances {
-		if isSuperAdminRequest(r) {
-			instance.CanManage = true
-			result = append(result, instance)
-			continue
-		}
-		var err error
-		instance.CanManage, err = s.hasResourceGrant(r, model.ResourceTypeDatabaseInstance, instance.ID)
+		visible, err := s.authorizeResourceActions(r, []string{rbac.ActionDBProxyView}, model.ResourceTypeDatabaseInstance, instance.ID)
 		if err != nil {
 			return nil, err
 		}
-		if instance.CanManage {
+		canManage, err := s.authorizeResourceActions(r, []string{rbac.ActionDBProxyUpdate, rbac.ActionDBProxyDelete}, model.ResourceTypeDatabaseInstance, instance.ID)
+		if err != nil {
+			return nil, err
+		}
+		if visible {
+			instance.CanManage = canManage
 			result = append(result, instance)
 			continue
 		}
+
 		accounts, err := s.store.InstanceAccounts(instance.ID)
 		if err != nil {
 			return nil, err
@@ -188,13 +172,14 @@ func (s *Server) visibleDatabaseInstances(r *http.Request, instances []store.Dat
 			continue
 		}
 		instance.AccountCount = len(accounts)
+		instance.CanManage = false
 		result = append(result, instance)
 	}
 	return result, nil
 }
 
 func (s *Server) databaseInstanceVisible(r *http.Request, instanceID string) (bool, error) {
-	allowed, err := s.hasResourceGrant(r, model.ResourceTypeDatabaseInstance, instanceID)
+	allowed, err := s.authorizeResourceActions(r, []string{rbac.ActionDBProxyView}, model.ResourceTypeDatabaseInstance, instanceID)
 	if err != nil || allowed {
 		return allowed, err
 	}
@@ -203,7 +188,7 @@ func (s *Server) databaseInstanceVisible(r *http.Request, instanceID string) (bo
 		return false, err
 	}
 	for _, account := range accounts {
-		allowed, err = s.hasResourceGrant(r, model.ResourceTypeDatabaseAccount, account.ID)
+		allowed, err = s.authorizeResourceActions(r, []string{rbac.ActionDBProxyView}, model.ResourceTypeDatabaseAccount, account.ID)
 		if err != nil || allowed {
 			return allowed, err
 		}
@@ -212,21 +197,20 @@ func (s *Server) databaseInstanceVisible(r *http.Request, instanceID string) (bo
 }
 
 func (s *Server) visibleDatabaseAccounts(r *http.Request, accounts []store.DatabaseAccountView) ([]store.DatabaseAccountView, error) {
+	return s.visibleDatabaseAccountsForActions(r, accounts, []string{rbac.ActionDBProxyView})
+}
+
+func (s *Server) visibleDatabaseAccountsForActions(r *http.Request, accounts []store.DatabaseAccountView, actions []string) ([]store.DatabaseAccountView, error) {
 	result := make([]store.DatabaseAccountView, 0, len(accounts))
 	for _, account := range accounts {
-		if isSuperAdminRequest(r) {
-			account.CanManage = true
-			result = append(result, account)
-			continue
-		}
-		allowed, err := s.hasResourceGrant(r, model.ResourceTypeDatabaseAccount, account.ID)
+		allowed, err := s.authorizeResourceActions(r, actions, model.ResourceTypeDatabaseAccount, account.ID)
 		if err != nil {
 			return nil, err
 		}
 		if !allowed {
 			continue
 		}
-		account.CanManage, err = s.hasResourceGrant(r, model.ResourceTypeDatabaseInstance, account.InstanceID)
+		account.CanManage, err = s.authorizeResourceActions(r, []string{rbac.ActionDBProxyUpdate, rbac.ActionDBProxyDelete}, model.ResourceTypeDatabaseAccount, account.ID)
 		if err != nil {
 			return nil, err
 		}
@@ -238,32 +222,33 @@ func (s *Server) visibleDatabaseAccounts(r *http.Request, accounts []store.Datab
 func (s *Server) visibleApplications(r *http.Request, applications []store.ApplicationView) ([]store.ApplicationView, error) {
 	result := make([]store.ApplicationView, 0, len(applications))
 	for _, application := range applications {
-		if isSuperAdminRequest(r) {
-			application.CanManage = true
-			result = append(result, application)
-			continue
-		}
-		allowed, err := s.hasResourceGrant(r, model.ResourceTypeApplication, application.ID)
+		allowed, err := s.authorizeResourceActions(r, []string{rbac.ActionAppView}, model.ResourceTypeApplication, application.ID)
 		if err != nil {
 			return nil, err
 		}
-		if allowed {
-			application.CanManage = true
-			result = append(result, application)
+		if !allowed {
+			continue
 		}
+		application.CanManage, err = s.authorizeResourceActions(r, []string{rbac.ActionAppUpdate, rbac.ActionAppDelete}, model.ResourceTypeApplication, application.ID)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, application)
 	}
 	return result, nil
 }
+
 func (s *Server) visiblePlatformAccounts(r *http.Request, accounts []store.PlatformAccountView) ([]store.PlatformAccountView, error) {
 	result := make([]store.PlatformAccountView, 0, len(accounts))
 	for _, account := range accounts {
-		allowed, err := s.hasResourceGrant(r, model.ResourceTypePlatformAccount, account.ID)
+		allowed, err := s.authorizeResourceActions(r, []string{rbac.ActionPlatformAccountView}, model.ResourceTypePlatformAccount, account.ID)
 		if err != nil {
 			return nil, err
 		}
-		if allowed {
-			result = append(result, account)
+		if !allowed {
+			continue
 		}
+		result = append(result, account)
 	}
 	return result, nil
 }

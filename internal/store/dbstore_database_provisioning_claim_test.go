@@ -460,6 +460,8 @@ func seedStoreProvisioningOperationWithToken(
 			Lease: service.DatabaseProvisioningLease{
 				Owner: "request", Token: "request-lease", Duration: time.Minute,
 			},
+			AdministratorUsername: admin.Username, AdministratorPassword: admin.Password.GetPlaintext(),
+			InstanceProof: databaseProvisioningInstanceProof(instance),
 		},
 	)
 	if err != nil {

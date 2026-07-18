@@ -290,6 +290,8 @@ func TestDatabaseProvisioningInitialLeaseAndClaimUseMetadataClockDespiteProcessS
 			Lease: service.DatabaseProvisioningLease{
 				Owner: "worker-a", Token: "lease-a", Duration: leaseDuration,
 			},
+			AdministratorUsername: admin.Username, AdministratorPassword: admin.Password.GetPlaintext(),
+			InstanceProof: databaseProvisioningInstanceProof(instance),
 		},
 	)
 	if err != nil {

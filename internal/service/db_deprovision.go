@@ -38,7 +38,7 @@ func (s *DatabaseProvisioningService) runDeprovision(parent context.Context, acc
 		return ErrDatabaseDeprovisionFailed
 	}
 	instance, admin, err := s.repository.DatabaseProvisioningAdmin(parent, op.InstanceID, op.AdminAccountID)
-	if err != nil || validateProvisioningAdministrator(instance, admin, s.now().UTC()) != nil {
+	if err != nil || validateProvisioningAdministratorForRecovery(instance, admin) != nil {
 		s.deferDropUncertain(parent, op)
 		return ErrDatabaseDeprovisionFailed
 	}

@@ -33,6 +33,8 @@ func TestDatabaseProvisioningOperationPersistsEncryptedIntentWithoutResource(t *
 			Lease: service.DatabaseProvisioningLease{
 				Owner: "request", Token: "request-lease", Duration: time.Minute,
 			},
+			AdministratorUsername: admin.Username, AdministratorPassword: admin.Password.GetPlaintext(),
+			InstanceProof: databaseProvisioningInstanceProof(instance),
 		},
 	)
 	if err != nil {
@@ -76,7 +78,9 @@ func TestDatabaseProvisioningCreateOrGetUsesActorScopedIdempotencyIdentity(t *te
 		Username: "jm_idempotency000000001", Password: "generated-top-secret", Host: "10.0.0.8",
 		GrantsJSON: `[ {"database":"orders","privilege":"read"} ]`, ActorID: "operator-1",
 		IdempotencyKey: "sqlite-idempotency-key-001", RequestHash: strings.Repeat("a", 64),
-		Lease: service.DatabaseProvisioningLease{Owner: "request", Token: "request-lease", Duration: time.Minute},
+		Lease:                 service.DatabaseProvisioningLease{Owner: "request", Token: "request-lease", Duration: time.Minute},
+		AdministratorUsername: admin.Username, AdministratorPassword: admin.Password.GetPlaintext(),
+		InstanceProof: databaseProvisioningInstanceProof(instance),
 	}
 	first, _, created, err := repository.CreateOrGetDatabaseProvisioningOperation(context.Background(), input)
 	if err != nil || !created {
@@ -103,7 +107,9 @@ func TestDatabaseProvisioningCreateOrGetSQLiteConcurrentUniqueIdentity(t *testin
 		Username: "jm_concurrent0000000001", Password: "generated-top-secret", Host: "10.0.0.8",
 		GrantsJSON: `[{"database":"orders","privilege":"read"}]`, ActorID: "operator-1",
 		IdempotencyKey: "sqlite-concurrent-key-001", RequestHash: strings.Repeat("a", 64),
-		Lease: service.DatabaseProvisioningLease{Owner: "request", Token: "request-lease", Duration: time.Minute},
+		Lease:                 service.DatabaseProvisioningLease{Owner: "request", Token: "request-lease", Duration: time.Minute},
+		AdministratorUsername: admin.Username, AdministratorPassword: admin.Password.GetPlaintext(),
+		InstanceProof: databaseProvisioningInstanceProof(instance),
 	}
 	const callers = 8
 	start := make(chan struct{})

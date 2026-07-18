@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"jianmen/internal/dbtls"
 	"jianmen/internal/model"
@@ -81,79 +82,6 @@ func (s *DBStore) AddDatabaseInstance(input DatabaseInstanceInput) (DatabaseInst
 		return DatabaseInstanceView{}, err
 	}
 	return s.databaseInstanceView(inst, 0), nil
-}
-
-func (s *DBStore) UpdateDatabaseInstance(id string, input DatabaseInstanceInput) (DatabaseInstanceView, error) {
-	id = strings.TrimSpace(id)
-	var inst model.DatabaseInstance
-	if err := s.db.First(&inst, "id = ?", id).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return DatabaseInstanceView{}, fmt.Errorf("%w: %q", ErrDBInstanceNotFound, id)
-		}
-		return DatabaseInstanceView{}, err
-	}
-	updated, err := normalizeDatabaseInstanceInput(input, inst.TLSCAPEM)
-	if err != nil {
-		return DatabaseInstanceView{}, err
-	}
-	inst.Name = updated.Name
-	inst.Protocol = updated.Protocol
-	inst.Address = updated.Address
-	inst.Port = updated.Port
-	inst.TLSMode = updated.TLSMode
-	inst.TLSServerName = updated.TLSServerName
-	inst.TLSCAPEM = updated.TLSCAPEM
-	inst.GroupName = updated.GroupName
-	inst.Remark = updated.Remark
-	inst.Status = updated.Status
-	if inst.Name == "" {
-		inst.Name = inst.Address
-	}
-	if err := s.db.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Save(&inst).Error; err != nil {
-			return err
-		}
-		if err := ensureResourceGroup(tx, inst.GroupName); err != nil {
-			return err
-		}
-		return s.syncResourceTx(tx, model.ResourceTypeDatabaseInstance, inst.ID, databaseInstanceResourceName(inst), "")
-	}); err != nil {
-		return DatabaseInstanceView{}, err
-	}
-	count, err := s.databaseAccountCount(inst.ID)
-	if err != nil {
-		return DatabaseInstanceView{}, err
-	}
-	return s.databaseInstanceView(inst, count), nil
-}
-
-func (s *DBStore) DeleteDatabaseInstance(id string) error {
-	id = strings.TrimSpace(id)
-	return s.db.Transaction(func(tx *gorm.DB) error {
-		var inst model.DatabaseInstance
-		if err := tx.First(&inst, "id = ?", id).Error; err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return fmt.Errorf("%w: %q", ErrDBInstanceNotFound, id)
-			}
-			return err
-		}
-		var accounts []model.DatabaseAccount
-		if err := tx.Where("instance_id = ?", id).Find(&accounts).Error; err != nil {
-			return err
-		}
-		for _, account := range accounts {
-			if err := s.deleteResourceTx(tx, model.ResourceTypeDatabaseAccount, account.ID); err != nil {
-				return err
-			}
-		}
-		if err := tx.Where("instance_id = ?", id).Delete(&model.DatabaseAccount{}).Error; err != nil {
-			return err
-		}
-		if err := s.deleteResourceTx(tx, model.ResourceTypeDatabaseInstance, inst.ID); err != nil {
-			return err
-		}
-		return tx.Delete(&inst).Error
-	})
 }
 
 func (s *DBStore) InstanceAccounts(instanceID string) ([]DatabaseAccountView, error) {
@@ -367,30 +295,56 @@ func (s *DBStore) AddDatabaseAccount(instanceID, username, password, group, rema
 func (s *DBStore) UpdateDatabaseAccount(id, username, password, group, remark string, expiresAt *time.Time, status string) (DatabaseAccountView, error) {
 	id = strings.TrimSpace(id)
 	username = strings.TrimSpace(username)
-	var acct model.DatabaseAccount
-	if err := s.db.First(&acct, "id = ?", id).Error; err != nil {
+	var locator model.DatabaseAccount
+	if err := s.db.Select("id", "instance_id").First(&locator, "id = ?", id).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return DatabaseAccountView{}, fmt.Errorf("%w: %q", ErrDBAccountNotFound, id)
 		}
 		return DatabaseAccountView{}, err
 	}
-	if acct.Managed && ((username != "" && username != acct.Username) || password != "") {
-		return DatabaseAccountView{}, errors.New("managed database account identity is immutable")
-	}
-	if username != "" {
-		if err := s.ensureDatabaseAccountUsernameAvailable(acct.InstanceID, username, acct.ID); err != nil {
-			return DatabaseAccountView{}, err
-		}
-		acct.Username = username
-	}
-	if password != "" {
-		acct.Password = model.NewEncryptedField(password)
-	}
-	acct.GroupName = strings.TrimSpace(group)
-	acct.Remark = strings.TrimSpace(remark)
-	acct.ExpiresAt = expiresAt
-	acct.Status = status
+	var acct model.DatabaseAccount
 	if err := s.db.Transaction(func(tx *gorm.DB) error {
+		if _, err := lockProvisioningInstance(tx, locator.InstanceID); err != nil {
+			return err
+		}
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&acct, "id = ? AND instance_id = ?", id, locator.InstanceID).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return fmt.Errorf("%w: %q", ErrDBAccountNotFound, id)
+			}
+			return err
+		}
+		changesIdentity := username != "" && username != acct.Username
+		changesPassword := password != ""
+		changesStatus := status != "" && status != "active"
+		if changesIdentity || changesPassword || changesStatus {
+			if err := protectReferencedAdministrator(tx, acct.ID); err != nil {
+				return err
+			}
+		}
+		if acct.Managed && (changesIdentity || changesPassword) {
+			return errors.New("managed database account identity is immutable")
+		}
+		if username != "" {
+			var count int64
+			if err := tx.Model(&model.DatabaseAccount{}).
+				Where("instance_id = ? AND username = ? AND id <> ?", acct.InstanceID, username, acct.ID).
+				Count(&count).Error; err != nil {
+				return fmt.Errorf("check database account duplicate: %w", err)
+			}
+			if count != 0 {
+				return fmt.Errorf("database account %q already exists on instance %q", username, acct.InstanceID)
+			}
+			acct.Username = username
+		}
+		if password != "" {
+			acct.Password = model.NewEncryptedField(password)
+		}
+		acct.GroupName = strings.TrimSpace(group)
+		acct.Remark = strings.TrimSpace(remark)
+		acct.ExpiresAt = expiresAt
+		if status != "" {
+			acct.Status = status
+		}
 		if err := tx.Save(&acct).Error; err != nil {
 			return err
 		}
@@ -422,9 +376,19 @@ func (s *DBStore) ensureDatabaseAccountUsernameAvailable(instanceID, username, e
 
 func (s *DBStore) DeleteDatabaseAccount(id string) error {
 	id = strings.TrimSpace(id)
+	var locator model.DatabaseAccount
+	if err := s.db.Select("id", "instance_id").First(&locator, "id = ?", id).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return fmt.Errorf("%w: %q", ErrDBAccountNotFound, id)
+		}
+		return err
+	}
 	return s.db.Transaction(func(tx *gorm.DB) error {
 		var account model.DatabaseAccount
-		if err := tx.First(&account, "id = ?", id).Error; err != nil {
+		if _, err := lockProvisioningInstance(tx, locator.InstanceID); err != nil {
+			return err
+		}
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&account, "id = ? AND instance_id = ?", id, locator.InstanceID).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return fmt.Errorf("%w: %q", ErrDBAccountNotFound, id)
 			}
@@ -432,6 +396,9 @@ func (s *DBStore) DeleteDatabaseAccount(id string) error {
 		}
 		if account.Managed {
 			return errors.New("managed database account requires deprovisioning")
+		}
+		if err := protectReferencedAdministrator(tx, account.ID); err != nil {
+			return err
 		}
 		if err := s.deleteResourceTx(tx, model.ResourceTypeDatabaseAccount, account.ID); err != nil {
 			return err

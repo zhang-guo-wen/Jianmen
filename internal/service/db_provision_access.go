@@ -40,7 +40,7 @@ func (s *DatabaseProvisioningService) ListDatabases(
 		request.InstanceID,
 		request.AdminAccountID,
 	)
-	if err != nil || validateProvisioningAdministrator(instance, admin, s.now().UTC()) != nil {
+	if err != nil || validateProvisioningAdministratorForNewUse(instance, admin, s.now().UTC()) != nil {
 		return nil, ErrDatabaseProvisioningFailed
 	}
 	auditID, err := s.beginCredentialAudit(

@@ -50,8 +50,8 @@ func (s *DatabaseProvisioningService) Reconcile(
 		result.Claimed++
 		switch claimed.Stage {
 		case ProvisioningStageReserved:
-			deleted, deleteErr := s.deleteClaimedOperation(ctx, claimed)
-			if deleteErr != nil || !deleted {
+			finalized, finalizeErr := s.finalizeNotCreatedOperation(ctx, claimed, "")
+			if finalizeErr != nil || !finalized {
 				result.Failed++
 			} else {
 				result.DeletedReserved++
@@ -112,16 +112,20 @@ func (s *DatabaseProvisioningService) claimForReconcile(
 	return claimed, ok, nil
 }
 
-func (s *DatabaseProvisioningService) deleteClaimedOperation(
+func (s *DatabaseProvisioningService) finalizeNotCreatedOperation(
 	parent context.Context,
 	operation DatabaseProvisioningOperation,
+	reason string,
 ) (bool, error) {
 	ctx, cancel := s.detachedContext(parent)
 	defer cancel()
-	return s.repository.DeleteDatabaseProvisioningOperation(
-		ctx,
-		operation.Fence(),
+	_, ok, err := s.repository.TransitionDatabaseProvisioningOperation(
+		ctx, operation.Fence(), DatabaseProvisioningTransition{
+			Stage: ProvisioningStageNotCreated, CleanupStatus: ProvisioningCleanupNone,
+			LastError: reason, ReleaseLease: true,
+		},
 	)
+	return ok, err
 }
 
 func (s *DatabaseProvisioningService) reconcileCleanup(
@@ -137,7 +141,7 @@ func (s *DatabaseProvisioningService) reconcileCleanup(
 		operation.InstanceID,
 		operation.AdminAccountID,
 	)
-	if err != nil || validateProvisioningAdministrator(instance, admin, s.now().UTC()) != nil {
+	if err != nil || validateProvisioningAdministratorForRecovery(instance, admin) != nil {
 		s.persistCleanupFailure(parent, operation)
 		return false
 	}
@@ -190,8 +194,8 @@ func (s *DatabaseProvisioningService) reconcileCleanup(
 		return false
 	}
 	s.completeCredentialAudit(parent, auditID, "success")
-	deleted, err := s.deleteClaimedOperation(parent, operation)
-	if err != nil || !deleted {
+	finalized, err := s.finalizeNotCreatedOperation(parent, operation, operation.LastError)
+	if err != nil || !finalized {
 		s.persistCleanupFailure(parent, operation)
 		return false
 	}

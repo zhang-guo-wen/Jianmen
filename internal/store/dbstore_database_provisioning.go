@@ -34,7 +34,9 @@ func (s *DBStore) CreateDatabaseProvisioningOperation(
 		input.InstanceID == "" || input.AdminAccountID == "" ||
 		input.Password == "" || input.Host == "" ||
 		strings.TrimSpace(input.GrantsJSON) == "" ||
-		input.Lease.Owner == "" || input.Lease.Token == "" || input.Lease.Duration <= 0 {
+		input.Lease.Owner == "" || input.Lease.Token == "" || input.Lease.Duration <= 0 ||
+		strings.TrimSpace(input.AdministratorUsername) == "" || input.AdministratorPassword == "" ||
+		len(strings.TrimSpace(input.InstanceProof)) != 64 {
 		return service.DatabaseProvisioningOperation{}, service.DatabaseProvisioningLeaseWindow{},
 			errors.New("invalid database provisioning operation")
 	}
@@ -65,15 +67,25 @@ func (s *DBStore) CreateDatabaseProvisioningOperation(
 	}
 	var window service.DatabaseProvisioningLeaseWindow
 	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var instance model.DatabaseInstance
-		if err := tx.First(&instance, "id = ?", input.InstanceID).Error; err != nil {
+		instance, err := lockProvisioningInstance(tx, input.InstanceID)
+		if err != nil {
 			return err
 		}
-		var admin model.DatabaseAccount
-		if err := tx.First(
-			&admin, "id = ? AND instance_id = ?", input.AdminAccountID, input.InstanceID,
-		).Error; err != nil {
+		admin, err := lockProvisioningAdministrator(tx, input.InstanceID, input.AdminAccountID)
+		if err != nil {
 			return err
+		}
+		if instance.Status != "active" || instance.Protocol != "mysql" || admin.Status != "active" ||
+			admin.Password.GetPlaintext() == "" {
+			return errors.New("database provisioning administrator changed")
+		}
+		if admin.Username != input.AdministratorUsername || admin.Password.GetPlaintext() != input.AdministratorPassword ||
+			databaseProvisioningInstanceProof(instance) != strings.TrimSpace(input.InstanceProof) {
+			return errors.New("database provisioning administrator changed")
+		}
+		now, err := databaseNow(ctx, tx)
+		if err != nil || (admin.ExpiresAt != nil && !now.Before(*admin.ExpiresAt)) {
+			return errors.New("database provisioning administrator unavailable")
 		}
 		var accountCount int64
 		if err := tx.Model(&model.DatabaseAccount{}).
@@ -96,7 +108,6 @@ func (s *DBStore) CreateDatabaseProvisioningOperation(
 		if err := tx.First(&record, "id = ?", record.ID).Error; err != nil {
 			return err
 		}
-		var err error
 		window, err = clock.leaseWindow(ctx, tx, record.ID, input.Lease.Duration)
 		return err
 	})

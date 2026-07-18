@@ -78,6 +78,15 @@ type DatabaseProvisioningOperationInput struct {
 	IdempotencyKey string
 	RequestHash    string
 	Lease          DatabaseProvisioningLease
+	// Administrator credentials are used only to prove that the transaction
+	// creating an operation still owns the exact credential validated by the
+	// caller. They are never persisted in the operation.
+	AdministratorUsername string
+	AdministratorPassword string
+	// InstanceProof is a SHA-256 digest of every connection-affecting instance
+	// field. It is checked under the same database transaction as the
+	// administrator credential proof and is never persisted.
+	InstanceProof string
 }
 
 type DatabaseProvisioningOperation struct {
@@ -362,7 +371,7 @@ func randomProvisioningString(reader io.Reader, length int, alphabet string) (st
 	return string(result), nil
 }
 
-func validateProvisioningAdministrator(
+func validateProvisioningAdministratorForNewUse(
 	instance model.DatabaseInstance,
 	admin model.DatabaseAccount,
 	now time.Time,
@@ -377,6 +386,19 @@ func validateProvisioningAdministrator(
 		return errors.New("database provisioning administrator is unavailable")
 	}
 	if admin.Password.GetPlaintext() == "" {
+		return errors.New("database provisioning administrator is unavailable")
+	}
+	return nil
+}
+
+func validateProvisioningAdministratorForRecovery(
+	instance model.DatabaseInstance,
+	admin model.DatabaseAccount,
+) error {
+	if instance.Status != "active" || admin.Status != "active" {
+		return errors.New("database provisioning administrator is unavailable")
+	}
+	if instance.Protocol != "mysql" || admin.Password.GetPlaintext() == "" {
 		return errors.New("database provisioning administrator is unavailable")
 	}
 	return nil

@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -48,7 +49,7 @@ func (s *DatabaseProvisioningService) Provision(
 	instance, admin, err := s.repository.DatabaseProvisioningAdmin(
 		ctx, request.InstanceID, request.AdminAccountID,
 	)
-	if err != nil || validateProvisioningAdministrator(instance, admin, s.now().UTC()) != nil {
+	if err != nil || validateProvisioningAdministratorForNewUse(instance, admin, s.now().UTC()) != nil {
 		return ProvisionDatabaseAccountResult{}, ErrDatabaseProvisioningFailed
 	}
 	auditID, err := s.beginCredentialAudit(
@@ -90,7 +91,9 @@ func (s *DatabaseProvisioningService) Provision(
 		Username: username, Password: password, Host: request.Host, GrantsJSON: string(grantsJSON),
 		Group: request.Group, Remark: request.Remark, ExpiresAt: request.ExpiresAt,
 		ActorID: request.Actor.UserID, IdempotencyKey: key, RequestHash: requestHash,
-		Lease: DatabaseProvisioningLease{Owner: s.workerID, Token: leaseToken, Duration: s.leaseDuration},
+		Lease:                 DatabaseProvisioningLease{Owner: s.workerID, Token: leaseToken, Duration: s.leaseDuration},
+		AdministratorUsername: admin.Username, AdministratorPassword: admin.Password.GetPlaintext(),
+		InstanceProof: databaseProvisioningInstanceProof(instance),
 	}
 	var operation DatabaseProvisioningOperation
 	created := true
@@ -189,6 +192,21 @@ func (s *DatabaseProvisioningService) Provision(
 	}
 	auditResult = "success"
 	return ProvisionDatabaseAccountResult{Account: account, OperationID: operation.ID}, nil
+}
+
+// databaseProvisioningInstanceProof binds a newly-created operation to the
+// exact endpoint and TLS material the service validated before opening an
+// upstream connection. The store recomputes it while holding the instance row.
+func databaseProvisioningInstanceProof(instance model.DatabaseInstance) string {
+	payload, _ := json.Marshal(struct {
+		Protocol, Address, TLSMode, TLSServerName, TLSCAPEM string
+		Port                                                int
+	}{
+		Protocol: instance.Protocol, Address: instance.Address, Port: instance.Port,
+		TLSMode: instance.TLSMode, TLSServerName: instance.TLSServerName, TLSCAPEM: instance.TLSCAPEM,
+	})
+	digest := sha256.Sum256(payload)
+	return fmt.Sprintf("%x", digest)
 }
 
 func (s *DatabaseProvisioningService) idempotentProvisioningResult(

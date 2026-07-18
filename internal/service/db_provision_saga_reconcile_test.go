@@ -88,9 +88,10 @@ func TestDatabaseProvisioningReconcilerDeletesStaleReservedWithoutDrop(t *testin
 	if err != nil {
 		t.Fatalf("reconcile stale reserved: %v", err)
 	}
-	if result.DeletedReserved != 1 || provisioner.dropCalls != 0 ||
-		len(repository.operationsSnapshot()) != 0 {
-		t.Fatalf("stale reservation was not safely deleted: %#v drops=%d",
+	operations := repository.operationsSnapshot()
+	if result.DeletedReserved != 1 || provisioner.dropCalls != 0 || len(operations) != 1 ||
+		operations[0].Stage != ProvisioningStageNotCreated || operations[0].LeaseOwner != "" {
+		t.Fatalf("stale reservation was not retained as a terminal tombstone: %#v drops=%d",
 			result, provisioner.dropCalls)
 	}
 }

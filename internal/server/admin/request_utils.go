@@ -153,6 +153,8 @@ func writeDBStoreError(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
 	case errors.Is(err, store.ErrDBProxyNotFound) || errors.Is(err, store.ErrDBAccountNotFound) || errors.Is(err, store.ErrDBInstanceNotFound):
 		apiresp.WriteError(w, http.StatusNotFound, apiresp.CodeNotFound, "database resource not found", nil, apiresp.RequestID(r.Context()))
+	case errors.Is(err, store.ErrReferencedDatabaseAdministrator), errors.Is(err, store.ErrReferencedDatabaseInstance):
+		apiresp.WriteError(w, http.StatusConflict, apiresp.CodeConflict, "database resource is referenced by provisioning operation", nil, apiresp.RequestID(r.Context()))
 	default:
 		apiresp.WriteError(w, http.StatusBadRequest, apiresp.CodeValidation, "invalid database request", nil, apiresp.RequestID(r.Context()))
 	}

@@ -298,7 +298,10 @@ async function testConnection() {
     const result = await apiClient.testTargetConnection({
       id: String(target.id || target.resource_id || username), name: String(target.name || username), username,
       password: '', private_key_path: '', private_key_pem: '', passphrase: '', host: String(target.host || target.address || ''),
-      port: Number(target.port) || 22, insecure_ignore_host_key: true, host_key_fingerprint: '', known_hosts_path: '',
+      port: Number(target.port) || 22,
+      insecure_ignore_host_key: target.insecure_ignore_host_key === true,
+      host_key_fingerprint: String(target.host_key_fingerprint || ''),
+      known_hosts_path: String(target.known_hosts_path || ''),
     });
     connectionTestResult.value = { ok: result.ok, latency_ms: result.latency_ms, error: result.ok ? undefined : result.error || result.message || '连接失败' };
   } catch (error) {

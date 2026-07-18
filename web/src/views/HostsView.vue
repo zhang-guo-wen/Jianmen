@@ -930,7 +930,7 @@ function emptyAccountForm(): AccountForm {
     password: "",
     private_key_pem: "",
     passphrase: "",
-    host_key_mode: "ignore",
+    host_key_mode: "fingerprint",
     insecure_ignore_host_key: false,
     host_key_fingerprint: "",
     known_hosts_path: "",

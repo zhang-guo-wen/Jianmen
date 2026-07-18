@@ -321,11 +321,6 @@ func (s *Server) handleTestConnection(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 测试连接默认允许跳过主机密钥验证（除非用户明确配置了指纹或 known_hosts）
-	if !targetCfg.InsecureIgnoreHostKey && targetCfg.HostKeyFingerprint == "" && targetCfg.KnownHostsPath == "" {
-		targetCfg.InsecureIgnoreHostKey = true
-	}
-
 	clientConfig, err := store.ClientConfigForTarget(targetCfg)
 	if err != nil {
 		s.writeJSON(w, r, http.StatusOK, map[string]any{"ok": false, "error": "配置错误: " + err.Error()})

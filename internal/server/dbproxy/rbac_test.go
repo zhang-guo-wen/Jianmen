@@ -118,17 +118,20 @@ func TestGatewayAuthorizeConnectPropagatesCancelledConnectionContext(t *testing.
 }
 
 type captureDatabaseAccountResolver struct {
-	ctx context.Context
-	err error
+	passwordContexts []context.Context
+	mysqlContexts    []context.Context
+	err              error
+	mysqlErr         error
 }
 
 func (c *captureDatabaseAccountResolver) AuthenticateConnectionPassword(ctx context.Context, _, _, _, _ string) error {
-	c.ctx = ctx
+	c.passwordContexts = append(c.passwordContexts, ctx)
 	return c.err
 }
 
-func (c *captureDatabaseAccountResolver) AuthenticateMySQLConnectionPassword(context.Context, string, string, []byte, []byte) error {
-	return nil
+func (c *captureDatabaseAccountResolver) AuthenticateMySQLConnectionPassword(ctx context.Context, _ string, _ string, _ []byte, _ []byte) error {
+	c.mysqlContexts = append(c.mysqlContexts, ctx)
+	return c.mysqlErr
 }
 
 func TestGatewayValidateUserPasswordPropagatesCancelledConnectionContext(t *testing.T) {
@@ -141,7 +144,7 @@ func TestGatewayValidateUserPasswordPropagatesCancelledConnectionContext(t *test
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("validateUserPassword error = %v, want context cancellation", err)
 	}
-	if resolver.ctx != ctx {
+	if len(resolver.passwordContexts) != 1 || resolver.passwordContexts[0] != ctx {
 		t.Fatal("validateUserPassword did not pass through the connection context")
 	}
 }

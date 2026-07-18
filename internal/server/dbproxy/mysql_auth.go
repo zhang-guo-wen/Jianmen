@@ -10,6 +10,7 @@ import (
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"net"
 	"strings"
@@ -149,27 +150,23 @@ func (g *Gateway) handleMySQL(ctx context.Context, client net.Conn) *gatewayConn
 		return nil
 	}
 
-	resolved, err := g.resolveAccount(obs.User)
+	resolved, err := g.resolveAccount(ctx, obs.User)
 	if err != nil {
 		g.logger.Warn("mysql gateway account resolution failed", "username", obs.User, "error", err)
 		return nil
 	}
 	acct := resolved.account
-	if g.store == nil || g.store.AuthenticateMySQLConnectionPassword(ctx, resolved.user.ID, acct.ID, fakeSalt, authResponse) != nil {
-		g.logger.Warn("mysql gateway auth failed", "user", resolved.rawName)
-		if err := writeMySQLClientAuthError(client); err != nil {
-			g.logger.Warn("mysql gateway failed to send auth error", "error", err)
+	if err := g.authenticateMySQLConnection(ctx, resolved, fakeSalt, authResponse); err != nil {
+		g.logger.Warn("mysql gateway authentication or authorization failed", "user", resolved.rawName, "error", err)
+		if errors.Is(err, errDatabaseAuthentication) {
+			if err := writeMySQLClientAuthError(client); err != nil {
+				g.logger.Warn("mysql gateway failed to send auth error", "error", err)
+			}
 		}
 		return nil
 	}
 
-	// RBAC check
 	rbacUserID := resolved.user.ID
-	resourceID := acct.ID
-	if err := g.authorizeConnect(ctx, rbacUserID, resourceID); err != nil {
-		g.logger.Warn("mysql gateway rbac denied", "resource", resourceID, "error", err)
-		return nil
-	}
 
 	// Check account disabled and expiry
 	if acct.Status == "disabled" {

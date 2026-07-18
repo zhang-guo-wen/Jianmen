@@ -309,7 +309,7 @@ func (g *Gateway) handlePG(ctx context.Context, client net.Conn, firstByte byte)
 		return nil
 	}
 
-	resolved, err := g.resolveAccount(username)
+	resolved, err := g.resolveAccount(ctx, username)
 	if err != nil {
 		g.logger.Warn("db gateway account resolution failed", "username", username, "error", err)
 		return nil
@@ -336,19 +336,11 @@ func (g *Gateway) handlePG(ctx context.Context, client net.Conn, firstByte byte)
 	// PG 密码消息以 \x00 结尾，需截断
 	password := strings.TrimRight(string(pwdBuf[5:5+pwdLen]), "\x00")
 
-	// 验证堡垒机用户密码
-	if err := g.validateUserPassword(ctx, resolved.user, resolved.account.ID, password); err != nil {
-		g.logger.Warn("db gateway auth failed", "user", resolved.rawName, "error", err)
+	if err := g.authenticatePostgresConnection(ctx, resolved, password); err != nil {
+		g.logger.Warn("db gateway authentication or authorization failed", "user", resolved.rawName, "error", err)
 		return nil
 	}
 	userID := resolved.user.ID
-
-	// RBAC check
-	resourceID := acct.ID
-	if err := g.authorizeConnect(ctx, userID, resourceID); err != nil {
-		g.logger.Warn("db gateway rbac denied", "user", userID, "resource", resourceID, "error", err)
-		return nil
-	}
 
 	// Check account disabled and expiry
 	if acct.Status == "disabled" {

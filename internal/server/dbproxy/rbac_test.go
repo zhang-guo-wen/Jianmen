@@ -24,7 +24,7 @@ type captureConnectionAuthorizer struct {
 	calls   []connectionAuthorizationCall
 }
 
-func (c *captureConnectionAuthorizer) Authorize(ctx context.Context, userID string, actions []string, resourceType, resourceID string) (bool, error) {
+func (c *captureConnectionAuthorizer) AuthorizeConnection(ctx context.Context, userID string, actions []string, resourceType, resourceID string) (bool, error) {
 	c.calls = append(c.calls, connectionAuthorizationCall{
 		ctx:          ctx,
 		userID:       userID,

@@ -74,9 +74,7 @@ func main() {
 		errCh <- sshSrv.ListenAndServe(ctx)
 	}()
 
-	superAdminIDs := admin.LoadSuperAdminIDs(cfg, dataDir)
-
-	dbGateway := dbproxy.NewGateway(cfg.DatabaseGateway, appStore, cfg.ReplayDir, logger, metadataDB, superAdminIDs, onlineSessions, appStore)
+	dbGateway := dbproxy.NewGateway(cfg.DatabaseGateway, appStore, cfg.ReplayDir, logger, metadataDB, authorizationService, onlineSessions, appStore)
 
 	if cfg.Admin.Enabled {
 		appProxy := appproxy.New(cfg.ApplicationGateway, cfg.Admin, metadataDB, authorizationService, logger)

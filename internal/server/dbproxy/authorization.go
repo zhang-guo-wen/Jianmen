@@ -17,7 +17,7 @@ func (g *Gateway) authorizeConnect(ctx context.Context, userID, resourceID strin
 	if g.authorizer == nil {
 		return errors.New("database authorization unavailable")
 	}
-	allowed, err := g.authorizer.Authorize(
+	allowed, err := g.authorizer.AuthorizeConnection(
 		ctx,
 		userID,
 		[]string{rbaccheck.ActionDBConnect},

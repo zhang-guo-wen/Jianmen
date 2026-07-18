@@ -43,7 +43,7 @@ type auditWriter interface {
 }
 
 type connectionAuthorizer interface {
-	Authorize(ctx context.Context, userID string, actions []string, resourceType, resourceID string) (bool, error)
+	AuthorizeConnection(ctx context.Context, userID string, actions []string, resourceType, resourceID string) (bool, error)
 }
 
 func NewGateway(cfg config.DatabaseGatewayConfig, store databaseAccountResolver, replayDir string, logger *slog.Logger, db *gorm.DB, authorizer connectionAuthorizer, onlineSessions *online.Registry, auditStore auditWriter) *Gateway {

@@ -720,6 +720,7 @@ async function openClientConnection(target: TargetRecord) {
   }
   window.location.href = buildSSHDeepLink({
     username: state.compactUser,
+    password: state.password,
     host: state.host,
     port: state.port,
   });

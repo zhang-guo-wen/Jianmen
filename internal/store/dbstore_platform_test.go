@@ -5,7 +5,9 @@ import (
 	"errors"
 	"path/filepath"
 	"testing"
+	"time"
 
+	"jianmen/internal/crypto"
 	"jianmen/internal/model"
 	"jianmen/internal/storage"
 
@@ -244,8 +246,142 @@ func TestCreateManagedPlatformAccountSkipsWriteOnCancelledContext(t *testing.T) 
 	}
 }
 
+func TestUpdatePlatformAccountPreservesConcurrentLifecycleAndPassword(t *testing.T) {
+	store, db := newPlatformAtomicTestStore(t)
+	owner := model.User{ID: "owner-concurrent", Username: "owner-concurrent", Status: "active"}
+	if err := db.Create(&owner).Error; err != nil {
+		t.Fatalf("create owner: %v", err)
+	}
+	oldExpiry := time.Now().UTC().Add(24 * time.Hour).Truncate(time.Second)
+	created, err := store.AddPlatformAccount(context.Background(), model.PlatformAccount{
+		ID: "platform-concurrent", Name: "before", PlatformName: "GitLab", Username: "alice",
+		Password: model.NewEncryptedField("old-secret"), OwnerID: owner.ID, Status: "active", ExpiresAt: &oldExpiry,
+	})
+	if err != nil {
+		t.Fatalf("create platform account: %v", err)
+	}
+
+	newExpiry := oldExpiry.Add(24 * time.Hour)
+	callbackName := "test:platform_concurrent_security_update"
+	callbackCalled := false
+	if err := db.Callback().Update().Before("gorm:update").Register(callbackName, func(tx *gorm.DB) {
+		if callbackCalled || tx.Statement.Schema == nil || tx.Statement.Schema.Table != "platform_accounts" {
+			return
+		}
+		callbackCalled = true
+		if err := tx.Exec(
+			"UPDATE platform_accounts SET status = ?, password = ?, expires_at = ? WHERE id = ?",
+			"disabled", model.NewEncryptedField("new-secret"), newExpiry, created.ID,
+		).Error; err != nil {
+			tx.AddError(err)
+		}
+	}); err != nil {
+		t.Fatalf("register concurrent update callback: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := db.Callback().Update().Remove(callbackName); err != nil {
+			t.Errorf("remove concurrent update callback: %v", err)
+		}
+	})
+
+	if _, err := store.UpdateManagedPlatformAccount(
+		context.Background(),
+		created.ID,
+		model.PlatformAccount{Name: "renamed"},
+	); err != nil {
+		t.Fatalf("update platform account: %v", err)
+	}
+	if !callbackCalled {
+		t.Fatal("concurrent security update callback was not called")
+	}
+	var refreshed model.PlatformAccount
+	if err := db.First(&refreshed, "id = ?", created.ID).Error; err != nil {
+		t.Fatalf("reload platform account: %v", err)
+	}
+	if refreshed.Name != "renamed" {
+		t.Fatalf("name = %q, want renamed", refreshed.Name)
+	}
+	if refreshed.Status != "disabled" {
+		t.Fatalf("status = %q, want concurrent disabled value", refreshed.Status)
+	}
+	if refreshed.Password.GetPlaintext() != "new-secret" {
+		t.Fatalf("password = %q, want concurrent replacement preserved", refreshed.Password.GetPlaintext())
+	}
+	if refreshed.ExpiresAt == nil || !refreshed.ExpiresAt.Equal(newExpiry) {
+		t.Fatalf("expires_at = %v, want %v", refreshed.ExpiresAt, newExpiry)
+	}
+}
+
+func TestUpdatePlatformAccountDoesNotReviveDeletedAccount(t *testing.T) {
+	store, db := newPlatformAtomicTestStore(t)
+	owner := model.User{ID: "owner-delete-race", Username: "owner-delete-race", Status: "active"}
+	if err := db.Create(&owner).Error; err != nil {
+		t.Fatalf("create owner: %v", err)
+	}
+	created, err := store.AddPlatformAccount(context.Background(), model.PlatformAccount{
+		ID: "platform-delete-race", Name: "before", PlatformName: "GitLab", Username: "alice",
+		OwnerID: owner.ID, Status: "active",
+	})
+	if err != nil {
+		t.Fatalf("create platform account: %v", err)
+	}
+
+	callbackName := "test:platform_delete_before_update"
+	callbackCalled := false
+	if err := db.Callback().Update().Before("gorm:update").Register(callbackName, func(tx *gorm.DB) {
+		if callbackCalled || tx.Statement.Schema == nil || tx.Statement.Schema.Table != "platform_accounts" {
+			return
+		}
+		callbackCalled = true
+		if err := tx.Exec(
+			"DELETE FROM resources WHERE type = ? AND resource_id = ?",
+			model.ResourceTypePlatformAccount, created.ID,
+		).Error; err != nil {
+			tx.AddError(err)
+			return
+		}
+		if err := tx.Exec("DELETE FROM platform_accounts WHERE id = ?", created.ID).Error; err != nil {
+			tx.AddError(err)
+		}
+	}); err != nil {
+		t.Fatalf("register concurrent delete callback: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := db.Callback().Update().Remove(callbackName); err != nil {
+			t.Errorf("remove concurrent delete callback: %v", err)
+		}
+	})
+
+	_, err = store.UpdateManagedPlatformAccount(
+		context.Background(),
+		created.ID,
+		model.PlatformAccount{Name: "must-not-return"},
+	)
+	if !errors.Is(err, ErrPlatformAccountNotFound) {
+		t.Fatalf("UpdateManagedPlatformAccount() error = %v, want %v", err, ErrPlatformAccountNotFound)
+	}
+	if !callbackCalled {
+		t.Fatal("concurrent delete callback was not called")
+	}
+	var accountCount, resourceCount int64
+	if err := db.Model(&model.PlatformAccount{}).Where("id = ?", created.ID).Count(&accountCount).Error; err != nil {
+		t.Fatalf("count platform accounts: %v", err)
+	}
+	if err := db.Model(&model.Resource{}).
+		Where("type = ? AND resource_id = ?", model.ResourceTypePlatformAccount, created.ID).
+		Count(&resourceCount).Error; err != nil {
+		t.Fatalf("count platform resources: %v", err)
+	}
+	if accountCount != 0 || resourceCount != 0 {
+		t.Fatalf("update revived deleted state: accounts=%d resources=%d", accountCount, resourceCount)
+	}
+}
+
 func newPlatformAtomicTestStore(t *testing.T) (*DBStore, *gorm.DB) {
 	t.Helper()
+	if _, err := crypto.Init(t.TempDir()); err != nil {
+		t.Fatalf("initialize crypto: %v", err)
+	}
 	dsn := filepath.ToSlash(filepath.Join(t.TempDir(), "platform-atomic.db"))
 	db, err := storage.Open(storage.Config{Driver: storage.DriverSQLite, DSN: dsn})
 	if err != nil {

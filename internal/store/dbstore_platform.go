@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"jianmen/internal/model"
 )
@@ -184,67 +185,67 @@ func (s *DBStore) UpdateManagedPlatformAccount(ctx context.Context, id string, a
 }
 
 func (s *DBStore) updatePlatformAccount(ctx context.Context, id string, acc model.PlatformAccount) (model.PlatformAccount, error) {
-	var existing model.PlatformAccount
-	if err := s.db.WithContext(ctx).First(&existing, "id = ?", id).Error; err != nil {
-		return model.PlatformAccount{}, fmt.Errorf("%w: %q", ErrPlatformAccountNotFound, id)
-	}
-
-	if acc.PlatformName != "" {
-		existing.PlatformName = acc.PlatformName
-	}
-	if acc.URL != "" {
-		existing.URL = acc.URL
-	}
-	if acc.GroupName != "" {
-		existing.GroupName = strings.TrimSpace(acc.GroupName)
-	}
-	if acc.Username != "" {
-		existing.Username = acc.Username
-	}
-	if acc.Name != "" {
-		existing.Name = acc.Name
-	}
-	if acc.Remark != "" {
-		existing.Remark = acc.Remark
-	}
-	if acc.Password.GetPlaintext() != "" {
-		existing.Password = acc.Password
-	}
-	if acc.Status != "" {
-		existing.Status = acc.Status
-	}
-	if acc.ExpiresAt != nil {
-		existing.ExpiresAt = acc.ExpiresAt
-	}
-
+	id = strings.TrimSpace(id)
 	var updated model.PlatformAccount
+	deletedBeforeUpdate := false
 	if err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Save(&existing).Error; err != nil {
+		var current model.PlatformAccount
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&current, "id = ?", id).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return fmt.Errorf("%w: %q", ErrPlatformAccountNotFound, id)
+			}
+			return fmt.Errorf("lock platform account for update: %w", err)
+		}
+		result := tx.Model(&model.PlatformAccount{}).
+			Where("id = ?", id).
+			Updates(platformAccountUpdateFields(acc))
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			deletedBeforeUpdate = true
+			return nil
+		}
+		if err := s.loadPlatformAccountMetadataTx(tx, id, &updated); err != nil {
+			return fmt.Errorf("load updated platform account: %w", err)
+		}
+		if err := ensureAccountGroup(tx, updated.GroupName); err != nil {
 			return err
 		}
-		if err := ensureAccountGroup(tx, existing.GroupName); err != nil {
+		if err := s.syncResourceTx(tx, model.ResourceTypePlatformAccount, updated.ID, updated.Name, ""); err != nil {
 			return err
 		}
-		if err := s.syncResourceTx(tx, model.ResourceTypePlatformAccount, existing.ID, existing.Name, ""); err != nil {
-			return err
-		}
-		return s.loadPlatformAccountMetadataTx(tx, id, &updated)
+		return nil
 	}); err != nil {
 		return model.PlatformAccount{}, fmt.Errorf("update platform account: %w", err)
+	}
+	if deletedBeforeUpdate {
+		return model.PlatformAccount{}, fmt.Errorf("update platform account: %w: %q", ErrPlatformAccountNotFound, id)
 	}
 	return updated, nil
 }
 
 func (s *DBStore) DeletePlatformAccount(ctx context.Context, id string) error {
+	id = strings.TrimSpace(id)
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var acc model.PlatformAccount
-		if err := tx.First(&acc, "id = ?", id).Error; err != nil {
-			return fmt.Errorf("%w: %q", ErrPlatformAccountNotFound, id)
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&acc, "id = ?", id).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return fmt.Errorf("%w: %q", ErrPlatformAccountNotFound, id)
+			}
+			return fmt.Errorf("lock platform account for delete: %w", err)
 		}
 		if err := s.deleteResourceTx(tx, model.ResourceTypePlatformAccount, acc.ID); err != nil {
 			return err
 		}
-		return tx.Delete(&acc).Error
+		result := tx.Where("id = ?", id).Delete(&model.PlatformAccount{})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return fmt.Errorf("%w: %q", ErrPlatformAccountNotFound, id)
+		}
+		return nil
 	})
 }
 
@@ -277,4 +278,37 @@ func (s *DBStore) loadPlatformAccountMetadataTx(tx *gorm.DB, id string, destinat
 			platform_accounts.status, platform_accounts.expires_at, platform_accounts.created_at, platform_accounts.updated_at,
 			CASE WHEN platform_accounts.password IS NULL OR platform_accounts.password = '' THEN 0 ELSE 1 END AS has_password`).
 		Preload("Owner").First(destination, "platform_accounts.id = ?", id).Error
+}
+
+func platformAccountUpdateFields(acc model.PlatformAccount) map[string]any {
+	updates := make(map[string]any, 10)
+	updates["updated_at"] = time.Now().UTC()
+	if value := strings.TrimSpace(acc.PlatformName); value != "" {
+		updates["platform_name"] = value
+	}
+	if value := strings.TrimSpace(acc.URL); value != "" {
+		updates["url"] = value
+	}
+	if value := strings.TrimSpace(acc.GroupName); value != "" {
+		updates["group_name"] = value
+	}
+	if value := strings.TrimSpace(acc.Username); value != "" {
+		updates["username"] = value
+	}
+	if value := strings.TrimSpace(acc.Name); value != "" {
+		updates["name"] = value
+	}
+	if value := strings.TrimSpace(acc.Remark); value != "" {
+		updates["remark"] = value
+	}
+	if acc.Password.GetPlaintext() != "" {
+		updates["password"] = acc.Password
+	}
+	if value := strings.TrimSpace(acc.Status); value != "" {
+		updates["status"] = value
+	}
+	if acc.ExpiresAt != nil {
+		updates["expires_at"] = acc.ExpiresAt
+	}
+	return updates
 }

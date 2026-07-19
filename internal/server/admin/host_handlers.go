@@ -1,16 +1,19 @@
 package admin
 
 import (
+	"context"
 	"encoding/json"
-	"jianmen/internal/config"
-	"jianmen/internal/model"
-	"jianmen/internal/rbac"
-	"jianmen/internal/store"
+	"errors"
 	"net/http"
 	"strings"
 	"time"
 
 	"golang.org/x/crypto/ssh"
+
+	"jianmen/internal/config"
+	"jianmen/internal/model"
+	"jianmen/internal/rbac"
+	"jianmen/internal/store"
 )
 
 func (s *Server) handleHosts(w http.ResponseWriter, r *http.Request) {
@@ -56,7 +59,11 @@ func (s *Server) handleCreateHost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.grantCreatedResource(r, model.ResourceTypeHost, view.ID); err != nil {
-		_ = s.hostTargets.DeleteHost(r.Context(), view.ID)
+		cleanupCtx, cancelCleanup := context.WithTimeout(context.WithoutCancel(r.Context()), 5*time.Second)
+		defer cancelCleanup()
+		if cleanupErr := s.hostTargets.DeleteHost(cleanupCtx, view.ID); cleanupErr != nil {
+			err = errors.Join(err, cleanupErr)
+		}
 		s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
 		return
 	}

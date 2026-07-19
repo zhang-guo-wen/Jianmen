@@ -73,34 +73,6 @@ func (s *DBStore) hostAddressPort(ctx context.Context, tx *gorm.DB, h model.Host
 	return
 }
 
-func (s *DBStore) ensureHost(ctx context.Context, tx *gorm.DB, hostID, address string, protocol string, port int) error {
-	db := queryWithContext(s.db, tx, ctx)
-	var existing model.Host
-	if err := db.First(&existing, "id = ?", hostID).Error; err == nil {
-		return s.syncResourceTx(db, model.ResourceTypeHost, existing.ID, hostResourceName(existing), "")
-	}
-	name := address
-	if port != 0 && port != 22 {
-		name = fmt.Sprintf("%s:%d", address, port)
-	}
-	if name == "" {
-		name = hostID
-	}
-	host := model.Host{
-		ID:       hostID,
-		Name:     name,
-		Address:  address,
-		Port:     port,
-		Protocol: normalizedHostProtocol(protocol),
-	}
-	return db.Transaction(func(txLocal *gorm.DB) error {
-		if err := txLocal.Create(&host).Error; err != nil {
-			return err
-		}
-		return s.syncResourceTx(txLocal, model.ResourceTypeHost, host.ID, hostResourceName(host), "")
-	})
-}
-
 func (s *DBStore) targetConfig(ctx context.Context, tx *gorm.DB, a model.HostAccount) TargetConfig {
 	host, port := s.hostAddressPort(ctx, tx, a.Host, a.HostID)
 	if host == "" {
@@ -213,24 +185,7 @@ func (s *DBStore) AddTarget(ctx context.Context, target config.Target) (TargetVi
 	if target.Username == "" {
 		return TargetView{}, errors.New("username is required")
 	}
-	if err := s.ensureHost(ctx, nil, target.HostID, target.Host, target.Protocol, target.Port); err != nil {
-		return TargetView{}, fmt.Errorf("ensure host: %w", err)
-	}
-	var targetHost model.Host
-	if err := s.db.WithContext(ctx).First(&targetHost, "id = ?", target.HostID).Error; err != nil {
-		return TargetView{}, fmt.Errorf("load target host: %w", err)
-	}
-	target.Protocol = normalizedHostProtocol(targetHost.Protocol)
-	if target.Protocol == "rdp" {
-		if err := validateNewRDPAccount(target); err != nil {
-			return TargetView{}, err
-		}
-	}
-	if err := s.ensureHostAccountUsernameAvailable(ctx, nil, target.HostID, target.Username, ""); err != nil {
-		return TargetView{}, err
-	}
-
-	seq, err := s.nextHostResourceSeq(ctx)
+	expiresAt, err := parseTargetExpiry(target.ExpiresAt)
 	if err != nil {
 		return TargetView{}, err
 	}
@@ -258,14 +213,8 @@ func (s *DBStore) AddTarget(ctx context.Context, target config.Target) (TargetVi
 		RDPDriveMapping:       target.RDPDriveMapping,
 		GroupName:             target.Group,
 		Remark:                target.Remark,
-		ResourceSeq:           seq,
-		ResourceID:            util.ResourceIDFromSeq(util.PrefixHost, seq),
+		ExpiresAt:             expiresAt,
 	}
-	expiresAt, err := parseTargetExpiry(target.ExpiresAt)
-	if err != nil {
-		return TargetView{}, err
-	}
-	a.ExpiresAt = expiresAt
 	if target.PrivateKeyPEM != "" || target.PrivateKeyPath != "" {
 		a.AuthType = "private_key"
 		if target.PrivateKeyPath != "" && target.PrivateKeyPEM == "" {
@@ -278,12 +227,35 @@ func (s *DBStore) AddTarget(ctx context.Context, target config.Target) (TargetVi
 		a.Status = "disabled"
 	}
 	if err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		targetHost, createHost, err := s.lockTargetHost(tx, target.HostID, target.Host, target.Protocol, target.Port)
+		if err != nil {
+			return fmt.Errorf("load target host: %w", err)
+		}
+		target.Protocol = normalizedHostProtocol(targetHost.Protocol)
+		if target.Protocol == "rdp" {
+			if err := validateNewRDPAccount(target); err != nil {
+				return err
+			}
+		}
+		if err := s.ensureHost(tx, &targetHost, createHost); err != nil {
+			return fmt.Errorf("ensure host: %w", err)
+		}
+		if err := s.ensureHostAccountUsernameAvailable(tx, target.HostID, target.Username, ""); err != nil {
+			return err
+		}
+		seq, err := s.nextHostResourceSeq(tx)
+		if err != nil {
+			return err
+		}
+		a.ResourceSeq = seq
+		a.ResourceID = util.ResourceIDFromSeq(util.PrefixHost, seq)
 		if err := tx.Create(&a).Error; err != nil {
 			return err
 		}
-		if err := tx.First(&a.Host, "id = ?", a.HostID).Error; err != nil {
-			return err
+		if err := ensureAccountGroup(tx, target.Group); err != nil {
+			return fmt.Errorf("create target group: %w", err)
 		}
+		a.Host = targetHost
 		if err := s.syncResourceTx(tx, model.ResourceTypeHostAccount, a.ID, hostAccountResourceName(a), a.HostID); err != nil {
 			return fmt.Errorf("sync target resource: %w", err)
 		}
@@ -303,6 +275,9 @@ func (s *DBStore) UpdateTarget(ctx context.Context, id string, target config.Tar
 	if err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.First(&a, "id = ?", id).Error; err != nil {
 			return fmt.Errorf("%w: %q", ErrTargetNotFound, id)
+		}
+		if target.HostID != "" && target.HostID != a.HostID {
+			return errors.New("host_id cannot be changed through target update")
 		}
 		var targetHost model.Host
 		if err := tx.First(&targetHost, "id = ?", a.HostID).Error; err != nil {
@@ -326,7 +301,7 @@ func (s *DBStore) UpdateTarget(ctx context.Context, id string, target config.Tar
 		if target.Username == "" {
 			return errors.New("username is required")
 		}
-		if err := s.ensureHostAccountUsernameAvailable(ctx, tx, a.HostID, target.Username, a.ID); err != nil {
+		if err := s.ensureHostAccountUsernameAvailable(tx, a.HostID, target.Username, a.ID); err != nil {
 			return err
 		}
 
@@ -383,14 +358,6 @@ func (s *DBStore) UpdateTarget(ctx context.Context, id string, target config.Tar
 
 		if err := ensureAccountGroup(tx, target.Group); err != nil {
 			return fmt.Errorf("update target: %w", err)
-		}
-
-		hostID := target.HostID
-		if hostID == "" {
-			hostID = a.HostID
-		}
-		if err := s.updateHostIfChanged(ctx, tx, hostID, target.Host, target.Port); err != nil {
-			return err
 		}
 
 		if err := tx.Save(&a).Error; err != nil {
@@ -459,45 +426,4 @@ func (s *DBStore) DefaultTarget(ctx context.Context, user model.User) (TargetCon
 		return TargetConfig{}, fmt.Errorf("find default target: %w", err)
 	}
 	return s.targetConfig(ctx, nil, account), nil
-}
-
-func (s *DBStore) ensureHostAccountUsernameAvailable(ctx context.Context, tx *gorm.DB, hostID, username, exceptID string) error {
-	var count int64
-	q := queryWithContext(s.db, tx, ctx).Model(&model.HostAccount{}).
-		Where("host_id = ? AND username = ?", hostID, username)
-	if exceptID != "" {
-		q = q.Where("id <> ?", exceptID)
-	}
-	if err := q.Count(&count).Error; err != nil {
-		return fmt.Errorf("check host account duplicate: %w", err)
-	}
-	if count > 0 {
-		return fmt.Errorf("host account %q already exists on host %q", username, hostID)
-	}
-	return nil
-}
-
-func (s *DBStore) updateHostIfChanged(ctx context.Context, tx *gorm.DB, hostID string, host string, port int) error {
-	if host == "" && port == 0 {
-		return nil
-	}
-	if tx == nil {
-		return s.db.WithContext(ctx).Transaction(func(inner *gorm.DB) error {
-			return s.updateHostIfChanged(ctx, inner, hostID, host, port)
-		})
-	}
-	var h model.Host
-	if err := tx.First(&h, "id = ?", hostID).Error; err != nil {
-		return nil
-	}
-	if host != "" {
-		h.Address = host
-	}
-	if port != 0 {
-		h.Port = port
-	}
-	if err := tx.Save(&h).Error; err != nil {
-		return err
-	}
-	return s.syncResourceTx(tx, model.ResourceTypeHost, h.ID, hostResourceName(h), "")
 }

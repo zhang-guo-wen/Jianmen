@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"jianmen/internal/model"
 )
@@ -127,34 +128,38 @@ func (s *DBStore) AddHost(ctx context.Context, host HostRecord) (HostView, error
 }
 
 func (s *DBStore) UpdateHost(ctx context.Context, id string, host HostRecord) (HostView, error) {
-	var m model.Host
-	if err := s.db.WithContext(ctx).First(&m, "id = ?", id).Error; err != nil {
-		return HostView{}, fmt.Errorf("%w: %q", ErrHostNotFound, id)
-	}
 	if err := validateHostProtocol(host.Protocol); err != nil {
 		return HostView{}, err
 	}
 	normalized := normalizeHostRecord(host)
-	if normalizedHostProtocol(m.Protocol) != normalized.Protocol {
-		var accountCount int64
-		if err := s.db.WithContext(ctx).Model(&model.HostAccount{}).Where("host_id = ?", m.ID).Count(&accountCount).Error; err != nil {
-			return HostView{}, fmt.Errorf("count host accounts: %w", err)
-		}
-		if accountCount != 0 {
-			return HostView{}, errors.New("host protocol cannot change while accounts exist")
-		}
-	}
-	m.Name = normalized.Name
-	m.Address = normalized.Address
-	m.Port = normalized.Port
-	m.Protocol = normalized.Protocol
-	m.GroupName = normalized.Group
-	m.Remark = normalized.Remark
-	m.Status = "active"
-	if normalized.Status == "disabled" {
-		m.Status = "disabled"
-	}
+	var (
+		m                           model.Host
+		protocolChangeValidationErr error
+	)
 	if err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&m, "id = ?", id).Error; err != nil {
+			return fmt.Errorf("%w: %q", ErrHostNotFound, id)
+		}
+		if normalizedHostProtocol(m.Protocol) != normalized.Protocol {
+			var accountCount int64
+			if err := tx.Model(&model.HostAccount{}).Where("host_id = ?", m.ID).Count(&accountCount).Error; err != nil {
+				return fmt.Errorf("count host accounts: %w", err)
+			}
+			if accountCount != 0 {
+				protocolChangeValidationErr = errors.New("host protocol cannot change while accounts exist")
+				return protocolChangeValidationErr
+			}
+		}
+		m.Name = normalized.Name
+		m.Address = normalized.Address
+		m.Port = normalized.Port
+		m.Protocol = normalized.Protocol
+		m.GroupName = normalized.Group
+		m.Remark = normalized.Remark
+		m.Status = "active"
+		if normalized.Status == "disabled" {
+			m.Status = "disabled"
+		}
 		if err := tx.Save(&m).Error; err != nil {
 			return err
 		}
@@ -163,6 +168,9 @@ func (s *DBStore) UpdateHost(ctx context.Context, id string, host HostRecord) (H
 		}
 		return s.syncResourceTx(tx, model.ResourceTypeHost, m.ID, hostResourceName(m), "")
 	}); err != nil {
+		if errors.Is(err, ErrHostNotFound) || errors.Is(err, protocolChangeValidationErr) {
+			return HostView{}, err
+		}
 		return HostView{}, fmt.Errorf("update host: %w", err)
 	}
 	return s.hostView(ctx, m), nil

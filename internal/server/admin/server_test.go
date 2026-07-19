@@ -119,7 +119,7 @@ func TestHandleTargetCRUD(t *testing.T) {
 	if err := decodeTestData(t, updateRec.Body.Bytes(), &updated); err != nil {
 		t.Fatalf("unmarshal update response: %v", err)
 	}
-	if updated.Name != "updated runtime" || updated.Host != "10.0.0.2" || updated.Port != 2200 || updated.Username != "ubuntu" {
+	if updated.Name != "updated runtime" || updated.Host != "127.0.0.2" || updated.Port != 22 || updated.Username != "ubuntu" {
 		t.Fatalf("unexpected updated target view: %#v", updated)
 	}
 	if updated.InsecureIgnoreHostKey || updated.HostKeyFingerprint != "SHA256:test-fingerprint" || updated.KnownHostsPath != "" {

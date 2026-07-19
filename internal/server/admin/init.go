@@ -199,6 +199,11 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 
 	// Browser logins use an HttpOnly server-side session.  User token hashes are
 	// retained exclusively for CLI and protocol identities.
+	if err := s.logLogin(r, username, user.ID, "success", ""); err != nil {
+		s.logger.Error("admin login audit gate failed", "user_id", user.ID, "error", err)
+		s.writeErrorText(w, r, http.StatusServiceUnavailable, "login audit unavailable")
+		return
+	}
 	user.LastLoginAt = &now
 	if err := s.db.Save(&user).Error; err != nil {
 		s.writeErrorText(w, r, http.StatusInternalServerError, "failed to save login state")
@@ -211,7 +216,6 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	limiter.reset(limitKey)
-	s.logLogin(r, username, user.ID, "success", "")
 	setBrowserSessionCookie(w, r, session.Secret, session.ExpiresAt, s.cfg.Admin.PublicURL)
 	s.writeJSON(w, r, http.StatusOK, map[string]string{"csrf_token": session.CSRFToken})
 }

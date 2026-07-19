@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"errors"
 	"fmt"
 	"log/slog"
 	"math"
@@ -120,12 +121,15 @@ func setRetryAfter(w http.ResponseWriter, d time.Duration) {
 	w.Header().Set("Retry-After", fmt.Sprintf("%d", seconds))
 }
 
-func (s *Server) logLogin(r *http.Request, username, userID, outcome, reason string) {
+func (s *Server) logLogin(r *http.Request, username, userID, outcome, reason string) error {
 	logger := s.logger
 	if logger == nil {
 		logger = slog.Default()
 	}
-	if s.audit != nil {
+	var auditErr error
+	if s.audit == nil {
+		auditErr = errors.New("login audit unavailable")
+	} else {
 		ctx, cancel := detachedAuditWriteContext(r.Context())
 		defer cancel()
 		if err := s.audit.CreateLoginAuditLog(ctx, &model.LoginAuditLog{
@@ -136,6 +140,7 @@ func (s *Server) logLogin(r *http.Request, username, userID, outcome, reason str
 			ClientIP:  requestClientIP(r),
 			UserAgent: r.UserAgent(),
 		}); err != nil {
+			auditErr = err
 			logger.Warn("failed to write login audit log", "username", username, "outcome", outcome, "error", err)
 		}
 	}
@@ -149,7 +154,8 @@ func (s *Server) logLogin(r *http.Request, username, userID, outcome, reason str
 	}
 	if outcome == "success" {
 		logger.Info("admin login", attrs...)
-		return
+		return auditErr
 	}
 	logger.Warn("admin login", attrs...)
+	return auditErr
 }

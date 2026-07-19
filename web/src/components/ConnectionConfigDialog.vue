@@ -93,8 +93,8 @@
     </div>
 
     <template #footer>
-      <el-button v-if="resourceType === 'host' && allowSsh" type="primary" :loading="preferences.loading" @click="openPreferredSSHClient">本地 SSH 客户端打开</el-button>
-      <el-button v-if="resourceType === 'host' && allowSsh" type="primary" @click="openInBrowser">在浏览器中打开</el-button>
+      <el-button data-testid="ssh-local-client" v-if="resourceType === 'host' && allowSsh" type="primary" :loading="preferences.loading" @click="openPreferredSSHClient">本地 SSH 客户端打开</el-button>
+      <el-button data-testid="ssh-browser" v-if="resourceType === 'host' && allowSsh" type="primary" @click="openInBrowser">在浏览器中打开</el-button>
       <el-button @click="visible = false">关闭</el-button>
     </template>
   </el-dialog>
@@ -204,7 +204,11 @@ const CommandRows = defineComponent({
       readonly: true,
       size: 'small',
     }, {
-      append: () => h(ElButton, { loading: componentProps.loadingFor(command.value), onClick: () => emit('copy', command.value) }, () => `复制${command.label}`),
+      append: () => h(ElButton, {
+        'data-testid': `connection-command-${command.label.includes('SFTP') ? 'sftp' : 'ssh'}`,
+        loading: componentProps.loadingFor(command.value),
+        onClick: () => emit('copy', command.value),
+      }, () => `复制${command.label}`),
     })));
   },
 });

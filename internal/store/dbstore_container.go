@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -66,19 +67,22 @@ func (s *DBStore) ListContainerEndpoints(ctx context.Context, params ContainerEn
 	return views, total, nil
 }
 
-func (s *DBStore) ContainerEndpoint(id string) (ContainerEndpointView, error) {
+func (s *DBStore) ContainerEndpoint(ctx context.Context, id string) (ContainerEndpointView, error) {
 	var endpoint model.ContainerEndpoint
-	if err := s.db.First(&endpoint, "id = ?", strings.TrimSpace(id)).Error; err != nil {
+	if err := s.db.WithContext(ctx).First(&endpoint, "id = ?", strings.TrimSpace(id)).Error; err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return ContainerEndpointView{}, err
+		}
 		return ContainerEndpointView{}, fmt.Errorf("%w: %q", ErrContainerEndpointNotFound, id)
 	}
-	views, err := s.containerEndpointViews(context.Background(), []model.ContainerEndpoint{endpoint})
+	views, err := s.containerEndpointViews(ctx, []model.ContainerEndpoint{endpoint})
 	if err != nil {
 		return ContainerEndpointView{}, err
 	}
 	return views[0], nil
 }
 
-func (s *DBStore) AddContainerEndpoint(input ContainerEndpointInput) (ContainerEndpointView, error) {
+func (s *DBStore) AddContainerEndpoint(ctx context.Context, input ContainerEndpointInput) (ContainerEndpointView, error) {
 	normalized, err := normalizeContainerEndpointInput(input)
 	if err != nil {
 		return ContainerEndpointView{}, err
@@ -89,7 +93,7 @@ func (s *DBStore) AddContainerEndpoint(input ContainerEndpointInput) (ContainerE
 		Address: normalized.Address, Port: normalized.Port, HostID: normalized.HostID,
 		HostAccountID: normalized.HostAccountID, Remark: normalized.Remark, Status: normalized.Status,
 	}
-	if err := s.db.Transaction(func(tx *gorm.DB) error {
+	if err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Create(&endpoint).Error; err != nil {
 			return err
 		}
@@ -100,16 +104,19 @@ func (s *DBStore) AddContainerEndpoint(input ContainerEndpointInput) (ContainerE
 	}); err != nil {
 		return ContainerEndpointView{}, fmt.Errorf("create container endpoint: %w", err)
 	}
-	views, err := s.containerEndpointViews(context.Background(), []model.ContainerEndpoint{endpoint})
+	views, err := s.containerEndpointViews(ctx, []model.ContainerEndpoint{endpoint})
 	if err != nil {
 		return ContainerEndpointView{}, err
 	}
 	return views[0], nil
 }
 
-func (s *DBStore) UpdateContainerEndpoint(id string, input ContainerEndpointInput) (ContainerEndpointView, error) {
+func (s *DBStore) UpdateContainerEndpoint(ctx context.Context, id string, input ContainerEndpointInput) (ContainerEndpointView, error) {
 	var endpoint model.ContainerEndpoint
-	if err := s.db.First(&endpoint, "id = ?", strings.TrimSpace(id)).Error; err != nil {
+	if err := s.db.WithContext(ctx).First(&endpoint, "id = ?", strings.TrimSpace(id)).Error; err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return ContainerEndpointView{}, fmt.Errorf("find container endpoint for update: %w", err)
+		}
 		return ContainerEndpointView{}, fmt.Errorf("%w: %q", ErrContainerEndpointNotFound, id)
 	}
 	normalized, err := normalizeContainerEndpointInput(input)
@@ -121,7 +128,7 @@ func (s *DBStore) UpdateContainerEndpoint(id string, input ContainerEndpointInpu
 	endpoint.Address, endpoint.Port = normalized.Address, normalized.Port
 	endpoint.HostID, endpoint.HostAccountID = normalized.HostID, normalized.HostAccountID
 	endpoint.Remark, endpoint.Status = normalized.Remark, normalized.Status
-	if err := s.db.Transaction(func(tx *gorm.DB) error {
+	if err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Save(&endpoint).Error; err != nil {
 			return err
 		}
@@ -132,17 +139,20 @@ func (s *DBStore) UpdateContainerEndpoint(id string, input ContainerEndpointInpu
 	}); err != nil {
 		return ContainerEndpointView{}, fmt.Errorf("update container endpoint: %w", err)
 	}
-	views, err := s.containerEndpointViews(context.Background(), []model.ContainerEndpoint{endpoint})
+	views, err := s.containerEndpointViews(ctx, []model.ContainerEndpoint{endpoint})
 	if err != nil {
 		return ContainerEndpointView{}, err
 	}
 	return views[0], nil
 }
 
-func (s *DBStore) DeleteContainerEndpoint(id string) error {
-	return s.db.Transaction(func(tx *gorm.DB) error {
+func (s *DBStore) DeleteContainerEndpoint(ctx context.Context, id string) error {
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var endpoint model.ContainerEndpoint
 		if err := tx.First(&endpoint, "id = ?", strings.TrimSpace(id)).Error; err != nil {
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				return fmt.Errorf("find container endpoint for delete: %w", err)
+			}
 			return fmt.Errorf("%w: %q", ErrContainerEndpointNotFound, id)
 		}
 		if err := s.deleteResourceTx(tx, model.ResourceTypeContainerEndpoint, endpoint.ID); err != nil {

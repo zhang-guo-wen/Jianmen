@@ -30,7 +30,7 @@ type Server struct {
 	userSessionCreation  *service.UserSessionCreationService
 	audit                adminAuditRepository
 	connectionPassword   *service.ConnectionPasswordService
-	preferences          adminUserPreferenceRepository
+	preferences          *service.UserPreferenceService
 	temporaryRepository  service.TemporaryAccessRepository
 	userRepository       service.UserRepository
 	userGroupRepository  service.UserGroupRepository
@@ -142,6 +142,10 @@ func New(
 	if err != nil {
 		return nil, fmt.Errorf("initialize connection password service: %w", err)
 	}
+	userPreferences, err := service.NewUserPreferenceService(dependencies.userPreferences)
+	if err != nil {
+		return nil, fmt.Errorf("initialize user preference service: %w", err)
+	}
 	databaseManagement, err := service.NewDatabaseManagementService(databaseManagementRepositoryAdapter{repository: dependencies.databases}, authorization, databaseProvisioning)
 	if err != nil {
 		return nil, fmt.Errorf("initialize database management service: %w", err)
@@ -174,7 +178,7 @@ func New(
 		databaseManagement: databaseManagement, applicationService: applicationService,
 		containerManagement: containerManagement, platformAccounts: dependencies.platformAccounts,
 		userSessionCreation: userSessionCreation, audit: dependencies.audit, connectionPassword: connectionPassword,
-		preferences: dependencies.preferences, temporaryRepository: dependencies.temporaryAccess,
+		preferences: userPreferences, temporaryRepository: dependencies.temporaryAccess,
 		userRepository: dependencies.users, userGroupRepository: dependencies.userGroups, roleRepository: dependencies.roles,
 		dataDir:      dataDir,
 		loginLimiter: newDefaultLoginLimiter(), loginCaptcha: loginCaptcha,

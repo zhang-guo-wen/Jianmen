@@ -161,7 +161,7 @@ func TestAdminRepositoryBoundaryStaysStaticallyComposedAndDomainSplit(t *testing
 		"userSessionCreation": reflect.TypeOf((*service.UserSessionCreationService)(nil)),
 		"audit":               reflect.TypeOf((*adminAuditRepository)(nil)).Elem(),
 		"connectionPassword":  reflect.TypeOf((*service.ConnectionPasswordService)(nil)),
-		"preferences":         reflect.TypeOf((*adminUserPreferenceRepository)(nil)).Elem(),
+		"preferences":         reflect.TypeOf((*service.UserPreferenceService)(nil)),
 	}
 	for name, want := range expectedFields {
 		field, found := serverType.FieldByName(name)
@@ -187,7 +187,7 @@ func TestAdminRepositoryBoundaryStaysStaticallyComposedAndDomainSplit(t *testing
 		"adminUserSessionCreationRepository": true,
 		"adminAuditRepository":               true,
 		"adminConnectionPasswordRepository":  true,
-		"adminUserPreferenceRepository":      true,
+		"service.UserPreferenceRepository":   true,
 		"resourceAccessRepository":           true,
 		"service.TemporaryAccessRepository":  true,
 		"service.UserRepository":             true,
@@ -300,7 +300,6 @@ func applyTestAdminDependencies(t *testing.T, server *Server, repository adminRe
 			t.Fatalf("new connection password service: %v", err)
 		}
 	}
-	server.preferences = dependencies.preferences
 	if server.resourceAccess == nil {
 		server.resourceAccess = dependencies.resourceAccess
 	}
@@ -340,6 +339,12 @@ func applyTestAdminServices(t *testing.T, server *Server, repository adminReposi
 		server.roleManagement, err = newRoleManagementService(dependencies.roles)
 		if err != nil {
 			t.Fatalf("new role service: %v", err)
+		}
+	}
+	if server.preferences == nil {
+		server.preferences, err = service.NewUserPreferenceService(dependencies.userPreferences)
+		if err != nil {
+			t.Fatalf("new user preference service: %v", err)
 		}
 	}
 }

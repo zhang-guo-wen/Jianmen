@@ -27,12 +27,12 @@ type adminRepository interface {
 	adminUserSessionCreationRepository
 	adminAuditRepository
 	adminConnectionPasswordRepository
-	adminUserPreferenceRepository
 	resourceAccessRepository
 	service.TemporaryAccessRepository
 	service.UserRepository
 	service.UserGroupRepository
 	service.RoleManagementRepository
+	service.UserPreferenceRepository
 }
 
 // adminDependencies keeps the server coupled to resource-scoped repositories
@@ -47,12 +47,12 @@ type adminDependencies struct {
 	userSessionCreation adminUserSessionCreationRepository
 	audit               adminAuditRepository
 	connectionPassword  adminConnectionPasswordRepository
-	preferences         adminUserPreferenceRepository
 	resourceAccess      resourceAccessRepository
 	temporaryAccess     service.TemporaryAccessRepository
 	users               service.UserRepository
 	userGroups          service.UserGroupRepository
 	roles               service.RoleManagementRepository
+	userPreferences     service.UserPreferenceRepository
 }
 
 type adminAIAccessTokenRepository interface {
@@ -135,11 +135,6 @@ type adminConnectionPasswordRepository interface {
 	service.ConnectionPasswordRepository
 }
 
-type adminUserPreferenceRepository interface {
-	UserPreference(context.Context, string) (model.UserPreference, error)
-	SaveUserPreference(context.Context, model.UserPreference) (model.UserPreference, error)
-}
-
 func resolveAdminDependencies(repository adminRepository) (adminDependencies, error) {
 	if isNilAdminRepository(repository) {
 		return adminDependencies{}, errAdminStoreRequired
@@ -154,12 +149,12 @@ func resolveAdminDependencies(repository adminRepository) (adminDependencies, er
 		userSessionCreation: repository,
 		audit:               repository,
 		connectionPassword:  repository,
-		preferences:         repository,
 		resourceAccess:      repository,
 		temporaryAccess:     repository,
 		users:               repository,
 		userGroups:          repository,
 		roles:               repository,
+		userPreferences:     repository,
 	}, nil
 }
 

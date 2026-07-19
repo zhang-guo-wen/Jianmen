@@ -2,10 +2,11 @@ package admin
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
-	"strings"
 
 	"jianmen/internal/model"
+	"jianmen/internal/service"
 )
 
 type userPreferenceResponse struct {
@@ -32,7 +33,7 @@ func (s *Server) handleMePreferences(w http.ResponseWriter, r *http.Request) {
 	}
 	switch r.Method {
 	case http.MethodGet:
-		preference, err := s.preferences.UserPreference(r.Context(), userID)
+		preference, err := s.preferences.Get(r.Context(), userID)
 		if err != nil {
 			s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
 			return
@@ -56,58 +57,26 @@ func (s *Server) updateMePreferences(w http.ResponseWriter, r *http.Request, use
 		s.writeErrorText(w, r, http.StatusBadRequest, err.Error())
 		return
 	}
-	preference, err := s.preferences.UserPreference(r.Context(), userID)
+	preference, err := s.preferences.Update(r.Context(), userID, toUserPreferencePatch(request))
 	if err != nil {
-		s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
-		return
-	}
-	applyUserPreferenceRequest(&preference, request)
-	if message := validateUserPreference(preference); message != "" {
-		s.writeErrorText(w, r, http.StatusBadRequest, message)
-		return
-	}
-	preference, err = s.preferences.SaveUserPreference(r.Context(), preference)
-	if err != nil {
+		if errors.Is(err, service.ErrInvalidUserPreference) {
+			s.writeErrorText(w, r, http.StatusBadRequest, err.Error())
+			return
+		}
 		s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
 		return
 	}
 	s.writeJSON(w, r, http.StatusOK, userPreferenceView(preference))
 }
 
-func applyUserPreferenceRequest(preference *model.UserPreference, request userPreferenceRequest) {
-	if request.Theme != nil {
-		preference.Theme = strings.ToLower(strings.TrimSpace(*request.Theme))
+func toUserPreferencePatch(request userPreferenceRequest) service.UserPreferencePatch {
+	return service.UserPreferencePatch{
+		Theme:              request.Theme,
+		SSHClient:          request.SSHClient,
+		SSHClientPath:      request.SSHClientPath,
+		TerminalFontFamily: request.TerminalFontFamily,
+		TerminalFontSize:   request.TerminalFontSize,
 	}
-	if request.SSHClient != nil {
-		preference.SSHClient = strings.ToLower(strings.TrimSpace(*request.SSHClient))
-	}
-	if request.SSHClientPath != nil {
-		preference.SSHClientPath = strings.TrimSpace(*request.SSHClientPath)
-	}
-	if request.TerminalFontFamily != nil {
-		preference.TerminalFontFamily = strings.TrimSpace(*request.TerminalFontFamily)
-	}
-	if request.TerminalFontSize != nil {
-		preference.TerminalFontSize = *request.TerminalFontSize
-	}
-}
-
-func validateUserPreference(preference model.UserPreference) string {
-	validThemes := map[string]bool{"system": true, "light": true, "dark": true}
-	if !validThemes[preference.Theme] {
-		return "theme must be system, light, or dark"
-	}
-	validClients := map[string]bool{"": true, "default": true, "xshell": true, "putty": true, "securecrt": true, "mobaxterm": true, "winterm": true, "system": true}
-	if !validClients[preference.SSHClient] {
-		return "unsupported ssh client"
-	}
-	if preference.TerminalFontSize < 10 || preference.TerminalFontSize > 30 {
-		return "terminal_font_size must be between 10 and 30"
-	}
-	if len(preference.SSHClientPath) > 512 || len(preference.TerminalFontFamily) > 128 {
-		return "preference value is too long"
-	}
-	return ""
 }
 
 func userPreferenceView(preference model.UserPreference) userPreferenceResponse {

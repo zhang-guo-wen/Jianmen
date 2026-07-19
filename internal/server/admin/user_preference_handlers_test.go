@@ -38,8 +38,8 @@ func TestMePreferencesDefaultsAndPersists(t *testing.T) {
 		t.Fatalf("put preferences status = %d, body=%s", putRecorder.Code, putRecorder.Body.String())
 	}
 
-	stored, err := server.preferences.UserPreference(putRequest.Context(), "u1")
-	if err != nil {
+	var stored model.UserPreference
+	if err := db.First(&stored, "user_id = ?", "u1").Error; err != nil {
 		t.Fatalf("read stored preference: %v", err)
 	}
 	if stored.Theme != "dark" || stored.SSHClient != "xshell" || stored.TerminalFontSize != 16 {
@@ -58,12 +58,18 @@ func TestUserPreferenceModelHasNoRemovedDatabaseClientFields(t *testing.T) {
 
 func TestMePreferencesRejectsInvalidValues(t *testing.T) {
 	server, _ := newAdminDBTestServer(t)
-	body := bytes.NewBufferString(`{"theme":"neon","terminal_font_size":99}`)
-	request := asTestUser(httptest.NewRequest(http.MethodPut, "/api/me/preferences", body), "u1", "alice")
-	recorder := httptest.NewRecorder()
-	server.handleMePreferences(recorder, request)
-	if recorder.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400; body=%s", recorder.Code, recorder.Body.String())
+	cases := []string{
+		`{"theme":"neon","terminal_font_size":99}`,
+		`{"language":"zh-CN"}`,
+		`{"layout":"split"}`,
+	}
+	for _, body := range cases {
+		recorder := httptest.NewRecorder()
+		request := asTestUser(httptest.NewRequest(http.MethodPut, "/api/me/preferences", bytes.NewBufferString(body)), "u1", "alice")
+		server.handleMePreferences(recorder, request)
+		if recorder.Code != http.StatusBadRequest {
+			t.Fatalf("body = %s, status = %d, want 400; body=%s", body, recorder.Code, recorder.Body.String())
+		}
 	}
 }
 
@@ -75,5 +81,22 @@ func TestMePreferencesRejectsRemovedDatabaseClientFields(t *testing.T) {
 	server.handleMePreferences(recorder, request)
 	if recorder.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400; body=%s", recorder.Code, recorder.Body.String())
+	}
+}
+
+func TestMePreferencesRejectsMissingUserID(t *testing.T) {
+	server, _ := newAdminDBTestServer(t)
+
+	getRecorder := httptest.NewRecorder()
+	server.handleMePreferences(getRecorder, httptest.NewRequest(http.MethodGet, "/api/me/preferences", nil))
+	if getRecorder.Code != http.StatusNotFound {
+		t.Fatalf("get status = %d, want %d; body=%s", getRecorder.Code, http.StatusNotFound, getRecorder.Body.String())
+	}
+
+	putRecorder := httptest.NewRecorder()
+	putRecorderBody := bytes.NewBufferString(`{"theme":"dark"}`)
+	server.handleMePreferences(putRecorder, httptest.NewRequest(http.MethodPut, "/api/me/preferences", putRecorderBody))
+	if putRecorder.Code != http.StatusNotFound {
+		t.Fatalf("put status = %d, want %d; body=%s", putRecorder.Code, http.StatusNotFound, putRecorder.Body.String())
 	}
 }

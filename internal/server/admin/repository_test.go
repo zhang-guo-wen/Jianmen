@@ -247,7 +247,6 @@ func applyTestAdminDependencies(t *testing.T, server *Server, repository adminRe
 	if err != nil {
 		t.Fatalf("resolve admin dependencies: %v", err)
 	}
-	server.aiTokens = dependencies.aiTokens
 	server.hostTargets = dependencies.hostTargets
 	server.databases = dependencies.databases
 	if server.applicationService == nil {
@@ -304,6 +303,12 @@ func applyTestAdminServices(t *testing.T, server *Server, repository adminReposi
 		server.temporaryAccess, err = service.NewTemporaryAccessService(dependencies.temporaryAccess)
 		if err != nil {
 			t.Fatalf("new temporary access service: %v", err)
+		}
+	}
+	if server.aiAccessTokens == nil {
+		server.aiAccessTokens, err = service.NewAIAccessTokenService(dependencies.aiTokens)
+		if err != nil {
+			t.Fatalf("new AI access token service: %v", err)
 		}
 	}
 	if server.userManagement == nil {

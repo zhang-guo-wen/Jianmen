@@ -103,7 +103,7 @@ func TestVisibleResourcesUseContainerAndAccountGrants(t *testing.T) {
 		}
 	}
 
-	instances, err := server.visibleDatabaseInstances(request, server.databases.DatabaseInstances())
+	instances, err := server.visibleDatabaseInstances(request, server.databases.DatabaseInstances(context.Background()))
 	if err != nil {
 		t.Fatalf("visibleDatabaseInstances: %v", err)
 	}

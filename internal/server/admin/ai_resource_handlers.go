@@ -92,7 +92,7 @@ func (s *Server) listAIResources(w http.ResponseWriter, r *http.Request) {
 			resources = append(resources, hostAIResource(target))
 		}
 	}
-	accounts, err := s.databases.DatabaseAccounts()
+	accounts, err := s.databases.DatabaseAccounts(r.Context())
 	if err != nil {
 		s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
 		return
@@ -104,7 +104,7 @@ func (s *Server) listAIResources(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if allowed && aiResourceStatusActive(account.Status) && (account.ExpiresAt == nil || time.Now().UTC().Before(*account.ExpiresAt)) {
-			instance, instanceErr := s.databases.DatabaseInstance(account.InstanceID)
+			instance, instanceErr := s.databases.DatabaseInstance(r.Context(), account.InstanceID)
 			if instanceErr != nil || !aiResourceStatusActive(instance.Status) {
 				continue
 			}
@@ -115,7 +115,7 @@ func (s *Server) listAIResources(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) getAIResource(w http.ResponseWriter, r *http.Request, resourceType, resourceID string) {
-	resource, err := s.loadAIResource(r, resourceType, resourceID)
+	resource, err := s.loadAIResource(r.Context(), resourceType, resourceID)
 	if err != nil {
 		s.writeAIResourceError(w, r, err)
 		return
@@ -164,7 +164,7 @@ func (s *Server) issueAIResourceCredential(w http.ResponseWriter, r *http.Reques
 }
 
 func (s *Server) issueAIResourceSession(w http.ResponseWriter, r *http.Request, resourceType, resourceID string) {
-	resource, err := s.loadAIResource(r, resourceType, resourceID)
+	resource, err := s.loadAIResource(r.Context(), resourceType, resourceID)
 	if err != nil {
 		s.writeAIResourceError(w, r, err)
 		return
@@ -194,9 +194,9 @@ func (s *Server) issueAIResourceSession(w http.ResponseWriter, r *http.Request, 
 	})
 }
 
-func (s *Server) loadAIResource(r *http.Request, resourceType, resourceID string) (aiResource, error) {
+func (s *Server) loadAIResource(ctx context.Context, resourceType, resourceID string) (aiResource, error) {
 	if resourceType == model.ResourceTypeHostAccount {
-		target, err := s.hostTargets.Target(r.Context(), resourceID)
+		target, err := s.hostTargets.Target(ctx, resourceID)
 		if err != nil {
 			return aiResource{}, err
 		}
@@ -206,14 +206,14 @@ func (s *Server) loadAIResource(r *http.Request, resourceType, resourceID string
 		return hostAIResource(target), nil
 	}
 	if resourceType == model.ResourceTypeDatabaseAccount {
-		account, err := s.databases.DatabaseAccount(resourceID)
+		account, err := s.databases.DatabaseAccount(ctx, resourceID)
 		if err != nil {
 			return aiResource{}, err
 		}
 		if !aiResourceStatusActive(account.Status) || (account.ExpiresAt != nil && time.Now().UTC().After(*account.ExpiresAt)) {
 			return aiResource{}, gorm.ErrRecordNotFound
 		}
-		instance, err := s.databases.DatabaseInstance(account.InstanceID)
+		instance, err := s.databases.DatabaseInstance(ctx, account.InstanceID)
 		if err != nil || !aiResourceStatusActive(instance.Status) {
 			return aiResource{}, gorm.ErrRecordNotFound
 		}

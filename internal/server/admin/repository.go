@@ -78,16 +78,16 @@ type adminHostTargetRepository interface {
 }
 
 type adminDatabaseRepository interface {
-	DatabaseInstances() []store.DatabaseInstanceView
-	DatabaseInstance(string) (store.DatabaseInstanceView, error)
-	AddDatabaseInstance(store.DatabaseInstanceInput) (store.DatabaseInstanceView, error)
-	UpdateDatabaseInstance(string, store.DatabaseInstanceInput) (store.DatabaseInstanceView, error)
-	DeleteDatabaseInstance(string) error
-	DatabaseAccounts() ([]store.DatabaseAccountView, error)
-	DatabaseAccount(string) (store.DatabaseAccountView, error)
-	AddDatabaseAccount(string, string, string, string, string, *time.Time) (store.DatabaseAccountView, error)
-	UpdateDatabaseAccount(string, string, string, string, string, *time.Time, string) (store.DatabaseAccountView, error)
-	DeleteDatabaseAccount(string) error
+	DatabaseInstances(context.Context) []store.DatabaseInstanceView
+	DatabaseInstance(context.Context, string) (store.DatabaseInstanceView, error)
+	AddDatabaseInstance(context.Context, store.DatabaseInstanceInput) (store.DatabaseInstanceView, error)
+	UpdateDatabaseInstance(context.Context, string, store.DatabaseInstanceInput) (store.DatabaseInstanceView, error)
+	DeleteDatabaseInstance(context.Context, string) error
+	DatabaseAccounts(context.Context) ([]store.DatabaseAccountView, error)
+	DatabaseAccount(context.Context, string) (store.DatabaseAccountView, error)
+	AddDatabaseAccount(context.Context, string, string, string, string, string, *time.Time) (store.DatabaseAccountView, error)
+	UpdateDatabaseAccount(context.Context, string, string, string, string, string, *time.Time, string) (store.DatabaseAccountView, error)
+	DeleteDatabaseAccount(context.Context, string) error
 }
 
 type adminApplicationRepository interface {

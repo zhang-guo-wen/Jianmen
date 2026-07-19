@@ -25,15 +25,18 @@ func (s *DBStore) nextHostResourceSeq(tx *gorm.DB) (int, error) {
 	return storage.NextSequenceValueInTransaction(tx, storage.SequenceHostAccount, storage.MaxCompactResourceSeq)
 }
 
-func (s *DBStore) nextDBResourceSeq() (int, error) {
+func (s *DBStore) nextDBResourceSeq(db *gorm.DB) (int, error) {
+	if db == nil {
+		return 0, fmt.Errorf("database handle required")
+	}
 	var maxSeq int
-	if err := s.db.Model(&model.DatabaseAccount{}).
+	if err := db.Model(&model.DatabaseAccount{}).
 		Select("COALESCE(MAX(resource_seq), 0)").
 		Scan(&maxSeq).Error; err != nil {
 		return 0, fmt.Errorf("database resource sequence floor: %w", err)
 	}
-	if err := storage.EnsureSequenceNextValue(s.db, storage.SequenceDatabaseAccount, maxSeq+1); err != nil {
+	if err := storage.EnsureSequenceNextValue(db, storage.SequenceDatabaseAccount, maxSeq+1); err != nil {
 		return 0, err
 	}
-	return storage.NextSequenceValue(s.db, storage.SequenceDatabaseAccount, storage.MaxCompactResourceSeq)
+	return storage.NextSequenceValue(db, storage.SequenceDatabaseAccount, storage.MaxCompactResourceSeq)
 }

@@ -19,12 +19,13 @@ import (
 
 // -- db instances (DB-backed) --
 
-func (s *DBStore) DatabaseInstances() []DatabaseInstanceView {
+func (s *DBStore) DatabaseInstances(ctx context.Context) []DatabaseInstanceView {
+	query := s.db.WithContext(ctx)
 	var instances []model.DatabaseInstance
-	if err := s.db.Order("name ASC").Find(&instances).Error; err != nil {
+	if err := query.Order("name ASC").Find(&instances).Error; err != nil {
 		return nil
 	}
-	counts, err := s.databaseAccountCounts(databaseInstanceIDs(instances))
+	counts, err := s.databaseAccountCounts(query, databaseInstanceIDs(instances))
 	if err != nil {
 		return nil
 	}
@@ -35,16 +36,17 @@ func (s *DBStore) DatabaseInstances() []DatabaseInstanceView {
 	return views
 }
 
-func (s *DBStore) DatabaseInstance(id string) (DatabaseInstanceView, error) {
+func (s *DBStore) DatabaseInstance(ctx context.Context, id string) (DatabaseInstanceView, error) {
 	id = strings.TrimSpace(id)
 	var inst model.DatabaseInstance
-	if err := s.db.First(&inst, "id = ?", id).Error; err != nil {
+	query := s.db.WithContext(ctx)
+	if err := query.First(&inst, "id = ?", id).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return DatabaseInstanceView{}, fmt.Errorf("%w: %q", ErrDBInstanceNotFound, id)
 		}
 		return DatabaseInstanceView{}, err
 	}
-	count, err := s.databaseAccountCount(inst.ID)
+	count, err := s.databaseAccountCount(query, inst.ID)
 	if err != nil {
 		return DatabaseInstanceView{}, err
 	}
@@ -62,7 +64,7 @@ func normalizeDBProtocol(protocol string) (string, error) {
 	return protocol, nil
 }
 
-func (s *DBStore) AddDatabaseInstance(input DatabaseInstanceInput) (DatabaseInstanceView, error) {
+func (s *DBStore) AddDatabaseInstance(ctx context.Context, input DatabaseInstanceInput) (DatabaseInstanceView, error) {
 	instance, err := normalizeDatabaseInstanceInput(input, "")
 	if err != nil {
 		return DatabaseInstanceView{}, err
@@ -71,7 +73,7 @@ func (s *DBStore) AddDatabaseInstance(input DatabaseInstanceInput) (DatabaseInst
 	if inst.Name == "" {
 		inst.Name = inst.Address
 	}
-	if err := s.db.Transaction(func(tx *gorm.DB) error {
+	if err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Create(&inst).Error; err != nil {
 			return err
 		}
@@ -97,9 +99,9 @@ func (s *DBStore) ListDatabaseAccountsByInstance(ctx context.Context, instanceID
 	return views, nil
 }
 
-func (s *DBStore) DatabaseAccounts() ([]DatabaseAccountView, error) {
+func (s *DBStore) DatabaseAccounts(ctx context.Context) ([]DatabaseAccountView, error) {
 	var accounts []model.DatabaseAccount
-	if err := s.db.Order("username ASC").Find(&accounts).Error; err != nil {
+	if err := s.db.WithContext(ctx).Order("username ASC").Find(&accounts).Error; err != nil {
 		return nil, err
 	}
 	views := make([]DatabaseAccountView, 0, len(accounts))
@@ -188,15 +190,21 @@ func defaultDatabasePort(protocol string, port int) int {
 	return 3306
 }
 
-func (s *DBStore) databaseAccountCount(instanceID string) (int, error) {
+func (s *DBStore) databaseAccountCount(db *gorm.DB, instanceID string) (int, error) {
+	if db == nil {
+		return 0, fmt.Errorf("database handle required")
+	}
 	var count int64
-	if err := s.db.Model(&model.DatabaseAccount{}).Where("instance_id = ?", instanceID).Count(&count).Error; err != nil {
+	if err := db.Model(&model.DatabaseAccount{}).Where("instance_id = ?", instanceID).Count(&count).Error; err != nil {
 		return 0, err
 	}
 	return int(count), nil
 }
 
-func (s *DBStore) databaseAccountCounts(ids []string) (map[string]int, error) {
+func (s *DBStore) databaseAccountCounts(db *gorm.DB, ids []string) (map[string]int, error) {
+	if db == nil {
+		return nil, fmt.Errorf("database handle required")
+	}
 	counts := make(map[string]int, len(ids))
 	if len(ids) == 0 {
 		return counts, nil
@@ -205,7 +213,7 @@ func (s *DBStore) databaseAccountCounts(ids []string) (map[string]int, error) {
 		InstanceID string
 		Count      int64
 	}
-	if err := s.db.Model(&model.DatabaseAccount{}).
+	if err := db.Model(&model.DatabaseAccount{}).
 		Select("instance_id, COUNT(*) AS count").
 		Where("instance_id IN ?", ids).
 		Group("instance_id").
@@ -228,10 +236,10 @@ func databaseInstanceIDs(instances []model.DatabaseInstance) []string {
 	return ids
 }
 
-func (s *DBStore) DatabaseAccount(id string) (DatabaseAccountView, error) {
+func (s *DBStore) DatabaseAccount(ctx context.Context, id string) (DatabaseAccountView, error) {
 	id = strings.TrimSpace(id)
 	var acct model.DatabaseAccount
-	if err := s.db.First(&acct, "id = ?", id).Error; err != nil {
+	if err := s.db.WithContext(ctx).First(&acct, "id = ?", id).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return DatabaseAccountView{}, fmt.Errorf("%w: %q", ErrDBAccountNotFound, id)
 		}
@@ -240,71 +248,81 @@ func (s *DBStore) DatabaseAccount(id string) (DatabaseAccountView, error) {
 	return s.databaseAccountView(acct), nil
 }
 
-func (s *DBStore) AddDatabaseAccount(instanceID, username, password, group, remark string, expiresAt *time.Time) (DatabaseAccountView, error) {
+func (s *DBStore) AddDatabaseAccount(
+	ctx context.Context,
+	instanceID, username, password, group, remark string,
+	expiresAt *time.Time,
+) (DatabaseAccountView, error) {
 	instanceID = strings.TrimSpace(instanceID)
 	username = strings.TrimSpace(username)
 	if password == "" {
 		return DatabaseAccountView{}, errors.New("password is required")
 	}
-	// Verify instance exists
-	var inst model.DatabaseInstance
-	if err := s.db.First(&inst, "id = ?", instanceID).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return DatabaseAccountView{}, fmt.Errorf("%w: %q", ErrDBInstanceNotFound, instanceID)
+
+	var account model.DatabaseAccount
+	if err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var instance model.DatabaseInstance
+		if err := tx.First(&instance, "id = ?", instanceID).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return fmt.Errorf("%w: %q", ErrDBInstanceNotFound, instanceID)
+			}
+			return err
 		}
-		return DatabaseAccountView{}, err
-	}
-	if username != "" {
-		if err := s.ensureDatabaseAccountUsernameAvailable(instanceID, username, ""); err != nil {
-			return DatabaseAccountView{}, err
+		if username != "" {
+			if err := s.ensureDatabaseAccountUsernameAvailable(tx, instanceID, username, ""); err != nil {
+				return err
+			}
 		}
-	}
-	uniqueName, err := s.generateUniqueName()
-	if err != nil {
-		return DatabaseAccountView{}, err
-	}
-	// 閸掑棝鍘ょ挧鍕爱ID
-	seq, err := s.nextDBResourceSeq()
-	if err != nil {
-		return DatabaseAccountView{}, err
-	}
-	acct := model.DatabaseAccount{
-		InstanceID:  instanceID,
-		UniqueName:  uniqueName,
-		Username:    username,
-		Password:    model.NewEncryptedField(password),
-		GroupName:   strings.TrimSpace(group),
-		Remark:      strings.TrimSpace(remark),
-		ExpiresAt:   expiresAt,
-		ResourceSeq: seq,
-		ResourceID:  util.ResourceIDFromSeq(util.PrefixDatabase, seq),
-	}
-	if err := s.db.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Create(&acct).Error; err != nil {
+		uniqueName, err := s.generateUniqueName(tx)
+		if err != nil {
+			return err
+		}
+		// 閸掑棝鍘ょ挧鍕爱ID
+		seq, err := s.nextDBResourceSeq(tx)
+		if err != nil {
+			return err
+		}
+		account = model.DatabaseAccount{
+			InstanceID:  instanceID,
+			UniqueName:  uniqueName,
+			Username:    username,
+			Password:    model.NewEncryptedField(password),
+			GroupName:   strings.TrimSpace(group),
+			Remark:      strings.TrimSpace(remark),
+			ExpiresAt:   expiresAt,
+			ResourceSeq: seq,
+			ResourceID:  util.ResourceIDFromSeq(util.PrefixDatabase, seq),
+		}
+		if err := tx.Create(&account).Error; err != nil {
 			return err
 		}
 		if err := ensureAccountGroup(tx, strings.TrimSpace(group)); err != nil {
 			return err
 		}
-		return s.syncResourceTx(tx, model.ResourceTypeDatabaseAccount, acct.ID, databaseAccountResourceName(acct), acct.InstanceID)
+		return s.syncResourceTx(tx, model.ResourceTypeDatabaseAccount, account.ID, databaseAccountResourceName(account), account.InstanceID)
 	}); err != nil {
 		return DatabaseAccountView{}, err
 	}
-	return s.databaseAccountView(acct), nil
+	return s.databaseAccountView(account), nil
 }
 
-func (s *DBStore) UpdateDatabaseAccount(id, username, password, group, remark string, expiresAt *time.Time, status string) (DatabaseAccountView, error) {
+func (s *DBStore) UpdateDatabaseAccount(
+	ctx context.Context,
+	id, username, password, group, remark string,
+	expiresAt *time.Time,
+	status string,
+) (DatabaseAccountView, error) {
 	id = strings.TrimSpace(id)
 	username = strings.TrimSpace(username)
 	var locator model.DatabaseAccount
-	if err := s.db.Select("id", "instance_id").First(&locator, "id = ?", id).Error; err != nil {
+	if err := s.db.WithContext(ctx).Select("id", "instance_id").First(&locator, "id = ?", id).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return DatabaseAccountView{}, fmt.Errorf("%w: %q", ErrDBAccountNotFound, id)
 		}
 		return DatabaseAccountView{}, err
 	}
 	var acct model.DatabaseAccount
-	if err := s.db.Transaction(func(tx *gorm.DB) error {
+	if err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if _, err := lockProvisioningInstance(tx, locator.InstanceID); err != nil {
 			return err
 		}
@@ -326,14 +344,8 @@ func (s *DBStore) UpdateDatabaseAccount(id, username, password, group, remark st
 			return errors.New("managed database account identity is immutable")
 		}
 		if username != "" {
-			var count int64
-			if err := tx.Model(&model.DatabaseAccount{}).
-				Where("instance_id = ? AND username = ? AND id <> ?", acct.InstanceID, username, acct.ID).
-				Count(&count).Error; err != nil {
-				return fmt.Errorf("check database account duplicate: %w", err)
-			}
-			if count != 0 {
-				return fmt.Errorf("database account %q already exists on instance %q", username, acct.InstanceID)
+			if err := s.ensureDatabaseAccountUsernameAvailable(tx, acct.InstanceID, username, acct.ID); err != nil {
+				return err
 			}
 			acct.Username = username
 		}
@@ -359,9 +371,12 @@ func (s *DBStore) UpdateDatabaseAccount(id, username, password, group, remark st
 	return s.databaseAccountView(acct), nil
 }
 
-func (s *DBStore) ensureDatabaseAccountUsernameAvailable(instanceID, username, exceptID string) error {
+func (s *DBStore) ensureDatabaseAccountUsernameAvailable(db *gorm.DB, instanceID, username, exceptID string) error {
+	if db == nil {
+		return fmt.Errorf("database handle required")
+	}
 	var count int64
-	q := s.db.Model(&model.DatabaseAccount{}).
+	q := db.Model(&model.DatabaseAccount{}).
 		Where("instance_id = ? AND username = ?", instanceID, username)
 	if exceptID != "" {
 		q = q.Where("id <> ?", exceptID)
@@ -375,16 +390,16 @@ func (s *DBStore) ensureDatabaseAccountUsernameAvailable(instanceID, username, e
 	return nil
 }
 
-func (s *DBStore) DeleteDatabaseAccount(id string) error {
+func (s *DBStore) DeleteDatabaseAccount(ctx context.Context, id string) error {
 	id = strings.TrimSpace(id)
 	var locator model.DatabaseAccount
-	if err := s.db.Select("id", "instance_id").First(&locator, "id = ?", id).Error; err != nil {
+	if err := s.db.WithContext(ctx).Select("id", "instance_id").First(&locator, "id = ?", id).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return fmt.Errorf("%w: %q", ErrDBAccountNotFound, id)
 		}
 		return err
 	}
-	return s.db.Transaction(func(tx *gorm.DB) error {
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var account model.DatabaseAccount
 		if _, err := lockProvisioningInstance(tx, locator.InstanceID); err != nil {
 			return err
@@ -437,11 +452,16 @@ func (s *DBStore) databaseAccountView(acct model.DatabaseAccount) DatabaseAccoun
 	}
 }
 
-func (s *DBStore) generateUniqueName() (string, error) {
+func (s *DBStore) generateUniqueName(db *gorm.DB) (string, error) {
+	if db == nil {
+		return "", fmt.Errorf("database handle required")
+	}
 	for i := 0; i < 10; i++ {
 		name := "db-" + model.NewID()[:12]
 		var count int64
-		s.db.Model(&model.DatabaseAccount{}).Where("unique_name = ?", name).Count(&count)
+		if err := db.Model(&model.DatabaseAccount{}).Where("unique_name = ?", name).Count(&count).Error; err != nil {
+			return "", fmt.Errorf("check database account unique name: %w", err)
+		}
 		if count == 0 {
 			return name, nil
 		}

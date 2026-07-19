@@ -66,7 +66,7 @@ func TestDatabaseGatewayPostgresCompatibilityMatrix(t *testing.T) {
 
 			fixture := newMetadataFixture(t)
 			host, port := splitAddress(t, upstreamAddress)
-			instance, err := fixture.store.AddDatabaseInstance(jmstore.DatabaseInstanceInput{
+			instance, err := fixture.store.AddDatabaseInstance(context.Background(), jmstore.DatabaseInstanceInput{
 				Name: "postgres-compat-" + major, Protocol: "postgres",
 				Address: host, Port: port, TLSMode: "disable",
 			})
@@ -74,6 +74,7 @@ func TestDatabaseGatewayPostgresCompatibilityMatrix(t *testing.T) {
 				t.Fatalf("add PostgreSQL %s instance: %v", major, err)
 			}
 			account, err := fixture.store.AddDatabaseAccount(
+				context.Background(),
 				instance.ID,
 				postgresCompatUpstreamUser,
 				postgresCompatUpstreamPassword,

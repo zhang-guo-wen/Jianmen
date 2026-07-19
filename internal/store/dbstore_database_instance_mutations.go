@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
@@ -10,10 +11,13 @@ import (
 	"jianmen/internal/model"
 )
 
-func (s *DBStore) UpdateDatabaseInstance(id string, input DatabaseInstanceInput) (DatabaseInstanceView, error) {
+func (s *DBStore) UpdateDatabaseInstance(ctx context.Context, id string, input DatabaseInstanceInput) (DatabaseInstanceView, error) {
 	id = strings.TrimSpace(id)
-	var inst model.DatabaseInstance
-	if err := s.db.Transaction(func(tx *gorm.DB) error {
+	var (
+		inst         model.DatabaseInstance
+		accountCount int
+	)
+	if err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		locked, err := lockProvisioningInstance(tx, id)
 		if err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -41,20 +45,24 @@ func (s *DBStore) UpdateDatabaseInstance(id string, input DatabaseInstanceInput)
 		if err := ensureResourceGroup(tx, inst.GroupName); err != nil {
 			return err
 		}
-		return s.syncResourceTx(tx, model.ResourceTypeDatabaseInstance, inst.ID, databaseInstanceResourceName(inst), "")
+		if err := s.syncResourceTx(tx, model.ResourceTypeDatabaseInstance, inst.ID, databaseInstanceResourceName(inst), ""); err != nil {
+			return err
+		}
+		count, err := s.databaseAccountCount(tx, inst.ID)
+		if err != nil {
+			return err
+		}
+		accountCount = count
+		return nil
 	}); err != nil {
 		return DatabaseInstanceView{}, err
 	}
-	count, err := s.databaseAccountCount(inst.ID)
-	if err != nil {
-		return DatabaseInstanceView{}, err
-	}
-	return s.databaseInstanceView(inst, count), nil
+	return s.databaseInstanceView(inst, accountCount), nil
 }
 
-func (s *DBStore) DeleteDatabaseInstance(id string) error {
+func (s *DBStore) DeleteDatabaseInstance(ctx context.Context, id string) error {
 	id = strings.TrimSpace(id)
-	return s.db.Transaction(func(tx *gorm.DB) error {
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		inst, err := lockProvisioningInstance(tx, id)
 		if err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {

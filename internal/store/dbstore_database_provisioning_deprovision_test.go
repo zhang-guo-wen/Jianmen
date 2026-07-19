@@ -55,13 +55,13 @@ func TestManagedDatabaseAccountUpdateRejectsIdentityButAllowsMetadata(t *testing
 	if err := db.Create(&account).Error; err != nil {
 		t.Fatalf("create managed account: %v", err)
 	}
-	if _, err := repository.UpdateDatabaseAccount(account.ID, "other", "", "", "", nil, "active"); err == nil {
+	if _, err := repository.UpdateDatabaseAccount(context.Background(), account.ID, "other", "", "", "", nil, "active"); err == nil {
 		t.Fatal("managed username update was allowed")
 	}
-	if _, err := repository.UpdateDatabaseAccount(account.ID, account.Username, "other-secret", "", "", nil, "active"); err == nil {
+	if _, err := repository.UpdateDatabaseAccount(context.Background(), account.ID, account.Username, "other-secret", "", "", nil, "active"); err == nil {
 		t.Fatal("managed password update was allowed")
 	}
-	if _, err := repository.UpdateDatabaseAccount(account.ID, account.Username, "", "ops", "retained", nil, "disabled"); err != nil {
+	if _, err := repository.UpdateDatabaseAccount(context.Background(), account.ID, account.Username, "", "ops", "retained", nil, "disabled"); err != nil {
 		t.Fatalf("managed metadata update: %v", err)
 	}
 }

@@ -151,7 +151,7 @@ func (g *Gateway) handleUnifiedConnectionWithTimeout(
 	default:
 		return
 	}
-	g.finishProtocolConnection(client, connection, protocol, handshakeLease)
+	g.finishProtocolConnection(ctx, client, connection, protocol, handshakeLease)
 }
 
 func detectUnifiedPreface(

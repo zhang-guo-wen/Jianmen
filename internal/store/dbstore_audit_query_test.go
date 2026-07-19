@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -9,6 +10,33 @@ import (
 
 	"jianmen/internal/model"
 )
+
+func TestCreateAuditDBQueryPreCanceledContextWritesNoRow(t *testing.T) {
+	repository, closeStore := newAuditRetentionTestStore(t)
+	defer closeStore()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	query := &model.AuditDBQuery{
+		ID:             "query-canceled",
+		AuditSessionID: "session-canceled",
+		Timestamp:      time.Now().UTC(),
+		SQLText:        "SELECT 1",
+	}
+	if err := repository.CreateAuditDBQuery(ctx, query); !errors.Is(err, context.Canceled) {
+		t.Fatalf("CreateAuditDBQuery() error = %v, want context canceled", err)
+	}
+
+	var count int64
+	if err := repository.db.Model(&model.AuditDBQuery{}).
+		Where("id = ?", query.ID).
+		Count(&count).Error; err != nil {
+		t.Fatalf("count canceled database audit query: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("canceled database audit query rows = %d, want 0", count)
+	}
+}
 
 func TestListAuditDBQueryPreviewsEnforcesStoreBounds(t *testing.T) {
 	repository, closeStore := newAuditRetentionTestStore(t)

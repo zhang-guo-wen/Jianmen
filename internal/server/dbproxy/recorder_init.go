@@ -1,6 +1,7 @@
 package dbproxy
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -12,6 +13,7 @@ import (
 )
 
 func (g *Gateway) newRecorder(
+	ctx context.Context,
 	conn *gatewayConn,
 	auditSessionID string,
 	onFatal func(error),
@@ -27,7 +29,7 @@ func (g *Gateway) newRecorder(
 	authUser := conn.userID
 	if g.db != nil {
 		var user model.User
-		if err := g.db.First(&user, "id = ?", conn.userID).Error; err == nil {
+		if err := g.db.WithContext(ctx).First(&user, "id = ?", conn.userID).Error; err == nil {
 			authUser = user.Username
 		}
 	}
@@ -53,6 +55,7 @@ func (g *Gateway) newRecorder(
 	}
 
 	recorder := &connectionRecorder{
+		ctx:                   ctx,
 		id:                    id,
 		protocol:              conn.protocol,
 		maxClientMessageBytes: normalizeMaxClientMessageBytes(g.cfg.MaxClientMessageBytes),

@@ -226,16 +226,19 @@ func (g *Gateway) handleProtocolConnectionWithTimeout(ctx context.Context, clien
 		g.logger.Warn("unsupported database protocol listener", "protocol", protocol)
 		return
 	}
-	g.finishProtocolConnection(client, connection, protocol, handshakeLease)
+	g.finishProtocolConnection(ctx, client, connection, protocol, handshakeLease)
 }
 
 func (g *Gateway) finishProtocolConnection(
+	listenerCtx context.Context,
 	client net.Conn,
 	connection *gatewayConn,
 	protocol databaseProtocol,
 	handshakeLease *pendingHandshakeLease,
 ) {
 	if connection != nil {
+		connectionCtx, cancelConnection := context.WithCancel(listenerCtx)
+		defer cancelConnection()
 		defer connection.releasePostgresCancel()
 		if err := client.SetDeadline(time.Time{}); err != nil {
 			g.logger.Warn("database gateway failed to clear handshake deadline", "protocol", protocol, "error", err)
@@ -250,7 +253,7 @@ func (g *Gateway) finishProtocolConnection(
 			}
 		}
 		handshakeLease.release()
-		g.handleGatewayConn(client, connection)
+		g.handleGatewayConn(connectionCtx, client, connection)
 	}
 }
 

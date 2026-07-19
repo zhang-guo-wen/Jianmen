@@ -118,12 +118,12 @@ func (g *Gateway) handleGatewayConn(client net.Conn, conn *gatewayConn) {
 		ClientIP:    "",
 		StartedAt:   time.Now().UTC(),
 		State:       "started",
-		ReplayDir:   filepath.Join(g.replayDir, "db", model.NewID()),
 	}
 	if conn.userSessionID != "" {
 		auditSession.UserSessionID = conn.userSessionID
 	}
 	auditSession.BeforeCreate(nil)
+	auditSession.ReplayDir = filepath.Join(g.replayDir, "db", auditSession.ID)
 	if g.auditRequired && g.audit == nil {
 		g.logger.Warn("db gateway audit writer unavailable")
 		g.writeAuditUnavailableResponse(client, conn.protocol)
@@ -138,13 +138,16 @@ func (g *Gateway) handleGatewayConn(client net.Conn, conn *gatewayConn) {
 		defer g.audit.EndAuditSession(auditSession.ID)
 	}
 
-	recorder, recErr := g.newRecorder(conn, auditSession.ID)
+	recorder, recErr := g.newRecorder(conn, auditSession.ID, func(error) {
+		_ = client.Close()
+		_ = conn.upstream.Close()
+	})
 	if recErr != nil {
-		g.logger.Warn("db gateway recorder init failed, audit db queries may be incomplete", "error", recErr)
+		g.logger.Warn("db gateway recorder init failed", "error", recErr)
+		g.writeAuditUnavailableResponse(client, conn.protocol)
+		return
 	}
-	if recorder != nil {
-		defer recorder.Close()
-	}
+	defer recorder.Close()
 
 	unregisterOnline := g.onlineSessions.Register(online.Session{
 		ID:             auditSession.ID,

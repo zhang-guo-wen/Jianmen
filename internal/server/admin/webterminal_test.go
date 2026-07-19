@@ -14,6 +14,7 @@ import (
 	"jianmen/internal/config"
 	"jianmen/internal/model"
 	"jianmen/internal/recording"
+	"jianmen/internal/service"
 )
 
 func TestParseWebTerminalResizeMessage(t *testing.T) {
@@ -56,7 +57,16 @@ func TestHandleWebTerminalRejectsMissingTicket(t *testing.T) {
 func TestCopyWebTerminalOutputRecordsTerminalCast(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	session := model.NewSession(model.User{Username: "web"}, "target-1", "target", "127.0.0.1")
-	recorder, err := recording.NewSessionRecorder(t.TempDir(), session, false, false, logger, nil)
+	recorder, err := recording.NewSessionRecorder(
+		t.TempDir(),
+		session,
+		false,
+		false,
+		service.NewAuditPolicy(30, false),
+		func(error) {},
+		logger,
+		nil,
+	)
 	if err != nil {
 		t.Fatalf("new recorder: %v", err)
 	}

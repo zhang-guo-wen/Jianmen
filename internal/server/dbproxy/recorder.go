@@ -3,11 +3,11 @@ package dbproxy
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net"
 	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -368,63 +368,9 @@ type connectionRecorder struct {
 	startedAt      time.Time
 	audit          auditWriter
 	auditSessionID string
-}
-
-func (g *Gateway) newRecorder(conn *gatewayConn, auditSessionID string) (*connectionRecorder, error) {
-	id := model.NewID()
-	startedAt := time.Now().UTC()
-	// 查找操作者用户名
-	authUser := conn.userID
-	if g.db != nil {
-		var u model.User
-		if err := g.db.First(&u, "id = ?", conn.userID).Error; err == nil {
-			authUser = u.Username
-		}
-	}
-
-	// 文件录制是可选的：即使文件创建失败，DB 审计仍然需要工作。
-	var file *os.File
-	var metaPath string
-	meta := DBConnectionMeta{
-		ID:           id,
-		Name:         conn.accountName,
-		Protocol:     conn.protocol,
-		ClientAddr:   "",
-		UpstreamAddr: conn.upstreamAddr,
-		StartedAt:    startedAt.Format(time.RFC3339Nano),
-		AccountName:  conn.accountUser,
-		InstanceName: conn.instanceName,
-		AuthUser:     authUser,
-	}
-
-	dir := filepath.Join(g.replayDir, "db", id)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		g.logger.Warn("db gateway cannot create replay directory, queries file will be skipped", "dir", dir, "error", err)
-	} else {
-		metaPath = filepath.Join(dir, "meta.json")
-		f, err := os.OpenFile(filepath.Join(dir, "queries.jsonl"), os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
-		if err != nil {
-			g.logger.Warn("db gateway cannot create queries file, queries file will be skipped", "path", filepath.Join(dir, "queries.jsonl"), "error", err)
-		} else {
-			file = f
-		}
-	}
-
-	recorder := &connectionRecorder{
-		id:             id,
-		protocol:       conn.protocol,
-		metaPath:       metaPath,
-		meta:           meta,
-		file:           file,
-		startedAt:      startedAt,
-		audit:          g.audit,
-		auditSessionID: auditSessionID,
-	}
-	// 元数据写入失败不影响审计，仅记录日志
-	if err := recorder.writeMetaLocked(); err != nil {
-		g.logger.Warn("db gateway cannot write meta file", "path", metaPath, "error", err)
-	}
-	return recorder, nil
+	onFatal        func(error)
+	fatalOnce      sync.Once
+	logger         *slog.Logger
 }
 
 func (r *connectionRecorder) StartQuery(sql string, detail map[string]any) (queryRecord, queryDecision) {
@@ -449,7 +395,7 @@ func (r *connectionRecorder) StartQuery(sql string, detail map[string]any) (quer
 	}
 	decision := allowQuery()
 	startDetail := mergeDetails(detail, map[string]any{"query_kind": queryKind})
-	r.writeQueryEventLocked(DBQueryEvent{
+	if err := r.writeQueryEventLocked(DBQueryEvent{
 		Type:         queryEventTypeStarted,
 		ConnectionID: r.id,
 		Seq:          record.seq,
@@ -459,7 +405,10 @@ func (r *connectionRecorder) StartQuery(sql string, detail map[string]any) (quer
 		Detail:       startDetail,
 		StartedAt:    startedAt.UnixMilli(),
 		Status:       queryStatusUnknown,
-	})
+	}); err != nil {
+		r.reportFatal(fmt.Errorf("write database query start event: %w", err))
+		return record, *newObserverFatalDecision(observerErrorAuditFailure, "database audit recording failed")
+	}
 	if !decision.Allowed {
 		r.writeFinishLocked(record, queryFinish{
 			Status:       decision.Status,
@@ -485,7 +434,7 @@ func (r *connectionRecorder) writeFinishLocked(record queryRecord, finish queryF
 		finish.Status = queryStatusUnknown
 	}
 	completedAt := time.Now().UTC()
-	r.writeQueryEventLocked(DBQueryEvent{
+	if err := r.writeQueryEventLocked(DBQueryEvent{
 		Type:         queryEventTypeFinished,
 		ConnectionID: r.id,
 		Seq:          record.seq,
@@ -501,7 +450,10 @@ func (r *connectionRecorder) writeFinishLocked(record queryRecord, finish queryF
 		ErrorMessage: finish.ErrorMessage,
 		RowsAffected: finish.RowsAffected,
 		Rows:         finish.Rows,
-	})
+	}); err != nil {
+		r.reportFatal(fmt.Errorf("write database query finish event: %w", err))
+		return
+	}
 	if r.audit != nil && r.auditSessionID != "" {
 		if err := r.audit.CreateAuditDBQuery(&model.AuditDBQuery{
 			AuditSessionID: r.auditSessionID,
@@ -510,21 +462,23 @@ func (r *connectionRecorder) writeFinishLocked(record queryRecord, finish queryF
 			QueryKind:      record.queryKind,
 			DurationMs:     completedAt.Sub(record.startedAt).Milliseconds(),
 		}); err != nil {
-			// 审计记录写入失败不应中断业务，但需要记录日志便于排查
-			slog.Warn("db gateway failed to write audit db query", "session_id", r.auditSessionID, "error", err)
+			r.reportFatal(fmt.Errorf("write database query audit record: %w", err))
 		}
 	}
 }
 
-func (r *connectionRecorder) writeQueryEventLocked(event DBQueryEvent) {
+func (r *connectionRecorder) writeQueryEventLocked(event DBQueryEvent) error {
 	if r.file == nil {
-		return
+		return errors.New("database query audit file is unavailable")
 	}
 	raw, err := json.Marshal(event)
 	if err != nil {
-		return
+		return err
 	}
-	_, _ = r.file.Write(append(raw, '\n'))
+	if _, err := r.file.Write(append(raw, '\n')); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (r *connectionRecorder) writeMetaLocked() error {
@@ -555,11 +509,34 @@ func (r *connectionRecorder) Close() error {
 	endedAt := time.Now().UTC()
 	r.meta.EndedAt = endedAt.Format(time.RFC3339Nano)
 	r.meta.DurationMs = endedAt.Sub(r.startedAt).Milliseconds()
-	r.writeMetaLocked()
+	metaErr := r.writeMetaLocked()
 	if r.file == nil {
-		return nil
+		if metaErr != nil {
+			r.reportFatal(fmt.Errorf("write database replay end metadata: %w", metaErr))
+		}
+		return metaErr
 	}
-	err := r.file.Close()
+	closeErr := r.file.Close()
 	r.file = nil
-	return err
+	if metaErr != nil {
+		r.reportFatal(fmt.Errorf("write database replay end metadata: %w", metaErr))
+	}
+	if closeErr != nil {
+		r.reportFatal(fmt.Errorf("close database query audit file: %w", closeErr))
+	}
+	return errors.Join(metaErr, closeErr)
+}
+
+func (r *connectionRecorder) reportFatal(err error) {
+	if r == nil || err == nil {
+		return
+	}
+	if r.logger != nil {
+		r.logger.Error("database audit recording failed; terminating session", "session", r.auditSessionID, "error", err)
+	}
+	r.fatalOnce.Do(func() {
+		if r.onFatal != nil {
+			r.onFatal(err)
+		}
+	})
 }

@@ -1,6 +1,7 @@
 package dbproxy
 
 import (
+	"os"
 	"sync"
 	"testing"
 	"time"
@@ -272,8 +273,14 @@ func TestObserversCommitPendingRemovalAfterFinishReturns(t *testing.T) {
 }
 
 func TestConnectionRecorderAuditPanicTerminatesObserver(t *testing.T) {
+	file, err := os.CreateTemp(t.TempDir(), "queries-*.jsonl")
+	if err != nil {
+		t.Fatalf("create query audit file: %v", err)
+	}
+	defer file.Close()
 	recorder := &connectionRecorder{
 		protocol:       "mysql",
+		file:           file,
 		audit:          panicAuditWriter{},
 		auditSessionID: "session-1",
 	}

@@ -180,6 +180,11 @@ var migrations = []Migration{
 		Name:    "database provisioning saga recovery state",
 		Run:     migrateDatabaseProvisioningSaga,
 	},
+	{
+		Version: "202607190001",
+		Name:    "resource grant logical uniqueness",
+		Run:     migrateResourceGrantLogicalUniqueness,
+	},
 }
 
 func rejectDuplicateDatabaseAccounts(tx *gorm.DB) error {

@@ -48,6 +48,7 @@ var currentStorageMigrationVersions = []string{
 	"202607180007",
 	"202607180008",
 	"202607180009",
+	"202607190001",
 }
 
 type metadataDatabaseCase struct {
@@ -424,6 +425,7 @@ func seedAppliedMigrations(t *testing.T, db *gorm.DB, versions ...string) {
 		"202607180007": "permission logical uniqueness",
 		"202607180008": "database account instance username uniqueness",
 		"202607180009": "database provisioning saga recovery state",
+		"202607190001": "resource grant logical uniqueness",
 	}
 	for _, version := range versions {
 		name, ok := names[version]

@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"jianmen/internal/model"
 )
@@ -70,14 +71,16 @@ func (s *DBStore) CreateResourceGrant(ctx context.Context, grant model.ResourceG
 }
 
 func (s *DBStore) EnsureResourceGrant(ctx context.Context, grant model.ResourceGrant) error {
-	match := model.ResourceGrant{
-		PrincipalType: grant.PrincipalType,
-		PrincipalID:   grant.PrincipalID,
-		ResourceType:  grant.ResourceType,
-		ResourceID:    grant.ResourceID,
-		Effect:        grant.Effect,
-	}
-	if err := s.db.WithContext(ctx).Where(match).FirstOrCreate(&grant).Error; err != nil {
+	if err := s.db.WithContext(ctx).Clauses(clause.OnConflict{
+		Columns: []clause.Column{
+			{Name: "principal_type"},
+			{Name: "principal_id"},
+			{Name: "resource_type"},
+			{Name: "resource_id"},
+			{Name: "effect"},
+		},
+		DoNothing: true,
+	}).Create(&grant).Error; err != nil {
 		return fmt.Errorf("ensure resource grant: %w", err)
 	}
 	return nil

@@ -90,6 +90,9 @@ func (s *Server) handleCreatePlatformAccount(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	if err := s.grantCreatedResource(r, model.ResourceTypePlatformAccount, view.ID); err != nil {
+		if cleanupErr := s.store.DeletePlatformAccount(view.ID); cleanupErr != nil {
+			err = errors.Join(err, cleanupErr)
+		}
 		s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
 		return
 	}

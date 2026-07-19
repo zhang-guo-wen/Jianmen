@@ -126,6 +126,9 @@ func TestNewAcceptsCompleteDBStoreRepository(t *testing.T) {
 		server.roleRepository != repository {
 		t.Fatal("admin server did not retain DBStore through its resource-scoped boundaries")
 	}
+	if server.aiResources == nil {
+		t.Fatal("admin server did not construct the AI resource service")
+	}
 }
 
 func TestResolveAdminDependenciesRejectsTypedNil(t *testing.T) {
@@ -136,7 +139,7 @@ func TestResolveAdminDependenciesRejectsTypedNil(t *testing.T) {
 	if !errors.Is(err, errAdminStoreRequired) {
 		t.Fatalf("resolve typed-nil repository error = %v, want %v", err, errAdminStoreRequired)
 	}
-	if dependencies.hostTargets != nil || dependencies.roles != nil {
+	if dependencies.aiResources != nil || dependencies.hostTargets != nil || dependencies.roles != nil {
 		t.Fatal("typed-nil repository returned non-empty dependencies")
 	}
 }
@@ -153,7 +156,9 @@ func TestAdminRepositoryBoundaryStaysStaticallyComposedAndDomainSplit(t *testing
 	}
 	expectedFields := map[string]reflect.Type{
 		"aiAccessTokens":         reflect.TypeOf((*service.AIAccessTokenService)(nil)),
+		"aiResources":            reflect.TypeOf((*service.AIResourceService)(nil)),
 		"hostTargets":            reflect.TypeOf((*adminHostTargetRepository)(nil)).Elem(),
+		"hostManagement":         reflect.TypeOf((*service.HostManagementService)(nil)),
 		"databases":              reflect.TypeOf((*adminDatabaseRepository)(nil)).Elem(),
 		"databaseManagement":     reflect.TypeOf((*service.DatabaseManagementService)(nil)),
 		"applicationService":     reflect.TypeOf((*service.ApplicationService)(nil)),
@@ -173,12 +178,32 @@ func TestAdminRepositoryBoundaryStaysStaticallyComposedAndDomainSplit(t *testing
 			t.Fatalf("Server field %q type = %v, want %v", name, field.Type, want)
 		}
 	}
+	dependenciesType := reflect.TypeOf(adminDependencies{})
+	aiResources, found := dependenciesType.FieldByName("aiResources")
+	if !found || aiResources.Type != reflect.TypeOf((*service.AIResourceRepository)(nil)).Elem() {
+		t.Fatalf("admin AI resource repository boundary = %v, found %t", aiResources.Type, found)
+	}
+	adapterType := reflect.TypeOf(aiResourceRepositoryAdapter{})
+	adapterFields := map[string]reflect.Type{
+		"hostTargets": reflect.TypeOf((*adminHostTargetRepository)(nil)).Elem(),
+		"databases":   reflect.TypeOf((*adminDatabaseRepository)(nil)).Elem(),
+	}
+	for name, want := range adapterFields {
+		field, found := adapterType.FieldByName(name)
+		if !found || field.Type != want {
+			t.Fatalf("AI resource adapter field %q = %v, found %t, want %v", name, field.Type, found, want)
+		}
+	}
+	if _, found := adapterType.FieldByName("repository"); found {
+		t.Fatal("AI resource adapter regained an application-wide repository field")
+	}
 
 	file, err := parser.ParseFile(token.NewFileSet(), "repository.go", nil, 0)
 	if err != nil {
 		t.Fatalf("parse repository boundary: %v", err)
 	}
 	wantEmbedded := map[string]bool{
+		"service.AdminAuthRepository":        true,
 		"adminAIAccessTokenRepository":       true,
 		"adminHostTargetRepository":          true,
 		"adminDatabaseRepository":            true,
@@ -199,6 +224,23 @@ func TestAdminRepositoryBoundaryStaysStaticallyComposedAndDomainSplit(t *testing
 	if !reflect.DeepEqual(gotEmbedded, wantEmbedded) {
 		t.Fatalf("adminRepository embeddings = %#v, want %#v", gotEmbedded, wantEmbedded)
 	}
+}
+
+func TestAIResourceHandlerUsesServiceBoundary(t *testing.T) {
+	file, err := parser.ParseFile(token.NewFileSet(), "ai_resource_handlers.go", nil, 0)
+	if err != nil {
+		t.Fatalf("parse AI resource handlers: %v", err)
+	}
+	ast.Inspect(file, func(node ast.Node) bool {
+		selector, ok := node.(*ast.SelectorExpr)
+		if !ok {
+			return true
+		}
+		if selector.Sel.Name == "hostTargets" || selector.Sel.Name == "databases" {
+			t.Errorf("AI resource handler directly accesses Server.%s", selector.Sel.Name)
+		}
+		return true
+	})
 }
 
 func adminRepositoryEmbeddings(t *testing.T, file *ast.File) map[string]bool {
@@ -249,6 +291,19 @@ func applyTestAdminDependencies(t *testing.T, server *Server, repository adminRe
 		t.Fatalf("resolve admin dependencies: %v", err)
 	}
 	server.hostTargets = dependencies.hostTargets
+	if server.hostManagement == nil {
+		authorization := server.authorization
+		if isNilAdminAuthorization(authorization) {
+			authorization = repositoryTestAuthorization{}
+		}
+		server.hostManagement, err = service.NewHostManagementService(
+			hostManagementRepositoryAdapter{repository: dependencies.hostTargets},
+			authorization,
+		)
+		if err != nil {
+			t.Fatalf("new host management service: %v", err)
+		}
+	}
 	server.databases = dependencies.databases
 	if server.applicationService == nil {
 		authorization := server.authorization
@@ -294,6 +349,20 @@ func applyTestAdminDependencies(t *testing.T, server *Server, repository adminRe
 		server.userSessionCreation, err = service.NewUserSessionCreationService(dependencies.userSessionCreation, repositoryTestAuthorization{})
 		if err != nil {
 			t.Fatalf("new user session creation service: %v", err)
+		}
+	}
+	if server.aiResources == nil {
+		authorization := server.authorization
+		if isNilAdminAuthorization(authorization) {
+			authorization = repositoryTestAuthorization{}
+		}
+		server.aiResources, err = service.NewAIResourceService(
+			dependencies.aiResources,
+			aiResourceAuthorizerAdapter{authorization: authorization},
+			aiResourceSessionCreatorAdapter{sessions: server.userSessionCreation},
+		)
+		if err != nil {
+			t.Fatalf("new AI resource service: %v", err)
 		}
 	}
 	server.audit = dependencies.audit

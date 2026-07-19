@@ -16,9 +16,13 @@ import (
 )
 
 func (s *DBStore) targetView(ctx context.Context, tx *gorm.DB, a model.HostAccount) TargetView {
-	status := "enabled"
-	if a.Status == "disabled" {
-		status = "disabled"
+	status := "disabled"
+	if storedResourceStatusActive(a.Status) {
+		status = "enabled"
+	}
+	hostStatus := strings.TrimSpace(a.Host.Status)
+	if hostStatus == "" {
+		hostStatus = "active"
 	}
 	authMethods := []string{"password"}
 	if a.AuthType == "private_key" || a.AuthType == "key" {
@@ -32,7 +36,7 @@ func (s *DBStore) targetView(ctx context.Context, tx *gorm.DB, a model.HostAccou
 		name = a.ID
 	}
 	host, port := s.hostAddressPort(ctx, tx, a.Host, a.HostID)
-	protocol := normalizedHostProtocol(a.Host.Protocol)
+	protocol := strings.ToLower(strings.TrimSpace(a.Host.Protocol))
 	expiresAt := ""
 	if a.ExpiresAt != nil {
 		expiresAt = a.ExpiresAt.UTC().Format(time.RFC3339Nano)
@@ -42,7 +46,9 @@ func (s *DBStore) targetView(ctx context.Context, tx *gorm.DB, a model.HostAccou
 		ResourceType: model.ResourceTypeHostAccount, ResourceID: a.ResourceID,
 		ResourceSeq: a.ResourceSeq,
 		Name:        name, Group: a.GroupName, Remark: a.Remark, ExpiresAt: expiresAt,
-		Host: host, Port: port, Protocol: protocol,
+		LifecycleStatus: strings.ToLower(strings.TrimSpace(a.Status)),
+		HostStatus:      hostStatus,
+		Host:            host, Port: port, Protocol: protocol,
 		Username: a.Username, Domain: a.Domain, Status: status,
 		AuthMethods:           authMethods,
 		InsecureIgnoreHostKey: a.InsecureIgnoreHostKey,

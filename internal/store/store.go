@@ -29,18 +29,19 @@ type HostRecord struct {
 }
 
 type HostView struct {
-	ID           string `json:"id"`
-	Name         string `json:"name"`
-	Group        string `json:"group"`
-	Address      string `json:"address"`
-	Port         int    `json:"port"`
-	Protocol     string `json:"protocol"`
-	Remark       string `json:"remark"`
-	Status       string `json:"status"`
-	AccountCount int    `json:"account_count"`
-	CreatedAt    string `json:"created_at"`
-	UpdatedAt    string `json:"updated_at"`
-	CanManage    bool   `json:"can_manage"`
+	ID              string `json:"id"`
+	Name            string `json:"name"`
+	Group           string `json:"group"`
+	Address         string `json:"address"`
+	Port            int    `json:"port"`
+	Protocol        string `json:"protocol"`
+	Remark          string `json:"remark"`
+	Status          string `json:"status"`
+	LifecycleStatus string `json:"-"`
+	AccountCount    int    `json:"account_count"`
+	CreatedAt       string `json:"created_at"`
+	UpdatedAt       string `json:"updated_at"`
+	CanManage       bool   `json:"can_manage"`
 }
 
 type TargetView struct {
@@ -55,6 +56,8 @@ type TargetView struct {
 	Remark                string   `json:"remark,omitempty"`
 	ExpiresAt             string   `json:"expires_at,omitempty"`
 	Status                string   `json:"status"`
+	LifecycleStatus       string   `json:"-"`
+	HostStatus            string   `json:"-"`
 	Host                  string   `json:"host"`
 	Port                  int      `json:"port"`
 	Protocol              string   `json:"protocol"`

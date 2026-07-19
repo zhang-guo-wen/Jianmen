@@ -293,30 +293,6 @@ func (s *Server) visibleDatabaseAccountsForActions(r *http.Request, accounts []s
 	return result, nil
 }
 
-func (s *Server) visibleApplications(r *http.Request, applications []store.ApplicationView) ([]store.ApplicationView, error) {
-	ids := make([]string, len(applications))
-	for index := range applications {
-		ids[index] = applications[index].ID
-	}
-	visible, err := s.authorizeResourceActionsBatch(r, []string{rbac.ActionAppView}, model.ResourceTypeApplication, ids)
-	if err != nil {
-		return nil, err
-	}
-	manageable, err := s.authorizeResourceActionsBatch(r, []string{rbac.ActionAppUpdate, rbac.ActionAppDelete}, model.ResourceTypeApplication, ids)
-	if err != nil {
-		return nil, err
-	}
-	result := make([]store.ApplicationView, 0, len(applications))
-	for index, application := range applications {
-		if !visible[index] {
-			continue
-		}
-		application.CanManage = manageable[index]
-		result = append(result, application)
-	}
-	return result, nil
-}
-
 func (s *Server) visiblePlatformAccounts(r *http.Request, accounts []store.PlatformAccountView) ([]store.PlatformAccountView, error) {
 	ids := make([]string, len(accounts))
 	for index := range accounts {

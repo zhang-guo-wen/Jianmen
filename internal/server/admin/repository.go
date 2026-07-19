@@ -57,9 +57,6 @@ type adminDependencies struct {
 
 type adminAIAccessTokenRepository interface {
 	service.AIAccessTokenRepository
-	ListAIAccessTokens(context.Context, string) ([]model.AIAccessToken, error)
-	AuthenticateAIAccessToken(context.Context, string, time.Time) (model.AIAccessToken, error)
-	RevokeAIAccessToken(context.Context, string, string, time.Time) error
 }
 
 type adminHostTargetRepository interface {

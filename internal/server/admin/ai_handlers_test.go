@@ -2,6 +2,7 @@ package admin
 
 import (
 	"bytes"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -17,8 +18,13 @@ import (
 
 func TestAIAccessTokenIssueRotateAndRevoke(t *testing.T) {
 	server, db := newAdminDBTestServer(t)
+	var logOutput bytes.Buffer
+	server.logger = slog.New(slog.NewTextHandler(&logOutput, nil))
 	if err := db.Create(&model.User{ID: "ai-user", Username: "ai-user", Status: "active"}).Error; err != nil {
 		t.Fatalf("create user: %v", err)
+	}
+	if err := db.Create(&model.User{ID: "other-user", Username: "other-user", Status: "active"}).Error; err != nil {
+		t.Fatalf("create other user: %v", err)
 	}
 
 	request := withTestUser(httptest.NewRequest(http.MethodPost, "/api/ai/tokens", bytes.NewBufferString(`{"name":"ops agent","access_ttl_seconds":3600,"refresh_ttl_seconds":86400,"permanent":true}`)), "ai-user", "ai-user")
@@ -76,6 +82,9 @@ func TestAIAccessTokenIssueRotateAndRevoke(t *testing.T) {
 	if saved.AccessTokenHash == "" || saved.RefreshTokenHash == "" {
 		t.Fatal("database did not retain token hashes")
 	}
+	if strings.Contains(logOutput.String(), issued.AccessToken) || strings.Contains(logOutput.String(), issued.RefreshToken) {
+		t.Fatalf("issue log exposed plaintext credentials: %s", logOutput.String())
+	}
 
 	listRequest := withTestUser(httptest.NewRequest(http.MethodGet, "/api/ai/tokens", nil), "ai-user", "ai-user")
 	listResponse := httptest.NewRecorder()
@@ -103,6 +112,18 @@ func TestAIAccessTokenIssueRotateAndRevoke(t *testing.T) {
 			t.Fatalf("token detail exposed a secret: %s", detailResponse.Body.String())
 		}
 	}
+	for _, method := range []string{http.MethodGet, http.MethodDelete} {
+		crossUserRequest := withTestUser(
+			httptest.NewRequest(method, "/api/ai/tokens/"+issued.ID, nil),
+			"other-user",
+			"other-user",
+		)
+		crossUserResponse := httptest.NewRecorder()
+		server.handleAIToken(crossUserResponse, crossUserRequest)
+		if crossUserResponse.Code != http.StatusNotFound {
+			t.Fatalf("cross-user %s status = %d, want 404; body=%s", method, crossUserResponse.Code, crossUserResponse.Body.String())
+		}
+	}
 
 	refreshRequest := httptest.NewRequest(http.MethodPost, "/api/ai/auth/refresh", bytes.NewBufferString(`{"refresh_token":"`+issued.RefreshToken+`"}`))
 	refreshResponse := httptest.NewRecorder()
@@ -119,6 +140,12 @@ func TestAIAccessTokenIssueRotateAndRevoke(t *testing.T) {
 	}
 	if refreshed.AccessToken == issued.AccessToken || refreshed.RefreshToken == issued.RefreshToken {
 		t.Fatal("refresh did not rotate credentials")
+	}
+	if strings.Contains(logOutput.String(), issued.AccessToken) ||
+		strings.Contains(logOutput.String(), issued.RefreshToken) ||
+		strings.Contains(logOutput.String(), refreshed.AccessToken) ||
+		strings.Contains(logOutput.String(), refreshed.RefreshToken) {
+		t.Fatalf("refresh log exposed plaintext credentials: %s", logOutput.String())
 	}
 	if err := db.First(&saved, "id = ?", issued.ID).Error; err != nil {
 		t.Fatalf("reload refreshed token: %v", err)
@@ -449,9 +476,9 @@ func TestAIAccessTokenReissueRotatesExistingTokenInPlace(t *testing.T) {
 		reissued.AccessToken == original.AccessToken || reissued.RefreshToken == original.RefreshToken {
 		t.Fatalf("unexpected reissued credentials: %#v", reissued)
 	}
-	if _, err := server.aiTokens.AuthenticateAIAccessToken(
+	if _, err := server.aiAccessTokens.Authenticate(
 		reissueRequest.Context(),
-		service.HashAIAccessToken(original.AccessToken),
+		original.AccessToken,
 		time.Now().UTC(),
 	); err == nil {
 		t.Fatal("old access token remained valid after reissue")

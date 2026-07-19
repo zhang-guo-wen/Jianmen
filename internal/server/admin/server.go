@@ -20,7 +20,7 @@ import (
 
 type Server struct {
 	cfg                  *config.Config
-	aiTokens             adminAIAccessTokenRepository
+	aiAccessTokens       *service.AIAccessTokenService
 	hostTargets          adminHostTargetRepository
 	databases            adminDatabaseRepository
 	applications         adminApplicationRepository
@@ -116,6 +116,10 @@ func New(
 	if err != nil {
 		return nil, fmt.Errorf("initialize temporary access service: %w", err)
 	}
+	aiAccessTokens, err := service.NewAIAccessTokenService(dependencies.aiTokens)
+	if err != nil {
+		return nil, fmt.Errorf("initialize AI access token service: %w", err)
+	}
 	userManagement, err := service.NewUserService(dependencies.users)
 	if err != nil {
 		return nil, fmt.Errorf("initialize user service: %w", err)
@@ -141,7 +145,7 @@ func New(
 	}
 	return &Server{
 		cfg: cfg, db: db, logger: logger,
-		aiTokens: dependencies.aiTokens, hostTargets: dependencies.hostTargets, databases: dependencies.databases,
+		aiAccessTokens: aiAccessTokens, hostTargets: dependencies.hostTargets, databases: dependencies.databases,
 		applications: dependencies.applications, containers: dependencies.containers, platformAccounts: dependencies.platformAccounts,
 		userSessionCreation: userSessionCreation, audit: dependencies.audit, connectionPassword: connectionPassword,
 		preferences: dependencies.preferences, temporaryRepository: dependencies.temporaryAccess,

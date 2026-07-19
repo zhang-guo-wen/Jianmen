@@ -12,7 +12,6 @@ import (
 
 	"jianmen/internal/model"
 	"jianmen/internal/rbac"
-	"jianmen/internal/service"
 	"jianmen/internal/store"
 )
 
@@ -49,7 +48,6 @@ func TestContainerRuntimeRequiresEndpointGrant(t *testing.T) {
 	}).Error; err != nil {
 		t.Fatalf("create endpoint grant: %v", err)
 	}
-	server.containerService = service.NewContainerService()
 	req = httptest.NewRequest(http.MethodGet, "/api/containers/endpoints/"+endpointID+"/containers", nil)
 	req = withTestUser(req, userID, userID)
 	rec = httptest.NewRecorder()
@@ -281,8 +279,8 @@ func TestContainerEndpointRejectsAccountFromDifferentHost(t *testing.T) {
 	rec := httptest.NewRecorder()
 	server.handleContainerEndpoints(rec, req)
 
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("create with account from different host status = %d, want %d; body=%s", rec.Code, http.StatusBadRequest, rec.Body.String())
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("create with account from different host before account grant status = %d, want %d; body=%s", rec.Code, http.StatusForbidden, rec.Body.String())
 	}
 }
 
@@ -304,8 +302,8 @@ func TestContainerEndpointRejectsMissingHostAccount(t *testing.T) {
 	rec := httptest.NewRecorder()
 	server.handleContainerEndpoints(rec, req)
 
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("create with missing host account status = %d, want %d; body=%s", rec.Code, http.StatusNotFound, rec.Body.String())
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("create with missing host account before account grant status = %d, want %d; body=%s", rec.Code, http.StatusForbidden, rec.Body.String())
 	}
 }
 

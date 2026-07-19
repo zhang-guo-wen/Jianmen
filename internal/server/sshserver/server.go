@@ -175,7 +175,23 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 func (s *Server) handleConn(ctx context.Context, rawConn net.Conn, serverConfig *ssh.ServerConfig) {
 	ctx, cancelSession := context.WithCancel(ctx)
 	defer cancelSession()
-	defer rawConn.Close()
+
+	rawConn = &idempotentCloseConn{Conn: rawConn}
+	stopConnectionWatcher := make(chan struct{})
+	connectionWatcherDone := make(chan struct{})
+	go func() {
+		defer close(connectionWatcherDone)
+		select {
+		case <-ctx.Done():
+			_ = rawConn.Close()
+		case <-stopConnectionWatcher:
+		}
+	}()
+	defer func() {
+		close(stopConnectionWatcher)
+		_ = rawConn.Close()
+		<-connectionWatcherDone
+	}()
 
 	serverConn, chans, reqs, err := ssh.NewServerConn(rawConn, serverConfig)
 	if err != nil {
@@ -303,6 +319,19 @@ func (s *Server) handleConn(ctx context.Context, rawConn net.Conn, serverConfig 
 		proxy := sshproxy.NewSession(targetClient, channel, requests, recorder, access, s.logger)
 		go proxy.Serve(ctx)
 	}
+}
+
+type idempotentCloseConn struct {
+	net.Conn
+	once sync.Once
+	err  error
+}
+
+func (c *idempotentCloseConn) Close() error {
+	c.once.Do(func() {
+		c.err = c.Conn.Close()
+	})
+	return c.err
 }
 
 func (s *Server) authorizeTarget(ctx context.Context, userID, targetID string) (sshproxy.Access, error) {

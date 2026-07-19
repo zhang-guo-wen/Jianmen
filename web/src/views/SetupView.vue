@@ -220,7 +220,7 @@ async function handleSetup() {
 	setCSRFToken(setupResult.csrf_token);
 
     try {
-      const keyResult = await apiClient.getEncryptionKey();
+      const keyResult = await apiClient.getEncryptionKey(form.password);
       encryptionKey.value = keyResult.key ?? '';
       step.value = 2;
     } catch {
@@ -237,7 +237,7 @@ async function handleSetup() {
 async function retryGetKey() {
   submitting.value = true;
   try {
-    const keyResult = await apiClient.getEncryptionKey();
+    const keyResult = await apiClient.getEncryptionKey(form.password);
     encryptionKey.value = keyResult.key ?? '';
     encryptionKeyNeeded.value = false;
     step.value = 2;

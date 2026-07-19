@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log/slog"
 	"reflect"
-	"sync"
 
 	"jianmen/internal/config"
 	"jianmen/internal/handler/accessrequest"
@@ -14,15 +13,18 @@ import (
 	"jianmen/internal/online"
 	"jianmen/internal/server/appproxy"
 	"jianmen/internal/service"
+	"jianmen/internal/store"
 
 	"gorm.io/gorm"
 )
 
 type Server struct {
 	cfg                    *config.Config
+	adminAuth              *service.AdminAuthService
 	aiAccessTokens         *service.AIAccessTokenService
 	aiResources            *service.AIResourceService
 	hostTargets            adminHostTargetRepository
+	hostManagement         *service.HostManagementService
 	databases              adminDatabaseRepository
 	databaseManagement     *service.DatabaseManagementService
 	applicationService     *service.ApplicationService
@@ -31,7 +33,7 @@ type Server struct {
 	userSessionCreation    *service.UserSessionCreationService
 	audit                  adminAuditRepository
 	connectionPassword     *service.ConnectionPasswordService
-	preferences            adminUserPreferenceRepository
+	preferences            *service.UserPreferenceService
 	temporaryRepository    service.TemporaryAccessRepository
 	userRepository         service.UserRepository
 	userGroupRepository    service.UserGroupRepository
@@ -56,8 +58,6 @@ type Server struct {
 	webRDP                 *webrdp.Handler
 	accessRequests         *accessrequest.Handler
 	systemSettings         *systemsettings.Handler
-	setupOnce              sync.Once
-	setupSlot              chan struct{}
 }
 
 func New(
@@ -120,6 +120,14 @@ func New(
 	if err != nil {
 		return nil, fmt.Errorf("initialize AI access token service: %w", err)
 	}
+	keyReader, err := store.NewFileAdminEncryptionKeyReader(dataDir)
+	if err != nil {
+		return nil, fmt.Errorf("initialize admin encryption key reader: %w", err)
+	}
+	adminAuth, err := service.NewAdminAuthService(dependencies.adminAuth, browserSessions, keyReader)
+	if err != nil {
+		return nil, fmt.Errorf("initialize admin auth service: %w", err)
+	}
 	userManagement, err := service.NewUserService(dependencies.users)
 	if err != nil {
 		return nil, fmt.Errorf("initialize user service: %w", err)
@@ -150,6 +158,14 @@ func New(
 	)
 	if err != nil {
 		return nil, fmt.Errorf("initialize connection password service: %w", err)
+	}
+	hostManagement, err := service.NewHostManagementService(hostManagementRepositoryAdapter{repository: dependencies.hostTargets}, authorization)
+	if err != nil {
+		return nil, fmt.Errorf("initialize host management service: %w", err)
+	}
+	userPreferences, err := service.NewUserPreferenceService(dependencies.userPreferences)
+	if err != nil {
+		return nil, fmt.Errorf("initialize user preference service: %w", err)
 	}
 	databaseManagement, err := service.NewDatabaseManagementService(databaseManagementRepositoryAdapter{repository: dependencies.databases}, authorization, databaseProvisioning)
 	if err != nil {
@@ -183,12 +199,12 @@ func New(
 	}
 	return &Server{
 		cfg: cfg, db: db, logger: logger,
-		aiAccessTokens: aiAccessTokens, aiResources: aiResources,
-		hostTargets: dependencies.hostTargets, databases: dependencies.databases,
+		adminAuth: adminAuth, aiAccessTokens: aiAccessTokens, aiResources: aiResources,
+		hostTargets: dependencies.hostTargets, hostManagement: hostManagement, databases: dependencies.databases,
 		databaseManagement: databaseManagement, applicationService: applicationService,
 		containerManagement: containerManagement, platformAccountService: platformAccountService,
 		userSessionCreation: userSessionCreation, audit: dependencies.audit, connectionPassword: connectionPassword,
-		preferences: dependencies.preferences, temporaryRepository: dependencies.temporaryAccess,
+		preferences: userPreferences, temporaryRepository: dependencies.temporaryAccess,
 		userRepository: dependencies.users, userGroupRepository: dependencies.userGroups, roleRepository: dependencies.roles,
 		dataDir:      dataDir,
 		loginLimiter: newDefaultLoginLimiter(), loginCaptcha: loginCaptcha,

@@ -20,6 +20,10 @@ func (s *DBStore) targetView(ctx context.Context, tx *gorm.DB, a model.HostAccou
 	if storedResourceStatusActive(a.Status) {
 		status = "enabled"
 	}
+	hostStatus := strings.TrimSpace(a.Host.Status)
+	if hostStatus == "" {
+		hostStatus = "active"
+	}
 	authMethods := []string{"password"}
 	if a.AuthType == "private_key" || a.AuthType == "key" {
 		authMethods = []string{"private_key"}
@@ -43,6 +47,7 @@ func (s *DBStore) targetView(ctx context.Context, tx *gorm.DB, a model.HostAccou
 		ResourceSeq: a.ResourceSeq,
 		Name:        name, Group: a.GroupName, Remark: a.Remark, ExpiresAt: expiresAt,
 		LifecycleStatus: strings.ToLower(strings.TrimSpace(a.Status)),
+		HostStatus:      hostStatus,
 		Host:            host, Port: port, Protocol: protocol,
 		Username: a.Username, Domain: a.Domain, Status: status,
 		AuthMethods:           authMethods,

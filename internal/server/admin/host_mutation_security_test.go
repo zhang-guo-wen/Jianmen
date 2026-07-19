@@ -2,19 +2,15 @@ package admin
 
 import (
 	"bytes"
-	"context"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
 
 	"gorm.io/gorm"
 
 	"jianmen/internal/model"
 	"jianmen/internal/rbac"
-	"jianmen/internal/store"
 )
 
 func TestTargetUpdatePermissionCannotMutateHostOwnershipOrEndpoint(t *testing.T) {
@@ -95,80 +91,6 @@ func TestTargetUpdatePermissionCannotMutateHostOwnershipOrEndpoint(t *testing.T)
 	if persistedAccount.Username != "renamed" {
 		t.Fatalf("account username = %q, want renamed", persistedAccount.Username)
 	}
-}
-
-func TestCreateHostCanceledRequestStillUsesBoundedCleanupAndJoinsErrors(t *testing.T) {
-	cleanupErr := errors.New("delete host cleanup failed")
-	repository := &hostCreateCleanupRepository{cleanupErr: cleanupErr}
-	server := &Server{hostTargets: repository}
-
-	request := asTestUser(
-		httptest.NewRequest(
-			http.MethodPost,
-			"/api/hosts",
-			bytes.NewBufferString(`{"name":"cleanup","address":"10.0.2.10","port":22}`),
-		),
-		"cleanup-user",
-		"cleanup-user",
-	)
-	canceledCtx, cancelRequest := context.WithCancel(request.Context())
-	cancelRequest()
-	request = request.WithContext(canceledCtx)
-	recorder := httptest.NewRecorder()
-
-	server.handleCreateHost(recorder, request)
-
-	if recorder.Code != http.StatusInternalServerError {
-		t.Fatalf("create host status = %d, want 500; body=%s", recorder.Code, recorder.Body.String())
-	}
-	if repository.deleteCalls != 1 || repository.deletedID != "cleanup-host" {
-		t.Fatalf("cleanup calls = %d, deleted ID = %q", repository.deleteCalls, repository.deletedID)
-	}
-	if repository.cleanupContextErr != nil {
-		t.Fatalf("cleanup context error at call = %v, want nil", repository.cleanupContextErr)
-	}
-	if !repository.cleanupHasDeadline {
-		t.Fatal("cleanup context has no deadline")
-	}
-	if repository.cleanupRemaining <= 0 || repository.cleanupRemaining > 5*time.Second {
-		t.Fatalf("cleanup deadline remaining = %v, want within (0, 5s]", repository.cleanupRemaining)
-	}
-	if repository.cleanupUserID != "cleanup-user" {
-		t.Fatalf("cleanup context user ID = %q, want cleanup-user", repository.cleanupUserID)
-	}
-	body := recorder.Body.String()
-	if !strings.Contains(body, "resource grant service unavailable") || !strings.Contains(body, cleanupErr.Error()) {
-		t.Fatalf("joined error body = %s", body)
-	}
-}
-
-type hostCreateCleanupRepository struct {
-	adminHostTargetRepository
-
-	cleanupErr         error
-	deleteCalls        int
-	deletedID          string
-	cleanupContextErr  error
-	cleanupHasDeadline bool
-	cleanupRemaining   time.Duration
-	cleanupUserID      string
-}
-
-func (r *hostCreateCleanupRepository) AddHost(context.Context, store.HostRecord) (store.HostView, error) {
-	return store.HostView{ID: "cleanup-host"}, nil
-}
-
-func (r *hostCreateCleanupRepository) DeleteHost(ctx context.Context, id string) error {
-	r.deleteCalls++
-	r.deletedID = id
-	r.cleanupContextErr = ctx.Err()
-	deadline, ok := ctx.Deadline()
-	r.cleanupHasDeadline = ok
-	if ok {
-		r.cleanupRemaining = time.Until(deadline)
-	}
-	r.cleanupUserID, _ = ctx.Value(ctxKeyUserID).(string)
-	return r.cleanupErr
 }
 
 func assertAdminHostState(t *testing.T, db *gorm.DB, want model.Host) {

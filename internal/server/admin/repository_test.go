@@ -158,6 +158,7 @@ func TestAdminRepositoryBoundaryStaysStaticallyComposedAndDomainSplit(t *testing
 		"aiAccessTokens":         reflect.TypeOf((*service.AIAccessTokenService)(nil)),
 		"aiResources":            reflect.TypeOf((*service.AIResourceService)(nil)),
 		"hostTargets":            reflect.TypeOf((*adminHostTargetRepository)(nil)).Elem(),
+		"hostManagement":         reflect.TypeOf((*service.HostManagementService)(nil)),
 		"databases":              reflect.TypeOf((*adminDatabaseRepository)(nil)).Elem(),
 		"databaseManagement":     reflect.TypeOf((*service.DatabaseManagementService)(nil)),
 		"applicationService":     reflect.TypeOf((*service.ApplicationService)(nil)),
@@ -166,7 +167,7 @@ func TestAdminRepositoryBoundaryStaysStaticallyComposedAndDomainSplit(t *testing
 		"userSessionCreation":    reflect.TypeOf((*service.UserSessionCreationService)(nil)),
 		"audit":                  reflect.TypeOf((*adminAuditRepository)(nil)).Elem(),
 		"connectionPassword":     reflect.TypeOf((*service.ConnectionPasswordService)(nil)),
-		"preferences":            reflect.TypeOf((*adminUserPreferenceRepository)(nil)).Elem(),
+		"preferences":            reflect.TypeOf((*service.UserPreferenceService)(nil)),
 	}
 	for name, want := range expectedFields {
 		field, found := serverType.FieldByName(name)
@@ -202,6 +203,7 @@ func TestAdminRepositoryBoundaryStaysStaticallyComposedAndDomainSplit(t *testing
 		t.Fatalf("parse repository boundary: %v", err)
 	}
 	wantEmbedded := map[string]bool{
+		"service.AdminAuthRepository":        true,
 		"adminAIAccessTokenRepository":       true,
 		"adminHostTargetRepository":          true,
 		"adminDatabaseRepository":            true,
@@ -211,7 +213,7 @@ func TestAdminRepositoryBoundaryStaysStaticallyComposedAndDomainSplit(t *testing
 		"adminUserSessionCreationRepository": true,
 		"adminAuditRepository":               true,
 		"adminConnectionPasswordRepository":  true,
-		"adminUserPreferenceRepository":      true,
+		"service.UserPreferenceRepository":   true,
 		"resourceAccessRepository":           true,
 		"service.TemporaryAccessRepository":  true,
 		"service.UserRepository":             true,
@@ -289,6 +291,19 @@ func applyTestAdminDependencies(t *testing.T, server *Server, repository adminRe
 		t.Fatalf("resolve admin dependencies: %v", err)
 	}
 	server.hostTargets = dependencies.hostTargets
+	if server.hostManagement == nil {
+		authorization := server.authorization
+		if isNilAdminAuthorization(authorization) {
+			authorization = repositoryTestAuthorization{}
+		}
+		server.hostManagement, err = service.NewHostManagementService(
+			hostManagementRepositoryAdapter{repository: dependencies.hostTargets},
+			authorization,
+		)
+		if err != nil {
+			t.Fatalf("new host management service: %v", err)
+		}
+	}
 	server.databases = dependencies.databases
 	if server.applicationService == nil {
 		authorization := server.authorization
@@ -364,7 +379,6 @@ func applyTestAdminDependencies(t *testing.T, server *Server, repository adminRe
 			t.Fatalf("new connection password service: %v", err)
 		}
 	}
-	server.preferences = dependencies.preferences
 	if server.resourceAccess == nil {
 		server.resourceAccess = dependencies.resourceAccess
 	}
@@ -404,6 +418,12 @@ func applyTestAdminServices(t *testing.T, server *Server, repository adminReposi
 		server.roleManagement, err = newRoleManagementService(dependencies.roles)
 		if err != nil {
 			t.Fatalf("new role service: %v", err)
+		}
+	}
+	if server.preferences == nil {
+		server.preferences, err = service.NewUserPreferenceService(dependencies.userPreferences)
+		if err != nil {
+			t.Fatalf("new user preference service: %v", err)
 		}
 	}
 }

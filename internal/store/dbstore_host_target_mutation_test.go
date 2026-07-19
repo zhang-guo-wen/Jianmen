@@ -14,6 +14,38 @@ import (
 	"jianmen/internal/storage"
 )
 
+func TestCreateManagedHostGrantFailureRollsBackHostResourceAndGrant(t *testing.T) {
+	repository, db := newHostTargetMutationTestStore(t)
+	creator := model.User{ID: "host-creator-rollback", Username: "host-creator-rollback", Status: "active"}
+	if err := db.Create(&creator).Error; err != nil {
+		t.Fatalf("create host creator: %v", err)
+	}
+	injectedErr := errors.New("injected host creator grant failure")
+	const callbackName = "test:fail-host-creator-grant"
+	if err := db.Callback().Create().Before("gorm:create").Register(callbackName, func(tx *gorm.DB) {
+		if tx.Statement.Schema != nil && tx.Statement.Schema.Name == "ResourceGrant" {
+			tx.AddError(injectedErr)
+		}
+	}); err != nil {
+		t.Fatalf("register creator grant failure: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := db.Callback().Create().Remove(callbackName); err != nil {
+			t.Errorf("remove creator grant failure: %v", err)
+		}
+	})
+
+	_, err := repository.CreateManagedHost(context.Background(), HostRecord{
+		ID: "host-creator-orphan", Name: "orphan", Address: "10.0.0.99", Port: 22, Protocol: "ssh",
+	}, creator.ID)
+	if !errors.Is(err, injectedErr) {
+		t.Fatalf("CreateManagedHost error = %v, want %v", err, injectedErr)
+	}
+	assertHostTargetArtifactCount(t, db, &model.Host{}, "id = ?", []any{"host-creator-orphan"}, 0)
+	assertHostTargetArtifactCount(t, db, &model.Resource{}, "type = ? AND resource_id = ?", []any{model.ResourceTypeHost, "host-creator-orphan"}, 0)
+	assertHostTargetArtifactCount(t, db, &model.ResourceGrant{}, "principal_id = ? AND resource_id = ?", []any{creator.ID, "host-creator-orphan"}, 0)
+}
+
 func TestAddTargetRejectsInvalidExpiryWithoutArtifacts(t *testing.T) {
 	repository, db := newHostTargetMutationTestStore(t)
 

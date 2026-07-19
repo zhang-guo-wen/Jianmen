@@ -152,7 +152,7 @@ func TestAdminRepositoryBoundaryStaysStaticallyComposedAndDomainSplit(t *testing
 		t.Fatal("Server regained an application-wide store field")
 	}
 	expectedFields := map[string]reflect.Type{
-		"aiTokens":            reflect.TypeOf((*adminAIAccessTokenRepository)(nil)).Elem(),
+		"aiAccessTokens":      reflect.TypeOf((*service.AIAccessTokenService)(nil)),
 		"hostTargets":         reflect.TypeOf((*adminHostTargetRepository)(nil)).Elem(),
 		"databases":           reflect.TypeOf((*adminDatabaseRepository)(nil)).Elem(),
 		"applicationService":  reflect.TypeOf((*service.ApplicationService)(nil)),

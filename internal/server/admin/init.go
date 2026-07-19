@@ -162,30 +162,45 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		s.writeErrorText(w, r, http.StatusUnauthorized, "invalid username or password")
 		return
 	}
-	if user.MySQLNativeHash == "" {
-		mysqlHash := util.MySQLNativePasswordHash(password)
-		if err := s.db.Model(&user).Update("my_sql_native_hash", mysqlHash).Error; err != nil {
-			s.logger.Warn("failed to backfill mysql password verifier", "user", user.ID, "error", err)
-		} else {
-			user.MySQLNativeHash = mysqlHash
-		}
-	}
 
 	// Browser logins use an HttpOnly server-side session.  User token hashes are
 	// retained exclusively for CLI and protocol identities.
+	intentID, err := s.beginLoginAudit(r, username, user.ID)
+	if err != nil {
+		s.logger.Error("admin login audit gate failed", "user_id", user.ID, "error", err)
+		s.writeErrorText(w, r, http.StatusServiceUnavailable, "login audit unavailable")
+		return
+	}
+	if user.MySQLNativeHash == "" {
+		user.MySQLNativeHash = util.MySQLNativePasswordHash(password)
+	}
 	user.LastLoginAt = &now
 	if err := s.db.Save(&user).Error; err != nil {
+		s.recordLoginAuditFailure(r, username, user.ID, intentID, "login_state_persist_failed")
 		s.writeErrorText(w, r, http.StatusInternalServerError, "failed to save login state")
 		return
 	}
 	session, err := s.browserSessions.Create(r.Context(), user.ID)
 	if err != nil {
+		s.recordLoginAuditFailure(r, username, user.ID, intentID, "session_create_failed")
 		s.writeErrorText(w, r, http.StatusInternalServerError, "failed to create browser session")
+		return
+	}
+	if err := s.recordLoginAuditResult(r, username, user.ID, intentID, "success", ""); err != nil {
+		s.logger.Error("admin login result audit failed", "user_id", user.ID, "intent_id", intentID, "error", err)
+		ctx, cancel := detachedAuditWriteContext(r.Context())
+		revokeErr := s.browserSessions.Revoke(ctx, session.SessionID)
+		cancel()
+		if revokeErr != nil {
+			s.logger.Error("failed to revoke unaudited admin session", "user_id", user.ID, "session_id", session.SessionID, "error", revokeErr)
+		}
+		s.recordLoginAuditFailure(r, username, user.ID, intentID, "success_audit_failed")
+		s.writeErrorText(w, r, http.StatusServiceUnavailable, "login audit unavailable")
 		return
 	}
 
 	limiter.reset(limitKey)
-	s.logLogin(r, username, user.ID, "success", "")
+	s.logLoginOutcome(s.loginLogger(), r, username, "success", "")
 	setBrowserSessionCookie(w, r, session.Secret, session.ExpiresAt, s.cfg.Admin.PublicURL)
 	s.writeJSON(w, r, http.StatusOK, map[string]string{"csrf_token": session.CSRFToken})
 }

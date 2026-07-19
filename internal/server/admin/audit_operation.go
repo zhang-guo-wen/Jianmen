@@ -2,6 +2,7 @@ package admin
 
 import (
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -9,6 +10,8 @@ import (
 	"jianmen/internal/model"
 	"jianmen/internal/pkg/apiresp"
 )
+
+var errOperationAuditUnavailable = errors.New("operation audit unavailable")
 
 // auditResponseWriter captures the final status without changing the response API.
 type auditResponseWriter struct {
@@ -47,11 +50,84 @@ func isAuditableMutation(r *http.Request) bool {
 	}
 }
 
-func (s *Server) recordOperation(r *http.Request, status int) {
-	if s.audit == nil {
-		return
+// withOperationAudit persists an intent before a mutation is allowed to run.
+// The intent is the durable trace anchor; the result is appended after the
+// handler without pretending that an already committed mutation can be rolled
+// back by HTTP middleware.
+func (s *Server) withOperationAudit(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if !isAuditableMutation(r) {
+			next(w, r)
+			return
+		}
+		intentID, err := s.recordOperationIntent(r)
+		if err != nil {
+			logger := s.logger
+			if logger == nil {
+				logger = slog.Default()
+			}
+			logger.Error("operation audit gate failed", "action", operationAction(r), "path", r.URL.Path, "error", err)
+			s.writeErrorText(w, r, http.StatusServiceUnavailable, "operation audit unavailable")
+			return
+		}
+
+		aw := &auditResponseWriter{ResponseWriter: w}
+		next(aw, r)
+		s.recordOperationResult(r, aw.statusCode(), intentID)
 	}
-	event := &model.AuditEvent{
+}
+
+func (s *Server) recordOperationIntent(r *http.Request) (string, error) {
+	event := s.newOperationAuditEvent(r)
+	event.ID = model.NewID()
+	detail, err := json.Marshal(map[string]any{
+		"method":     r.Method,
+		"path":       r.URL.Path,
+		"phase":      "intent",
+		"result":     "pending",
+		"request_id": apiresp.RequestID(r.Context()),
+		"user_agent": r.UserAgent(),
+	})
+	if err != nil {
+		return "", err
+	}
+	event.Detail = string(detail)
+	if err := s.createOperationAuditEvent(r, event); err != nil {
+		return "", err
+	}
+	return event.ID, nil
+}
+
+func (s *Server) recordOperation(r *http.Request, status int) {
+	s.recordOperationResult(r, status, "")
+}
+
+func (s *Server) recordOperationResult(r *http.Request, status int, intentID string) {
+	event := s.newOperationAuditEvent(r)
+	detail, err := json.Marshal(map[string]any{
+		"method":     r.Method,
+		"path":       r.URL.Path,
+		"phase":      "result",
+		"status":     status,
+		"result":     operationResult(status),
+		"intent_id":  intentID,
+		"request_id": apiresp.RequestID(r.Context()),
+		"user_agent": r.UserAgent(),
+	})
+	if err == nil {
+		event.Detail = string(detail)
+	}
+	if err := s.createOperationAuditEvent(r, event); err != nil {
+		logger := s.logger
+		if logger == nil {
+			logger = slog.Default()
+		}
+		logger.Warn("failed to write operation audit result", "action", event.Action, "path", r.URL.Path, "intent_id", intentID, "error", err)
+	}
+}
+
+func (s *Server) newOperationAuditEvent(r *http.Request) *model.AuditEvent {
+	return &model.AuditEvent{
 		ActorID:       userIDFromRequest(r),
 		ActorUsername: usernameFromRequest(r),
 		Action:        operationAction(r),
@@ -60,26 +136,18 @@ func (s *Server) recordOperation(r *http.Request, status int) {
 		ResourceName:  r.URL.Path,
 		ClientIP:      requestClientIP(r),
 	}
-	detail, err := json.Marshal(map[string]any{
-		"method":     r.Method,
-		"path":       r.URL.Path,
-		"status":     status,
-		"result":     operationResult(status),
-		"request_id": apiresp.RequestID(r.Context()),
-		"user_agent": r.UserAgent(),
-	})
-	if err == nil {
-		event.Detail = string(detail)
+}
+
+func (s *Server) createOperationAuditEvent(r *http.Request, event *model.AuditEvent) error {
+	if s.audit == nil {
+		return errOperationAuditUnavailable
 	}
 	ctx, cancel := detachedAuditWriteContext(r.Context())
 	defer cancel()
 	if err := s.audit.CreateAuditEvent(ctx, event); err != nil {
-		logger := s.logger
-		if logger == nil {
-			logger = slog.Default()
-		}
-		logger.Warn("failed to write operation audit log", "action", event.Action, "path", r.URL.Path, "error", err)
+		return err
 	}
+	return nil
 }
 
 func operationResult(status int) string {
@@ -91,6 +159,9 @@ func operationResult(status int) string {
 
 func operationAction(r *http.Request) string {
 	path := strings.ToLower(r.URL.Path)
+	if strings.Contains(path, "/refresh") {
+		return "refresh"
+	}
 	if strings.Contains(path, "/revoke") || strings.Contains(path, "/disconnect") {
 		return "revoke"
 	}
@@ -116,6 +187,9 @@ func operationResourceType(path string) string {
 	if len(parts) == 0 {
 		return "api"
 	}
+	if parts[0] == "ai" && len(parts) > 2 && parts[1] == "resources" {
+		return parts[2]
+	}
 	if parts[0] == "db" && len(parts) > 1 {
 		return "db/" + parts[1]
 	}
@@ -131,7 +205,9 @@ func operationResourceID(path string) string {
 		return ""
 	}
 	index := 1
-	if parts[0] == "db" || parts[0] == "rbac" {
+	if parts[0] == "ai" && len(parts) > 2 && parts[1] == "resources" {
+		index = 3
+	} else if parts[0] == "db" || parts[0] == "rbac" {
 		index = 2
 	}
 	if len(parts) <= index || isOperationPathPart(parts[index]) {

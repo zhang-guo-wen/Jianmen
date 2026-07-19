@@ -3,11 +3,17 @@ package service
 import (
 	"context"
 	"errors"
+	"reflect"
 	"testing"
 
 	"jianmen/internal/model"
 	"jianmen/internal/rbac"
 	"jianmen/internal/storage"
+)
+
+var (
+	_ AuthorizationActionAuthorizer   = (*rbac.Checker)(nil)
+	_ AuthorizationResourceAuthorizer = (*rbac.ResourceGrantChecker)(nil)
 )
 
 type fakeAuthorizationIdentity struct {
@@ -63,6 +69,34 @@ func (f *fakeActionAuthorizer) HasDenyContext(
 		return false, f.denyErr
 	}
 	return f.denied[action], nil
+}
+
+func (f *fakeActionAuthorizer) BatchActionDecisionsContext(
+	_ context.Context,
+	_ string,
+	requests []rbac.BatchAuthorizationRequest,
+) ([]rbac.BatchActionDecision, error) {
+	result := make([]rbac.BatchActionDecision, len(requests))
+	if f.err != nil {
+		return nil, f.err
+	}
+	for index, request := range requests {
+		for _, action := range request.Actions {
+			if !f.allowed[action] {
+				continue
+			}
+			result[index].ActionAllowed = true
+			if f.denied[action] {
+				result[index].Denied = true
+				continue
+			}
+			result[index].Allowed = true
+		}
+		if result[index].Allowed {
+			result[index].Denied = false
+		}
+	}
+	return result, nil
 }
 
 type fakeResourceAuthorizer struct {
@@ -139,11 +173,26 @@ func (f *fakeResourceAuthorizer) HasGrantContext(
 	return f.allowed, nil
 }
 
+func (f *fakeResourceAuthorizer) BatchGrantsContext(
+	_ context.Context,
+	_ string,
+	requests []rbac.BatchAuthorizationRequest,
+) ([]bool, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	result := make([]bool, len(requests))
+	for index := range result {
+		result[index] = f.allowed
+	}
+	return result, nil
+}
+
 func newAuthorizationTestService(
 	t *testing.T,
 	identity AuthorizationIdentity,
-	actions ActionAuthorizer,
-	resources ResourceAuthorizer,
+	actions AuthorizationActionAuthorizer,
+	resources AuthorizationResourceAuthorizer,
 ) *AuthorizationService {
 	t.Helper()
 	authorizer, err := NewAuthorizationService(identity, actions, resources)
@@ -510,8 +559,8 @@ func TestNewAuthorizationServiceRejectsNilDependencies(t *testing.T) {
 	tests := []struct {
 		name      string
 		identity  AuthorizationIdentity
-		actions   ActionAuthorizer
-		resources ResourceAuthorizer
+		actions   AuthorizationActionAuthorizer
+		resources AuthorizationResourceAuthorizer
 	}{
 		{name: "identity", actions: actions, resources: resources},
 		{name: "actions", identity: identity, resources: resources},
@@ -538,6 +587,35 @@ func TestNewAuthorizationServiceRejectsTypedNilDependencies(t *testing.T) {
 	}
 	if _, err := NewAuthorizationService(&fakeAuthorizationIdentity{}, &fakeActionAuthorizer{}, resources); err == nil {
 		t.Fatal("typed-nil resource authorizer was accepted")
+	}
+}
+
+func TestNewAuthorizationServiceRequiresBatchCapabilitiesInStaticContract(t *testing.T) {
+	constructor := reflect.TypeOf(NewAuthorizationService)
+	for _, test := range []struct {
+		name     string
+		argument int
+		methods  []string
+	}{
+		{
+			name:     "action authorizer",
+			argument: 1,
+			methods:  []string{"HasPermissionContext", "HasDenyContext", "BatchActionDecisionsContext"},
+		},
+		{
+			name:     "resource authorizer",
+			argument: 2,
+			methods:  []string{"HasGrantContext", "BatchGrantsContext"},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			contract := constructor.In(test.argument)
+			for _, method := range test.methods {
+				if _, ok := contract.MethodByName(method); !ok {
+					t.Fatalf("constructor argument %d does not statically require %s", test.argument, method)
+				}
+			}
+		})
 	}
 }
 
@@ -577,6 +655,76 @@ func TestAuthorizationServiceBatchChecksContextAfterIdentity(t *testing.T) {
 	}
 	if _, err := authorizer.AuthorizeBatch(ctx, "admin", []AuthorizationRequest{{Actions: []string{"view"}, ResourceType: "host", ResourceID: "h1"}}); !errors.Is(err, context.Canceled) {
 		t.Fatalf("error=%v want context canceled", err)
+	}
+}
+
+func TestAuthorizationServiceBatchActionOnlyDenyMatchesSingleForAlternativeActions(t *testing.T) {
+	db, err := storage.Open(storage.Config{Driver: storage.DriverSQLite, DSN: ":memory:"})
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	if err := storage.AutoMigrate(db); err != nil {
+		t.Fatalf("auto migrate: %v", err)
+	}
+	user := model.User{ID: "u-batch-equivalent", Username: "batch-equivalent", Status: "active"}
+	role := model.Role{ID: "r-batch-equivalent", Name: "batch-equivalent", Status: "active"}
+	for _, record := range []any{&user, &role, &model.UserRole{ID: "ur-batch-equivalent", UserID: user.ID, RoleID: role.ID}} {
+		if err := db.Create(record).Error; err != nil {
+			t.Fatalf("create %T: %v", record, err)
+		}
+	}
+	permissions := []model.Permission{
+		{ID: "allow-view-equivalent", Action: "resource:view", Effect: model.PermissionEffectAllow},
+		{ID: "deny-view-equivalent", Action: "resource:view", Effect: model.PermissionEffectDeny},
+		{ID: "allow-connect-equivalent", Action: "resource:connect", Effect: model.PermissionEffectAllow},
+		{ID: "deny-connect-h1-equivalent", Action: "resource:connect", ResourceType: model.ResourceTypeHost, ResourceID: "h1", Effect: model.PermissionEffectDeny},
+	}
+	for index := range permissions {
+		if err := db.Create(&permissions[index]).Error; err != nil {
+			t.Fatal(err)
+		}
+		if err := db.Create(&model.RolePermission{ID: "rp-" + permissions[index].ID, RoleID: role.ID, PermissionID: permissions[index].ID}).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, id := range []string{"h1", "h2"} {
+		if err := db.Create(&model.ResourceGrant{ID: "grant-" + id, PrincipalType: "user", PrincipalID: user.ID, ResourceType: model.ResourceTypeHost, ResourceID: id, Effect: model.PermissionEffectAllow}).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	authorizer := newAuthorizationTestService(
+		t,
+		&fakeAuthorizationIdentity{subject: IdentitySubject{ID: user.ID, Username: user.Username, Status: user.Status}, found: true},
+		rbac.NewChecker(db),
+		rbac.NewResourceGrantChecker(db),
+	)
+	requests := []AuthorizationRequest{
+		{UserID: user.ID, Actions: []string{"resource:view"}, ResourceType: model.ResourceTypeHost, ResourceID: "h1"},
+		{UserID: user.ID, Actions: []string{"resource:view", "resource:connect"}, ResourceType: model.ResourceTypeHost, ResourceID: "h1"},
+		{UserID: user.ID, Actions: []string{"resource:view", "resource:connect"}, ResourceType: model.ResourceTypeHost, ResourceID: "h2"},
+		{UserID: user.ID, Actions: []string{"resource:view", "missing"}, ResourceType: model.ResourceTypeHost, ResourceID: "h2"},
+	}
+	batch, err := authorizer.AuthorizeBatch(context.Background(), user.ID, requests)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantReasons := []string{
+		AuthorizationReasonActionDenied,
+		AuthorizationReasonResourceDenied,
+		AuthorizationReasonAllowed,
+		AuthorizationReasonActionDenied,
+	}
+	for index, request := range requests {
+		single, err := authorizer.Authorize(context.Background(), request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if batch[index] != single {
+			t.Fatalf("request[%d] single=%#v batch=%#v", index, single, batch[index])
+		}
+		if batch[index].Reason != wantReasons[index] {
+			t.Fatalf("request[%d] reason=%s want=%s", index, batch[index].Reason, wantReasons[index])
+		}
 	}
 }
 

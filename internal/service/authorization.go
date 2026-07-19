@@ -57,16 +57,34 @@ type ResourceAuthorizer interface {
 	HasGrantContext(ctx context.Context, userID, resourceType, resourceID string) (bool, error)
 }
 
+type BatchActionAuthorizer interface {
+	BatchActionDecisionsContext(context.Context, string, []rbac.BatchAuthorizationRequest) ([]rbac.BatchActionDecision, error)
+}
+
+type BatchResourceAuthorizer interface {
+	BatchGrantsContext(context.Context, string, []rbac.BatchAuthorizationRequest) ([]bool, error)
+}
+
+type AuthorizationActionAuthorizer interface {
+	ActionAuthorizer
+	BatchActionAuthorizer
+}
+
+type AuthorizationResourceAuthorizer interface {
+	ResourceAuthorizer
+	BatchResourceAuthorizer
+}
+
 type AuthorizationService struct {
 	identity  AuthorizationIdentity
-	actions   ActionAuthorizer
-	resources ResourceAuthorizer
+	actions   AuthorizationActionAuthorizer
+	resources AuthorizationResourceAuthorizer
 }
 
 func NewAuthorizationService(
 	identity AuthorizationIdentity,
-	actions ActionAuthorizer,
-	resources ResourceAuthorizer,
+	actions AuthorizationActionAuthorizer,
+	resources AuthorizationResourceAuthorizer,
 ) (*AuthorizationService, error) {
 	switch {
 	case isNilAuthorizationDependency(identity):
@@ -223,14 +241,6 @@ func normalizedActions(actions []string) []string {
 	return normalized
 }
 
-type BatchActionAuthorizer interface {
-	BatchActionDecisionsContext(context.Context, string, []rbac.BatchAuthorizationRequest) ([]rbac.BatchActionDecision, error)
-}
-
-type BatchResourceAuthorizer interface {
-	BatchGrantsContext(context.Context, string, []rbac.BatchAuthorizationRequest) ([]bool, error)
-}
-
 // AuthorizeBatch resolves the identity once and authorizes every concrete
 // resource from bounded authorization datasets. Empty input never reaches RBAC.
 func (s *AuthorizationService) AuthorizeBatch(ctx context.Context, userID string, requests []AuthorizationRequest) ([]AuthorizationDecision, error) {
@@ -286,19 +296,11 @@ func (s *AuthorizationService) AuthorizeBatch(ctx context.Context, userID string
 		}
 		return decisions, nil
 	}
-	actions, ok := s.actions.(BatchActionAuthorizer)
-	if !ok {
-		return nil, errors.New("batch action authorizer is required")
-	}
-	resources, ok := s.resources.(BatchResourceAuthorizer)
-	if !ok {
-		return nil, errors.New("batch resource authorizer is required")
-	}
-	actionDecisions, err := actions.BatchActionDecisionsContext(ctx, subject.ID, batch)
+	actionDecisions, err := s.actions.BatchActionDecisionsContext(ctx, subject.ID, batch)
 	if err != nil {
 		return nil, fmt.Errorf("batch authorize actions: %w", err)
 	}
-	grantDecisions, err := resources.BatchGrantsContext(ctx, subject.ID, batch)
+	grantDecisions, err := s.resources.BatchGrantsContext(ctx, subject.ID, batch)
 	if err != nil {
 		return nil, fmt.Errorf("batch authorize resources: %w", err)
 	}

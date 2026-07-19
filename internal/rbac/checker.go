@@ -245,29 +245,43 @@ func (c *Checker) BatchActionDecisionsContext(ctx context.Context, userID string
 	for index, request := range requests {
 		decision := result[index]
 		for _, action := range normalizedBatchActions(request.Actions) {
-			actionAllowed := false
-			actionDenied := false
+			globalAllowed := false
+			globalDenied := false
+			resourceDenied := false
 			for _, permission := range permissions {
 				if !actionMatches(permission.Action, action) {
 					continue
 				}
-				if isDeny(permission) && (isActionOnly(permission) || batchPermissionResourceMatches(permission, request, facts)) {
-					actionDenied = true
+				if isActionOnly(permission) {
+					if isDeny(permission) {
+						globalDenied = true
+					}
+					if isAllow(permission) {
+						globalAllowed = true
+					}
 					continue
 				}
-				if isAllow(permission) && isActionOnly(permission) {
-					actionAllowed = true
+				if isDeny(permission) && batchPermissionResourceMatches(permission, request, facts) {
+					resourceDenied = true
 				}
 			}
-			if actionAllowed {
-				decision.ActionAllowed = true
+			// HasPermissionContext(user, action, "", "") first applies
+			// action-only deny precedence, then requires an action-only allow.
+			// Keep that decision separate from a concrete resource deny so the
+			// service can preserve action_denied versus resource_denied.
+			if globalDenied || !globalAllowed {
+				continue
 			}
-			if actionAllowed && !actionDenied {
+			decision.ActionAllowed = true
+			if !resourceDenied {
 				decision.Allowed = true
 			}
-			if actionAllowed && actionDenied {
+			if resourceDenied {
 				decision.Denied = true
 			}
+		}
+		if decision.Allowed {
+			decision.Denied = false
 		}
 		result[index] = decision
 	}

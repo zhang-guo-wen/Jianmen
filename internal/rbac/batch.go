@@ -25,12 +25,14 @@ func BatchResourceKey(resourceType, resourceID string) string {
 }
 
 type batchFacts struct {
-	resourceGroups map[string]string
-	accountGroups  map[string]string
-	resourceOf     map[string]string
-	accountOf      map[string]string
-	hostOf         map[string]string
-	instanceOf     map[string]string
+	permissionGroups map[string]string
+	permissionOf     map[string]string
+	resourceGroups   map[string]string
+	accountGroups    map[string]string
+	resourceOf       map[string]string
+	accountOf        map[string]string
+	hostOf           map[string]string
+	instanceOf       map[string]string
 }
 
 func (f batchFacts) groupMatches(groupID string, resourceType, resourceID string, account bool) bool {
@@ -39,6 +41,14 @@ func (f batchFacts) groupMatches(groupID string, resourceType, resourceID string
 		return f.accountGroups[groupID] != "" && f.accountGroups[groupID] == f.accountOf[key]
 	}
 	return f.resourceGroups[groupID] != "" && f.resourceGroups[groupID] == f.resourceOf[key]
+}
+
+func (f batchFacts) permissionGroupMatches(groupID, resourceType, resourceID string) bool {
+	groupName := f.permissionGroups[groupID]
+	if groupName == "" {
+		return false
+	}
+	return groupName == f.permissionOf[BatchResourceKey(resourceType, resourceID)]
 }
 
 func batchIDs(requests []BatchAuthorizationRequest, resourceType string) []string {
@@ -56,7 +66,16 @@ func batchIDs(requests []BatchAuthorizationRequest, resourceType string) []strin
 }
 
 func (c *Checker) loadBatchFacts(ctx context.Context, requests []BatchAuthorizationRequest, groupIDs []string) (batchFacts, error) {
-	facts := batchFacts{resourceGroups: map[string]string{}, accountGroups: map[string]string{}, resourceOf: map[string]string{}, accountOf: map[string]string{}, hostOf: map[string]string{}, instanceOf: map[string]string{}}
+	facts := batchFacts{
+		permissionGroups: map[string]string{},
+		permissionOf:     map[string]string{},
+		resourceGroups:   map[string]string{},
+		accountGroups:    map[string]string{},
+		resourceOf:       map[string]string{},
+		accountOf:        map[string]string{},
+		hostOf:           map[string]string{},
+		instanceOf:       map[string]string{},
+	}
 	db := c.db.WithContext(ctx)
 	if len(groupIDs) > 0 {
 		var groups []model.ResourceGroup
@@ -64,6 +83,10 @@ func (c *Checker) loadBatchFacts(ctx context.Context, requests []BatchAuthorizat
 			return facts, err
 		}
 		for _, group := range groups {
+			// Permission keeps the legacy Checker.groupContainsResource
+			// semantics: the referenced group ID supplies a name regardless of
+			// group_type. ResourceGrant uses the two typed maps below instead.
+			facts.permissionGroups[group.ID] = group.Name
 			if group.GroupType == model.ResourceGroupTypeAccount {
 				facts.accountGroups[group.ID] = group.Name
 			} else {
@@ -77,7 +100,9 @@ func (c *Checker) loadBatchFacts(ctx context.Context, requests []BatchAuthorizat
 			return facts, err
 		}
 		for _, x := range rows {
-			facts.resourceOf[BatchResourceKey(model.ResourceTypeHost, x.ID)] = x.GroupName
+			key := BatchResourceKey(model.ResourceTypeHost, x.ID)
+			facts.permissionOf[key] = x.GroupName
+			facts.resourceOf[key] = x.GroupName
 		}
 	}
 	if ids := batchIDs(requests, model.ResourceTypeDatabaseInstance); len(ids) > 0 {
@@ -86,7 +111,9 @@ func (c *Checker) loadBatchFacts(ctx context.Context, requests []BatchAuthorizat
 			return facts, err
 		}
 		for _, x := range rows {
-			facts.resourceOf[BatchResourceKey(model.ResourceTypeDatabaseInstance, x.ID)] = x.GroupName
+			key := BatchResourceKey(model.ResourceTypeDatabaseInstance, x.ID)
+			facts.permissionOf[key] = x.GroupName
+			facts.resourceOf[key] = x.GroupName
 		}
 	}
 	if ids := batchIDs(requests, model.ResourceTypeApplication); len(ids) > 0 {
@@ -95,7 +122,9 @@ func (c *Checker) loadBatchFacts(ctx context.Context, requests []BatchAuthorizat
 			return facts, err
 		}
 		for _, x := range rows {
-			facts.resourceOf[BatchResourceKey(model.ResourceTypeApplication, x.ID)] = x.AppGroup
+			key := BatchResourceKey(model.ResourceTypeApplication, x.ID)
+			facts.permissionOf[key] = x.AppGroup
+			facts.resourceOf[key] = x.AppGroup
 		}
 	}
 	if ids := batchIDs(requests, model.ResourceTypePlatformAccount); len(ids) > 0 {
@@ -105,7 +134,7 @@ func (c *Checker) loadBatchFacts(ctx context.Context, requests []BatchAuthorizat
 		}
 		for _, x := range rows {
 			key := BatchResourceKey(model.ResourceTypePlatformAccount, x.ID)
-			facts.resourceOf[key] = x.GroupName
+			facts.permissionOf[key] = x.GroupName
 			facts.accountOf[key] = x.GroupName
 		}
 	}
@@ -115,6 +144,8 @@ func (c *Checker) loadBatchFacts(ctx context.Context, requests []BatchAuthorizat
 			return facts, err
 		}
 		for _, x := range rows {
+			// Legacy Permission group matching intentionally excludes container
+			// endpoints. ResourceGrant resource groups continue to include them.
 			facts.resourceOf[BatchResourceKey(model.ResourceTypeContainerEndpoint, x.ID)] = x.GroupName
 		}
 	}
@@ -125,6 +156,7 @@ func (c *Checker) loadBatchFacts(ctx context.Context, requests []BatchAuthorizat
 		}
 		for _, x := range rows {
 			key := BatchResourceKey(model.ResourceTypeHostAccount, x.ID)
+			facts.permissionOf[key] = x.HostGroup
 			facts.resourceOf[key] = x.HostGroup
 			facts.accountOf[key] = x.GroupName
 			facts.hostOf[x.ID] = x.HostID
@@ -137,6 +169,7 @@ func (c *Checker) loadBatchFacts(ctx context.Context, requests []BatchAuthorizat
 		}
 		for _, x := range rows {
 			key := BatchResourceKey(model.ResourceTypeDatabaseAccount, x.ID)
+			facts.permissionOf[key] = x.InstanceGroup
 			facts.resourceOf[key] = x.InstanceGroup
 			facts.accountOf[key] = x.GroupName
 			facts.instanceOf[x.ID] = x.InstanceID
@@ -176,5 +209,5 @@ func batchPermissionResourceMatches(permission model.Permission, request BatchAu
 	if resourceTypeMatches(permission.ResourceType, request.ResourceType) && resourceIDMatches(permission.ResourceID, request.ResourceID) {
 		return true
 	}
-	return permission.ResourceType == model.ResourceTypeGroup && facts.groupMatches(permission.ResourceID, request.ResourceType, request.ResourceID, false)
+	return permission.ResourceType == model.ResourceTypeGroup && facts.permissionGroupMatches(permission.ResourceID, request.ResourceType, request.ResourceID)
 }

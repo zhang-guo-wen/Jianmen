@@ -242,3 +242,152 @@ func TestBatchActionDecisionsAreIndexAlignedAndBoundedForHundredResources(t *tes
 		t.Fatalf("batch action SQL grew with distinct resource IDs: small=%d large=%d", smallQueries, largeQueries)
 	}
 }
+
+func TestBatchPermissionGroupFactsMatchLegacyCheckerSemantics(t *testing.T) {
+	db := newTestDB(t)
+	for _, value := range []any{
+		&model.User{ID: "owner", Username: "owner"},
+		&model.ResourceGroup{ID: "resource-shared", Name: "shared", GroupType: model.ResourceGroupTypeResource},
+		&model.ResourceGroup{ID: "account-shared", Name: "shared", GroupType: model.ResourceGroupTypeAccount},
+		&model.Host{ID: "host-shared", Name: "host", Address: "10.10.0.1", Port: 22, GroupName: "shared"},
+		&model.HostAccount{ID: "host-account-shared", HostID: "host-shared", Username: "root", ResourceID: "ha-shared", Status: "active"},
+		&model.DatabaseInstance{ID: "db-shared", Name: "db", Protocol: "mysql", Address: "10.10.0.2", Port: 3306, GroupName: "shared"},
+		&model.DatabaseAccount{ID: "db-account-shared", InstanceID: "db-shared", UniqueName: "app", Username: "app", ResourceID: "da-shared", Status: "active"},
+		&model.Application{ID: "app-shared", Name: "app", AppGroup: "shared", ListenPort: 18081, InternalScheme: "http", InternalHost: "127.0.0.1", InternalPort: 8081, Status: "active"},
+		&model.PlatformAccount{ID: "platform-shared", Name: "platform", PlatformName: "git", GroupName: "shared", Username: "admin", OwnerID: "owner", Status: "active"},
+		&model.ContainerEndpoint{ID: "container-shared", Name: "container", Runtime: model.ContainerRuntimeDocker, ConnectionMode: model.ContainerConnectionDockerAPI, Address: "unix:///var/run/docker.sock", GroupName: "shared", Status: "active"},
+	} {
+		if err := db.Create(value).Error; err != nil {
+			t.Fatalf("create %T: %v", value, err)
+		}
+	}
+
+	requests := []BatchAuthorizationRequest{
+		{ResourceType: model.ResourceTypeHost, ResourceID: "host-shared"},
+		{ResourceType: model.ResourceTypeHostAccount, ResourceID: "host-account-shared"},
+		{ResourceType: model.ResourceTypeDatabaseInstance, ResourceID: "db-shared"},
+		{ResourceType: model.ResourceTypeDatabaseAccount, ResourceID: "db-account-shared"},
+		{ResourceType: model.ResourceTypeApplication, ResourceID: "app-shared"},
+		{ResourceType: model.ResourceTypePlatformAccount, ResourceID: "platform-shared"},
+		{ResourceType: model.ResourceTypeContainerEndpoint, ResourceID: "container-shared"},
+	}
+
+	for _, test := range []struct {
+		name    string
+		userID  string
+		groupID string
+		action  string
+	}{
+		{name: "permission references account-group id", userID: "u-account-group", groupID: "account-shared", action: "resource:view-account"},
+		{name: "permission references same-name resource-group id", userID: "u-resource-group", groupID: "resource-shared", action: "resource:view-resource"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			seedRBAC(t, db, test.userID, []model.Permission{
+				{ID: "allow-" + test.userID, Action: test.action, Effect: model.PermissionEffectAllow},
+				{
+					ID:           "deny-" + test.userID,
+					Action:       test.action,
+					ResourceType: model.ResourceTypeGroup,
+					ResourceID:   test.groupID,
+					Effect:       model.PermissionEffectDeny,
+				},
+			})
+			batchRequests := append([]BatchAuthorizationRequest(nil), requests...)
+			for index := range batchRequests {
+				batchRequests[index].Actions = []string{test.action}
+			}
+			checker := NewChecker(db)
+			got, err := checker.BatchActionDecisionsContext(context.Background(), test.userID, batchRequests)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for index, request := range batchRequests {
+				globalAllowed, err := checker.HasPermissionContext(context.Background(), test.userID, test.action, "", "")
+				if err != nil {
+					t.Fatal(err)
+				}
+				resourceDenied, err := checker.HasDenyContext(context.Background(), test.userID, test.action, request.ResourceType, request.ResourceID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				want := BatchActionDecision{
+					ActionAllowed: globalAllowed,
+					Allowed:       globalAllowed && !resourceDenied,
+					Denied:        globalAllowed && resourceDenied,
+				}
+				if got[index] != want {
+					t.Fatalf("%s/%s batch=%#v single-derived=%#v", request.ResourceType, request.ResourceID, got[index], want)
+				}
+				if request.ResourceType == model.ResourceTypeContainerEndpoint && resourceDenied {
+					t.Fatal("legacy Permission group matching unexpectedly included container endpoint")
+				}
+				if request.ResourceType != model.ResourceTypeContainerEndpoint && !resourceDenied {
+					t.Fatalf("legacy Permission group matching missed %s", request.ResourceType)
+				}
+			}
+		})
+	}
+}
+
+func TestBatchActionOnlyDenyAndAlternativeActionsMatchSingleChecks(t *testing.T) {
+	db := newTestDB(t)
+	seedRBAC(t, db, "u1", []model.Permission{
+		{ID: "allow-view", Action: "resource:view", Effect: model.PermissionEffectAllow},
+		{ID: "deny-view", Action: "resource:view", Effect: model.PermissionEffectDeny},
+		{ID: "allow-connect", Action: "resource:connect", Effect: model.PermissionEffectAllow},
+		{ID: "deny-connect-h1", Action: "resource:connect", ResourceType: model.ResourceTypeHost, ResourceID: "h1", Effect: model.PermissionEffectDeny},
+	})
+	for _, id := range []string{"h1", "h2"} {
+		if err := db.Create(&model.Host{ID: id, Name: id, Address: id, Port: 22}).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	requests := []BatchAuthorizationRequest{
+		{ResourceType: model.ResourceTypeHost, ResourceID: "h1", Actions: []string{"resource:view"}},
+		{ResourceType: model.ResourceTypeHost, ResourceID: "h1", Actions: []string{"resource:view", "resource:connect"}},
+		{ResourceType: model.ResourceTypeHost, ResourceID: "h2", Actions: []string{"resource:view", "resource:connect"}},
+		{ResourceType: model.ResourceTypeHost, ResourceID: "h2", Actions: []string{"resource:view", "missing"}},
+	}
+	checker := NewChecker(db)
+	got, err := checker.BatchActionDecisionsContext(context.Background(), "u1", requests)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for index, request := range requests {
+		want := BatchActionDecision{}
+		for _, action := range normalizedBatchActions(request.Actions) {
+			globalAllowed, err := checker.HasPermissionContext(context.Background(), "u1", action, "", "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !globalAllowed {
+				continue
+			}
+			want.ActionAllowed = true
+			resourceDenied, err := checker.HasDenyContext(context.Background(), "u1", action, request.ResourceType, request.ResourceID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if resourceDenied {
+				want.Denied = true
+				continue
+			}
+			want.Allowed = true
+		}
+		if want.Allowed {
+			want.Denied = false
+		}
+		if got[index] != want {
+			t.Fatalf("request[%d]=%#v batch=%#v single-derived=%#v", index, request, got[index], want)
+		}
+	}
+	if got[0].ActionAllowed {
+		t.Fatalf("action-only deny did not override allow: %#v", got[0])
+	}
+	if !got[1].ActionAllowed || got[1].Allowed || !got[1].Denied {
+		t.Fatalf("resource deny classification was lost: %#v", got[1])
+	}
+	if !got[2].Allowed {
+		t.Fatalf("allowed alternative action was rejected: %#v", got[2])
+	}
+}

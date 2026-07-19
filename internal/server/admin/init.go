@@ -22,14 +22,7 @@ import (
 
 // InitStatusResponse 系统初始化状态
 type InitStatusResponse struct {
-	Initialized bool              `json:"initialized"`
-	Admin       *InitAdminSummary `json:"admin,omitempty"`
-}
-
-type InitAdminSummary struct {
-	Username    string `json:"username"`
-	DisplayName string `json:"display_name,omitempty"`
-	Email       string `json:"email,omitempty"`
+	Initialized bool `json:"initialized"`
 }
 
 // SetupRequest 初始化设置请求
@@ -67,26 +60,7 @@ func (s *Server) handleInitStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	resp := InitStatusResponse{Initialized: count > 0}
-	if resp.Initialized {
-		if admin := s.initStatusAdminSummary(); admin != nil {
-			resp.Admin = admin
-		}
-	}
 	s.writeJSON(w, r, http.StatusOK, resp)
-}
-
-func (s *Server) initStatusAdminSummary() *InitAdminSummary {
-	if s.db == nil {
-		return nil
-	}
-	var user model.User
-	if err := s.db.
-		Where("is_super_admin = ? AND status = ?", true, "active").
-		Order("created_at ASC").
-		First(&user).Error; err != nil {
-		return nil
-	}
-	return &InitAdminSummary{Username: user.Username, DisplayName: user.DisplayName, Email: user.Email}
 }
 
 // handleLoginCaptchaChallenge returns a short-lived, single-use ALTCHA challenge.

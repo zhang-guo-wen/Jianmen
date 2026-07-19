@@ -43,6 +43,7 @@ func TestSystemSettingsBecomeEffectiveAfterRestartBootstrap(t *testing.T) {
 	desired.RecordingRetentionDays = 7
 	desired.RecordingMaxReplayBytes = 2 * 1024 * 1024
 	desired.RecordingCleanupBatchSize = 17
+	desired.DatabaseMaxClientMessageBytes = 12 * 1024 * 1024
 	state, err := settings.Update(context.Background(), service.SystemSettingsUpdate{
 		Settings: desired, ExpectedRevision: 1,
 		ConfirmRisk: true,
@@ -111,6 +112,9 @@ func validManagedSettingsConfig() *config.Config {
 		Recording: config.RecordingConfig{
 			Enabled: true, RecordCommands: true, RetentionDays: 30,
 			MaxReplayBytes: 10 * 1024 * 1024 * 1024, CleanupBatchSize: 100,
+		},
+		DatabaseGateway: config.DatabaseGatewayConfig{
+			MaxClientMessageBytes: config.DefaultDatabaseGatewayMaxClientMessageBytes,
 		},
 	}
 }

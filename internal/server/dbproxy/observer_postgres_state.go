@@ -15,35 +15,87 @@ type postgresQueryCycle struct {
 	entries []*postgresQueryEntry
 }
 
+type postgresPreparedStatement struct {
+	audit databaseSQLAudit
+}
+
 type postgresPortal struct {
 	statement string
-	sql       string
+	prepared  *postgresPreparedStatement
 }
 
 func (o *postgresObserver) observePostgresClientMessage(typ byte, payload []byte) *queryDecision {
 	if o.sink == nil {
 		return nil
 	}
+	if decision := o.ensurePostgresOperationCapacity(typ); decision != nil {
+		return decision
+	}
 	switch typ {
 	case 'Q':
-		sql := redactDatabaseSQL(trimCString(payload))
-		return o.startPostgresSimpleQuery(sql)
+		sql, _ := splitCString(payload)
+		audit := prepareDatabaseSQLAudit(
+			sql,
+			o.maxClientMessageBytes,
+		)
+		return o.startPostgresSimpleQuery(audit)
 	case 'P':
 		name, rest := splitCString(payload)
 		sql, _ := splitCString(rest)
-		o.ensurePostgresMaps()
-		o.preparedStatements[name] = redactDatabaseSQL(sql)
+		if name != "" {
+			if _, exists := o.projectedPostgresPreparedStatement(name); exists {
+				return o.fail(
+					observerErrorProtocol,
+					"PostgreSQL named prepared statement already exists",
+				)
+			}
+		}
+		prepared := &postgresPreparedStatement{
+			audit: prepareDatabaseSQLAudit(sql, o.maxClientMessageBytes),
+		}
+		operation := postgresFrontendOperation{
+			messageType: 'P',
+			name:        name,
+			prepared:    prepared,
+		}
+		if !o.canQueuePostgresStateOperation(operation) {
+			return o.fail(
+				observerErrorPendingLimit,
+				"PostgreSQL prepared statement audit state exceeds the configured limit",
+			)
+		}
+		o.enqueuePostgresOperation(operation)
 	case 'B':
 		portal, rest := splitCString(payload)
 		statement, _ := splitCString(rest)
-		o.ensurePostgresMaps()
-		if _, exists := o.preparedStatements[statement]; !exists {
+		if portal != "" {
+			if _, exists := o.projectedPostgresPortal(portal); exists {
+				return o.fail(
+					observerErrorProtocol,
+					"PostgreSQL named portal already exists",
+				)
+			}
+		}
+		prepared, exists := o.projectedPostgresPreparedStatement(statement)
+		if !exists {
 			return o.fail(observerErrorProtocol, "PostgreSQL Bind references an unknown statement")
 		}
-		o.portals[portal] = postgresPortal{
+		binding := postgresPortal{
 			statement: statement,
-			sql:       o.preparedStatements[statement],
+			prepared:  prepared,
 		}
+		operation := postgresFrontendOperation{
+			messageType: 'B',
+			name:        portal,
+			portal:      binding,
+		}
+		if !o.canQueuePostgresStateOperation(operation) {
+			return o.fail(
+				observerErrorPendingLimit,
+				"PostgreSQL portal audit state exceeds the configured limit",
+			)
+		}
+		o.enqueuePostgresOperation(operation)
 	case 'E':
 		portal, _ := splitCString(payload)
 		return o.startPostgresPortalExecution(portal)
@@ -52,17 +104,35 @@ func (o *postgresObserver) observePostgresClientMessage(typ byte, payload []byte
 			o.cycles = append(o.cycles, o.openCycle)
 			o.openCycle = nil
 		}
+		o.enqueuePostgresOperation(postgresFrontendOperation{messageType: 'S'})
 	case 'C':
-		o.closePostgresPreparedObject(payload)
+		name, _ := splitCString(payload[1:])
+		operation := postgresFrontendOperation{
+			messageType: 'C',
+			target:      payload[0],
+			name:        name,
+		}
+		if !o.canQueuePostgresStateOperation(operation) {
+			return o.fail(
+				observerErrorPendingLimit,
+				"PostgreSQL prepared-state audit data exceeds the configured limit",
+			)
+		}
+		o.enqueuePostgresOperation(operation)
+	case 'D':
+		o.enqueuePostgresOperation(postgresFrontendOperation{messageType: 'D'})
 	}
 	return nil
 }
 
-func (o *postgresObserver) startPostgresSimpleQuery(sql string) *queryDecision {
+func (o *postgresObserver) startPostgresSimpleQuery(audit databaseSQLAudit) *queryDecision {
 	if len(o.pending) >= maxObserverPendingQueries {
 		return o.fail(observerErrorPendingLimit, "too many in-flight PostgreSQL commands")
 	}
-	record, decision, ok := startObservedQuery(o.sink, sql, map[string]any{
+	if !observerPendingAuditWithinLimit(o.pending, audit, o.maxClientMessageBytes) {
+		return o.fail(observerErrorPendingLimit, "pending PostgreSQL audit text exceeds the configured limit")
+	}
+	record, decision, ok := startPreparedObservedSQLQuery(o.sink, audit, map[string]any{
 		"protocol": "postgres",
 		"message":  "Query",
 	})
@@ -75,19 +145,25 @@ func (o *postgresObserver) startPostgresSimpleQuery(sql string) *queryDecision {
 	entry := &postgresQueryEntry{record: record}
 	o.pending = append(o.pending, record)
 	o.cycles = append(o.cycles, &postgresQueryCycle{simple: true, entries: []*postgresQueryEntry{entry}})
+	o.enqueuePostgresOperation(postgresFrontendOperation{messageType: 'Q'})
 	return nil
 }
 
 func (o *postgresObserver) startPostgresPortalExecution(portal string) *queryDecision {
-	o.ensurePostgresMaps()
-	binding, exists := o.portals[portal]
+	binding, exists := o.projectedPostgresPortal(portal)
 	if !exists {
 		return o.fail(observerErrorProtocol, "PostgreSQL Execute references an unknown portal")
 	}
 	if len(o.pending) >= maxObserverPendingQueries {
 		return o.fail(observerErrorPendingLimit, "too many in-flight PostgreSQL commands")
 	}
-	record, decision, ok := startObservedQuery(o.sink, binding.sql, map[string]any{
+	if binding.prepared == nil {
+		return o.fail(observerErrorProtocol, "PostgreSQL portal has no prepared statement")
+	}
+	if !observerPendingAuditWithinLimit(o.pending, binding.prepared.audit, o.maxClientMessageBytes) {
+		return o.fail(observerErrorPendingLimit, "pending PostgreSQL audit text exceeds the configured limit")
+	}
+	record, decision, ok := startPreparedObservedSQLQuery(o.sink, binding.prepared.audit, map[string]any{
 		"protocol": "postgres",
 		"message":  "Execute",
 	})
@@ -102,10 +178,15 @@ func (o *postgresObserver) startPostgresPortalExecution(portal string) *queryDec
 	}
 	o.pending = append(o.pending, record)
 	o.openCycle.entries = append(o.openCycle.entries, &postgresQueryEntry{record: record})
+	o.enqueuePostgresOperation(postgresFrontendOperation{messageType: 'E'})
 	return nil
 }
 
 func (o *postgresObserver) observePostgresServerMessage(typ byte, payload []byte) {
+	if decision := o.observePostgresOperationResponse(typ, payload); decision != nil {
+		o.failDecision(decision)
+		return
+	}
 	cycle := o.activePostgresCycle()
 	if cycle == nil || len(cycle.entries) == 0 || o.sink == nil {
 		return
@@ -247,23 +328,10 @@ func (c *postgresQueryCycle) nextIncomplete() *postgresQueryEntry {
 
 func (o *postgresObserver) ensurePostgresMaps() {
 	if o.preparedStatements == nil {
-		o.preparedStatements = make(map[string]string)
+		o.preparedStatements = make(map[string]*postgresPreparedStatement)
 	}
 	if o.portals == nil {
 		o.portals = make(map[string]postgresPortal)
-	}
-}
-
-func (o *postgresObserver) closePostgresPreparedObject(payload []byte) {
-	if len(payload) < 2 {
-		return
-	}
-	name := trimCString(payload[1:])
-	switch payload[0] {
-	case 'S':
-		delete(o.preparedStatements, name)
-	case 'P':
-		delete(o.portals, name)
 	}
 }
 

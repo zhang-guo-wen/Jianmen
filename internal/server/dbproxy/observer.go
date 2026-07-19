@@ -5,23 +5,24 @@ import (
 )
 
 type mysqlObserver struct {
-	sink              querySink
-	clientBuf         []byte
-	serverBuf         []byte
-	serverStream      *mysqlServerPacketStream
-	serverLogical     *mysqlServerLogicalPacket
-	pending           []queryRecord
-	pendingRecorded   []bool
-	pendingFailed     []bool
-	pendingCommands   []byte
-	pendingPrepared   []mysqlPreparedStatement
-	prepared          map[uint32]mysqlPreparedStatement
-	response          *mysqlResponseState
-	fatal             *queryDecision
-	nextErrorSeq      byte
-	hasErrorSeq       bool
-	expectedServerSeq byte
-	serverSeqActive   bool
+	sink                  querySink
+	maxClientMessageBytes int
+	clientBuf             []byte
+	serverBuf             []byte
+	serverStream          *mysqlServerPacketStream
+	serverLogical         *mysqlServerLogicalPacket
+	pending               []queryRecord
+	pendingRecorded       []bool
+	pendingFailed         []bool
+	pendingCommands       []byte
+	pendingPrepared       []mysqlPreparedStatement
+	prepared              map[uint32]mysqlPreparedStatement
+	response              *mysqlResponseState
+	fatal                 *queryDecision
+	nextErrorSeq          byte
+	hasErrorSeq           bool
+	expectedServerSeq     byte
+	serverSeqActive       bool
 }
 
 func (o *mysqlObserver) ObserveClientBytes(data []byte) *queryDecision {
@@ -40,13 +41,14 @@ func (o *mysqlObserver) observeClientRelayBytes(data []byte) ([]byte, *queryDeci
 	if len(data) == 0 {
 		return nil, nil
 	}
+	maxClientMessageBytes := normalizeMaxClientMessageBytes(o.maxClientMessageBytes)
 	var forward []byte
 	for {
 		if len(o.clientBuf) < 4 {
 			if len(data) == 0 {
 				return forward, nil
 			}
-			if !appendObserverBufferChunk(&o.clientBuf, &data, maxMySQLObserverBufferBytes) {
+			if !appendObserverBufferChunk(&o.clientBuf, &data, maxClientMessageBytes) {
 				return forward, o.fail(observerErrorBufferLimit, "MySQL observer frame exceeds the audit limit")
 			}
 			continue
@@ -56,14 +58,14 @@ func (o *mysqlObserver) observeClientRelayBytes(data []byte) ([]byte, *queryDeci
 		if payloadLen < 0 || total < 4 {
 			return forward, o.fail(observerErrorProtocol, "malformed MySQL packet")
 		}
-		if total > maxMySQLObserverBufferBytes {
+		if total > maxClientMessageBytes {
 			return forward, o.fail(observerErrorBufferLimit, "MySQL observer frame exceeds the audit limit")
 		}
 		if len(o.clientBuf) < total {
 			if len(data) == 0 {
 				return forward, nil
 			}
-			if !appendObserverBufferChunk(&o.clientBuf, &data, maxMySQLObserverBufferBytes) {
+			if !appendObserverBufferChunk(&o.clientBuf, &data, maxClientMessageBytes) {
 				return forward, o.fail(observerErrorBufferLimit, "MySQL observer frame exceeds the audit limit")
 			}
 			continue
@@ -291,7 +293,10 @@ func (o *mysqlObserver) handleClientPacket(seq byte, payload []byte) (decision *
 	}
 	prepared := mysqlPreparedStatement{}
 	if cmd == mysqlCommandStmtPrepare {
-		prepared = newMySQLPreparedStatement(string(payload[1:]))
+		prepared = newMySQLPreparedStatement(
+			string(payload[1:]),
+			o.maxClientMessageBytes,
+		)
 	}
 	if o.sink == nil {
 		if mysqlCommandExpectsResponse(cmd) {
@@ -302,7 +307,11 @@ func (o *mysqlObserver) handleClientPacket(seq byte, payload []byte) (decision *
 	}
 	switch cmd {
 	case 0x03: // COM_QUERY
-		record, decision, ok := startObservedQuery(o.sink, redactDatabaseSQL(string(payload[1:])), map[string]any{
+		audit := prepareDatabaseSQLAudit(string(payload[1:]), o.maxClientMessageBytes)
+		if !observerPendingAuditWithinLimit(o.pending, audit, o.maxClientMessageBytes) {
+			return o.fail(observerErrorPendingLimit, "pending MySQL audit text exceeds the configured limit")
+		}
+		record, decision, ok := startPreparedObservedSQLQuery(o.sink, audit, map[string]any{
 			"protocol": "mysql",
 			"command":  "COM_QUERY",
 			"seq":      seq,
@@ -315,7 +324,10 @@ func (o *mysqlObserver) handleClientPacket(seq byte, payload []byte) (decision *
 		}
 		o.enqueueMySQLResponse(record, true, cmd)
 	case mysqlCommandStmtPrepare:
-		record, decision, ok := startObservedQuery(o.sink, prepared.sql, map[string]any{
+		if !observerPendingAuditWithinLimit(o.pending, prepared.audit, o.maxClientMessageBytes) {
+			return o.fail(observerErrorPendingLimit, "pending MySQL audit text exceeds the configured limit")
+		}
+		record, decision, ok := startPreparedObservedSQLQuery(o.sink, prepared.audit, map[string]any{
 			"protocol":   "mysql",
 			"command":    "COM_STMT_PREPARE",
 			"query_kind": prepared.queryKind,
@@ -330,8 +342,11 @@ func (o *mysqlObserver) handleClientPacket(seq byte, payload []byte) (decision *
 		o.enqueueMySQLResponse(record, true, cmd)
 		o.setLastMySQLPendingPrepared(prepared)
 	case mysqlCommandStmtExecute:
+		if !observerPendingAuditWithinLimit(o.pending, statement.audit, o.maxClientMessageBytes) {
+			return o.fail(observerErrorPendingLimit, "pending MySQL audit text exceeds the configured limit")
+		}
 		stmtID := binary.LittleEndian.Uint32(payload[1:5])
-		record, decision, ok := startObservedQuery(o.sink, statement.sql, map[string]any{
+		record, decision, ok := startPreparedObservedSQLQuery(o.sink, statement.audit, map[string]any{
 			"protocol":            "mysql",
 			"command":             "COM_STMT_EXECUTE",
 			"stmt_id":             stmtID,

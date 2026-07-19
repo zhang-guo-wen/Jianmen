@@ -3,13 +3,21 @@ package dbproxy
 import (
 	"strings"
 	"unicode"
+
+	"jianmen/internal/config"
 )
 
 const (
+	defaultMaxClientMessageBytes = config.DefaultDatabaseGatewayMaxClientMessageBytes
+
+	// These fixed thresholds protect server-response, startup, and streaming
+	// protocol paths. Only post-authentication client SQL/command frames use
+	// the configurable maxClientMessageBytes value.
 	maxMySQLObserverBufferBytes    = 256 * 1024
 	maxPostgresObserverBufferBytes = 256 * 1024
 	maxRedisObserverBufferBytes    = 64 * 1024
 	maxObserverPendingQueries      = 32
+	maxObserverPreparedObjects     = 128
 
 	observerErrorBufferLimit  = "OBSERVER_BUFFER_LIMIT"
 	observerErrorProtocol     = "OBSERVER_PROTOCOL_ERROR"
@@ -18,6 +26,32 @@ const (
 	observerErrorDrainTimeout = "OBSERVER_DRAIN_TIMEOUT"
 	observerErrorAuditFailure = "OBSERVER_AUDIT_FAILURE"
 )
+
+func observerPendingAuditWithinLimit(
+	pending []queryRecord,
+	next databaseSQLAudit,
+	limit int,
+) bool {
+	limit = normalizeMaxClientMessageBytes(limit)
+	total := len(next.text)
+	if total > limit {
+		return false
+	}
+	for _, record := range pending {
+		if len(record.sql) > limit-total {
+			return false
+		}
+		total += len(record.sql)
+	}
+	return true
+}
+
+func normalizeMaxClientMessageBytes(limit int) int {
+	if limit <= 0 {
+		return defaultMaxClientMessageBytes
+	}
+	return limit
+}
 
 func appendObserverBufferChunk(buffer *[]byte, data *[]byte, limit int) bool {
 	if len(*data) == 0 {

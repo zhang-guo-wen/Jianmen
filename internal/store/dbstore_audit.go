@@ -394,36 +394,6 @@ func (s *DBStore) ListAuditSFTPEvents(sessionID string, opts PageOpts) ([]model.
 	return events, total, nil
 }
 
-// -- audit DB queries --
-
-func (s *DBStore) CreateAuditDBQuery(query *model.AuditDBQuery) error {
-	return s.db.Create(query).Error
-}
-
-func (s *DBStore) ListAuditDBQueries(sessionID string, opts PageOpts) ([]model.AuditDBQuery, int64, error) {
-	q := s.db.Model(&model.AuditDBQuery{}).Where("audit_session_id = ?", sessionID)
-	var total int64
-	if err := q.Count(&total).Error; err != nil {
-		return nil, 0, err
-	}
-	var queries []model.AuditDBQuery
-	if opts.Limit <= 0 {
-		opts.Limit = 1000
-	}
-	if err := q.Order("timestamp ASC").Offset(opts.Offset).Limit(opts.Limit).Find(&queries).Error; err != nil {
-		return nil, 0, err
-	}
-	return queries, total, nil
-}
-
-func (s *DBStore) ListAuditDBQueryEvents(sessionID string) ([]model.AuditDBQuery, error) {
-	var queries []model.AuditDBQuery
-	if err := s.db.Where("audit_session_id = ?", sessionID).Order("timestamp ASC").Find(&queries).Error; err != nil {
-		return nil, err
-	}
-	return queries, nil
-}
-
 // -- management and login audit logs --
 
 func (s *DBStore) CreateAuditEvent(event *model.AuditEvent) error {

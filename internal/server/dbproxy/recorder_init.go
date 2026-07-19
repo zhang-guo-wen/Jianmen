@@ -53,16 +53,17 @@ func (g *Gateway) newRecorder(
 	}
 
 	recorder := &connectionRecorder{
-		id:             id,
-		protocol:       conn.protocol,
-		metaPath:       metaPath,
-		meta:           meta,
-		file:           file,
-		startedAt:      startedAt,
-		audit:          g.audit,
-		auditSessionID: auditSessionID,
-		onFatal:        onFatal,
-		logger:         g.logger,
+		id:                    id,
+		protocol:              conn.protocol,
+		maxClientMessageBytes: normalizeMaxClientMessageBytes(g.cfg.MaxClientMessageBytes),
+		metaPath:              metaPath,
+		meta:                  meta,
+		file:                  file,
+		startedAt:             startedAt,
+		audit:                 g.audit,
+		auditSessionID:        auditSessionID,
+		onFatal:               onFatal,
+		logger:                g.logger,
 	}
 	if err := recorder.writeMetaLocked(); err != nil {
 		_ = file.Close()

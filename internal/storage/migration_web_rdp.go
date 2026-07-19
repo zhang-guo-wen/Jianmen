@@ -174,7 +174,7 @@ func metadataModelsBeforeWebRDP() []any {
 		&model.LoginAuditLog{},
 		&auditSessionBeforeWebRDP{},
 		&model.AuditSSHCommand{},
-		&model.AuditDBQuery{},
+		&auditDBQueryBeforeLargePayload{},
 		&model.AuditSFTPEvent{},
 	}
 }

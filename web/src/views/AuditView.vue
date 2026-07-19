@@ -581,8 +581,10 @@
         <DataTableCard
           v-else-if="isDBQueries"
           :key="`queries-${logSearchVersion}`"
-          :data="pagedQueryEvents"
-          :total="filteredQueryEvents.length"
+          :data="mergedQueryEvents"
+          :total="dbQueryTotal"
+          :loading="detailLoading"
+          row-key="seq"
           :search-placeholder="t('audit.search.sqlLog')"
           v-model:page="logPage"
           v-model:page-size="logPageSize"
@@ -593,7 +595,25 @@
               {{ formatTime(row.started_at) }}
             </template>
           </el-table-column>
-          <el-table-column prop="sql" :label="t('audit.column.sql')" min-width="420" show-overflow-tooltip />
+          <el-table-column :label="t('audit.column.sql')" min-width="420">
+            <template #default="{ row }">
+              <div class="query-sql-cell">
+                <span class="query-sql-cell__text" :title="row.sql">{{ row.sql }}</span>
+                <el-tag v-if="row.sql_truncated" type="warning" size="small" effect="plain">
+                  {{ t('audit.query.truncated') }} {{ formatBytes(row.sql_original_bytes) }}
+                </el-tag>
+                <el-button
+                  v-if="row.sql"
+                  class="query-sql-cell__copy"
+                  link
+                  size="small"
+                  @click.stop="copyQuerySQL(row.sql)"
+                >
+                  {{ t('audit.query.copyPreview') }}
+                </el-button>
+              </div>
+            </template>
+          </el-table-column>
           <el-table-column :label="t('audit.column.duration')" width="100">
             <template #default="{ row }">
               {{ formatDuration(row.duration_ms) }}
@@ -929,6 +949,9 @@ const logPage = ref(1);
 const logPageSize = ref(50);
 const logKeyword = ref('');
 const logSearchVersion = ref(0);
+const dbQueryConnectionID = ref('');
+const dbQueryTotal = ref(0);
+let detailRequestVersion = 0;
 
 // ── Replay state ──
 const playbackSpeed = ref(1);
@@ -963,6 +986,8 @@ const queryEvents = computed(() => extractItems<DBQueryEventRecord>(detailData.v
 interface MergedQueryEvent {
   seq: number;
   sql: string;
+  sql_truncated: boolean;
+  sql_original_bytes: number;
   comment: string;
   query_kind: string;
   status: string;
@@ -983,13 +1008,25 @@ const mergedQueryEvents = computed<MergedQueryEvent[]>(() => {
   const map = new Map<number, MergedQueryEvent>();
   for (const ev of queryEvents.value) {
     const seq = ev.seq ?? 0;
-    const cur = map.get(seq) ?? { seq, sql: '', comment: '', query_kind: ev.query_kind ?? '', status: 'unknown', duration_ms: 0, started_at: ev.started_at ?? 0 };
+    const cur = map.get(seq) ?? {
+      seq,
+      sql: '',
+      sql_truncated: false,
+      sql_original_bytes: 0,
+      comment: '',
+      query_kind: ev.query_kind ?? '',
+      status: 'unknown',
+      duration_ms: 0,
+      started_at: ev.started_at ?? 0,
+    };
     if (ev.type === 'query_started') {
       const parsed = splitSQLComment(ev.sql || cur.sql);
       cur.sql = parsed.sql || cur.sql;
       cur.comment = parsed.comment || cur.comment;
       cur.query_kind = ev.query_kind || cur.query_kind;
       cur.started_at = ev.started_at ?? cur.started_at;
+      cur.sql_truncated = Boolean(ev.detail?.sql_truncated);
+      cur.sql_original_bytes = Number(ev.detail?.sql_original_bytes ?? 0);
     } else {
       cur.status = ev.status ?? cur.status;
       cur.duration_ms = ev.duration_ms ?? cur.duration_ms;
@@ -1014,20 +1051,12 @@ function extractItems<T>(data: unknown): T[] {
 const commandEvents = computed(() => extractItems<SessionCommandRecord>(detailData.value));
 const fileEvents = computed(() => extractItems<SessionFileEventRecord>(detailData.value));
 const normalizedLogKeyword = computed(() => logKeyword.value.trim().toLowerCase());
-const filteredQueryEvents = computed(() => {
-  if (!normalizedLogKeyword.value) return mergedQueryEvents.value;
-  return mergedQueryEvents.value.filter((event) => event.sql.toLowerCase().includes(normalizedLogKeyword.value));
-});
 const filteredCommandEvents = computed(() => {
   if (!normalizedLogKeyword.value) return commandEvents.value;
   return commandEvents.value.filter((event) => String(event.command ?? '').toLowerCase().includes(normalizedLogKeyword.value));
 });
 
 // Client-side pagination for drawer sub-tables
-const pagedQueryEvents = computed(() => {
-  const start = (logPage.value - 1) * logPageSize.value;
-  return filteredQueryEvents.value.slice(start, start + logPageSize.value);
-});
 const pagedCommandEvents = computed(() => {
   const start = (logPage.value - 1) * logPageSize.value;
   return filteredCommandEvents.value.slice(start, start + logPageSize.value);
@@ -1633,8 +1662,23 @@ function setDetail(title: string, kind: DetailKind, data: unknown) {
 
 function closeDetail() {
   stopReplay();
+  detailRequestVersion++;
+  dbQueryConnectionID.value = '';
+  dbQueryTotal.value = 0;
   drawerVisible.value = false;
   playbackSpeed.value = 1;
+}
+
+async function copyQuerySQL(sql: string): Promise<void> {
+  try {
+    if (!navigator.clipboard?.writeText) {
+      throw new Error('clipboard is unavailable');
+    }
+    await navigator.clipboard.writeText(sql);
+    ElMessage.success(t('audit.query.copySuccess'));
+  } catch {
+    ElMessage.error(t('audit.query.copyFailed'));
+  }
 }
 
 // ── Data fetching ──
@@ -1788,7 +1832,15 @@ async function loadDBConnections() {
 
 function onLogSearch(q: string) {
   logKeyword.value = q;
-  logPage.value = 1;
+  if (detailKind.value !== 'queries' || !dbQueryConnectionID.value) {
+    logPage.value = 1;
+    return;
+  }
+  if (logPage.value !== 1) {
+    logPage.value = 1;
+  } else {
+    void loadDBQueryPage(dbQueryConnectionID.value, false);
+  }
 }
 
 function onOnlineSearch(q: string) {
@@ -1831,27 +1883,49 @@ async function loadSessionArtifact(session: SessionRecord, kind: Exclude<DetailK
     return;
   }
 
+  const requestVersion = ++detailRequestVersion;
+  dbQueryConnectionID.value = '';
+  dbQueryTotal.value = 0;
   detailLoading.value = true;
   detailError.value = '';
 
   try {
+    let title = '';
+    let data: unknown;
+    let startReplay = false;
     if (kind === 'meta') {
-      setDetail(`${t('audit.scope.ssh')} ${id}`, kind, await apiClient.getSessionMeta(id));
+      title = `${t('audit.scope.ssh')} ${id}`;
+      data = await apiClient.getSessionMeta(id);
     } else if (kind === 'replay') {
-      setDetail(`${t('audit.action.replay')} ${id}`, kind, parseReplayCast(await apiClient.getSessionReplay(id)));
-      await nextTick();
-      playReplay();
+      title = `${t('audit.action.replay')} ${id}`;
+      data = parseReplayCast(await apiClient.getSessionReplay(id));
+      startReplay = true;
     } else if (kind === 'commands') {
-      setDetail(`${t('audit.action.commands')} ${id}`, kind, await apiClient.getSessionCommands(id));
+      title = `${t('audit.action.commands')} ${id}`;
+      data = await apiClient.getSessionCommands(id);
     } else if (kind === 'files') {
-      setDetail(`${t('audit.action.files')} ${id}`, kind, await apiClient.getSessionFiles(id));
+      title = `${t('audit.action.files')} ${id}`;
+      data = await apiClient.getSessionFiles(id);
     } else {
-      setDetail(`${t('audit.action.summary')} ${id}`, kind, await apiClient.getSessionFileSummary(id));
+      title = `${t('audit.action.summary')} ${id}`;
+      data = await apiClient.getSessionFileSummary(id);
+    }
+    if (requestVersion !== detailRequestVersion) return;
+
+    setDetail(title, kind, data);
+    if (startReplay) {
+      await nextTick();
+      if (requestVersion !== detailRequestVersion) return;
+      playReplay();
     }
   } catch (err) {
-    detailError.value = err instanceof Error ? err.message : t('audit.error.loadArtifact');
+    if (requestVersion === detailRequestVersion) {
+      detailError.value = err instanceof Error ? err.message : t('audit.error.loadArtifact');
+    }
   } finally {
-    detailLoading.value = false;
+    if (requestVersion === detailRequestVersion) {
+      detailLoading.value = false;
+    }
   }
 }
 
@@ -2212,23 +2286,68 @@ async function loadDBArtifact(connection: DBConnectionRecord, kind: 'meta' | 'qu
     return;
   }
 
+  if (kind === 'queries') {
+    detailRequestVersion++;
+    dbQueryConnectionID.value = '';
+    logPage.value = 1;
+    logKeyword.value = '';
+    await loadDBQueryPage(id, true);
+    return;
+  }
+
+  const requestVersion = ++detailRequestVersion;
+  dbQueryConnectionID.value = '';
+  dbQueryTotal.value = 0;
   detailLoading.value = true;
   detailError.value = '';
 
   try {
-    if (kind === 'meta') {
-      setDetail(`${t('audit.scope.db')} ${id}`, kind, await apiClient.getDBConnectionMeta(id));
-    } else {
-      setDetail(`${t('audit.action.queries')} ${id}`, kind, await apiClient.getDBConnectionQueries(id));
-    }
+    const response = await apiClient.getDBConnectionMeta(id);
+    if (requestVersion !== detailRequestVersion) return;
+    setDetail(`${t('audit.scope.db')} ${id}`, kind, response);
   } catch (err) {
-    detailError.value = err instanceof Error ? err.message : t('audit.error.loadArtifact');
+    if (requestVersion === detailRequestVersion) {
+      detailError.value = err instanceof Error ? err.message : t('audit.error.loadArtifact');
+    }
   } finally {
-    detailLoading.value = false;
+    if (requestVersion === detailRequestVersion) {
+      detailLoading.value = false;
+    }
   }
 }
 
 // ── Lifecycle & watchers ──
+
+async function loadDBQueryPage(id: string, openDrawer: boolean) {
+  const requestVersion = ++detailRequestVersion;
+  detailLoading.value = true;
+  detailError.value = '';
+
+  try {
+    const response = await apiClient.getDBConnectionQueries(id, {
+      page: logPage.value,
+      page_size: logPageSize.value,
+      q: logKeyword.value.trim() || undefined,
+    });
+    if (requestVersion !== detailRequestVersion) return;
+
+    dbQueryConnectionID.value = id;
+    dbQueryTotal.value = response.total ?? 0;
+    if (openDrawer) {
+      setDetail(`${t('audit.action.queries')} ${id}`, 'queries', response);
+    } else {
+      detailData.value = response;
+    }
+  } catch (err) {
+    if (requestVersion === detailRequestVersion) {
+      detailError.value = err instanceof Error ? err.message : t('audit.error.loadArtifact');
+    }
+  } finally {
+    if (requestVersion === detailRequestVersion) {
+      detailLoading.value = false;
+    }
+  }
+}
 
 function applyRouteAuditFilter() {
   const scope = permittedAuditScope(route.query.scope);
@@ -2333,6 +2452,16 @@ watch([dbPage, dbPageSize], () => {
 });
 watch([onlinePage, onlinePageSize], () => {
   if (auditScope.value === 'online') loadOnlineSessions();
+});
+watch([logPage, logPageSize], ([page, pageSize], [previousPage, previousPageSize]) => {
+  if (detailKind.value !== 'queries' || !dbQueryConnectionID.value) return;
+  if (pageSize !== previousPageSize && page !== 1) {
+    logPage.value = 1;
+    return;
+  }
+  if (page !== previousPage || pageSize !== previousPageSize) {
+    void loadDBQueryPage(dbQueryConnectionID.value, false);
+  }
 });
 
 onBeforeUnmount(() => {
@@ -2545,6 +2674,27 @@ onBeforeUnmount(() => {
   font-size: 13px;
   text-align: center;
   pointer-events: none;
+}
+
+.query-sql-cell {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.query-sql-cell__text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.query-sql-cell :deep(.el-tag) {
+  flex-shrink: 0;
+}
+
+.query-sql-cell__copy {
+  flex-shrink: 0;
 }
 
 @media (max-width: 720px) {

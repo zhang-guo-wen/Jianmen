@@ -23,11 +23,8 @@ func (userSessionHandlerRepository) FindActiveHost(context.Context, string) (mod
 func (userSessionHandlerRepository) FindActiveDatabaseAccount(context.Context, string) (model.DatabaseAccount, bool, error) {
 	return model.DatabaseAccount{}, false, nil
 }
-func (userSessionHandlerRepository) FindActivePermanentUserSession(context.Context, string) (model.UserSession, bool, error) {
-	return model.UserSession{ID: "session-1", SessionID: "00001", SessionSeq: 1, Type: "permanent", Status: "active"}, true, nil
-}
-func (userSessionHandlerRepository) CreateUserSessionWithContext(context.Context, model.UserSession) (*model.UserSession, error) {
-	return nil, nil
+func (userSessionHandlerRepository) GetOrCreateActivePermanentUserSession(context.Context, string) (model.UserSession, error) {
+	return model.UserSession{ID: "session-1", SessionID: "00001", SessionSeq: 1, Type: "permanent", Status: "active"}, nil
 }
 
 type userSessionHandlerAuthorizer struct{ allowed bool }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 
 	"jianmen/internal/model"
@@ -27,8 +28,7 @@ type UserSessionCreationRepository interface {
 	FindActiveHostAccount(context.Context, string) (model.HostAccount, bool, error)
 	FindActiveHost(context.Context, string) (model.Host, bool, error)
 	FindActiveDatabaseAccount(context.Context, string) (model.DatabaseAccount, bool, error)
-	FindActivePermanentUserSession(context.Context, string) (model.UserSession, bool, error)
-	CreateUserSessionWithContext(context.Context, model.UserSession) (*model.UserSession, error)
+	GetOrCreateActivePermanentUserSession(context.Context, string) (model.UserSession, error)
 }
 
 // UserSessionConnectionAuthorizer is the narrow authorization dependency for
@@ -55,10 +55,10 @@ type CreateUserSessionResult struct {
 }
 
 func NewUserSessionCreationService(repository UserSessionCreationRepository, authorizer UserSessionConnectionAuthorizer) (*UserSessionCreationService, error) {
-	if repository == nil {
+	if isNilUserSessionCreationDependency(repository) {
 		return nil, errors.New("user session creation repository is required")
 	}
-	if authorizer == nil {
+	if isNilUserSessionCreationDependency(authorizer) {
 		return nil, errors.New("user session creation authorizer is required")
 	}
 	return &UserSessionCreationService{repository: repository, authorizer: authorizer}, nil
@@ -89,20 +89,9 @@ func (s *UserSessionCreationService) Create(ctx context.Context, request CreateU
 		return CreateUserSessionResult{}, ErrUserSessionForbidden
 	}
 
-	session, found, err := s.repository.FindActivePermanentUserSession(ctx, userID)
+	session, err := s.repository.GetOrCreateActivePermanentUserSession(ctx, userID)
 	if err != nil {
 		return CreateUserSessionResult{}, err
-	}
-	if !found {
-		created, err := s.repository.CreateUserSessionWithContext(ctx, model.UserSession{
-			UserID: userID,
-			Type:   "permanent",
-			Status: "active",
-		})
-		if err != nil {
-			return CreateUserSessionResult{}, err
-		}
-		session = *created
 	}
 	return CreateUserSessionResult{
 		Session:         session,
@@ -110,6 +99,19 @@ func (s *UserSessionCreationService) Create(ctx context.Context, request CreateU
 		ResourceType:    resourceType,
 		CompactUsername: prefix + resourceID + session.SessionID,
 	}, nil
+}
+
+func isNilUserSessionCreationDependency(dependency any) bool {
+	if dependency == nil {
+		return true
+	}
+	value := reflect.ValueOf(dependency)
+	switch value.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
+		return value.IsNil()
+	default:
+		return false
+	}
 }
 
 func (s *UserSessionCreationService) resolveTarget(ctx context.Context, targetID string) (resourceID, resourceType, prefix string, actions []string, err error) {

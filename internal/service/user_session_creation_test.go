@@ -18,8 +18,7 @@ type userSessionCreationRepositoryStub struct {
 	database         model.DatabaseAccount
 	databaseFound    bool
 	session          model.UserSession
-	sessionFound     bool
-	created          model.UserSession
+	createdUserID    string
 	contexts         []context.Context
 	err              error
 }
@@ -39,15 +38,13 @@ func (s *userSessionCreationRepositoryStub) FindActiveDatabaseAccount(ctx contex
 	s.remember(ctx)
 	return s.database, s.databaseFound, s.err
 }
-func (s *userSessionCreationRepositoryStub) FindActivePermanentUserSession(ctx context.Context, _ string) (model.UserSession, bool, error) {
+func (s *userSessionCreationRepositoryStub) GetOrCreateActivePermanentUserSession(ctx context.Context, userID string) (model.UserSession, error) {
 	s.remember(ctx)
-	return s.session, s.sessionFound, s.err
-}
-func (s *userSessionCreationRepositoryStub) CreateUserSessionWithContext(ctx context.Context, session model.UserSession) (*model.UserSession, error) {
-	s.remember(ctx)
-	s.created = session
-	session.ID, session.SessionID, session.SessionSeq = "session-1", "00001", 1
-	return &session, s.err
+	s.createdUserID = userID
+	if s.session.ID == "" {
+		s.session = model.UserSession{ID: "session-1", UserID: userID, SessionID: "00001", SessionSeq: 1, Type: "permanent", Status: "active"}
+	}
+	return s.session, s.err
 }
 
 type userSessionCreationAuthorizerStub struct {
@@ -88,8 +85,8 @@ func TestUserSessionCreationServiceCreatesHostSessionAndPropagatesContext(t *tes
 	if authorizer.resourceID != "target-1" || authorizer.resourceType != model.ResourceTypeHostAccount {
 		t.Fatalf("authorization resource = %s/%s", authorizer.resourceType, authorizer.resourceID)
 	}
-	if repository.created.UserID != "user-1" || repository.created.Type != "permanent" || repository.created.Status != "active" {
-		t.Fatalf("created = %#v", repository.created)
+	if repository.createdUserID != "user-1" {
+		t.Fatalf("repository user id = %q, want user-1", repository.createdUserID)
 	}
 	if authorizer.ctx != ctx {
 		t.Fatal("authorizer did not receive request context")
@@ -102,7 +99,7 @@ func TestUserSessionCreationServiceCreatesHostSessionAndPropagatesContext(t *tes
 }
 
 func TestUserSessionCreationServiceDatabaseRedisAndFailClosed(t *testing.T) {
-	repository := &userSessionCreationRepositoryStub{database: model.DatabaseAccount{ID: "db-1", ResourceID: "D001", Instance: model.DatabaseInstance{ID: "instance-1", Protocol: "redis", Status: "active"}}, databaseFound: true, session: model.UserSession{ID: "existing", SessionID: "00007", SessionSeq: 7}, sessionFound: true}
+	repository := &userSessionCreationRepositoryStub{database: model.DatabaseAccount{ID: "db-1", ResourceID: "D001", Instance: model.DatabaseInstance{ID: "instance-1", Protocol: "redis", Status: "active"}}, databaseFound: true, session: model.UserSession{ID: "existing", SessionID: "00007", SessionSeq: 7}}
 	authorizer := &userSessionCreationAuthorizerStub{allowed: false}
 	service, err := NewUserSessionCreationService(repository, authorizer)
 	if err != nil {
@@ -124,6 +121,17 @@ func TestUserSessionCreationServiceDatabaseRedisAndFailClosed(t *testing.T) {
 	}
 	if len(authorizer.actions) != 1 || authorizer.actions[0] != rbac.ActionDBConnect {
 		t.Fatalf("database actions = %#v", authorizer.actions)
+	}
+}
+
+func TestNewUserSessionCreationServiceRejectsTypedNilDependencies(t *testing.T) {
+	var repository *userSessionCreationRepositoryStub
+	if _, err := NewUserSessionCreationService(repository, &userSessionCreationAuthorizerStub{}); err == nil {
+		t.Fatal("typed-nil repository was accepted")
+	}
+	var authorizer *userSessionCreationAuthorizerStub
+	if _, err := NewUserSessionCreationService(&userSessionCreationRepositoryStub{}, authorizer); err == nil {
+		t.Fatal("typed-nil authorizer was accepted")
 	}
 }
 

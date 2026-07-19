@@ -5,13 +5,17 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 
 	"jianmen/internal/model"
 	"jianmen/internal/storage"
 	"jianmen/internal/util"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
+
+var sqliteUserSessionCreationMu sync.Mutex
 
 // -- user sessions --
 
@@ -120,6 +124,48 @@ func (s *DBStore) CreateUserSessionWithContext(ctx context.Context, sess model.U
 	return &sess, nil
 }
 
+// GetOrCreateActivePermanentUserSession serializes permanent session creation
+// with a row lock on the authenticated user. MySQL and PostgreSQL enforce that
+// lock across processes; SQLite uses only the test-local process mutex because
+// it does not implement SELECT FOR UPDATE.
+func (s *DBStore) GetOrCreateActivePermanentUserSession(ctx context.Context, userID string) (model.UserSession, error) {
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return model.UserSession{}, fmt.Errorf("user_id is required")
+	}
+	if s.db.Dialector.Name() == "sqlite" {
+		sqliteUserSessionCreationMu.Lock()
+		defer sqliteUserSessionCreationMu.Unlock()
+	}
+	var session model.UserSession
+	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var user model.User
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&user, "id = ?", userID).Error; err != nil {
+			return err
+		}
+		err := tx.Where("user_id = ? AND type = ? AND status = ?", userID, "permanent", "active").First(&session).Error
+		if err == nil {
+			return nil
+		}
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return err
+		}
+		if err := s.ensureUserSessionSequenceFloorTx(tx); err != nil {
+			return err
+		}
+		seq, err := storage.NextSequenceValueInTransaction(tx, storage.SequenceUserSession, storage.MaxCompactSessionSeq)
+		if err != nil {
+			return err
+		}
+		session = model.UserSession{UserID: userID, Type: "permanent", Status: "active", SessionSeq: seq, SessionID: util.EncodeBase62Padded(uint64(seq), 5)}
+		return tx.Create(&session).Error
+	})
+	if err != nil {
+		return model.UserSession{}, err
+	}
+	return session, nil
+}
+
 func (s *DBStore) ensureUserSessionSequenceFloor(ctx context.Context) error {
 	var maxSeq int
 	if err := s.db.WithContext(ctx).Model(&model.UserSession{}).
@@ -128,6 +174,14 @@ func (s *DBStore) ensureUserSessionSequenceFloor(ctx context.Context) error {
 		return fmt.Errorf("user session sequence floor: %w", err)
 	}
 	return storage.EnsureSequenceNextValue(s.db.WithContext(ctx), storage.SequenceUserSession, maxSeq+1)
+}
+
+func (s *DBStore) ensureUserSessionSequenceFloorTx(tx *gorm.DB) error {
+	var maxSeq int
+	if err := tx.Model(&model.UserSession{}).Select("COALESCE(MAX(session_seq), 0)").Scan(&maxSeq).Error; err != nil {
+		return fmt.Errorf("user session sequence floor: %w", err)
+	}
+	return storage.EnsureSequenceNextValueInTransaction(tx, storage.SequenceUserSession, maxSeq+1)
 }
 
 func (s *DBStore) DisableUserSession(id string) error {

@@ -145,12 +145,14 @@
 
 阶段门禁证据（2026-07-19）：
 
+- 最新合并快照：`6026593`。
 - 后端：`go build ./...`、`go test ./... -count=1`、`go vet ./...` 全部通过。
-- 前端：`npm run typecheck`、`npm run build` 全部通过；真实挂载测试 4/4、命令与静态契约测试 39/39。
-- 实库：`JIANMEN_REQUIRE_DOCKER=1 go test -tags=integration ./internal/integration -count=1 -timeout=30m` 通过，耗时 631.07 秒。
-- 并发：Linux/CGO `-race` 组合包通过；数据库配置随机源原竞态用例连续 20 轮通过。
-- 打包：`.\build.ps1` 通过，产出 Windows amd64 37.7 MB、Linux amd64 36.9 MB。
-- 容器：生产 Dockerfile 在线重建被外部 Alpine 镜像源临时 DNS 错误阻塞，未修改 Dockerfile；使用本地已验证 runtime 镜像和本次精确 Linux 产物构建离线镜像成功，网络隔离启动后 `/api/init/status` 返回成功，进程以 UID/GID 10001 运行。在线重建属于外部环境阻塞，不改变本阶段代码验收结论。
+- 前端：`npm ci`、`npm run typecheck`、`npm run build`、`npm audit` 全部通过，安全漏洞数为 0；PURE 注释、分包体积和 `glob` 弃用警告已登记为 P3。
+- 实库：`JIANMEN_REQUIRE_DOCKER=1 go test -tags=integration ./internal/integration -count=1 -timeout=30m` 全矩阵通过，耗时 480.797 秒。
+- 打包：`.\build.ps1` 通过，产出 Windows amd64 37.88 MB、Linux amd64 37.09 MB。
+- 主目录烟测：正式 ALTCHA 登录成功；Admin、Web、SSH、统一数据库端口 `47100/47101/47102/33060` 均监听；初始化接口、Web 页面和前端 API 代理通过；后端及前端错误日志均为 0 字节。
+- 前序并发专项：Linux/CGO `-race` 组合包通过；数据库配置随机源原竞态用例连续 20 轮通过。
+- 前序容器专项：生产 Dockerfile 在线重建被外部 Alpine 镜像源临时 DNS 错误阻塞，未修改 Dockerfile；使用本地已验证 runtime 镜像和精确 Linux 产物构建离线镜像成功，网络隔离启动后 `/api/init/status` 返回成功，进程以 UID/GID 10001 运行。在线重建属于外部环境阻塞，不改变代码验收结论。
 
 ### 可以延期
 

@@ -161,66 +161,42 @@ func (g *Gateway) handleRedis(ctx context.Context, client net.Conn, firstByte by
 		return nil
 	}
 
-	if cmd != "AUTH" {
+	initialAuthentication, authenticationError, ok := parseRedisInitialAuthentication(cmd, args)
+	if !ok {
 		g.logRejectedRedisInitialAuthentication()
-		if cmd == "HELLO" {
-			_ = writeRESPErrorCode(client, "NOPROTO", "HELLO/RESP3 is not supported by the gateway")
-			return nil
+		switch authenticationError {
+		case redisInitialAuthenticationUnsupportedProtocol:
+			_ = writeRESPErrorCode(client, "NOPROTO", "unsupported protocol version")
+		case redisInitialAuthenticationRequired:
+			_ = writeRESPErrorCode(client, "NOAUTH", "Authentication required.")
+		default:
+			_ = writeRESPError(client, "syntax error")
 		}
-		writeRESPError(client, "NOAUTH Authentication required.")
 		return nil
 	}
-
-	// Parse AUTH arguments: AUTH [username] password
-	// args[0] is the command name ("AUTH"), skip it
-	// Redis 6+ ACL: AUTH username password (total 3 args)
-	// Legacy: AUTH password (total 2 args)
-	authArgs := args[1:]
-	var compactUser, bastionPassword string
-	switch len(authArgs) {
-	case 1:
-		bastionPassword = authArgs[0]
-	case 2:
-		compactUser = authArgs[0]
-		bastionPassword = authArgs[1]
-	default:
-		g.logRejectedRedisInitialAuthentication()
-		writeRESPError(client, "invalid password")
-		return nil
-	}
-
-	// If compactUser not provided by ACL-style AUTH, extract from password arg
-	// (client sends: AUTH <compact_username> <bastion_password>)
-	// If only 1 arg, client sent compact username as sole argument, so compactUser is the first arg
-	if compactUser == "" && len(authArgs) == 1 {
-		compactUser = bastionPassword
-		// In single-arg mode, the client sends AUTH <compact_username> and we need
-		// the bastion password too. But we don't have it. So we expect 2-arg mode.
-		g.logRejectedRedisInitialAuthentication()
-		writeRESPError(client, "NOAUTH Authentication required. Use AUTH <username> <password>.")
-		return nil
-	}
+	compactUser := initialAuthentication.username
+	bastionPassword := initialAuthentication.password
 
 	// Resolve account
 	resolved, err := g.resolveAccount(ctx, strings.TrimSpace(compactUser))
 	if err != nil {
 		g.logRejectedRedisInitialAuthentication()
-		writeRESPError(client, "WRONGPASS invalid username-password pair or user is disabled.")
+		writeRESPErrorCode(client, "WRONGPASS", "invalid username-password pair or user is disabled.")
 		return nil
 	}
 	acct := resolved.account
 	if err := validateResolvedAccountProtocol(resolved, databaseProtocolRedis); err != nil {
 		g.logRejectedRedisInitialAuthentication()
-		writeRESPError(client, "WRONGPASS invalid username-password pair or user is disabled.")
+		writeRESPErrorCode(client, "WRONGPASS", "invalid username-password pair or user is disabled.")
 		return nil
 	}
 
 	if err := g.authenticateRedisConnection(ctx, resolved, bastionPassword); err != nil {
 		g.logRejectedRedisInitialAuthentication()
 		if errors.Is(err, errDatabaseAuthentication) {
-			writeRESPError(client, "WRONGPASS invalid username-password pair or user is disabled.")
+			writeRESPErrorCode(client, "WRONGPASS", "invalid username-password pair or user is disabled.")
 		} else {
-			writeRESPError(client, "NOPERM this user has no permissions to run the command")
+			writeRESPErrorCode(client, "NOPERM", "this user has no permissions to run the command")
 		}
 		return nil
 	}
@@ -229,17 +205,17 @@ func (g *Gateway) handleRedis(ctx context.Context, client net.Conn, firstByte by
 	// Check account disabled and expiry
 	if acct.Status == "disabled" {
 		g.logRejectedRedisInitialAuthentication()
-		writeRESPError(client, "WRONGPASS invalid username-password pair or user is disabled.")
+		writeRESPErrorCode(client, "WRONGPASS", "invalid username-password pair or user is disabled.")
 		return nil
 	}
 	if acct.ExpiresAt != nil && time.Now().UTC().After(*acct.ExpiresAt) {
 		g.logRejectedRedisInitialAuthentication()
-		writeRESPError(client, "WRONGPASS invalid username-password pair or user is disabled.")
+		writeRESPErrorCode(client, "WRONGPASS", "invalid username-password pair or user is disabled.")
 		return nil
 	}
 	if acct.Instance.Status == "disabled" {
 		g.logRejectedRedisInitialAuthentication()
-		writeRESPError(client, "WRONGPASS invalid username-password pair or user is disabled.")
+		writeRESPErrorCode(client, "WRONGPASS", "invalid username-password pair or user is disabled.")
 		return nil
 	}
 
@@ -259,14 +235,32 @@ func (g *Gateway) handleRedis(ctx context.Context, client net.Conn, firstByte by
 	if err := authenticateUpstreamRedis(upstream, acct.Username, acct.Password.GetPlaintext(), authenticationDeadline); err != nil {
 		g.logRejectedRedisInitialAuthentication()
 		upstream.Close()
-		writeRESPError(client, "WRONGPASS invalid username-password pair or user is disabled.")
+		writeRESPErrorCode(client, "WRONGPASS", "invalid username-password pair or user is disabled.")
 		return nil
 	}
 
-	// Send OK to client
-	if err := writeRESPSimple(client, "OK"); err != nil {
-		upstream.Close()
-		return nil
+	if initialAuthentication.helloVersion == 0 {
+		if err := writeRESPSimple(client, "OK"); err != nil {
+			upstream.Close()
+			return nil
+		}
+	} else {
+		response, err := negotiateUpstreamRedisHello(
+			upstream,
+			initialAuthentication.helloVersion,
+			initialAuthentication.clientName,
+			authenticationDeadline,
+		)
+		if err != nil {
+			g.logRejectedRedisInitialAuthentication()
+			upstream.Close()
+			_ = writeRESPError(client, "io-error negotiating protocol with the server")
+			return nil
+		}
+		if _, err := client.Write(response); err != nil {
+			upstream.Close()
+			return nil
+		}
 	}
 
 	return &gatewayConn{

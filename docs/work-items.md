@@ -124,6 +124,7 @@
 | 审计保留、分批清理与回放字节配额 | 已完成 | `8b8b633`、`99cf3aa` | [保留服务测试](../internal/service/audit_retention_test.go)、[存储一致性测试](../internal/store/dbstore_audit_retention_test.go) |
 | 跨分片脱敏及审计录制失败关闭 | 已完成 | `c517a3b` | [流式脱敏测试](../internal/recording/stream_redactor_test.go)、[数据库录制失败测试](../internal/server/dbproxy/audit_replay_path_test.go) |
 | 超级管理员独立文件权威路径与无管理员锁死 | 已完成 | `15e9c28`、`1c1b141` | 启动不再读取或重命名 `.super_admin_ids`；有用户但无有效超级管理员时失败关闭；显式配置只允许在无有效管理员时写库恢复；[启动回归测试](../cmd/bastion-core/bootstrap_test.go)、[存储事务测试](../internal/storage/super_admin_test.go) |
+| `TEST-20260719-001` 数据库真实协议兼容矩阵与模糊测试 | 已完成 | 本次提交 | [兼容矩阵](./database-protocol-compatibility.md)、[MySQL 实库](../internal/integration/mysql_proxy_integration_test.go)、[PostgreSQL 实库](../internal/integration/postgres_proxy_integration_test.go)、[Redis 实库](../internal/integration/redis_proxy_integration_test.go)、[监听生命周期](../internal/server/dbproxy/listeners_test.go) |
 
 ### 可以延期
 
@@ -135,7 +136,6 @@
 | `TECH-20260719-003` | P2 | 已延期 | 资源授权列表仍缺少批量查询能力，数据量增长后可能形成 N+1 | 提供批量授权查询；列表查询次数不随资源数线性增长；保留资源级拒绝语义 | 性能测试出现线性查询增长，最迟容量测试前 | [后端审计](./backend-audit-2026-07-18.md) |
 | `DEF-20260719-002` | P2 | 已延期 | 进程异常退出或结束状态写入失败后，审计会话可能长期保持 `started`，为避免误删活动会话，当前保留/配额任务不会清理它 | 增加带租约或心跳的会话恢复规则；仅回收可证明已失活的会话；覆盖重启和结束写入失败 | 首个发布候选前，或发现长期 `started` 会话时 | 审计治理切片复核 |
 | `TECH-20260719-005` | P3 | 已延期 | DTO、GORM Model 和 Store View 类型仍未彻底分离 | Model 不承载 API JSON 结构；Store 不堆放表现层 View；迁移不改变 API 行为 | 修改关联 API 或类型再次造成跨层依赖时 | [后端审计](./backend-audit-2026-07-18.md) |
-| `TEST-20260719-001` | P3 | 已延期 | 数据库协议缺少完整 Docker 实库矩阵和协议模糊测试 | 覆盖 MySQL/PostgreSQL/Redis 真实连接、监听生命周期、异常帧和大响应；环境缺失时显式跳过 | 修改协议适配器时，完整矩阵最迟首个发布候选前 | [Phase 2 计划](./superpowers/plans/2026-07-18-core-stabilization-phase2-plan.md) |
 | `TECH-20260719-006` | P3 | 已延期 | 前端生产构建仍有第三方 PURE 注释告警和主分包体积告警 | 先确认无功能风险；按页面拆分主包并记录体积基线；不为消除第三方告警修改依赖源码 | 主包继续增长或进入发布性能优化阶段时 | 最近一次阶段构建输出 |
 | `TECH-20260719-007` | P3 | 已延期 | 回放配额统计当前每小时遍历回放根目录，超大规模下耗时随文件数线性增长 | 记录会话关闭时的回放字节数并增量维护总量；以容量基准证明清理周期稳定 | 回放文件超过 100 万或扫描超过清理周期的 10% 时 | 审计治理切片复核 |
 

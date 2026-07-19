@@ -121,17 +121,19 @@ func TestReadRESPCommandFromBufRejectsUnterminatedOversizedFirstLine(t *testing.
 	}
 }
 
-func TestHandleRedisRejectsHELLOWithoutStartingSession(t *testing.T) {
+func TestHandleRedisHELLORequiresValidAuthenticationWithoutStartingSession(t *testing.T) {
 	tests := []struct {
-		name    string
-		command string
+		name           string
+		command        string
+		responsePrefix string
 	}{
-		{name: "RESP2", command: "*2\r\n$5\r\nHELLO\r\n$1\r\n2\r\n"},
-		{name: "RESP3", command: "*2\r\n$5\r\nHELLO\r\n$1\r\n3\r\n"},
-		{name: "RESP3 AUTH", command: "*5\r\n$5\r\nHELLO\r\n$1\r\n3\r\n$4\r\nAUTH\r\n$4\r\nuser\r\n$12\r\nhello-secret\r\n"},
-		{name: "RESP3 SETNAME", command: "*4\r\n$5\r\nHELLO\r\n$1\r\n3\r\n$7\r\nSETNAME\r\n$6\r\nclient\r\n"},
-		{name: "RESP3 AUTH SETNAME", command: "*7\r\n$5\r\nHELLO\r\n$1\r\n3\r\n$4\r\nAUTH\r\n$4\r\nuser\r\n$12\r\nhello-secret\r\n$7\r\nSETNAME\r\n$6\r\nclient\r\n"},
-		{name: "RESP2 AUTH SETNAME", command: "*7\r\n$5\r\nHELLO\r\n$1\r\n2\r\n$4\r\nAUTH\r\n$4\r\nuser\r\n$12\r\nhello-secret\r\n$7\r\nSETNAME\r\n$6\r\nclient\r\n"},
+		{name: "RESP2", command: "*2\r\n$5\r\nHELLO\r\n$1\r\n2\r\n", responsePrefix: "-NOAUTH "},
+		{name: "RESP3", command: "*2\r\n$5\r\nHELLO\r\n$1\r\n3\r\n", responsePrefix: "-NOAUTH "},
+		{name: "RESP3 AUTH", command: "*5\r\n$5\r\nHELLO\r\n$1\r\n3\r\n$4\r\nAUTH\r\n$4\r\nuser\r\n$12\r\nhello-secret\r\n", responsePrefix: "-WRONGPASS "},
+		{name: "RESP3 SETNAME", command: "*4\r\n$5\r\nHELLO\r\n$1\r\n3\r\n$7\r\nSETNAME\r\n$6\r\nclient\r\n", responsePrefix: "-NOAUTH "},
+		{name: "RESP3 AUTH SETNAME", command: "*7\r\n$5\r\nHELLO\r\n$1\r\n3\r\n$4\r\nAUTH\r\n$4\r\nuser\r\n$12\r\nhello-secret\r\n$7\r\nSETNAME\r\n$6\r\nclient\r\n", responsePrefix: "-WRONGPASS "},
+		{name: "RESP2 AUTH SETNAME", command: "*7\r\n$5\r\nHELLO\r\n$1\r\n2\r\n$4\r\nAUTH\r\n$4\r\nuser\r\n$12\r\nhello-secret\r\n$7\r\nSETNAME\r\n$6\r\nclient\r\n", responsePrefix: "-WRONGPASS "},
+		{name: "unsupported protocol", command: "*2\r\n$5\r\nHELLO\r\n$1\r\n4\r\n", responsePrefix: "-NOPROTO "},
 	}
 
 	for _, tt := range tests {
@@ -155,8 +157,8 @@ func TestHandleRedisRejectsHELLOWithoutStartingSession(t *testing.T) {
 				t.Fatalf("read HELLO response: %v", err)
 			}
 			got := string(response[:n])
-			if !strings.HasPrefix(got, "-NOPROTO ") {
-				t.Fatalf("HELLO response = %q, want -NOPROTO rejection", got)
+			if !strings.HasPrefix(got, tt.responsePrefix) {
+				t.Fatalf("HELLO response = %q, want prefix %q", got, tt.responsePrefix)
 			}
 			if strings.Contains(got, "hello-secret") {
 				t.Fatal("HELLO response exposed the authentication password")

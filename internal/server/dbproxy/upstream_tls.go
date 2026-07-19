@@ -103,7 +103,11 @@ func (connection *upstreamHandshakeConn) stopContextWatcher() {
 	<-connection.exited
 }
 
-func dialMySQLUpstream(ctx context.Context, instance model.DatabaseInstance) (net.Conn, *MySQLHandshake, error) {
+func dialMySQLUpstream(
+	ctx context.Context,
+	instance model.DatabaseInstance,
+	database string,
+) (net.Conn, *MySQLHandshake, error) {
 	connection, err := dialUpstream(ctx, instance)
 	if err != nil {
 		return nil, nil, err
@@ -130,7 +134,13 @@ func dialMySQLUpstream(ctx context.Context, instance model.DatabaseInstance) (ne
 	if handshake.CapabilityFlags&mysqlClientSSL == 0 {
 		return closeOnError(errors.New("MySQL upstream does not support TLS"))
 	}
-	if err := writeMySQLUpstreamTLSRequest(connection, handshake.CharacterSet); err != nil {
+	selectDatabase := database != "" &&
+		handshake.CapabilityFlags&mysqlClientConnectWithDB != 0
+	if err := writeMySQLUpstreamTLSRequest(
+		connection,
+		handshake.CharacterSet,
+		selectDatabase,
+	); err != nil {
 		return closeOnError(err)
 	}
 	secured, err := dbtls.HandshakeClient(ctx, connection, policy, upstreamAddress(instance))
@@ -140,9 +150,22 @@ func dialMySQLUpstream(ctx context.Context, instance model.DatabaseInstance) (ne
 	return secured, handshake, nil
 }
 
-func writeMySQLUpstreamTLSRequest(connection net.Conn, characterSet byte) error {
+func writeMySQLUpstreamTLSRequest(
+	connection net.Conn,
+	characterSet byte,
+	selectDatabase bool,
+) error {
 	payload := make([]byte, 32)
-	binary.LittleEndian.PutUint32(payload[:4], mysqlClientProtocol41|mysqlClientSecureConnection|mysqlClientPluginAuth|mysqlClientSSL)
+	capabilities := uint32(
+		mysqlClientProtocol41 |
+			mysqlClientSecureConnection |
+			mysqlClientPluginAuth |
+			mysqlClientSSL,
+	)
+	if selectDatabase {
+		capabilities |= mysqlClientConnectWithDB
+	}
+	binary.LittleEndian.PutUint32(payload[:4], capabilities)
 	binary.LittleEndian.PutUint32(payload[4:8], 1<<24)
 	if characterSet == 0 {
 		characterSet = 45

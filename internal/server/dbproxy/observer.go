@@ -9,6 +9,7 @@ type mysqlObserver struct {
 	clientBuf         []byte
 	serverBuf         []byte
 	serverStream      *mysqlServerPacketStream
+	serverLogical     *mysqlServerLogicalPacket
 	pending           []queryRecord
 	pendingRecorded   []bool
 	pendingFailed     []bool
@@ -135,9 +136,15 @@ func (o *mysqlObserver) observeServerRelayBytes(data []byte) ([]byte, *queryDeci
 			if !o.acceptMySQLServerSequence(sequence) {
 				return forward, o.fail(observerErrorProtocol, "unexpected MySQL server packet sequence")
 			}
+			firstFragment := o.serverLogical == nil
+			if firstFragment {
+				o.serverLogical = &mysqlServerLogicalPacket{}
+			}
 			o.serverStream = &mysqlServerPacketStream{
-				remaining: payloadLen,
-				sequence:  sequence,
+				remaining:     payloadLen,
+				sequence:      sequence,
+				collectPrefix: firstFragment,
+				finalFragment: payloadLen < maxMySQLPhysicalPacketPayloadBytes,
 			}
 			forward = append(forward, o.serverBuf[:4]...)
 			bufferedPayload := o.serverBuf[4:]
@@ -163,6 +170,17 @@ func (o *mysqlObserver) observeServerRelayBytes(data []byte) ([]byte, *queryDeci
 			return forward, o.fail(observerErrorProtocol, "unexpected MySQL server packet sequence")
 		}
 		payload := o.serverBuf[4:total]
+		if o.serverLogical != nil {
+			forward = append(forward, packet...)
+			o.serverBuf = o.serverBuf[total:]
+			if decision := o.finishMySQLServerLogicalPacket(packet[3]); decision != nil {
+				return forward, decision
+			}
+			if o.fatal != nil {
+				return forward, o.fatal
+			}
+			continue
+		}
 		if decision := o.handleServerPacket(payload); decision != nil {
 			return forward, decision
 		}
@@ -217,6 +235,7 @@ func (o *mysqlObserver) failDecision(decision *queryDecision) *queryDecision {
 	o.clientBuf = nil
 	o.serverBuf = nil
 	o.serverStream = nil
+	o.serverLogical = nil
 	o.pending = nil
 	o.pendingRecorded = nil
 	o.pendingFailed = nil

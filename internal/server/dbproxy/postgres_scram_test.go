@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/binary"
 	"errors"
+	"io"
 	"net"
 	"strings"
 	"testing"
@@ -42,6 +43,46 @@ func TestPostgresSCRAMRequiresExplicitlyOfferedMechanism(t *testing.T) {
 	}
 	if !postgresSCRAMMechanismOffered([]byte("OTHER-SASL\x00SCRAM-SHA-256\x00\x00"), postgresSCRAMSHA256) {
 		t.Fatal("SCRAM-SHA-256 was not found in a valid mechanism list")
+	}
+}
+
+func TestPostgresSCRAMNormalizesUnicodePasswordLikePostgreSQL(t *testing.T) {
+	const password = "before\u00a0after"
+	normalized := normalizePostgresSCRAMPassword(password)
+	if string(normalized) != "before after" {
+		t.Fatalf("normalized password = %q", normalized)
+	}
+
+	client, server := net.Pipe()
+	defer client.Close()
+	defer server.Close()
+	serverResult := make(chan error, 1)
+	go func() {
+		serverResult <- servePostgresSCRAMTest(
+			server,
+			postgresSCRAMTestOptions{password: password},
+		)
+	}()
+	if err := runPostgresSCRAMWithNonce(
+		client,
+		"probe",
+		password,
+		[]byte("SCRAM-SHA-256\x00\x00"),
+		"client-nonce",
+	); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-serverResult; err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestPostgresSCRAMUsesRFC4013SASLprep(t *testing.T) {
+	if got := string(normalizePostgresSCRAMPassword("pass\u2163")); got != "passIV" {
+		t.Fatalf("SASLprep compatibility normalization = %q", got)
+	}
+	if got := string(normalizePostgresSCRAMPassword("before\tafter")); got != "before\tafter" {
+		t.Fatalf("invalid SASLprep input fallback = %q", got)
 	}
 }
 
@@ -158,23 +199,127 @@ func TestAuthenticatePostgresUpstreamCompletesSCRAMAndForwardsAuthOK(t *testing.
 			serverResult <- err
 			return
 		}
-		serverResult <- writePostgresMessage(upstreamServer, 'R', []byte{0, 0, 0, 0})
+		for _, message := range []postgresWireMessage{
+			{kind: 'R', payload: []byte{0, 0, 0, 0}},
+			{kind: 'S', payload: []byte("server_version\x0016.0\x00")},
+			{kind: 'K', payload: []byte{0, 0, 0, 42, 1, 2, 3, 4}},
+			{kind: 'Z', payload: []byte{'I'}},
+		} {
+			if err := writePostgresMessage(upstreamServer, message.kind, message.payload); err != nil {
+				serverResult <- err
+				return
+			}
+		}
+		serverResult <- nil
 	}()
 
-	authResult := make(chan error, 1)
+	type authenticationResult struct {
+		startup postgresUpstreamStartup
+		err     error
+	}
+	registered := make(chan postgresCancelKey, 1)
+	cleanupCalls := 0
+	authResult := make(chan authenticationResult, 1)
 	go func() {
-		authResult <- authenticatePostgresUpstream(upstreamGateway, clientGateway, "probe", "secret")
+		startup, err := authenticatePostgresUpstream(
+			upstreamGateway,
+			clientGateway,
+			"probe",
+			"secret",
+			func(key postgresCancelKey) func() {
+				registered <- key
+				return func() {
+					cleanupCalls++
+				}
+			},
+		)
+		authResult <- authenticationResult{startup: startup, err: err}
 	}()
 
-	authOK, err := readPostgresMessage(clientPeer, maxPostgresAuthMessageBytes)
-	if err != nil {
+	var kinds []byte
+	for {
+		message, err := readPostgresMessage(clientPeer, maxPostgresAuthMessageBytes)
+		if err != nil {
+			t.Fatal(err)
+		}
+		kinds = append(kinds, message.kind)
+		if message.kind == 'K' {
+			select {
+			case key := <-registered:
+				if key.processID != 42 ||
+					key.secret != string([]byte{1, 2, 3, 4}) {
+					t.Fatalf("registered BackendKeyData = %#v", key)
+				}
+			default:
+				t.Fatal("BackendKeyData reached client before cancellation route registration")
+			}
+		}
+		if message.kind == 'Z' {
+			break
+		}
+	}
+	if string(kinds) != "RSKZ" {
+		t.Fatalf("client startup message kinds = %q, want RSKZ", kinds)
+	}
+	result := <-authResult
+	if result.err != nil {
+		t.Fatal(result.err)
+	}
+	if result.startup.cancelCleanup == nil {
+		t.Fatal("successful PostgreSQL startup did not return cancellation cleanup")
+	}
+	result.startup.cancelCleanup()
+	if cleanupCalls != 1 {
+		t.Fatalf("cancellation cleanup calls = %d, want 1", cleanupCalls)
+	}
+	if err := <-serverResult; err != nil {
 		t.Fatal(err)
 	}
-	if authOK.kind != 'R' || len(authOK.payload) != 4 || binary.BigEndian.Uint32(authOK.payload) != 0 {
-		t.Fatalf("client auth response = kind %q payload %x", authOK.kind, authOK.payload)
+}
+
+func TestAuthenticatePostgresUpstreamCleansCancelRouteOnStartupFailure(t *testing.T) {
+	upstreamServer, upstreamGateway := net.Pipe()
+	defer upstreamServer.Close()
+	defer upstreamGateway.Close()
+	clientGateway, clientPeer := net.Pipe()
+	defer clientGateway.Close()
+	defer clientPeer.Close()
+	go func() {
+		_, _ = io.Copy(io.Discard, clientPeer)
+	}()
+
+	serverResult := make(chan error, 1)
+	go func() {
+		for _, message := range []postgresWireMessage{
+			{kind: 'R', payload: []byte{0, 0, 0, 0}},
+			{kind: 'K', payload: []byte{0, 0, 0, 42, 1, 2, 3, 4}},
+			{kind: 'Z', payload: []byte{'X'}},
+		} {
+			if err := writePostgresMessage(upstreamServer, message.kind, message.payload); err != nil {
+				serverResult <- err
+				return
+			}
+		}
+		serverResult <- nil
+	}()
+
+	cleanupCalls := 0
+	_, err := authenticatePostgresUpstream(
+		upstreamGateway,
+		clientGateway,
+		"probe",
+		"secret",
+		func(postgresCancelKey) func() {
+			return func() {
+				cleanupCalls++
+			}
+		},
+	)
+	if err == nil || !strings.Contains(err.Error(), "ReadyForQuery") {
+		t.Fatalf("malformed startup result = %v", err)
 	}
-	if err := <-authResult; err != nil {
-		t.Fatal(err)
+	if cleanupCalls != 1 {
+		t.Fatalf("failed startup cancellation cleanup calls = %d, want 1", cleanupCalls)
 	}
 	if err := <-serverResult; err != nil {
 		t.Fatal(err)
@@ -186,6 +331,7 @@ type postgresSCRAMTestOptions struct {
 	badVerifier   bool
 	nonceMismatch bool
 	serverError   bool
+	password      string
 }
 
 func servePostgresSCRAMTest(conn net.Conn, options postgresSCRAMTestOptions) error {
@@ -235,7 +381,11 @@ func servePostgresSCRAMTest(conn net.Conn, options postgresSCRAMTestOptions) err
 	}
 	clientFinalWithoutProof := clientFinal[:proofPosition]
 	authMessage := clientFirstBare + "," + serverFirst + "," + clientFinalWithoutProof
-	verifier := postgresSCRAMTestVerifier("secret", salt, iterations, authMessage)
+	password := options.password
+	if password == "" {
+		password = "secret"
+	}
+	verifier := postgresSCRAMTestVerifier(password, salt, iterations, authMessage)
 	if options.badVerifier {
 		verifier[0] ^= 0xff
 	}
@@ -277,7 +427,7 @@ func readPostgresTestSASLInitial(conn net.Conn) (string, string, error) {
 }
 
 func postgresSCRAMTestVerifier(password string, salt []byte, iterations int, authMessage string) []byte {
-	saltedPassword := PBKDF2Key([]byte(password), salt, iterations, sha256.Size)
+	saltedPassword := PBKDF2Key(normalizePostgresSCRAMPassword(password), salt, iterations, sha256.Size)
 	serverKey := hmacSHA256Test(saltedPassword, []byte("Server Key"))
 	return hmacSHA256Test(serverKey, []byte(authMessage))
 }

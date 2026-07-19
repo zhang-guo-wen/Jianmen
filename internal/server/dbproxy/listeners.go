@@ -3,7 +3,6 @@ package dbproxy
 import (
 	"context"
 	"crypto/tls"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"net"
@@ -214,6 +213,7 @@ func (g *Gateway) handleProtocolConnectionWithTimeout(ctx context.Context, clien
 		return
 	}
 	if connection != nil {
+		defer connection.releasePostgresCancel()
 		if err := client.SetDeadline(time.Time{}); err != nil {
 			g.logger.Warn("database gateway failed to clear handshake deadline", "protocol", protocol, "error", err)
 			_ = connection.upstream.Close()
@@ -228,50 +228,6 @@ func (g *Gateway) handleProtocolConnectionWithTimeout(ctx context.Context, clien
 		}
 		g.handleGatewayConn(client, connection)
 	}
-}
-
-func (g *Gateway) handlePostgresConnection(ctx context.Context, client net.Conn, listenerConfig config.DatabaseProtocolListener) *gatewayConn {
-	first := make([]byte, 8)
-	if _, err := readFull(client, first); err != nil {
-		return nil
-	}
-	if isPostgresGSSENCRequest(first) {
-		if _, err := client.Write([]byte{'N'}); err != nil {
-			return nil
-		}
-		if _, err := readFull(client, first); err != nil {
-			return nil
-		}
-	}
-	if !isPostgresSSLRequest(first) {
-		writePostgresTLSError(client)
-		return nil
-	}
-	if listenerConfig.CertFile == "" || listenerConfig.KeyFile == "" {
-		_, _ = client.Write([]byte{'N'})
-		return nil
-	}
-	tlsConfig, err := databaseListenerTLSConfig(listenerConfig)
-	if err != nil {
-		g.logger.Error("load PostgreSQL listener certificate", "error", err)
-		return nil
-	}
-	if _, err := client.Write([]byte{'S'}); err != nil {
-		return nil
-	}
-	secured := tls.Server(client, tlsConfig)
-	if err := secured.HandshakeContext(ctx); err != nil {
-		return nil
-	}
-	firstByte := make([]byte, 1)
-	if _, err := readFull(secured, firstByte); err != nil {
-		return nil
-	}
-	connection := g.handlePG(ctx, secured, firstByte[0])
-	if connection != nil {
-		connection.client = secured
-	}
-	return connection
 }
 
 func (g *Gateway) handleRedisConnection(ctx context.Context, client net.Conn, listenerConfig config.DatabaseProtocolListener) *gatewayConn {
@@ -308,25 +264,6 @@ func databaseListenerTLSConfig(listener config.DatabaseProtocolListener) (*tls.C
 		return nil, fmt.Errorf("load listener certificate: %w", err)
 	}
 	return &tls.Config{Certificates: []tls.Certificate{certificate}, MinVersion: tls.VersionTLS12}, nil
-}
-
-func isPostgresSSLRequest(header []byte) bool {
-	return len(header) == 8 && header[0] == 0 && header[1] == 0 && header[2] == 0 && header[3] == 8 &&
-		header[4] == 4 && header[5] == 210 && header[6] == 22 && header[7] == 47
-}
-
-func isPostgresGSSENCRequest(header []byte) bool {
-	return len(header) == 8 && header[0] == 0 && header[1] == 0 && header[2] == 0 && header[3] == 8 &&
-		header[4] == 4 && header[5] == 210 && header[6] == 22 && header[7] == 48
-}
-
-func writePostgresTLSError(conn net.Conn) {
-	payload := []byte("SFATAL\x00MSSL is required for password authentication\x00\x00")
-	message := make([]byte, 5+len(payload))
-	message[0] = 'E'
-	binary.BigEndian.PutUint32(message[1:5], uint32(4+len(payload)))
-	copy(message[5:], payload)
-	_, _ = conn.Write(message)
 }
 
 func isLoopbackPeer(address net.Addr) bool {

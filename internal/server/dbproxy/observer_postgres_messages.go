@@ -41,7 +41,8 @@ func validPostgresBackendMessage(messageType byte, payload []byte) bool {
 	case 'G', 'H', 'W':
 		return validPostgresCopyResponse(payload)
 	case 'K':
-		return len(payload) == 8
+		_, err := parsePostgresBackendKey(payload)
+		return err == nil
 	case 'S':
 		return validPostgresParameterStatus(payload)
 	case 'T':

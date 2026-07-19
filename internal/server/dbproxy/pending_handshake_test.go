@@ -186,6 +186,7 @@ func TestPendingHandshakeSlotIsReleasedBeforeLongLivedRelay(t *testing.T) {
 	go func() {
 		defer close(done)
 		gateway.finishProtocolConnection(
+			context.Background(),
 			client,
 			connection,
 			databaseProtocolRedis,

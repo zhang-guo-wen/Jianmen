@@ -1,6 +1,8 @@
 package dbproxy
 
 import (
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,6 +12,58 @@ import (
 
 	"jianmen/internal/model"
 )
+
+func TestRecorderThreadsConnectionContextAndReportsQueryFailureOnce(t *testing.T) {
+	file, err := os.Create(filepath.Join(t.TempDir(), "queries.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	audit := &queryCaptureAudit{queryErr: errors.New("audit query unavailable")}
+	client := newAuditGateConn()
+	upstream := newAuditGateConn()
+	fatalCalls := 0
+	ctx := context.WithValue(context.Background(), recorderContextKey{}, "connection-value")
+	recorder := &connectionRecorder{
+		ctx:            ctx,
+		id:             "connection-context",
+		protocol:       "mysql",
+		file:           file,
+		startedAt:      time.Now(),
+		audit:          audit,
+		auditSessionID: "session-context",
+		onFatal: func(error) {
+			fatalCalls++
+			_ = client.Close()
+			_ = upstream.Close()
+		},
+	}
+	defer recorder.Close()
+
+	record, decision := recorder.StartQuery("SELECT 1", nil)
+	if !decision.Allowed {
+		t.Fatalf("StartQuery() decision = %#v, want allowed", decision)
+	}
+	recorder.FinishQuery(record, queryFinish{Status: queryStatusSuccess})
+	recorder.reportFatal(errors.New("duplicate fatal signal"))
+
+	contexts := audit.contextSnapshot()
+	if len(contexts) != 1 || contexts[0].Value(recorderContextKey{}) != "connection-value" {
+		t.Fatalf("CreateAuditDBQuery contexts = %#v, want connection context", contexts)
+	}
+	if fatalCalls != 1 {
+		t.Fatalf("fatal callback calls = %d, want 1", fatalCalls)
+	}
+	select {
+	case <-client.closed:
+	default:
+		t.Fatal("query audit failure did not close client")
+	}
+	select {
+	case <-upstream.closed:
+	default:
+		t.Fatal("query audit failure did not close upstream")
+	}
+}
 
 func TestRecorderPersistsOnlyRedactedSQLAndPairsTerminalEvents(t *testing.T) {
 	tests := []struct {
@@ -39,6 +93,7 @@ func TestRecorderPersistsOnlyRedactedSQLAndPairsTerminalEvents(t *testing.T) {
 			}
 			audit := &queryCaptureAudit{}
 			recorder := &connectionRecorder{
+				ctx:                   context.Background(),
 				id:                    "connection-1",
 				protocol:              "mysql",
 				maxClientMessageBytes: defaultMaxClientMessageBytes,
@@ -90,17 +145,22 @@ func TestRecorderPersistsOnlyRedactedSQLAndPairsTerminalEvents(t *testing.T) {
 }
 
 type queryCaptureAudit struct {
-	mu      sync.Mutex
-	queries []model.AuditDBQuery
+	mu            sync.Mutex
+	queries       []model.AuditDBQuery
+	queryContexts []context.Context
+	queryErr      error
 }
 
-func (*queryCaptureAudit) CreateAuditSession(*model.AuditSession) error { return nil }
-func (*queryCaptureAudit) EndAuditSession(string) error                 { return nil }
-func (a *queryCaptureAudit) CreateAuditDBQuery(query *model.AuditDBQuery) error {
+func (*queryCaptureAudit) CreateAuditSession(context.Context, *model.AuditSession) error {
+	return nil
+}
+func (*queryCaptureAudit) EndAuditSession(context.Context, string) error { return nil }
+func (a *queryCaptureAudit) CreateAuditDBQuery(ctx context.Context, query *model.AuditDBQuery) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.queries = append(a.queries, *query)
-	return nil
+	a.queryContexts = append(a.queryContexts, ctx)
+	return a.queryErr
 }
 
 func (a *queryCaptureAudit) snapshot() []model.AuditDBQuery {
@@ -108,5 +168,13 @@ func (a *queryCaptureAudit) snapshot() []model.AuditDBQuery {
 	defer a.mu.Unlock()
 	return append([]model.AuditDBQuery(nil), a.queries...)
 }
+
+func (a *queryCaptureAudit) contextSnapshot() []context.Context {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return append([]context.Context(nil), a.queryContexts...)
+}
+
+type recorderContextKey struct{}
 
 var _ auditWriter = (*queryCaptureAudit)(nil)

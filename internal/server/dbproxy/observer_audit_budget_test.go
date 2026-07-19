@@ -1,6 +1,7 @@
 package dbproxy
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -156,6 +157,7 @@ func TestLargeSQLProductionRecorderUsesBoundedAuditMetadata(t *testing.T) {
 	}
 	auditWriter := &queryCaptureAudit{}
 	recorder := &connectionRecorder{
+		ctx:                   context.Background(),
 		id:                    "large-sql-connection",
 		protocol:              "mysql",
 		maxClientMessageBytes: limit,

@@ -1,6 +1,7 @@
 package dbproxy
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -363,6 +364,7 @@ func writeRelayBytes(connection net.Conn, data []byte) error {
 
 type connectionRecorder struct {
 	mu                    sync.Mutex
+	ctx                   context.Context
 	id                    string
 	protocol              string
 	maxClientMessageBytes int
@@ -468,7 +470,7 @@ func (r *connectionRecorder) writeFinishLocked(record queryRecord, finish queryF
 		return
 	}
 	if r.audit != nil && r.auditSessionID != "" {
-		if err := r.audit.CreateAuditDBQuery(&model.AuditDBQuery{
+		if err := r.audit.CreateAuditDBQuery(r.ctx, &model.AuditDBQuery{
 			AuditSessionID:   r.auditSessionID,
 			Timestamp:        completedAt,
 			SQLText:          record.sql,

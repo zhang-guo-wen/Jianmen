@@ -34,8 +34,11 @@ type AuditDBQueryPreviewParams struct {
 	Offset int
 }
 
-func (s *DBStore) CreateAuditDBQuery(query *model.AuditDBQuery) error {
-	return s.db.Create(query).Error
+func (s *DBStore) CreateAuditDBQuery(ctx context.Context, query *model.AuditDBQuery) error {
+	if ctx == nil {
+		return fmt.Errorf("create database audit query: nil context")
+	}
+	return s.db.WithContext(ctx).Create(query).Error
 }
 
 func (s *DBStore) ListAuditDBQueryPreviews(

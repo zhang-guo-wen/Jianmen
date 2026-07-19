@@ -35,9 +35,9 @@ type databaseAccountResolver interface {
 }
 
 type auditWriter interface {
-	CreateAuditSession(session *model.AuditSession) error
-	EndAuditSession(id string) error
-	CreateAuditDBQuery(query *model.AuditDBQuery) error
+	CreateAuditSession(ctx context.Context, session *model.AuditSession) error
+	EndAuditSession(ctx context.Context, id string) error
+	CreateAuditDBQuery(ctx context.Context, query *model.AuditDBQuery) error
 }
 
 type connectionAuthorizer interface {
@@ -103,7 +103,9 @@ func upstreamAddress(inst model.DatabaseInstance) string {
 	return net.JoinHostPort(inst.Address, strconv.Itoa(port))
 }
 
-func (g *Gateway) handleGatewayConn(client net.Conn, conn *gatewayConn) {
+const auditSessionEndTimeout = 5 * time.Second
+
+func (g *Gateway) handleGatewayConn(ctx context.Context, client net.Conn, conn *gatewayConn) {
 	if conn.client != nil {
 		client = conn.client
 	}
@@ -119,7 +121,7 @@ func (g *Gateway) handleGatewayConn(client net.Conn, conn *gatewayConn) {
 	var authUser string
 	if g.db != nil {
 		var u model.User
-		if err := g.db.First(&u, "id = ?", conn.userID).Error; err == nil {
+		if err := g.db.WithContext(ctx).First(&u, "id = ?", conn.userID).Error; err == nil {
 			authUser = u.Username
 		}
 	}
@@ -145,15 +147,21 @@ func (g *Gateway) handleGatewayConn(client net.Conn, conn *gatewayConn) {
 		return
 	}
 	if g.audit != nil {
-		if err := g.audit.CreateAuditSession(auditSession); err != nil {
+		if err := g.audit.CreateAuditSession(ctx, auditSession); err != nil {
 			g.logger.Warn("db gateway audit session creation failed", "error", err)
 			g.writeAuditUnavailableResponse(client, conn.protocol)
 			return
 		}
-		defer g.audit.EndAuditSession(auditSession.ID)
+		defer func() {
+			endCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), auditSessionEndTimeout)
+			defer cancel()
+			if err := g.audit.EndAuditSession(endCtx, auditSession.ID); err != nil {
+				g.logger.Warn("db gateway audit session finalization failed", "error", err)
+			}
+		}()
 	}
 
-	recorder, recErr := g.newRecorder(conn, auditSession.ID, func(error) {
+	recorder, recErr := g.newRecorder(ctx, conn, auditSession.ID, func(error) {
 		_ = client.Close()
 		_ = conn.upstream.Close()
 	})

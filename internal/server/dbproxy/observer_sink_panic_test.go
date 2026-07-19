@@ -1,6 +1,7 @@
 package dbproxy
 
 import (
+	"context"
 	"os"
 	"sync"
 	"testing"
@@ -279,6 +280,7 @@ func TestConnectionRecorderAuditPanicTerminatesObserver(t *testing.T) {
 	}
 	defer file.Close()
 	recorder := &connectionRecorder{
+		ctx:            context.Background(),
 		protocol:       "mysql",
 		file:           file,
 		audit:          panicAuditWriter{},
@@ -315,9 +317,11 @@ func (s *assertPendingSink) FinishQuery(queryRecord, queryFinish) {
 
 type panicAuditWriter struct{}
 
-func (panicAuditWriter) CreateAuditSession(*model.AuditSession) error { return nil }
-func (panicAuditWriter) EndAuditSession(string) error                 { return nil }
-func (panicAuditWriter) CreateAuditDBQuery(*model.AuditDBQuery) error {
+func (panicAuditWriter) CreateAuditSession(context.Context, *model.AuditSession) error {
+	return nil
+}
+func (panicAuditWriter) EndAuditSession(context.Context, string) error { return nil }
+func (panicAuditWriter) CreateAuditDBQuery(context.Context, *model.AuditDBQuery) error {
 	panic("database sink secret")
 }
 

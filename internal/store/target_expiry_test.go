@@ -29,7 +29,7 @@ func TestTargetConfigCarriesHostAccountExpiry(t *testing.T) {
 		t.Fatalf("create account: %v", err)
 	}
 
-	target, err := NewDBStore(db).TargetConfig(account.ID)
+	target, err := NewDBStore(db).TargetConfig(context.Background(), account.ID)
 	if err != nil {
 		t.Fatalf("target config: %v", err)
 	}

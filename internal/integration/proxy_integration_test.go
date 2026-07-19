@@ -66,7 +66,7 @@ func TestSSHProxyAgainstDockerOpenSSH(t *testing.T) {
 
 	fixture := newMetadataFixture(t)
 	targetHost, targetPort := splitAddress(t, targetAddr)
-	target, err := fixture.store.AddTarget(config.Target{
+	target, err := fixture.store.AddTarget(context.Background(), config.Target{
 		HostID:                "docker-openssh",
 		Host:                  targetHost,
 		Port:                  targetPort,

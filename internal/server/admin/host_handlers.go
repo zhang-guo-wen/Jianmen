@@ -1,16 +1,19 @@
 package admin
 
 import (
+	"context"
 	"encoding/json"
-	"jianmen/internal/config"
-	"jianmen/internal/model"
-	"jianmen/internal/rbac"
-	"jianmen/internal/store"
+	"errors"
 	"net/http"
 	"strings"
 	"time"
 
 	"golang.org/x/crypto/ssh"
+
+	"jianmen/internal/config"
+	"jianmen/internal/model"
+	"jianmen/internal/rbac"
+	"jianmen/internal/store"
 )
 
 func (s *Server) handleHosts(w http.ResponseWriter, r *http.Request) {
@@ -19,7 +22,12 @@ func (s *Server) handleHosts(w http.ResponseWriter, r *http.Request) {
 		if !s.requireAuthenticatedUser(w, r) {
 			return
 		}
-		hosts, err := s.visibleHosts(r, s.hostTargets.Hosts())
+		hosts, err := s.hostTargets.Hosts(r.Context())
+		if err != nil {
+			s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
+			return
+		}
+		hosts, err = s.visibleHosts(r, hosts)
 		if err != nil {
 			s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
 			return
@@ -45,13 +53,17 @@ func (s *Server) handleCreateHost(w http.ResponseWriter, r *http.Request) {
 		s.writeErrorText(w, r, http.StatusBadRequest, err.Error())
 		return
 	}
-	view, err := s.hostTargets.AddHost(host)
+	view, err := s.hostTargets.AddHost(r.Context(), host)
 	if err != nil {
 		s.writeErrorText(w, r, http.StatusBadRequest, err.Error())
 		return
 	}
 	if err := s.grantCreatedResource(r, model.ResourceTypeHost, view.ID); err != nil {
-		_ = s.hostTargets.DeleteHost(view.ID)
+		cleanupCtx, cancelCleanup := context.WithTimeout(context.WithoutCancel(r.Context()), 5*time.Second)
+		defer cancelCleanup()
+		if cleanupErr := s.hostTargets.DeleteHost(cleanupCtx, view.ID); cleanupErr != nil {
+			err = errors.Join(err, cleanupErr)
+		}
 		s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -121,7 +133,7 @@ func (s *Server) handleHost(w http.ResponseWriter, r *http.Request) {
 			s.forbidden(w, r)
 			return
 		}
-		view, err := s.hostTargets.Host(id)
+		view, err := s.hostTargets.Host(r.Context(), id)
 		if err != nil {
 			writeHostStoreError(w, r, err)
 			return
@@ -136,7 +148,7 @@ func (s *Server) handleHost(w http.ResponseWriter, r *http.Request) {
 		if !s.requireResourceAction(w, r, rbac.ActionHostDelete, model.ResourceTypeHost, id) {
 			return
 		}
-		if err := s.hostTargets.DeleteHost(id); err != nil {
+		if err := s.hostTargets.DeleteHost(r.Context(), id); err != nil {
 			writeHostStoreError(w, r, err)
 			return
 		}
@@ -155,7 +167,7 @@ func (s *Server) handleUpdateHost(w http.ResponseWriter, r *http.Request, id str
 		s.writeErrorText(w, r, http.StatusBadRequest, err.Error())
 		return
 	}
-	view, err := s.hostTargets.UpdateHost(id, host)
+	view, err := s.hostTargets.UpdateHost(r.Context(), id, host)
 	if err != nil {
 		writeHostStoreError(w, r, err)
 		return
@@ -178,8 +190,12 @@ func (s *Server) handleTargets(w http.ResponseWriter, r *http.Request) {
 		} else {
 			actions = []string{rbac.ActionTargetView}
 		}
-		targets := s.hostTargets.Targets()
 		var err error
+		targets, err := s.hostTargets.Targets(r.Context())
+		if err != nil {
+			s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
+			return
+		}
 		if connectableOnly(r) {
 			targets, err = s.visibleConnectableTargets(r, targets)
 		} else {
@@ -225,7 +241,7 @@ func (s *Server) handleCreateTarget(w http.ResponseWriter, r *http.Request) {
 	} else if !s.requireResourceAction(w, r, rbac.ActionTargetCreate, model.ResourceTypeHost, target.HostID) {
 		return
 	}
-	view, err := s.hostTargets.AddTarget(target)
+	view, err := s.hostTargets.AddTarget(r.Context(), target)
 	if err != nil {
 		s.writeErrorText(w, r, http.StatusBadRequest, err.Error())
 		return
@@ -291,7 +307,7 @@ func (s *Server) handleTestConnection(w http.ResponseWriter, r *http.Request) {
 		HostID:                target.HostID,
 	}
 	if targetCfg.Password == "" && targetCfg.PrivateKeyPath == "" && targetCfg.PrivateKeyPEM == "" && targetCfg.ID != "" {
-		storedTarget, err := s.hostTargets.TargetConfig(targetCfg.ID)
+		storedTarget, err := s.hostTargets.TargetConfig(r.Context(), targetCfg.ID)
 		if err != nil {
 			s.writeJSON(w, r, http.StatusOK, map[string]any{"ok": false, "message": "配置错误: " + err.Error()})
 			return
@@ -321,7 +337,7 @@ func (s *Server) handleTestConnection(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if targetCfg.HostID != "" && (targetCfg.Host == "" || targetCfg.Port == 0) {
-		host, err := s.hostTargets.Host(targetCfg.HostID)
+		host, err := s.hostTargets.Host(r.Context(), targetCfg.HostID)
 		if err != nil {
 			s.writeJSON(w, r, http.StatusOK, map[string]any{"ok": false, "error": "configuration error: " + err.Error()})
 			return
@@ -397,7 +413,7 @@ func (s *Server) handleTarget(w http.ResponseWriter, r *http.Request) {
 		if !s.requireResourceAction(w, r, rbac.ActionTargetView, model.ResourceTypeHostAccount, id) {
 			return
 		}
-		view, err := s.hostTargets.Target(id)
+		view, err := s.hostTargets.Target(r.Context(), id)
 		if err != nil {
 			writeTargetStoreError(w, r, err)
 			return
@@ -412,7 +428,7 @@ func (s *Server) handleTarget(w http.ResponseWriter, r *http.Request) {
 		if !s.requireResourceAction(w, r, rbac.ActionTargetDelete, model.ResourceTypeHostAccount, id) {
 			return
 		}
-		if err := s.hostTargets.DeleteTarget(id); err != nil {
+		if err := s.hostTargets.DeleteTarget(r.Context(), id); err != nil {
 			writeTargetStoreError(w, r, err)
 			return
 		}
@@ -430,7 +446,7 @@ func (s *Server) handleUpdateTarget(w http.ResponseWriter, r *http.Request, id s
 		s.writeErrorText(w, r, http.StatusBadRequest, err.Error())
 		return
 	}
-	view, err := s.hostTargets.UpdateTarget(id, target)
+	view, err := s.hostTargets.UpdateTarget(r.Context(), id, target)
 	if err != nil {
 		writeTargetStoreError(w, r, err)
 		return

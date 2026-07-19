@@ -77,7 +77,11 @@ func (s *Server) handleAIResources(w http.ResponseWriter, r *http.Request) {
 func (s *Server) listAIResources(w http.ResponseWriter, r *http.Request) {
 	userID := userIDFromRequest(r)
 	resources := make([]aiResource, 0)
-	targets := s.hostTargets.Targets()
+	targets, err := s.hostTargets.Targets(r.Context())
+	if err != nil {
+		s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
+		return
+	}
 	for _, target := range targets {
 		allowed, authErr := s.authorizeAnyConnection(r.Context(), userID, []string{rbac.ActionSessionConnect, rbac.ActionSFTPConnect}, model.ResourceTypeHostAccount, target.ID)
 		if authErr != nil {
@@ -192,7 +196,7 @@ func (s *Server) issueAIResourceSession(w http.ResponseWriter, r *http.Request, 
 
 func (s *Server) loadAIResource(ctx context.Context, resourceType, resourceID string) (aiResource, error) {
 	if resourceType == model.ResourceTypeHostAccount {
-		target, err := s.hostTargets.Target(resourceID)
+		target, err := s.hostTargets.Target(ctx, resourceID)
 		if err != nil {
 			return aiResource{}, err
 		}

@@ -2,6 +2,7 @@ package admin
 
 import (
 	"bytes"
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -94,7 +95,7 @@ func TestHandleUpdateTargetRejectsInvalidRDPSecurity(t *testing.T) {
 		t.Fatalf("update response does not explain valid RDP security modes: %s", updateResponse.Body.String())
 	}
 
-	stored, err := server.hostTargets.Target("rdp-security-account")
+	stored, err := server.hostTargets.Target(context.Background(), "rdp-security-account")
 	if err != nil {
 		t.Fatalf("load stored target: %v", err)
 	}

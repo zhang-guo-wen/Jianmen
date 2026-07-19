@@ -9,6 +9,7 @@ import (
 
 	"jianmen/internal/model"
 	"jianmen/internal/rbac"
+	"jianmen/internal/service"
 	"jianmen/internal/store"
 )
 
@@ -77,34 +78,38 @@ func (s *Server) grantCreatedResource(r *http.Request, resourceType, resourceID 
 }
 
 func (s *Server) visibleHosts(r *http.Request, hosts []store.HostView) ([]store.HostView, error) {
+	hostIDs := make([]string, len(hosts))
+	for index := range hosts {
+		hostIDs[index] = hosts[index].ID
+	}
+	hostVisible, err := s.authorizeResourceActionsBatch(r, []string{rbac.ActionHostView}, model.ResourceTypeHost, hostIDs)
+	if err != nil {
+		return nil, err
+	}
+	hostManage, err := s.authorizeResourceActionsBatch(r, []string{rbac.ActionHostUpdate, rbac.ActionHostDelete}, model.ResourceTypeHost, hostIDs)
+	if err != nil {
+		return nil, err
+	}
+	allTargets := s.hostTargets.Targets()
+	visibleTargets, err := s.visibleTargets(r, allTargets)
+	if err != nil {
+		return nil, err
+	}
+	targetCount := make(map[string]int, len(hosts))
+	for _, target := range visibleTargets {
+		targetCount[target.HostID]++
+	}
 	result := make([]store.HostView, 0, len(hosts))
-	for _, host := range hosts {
-		visible, err := s.authorizeResourceActions(r, []string{rbac.ActionHostView}, model.ResourceTypeHost, host.ID)
-		if err != nil {
-			return nil, err
-		}
-		canManage, err := s.authorizeResourceActions(r, []string{rbac.ActionHostUpdate, rbac.ActionHostDelete}, model.ResourceTypeHost, host.ID)
-		if err != nil {
-			return nil, err
-		}
-		if visible {
-			host.CanManage = canManage
+	for index, host := range hosts {
+		if hostVisible[index] {
+			host.CanManage = hostManage[index]
 			result = append(result, host)
 			continue
 		}
-
-		accounts, err := s.resourceAccess.ListHostAccounts(r.Context(), host.ID)
-		if err != nil {
-			return nil, err
-		}
-		accounts, err = s.visibleTargets(r, accounts)
-		if err != nil {
-			return nil, err
-		}
-		if len(accounts) == 0 {
+		if targetCount[host.ID] == 0 {
 			continue
 		}
-		host.AccountCount = len(accounts)
+		host.AccountCount = targetCount[host.ID]
 		host.CanManage = false
 		result = append(result, host)
 	}
@@ -134,19 +139,24 @@ func (s *Server) visibleTargets(r *http.Request, targets []store.TargetView) ([]
 }
 
 func (s *Server) visibleTargetsForActions(r *http.Request, targets []store.TargetView, actions []string) ([]store.TargetView, error) {
+	ids := make([]string, len(targets))
+	for index := range targets {
+		ids[index] = targets[index].ID
+	}
+	visible, err := s.authorizeResourceActionsBatch(r, actions, model.ResourceTypeHostAccount, ids)
+	if err != nil {
+		return nil, err
+	}
+	manageable, err := s.authorizeResourceActionsBatch(r, []string{rbac.ActionTargetUpdate, rbac.ActionTargetDelete}, model.ResourceTypeHostAccount, ids)
+	if err != nil {
+		return nil, err
+	}
 	result := make([]store.TargetView, 0, len(targets))
-	for _, target := range targets {
-		allowed, err := s.authorizeResourceActions(r, actions, model.ResourceTypeHostAccount, target.ID)
-		if err != nil {
-			return nil, err
-		}
-		if !allowed {
+	for index, target := range targets {
+		if !visible[index] {
 			continue
 		}
-		target.CanManage, err = s.authorizeResourceActions(r, []string{rbac.ActionTargetUpdate, rbac.ActionTargetDelete}, model.ResourceTypeHostAccount, target.ID)
-		if err != nil {
-			return nil, err
-		}
+		target.CanManage = manageable[index]
 		result = append(result, target)
 	}
 	return result, nil
@@ -191,34 +201,41 @@ func (s *Server) visibleDatabaseInstancesForActions(
 	instances []store.DatabaseInstanceView,
 	actions []string,
 ) ([]store.DatabaseInstanceView, error) {
+	instanceIDs := make([]string, len(instances))
+	for index := range instances {
+		instanceIDs[index] = instances[index].ID
+	}
+	instanceVisible, err := s.authorizeResourceActionsBatch(r, actions, model.ResourceTypeDatabaseInstance, instanceIDs)
+	if err != nil {
+		return nil, err
+	}
+	instanceManage, err := s.authorizeResourceActionsBatch(r, []string{rbac.ActionDBProxyUpdate, rbac.ActionDBProxyDelete}, model.ResourceTypeDatabaseInstance, instanceIDs)
+	if err != nil {
+		return nil, err
+	}
+	allAccounts, err := s.databases.DatabaseAccounts()
+	if err != nil {
+		return nil, err
+	}
+	visibleAccounts, err := s.visibleDatabaseAccountsForActions(r, allAccounts, actions)
+	if err != nil {
+		return nil, err
+	}
+	accountCount := make(map[string]int, len(instances))
+	for _, account := range visibleAccounts {
+		accountCount[account.InstanceID]++
+	}
 	result := make([]store.DatabaseInstanceView, 0, len(instances))
-	for _, instance := range instances {
-		visible, err := s.authorizeResourceActions(r, actions, model.ResourceTypeDatabaseInstance, instance.ID)
-		if err != nil {
-			return nil, err
-		}
-		canManage, err := s.authorizeResourceActions(r, []string{rbac.ActionDBProxyUpdate, rbac.ActionDBProxyDelete}, model.ResourceTypeDatabaseInstance, instance.ID)
-		if err != nil {
-			return nil, err
-		}
-		if visible {
-			instance.CanManage = canManage
+	for index, instance := range instances {
+		if instanceVisible[index] {
+			instance.CanManage = instanceManage[index]
 			result = append(result, instance)
 			continue
 		}
-
-		accounts, err := s.resourceAccess.ListDatabaseAccountsByInstance(r.Context(), instance.ID)
-		if err != nil {
-			return nil, err
-		}
-		accounts, err = s.visibleDatabaseAccountsForActions(r, accounts, actions)
-		if err != nil {
-			return nil, err
-		}
-		if len(accounts) == 0 {
+		if accountCount[instance.ID] == 0 {
 			continue
 		}
-		instance.AccountCount = len(accounts)
+		instance.AccountCount = accountCount[instance.ID]
 		instance.CanManage = false
 		result = append(result, instance)
 	}
@@ -248,54 +265,119 @@ func (s *Server) visibleDatabaseAccounts(r *http.Request, accounts []store.Datab
 }
 
 func (s *Server) visibleDatabaseAccountsForActions(r *http.Request, accounts []store.DatabaseAccountView, actions []string) ([]store.DatabaseAccountView, error) {
+	ids := make([]string, len(accounts))
+	for index := range accounts {
+		ids[index] = accounts[index].ID
+	}
+	visible, err := s.authorizeResourceActionsBatch(r, actions, model.ResourceTypeDatabaseAccount, ids)
+	if err != nil {
+		return nil, err
+	}
+	manageable, err := s.authorizeResourceActionsBatch(r, []string{rbac.ActionDBProxyUpdate, rbac.ActionDBProxyDelete}, model.ResourceTypeDatabaseAccount, ids)
+	if err != nil {
+		return nil, err
+	}
 	result := make([]store.DatabaseAccountView, 0, len(accounts))
-	for _, account := range accounts {
-		allowed, err := s.authorizeResourceActions(r, actions, model.ResourceTypeDatabaseAccount, account.ID)
-		if err != nil {
-			return nil, err
-		}
-		if !allowed {
+	for index, account := range accounts {
+		if !visible[index] {
 			continue
 		}
-		account.CanManage, err = s.authorizeResourceActions(r, []string{rbac.ActionDBProxyUpdate, rbac.ActionDBProxyDelete}, model.ResourceTypeDatabaseAccount, account.ID)
-		if err != nil {
-			return nil, err
-		}
+		account.CanManage = manageable[index]
 		result = append(result, account)
 	}
 	return result, nil
 }
 
 func (s *Server) visibleApplications(r *http.Request, applications []store.ApplicationView) ([]store.ApplicationView, error) {
+	ids := make([]string, len(applications))
+	for index := range applications {
+		ids[index] = applications[index].ID
+	}
+	visible, err := s.authorizeResourceActionsBatch(r, []string{rbac.ActionAppView}, model.ResourceTypeApplication, ids)
+	if err != nil {
+		return nil, err
+	}
+	manageable, err := s.authorizeResourceActionsBatch(r, []string{rbac.ActionAppUpdate, rbac.ActionAppDelete}, model.ResourceTypeApplication, ids)
+	if err != nil {
+		return nil, err
+	}
 	result := make([]store.ApplicationView, 0, len(applications))
-	for _, application := range applications {
-		allowed, err := s.authorizeResourceActions(r, []string{rbac.ActionAppView}, model.ResourceTypeApplication, application.ID)
-		if err != nil {
-			return nil, err
-		}
-		if !allowed {
+	for index, application := range applications {
+		if !visible[index] {
 			continue
 		}
-		application.CanManage, err = s.authorizeResourceActions(r, []string{rbac.ActionAppUpdate, rbac.ActionAppDelete}, model.ResourceTypeApplication, application.ID)
-		if err != nil {
-			return nil, err
-		}
+		application.CanManage = manageable[index]
 		result = append(result, application)
 	}
 	return result, nil
 }
 
 func (s *Server) visiblePlatformAccounts(r *http.Request, accounts []store.PlatformAccountView) ([]store.PlatformAccountView, error) {
+	ids := make([]string, len(accounts))
+	for index := range accounts {
+		ids[index] = accounts[index].ID
+	}
+	visible, err := s.authorizeResourceActionsBatch(r, []string{rbac.ActionPlatformAccountView}, model.ResourceTypePlatformAccount, ids)
+	if err != nil {
+		return nil, err
+	}
 	result := make([]store.PlatformAccountView, 0, len(accounts))
-	for _, account := range accounts {
-		allowed, err := s.authorizeResourceActions(r, []string{rbac.ActionPlatformAccountView}, model.ResourceTypePlatformAccount, account.ID)
-		if err != nil {
-			return nil, err
-		}
-		if !allowed {
+	for index, account := range accounts {
+		if !visible[index] {
 			continue
 		}
 		result = append(result, account)
 	}
 	return result, nil
+}
+
+func (s *Server) visibleContainerEndpoints(r *http.Request, endpoints []store.ContainerEndpointView) ([]store.ContainerEndpointView, error) {
+	ids := make([]string, len(endpoints))
+	for index := range endpoints {
+		ids[index] = endpoints[index].ID
+	}
+	visible, err := s.authorizeResourceActionsBatch(r, []string{rbac.ActionContainerView, rbac.ActionContainerConnect}, model.ResourceTypeContainerEndpoint, ids)
+	if err != nil {
+		return nil, err
+	}
+	manageable, err := s.authorizeResourceActionsBatch(r, []string{rbac.ActionContainerUpdate, rbac.ActionContainerDelete}, model.ResourceTypeContainerEndpoint, ids)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]store.ContainerEndpointView, 0, len(endpoints))
+	for index, endpoint := range endpoints {
+		if !visible[index] {
+			continue
+		}
+		endpoint.CanManage = manageable[index]
+		result = append(result, endpoint)
+	}
+	return result, nil
+}
+
+func (s *Server) authorizeResourceActionsBatch(r *http.Request, actions []string, resourceType string, ids []string) ([]bool, error) {
+	allowed := make([]bool, len(ids))
+	if len(ids) == 0 {
+		return allowed, nil
+	}
+	userID := userIDFromRequest(r)
+	if userID == "" {
+		return allowed, nil
+	}
+	batch, ok := s.authorization.(batchAuthorizationService)
+	if !ok {
+		return nil, errors.New("batch authorization service unavailable")
+	}
+	requests := make([]service.AuthorizationRequest, len(ids))
+	for index, id := range ids {
+		requests[index] = service.AuthorizationRequest{Actions: actions, ResourceType: resourceType, ResourceID: id}
+	}
+	decisions, err := batch.AuthorizeBatch(r.Context(), userID, requests)
+	if err != nil {
+		return nil, fmt.Errorf("batch authorize resource actions: %w", err)
+	}
+	for index, decision := range decisions {
+		allowed[index] = decision.Allowed
+	}
+	return allowed, nil
 }

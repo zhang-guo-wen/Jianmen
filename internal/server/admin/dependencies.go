@@ -11,6 +11,9 @@ type loginCaptchaVerifier interface {
 	Verify(payload string) error
 }
 
+type batchAuthorizationService interface {
+	AuthorizeBatch(context.Context, string, []service.AuthorizationRequest) ([]service.AuthorizationDecision, error)
+}
 type authorizationService interface {
 	AuthorizeConnection(
 		ctx context.Context,

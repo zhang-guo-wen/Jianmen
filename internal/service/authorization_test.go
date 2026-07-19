@@ -72,6 +72,39 @@ type fakeResourceAuthorizer struct {
 	calls   int
 }
 
+type fakeBatchActionAuthorizer struct{ calls int }
+
+func (*fakeBatchActionAuthorizer) HasPermissionContext(context.Context, string, string, string, string) (bool, error) {
+	return false, nil
+}
+func (*fakeBatchActionAuthorizer) HasDenyContext(context.Context, string, string, string, string) (bool, error) {
+	return false, nil
+}
+
+func (f *fakeBatchActionAuthorizer) BatchActionDecisionsContext(_ context.Context, _ string, requests []rbac.BatchAuthorizationRequest) (map[string]rbac.BatchActionDecision, error) {
+	f.calls++
+	result := make(map[string]rbac.BatchActionDecision, len(requests))
+	for _, request := range requests {
+		result[rbac.BatchResourceKey(request.ResourceType, request.ResourceID)] = rbac.BatchActionDecision{Allowed: true}
+	}
+	return result, nil
+}
+
+type fakeBatchResourceAuthorizer struct{ calls int }
+
+func (*fakeBatchResourceAuthorizer) HasGrantContext(context.Context, string, string, string) (bool, error) {
+	return false, nil
+}
+
+func (f *fakeBatchResourceAuthorizer) BatchGrantsContext(_ context.Context, _ string, requests []rbac.BatchAuthorizationRequest) (map[string]bool, error) {
+	f.calls++
+	result := make(map[string]bool, len(requests))
+	for _, request := range requests {
+		result[rbac.BatchResourceKey(request.ResourceType, request.ResourceID)] = true
+	}
+	return result, nil
+}
+
 func (f *fakeResourceAuthorizer) HasGrantContext(
 	ctx context.Context,
 	_ string,
@@ -146,6 +179,22 @@ func TestAuthorizationServiceAllowsActiveSuperAdministrator(t *testing.T) {
 	}
 	if len(actions.calls) != 0 || resources.calls != 0 {
 		t.Fatalf("super administrator reached checkers: action=%v resource=%d", actions.calls, resources.calls)
+	}
+}
+
+func TestAuthorizationServiceBatchSuperAdminSkipsRBAC(t *testing.T) {
+	actions := &fakeBatchActionAuthorizer{}
+	resources := &fakeBatchResourceAuthorizer{}
+	authorizer, err := NewAuthorizationService(&fakeAuthorizationIdentity{subject: IdentitySubject{ID: "admin", SuperAdmin: true}, found: true}, actions, resources)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decisions, err := authorizer.AuthorizeBatch(context.Background(), "admin", []AuthorizationRequest{{Actions: []string{"host:view"}, ResourceType: "host", ResourceID: "h1"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(decisions) != 1 || !decisions[0].Allowed || actions.calls != 0 || resources.calls != 0 {
+		t.Fatalf("unexpected batch superadmin result=%#v action=%d resource=%d", decisions, actions.calls, resources.calls)
 	}
 }
 

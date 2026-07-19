@@ -219,3 +219,72 @@ func isAllow(permission model.Permission) bool {
 func isDeny(permission model.Permission) bool {
 	return strings.EqualFold(permission.Effect, model.PermissionEffectDeny)
 }
+
+// BatchActionDecisionsContext loads all role permissions and resource-group
+// memberships once, then evaluates every requested resource in memory.
+func (c *Checker) BatchActionDecisionsContext(ctx context.Context, userID string, requests []BatchAuthorizationRequest) (map[string]BatchActionDecision, error) {
+	result := make(map[string]BatchActionDecision, len(requests))
+	if c == nil || c.db == nil {
+		return nil, errors.New("rbac: nil database")
+	}
+	if len(requests) == 0 {
+		return result, nil
+	}
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return result, nil
+	}
+	permissions, err := (&Checker{db: c.db.WithContext(ctx)}).permissionsForUser(userID)
+	if err != nil {
+		return nil, err
+	}
+	facts, err := c.loadBatchFacts(ctx, requests, groupIDsFromPermissions(permissions))
+	if err != nil {
+		return nil, err
+	}
+	for _, request := range requests {
+		key := BatchResourceKey(request.ResourceType, request.ResourceID)
+		decision := result[key]
+		for _, action := range normalizedBatchActions(request.Actions) {
+			actionAllowed := false
+			actionDenied := false
+			for _, permission := range permissions {
+				if !actionMatches(permission.Action, action) {
+					continue
+				}
+				if isDeny(permission) && (isActionOnly(permission) || batchPermissionResourceMatches(permission, request, facts)) {
+					actionDenied = true
+					continue
+				}
+				if isAllow(permission) && isActionOnly(permission) {
+					actionAllowed = true
+				}
+			}
+			if actionAllowed && !actionDenied {
+				decision.Allowed = true
+			}
+			if actionAllowed && actionDenied {
+				decision.Denied = true
+			}
+		}
+		result[key] = decision
+	}
+	return result, nil
+}
+
+func normalizedBatchActions(actions []string) []string {
+	seen := map[string]struct{}{}
+	result := make([]string, 0, len(actions))
+	for _, action := range actions {
+		action = strings.TrimSpace(action)
+		if action == "" {
+			continue
+		}
+		if _, ok := seen[action]; ok {
+			continue
+		}
+		seen[action] = struct{}{}
+		result = append(result, action)
+	}
+	return result
+}

@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+
+	"jianmen/internal/rbac"
 )
 
 const (
@@ -205,4 +207,95 @@ func normalizedActions(actions []string) []string {
 		normalized = append(normalized, action)
 	}
 	return normalized
+}
+
+type BatchActionAuthorizer interface {
+	BatchActionDecisionsContext(context.Context, string, []rbac.BatchAuthorizationRequest) (map[string]rbac.BatchActionDecision, error)
+}
+
+type BatchResourceAuthorizer interface {
+	BatchGrantsContext(context.Context, string, []rbac.BatchAuthorizationRequest) (map[string]bool, error)
+}
+
+// AuthorizeBatch resolves the identity once and authorizes every concrete
+// resource from bounded authorization datasets. Empty input never reaches RBAC.
+func (s *AuthorizationService) AuthorizeBatch(ctx context.Context, userID string, requests []AuthorizationRequest) ([]AuthorizationDecision, error) {
+	decisions := make([]AuthorizationDecision, len(requests))
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("authorization context: %w", err)
+	}
+	if len(requests) == 0 {
+		return decisions, nil
+	}
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		for i := range decisions {
+			decisions[i] = AuthorizationDecision{Reason: AuthorizationReasonMissingUser}
+		}
+		return decisions, nil
+	}
+	subject, found, err := s.identity.FindIdentitySubject(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("authorize identity: %w", err)
+	}
+	if !found {
+		for i := range decisions {
+			decisions[i] = AuthorizationDecision{Reason: AuthorizationReasonInvalidIdentity}
+		}
+		return decisions, nil
+	}
+	batch := make([]rbac.BatchAuthorizationRequest, 0, len(requests))
+	valid := make([]bool, len(requests))
+	for i, request := range requests {
+		resourceType := strings.TrimSpace(request.ResourceType)
+		resourceID := strings.TrimSpace(request.ResourceID)
+		if resourceType == "" || resourceID == "" {
+			decisions[i] = AuthorizationDecision{Reason: AuthorizationReasonInvalidResource}
+			continue
+		}
+		actions := normalizedActions(request.Actions)
+		if len(actions) == 0 {
+			decisions[i] = AuthorizationDecision{Reason: AuthorizationReasonActionDenied}
+			continue
+		}
+		valid[i] = true
+		batch = append(batch, rbac.BatchAuthorizationRequest{ResourceType: resourceType, ResourceID: resourceID, Actions: actions})
+	}
+	if subject.SuperAdmin {
+		for i := range decisions {
+			if valid[i] {
+				decisions[i] = AuthorizationDecision{Allowed: true, Reason: AuthorizationReasonSuperAdmin}
+			}
+		}
+		return decisions, nil
+	}
+	actions, ok := s.actions.(BatchActionAuthorizer)
+	if !ok {
+		return nil, errors.New("batch action authorizer is required")
+	}
+	resources, ok := s.resources.(BatchResourceAuthorizer)
+	if !ok {
+		return nil, errors.New("batch resource authorizer is required")
+	}
+	actionDecisions, err := actions.BatchActionDecisionsContext(ctx, subject.ID, batch)
+	if err != nil {
+		return nil, fmt.Errorf("batch authorize actions: %w", err)
+	}
+	grantDecisions, err := resources.BatchGrantsContext(ctx, subject.ID, batch)
+	if err != nil {
+		return nil, fmt.Errorf("batch authorize resources: %w", err)
+	}
+	for i, request := range requests {
+		if !valid[i] {
+			continue
+		}
+		key := rbac.BatchResourceKey(strings.TrimSpace(request.ResourceType), strings.TrimSpace(request.ResourceID))
+		action := actionDecisions[key]
+		if !action.Allowed || !grantDecisions[key] {
+			decisions[i] = AuthorizationDecision{Reason: AuthorizationReasonResourceDenied}
+			continue
+		}
+		decisions[i] = AuthorizationDecision{Allowed: true, Reason: AuthorizationReasonAllowed}
+	}
+	return decisions, nil
 }

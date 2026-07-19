@@ -100,6 +100,7 @@ func (s *DatabaseManagementService) ListInstances(ctx context.Context, actorID s
 	if connectable {
 		action = rbac.ActionDBConnect
 	}
+	now := s.now().UTC()
 	instances, err := s.repository.DatabaseInstances(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("list database instances: %w", err)
@@ -120,16 +121,24 @@ func (s *DatabaseManagementService) ListInstances(ctx context.Context, actorID s
 	if err != nil {
 		return nil, err
 	}
+	instancesByID := databaseInstancesByID(instances)
 	accountCount := map[string]int{}
 	for i, account := range accounts {
-		if accountVisible[i] {
+		instance, found := instancesByID[account.InstanceID]
+		if accountVisible[i] && (!connectable || found && databaseAccountConnectable(account, instance, now)) {
 			accountCount[account.InstanceID]++
 		}
 	}
 	result := make([]DatabaseInstance, 0, len(instances))
 	for i, instance := range instances {
+		if connectable && !databaseInstanceActive(instance) {
+			continue
+		}
 		if instanceVisible[i] {
 			instance.CanManage = instanceManage[i]
+			if connectable {
+				instance.AccountCount = accountCount[instance.ID]
+			}
 			result = append(result, instance)
 			continue
 		}
@@ -158,6 +167,13 @@ func (s *DatabaseManagementService) ListAccounts(ctx context.Context, actorID st
 	if err != nil {
 		return nil, fmt.Errorf("list database accounts: %w", err)
 	}
+	var instances []DatabaseInstance
+	if connectable {
+		instances, err = s.repository.DatabaseInstances(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("list database instances: %w", err)
+		}
+	}
 	visible, err := s.batch(ctx, actorID, []string{action}, model.ResourceTypeDatabaseAccount, databaseAccountIDs(accounts))
 	if err != nil {
 		return nil, err
@@ -167,11 +183,20 @@ func (s *DatabaseManagementService) ListAccounts(ctx context.Context, actorID st
 		return nil, err
 	}
 	result := make([]DatabaseAccount, 0, len(accounts))
+	now := s.now().UTC()
+	instancesByID := databaseInstancesByID(instances)
 	for i, account := range accounts {
-		if visible[i] {
-			account.CanManage = manageable[i]
-			result = append(result, account)
+		if !visible[i] {
+			continue
 		}
+		if connectable {
+			instance, found := instancesByID[account.InstanceID]
+			if !found || !databaseAccountConnectable(account, instance, now) {
+				continue
+			}
+		}
+		account.CanManage = manageable[i]
+		result = append(result, account)
 	}
 	return result, nil
 }
@@ -321,10 +346,29 @@ func (s *DatabaseManagementService) validateConnectable(accountStatus string, ex
 	if strings.EqualFold(strings.TrimSpace(accountStatus), "disabled") || strings.EqualFold(strings.TrimSpace(instanceStatus), "disabled") {
 		return ErrDatabaseManagementDisabled
 	}
-	if expiresAt != nil && s.now().UTC().After(expiresAt.UTC()) {
+	if expiresAt != nil && !expiresAt.After(s.now().UTC()) {
 		return ErrDatabaseManagementExpired
 	}
 	return nil
+}
+
+func databaseInstanceActive(instance DatabaseInstance) bool {
+	return strings.EqualFold(strings.TrimSpace(instance.Status), "active")
+}
+
+func databaseAccountConnectable(account DatabaseAccount, instance DatabaseInstance, now time.Time) bool {
+	if !strings.EqualFold(strings.TrimSpace(account.Status), "active") || !databaseInstanceActive(instance) {
+		return false
+	}
+	return account.ExpiresAt == nil || account.ExpiresAt.After(now)
+}
+
+func databaseInstancesByID(instances []DatabaseInstance) map[string]DatabaseInstance {
+	result := make(map[string]DatabaseInstance, len(instances))
+	for _, instance := range instances {
+		result[instance.ID] = instance
+	}
+	return result
 }
 
 func (s *DatabaseManagementService) authorizeInstanceOrAccount(ctx context.Context, actorID, action, instanceID string) error {

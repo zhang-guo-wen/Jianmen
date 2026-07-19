@@ -23,6 +23,7 @@ type Server struct {
 	aiTokens             adminAIAccessTokenRepository
 	hostTargets          adminHostTargetRepository
 	databases            adminDatabaseRepository
+	databaseManagement   *service.DatabaseManagementService
 	applications         adminApplicationRepository
 	containers           adminContainerRepository
 	platformAccounts     adminPlatformAccountRepository
@@ -139,9 +140,13 @@ func New(
 	if err != nil {
 		return nil, fmt.Errorf("initialize connection password service: %w", err)
 	}
+	databaseManagement, err := service.NewDatabaseManagementService(databaseManagementRepositoryAdapter{repository: dependencies.databases}, authorization, databaseProvisioning)
+	if err != nil {
+		return nil, fmt.Errorf("initialize database management service: %w", err)
+	}
 	return &Server{
 		cfg: cfg, db: db, logger: logger,
-		aiTokens: dependencies.aiTokens, hostTargets: dependencies.hostTargets, databases: dependencies.databases,
+		aiTokens: dependencies.aiTokens, hostTargets: dependencies.hostTargets, databases: dependencies.databases, databaseManagement: databaseManagement,
 		applications: dependencies.applications, containers: dependencies.containers, platformAccounts: dependencies.platformAccounts,
 		userSessionCreation: userSessionCreation, audit: dependencies.audit, connectionPassword: connectionPassword,
 		preferences: dependencies.preferences, temporaryRepository: dependencies.temporaryAccess,

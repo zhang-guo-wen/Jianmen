@@ -21,6 +21,7 @@ import (
 type Server struct {
 	cfg                    *config.Config
 	aiAccessTokens         *service.AIAccessTokenService
+	aiResources            *service.AIResourceService
 	hostTargets            adminHostTargetRepository
 	databases              adminDatabaseRepository
 	databaseManagement     *service.DatabaseManagementService
@@ -135,6 +136,14 @@ func New(
 	if err != nil {
 		return nil, fmt.Errorf("initialize user session creation service: %w", err)
 	}
+	aiResources, err := service.NewAIResourceService(
+		dependencies.aiResources,
+		aiResourceAuthorizerAdapter{authorization: authorization},
+		aiResourceSessionCreatorAdapter{sessions: userSessionCreation},
+	)
+	if err != nil {
+		return nil, fmt.Errorf("initialize AI resource service: %w", err)
+	}
 	connectionPassword, err := service.NewConnectionPasswordService(
 		dependencies.connectionPassword,
 		authorization,
@@ -174,7 +183,8 @@ func New(
 	}
 	return &Server{
 		cfg: cfg, db: db, logger: logger,
-		aiAccessTokens: aiAccessTokens, hostTargets: dependencies.hostTargets, databases: dependencies.databases,
+		aiAccessTokens: aiAccessTokens, aiResources: aiResources,
+		hostTargets: dependencies.hostTargets, databases: dependencies.databases,
 		databaseManagement: databaseManagement, applicationService: applicationService,
 		containerManagement: containerManagement, platformAccountService: platformAccountService,
 		userSessionCreation: userSessionCreation, audit: dependencies.audit, connectionPassword: connectionPassword,

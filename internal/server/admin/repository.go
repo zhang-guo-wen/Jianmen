@@ -39,6 +39,7 @@ type adminRepository interface {
 // instead of the application-wide repository aggregate.
 type adminDependencies struct {
 	aiTokens            adminAIAccessTokenRepository
+	aiResources         service.AIResourceRepository
 	hostTargets         adminHostTargetRepository
 	databases           adminDatabaseRepository
 	applications        adminApplicationRepository
@@ -137,6 +138,7 @@ func resolveAdminDependencies(repository adminRepository) (adminDependencies, er
 	}
 	return adminDependencies{
 		aiTokens:            repository,
+		aiResources:         aiResourceRepositoryAdapter{hostTargets: repository, databases: repository},
 		hostTargets:         repository,
 		databases:           repository,
 		applications:        repository,

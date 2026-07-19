@@ -3,6 +3,7 @@ package admin
 import (
 	"context"
 	"errors"
+	"reflect"
 	"time"
 
 	"jianmen/internal/config"
@@ -11,24 +12,28 @@ import (
 	"jianmen/internal/store"
 )
 
-var (
-	errAdminStoreRequired                  = errors.New("admin store is required")
-	errAdminAIAccessTokensUnsupported      = errors.New("admin store does not support AI access tokens")
-	errAdminHostTargetsUnsupported         = errors.New("admin store does not support host targets")
-	errAdminDatabasesUnsupported           = errors.New("admin store does not support databases")
-	errAdminApplicationsUnsupported        = errors.New("admin store does not support applications")
-	errAdminContainersUnsupported          = errors.New("admin store does not support containers")
-	errAdminPlatformAccountsUnsupported    = errors.New("admin store does not support platform accounts")
-	errAdminUserSessionsUnsupported        = errors.New("admin store does not support user sessions")
-	errAdminAuditUnsupported               = errors.New("admin store does not support audit")
-	errAdminConnectionPasswordsUnsupported = errors.New("admin store does not support connection passwords")
-	errAdminUserPreferencesUnsupported     = errors.New("admin store does not support user preferences")
-	errAdminResourceAccessUnsupported      = errors.New("admin store does not support resource access")
-	errAdminTemporaryAccessUnsupported     = errors.New("admin store does not support temporary access")
-	errAdminUsersUnsupported               = errors.New("admin store does not support user management")
-	errAdminUserGroupsUnsupported          = errors.New("admin store does not support user group management")
-	errAdminRolesUnsupported               = errors.New("admin store does not support role management")
-)
+var errAdminStoreRequired = errors.New("admin store is required")
+
+// adminRepository is the compile-time boundary accepted by New. Its method set
+// is composed from resource-scoped interfaces owned by the Admin consumer and
+// existing service repositories; Server retains the dependencies by domain.
+type adminRepository interface {
+	adminAIAccessTokenRepository
+	adminHostTargetRepository
+	adminDatabaseRepository
+	adminApplicationRepository
+	adminContainerRepository
+	adminPlatformAccountRepository
+	adminUserSessionRepository
+	adminAuditRepository
+	adminConnectionPasswordRepository
+	adminUserPreferenceRepository
+	resourceAccessRepository
+	service.TemporaryAccessRepository
+	service.UserRepository
+	service.UserGroupRepository
+	service.RoleManagementRepository
+}
 
 // adminDependencies keeps the server coupled to resource-scoped repositories
 // instead of the application-wide repository aggregate.
@@ -141,56 +146,38 @@ type adminUserPreferenceRepository interface {
 	SaveUserPreference(context.Context, model.UserPreference) (model.UserPreference, error)
 }
 
-func resolveAdminDependencies(repository any) (adminDependencies, error) {
-	if repository == nil {
+func resolveAdminDependencies(repository adminRepository) (adminDependencies, error) {
+	if isNilAdminRepository(repository) {
 		return adminDependencies{}, errAdminStoreRequired
 	}
-	dependencies := adminDependencies{}
-	var ok bool
-	if dependencies.aiTokens, ok = repository.(adminAIAccessTokenRepository); !ok {
-		return adminDependencies{}, errAdminAIAccessTokensUnsupported
+	return adminDependencies{
+		aiTokens:           repository,
+		hostTargets:        repository,
+		databases:          repository,
+		applications:       repository,
+		containers:         repository,
+		platformAccounts:   repository,
+		userSessions:       repository,
+		audit:              repository,
+		connectionPassword: repository,
+		preferences:        repository,
+		resourceAccess:     repository,
+		temporaryAccess:    repository,
+		users:              repository,
+		userGroups:         repository,
+		roles:              repository,
+	}, nil
+}
+
+func isNilAdminRepository(repository adminRepository) bool {
+	if repository == nil {
+		return true
 	}
-	if dependencies.hostTargets, ok = repository.(adminHostTargetRepository); !ok {
-		return adminDependencies{}, errAdminHostTargetsUnsupported
+	value := reflect.ValueOf(repository)
+	switch value.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
+		return value.IsNil()
+	default:
+		return false
 	}
-	if dependencies.databases, ok = repository.(adminDatabaseRepository); !ok {
-		return adminDependencies{}, errAdminDatabasesUnsupported
-	}
-	if dependencies.applications, ok = repository.(adminApplicationRepository); !ok {
-		return adminDependencies{}, errAdminApplicationsUnsupported
-	}
-	if dependencies.containers, ok = repository.(adminContainerRepository); !ok {
-		return adminDependencies{}, errAdminContainersUnsupported
-	}
-	if dependencies.platformAccounts, ok = repository.(adminPlatformAccountRepository); !ok {
-		return adminDependencies{}, errAdminPlatformAccountsUnsupported
-	}
-	if dependencies.userSessions, ok = repository.(adminUserSessionRepository); !ok {
-		return adminDependencies{}, errAdminUserSessionsUnsupported
-	}
-	if dependencies.audit, ok = repository.(adminAuditRepository); !ok {
-		return adminDependencies{}, errAdminAuditUnsupported
-	}
-	if dependencies.connectionPassword, ok = repository.(adminConnectionPasswordRepository); !ok {
-		return adminDependencies{}, errAdminConnectionPasswordsUnsupported
-	}
-	if dependencies.preferences, ok = repository.(adminUserPreferenceRepository); !ok {
-		return adminDependencies{}, errAdminUserPreferencesUnsupported
-	}
-	if dependencies.resourceAccess, ok = repository.(resourceAccessRepository); !ok {
-		return adminDependencies{}, errAdminResourceAccessUnsupported
-	}
-	if dependencies.temporaryAccess, ok = repository.(service.TemporaryAccessRepository); !ok {
-		return adminDependencies{}, errAdminTemporaryAccessUnsupported
-	}
-	if dependencies.users, ok = repository.(service.UserRepository); !ok {
-		return adminDependencies{}, errAdminUsersUnsupported
-	}
-	if dependencies.userGroups, ok = repository.(service.UserGroupRepository); !ok {
-		return adminDependencies{}, errAdminUserGroupsUnsupported
-	}
-	if dependencies.roles, ok = repository.(service.RoleManagementRepository); !ok {
-		return adminDependencies{}, errAdminRolesUnsupported
-	}
-	return dependencies, nil
 }

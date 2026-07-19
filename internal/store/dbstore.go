@@ -11,7 +11,7 @@ import (
 
 const defaultAuditSessionLeaseDuration = 90 * time.Second
 
-// DBStore implements Store backed by a GORM database.
+// DBStore provides GORM-backed repository methods for consumer-owned interfaces.
 type DBStore struct {
 	db                 *gorm.DB
 	auditLeaseOwner    string

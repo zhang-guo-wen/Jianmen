@@ -59,7 +59,7 @@ type Server struct {
 
 func New(
 	cfg *config.Config,
-	repository any,
+	repository adminRepository,
 	db *gorm.DB,
 	identity *service.IdentityService,
 	browserSessions *service.BrowserSessionService,

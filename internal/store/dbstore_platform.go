@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
@@ -33,8 +34,8 @@ func (s *DBStore) platformAccountView(a model.PlatformAccount) PlatformAccountVi
 	return view
 }
 
-func (s *DBStore) PlatformAccounts(params PlatformAccountListParams) ([]PlatformAccountView, int64, error) {
-	q := s.db.Model(&model.PlatformAccount{})
+func (s *DBStore) PlatformAccounts(ctx context.Context, params PlatformAccountListParams) ([]PlatformAccountView, int64, error) {
+	q := s.db.WithContext(ctx).Model(&model.PlatformAccount{})
 	if params.Platform != "" {
 		q = q.Where("platform_name = ?", params.Platform)
 	}
@@ -72,15 +73,15 @@ func (s *DBStore) PlatformAccounts(params PlatformAccountListParams) ([]Platform
 	return views, total, nil
 }
 
-func (s *DBStore) PlatformAccount(id string) (PlatformAccountView, error) {
+func (s *DBStore) PlatformAccount(ctx context.Context, id string) (PlatformAccountView, error) {
 	var a model.PlatformAccount
-	if err := s.db.Preload("Owner").First(&a, "id = ?", id).Error; err != nil {
+	if err := s.db.WithContext(ctx).Preload("Owner").First(&a, "id = ?", id).Error; err != nil {
 		return PlatformAccountView{}, fmt.Errorf("%w: %q", ErrPlatformAccountNotFound, id)
 	}
 	return s.platformAccountView(a), nil
 }
 
-func (s *DBStore) AddPlatformAccount(acc model.PlatformAccount) (PlatformAccountView, error) {
+func (s *DBStore) AddPlatformAccount(ctx context.Context, acc model.PlatformAccount) (PlatformAccountView, error) {
 	if acc.Username == "" {
 		return PlatformAccountView{}, errors.New("username is required")
 	}
@@ -92,28 +93,37 @@ func (s *DBStore) AddPlatformAccount(acc model.PlatformAccount) (PlatformAccount
 	}
 	acc.GroupName = strings.TrimSpace(acc.GroupName)
 
-	if err := s.db.Transaction(func(tx *gorm.DB) error {
+	var createdView PlatformAccountView
+	var loadErr error
+	if err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Create(&acc).Error; err != nil {
 			return err
 		}
 		if err := ensureAccountGroup(tx, acc.GroupName); err != nil {
 			return err
 		}
-		return s.syncResourceTx(tx, model.ResourceTypePlatformAccount, acc.ID, acc.Name, "")
+		if err := s.syncResourceTx(tx, model.ResourceTypePlatformAccount, acc.ID, acc.Name, ""); err != nil {
+			return err
+		}
+		var created model.PlatformAccount
+		if err := tx.Preload("Owner").First(&created, "id = ?", acc.ID).Error; err != nil {
+			loadErr = fmt.Errorf("load created platform account: %w", err)
+			return loadErr
+		}
+		createdView = s.platformAccountView(created)
+		return nil
 	}); err != nil {
+		if loadErr != nil {
+			return PlatformAccountView{}, loadErr
+		}
 		return PlatformAccountView{}, fmt.Errorf("create platform account: %w", err)
 	}
-
-	var created model.PlatformAccount
-	if err := s.db.Preload("Owner").First(&created, "id = ?", acc.ID).Error; err != nil {
-		return PlatformAccountView{}, fmt.Errorf("load created platform account: %w", err)
-	}
-	return s.platformAccountView(created), nil
+	return createdView, nil
 }
 
-func (s *DBStore) UpdatePlatformAccount(id string, acc model.PlatformAccount) (PlatformAccountView, error) {
+func (s *DBStore) UpdatePlatformAccount(ctx context.Context, id string, acc model.PlatformAccount) (PlatformAccountView, error) {
 	var existing model.PlatformAccount
-	if err := s.db.First(&existing, "id = ?", id).Error; err != nil {
+	if err := s.db.WithContext(ctx).First(&existing, "id = ?", id).Error; err != nil {
 		return PlatformAccountView{}, fmt.Errorf("%w: %q", ErrPlatformAccountNotFound, id)
 	}
 
@@ -145,27 +155,36 @@ func (s *DBStore) UpdatePlatformAccount(id string, acc model.PlatformAccount) (P
 		existing.ExpiresAt = acc.ExpiresAt
 	}
 
-	if err := s.db.Transaction(func(tx *gorm.DB) error {
+	var updatedView PlatformAccountView
+	var loadErr error
+	if err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Save(&existing).Error; err != nil {
 			return err
 		}
 		if err := ensureAccountGroup(tx, existing.GroupName); err != nil {
 			return err
 		}
-		return s.syncResourceTx(tx, model.ResourceTypePlatformAccount, existing.ID, existing.Name, "")
+		if err := s.syncResourceTx(tx, model.ResourceTypePlatformAccount, existing.ID, existing.Name, ""); err != nil {
+			return err
+		}
+		var updated model.PlatformAccount
+		if err := tx.Preload("Owner").First(&updated, "id = ?", id).Error; err != nil {
+			loadErr = fmt.Errorf("load updated platform account: %w", err)
+			return loadErr
+		}
+		updatedView = s.platformAccountView(updated)
+		return nil
 	}); err != nil {
+		if loadErr != nil {
+			return PlatformAccountView{}, loadErr
+		}
 		return PlatformAccountView{}, fmt.Errorf("update platform account: %w", err)
 	}
-
-	var updated model.PlatformAccount
-	if err := s.db.Preload("Owner").First(&updated, "id = ?", id).Error; err != nil {
-		return PlatformAccountView{}, fmt.Errorf("load updated platform account: %w", err)
-	}
-	return s.platformAccountView(updated), nil
+	return updatedView, nil
 }
 
-func (s *DBStore) DeletePlatformAccount(id string) error {
-	return s.db.Transaction(func(tx *gorm.DB) error {
+func (s *DBStore) DeletePlatformAccount(ctx context.Context, id string) error {
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var acc model.PlatformAccount
 		if err := tx.First(&acc, "id = ?", id).Error; err != nil {
 			return fmt.Errorf("%w: %q", ErrPlatformAccountNotFound, id)
@@ -177,9 +196,9 @@ func (s *DBStore) DeletePlatformAccount(id string) error {
 	})
 }
 
-func (s *DBStore) GetPlatformAccountPassword(id string) (string, error) {
+func (s *DBStore) GetPlatformAccountPassword(ctx context.Context, id string) (string, error) {
 	var acc model.PlatformAccount
-	if err := s.db.First(&acc, "id = ?", id).Error; err != nil {
+	if err := s.db.WithContext(ctx).First(&acc, "id = ?", id).Error; err != nil {
 		return "", fmt.Errorf("%w: %q", ErrPlatformAccountNotFound, id)
 	}
 	return acc.Password.GetPlaintext(), nil

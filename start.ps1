@@ -139,6 +139,28 @@ function Wait-TcpPort($Name, $HostName, $Port, $TimeoutSeconds) {
     throw "$Name not ready after ${TimeoutSeconds}s: ${HostName}:$Port"
 }
 
+function Wait-AnyTcpPort($Name, $HostName, $Ports, $TimeoutSeconds) {
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    while ((Get-Date) -lt $deadline) {
+        foreach ($port in $Ports) {
+            $client = New-Object System.Net.Sockets.TcpClient
+            try {
+                $iar = $client.BeginConnect($HostName, $port, $null, $null)
+                if ($iar.AsyncWaitHandle.WaitOne(250, $false)) {
+                    $client.EndConnect($iar)
+                    Write-Ok "$Name ready: ${HostName}:$port"
+                    return $port
+                }
+            } catch {
+            } finally {
+                $client.Close()
+            }
+        }
+        Start-Sleep -Milliseconds 250
+    }
+    throw "$Name not ready after ${TimeoutSeconds}s: ${HostName}:$($Ports -join ',')"
+}
+
 function Fail-WithDiagnostics($Message) {
     Write-Host ""
     Write-Host "Startup failed: $Message" -ForegroundColor Red
@@ -175,7 +197,9 @@ try {
     Stop-ProcessOnPort 47100 "Admin API"
     Stop-ProcessOnPort 47101 "Web UI"
     Stop-ProcessOnPort 47102 "SSH gateway"
-    Stop-ProcessOnPort 33060 "Database gateway"
+    foreach ($databasePort in 33060..33063) {
+        Stop-ProcessOnPort $databasePort "Database gateway"
+    }
     Get-Process -Name "bastion-core" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
     $oldNode = Get-Process -Name "node" -ErrorAction SilentlyContinue | Where-Object { $_.CommandLine -like "*vite*" -or $_.CommandLine -like "*npm*run*dev*" }
     if ($oldNode) { $oldNode | Stop-Process -Force -ErrorAction SilentlyContinue }
@@ -201,13 +225,13 @@ try {
 
     Write-Step "[4/5] Starting backend..."
     Remove-Item $backendLog, $backendErrLog -Force -ErrorAction SilentlyContinue
-    $backend = Start-Process -FilePath (Join-Path $binDir "bastion-core.exe") -ArgumentList "-config", "config.local.json" -WorkingDirectory $root -RedirectStandardOutput $backendLog -RedirectStandardError $backendErrLog -PassThru
+    $backend = Start-Process -FilePath (Join-Path $binDir "bastion-core.exe") -ArgumentList "-config", "config.local.json" -WorkingDirectory $root -RedirectStandardOutput $backendLog -RedirectStandardError $backendErrLog -WindowStyle Hidden -PassThru
     Set-Content -Path $backendPid -Value $backend.Id -Encoding ascii
     Write-Ok "backend process started: PID $($backend.Id)"
 
     # Wait for TCP ports first
     Wait-TcpPort "Admin API port" "127.0.0.1" 47100 20
-    Wait-TcpPort "Database gateway" "127.0.0.1" 33060 10
+    $databaseGatewayPort = Wait-AnyTcpPort "Database gateway" "127.0.0.1" @(33060, 33061, 33062, 33063) 10
     Wait-TcpPort "SSH gateway" "127.0.0.1" 47102 10
 
     # Login through the production challenge flow and retain the HttpOnly session cookie.
@@ -247,7 +271,7 @@ try {
     Remove-Item $frontendLog, $frontendErrLog -Force -ErrorAction SilentlyContinue
     $npmCommand = (Get-Command "npm.cmd" -ErrorAction SilentlyContinue).Source
     if (-not $npmCommand) { $npmCommand = (Get-Command "npm" -ErrorAction Stop).Source }
-    $frontend = Start-Process -FilePath $npmCommand -ArgumentList "run", "dev", "--", "--host", "127.0.0.1", "--strictPort" -WorkingDirectory (Join-Path $root "web") -RedirectStandardOutput $frontendLog -RedirectStandardError $frontendErrLog -PassThru
+    $frontend = Start-Process -FilePath $npmCommand -ArgumentList "run", "dev", "--", "--host", "127.0.0.1", "--strictPort" -WorkingDirectory (Join-Path $root "web") -RedirectStandardOutput $frontendLog -RedirectStandardError $frontendErrLog -WindowStyle Hidden -PassThru
     Set-Content -Path $frontendPid -Value $frontend.Id -Encoding ascii
     Write-Ok "frontend process started: PID $($frontend.Id)"
 
@@ -262,7 +286,8 @@ try {
     Write-Host "  Admin API : http://127.0.0.1:47100/" -ForegroundColor White
     Write-Host "  Web UI    : http://127.0.0.1:47101/" -ForegroundColor White
     Write-Host "  SSH GW    : 127.0.0.1:47102" -ForegroundColor White
-    Write-Host "  DB GW     : 127.0.0.1:33060" -ForegroundColor White
+    $databaseGatewayMode = if ($databaseGatewayPort -eq 33060) { "unified" } else { "independent" }
+    Write-Host "  DB GW     : 127.0.0.1:$databaseGatewayPort ($databaseGatewayMode)" -ForegroundColor White
     Write-Host "  Auth      : browser session established" -ForegroundColor Gray
     Write-Host ""
     Write-Host "Logs:" -ForegroundColor Gray

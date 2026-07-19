@@ -88,6 +88,10 @@ func TestCollectionReturnsStateAndRedactedInfrastructure(t *testing.T) {
 	if envelope.Data.Revision != 3 || !envelope.Data.PendingRestart {
 		t.Fatalf("state response = %#v", envelope.Data)
 	}
+	if envelope.Data.Desired.DatabaseGatewayMode != "unified" ||
+		envelope.Data.Effective.DatabaseGatewayMode != "unified" {
+		t.Fatalf("database gateway modes were not mapped: %#v", envelope.Data)
+	}
 	storage := envelope.Data.Infrastructure.ObjectStorage
 	if !storage.CredentialsConfigured || storage.AccessKeyIDConfigured != true {
 		t.Fatalf("object storage response = %#v", storage)
@@ -99,6 +103,7 @@ func TestCollectionUpdatesWithAuthenticatedActor(t *testing.T) {
 	handler := newTestHandler(t, settings, fakeDiagnosticsService{})
 	body := []byte(`{
 		"settings": {
+			"database_gateway_mode": "independent",
 			"web_rdp_enabled": true,
 			"web_rdp_connect_timeout_seconds": 30,
 			"web_rdp_allow_unrecorded": false,
@@ -122,6 +127,7 @@ func TestCollectionUpdatesWithAuthenticatedActor(t *testing.T) {
 	}
 	if settings.update.Actor.ID != "admin-1" ||
 		settings.update.Actor.Username != "alice" ||
+		settings.update.Settings.DatabaseGatewayMode != "independent" ||
 		settings.update.ExpectedRevision != 3 ||
 		!settings.update.ConfirmRisk {
 		t.Fatalf("update = %#v", settings.update)
@@ -297,6 +303,7 @@ func newTestHandler(
 
 func testSystemSettingsState() service.SystemSettingsState {
 	values := service.SystemSettings{
+		DatabaseGatewayMode:         "unified",
 		WebRDPConnectTimeoutSeconds: 15, RecordingEnabled: true,
 		RecordingRecordCommands: true, RecordingRetentionDays: 30,
 		RecordingMaxReplayBytes: 1024, RecordingCleanupBatchSize: 100,
@@ -310,6 +317,7 @@ func testSystemSettingsState() service.SystemSettingsState {
 func validUpdateBody() []byte {
 	return []byte(`{
 		"settings":{
+			"database_gateway_mode":"unified",
 			"web_rdp_enabled":false,
 			"web_rdp_connect_timeout_seconds":15,
 			"web_rdp_allow_unrecorded":false,

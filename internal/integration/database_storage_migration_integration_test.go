@@ -30,6 +30,7 @@ const (
 	webRDPAuditMigrationVersion               = "202607190003"
 	auditSessionLeaseMigrationVersion         = "202607190004"
 	systemSettingMigrationVersion             = "202607190005"
+	databaseGatewayModeMigrationVersion       = "202607190007"
 )
 
 var currentStorageMigrationVersions = []string{
@@ -57,6 +58,7 @@ var currentStorageMigrationVersions = []string{
 	"202607190003",
 	"202607190004",
 	systemSettingMigrationVersion,
+	databaseGatewayModeMigrationVersion,
 }
 
 type metadataDatabaseCase struct {
@@ -635,30 +637,31 @@ func assertOtherDatabaseMigrationsApplied(t *testing.T, db *gorm.DB, pendingVers
 func seedAppliedMigrations(t *testing.T, db *gorm.DB, versions ...string) {
 	t.Helper()
 	names := map[string]string{
-		"202606290001":                "prepare metadata sequences",
-		"202606290002":                "core metadata schema",
-		"202606290003":                "reconcile metadata resources",
-		"202606290004":                "global compact session identity",
-		"202606290005":                "metadata query indexes",
-		"202607130001":                "user groups and resource grants",
-		"202607160001":                "AI access tokens",
-		"202607160002":                "encrypted AI token values",
-		"202607170001":                "container management endpoints",
-		"202607170002":                "user expiry and temporary authorization metadata",
-		"202607180001":                "database backed super administrator identity",
-		"202607180002":                "temporary access connection password lifecycle",
-		"202607180003":                "atomic system initialization guard",
-		"202607180004":                "browser sessions and websocket tickets",
-		"202607180005":                "remove reversible AI token secrets",
-		"202607180006":                "database instance upstream TLS policy",
-		"202607180007":                "permission logical uniqueness",
-		"202607180008":                "database account instance username uniqueness",
-		"202607180009":                "database provisioning saga recovery state",
-		"202607190001":                "resource grant logical uniqueness",
-		"202607190002":                "audit retention cleanup state",
-		"202607190003":                "web RDP access control and audit schema",
-		"202607190004":                "audit session lease recovery",
-		systemSettingMigrationVersion: "system configuration management",
+		"202606290001":                      "prepare metadata sequences",
+		"202606290002":                      "core metadata schema",
+		"202606290003":                      "reconcile metadata resources",
+		"202606290004":                      "global compact session identity",
+		"202606290005":                      "metadata query indexes",
+		"202607130001":                      "user groups and resource grants",
+		"202607160001":                      "AI access tokens",
+		"202607160002":                      "encrypted AI token values",
+		"202607170001":                      "container management endpoints",
+		"202607170002":                      "user expiry and temporary authorization metadata",
+		"202607180001":                      "database backed super administrator identity",
+		"202607180002":                      "temporary access connection password lifecycle",
+		"202607180003":                      "atomic system initialization guard",
+		"202607180004":                      "browser sessions and websocket tickets",
+		"202607180005":                      "remove reversible AI token secrets",
+		"202607180006":                      "database instance upstream TLS policy",
+		"202607180007":                      "permission logical uniqueness",
+		"202607180008":                      "database account instance username uniqueness",
+		"202607180009":                      "database provisioning saga recovery state",
+		"202607190001":                      "resource grant logical uniqueness",
+		"202607190002":                      "audit retention cleanup state",
+		"202607190003":                      "web RDP access control and audit schema",
+		"202607190004":                      "audit session lease recovery",
+		systemSettingMigrationVersion:       "system configuration management",
+		databaseGatewayModeMigrationVersion: "database gateway mode system setting",
 	}
 	for _, version := range versions {
 		name, ok := names[version]

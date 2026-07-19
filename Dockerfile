@@ -51,7 +51,7 @@ USER jianmen
 
 VOLUME ["/app/data"]
 
-EXPOSE 47100 47102 33060 54330 63790
+EXPOSE 47100 47102 33060 33061 33062 33063
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD wget -q --no-check-certificate -O /dev/null https://127.0.0.1:47100/api/init/status \

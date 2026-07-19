@@ -35,12 +35,14 @@ func (s *Server) handleDBGateway(w http.ResponseWriter, r *http.Request) {
 		strings.TrimSpace(listener.CertFile) != "" &&
 		strings.TrimSpace(listener.KeyFile) != ""
 	response := map[string]any{
-		"enabled":     enabled,
-		"protocol":    protocol,
-		"listen_addr": listener.Address,
-		"host":        host,
-		"port":        port,
-		"tls_enabled": tlsEnabled,
+		"enabled":                  enabled,
+		"mode":                     cfg.EffectiveMode(),
+		"protocol":                 protocol,
+		"listen_addr":              listener.Address,
+		"host":                     host,
+		"port":                     port,
+		"tls_enabled":              tlsEnabled,
+		"mysql_detection_delay_ms": databaseGatewayMySQLDetectionDelay(cfg),
 	}
 	if tlsEnabled {
 		caPEM, fingerprint, err := databaseGatewayTLSIdentityMaterial(listener)
@@ -64,16 +66,49 @@ func databaseGatewayTLSIdentityMaterial(listener config.DatabaseProtocolListener
 }
 
 func databaseProtocolListener(gateway config.DatabaseGatewayConfig, requested string) (string, config.DatabaseProtocolListener, bool) {
+	protocol := ""
 	switch strings.ToLower(strings.TrimSpace(requested)) {
 	case "", "mysql":
-		return "mysql", gateway.MySQL, true
+		protocol = "mysql"
 	case "postgres", "postgresql":
-		return "postgresql", gateway.PostgreSQL, true
+		protocol = "postgresql"
 	case "redis":
-		return "redis", gateway.Redis, true
+		protocol = "redis"
 	default:
 		return "", config.DatabaseProtocolListener{}, false
 	}
+	if gateway.EffectiveMode() == config.DatabaseGatewayModeUnified {
+		unified := gateway.Unified
+		enabled := unified.Enabled
+		if protocol == "postgresql" &&
+			(strings.TrimSpace(unified.CertFile) == "" ||
+				strings.TrimSpace(unified.KeyFile) == "") {
+			enabled = false
+		}
+		return protocol, config.DatabaseProtocolListener{
+			Enabled:    enabled,
+			Address:    unified.Address,
+			CertFile:   unified.CertFile,
+			KeyFile:    unified.KeyFile,
+			CAFile:     unified.CAFile,
+			ServerName: unified.ServerName,
+		}, true
+	}
+	switch protocol {
+	case "postgresql":
+		return protocol, gateway.PostgreSQL, true
+	case "redis":
+		return protocol, gateway.Redis, true
+	default:
+		return protocol, gateway.MySQL, true
+	}
+}
+
+func databaseGatewayMySQLDetectionDelay(gateway config.DatabaseGatewayConfig) int {
+	if gateway.EffectiveMode() != config.DatabaseGatewayModeUnified || !gateway.Unified.Enabled {
+		return 0
+	}
+	return gateway.Unified.DetectionTimeoutMS
 }
 
 func parseListenAddr(addr string) (host string, port int) {

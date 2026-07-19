@@ -41,6 +41,7 @@ func TestSystemSettingMigrationCreatesSingletonAndRevisionSchema(t *testing.T) {
 		}
 	}
 	for _, column := range []string{
+		"database_gateway_mode",
 		"web_rdp_enabled",
 		"web_rdp_connect_timeout_seconds",
 		"web_rdp_allow_unrecorded",

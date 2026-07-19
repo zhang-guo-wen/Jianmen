@@ -124,7 +124,7 @@ func (s *Server) getAIResource(w http.ResponseWriter, r *http.Request, resourceT
 	}
 	s.writeJSON(w, r, http.StatusOK, aiResourceDetail{
 		Resource: resource,
-		Bastion:  s.aiBastionInfo(r),
+		Bastion:  s.aiBastionInfo(r, resource.Protocol),
 		Usage: map[string]string{
 			"session":     "POST /api/ai/resources/" + url.PathEscape(resourceType) + "/" + url.PathEscape(resourceID) + "/session",
 			"credentials": "POST /api/ai/resources/" + url.PathEscape(resourceType) + "/" + url.PathEscape(resourceID) + "/credentials",
@@ -191,7 +191,7 @@ func (s *Server) issueAIResourceSession(w http.ResponseWriter, r *http.Request, 
 	s.writeJSON(w, r, http.StatusCreated, map[string]any{
 		"resource_id": resourceID, "compact_username": compactUsername,
 		"session_id": session.SessionID, "session_seq": session.SessionSeq,
-		"bastion": s.aiBastionInfo(r),
+		"bastion": s.aiBastionInfo(r, resource.Protocol),
 	})
 }
 
@@ -246,13 +246,15 @@ func aiResourceActions(resourceType string) []string {
 	return []string{rbac.ActionSessionConnect, rbac.ActionSFTPConnect}
 }
 
-func (s *Server) aiBastionInfo(r *http.Request) map[string]any {
+func (s *Server) aiBastionInfo(r *http.Request, databaseProtocol string) map[string]any {
 	requestHostName := requestHostname(r)
 	host, port := parseListenAddr(s.cfg.ListenAddr)
 	if host == "" || host == "0.0.0.0" || host == "::" || host == "[::]" {
 		host = requestHostName
 	}
-	databaseHost, databasePort := parseListenAddr(s.cfg.DatabaseGateway.MySQL.Address)
+	databaseHost, databasePort := parseListenAddr(
+		databaseGatewayListenerAddress(s.cfg.DatabaseGateway, databaseProtocol),
+	)
 	if databaseHost == "" || databaseHost == "0.0.0.0" || databaseHost == "::" || databaseHost == "[::]" {
 		databaseHost = requestHostName
 	}

@@ -102,6 +102,9 @@ jobs:
           go test ./internal/server/dbproxy -run=^$ -fuzz=^FuzzReadPostgresStartupMessage$ -fuzztime=10s
           go test ./internal/server/dbproxy -run=^$ -fuzz=^FuzzReadPostgresTypedMessage$ -fuzztime=10s
 
+      - name: Fuzz unified database protocol detection
+        run: go test ./internal/server/dbproxy -run=^$ -fuzz=^FuzzDetectUnifiedPreface$ -fuzztime=10s
+
       - name: Fuzz Redis frames, commands, and authentication
         run: |
           go test ./internal/server/dbproxy -run=^$ -fuzz=^FuzzRedisRESPFrameLength$ -fuzztime=10s

@@ -30,6 +30,14 @@
           <InfoValue label="连接地址" :value="gatewayAddress" :loading="isCopyInFlight(gatewayAddress)" @copy="copyValue" />
           <InfoValue v-if="!isRedis" label="连接账户" :value="connectionInfo.compactUser" :loading="isCopyInFlight(connectionInfo.compactUser)" @copy="copyValue" />
         </div>
+        <el-alert
+          v-if="mysqlDetectionNotice"
+          class="mysql-detection-notice"
+          type="info"
+          :closable="false"
+          show-icon
+          :title="mysqlDetectionNotice"
+        />
         <section v-if="resourceType === 'database' && secureGatewayTLS" class="gateway-tls-panel">
           <InfoValue label="TLS 验证名称" :value="connectionInfo.tlsServerName" :loading="isCopyInFlight(connectionInfo.tlsServerName)" @copy="copyValue" />
           <InfoValue label="证书 SHA-256 指纹" :value="connectionInfo.tlsCertSHA256" :loading="isCopyInFlight(connectionInfo.tlsCertSHA256)" @copy="copyValue" />
@@ -145,6 +153,8 @@ import {
   buildDatabaseGatewayConnection,
   databaseGatewayCAFileName,
   hasDatabaseGatewayTLSIdentity,
+  resolveDatabaseGatewayPort,
+  unifiedMySQLDetectionNotice,
 } from '@/utils/databaseGatewayCommands';
 import {
   beginInFlightIfIdle,
@@ -246,6 +256,8 @@ const connectionInfo = ref<{
   tlsServerName: string;
   tlsCAPEM: string;
   tlsCertSHA256: string;
+  gatewayMode: DBGatewayConfig['mode'];
+  mysqlDetectionDelayMs: number;
 } | null>(null);
 const temporaryPassword = ref('');
 const temporaryPasswordExpiresAt = ref('');
@@ -255,6 +267,14 @@ const testRequest = createLatestKeyedRequest<{ ok: boolean; error?: string; late
 const operationCounters = reactive<InFlightCounters>({});
 
 const gatewayAddress = computed(() => connectionInfo.value ? `${connectionInfo.value.host}:${connectionInfo.value.port}` : '');
+const mysqlDetectionNotice = computed(() => (
+  props.resourceType === 'database' && connectionInfo.value
+    ? unifiedMySQLDetectionNotice(props.protocol, {
+      mode: connectionInfo.value.gatewayMode,
+      mysql_detection_delay_ms: connectionInfo.value.mysqlDetectionDelayMs,
+    })
+    : ''
+));
 const requiresGatewayTLSIdentity = computed(() => ['mysql', 'postgres', 'postgresql', 'redis'].includes(props.protocol.toLowerCase()));
 const isPostgres = computed(() => ['postgres', 'postgresql'].includes(props.protocol.toLowerCase()));
 const isRedis = computed(() => (
@@ -270,13 +290,25 @@ const secureGatewayTLS = computed(() => hasDatabaseGatewayTLSIdentity({
 }));
 const databaseConnectionPlan = computed(() => {
   if (props.resourceType !== 'database' || !connectionInfo.value) return null;
-  const { host, port, compactUser, tlsEnabled, tlsServerName, tlsCAPEM, tlsCertSHA256 } = connectionInfo.value;
+  const {
+    host,
+    port,
+    compactUser,
+    tlsEnabled,
+    tlsServerName,
+    tlsCAPEM,
+    tlsCertSHA256,
+    gatewayMode,
+    mysqlDetectionDelayMs,
+  } = connectionInfo.value;
   const gateway: DBGatewayConfig = {
     enabled: true,
+    mode: gatewayMode,
     protocol: props.protocol,
     listen_addr: '',
     host,
     port,
+    mysql_detection_delay_ms: mysqlDetectionDelayMs,
     tls_enabled: tlsEnabled,
     tls_server_name: tlsServerName,
     tls_ca_pem: tlsCAPEM,
@@ -307,13 +339,6 @@ const commands = computed<CommandItem[]>(() => {
   };
   return buildConnectionCommands(input);
 });
-
-function databaseGatewayDefaultPort(protocol: string): number {
-  const normalized = protocol.toLowerCase();
-  if (normalized === 'redis') return 63790;
-  if (normalized === 'postgres' || normalized === 'postgresql') return 54330;
-  return 33060;
-}
 const temporaryPasswordExpiryText = computed(() => {
   const formatted = formatExpiresAt(temporaryPasswordExpiresAt.value);
   return formatted ? `${formatted}（到期前可重复使用）` : '30 分钟内可重复使用';
@@ -424,12 +449,18 @@ async function initializeConnection(snapshot: ConnectionTargetSnapshot) {
     if (snapshot.resourceType === 'database' && !gateway?.enabled) throw new Error(`${snapshot.protocol.toUpperCase()} 数据库网关未启用`);
     connectionInfo.value = {
       host: gateway?.tls_server_name || gateway?.host || window.location.hostname,
-      port: Number(gateway?.port) || (snapshot.resourceType === 'host' ? 47102 : databaseGatewayDefaultPort(snapshot.protocol)),
+      port: snapshot.resourceType === 'host'
+        ? 47102
+        : resolveDatabaseGatewayPort(snapshot.protocol, gateway),
       compactUser: session?.compact_username || '',
       tlsEnabled: gateway?.tls_enabled ?? false,
       tlsServerName: gateway?.tls_server_name || '',
       tlsCAPEM: gateway?.tls_ca_pem || '',
       tlsCertSHA256: gateway?.tls_cert_sha256 || '',
+      gatewayMode: gateway?.mode === 'independent' ? 'independent' : 'unified',
+      mysqlDetectionDelayMs: Number.isInteger(gateway?.mysql_detection_delay_ms)
+        ? Number(gateway?.mysql_detection_delay_ms)
+        : 0,
     };
     temporaryPassword.value = credential?.password || '';
     temporaryPasswordExpiresAt.value = credential?.expires_at || '';
@@ -576,6 +607,7 @@ function formatExpiresAt(value: string): string {
 .connectivity-row { display: flex; align-items: center; gap: 8px; color: var(--el-text-color-secondary); font-size: 13px; }
 .shared-connection-panel { overflow: hidden; border: 1px solid var(--el-border-color-light); border-radius: 10px; }
 .shared-connection-panel .detail-grid { border-top: 0; }
+.mysql-detection-notice { margin: 10px 14px; }
 :deep(.copy-action) { justify-self: end; }
 .connect-error { color: var(--el-color-danger); }
 .loading-state { padding: 30px 0; text-align: center; }

@@ -35,6 +35,14 @@ type boundProtocolListener struct {
 const protocolHandshakeTimeout = 5 * time.Second
 
 func (g *Gateway) listenAndServeProtocolListeners(ctx context.Context) error {
+	switch g.cfg.EffectiveMode() {
+	case config.DatabaseGatewayModeUnified:
+		return g.listenAndServeUnifiedListener(ctx)
+	case config.DatabaseGatewayModeIndependent:
+	default:
+		return fmt.Errorf("unsupported database gateway mode %q", g.cfg.Mode)
+	}
+
 	listeners := g.configuredProtocolListeners()
 	if len(listeners) == 0 {
 		return errors.New("database gateway has no enabled protocol listeners")
@@ -193,6 +201,12 @@ func (g *Gateway) handleProtocolConnection(ctx context.Context, client net.Conn,
 }
 
 func (g *Gateway) handleProtocolConnectionWithTimeout(ctx context.Context, client net.Conn, protocol databaseProtocol, listenerConfig config.DatabaseProtocolListener, timeout time.Duration) {
+	handshakeLease, acquired := g.tryAcquirePendingHandshake()
+	if !acquired {
+		return
+	}
+	defer handshakeLease.release()
+
 	// The protocol preface, listener TLS handshake, and bastion authentication all
 	// happen before a connection can enter the long-lived relay. A single deadline
 	// covers that entire phase and prevents slowloris-style goroutine retention.
@@ -212,6 +226,15 @@ func (g *Gateway) handleProtocolConnectionWithTimeout(ctx context.Context, clien
 		g.logger.Warn("unsupported database protocol listener", "protocol", protocol)
 		return
 	}
+	g.finishProtocolConnection(client, connection, protocol, handshakeLease)
+}
+
+func (g *Gateway) finishProtocolConnection(
+	client net.Conn,
+	connection *gatewayConn,
+	protocol databaseProtocol,
+	handshakeLease *pendingHandshakeLease,
+) {
 	if connection != nil {
 		defer connection.releasePostgresCancel()
 		if err := client.SetDeadline(time.Time{}); err != nil {
@@ -226,6 +249,7 @@ func (g *Gateway) handleProtocolConnectionWithTimeout(ctx context.Context, clien
 				return
 			}
 		}
+		handshakeLease.release()
 		g.handleGatewayConn(client, connection)
 	}
 }
@@ -251,7 +275,11 @@ func (g *Gateway) handleRedisConnection(ctx context.Context, client net.Conn, li
 	if _, err := readFull(client, firstByte); err != nil {
 		return nil
 	}
-	connection := g.handleRedis(ctx, client, firstByte[0])
+	return g.handleRedisAfterTransport(ctx, client, firstByte[0])
+}
+
+func (g *Gateway) handleRedisAfterTransport(ctx context.Context, client net.Conn, firstByte byte) *gatewayConn {
+	connection := g.handleRedis(ctx, client, firstByte)
 	if connection != nil {
 		connection.client = client
 	}

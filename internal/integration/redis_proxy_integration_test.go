@@ -6,6 +6,8 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"fmt"
 	"io"
 	"net"
@@ -67,29 +69,35 @@ func TestDatabaseGatewayRedisAgainstDocker(t *testing.T) {
 			if err != nil {
 				t.Fatalf("add Redis account: %v", err)
 			}
-			gatewayAddr := startRedisDatabaseGateway(t, fixture)
 			compactUsername := util.PrefixRedis + account.ResourceID + fixture.session.SessionID
 
-			resp2 := newRedisProtocolClient(t, gatewayAddr)
-			resp2.authenticateRESP2(t, compactUsername, integrationPassword)
-			exerciseRedisCommonCompatibility(t, resp2, "resp2", 2)
-			exerciseRedisPubSubCompatibility(t, resp2, gatewayAddr, upstreamAddr, compactUsername, 2)
-			resp2.close(t)
+			for _, mode := range databaseGatewayModes() {
+				mode := mode
+				t.Run(mode, func(t *testing.T) {
+					gateway := startRedisDatabaseGateway(t, fixture, mode)
 
-			hello2 := newRedisProtocolClient(t, gatewayAddr)
-			hello2.authenticateRESP2ViaHELLO(t, compactUsername, integrationPassword)
-			hello2.expect(t, hello2.command(t, "PING"), '+', "PONG")
-			hello2.close(t)
+					resp2 := newRedisGatewayProtocolClient(t, gateway)
+					resp2.authenticateRESP2(t, compactUsername, integrationPassword)
+					exerciseRedisCommonCompatibility(t, resp2, "resp2", 2)
+					exerciseRedisPubSubCompatibility(t, resp2, gateway, upstreamAddr, compactUsername, 2)
+					resp2.close(t)
 
-			resp3 := newRedisProtocolClient(t, gatewayAddr)
-			resp3.authenticateRESP3(t, compactUsername, integrationPassword)
-			exerciseRedisCommonCompatibility(t, resp3, "resp3", 3)
-			exerciseRedisRESP3Types(t, resp3)
-			exerciseRedisPubSubCompatibility(t, resp3, gatewayAddr, upstreamAddr, compactUsername, 3)
-			resp3.close(t)
+					hello2 := newRedisGatewayProtocolClient(t, gateway)
+					hello2.authenticateRESP2ViaHELLO(t, compactUsername, integrationPassword)
+					hello2.expect(t, hello2.command(t, "PING"), '+', "PONG")
+					hello2.close(t)
 
-			assertDBAuditSQLContains(t, fixture.replayDir, "SET resp2:value [REDACTED]")
-			assertDBAuditSQLContains(t, fixture.replayDir, "SET resp3:value [REDACTED]")
+					resp3 := newRedisGatewayProtocolClient(t, gateway)
+					resp3.authenticateRESP3(t, compactUsername, integrationPassword)
+					exerciseRedisCommonCompatibility(t, resp3, "resp3", 3)
+					exerciseRedisRESP3Types(t, resp3)
+					exerciseRedisPubSubCompatibility(t, resp3, gateway, upstreamAddr, compactUsername, 3)
+					resp3.close(t)
+
+					assertDBAuditSQLContains(t, fixture.replayDir, "SET resp2:value [REDACTED]")
+					assertDBAuditSQLContains(t, fixture.replayDir, "SET resp3:value [REDACTED]")
+				})
+			}
 		})
 	}
 }
@@ -111,13 +119,29 @@ func redisImages() []string {
 	return images
 }
 
-func startRedisDatabaseGateway(t *testing.T, fixture metadataFixture) string {
+func startRedisDatabaseGateway(
+	t *testing.T,
+	fixture metadataFixture,
+	mode string,
+) databaseGatewayEndpoint {
 	t.Helper()
 	address := freeTCPAddress(t)
-	cfg := config.DatabaseGatewayConfig{
-		Enabled: true,
-		Redis:   config.DatabaseProtocolListener{Enabled: true, Address: address},
-	}
+	certFile, keyFile, caFile := writeIntegrationTLSCertificate(t)
+	cfg := config.DatabaseGatewayConfig{Enabled: true}
+	configureDatabaseGatewayMode(
+		t,
+		&cfg,
+		mode,
+		"redis",
+		config.DatabaseProtocolListener{
+			Enabled:    true,
+			Address:    address,
+			CertFile:   certFile,
+			KeyFile:    keyFile,
+			CAFile:     caFile,
+			ServerName: "127.0.0.1",
+		},
+	)
 	gateway := dbproxy.NewGateway(
 		cfg,
 		fixture.store,
@@ -143,7 +167,7 @@ func startRedisDatabaseGateway(t *testing.T, fixture metadataFixture) string {
 		}
 	})
 	waitServerTCP(t, address, errCh)
-	return address
+	return databaseGatewayEndpoint{address: address, caFile: caFile}
 }
 
 func waitRedis(t *testing.T, address string) {
@@ -271,7 +295,7 @@ func exerciseRedisRESP3Types(t *testing.T, client *redisProtocolClient) {
 func exerciseRedisPubSubCompatibility(
 	t *testing.T,
 	subscriber *redisProtocolClient,
-	gatewayAddr string,
+	gateway databaseGatewayEndpoint,
 	upstreamAddr string,
 	compactUsername string,
 	version int,
@@ -288,7 +312,7 @@ func exerciseRedisPubSubCompatibility(
 		t.Fatalf("subscribe ack = %#v", ack)
 	}
 
-	publisher := newRedisProtocolClient(t, gatewayAddr)
+	publisher := newRedisGatewayProtocolClient(t, gateway)
 	publisher.authenticateRESP2(t, compactUsername, integrationPassword)
 	publisher.expectInteger(t, publisher.command(t, "PUBLISH", channel, "payload"), 1)
 	publisher.close(t)
@@ -404,6 +428,39 @@ func newRedisProtocolClient(t *testing.T, address string) *redisProtocolClient {
 		t.Fatalf("set Redis client deadline: %v", err)
 	}
 	return &redisProtocolClient{conn: conn, reader: bufio.NewReader(conn)}
+}
+
+func newRedisGatewayProtocolClient(
+	t *testing.T,
+	gateway databaseGatewayEndpoint,
+) *redisProtocolClient {
+	t.Helper()
+	caPEM, err := os.ReadFile(gateway.caFile)
+	if err != nil {
+		t.Fatalf("read Redis gateway CA: %v", err)
+	}
+	roots := x509.NewCertPool()
+	if !roots.AppendCertsFromPEM(caPEM) {
+		t.Fatal("parse Redis gateway CA")
+	}
+	raw, err := net.DialTimeout("tcp", gateway.address, 5*time.Second)
+	if err != nil {
+		t.Fatalf("dial Redis gateway: %v", err)
+	}
+	if err := raw.SetDeadline(time.Now().Add(20 * time.Second)); err != nil {
+		raw.Close()
+		t.Fatalf("set Redis gateway client deadline: %v", err)
+	}
+	secured := tls.Client(raw, &tls.Config{
+		MinVersion: tls.VersionTLS12,
+		RootCAs:    roots,
+		ServerName: "127.0.0.1",
+	})
+	if err := secured.Handshake(); err != nil {
+		raw.Close()
+		t.Fatalf("handshake Redis gateway TLS: %v", err)
+	}
+	return &redisProtocolClient{conn: secured, reader: bufio.NewReader(secured)}
 }
 
 func (c *redisProtocolClient) authenticateRESP2(t *testing.T, username, password string) {

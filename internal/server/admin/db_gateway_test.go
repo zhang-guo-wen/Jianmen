@@ -90,6 +90,7 @@ func TestHandleDBGatewayReturnsProtocolListenerToConnectOnlyUser(t *testing.T) {
 	}
 	var response struct {
 		Enabled       bool   `json:"enabled"`
+		Mode          string `json:"mode"`
 		Protocol      string `json:"protocol"`
 		ListenAddr    string `json:"listen_addr"`
 		Host          string `json:"host"`
@@ -98,11 +99,14 @@ func TestHandleDBGatewayReturnsProtocolListenerToConnectOnlyUser(t *testing.T) {
 		TLSServerName string `json:"tls_server_name"`
 		TLSCAPEM      string `json:"tls_ca_pem"`
 		TLSCertSHA256 string `json:"tls_cert_sha256"`
+		MySQLDelayMS  int    `json:"mysql_detection_delay_ms"`
 	}
 	if err := decodeTestData(t, recorder.Body.Bytes(), &response); err != nil {
 		t.Fatalf("decode gateway response: %v", err)
 	}
-	if !response.Enabled || response.Protocol != "postgresql" || response.ListenAddr != "0.0.0.0:54330" ||
+	if !response.Enabled || response.Mode != config.DatabaseGatewayModeIndependent ||
+		response.MySQLDelayMS != 0 ||
+		response.Protocol != "postgresql" || response.ListenAddr != "0.0.0.0:54330" ||
 		response.Host != "" || response.Port != 54330 || !response.TLSEnabled ||
 		response.TLSServerName != "pg-gateway.example.test" || response.TLSCAPEM == "" ||
 		response.TLSCertSHA256 != leafFingerprint {
@@ -110,6 +114,148 @@ func TestHandleDBGatewayReturnsProtocolListenerToConnectOnlyUser(t *testing.T) {
 	}
 	if strings.Contains(recorder.Body.String(), "private-key-content") || strings.Contains(recorder.Body.String(), "database-password") || strings.Contains(recorder.Body.String(), "key_file") {
 		t.Fatalf("gateway response exposed a secret or key path: %s", recorder.Body.String())
+	}
+}
+
+func TestHandleDBGatewayUsesUnifiedEntryForEveryProtocol(t *testing.T) {
+	server, db := newAdminDBTestServer(t)
+	seedTestSuperAdmin(t, db, "u-admin")
+	certFile, caFile, _ := writeGatewayTLSMaterial(t, "database-gateway.example.test")
+	server.cfg.DatabaseGateway = config.DatabaseGatewayConfig{
+		Enabled: true,
+		Mode:    config.DatabaseGatewayModeUnified,
+		Unified: config.DatabaseUnifiedListener{
+			Enabled:            true,
+			Address:            "0.0.0.0:33060",
+			CertFile:           certFile,
+			KeyFile:            "private-key-content",
+			CAFile:             caFile,
+			ServerName:         "database-gateway.example.test",
+			DetectionTimeoutMS: 200,
+		},
+		MySQL: config.DatabaseProtocolListener{
+			Enabled: true, Address: "0.0.0.0:33061",
+		},
+		PostgreSQL: config.DatabaseProtocolListener{
+			Enabled: true, Address: "0.0.0.0:33062",
+		},
+		Redis: config.DatabaseProtocolListener{
+			Enabled: true, Address: "0.0.0.0:33063",
+		},
+	}
+
+	for _, protocol := range []string{"mysql", "postgresql", "redis"} {
+		t.Run(protocol, func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			request := asTestSuperAdmin(httptest.NewRequest(
+				http.MethodGet,
+				"/api/db/gateway?protocol="+protocol,
+				nil,
+			))
+			server.handleDBGateway(recorder, request)
+			if recorder.Code != http.StatusOK {
+				t.Fatalf("status = %d; body=%s", recorder.Code, recorder.Body.String())
+			}
+			var response struct {
+				Enabled      bool   `json:"enabled"`
+				Mode         string `json:"mode"`
+				Protocol     string `json:"protocol"`
+				ListenAddr   string `json:"listen_addr"`
+				Port         int    `json:"port"`
+				TLSEnabled   bool   `json:"tls_enabled"`
+				MySQLDelayMS int    `json:"mysql_detection_delay_ms"`
+			}
+			if err := decodeTestData(t, recorder.Body.Bytes(), &response); err != nil {
+				t.Fatalf("decode gateway response: %v", err)
+			}
+			if !response.Enabled ||
+				response.Mode != config.DatabaseGatewayModeUnified ||
+				response.Protocol != protocol ||
+				response.ListenAddr != "0.0.0.0:33060" ||
+				response.Port != 33060 ||
+				!response.TLSEnabled ||
+				response.MySQLDelayMS != 200 {
+				t.Fatalf("unexpected unified gateway response: %#v", response)
+			}
+		})
+	}
+}
+
+func TestHandleDBGatewayDoesNotAdvertisePostgreSQLWithoutUnifiedTLS(t *testing.T) {
+	server, db := newAdminDBTestServer(t)
+	seedTestSuperAdmin(t, db, "u-admin")
+	server.cfg.DatabaseGateway = config.DatabaseGatewayConfig{
+		Enabled: true,
+		Mode:    config.DatabaseGatewayModeUnified,
+		Unified: config.DatabaseUnifiedListener{
+			Enabled: true, Address: "127.0.0.1:33060", DetectionTimeoutMS: 200,
+		},
+	}
+	for protocol, wantEnabled := range map[string]bool{
+		"mysql": true, "postgresql": false, "redis": true,
+	} {
+		t.Run(protocol, func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			server.handleDBGateway(
+				recorder,
+				asTestSuperAdmin(httptest.NewRequest(
+					http.MethodGet,
+					"/api/db/gateway?protocol="+protocol,
+					nil,
+				)),
+			)
+			if recorder.Code != http.StatusOK {
+				t.Fatalf("status = %d; body=%s", recorder.Code, recorder.Body.String())
+			}
+			var response struct {
+				Enabled    bool `json:"enabled"`
+				TLSEnabled bool `json:"tls_enabled"`
+			}
+			if err := decodeTestData(t, recorder.Body.Bytes(), &response); err != nil {
+				t.Fatalf("decode gateway response: %v", err)
+			}
+			if response.Enabled != wantEnabled || response.TLSEnabled {
+				t.Fatalf(
+					"%s response = %#v, want enabled=%t without TLS",
+					protocol,
+					response,
+					wantEnabled,
+				)
+			}
+		})
+	}
+}
+
+func TestDatabaseGatewayListenerAddressUsesEffectiveMode(t *testing.T) {
+	gateway := config.DatabaseGatewayConfig{
+		Enabled: true,
+		Mode:    config.DatabaseGatewayModeUnified,
+		Unified: config.DatabaseUnifiedListener{
+			Enabled: true, Address: "127.0.0.1:33060", DetectionTimeoutMS: 200,
+		},
+		MySQL: config.DatabaseProtocolListener{
+			Enabled: true, Address: "127.0.0.1:33061",
+		},
+		PostgreSQL: config.DatabaseProtocolListener{
+			Enabled: true, Address: "127.0.0.1:33062",
+		},
+		Redis: config.DatabaseProtocolListener{
+			Enabled: true, Address: "127.0.0.1:33063",
+		},
+	}
+	for _, protocol := range []string{"mysql", "postgresql", "redis"} {
+		if got := databaseGatewayListenerAddress(gateway, protocol); got != "127.0.0.1:33060" {
+			t.Fatalf("unified %s address = %q", protocol, got)
+		}
+	}
+
+	gateway.Mode = config.DatabaseGatewayModeIndependent
+	for protocol, want := range map[string]string{
+		"mysql": "127.0.0.1:33061", "postgresql": "127.0.0.1:33062", "redis": "127.0.0.1:33063",
+	} {
+		if got := databaseGatewayListenerAddress(gateway, protocol); got != want {
+			t.Fatalf("independent %s address = %q, want %q", protocol, got, want)
+		}
 	}
 }
 

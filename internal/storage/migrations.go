@@ -205,6 +205,11 @@ var migrations = []Migration{
 		Name:    "system configuration management",
 		Run:     migrateSystemSettings,
 	},
+	{
+		Version: databaseGatewayModeMigrationVersion,
+		Name:    "database gateway mode system setting",
+		Run:     migrateDatabaseGatewayMode,
+	},
 }
 
 func rejectDuplicateDatabaseAccounts(tx *gorm.DB) error {

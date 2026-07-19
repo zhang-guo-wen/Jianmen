@@ -85,45 +85,50 @@ func TestDatabaseGatewayPostgresCompatibilityMatrix(t *testing.T) {
 				t.Fatalf("add PostgreSQL %s account: %v", major, err)
 			}
 
-			gateway := startDatabaseGateway(t, fixture, "postgresql", testLogger())
 			compactUsername := util.PrefixDatabase + account.ResourceID + fixture.session.SessionID
-			applicationName := "jianmen-compat-pg" + major
-			dsn := postgresCompatGatewayDSN(
-				gateway,
-				compactUsername,
-				applicationName,
-				nil,
-			)
+			for _, mode := range databaseGatewayModes() {
+				mode := mode
+				t.Run(mode, func(t *testing.T) {
+					gateway := startDatabaseGateway(t, fixture, mode, "postgresql", testLogger())
+					applicationName := "jianmen-compat-pg" + major + "-" + mode
+					dsn := postgresCompatGatewayDSN(
+						gateway,
+						compactUsername,
+						applicationName,
+						nil,
+					)
 
-			postgresCompatVerifyDatabaseSQL(t, dsn, major, applicationName)
-			postgresCompatVerifySimpleProtocol(t, gateway, compactUsername)
-			postgresCompatVerifyCopy(t, dsn)
-			postgresCompatVerifyContextCancel(t, dsn)
-			if major == "18" {
-				postgresCompatVerifyGatewayTLSFailures(
-					t,
-					gateway,
-					compactUsername,
-				)
+					postgresCompatVerifyDatabaseSQL(t, dsn, major, applicationName)
+					postgresCompatVerifySimpleProtocol(t, gateway, compactUsername)
+					postgresCompatVerifyCopy(t, dsn)
+					postgresCompatVerifyContextCancel(t, dsn)
+					if major == "18" {
+						postgresCompatVerifyGatewayTLSFailures(
+							t,
+							gateway,
+							compactUsername,
+						)
+					}
+					if major == "17" || major == "18" {
+						protocolMinor := uint32(0)
+						if major == "18" {
+							protocolMinor = 2
+						}
+						postgresCompatVerifyDirectTLS(
+							t,
+							gateway,
+							compactUsername,
+							major,
+							protocolMinor,
+						)
+					}
+					assertDBAuditSQLContains(
+						t,
+						fixture.replayDir,
+						"SELECT [REDACTED] AS audit_probe",
+					)
+				})
 			}
-			if major == "17" || major == "18" {
-				protocolMinor := uint32(0)
-				if major == "18" {
-					protocolMinor = 2
-				}
-				postgresCompatVerifyDirectTLS(
-					t,
-					gateway,
-					compactUsername,
-					major,
-					protocolMinor,
-				)
-			}
-			assertDBAuditSQLContains(
-				t,
-				fixture.replayDir,
-				"SELECT [REDACTED] AS audit_probe",
-			)
 		})
 	}
 }

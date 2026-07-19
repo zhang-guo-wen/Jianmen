@@ -31,6 +31,14 @@
 | PostgreSQL | `14`、`15`、`16`、`17`、`18` | Protocol 3.0、TLS/Direct TLS、上游 SCRAM-SHA-256；3.2 客户端可协商降级到 3.0 | 简单/扩展查询、预处理语句、事务、COPY、CancelRequest、大报文和错误恢复 |
 | Redis | `6.2`、`7.4`、`8.8` | RESP2/RESP3、双参数 `AUTH`、`HELLO 2 AUTH` / `HELLO 3 AUTH`，支持配置 TLS | 流水线、MULTI/EXEC、SELECT、Pub/Sub、RESP3 Push、大报文和审计脱敏 |
 
+数据库入口支持两种全局模式：
+
+- `unified`（默认）：MySQL、PostgreSQL、Redis 原生客户端共用 `33060`。MySQL 必须等待协议探测窗口，因此每次新建连接约增加 200ms；已建立连接的查询和传输不受这段等待影响。
+- `independent`：MySQL 使用 `33061`、PostgreSQL 使用 `33062`、Redis 使用 `33063`，不引入统一入口的探测等待。
+
+两种模式不会同时监听；在“系统设置”切换并重启服务后生效。快速连接会读取当前生效配置并自动生成正确端口。
+完整启用三种协议需要配置数据库网关 TLS 证书；仅回环地址、无证书的本机开发配置可使用 MySQL 和 Redis，但 PostgreSQL 会显示为不可用。
+
 以上是默认回归兼容范围；未列出的版本或扩展可能可以使用，但不作兼容承诺。认证路径、TLS 边界、明确不支持项和测试方法见 [数据库真实协议兼容矩阵](docs/database-protocol-compatibility.md)。
 
 ### 审计与追溯
@@ -125,8 +133,6 @@ docker run -d \
   -p 127.0.0.1:47100:47100 \
   -p 47102:47102 \
   -p 33060:33060 \
-  -p 54330:54330 \
-  -p 63790:63790 \
   -p 47110-47199:47110-47199 \
   -v jianmen-data:/app/data \
   -v jianmen-certs:/app/certs:ro \
@@ -139,23 +145,28 @@ docker run -d \
 |---|---|
 | `47100` | Web 管理页面和管理 API |
 | `47102` | SSH/SFTP 堡垒机入口 |
-| `33060` | MySQL 数据库网关 |
-| `54330` | PostgreSQL 数据库网关（TLS 必须） |
-| `63790` | Redis 数据库网关（远程 AUTH 必须使用 TLS） |
+| `33060` | 统一数据库入口（默认，MySQL/PostgreSQL/Redis） |
+| `33061` | 独立模式 MySQL 入口 |
+| `33062` | 独立模式 PostgreSQL 入口（TLS 必须） |
+| `33063` | 独立模式 Redis 入口（远程 AUTH 必须使用 TLS） |
 | `47110-47199` | 内网应用动态代理端口范围 |
+
+默认统一模式只需发布 `33060`。若在系统设置中切换为独立端口模式，重启容器时还需增加 `-p 33061:33061 -p 33062:33062 -p 33063:33063`；Compose 部署同样需要在 `ports` 中增加这三个映射。
 
 ### 数据库网关 TLS 身份校验
 
-MySQL 和 PostgreSQL 网关应同时配置服务端证书、私钥、公共 CA 文件与客户端验证名称。`server_name` 必须是证书 SAN 中的 DNS 名称或 IP；客户端连接命令使用该名称，而不是监听地址。`ca_file` 仅保存可公开分发的 CA PEM。只有单张、当前有效且可验证的自签名叶证书才允许省略 `ca_file`，此时按证书固定（pin）语义分发；普通 CA 签发的叶证书不能被当作根证书。`key_file` 永不会通过 API 返回。
+统一入口以及各协议独立入口应配置服务端证书、私钥、公共 CA 文件与客户端验证名称。`server_name` 必须是证书 SAN 中的 DNS 名称或 IP；客户端连接命令使用该名称，而不是监听地址。`ca_file` 仅保存可公开分发的 CA PEM。只有单张、当前有效且可验证的自签名叶证书才允许省略 `ca_file`，此时按证书固定（pin）语义分发；普通 CA 签发的叶证书不能被当作根证书。`key_file` 永不会通过 API 返回。
 
 ```json
-"postgresql": {
+"mode": "unified",
+"unified": {
   "enabled": true,
-  "listen_addr": "0.0.0.0:54330",
+  "listen_addr": "0.0.0.0:33060",
   "cert_file": "/app/certs/database.crt",
   "key_file": "/app/certs/database.key",
   "ca_file": "/app/certs/database-ca.crt",
-  "server_name": "localhost"
+  "server_name": "localhost",
+  "detection_timeout_ms": 200
 }
 ```
 
@@ -193,8 +204,6 @@ docker run -d \
   --network jianmen-internal \
   -p 47102:47102 \
   -p 33060:33060 \
-  -p 54330:54330 \
-  -p 63790:63790 \
   -p 47110-47199:47110-47199 \
   -v jianmen-data:/app/data \
   -v jianmen-certs:/app/certs:ro \
@@ -241,8 +250,6 @@ docker run -d \
   -p 127.0.0.1:47100:47100 \
   -p 47102:47102 \
   -p 33060:33060 \
-  -p 54330:54330 \
-  -p 63790:63790 \
   -p 47110-47199:47110-47199 \
   -v jianmen-data:/app/data \
   -v jianmen-certs:/app/certs:ro \

@@ -1,8 +1,11 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
 import {
   BYTES_PER_GIB,
+  SYSTEM_SETTINGS_FIELDS,
+  changedSystemSettingsFields,
   replayBytesToGiB,
   replayGiBToBytes,
   weakerProtectionReasons,
@@ -11,6 +14,7 @@ import {
 
 function settings(overrides: Partial<SystemSettingsValues> = {}): SystemSettingsValues {
   return {
+    database_gateway_mode: 'unified',
     web_rdp_enabled: true,
     web_rdp_connect_timeout_seconds: 15,
     web_rdp_allow_unrecorded: false,
@@ -23,6 +27,25 @@ function settings(overrides: Partial<SystemSettingsValues> = {}): SystemSettings
     ...overrides,
   };
 }
+
+test('database gateway mode participates in global settings differences', () => {
+  const current = settings();
+  const next = settings({ database_gateway_mode: 'independent' });
+
+  assert.equal(SYSTEM_SETTINGS_FIELDS.includes('database_gateway_mode'), true);
+  assert.deepEqual(changedSystemSettingsFields(current, next), ['database_gateway_mode']);
+  assert.deepEqual(changedSystemSettingsFields(next, next), []);
+});
+
+test('system settings presents unified database entry as the default with the MySQL delay notice', () => {
+  const source = readFileSync(new URL('../views/SystemSettingsView.vue', import.meta.url), 'utf8');
+
+  assert.match(source, /database_gateway_mode:\s*'unified'/);
+  assert.match(source, /label="运行策略"/);
+  assert.match(source, /统一入口（默认）/);
+  assert.match(source, /独立端口/);
+  assert.match(source, /统一入口的 MySQL 每次连接会增加约 200ms 建连时间/);
+});
 
 test('GiB conversion preserves normal configuration values', () => {
   assert.equal(replayBytesToGiB(10 * BYTES_PER_GIB), 10);

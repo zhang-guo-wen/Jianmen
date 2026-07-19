@@ -29,6 +29,7 @@ type Server struct {
 	platformAccountService *service.PlatformAccountService
 	userSessionCreation    *service.UserSessionCreationService
 	audit                  adminAuditRepository
+	auditQuery             *service.AuditQueryService
 	connectionPassword     *service.ConnectionPasswordService
 	preferences            *service.UserPreferenceService
 	temporaryRepository    service.TemporaryAccessRepository
@@ -176,12 +177,19 @@ func New(
 	if err != nil {
 		return nil, fmt.Errorf("initialize container management service: %w", err)
 	}
+	auditQuery, err := service.NewAuditQueryService(
+		adminAuditQueryRepository{repository: dependencies.audit},
+		adminAuditQueryAuthorizer{authorization: authorization},
+	)
+	if err != nil {
+		return nil, fmt.Errorf("initialize audit query service: %w", err)
+	}
 	return &Server{
 		cfg: cfg, db: db, logger: logger,
 		aiAccessTokens: aiAccessTokens, hostTargets: dependencies.hostTargets, databases: dependencies.databases,
 		databaseManagement: databaseManagement, applicationService: applicationService,
 		containerManagement: containerManagement, platformAccountService: platformAccountService,
-		userSessionCreation: userSessionCreation, audit: dependencies.audit, connectionPassword: connectionPassword,
+		userSessionCreation: userSessionCreation, audit: dependencies.audit, auditQuery: auditQuery, connectionPassword: connectionPassword,
 		preferences: userPreferences, temporaryRepository: dependencies.temporaryAccess,
 		userRepository: dependencies.users, userGroupRepository: dependencies.userGroups, roleRepository: dependencies.roles,
 		dataDir:      dataDir,

@@ -347,6 +347,7 @@ const sshClientUrl = computed(() => {
   if (!connectionInfo.value) return '#';
   return buildSSHDeepLink({
     username: connectionInfo.value.compactUser,
+    password: temporaryPassword.value,
     host: connectionInfo.value.host,
     port: connectionInfo.value.port,
   });

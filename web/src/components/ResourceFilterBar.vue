@@ -161,6 +161,7 @@ onBeforeUnmount(() => resizeObserver?.disconnect());
 
 @media (max-width: 780px) {
   .resource-filter-bar {
+    flex: 0 1 auto;
     width: 100%;
   }
 }

@@ -16,7 +16,7 @@
       </div>
       <div class="toolbar-right">
         <span class="completion-hint">Tab 补全 · 连按两次查看候选</span>
-        <span class="status-badge" :class="status">
+        <span class="status-badge" :class="status" role="status" aria-live="polite">
           <span class="status-dot"></span>
           {{ statusLabel }}
         </span>
@@ -30,7 +30,7 @@
       <!-- 连接中遮罩 -->
       <div v-if="status === 'connecting'" class="terminal-overlay">
         <el-icon class="is-loading" :size="32"><Loading /></el-icon>
-        <p>正在连接...</p>
+        <p>正在连接…</p>
       </div>
 
       <!-- 错误遮罩 -->
@@ -81,7 +81,7 @@ const {
 const statusLabel = computed(() => {
   const map: Record<TerminalStatus, string> = {
     idle: '就绪',
-    connecting: '连接中...',
+    connecting: '连接中…',
     connected: '已连接',
     disconnected: '已断开',
     error: '错误',
@@ -135,7 +135,9 @@ onUnmounted(() => {
 .web-terminal-page {
   display: flex;
   flex-direction: column;
-  height: calc(100vh - 60px); /* 减去 app header 高度 */
+  width: 100%;
+  height: 100dvh;
+  min-height: 0;
   background: #1e1e2e;
 }
 

@@ -296,9 +296,14 @@ test('disabled database client symbols are absent from production frontend sourc
   assert.doesNotMatch(preferencesSource, /database_client|database_client_path/);
 });
 
-test('settings does not expose disabled database deep-link configuration', () => {
+test('settings exposes local-only database client configuration without restoring the password link', () => {
   const settingsSource = readFileSync(new URL('../views/SettingsView.vue', import.meta.url), 'utf8');
-  assert.doesNotMatch(settingsSource, /dbeaver|jianmen-db:\/\//i);
+  const localStoreSource = readFileSync(new URL('../stores/databaseClient.ts', import.meta.url), 'utf8');
+  assert.match(settingsSource, /DBeaver/);
+  assert.match(settingsSource, /useDatabaseClientStore/);
+  assert.doesNotMatch(settingsSource, /jianmen-db:\/\//i);
+  assert.match(localStoreSource, /localStorage/);
+  assert.doesNotMatch(localStoreSource, /apiClient/);
   const preferencesSource = readFileSync(new URL('../stores/preferences.ts', import.meta.url), 'utf8');
   assert.doesNotMatch(preferencesSource, /dbeaver/i);
 });
@@ -339,7 +344,26 @@ test('RDP audit playback uses object recording endpoint without replay directory
 
 test('temporary password copy button exposes its in-flight state', () => {
   const dialogSource = readFileSync(new URL('../components/ConnectionConfigDialog.vue', import.meta.url), 'utf8');
-  assert.match(dialogSource, /InfoValue label="临时密码"[\s\S]*:loading="isCopyInFlight\(temporaryPassword\)"/);
+  assert.match(
+    dialogSource,
+    /InfoValue label="临时密码"[\s\S]*:loading="isCopyInFlight\(temporaryPassword, '临时密码'\)"/,
+  );
+});
+
+test('DBeaver handoff fails closed and clears temporary credentials when the dialog closes', () => {
+  const dialogSource = readFileSync(new URL('../components/ConnectionConfigDialog.vue', import.meta.url), 'utf8');
+  assert.match(
+    dialogSource,
+    /const dbeaverConfigurationCommand[\s\S]*\|\| !secureGatewayTLS\.value/,
+  );
+  assert.match(
+    dialogSource,
+    /if \(!isVisible \|\| !targetID\)[\s\S]*clearConnectionState\(\)/,
+  );
+  assert.match(
+    dialogSource,
+    /function clearConnectionState\(\)[\s\S]*temporaryPassword\.value = ''/,
+  );
 });
 
 test('auto-provision view does not display generated upstream identity or secret', () => {

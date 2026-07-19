@@ -1,5 +1,12 @@
 <template>
-  <el-dialog v-model="visible" destroy-on-close :title="dialogTitle" width="min(700px, calc(100vw - 24px))" class="connection-config-dialog">
+  <el-dialog
+    v-model="visible"
+    destroy-on-close
+    :close-on-click-modal="false"
+    :title="dialogTitle"
+    width="min(700px, calc(100vw - 24px))"
+    class="connection-config-dialog"
+  >
     <div v-if="target" class="dialog-content">
       <section class="resource-summary">
         <div class="resource-icon">{{ resourceType === 'host' ? 'SSH' : protocolLabel }}</div>
@@ -16,7 +23,7 @@
 
       <div v-if="!connectionError && !isRedis" class="connectivity-row">
         <span>连通性</span>
-        <el-tag v-if="connectionTesting" type="info" size="small">测试中...</el-tag>
+        <el-tag v-if="connectionTesting" type="info" size="small">测试中…</el-tag>
         <template v-else-if="connectionTestResult">
           <el-tag :type="connectionTestResult.ok ? 'success' : 'danger'" size="small">
             {{ connectionTestResult.ok ? '可达' : '不可达' }}
@@ -27,8 +34,8 @@
       </div>
       <section v-if="connectionInfo && gatewayAddress" class="shared-connection-panel">
         <div class="detail-grid">
-          <InfoValue label="连接地址" :value="gatewayAddress" :loading="isCopyInFlight(gatewayAddress)" @copy="copyValue" />
-          <InfoValue v-if="!isRedis" label="连接账户" :value="connectionInfo.compactUser" :loading="isCopyInFlight(connectionInfo.compactUser)" @copy="copyValue" />
+          <InfoValue label="连接地址" :value="gatewayAddress" :loading="isCopyInFlight(gatewayAddress, '连接地址')" @copy="copyValue" />
+          <InfoValue v-if="!isRedis" label="连接账户" :value="connectionInfo.compactUser" :loading="isCopyInFlight(connectionInfo.compactUser, '连接账户')" @copy="copyValue" />
         </div>
         <el-alert
           v-if="mysqlDetectionNotice"
@@ -39,8 +46,8 @@
           :title="mysqlDetectionNotice"
         />
         <section v-if="resourceType === 'database' && secureGatewayTLS" class="gateway-tls-panel">
-          <InfoValue label="TLS 验证名称" :value="connectionInfo.tlsServerName" :loading="isCopyInFlight(connectionInfo.tlsServerName)" @copy="copyValue" />
-          <InfoValue label="证书 SHA-256 指纹" :value="connectionInfo.tlsCertSHA256" :loading="isCopyInFlight(connectionInfo.tlsCertSHA256)" @copy="copyValue" />
+          <InfoValue label="TLS 验证名称" :value="connectionInfo.tlsServerName" :loading="isCopyInFlight(connectionInfo.tlsServerName, 'TLS 验证名称')" @copy="copyValue" />
+          <InfoValue label="证书 SHA-256 指纹" :value="connectionInfo.tlsCertSHA256" :loading="isCopyInFlight(connectionInfo.tlsCertSHA256, '证书 SHA-256 指纹')" @copy="copyValue" />
           <el-form-item v-if="isPostgres" label="数据库名称">
             <el-input v-model="databaseName" placeholder="postgres" />
           </el-form-item>
@@ -71,7 +78,7 @@
 
       <div v-if="creatingSession" class="loading-state">
         <el-icon class="is-loading" :size="30"><Loading /></el-icon>
-        <p>正在生成连接配置...</p>
+        <p>正在生成连接配置…</p>
       </div>
 
       <template v-else-if="!connectionError && connectionInfo && !isRedis">
@@ -94,7 +101,7 @@
             <div class="expiry-summary"><span>密码有效期</span><strong>{{ temporaryPasswordExpiryText }}</strong></div>
           </header>
           <div class="detail-grid">
-            <InfoValue label="临时密码" :value="temporaryPassword" :loading="isCopyInFlight(temporaryPassword)" accent @copy="copyValue" />
+            <InfoValue label="临时密码" :value="temporaryPassword" :loading="isCopyInFlight(temporaryPassword, '临时密码')" accent @copy="copyValue" />
           </div>
         </section>
       </template>
@@ -103,11 +110,27 @@
     <template #footer>
       <el-button data-testid="ssh-local-client" v-if="resourceType === 'host' && allowSsh" type="primary" :loading="preferences.loading" @click="openPreferredSSHClient">本地 SSH 客户端打开</el-button>
       <el-button data-testid="ssh-browser" v-if="resourceType === 'host' && allowSsh" type="primary" @click="openInBrowser">在浏览器中打开</el-button>
+      <el-button v-if="resourceType === 'database'" @click="openDatabaseClientSettings">本地客户端设置</el-button>
+      <el-button
+        v-if="resourceType === 'database' && !isRedis && databaseClient.configured"
+        type="primary"
+        :disabled="!dbeaverConfigurationCommand"
+        :loading="isCopyInFlight(dbeaverConfigurationCommand, 'dbeaver')"
+        @click="copyDBeaverConfigurationCommand"
+      >
+        复制 DBeaver 配置命令
+      </el-button>
       <el-button @click="visible = false">关闭</el-button>
     </template>
   </el-dialog>
 
-  <el-dialog v-model="initClientVisible" title="初始化本地 SSH 客户端" width="560px" destroy-on-close>
+  <el-dialog
+    v-model="initClientVisible"
+    title="初始化本地 SSH 客户端"
+    width="min(560px, calc(100vw - 24px))"
+    class="local-client-dialog"
+    destroy-on-close
+  >
     <el-form label-position="top">
       <el-form-item label="客户端" required>
         <el-select v-model="initClientType" style="width: 100%">
@@ -116,8 +139,13 @@
       </el-form-item>
       <el-form-item label="程序路径" required :error="initClientPathError">
         <div class="path-field">
-          <el-input v-model="initClientPath" placeholder="请输入完整绝对路径，如 C:\Program Files\PuTTY\putty.exe" />
-          <el-button @click="pickClientFile">浏览...</el-button>
+          <el-input
+            v-model="initClientPath"
+            name="ssh_client_path"
+            autocomplete="off"
+            placeholder="例如 C:\Program Files\PuTTY\putty.exe"
+          />
+          <el-button @click="pickClientFile">浏览…</el-button>
         </div>
         <div class="path-help">程序路径必填，不提供默认值，且必须是包含盘符的完整绝对路径。</div>
       </el-form-item>
@@ -141,7 +169,9 @@ import { Loading } from '@element-plus/icons-vue';
 import { ElButton, ElInput, ElMessage } from 'element-plus';
 
 import { apiClient, type DBAccountRecord, type DBGatewayConfig, type TargetRecord } from '@/api/client';
+import { buildDBeaverConfigurationCommand } from '@/config/databaseClients';
 import { buildSSHProtocolRegistrationCommand, isAbsoluteExecutablePath, SSH_CLIENT_OPTIONS } from '@/config/sshClients';
+import { useDatabaseClientStore } from '@/stores/databaseClient';
 import { usePreferencesStore } from '@/stores/preferences';
 import { writeClipboardText } from '@/utils/clipboard';
 import {
@@ -196,7 +226,15 @@ const InfoValue = defineComponent({
     return () => h('div', { class: ['detail-item', componentProps.accent ? 'accent-value' : ''] }, [
       h('span', componentProps.label),
       h('code', { class: 'detail-value' }, componentProps.value || '-'),
-      h(ElButton, { class: 'copy-action', link: true, type: 'primary', size: 'small', loading: componentProps.loading, onClick: () => emit('copy', componentProps.value) }, () => '复制'),
+      h(ElButton, {
+        class: 'copy-action',
+        link: true,
+        type: 'primary',
+        size: 'small',
+        loading: componentProps.loading,
+        'aria-label': `复制${componentProps.label}`,
+        onClick: () => emit('copy', componentProps.value, componentProps.label),
+      }, () => '复制'),
     ]);
   },
 });
@@ -204,22 +242,29 @@ const InfoValue = defineComponent({
 const CommandRows = defineComponent({
   props: {
     commands: { type: Array as () => CommandItem[], required: true },
-    loadingFor: { type: Function as PropType<(value: string) => boolean>, required: true },
+    loadingFor: { type: Function as PropType<(value: string, operation?: string) => boolean>, required: true },
   },
   emits: ['copy'],
   setup(componentProps, { emit }) {
-    return () => h('div', { class: 'command-list' }, componentProps.commands.map(command => h(ElInput, {
-      class: 'command-input',
-      modelValue: command.value,
-      readonly: true,
-      size: 'small',
-    }, {
-      append: () => h(ElButton, {
-        'data-testid': `connection-command-${command.label.includes('SFTP') ? 'sftp' : 'ssh'}`,
-        loading: componentProps.loadingFor(command.value),
-        onClick: () => emit('copy', command.value),
-      }, () => `复制${command.label}`),
-    })));
+    return () => h('div', { class: 'command-list' }, componentProps.commands.map(command => h('div', {
+      class: 'command-row',
+    }, [
+      h('span', { class: 'command-row__heading' }, command.label),
+      h(ElInput, {
+        class: 'command-input',
+        modelValue: command.value,
+        readonly: true,
+        size: 'small',
+        'aria-label': command.label,
+      }, {
+        append: () => h(ElButton, {
+          'data-testid': `connection-command-${command.label.includes('SFTP') ? 'sftp' : 'ssh'}`,
+          'aria-label': `复制${command.label}`,
+          loading: componentProps.loadingFor(command.value, command.label),
+          onClick: () => emit('copy', command.value, command.label),
+        }, () => '复制'),
+      }),
+    ])));
   },
 });
 
@@ -240,6 +285,7 @@ const props = withDefaults(defineProps<{
 const emit = defineEmits<{ (event: 'update:modelValue', value: boolean): void }>();
 const router = useRouter();
 const preferences = usePreferencesStore();
+const databaseClient = useDatabaseClientStore();
 const visible = computed({ get: () => props.modelValue, set: value => emit('update:modelValue', value) });
 const dialogTitle = computed(() => props.resourceType === 'host' ? '主机连接配置' : '数据库连接配置');
 const protocolLabel = computed(() => props.protocol.toUpperCase());
@@ -352,6 +398,27 @@ const sshClientUrl = computed(() => {
     port: connectionInfo.value.port,
   });
 });
+const dbeaverConfigurationCommand = computed(() => {
+  if (
+    props.resourceType !== 'database'
+    || isRedis.value
+    || !connectionInfo.value
+    || !secureGatewayTLS.value
+    || !databaseClient.configured
+  ) {
+    return '';
+  }
+  return buildDBeaverConfigurationCommand({
+    platform: databaseClient.value.platform,
+    executablePath: databaseClient.value.executablePath,
+    protocol: props.protocol,
+    host: connectionInfo.value.host,
+    port: connectionInfo.value.port,
+    username: connectionInfo.value.compactUser,
+    databaseName: databaseName.value,
+    connectionName: props.resourceName || 'Jianmen 临时连接',
+  });
+});
 
 const initClientVisible = ref(false);
 const initClientType = ref('xshell');
@@ -390,7 +457,7 @@ function operationCounterKey(operation: string): string {
   return `${currentTargetSnapshotKey()}:${operation}`;
 }
 
-function isCopyInFlight(value: string, operation = value): boolean {
+function isCopyInFlight(value: string, operation = 'value'): boolean {
   return Boolean(value) && isInFlight(operationCounters, operationCounterKey(`copy:${operation}`), 'copy');
 }
 
@@ -404,12 +471,23 @@ watch(
       testRequest.invalidate();
       creatingSession.value = false;
       connectionTesting.value = false;
+      clearConnectionState();
       return;
     }
     const snapshot = captureTargetSnapshot();
     if (snapshot) void initializeConnection(snapshot);
   },
 );
+
+function clearConnectionState() {
+  connectionError.value = '';
+  connectionTestResult.value = null;
+  connectionInfo.value = null;
+  temporaryPassword.value = '';
+  temporaryPasswordExpiresAt.value = '';
+  databaseName.value = 'postgres';
+  for (const key of Object.keys(operationCounters)) delete operationCounters[key];
+}
 
 async function initializeConnection(snapshot: ConnectionTargetSnapshot) {
   const request = initializeRequest.begin(snapshot.key, async () => {
@@ -431,12 +509,7 @@ async function initializeConnection(snapshot: ConnectionTargetSnapshot) {
     return { session, credential, gateway: null };
   });
   const token = request.token;
-  connectionError.value = '';
-  connectionTestResult.value = null;
-  connectionInfo.value = null;
-  temporaryPassword.value = '';
-  temporaryPasswordExpiresAt.value = '';
-  databaseName.value = 'postgres';
+  clearConnectionState();
   creatingSession.value = true;
   if (snapshot.resourceType === 'database' && isGatewayOnlyDatabaseProtocol(snapshot.protocol)) {
     testRequest.invalidate();
@@ -510,7 +583,7 @@ async function testConnection(snapshot: ConnectionTargetSnapshot) {
   }
 }
 
-async function copyValue(value: string, operation = value) {
+async function copyValue(value: string, operation = 'value') {
   if (!value) return;
   const key = operationCounterKey(`copy:${operation}`);
   if (!beginInFlightIfIdle(operationCounters, key, 'copy')) return;
@@ -560,6 +633,20 @@ function openInBrowser() {
   router.push({ path: '/web-terminal', query: { target_id: targetID } });
 }
 
+function openDatabaseClientSettings() {
+  const returnTo = router.currentRoute.value.fullPath;
+  visible.value = false;
+  void router.push({ path: '/settings', query: { tab: 'database', return_to: returnTo } });
+}
+
+async function copyDBeaverConfigurationCommand() {
+  if (!dbeaverConfigurationCommand.value) {
+    ElMessage.warning('请先完成本地数据库客户端设置');
+    return;
+  }
+  await copyValue(dbeaverConfigurationCommand.value, 'dbeaver');
+}
+
 function pickClientFile() {
   const input = document.createElement('input');
   input.type = 'file'; input.accept = '.exe';
@@ -596,7 +683,7 @@ function formatExpiresAt(value: string): string {
 </script>
 
 <style scoped>
-.dialog-content { display: flex; flex-direction: column; gap: 10px; }
+.dialog-content { display: flex; min-width: 0; flex-direction: column; gap: 10px; }
 .resource-summary { display: grid; grid-template-columns: auto minmax(0, 1fr) minmax(260px, auto); gap: 12px; align-items: center; padding: 12px 14px; border: 1px solid var(--el-border-color-light); border-radius: 12px; background: linear-gradient(135deg, var(--el-fill-color-light), transparent); }
 .resource-icon { display: grid; place-items: center; width: 44px; height: 44px; border-radius: 10px; background: var(--el-color-primary); color: white; font-size: 12px; font-weight: 800; letter-spacing: .06em; }
 .resource-main { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
@@ -609,6 +696,11 @@ function formatExpiresAt(value: string): string {
 .shared-connection-panel { overflow: hidden; border: 1px solid var(--el-border-color-light); border-radius: 10px; }
 .shared-connection-panel .detail-grid { border-top: 0; }
 .mysql-detection-notice { margin: 10px 14px; }
+.gateway-tls-panel { display: grid; gap: 1px; background: var(--el-border-color-lighter); border-top: 1px solid var(--el-border-color-lighter); }
+.gateway-tls-panel > * { background: var(--el-bg-color); }
+.gateway-tls-panel :deep(.el-form-item) { margin: 0; padding: 9px 14px; }
+.gateway-tls-hint { margin: 0; padding: 9px 14px; color: var(--el-text-color-secondary); font-size: 12px; line-height: 1.5; }
+.gateway-tls-actions { display: flex; flex-wrap: wrap; gap: 8px; padding: 10px 14px; }
 :deep(.copy-action) { justify-self: end; }
 .connect-error { color: var(--el-color-danger); }
 .loading-state { padding: 30px 0; text-align: center; }
@@ -628,7 +720,9 @@ function formatExpiresAt(value: string): string {
 .accent-value code { color: var(--el-color-warning-dark-2); font-size: 14px; font-weight: 800; letter-spacing: .04em; }
 .password-label { color: var(--el-text-color-regular) !important; font-size: 14px !important; }
 .password-hint { grid-column: 2 / 4; color: var(--el-text-color-secondary); font-size: 13px; font-weight: 400; line-height: 1.5; }
-.command-list { display: flex; flex-direction: column; gap: 8px; padding: 10px 14px; border-top: 1px solid var(--el-border-color-lighter); background: var(--el-fill-color-extra-light); }
+.command-list { display: flex; flex-direction: column; gap: 10px; padding: 10px 14px; border-top: 1px solid var(--el-border-color-lighter); background: var(--el-fill-color-extra-light); }
+.command-row { display: grid; min-width: 0; gap: 5px; }
+.command-row__heading { color: var(--el-text-color-secondary); font-size: 12px; }
 :deep(.command-input .el-input__inner) { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 12px; }
 .path-field { display: flex; gap: 8px; width: 100%; }
 .path-help { margin-top: 5px; color: var(--el-text-color-secondary); font-size: 12px; }
@@ -638,5 +732,13 @@ function formatExpiresAt(value: string): string {
   .source-meta { grid-column: 1 / -1; }
   .connection-panel header { align-items: flex-start; flex-direction: column; gap: 6px; }
   .expiry-summary { align-items: flex-start; flex-direction: column; gap: 2px; }
+  .detail-item { grid-template-columns: minmax(0, 1fr) auto; }
+  .detail-item > span { grid-column: 1 / -1; }
+  .password-hint { grid-column: 1 / -1; }
+  .path-field { align-items: stretch; flex-direction: column; }
+  :deep(.connection-config-dialog .el-dialog__footer),
+  :deep(.local-client-dialog .el-dialog__footer) { display: flex; flex-wrap: wrap; gap: 8px; }
+  :deep(.connection-config-dialog .el-dialog__footer .el-button),
+  :deep(.local-client-dialog .el-dialog__footer .el-button) { flex: 1 1 180px; margin: 0; }
 }
 </style>

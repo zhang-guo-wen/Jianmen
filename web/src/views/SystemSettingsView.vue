@@ -843,11 +843,14 @@ function errorMessage(error: unknown, fallback: string): string {
 .system-settings-page {
   flex: 1;
   min-height: 0;
+  min-width: 0;
   padding-right: 4px;
+  overflow-x: hidden;
   overflow-y: auto;
 }
 
 .system-settings-card {
+  width: 100%;
   min-height: 100%;
   border: 1px solid var(--color-border);
   border-radius: 18px;
@@ -881,7 +884,12 @@ function errorMessage(error: unknown, fallback: string): string {
   gap: 20px;
 }
 
+.card-header > :first-child {
+  min-width: 0;
+}
+
 .header-title {
+  flex-wrap: wrap;
   gap: 10px;
   font-size: 18px;
   font-weight: 750;
@@ -891,11 +899,16 @@ function errorMessage(error: unknown, fallback: string): string {
   margin: 5px 0 0;
   color: var(--color-text-secondary);
   font-size: 13px;
+  line-height: 1.6;
 }
 
 .header-actions {
   flex-shrink: 0;
   gap: 10px;
+}
+
+.header-actions :deep(.el-button + .el-button) {
+  margin-left: 0;
 }
 
 .load-error,
@@ -941,7 +954,9 @@ function errorMessage(error: unknown, fallback: string): string {
 .revision-item {
   display: flex;
   align-items: baseline;
+  flex-wrap: wrap;
   gap: 8px;
+  min-width: 0;
   min-height: 58px;
   padding: 12px 16px;
   background: var(--color-surface-muted);
@@ -955,10 +970,15 @@ function errorMessage(error: unknown, fallback: string): string {
 
 .revision-item strong {
   font-size: 16px;
+  overflow-wrap: anywhere;
 }
 
 .revision-item--wide {
   justify-content: flex-end;
+}
+
+.revision-item small {
+  overflow-wrap: anywhere;
 }
 
 .settings-tabs {
@@ -982,7 +1002,7 @@ function errorMessage(error: unknown, fallback: string): string {
 
 .policy-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 460px), 1fr));
   align-items: start;
   gap: 18px;
   padding: 22px;
@@ -998,6 +1018,17 @@ function errorMessage(error: unknown, fallback: string): string {
 
 .gateway-mode-control {
   flex-shrink: 0;
+  max-width: 100%;
+}
+
+.gateway-mode-control :deep(.el-radio-button) {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.gateway-mode-control :deep(.el-radio-button__inner) {
+  width: 100%;
+  white-space: nowrap;
 }
 
 .infrastructure-stack {
@@ -1007,6 +1038,7 @@ function errorMessage(error: unknown, fallback: string): string {
 }
 
 .settings-section {
+  max-width: 100%;
   min-width: 0;
   padding: 22px;
   border: 1px solid var(--color-border);
@@ -1040,9 +1072,9 @@ function errorMessage(error: unknown, fallback: string): string {
 }
 
 .setting-row {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) max-content;
   align-items: center;
-  justify-content: space-between;
   gap: 22px;
   min-height: 72px;
   padding: 14px 0;
@@ -1074,14 +1106,18 @@ function errorMessage(error: unknown, fallback: string): string {
 }
 
 .number-control {
-  display: flex;
-  flex-shrink: 0;
+  display: grid;
+  grid-template-columns: minmax(120px, 150px) max-content;
+  justify-content: end;
   align-items: center;
   gap: 8px;
+  max-width: 100%;
+  min-width: 0;
 }
 
 .number-control .el-input-number {
   width: 150px;
+  max-width: 100%;
 }
 
 .number-control > span {
@@ -1091,7 +1127,12 @@ function errorMessage(error: unknown, fallback: string): string {
 }
 
 .number-control > .number-control__exact {
-  min-width: max-content;
+  grid-column: 1 / -1;
+  justify-self: end;
+  min-width: 0;
+  max-width: 100%;
+  text-align: right;
+  overflow-wrap: anywhere;
   font-family: "Cascadia Mono", Consolas, monospace;
 }
 
@@ -1105,7 +1146,7 @@ function errorMessage(error: unknown, fallback: string): string {
 }
 
 code {
-  color: var(--color-text-primary);
+  color: var(--color-text);
   font-family: "Cascadia Mono", Consolas, monospace;
   overflow-wrap: anywhere;
 }
@@ -1114,13 +1155,13 @@ code {
   margin: 22px;
 }
 
-@media (max-width: 1060px) {
+@media (max-width: 1240px) {
   .policy-grid {
     grid-template-columns: 1fr;
   }
 }
 
-@media (max-width: 720px) {
+@media (max-width: 1100px) {
   :deep(.system-settings-card > .el-card__header) {
     position: static;
   }
@@ -1158,14 +1199,28 @@ code {
   }
 
   .setting-row {
+    grid-template-columns: minmax(0, 1fr);
     align-items: flex-start;
-    flex-direction: column;
     gap: 12px;
   }
 
-  .number-control,
-  .number-control .el-input-number,
+  .number-control {
+    grid-template-columns: minmax(0, 180px) max-content;
+    justify-content: start;
+    width: 100%;
+  }
+
+  .number-control .el-input-number {
+    width: 100%;
+  }
+
+  .number-control > .number-control__exact {
+    justify-self: start;
+    text-align: left;
+  }
+
   .gateway-mode-control {
+    display: flex;
     width: 100%;
   }
 
@@ -1173,9 +1228,41 @@ code {
     margin: 14px;
   }
 
-  :deep(.el-descriptions__body .el-descriptions__table) {
-    display: block;
+  :deep(.el-descriptions__body) {
+    max-width: 100%;
     overflow-x: auto;
+  }
+
+  :deep(.el-descriptions__body .el-descriptions__table) {
+    min-width: 640px;
+  }
+}
+
+@media (max-width: 520px) {
+  .revision-strip {
+    grid-template-columns: 1fr;
+  }
+
+  .revision-item--wide {
+    grid-column: auto;
+  }
+
+  .header-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .header-actions .el-button {
+    width: 100%;
+  }
+
+  .gateway-mode-control :deep(.el-radio-button__inner) {
+    padding-right: 10px;
+    padding-left: 10px;
+  }
+
+  :deep(.el-descriptions__body .el-descriptions__table) {
+    min-width: 560px;
   }
 }
 </style>

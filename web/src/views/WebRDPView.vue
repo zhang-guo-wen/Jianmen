@@ -9,16 +9,17 @@
         <span class="target-name" :title="displayTargetName">
           {{ displayTargetName }}
         </span>
-        <el-tag v-if="approvalId" size="small" type="warning" effect="dark">
+        <el-tag v-if="approvalId" class="approval-tag" size="small" type="warning" effect="dark">
           审批 {{ approvalId }}
         </el-tag>
-        <span class="status-badge" :class="status">
+        <span class="status-badge" :class="status" role="status" aria-live="polite">
           <span class="status-dot"></span>
           {{ statusLabel }}
         </span>
       </div>
 
       <div class="toolbar-actions">
+        <div class="toolbar-secondary-actions" aria-label="远程桌面辅助操作">
         <el-tooltip :content="clipboardReadTooltip" placement="bottom">
           <span class="tooltip-trigger">
             <el-button
@@ -97,6 +98,7 @@
           <span class="tooltip-trigger">
             <el-button
               size="small"
+              aria-label="缩小远程画面"
               :disabled="status !== 'connected' || scale <= 0.25"
               circle
               @click="setScale(scale - 0.1)"
@@ -110,6 +112,7 @@
           <span class="tooltip-trigger">
             <el-button
               size="small"
+              aria-label="放大远程画面"
               :disabled="status !== 'connected' || scale >= 3"
               circle
               @click="setScale(scale + 0.1)"
@@ -141,8 +144,15 @@
             </el-button>
           </span>
         </el-tooltip>
+        </div>
+        <div class="toolbar-session-actions" aria-label="会话操作">
         <el-tooltip :content="isFullscreen ? '退出全屏' : '进入全屏'" placement="bottom">
-          <el-button size="small" circle @click="toggleFullscreen">
+          <el-button
+            size="small"
+            circle
+            :aria-label="isFullscreen ? '退出全屏' : '进入全屏'"
+            @click="toggleFullscreen"
+          >
             <el-icon><FullScreen /></el-icon>
           </el-button>
         </el-tooltip>
@@ -155,6 +165,7 @@
         >
           断开
         </el-button>
+        </div>
       </div>
     </header>
 
@@ -164,6 +175,8 @@
       <div
         v-if="status === 'requesting-ticket' || status === 'connecting'"
         class="rdp-overlay"
+        role="status"
+        aria-live="polite"
       >
         <el-icon class="is-loading overlay-icon" :size="34"><Loading /></el-icon>
         <strong>
@@ -172,7 +185,7 @@
         <span>连接建立后，键盘和鼠标操作将发送到目标 Windows 主机</span>
       </div>
 
-      <div v-else-if="status === 'error'" class="rdp-overlay">
+      <div v-else-if="status === 'error'" class="rdp-overlay" role="status" aria-live="polite">
         <el-icon class="overlay-icon error-icon" :size="34"><WarningFilled /></el-icon>
         <strong>连接失败</strong>
         <span>{{ error || '无法建立 Web RDP 连接' }}</span>
@@ -188,7 +201,7 @@
         </div>
       </div>
 
-      <div v-else-if="status === 'disconnected'" class="rdp-overlay">
+      <div v-else-if="status === 'disconnected'" class="rdp-overlay" role="status" aria-live="polite">
         <el-icon class="overlay-icon" :size="34"><CircleClose /></el-icon>
         <strong>远程桌面已断开</strong>
         <span>可重新申请票据并建立新连接</span>
@@ -409,7 +422,7 @@ function requestAccess() {
   disconnect();
   void router.push({
     path: '/audit',
-    query: { scope: 'rdp', account_id: targetId.value },
+    query: { scope: 'rdp', section: 'approvals', account_id: targetId.value },
   });
 }
 
@@ -523,15 +536,20 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   width: 100%;
-  height: calc(100vh - 60px);
-  min-height: 420px;
+  height: 100dvh;
+  min-height: 0;
+  padding:
+    env(safe-area-inset-top)
+    env(safe-area-inset-right)
+    env(safe-area-inset-bottom)
+    env(safe-area-inset-left);
   overflow: hidden;
   color: #dbe5f2;
   background: #10151d;
 }
 
 .web-rdp-page:fullscreen {
-  height: 100vh;
+  height: 100dvh;
 }
 
 .rdp-toolbar {
@@ -547,7 +565,9 @@ onUnmounted(() => {
 }
 
 .toolbar-identity,
-.toolbar-actions {
+.toolbar-actions,
+.toolbar-secondary-actions,
+.toolbar-session-actions {
   display: flex;
   align-items: center;
   gap: 7px;
@@ -560,8 +580,19 @@ onUnmounted(() => {
 
 .toolbar-actions {
   flex: 0 1 auto;
-  overflow-x: auto;
+  overflow: hidden;
   padding-bottom: 1px;
+}
+
+.toolbar-secondary-actions {
+  min-width: 0;
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+  scrollbar-width: thin;
+}
+
+.toolbar-session-actions {
+  flex: 0 0 auto;
 }
 
 .toolbar-back {
@@ -575,6 +606,12 @@ onUnmounted(() => {
   font-size: 13px;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.approval-tag {
+  max-width: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .status-badge {
@@ -648,12 +685,15 @@ onUnmounted(() => {
   width: 100%;
   height: 100%;
   overflow: auto;
-  outline: none;
 }
 
 :deep(.rdp-display > div) {
   flex: 0 0 auto;
-  outline: none;
+}
+
+:deep(.rdp-display > div:focus-visible) {
+  outline: 2px solid #60a5fa;
+  outline-offset: -2px;
 }
 
 .rdp-overlay {
@@ -706,6 +746,7 @@ onUnmounted(() => {
   overflow-x: auto;
   color: #75879a;
   font-size: 11px;
+  font-variant-numeric: tabular-nums;
   white-space: nowrap;
   border-top: 1px solid #25303d;
   background: #121923;
@@ -723,8 +764,39 @@ onUnmounted(() => {
     width: 100%;
   }
 
+  .toolbar-actions {
+    justify-content: space-between;
+  }
+
+  .toolbar-secondary-actions {
+    flex: 1 1 auto;
+  }
+
   .target-name {
     max-width: 45vw;
+  }
+}
+
+@media (max-width: 600px) {
+  .rdp-toolbar {
+    padding-inline: 8px;
+  }
+
+  .toolbar-secondary-actions {
+    padding-right: 8px;
+    mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent);
+  }
+
+  .approval-tag {
+    display: none;
+  }
+
+  .target-name {
+    max-width: 38vw;
+  }
+
+  .rdp-footer {
+    gap: 10px;
   }
 }
 </style>

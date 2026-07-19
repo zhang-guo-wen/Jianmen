@@ -57,6 +57,8 @@ export function endInFlight(
   const account = counters[key];
   if (!account) return;
   account[operation] = Math.max(0, (account[operation] ?? 0) - 1);
+  if (account[operation] === 0) delete account[operation];
+  if (!Object.values(account).some(count => (count ?? 0) > 0)) delete counters[key];
 }
 
 export function isInFlight(

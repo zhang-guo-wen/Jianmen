@@ -1,31 +1,34 @@
 ﻿<template>
   <el-config-provider :locale="elementLocale">
-    <router-view v-if="isLoginRoute" />
+    <router-view v-if="isStandaloneRoute" />
     <el-container v-else class="app-shell">
-      <el-aside class="app-sidebar" width="174px">
+      <a class="skip-link" href="#main-content">跳转到主内容</a>
+      <el-aside class="app-sidebar" width="var(--sidebar-width)">
         <div class="brand">
-          <div class="brand-mark">JM</div>
+          <div class="brand-mark" aria-hidden="true">JM</div>
           <div class="brand-copy">
             <strong>Jianmen</strong>
             <span>{{ t("app.subtitle") }}</span>
           </div>
         </div>
-        <el-menu
-          :default-active="activePath"
-          class="nav-menu"
-          router
-          text-color="#cbd5e1"
-          active-text-color="#ffffff"
-        >
-          <el-menu-item
-            v-for="item in navItems"
-            :key="item.path"
-            :index="item.path"
+        <nav class="app-nav" aria-label="主导航">
+          <el-menu
+            :default-active="activePath"
+            class="nav-menu"
+            router
+            text-color="#cbd5e1"
+            active-text-color="#ffffff"
           >
-            <el-icon><component :is="item.icon" /></el-icon>
-            <span>{{ t(item.labelKey) }}</span>
-          </el-menu-item>
-        </el-menu>
+            <el-menu-item
+              v-for="item in navItems"
+              :key="item.path"
+              :index="item.path"
+            >
+              <el-icon aria-hidden="true"><component :is="item.icon" /></el-icon>
+              <span>{{ t(item.labelKey) }}</span>
+            </el-menu-item>
+          </el-menu>
+        </nav>
         <div class="sidebar-footer">
           <el-button
             class="sidebar-logout"
@@ -33,7 +36,7 @@
             plain
             @click="logout"
           >
-            <el-icon><SwitchButton /></el-icon>
+            <el-icon aria-hidden="true"><SwitchButton /></el-icon>
             {{ t("common.logout") }}
           </el-button>
         </div>
@@ -46,8 +49,8 @@
             <p>{{ pageDescription }}</p>
           </div>
         </el-header>
-        <el-main class="app-main">
-          <div v-if="permission.error" class="permission-banner" role="status">
+        <el-main id="main-content" class="app-main" tabindex="-1">
+          <div v-if="permission.error" class="permission-banner" role="status" aria-live="polite">
             <span>{{ permission.error }}</span>
             <el-button
               link
@@ -83,8 +86,8 @@ const route = useRoute();
 const router = useRouter();
 const { elementLocale, t } = useI18n();
 
-const isLoginRoute = computed(
-  () => route.name === "login" || route.name === "setup",
+const isStandaloneRoute = computed(
+  () => route.name === "login" || route.name === "setup" || route.meta.immersive === true,
 );
 const activePath = computed(() => route.path);
 const permission = usePermissionStore();
@@ -94,7 +97,7 @@ const navItems = computed(() =>
 );
 
 onMounted(async () => {
-	if (!isLoginRoute.value && getCSRFToken()) {
+	if (!isStandaloneRoute.value && getCSRFToken()) {
     await Promise.all([permission.fetch(), preferences.fetch().catch(() => undefined)]);
   }
 });

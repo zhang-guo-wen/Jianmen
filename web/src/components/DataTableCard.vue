@@ -1,10 +1,13 @@
 <template>
-  <div class="page-card data-table-card">
+  <div ref="card" class="page-card data-table-card">
     <div class="page-card__toolbar" v-if="showSearch || $slots['toolbar-extra']">
       <div class="page-card__search" v-if="showSearch">
         <el-input
           v-model="searchText"
           :placeholder="searchPlaceholder"
+          :aria-label="searchPlaceholder"
+          name="table_search"
+          autocomplete="off"
           clearable
           @keyup.enter="emit('search', searchText)"
           @clear="emit('search', '')"
@@ -25,8 +28,8 @@
         :row-key="rowKey"
         v-loading="loading"
         size="small"
-        highlight-current-row
-        @row-click="(row: any) => emit('row-click', row)"
+        :highlight-current-row="rowClickable"
+        @row-click="handleRowClick"
         style="width: 100%"
         height="100%"
       >
@@ -39,7 +42,8 @@
         v-model:page-size="currentPageSizeModel"
         :page-sizes="pageSizes"
         :total="total"
-        layout="total, sizes, prev, pager, next"
+        :layout="paginationLayout"
+        :pager-count="compactPagination ? 5 : 7"
         size="small"
         background
       />
@@ -48,7 +52,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, useTemplateRef } from 'vue'
 import { Search } from '@element-plus/icons-vue'
 
 const props = withDefaults(
@@ -63,13 +67,15 @@ const props = withDefaults(
     searchPlaceholder?: string
     search?: string
     rowKey?: string
+    rowClickable?: boolean
   }>(),
   {
     loading: false,
     pageSizes: () => [20, 50, 100],
     showSearch: true,
-    searchPlaceholder: '搜索...',
+    searchPlaceholder: '搜索…',
     rowKey: 'id',
+    rowClickable: false,
   },
 )
 
@@ -82,6 +88,13 @@ const emit = defineEmits<{
 }>()
 
 const localSearchText = ref('')
+const card = useTemplateRef<HTMLElement>('card')
+const compactPagination = shallowRef(false)
+let resizeObserver: ResizeObserver | undefined
+
+const paginationLayout = computed(() =>
+  compactPagination.value ? 'prev, pager, next' : 'total, sizes, prev, pager, next',
+)
 const searchText = computed({
   get: () => props.search ?? localSearchText.value,
   set: (value: string) => {
@@ -98,4 +111,44 @@ const currentPageSizeModel = computed({
   get: () => props.pageSize,
   set: (v) => emit('update:pageSize', v),
 })
+
+function handleRowClick(row: any) {
+  if (props.rowClickable) emit('row-click', row)
+}
+
+function measurePagination() {
+  compactPagination.value = Boolean(card.value && card.value.clientWidth < 560)
+}
+
+onMounted(() => {
+  resizeObserver = new ResizeObserver(measurePagination)
+  if (card.value) resizeObserver.observe(card.value)
+  void nextTick(measurePagination)
+})
+
+onBeforeUnmount(() => resizeObserver?.disconnect())
 </script>
+
+<style scoped>
+.data-table-card > .page-card__body {
+  overflow: hidden;
+}
+
+.data-table-card > .page-card__footer {
+  min-width: 0;
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+  scrollbar-width: thin;
+}
+
+.data-table-card > .page-card__footer :deep(.el-pagination) {
+  flex: 0 0 auto;
+}
+
+@media (max-width: 560px) {
+  .data-table-card > .page-card__footer {
+    justify-content: center;
+    padding-inline: 8px;
+  }
+}
+</style>

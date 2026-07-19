@@ -3,8 +3,9 @@
     :model-value="visible"
     @update:model-value="emit('update:visible', $event)"
     :title="title"
-    :width="width"
+    :width="dialogWidth"
     :close-on-click-modal="false"
+    class="form-dialog"
     destroy-on-close
   >
     <div class="form-dialog-body">
@@ -20,7 +21,9 @@
 </template>
 
 <script setup lang="ts">
-withDefaults(
+import { computed } from 'vue'
+
+const props = withDefaults(
   defineProps<{
     visible: boolean
     title: string
@@ -35,6 +38,10 @@ withDefaults(
   },
 )
 
+const dialogWidth = computed(() =>
+  props.width.startsWith('min(') ? props.width : `min(${props.width}, calc(100vw - 24px))`,
+)
+
 const emit = defineEmits<{
   'update:visible': [value: boolean]
   submit: []
@@ -43,8 +50,41 @@ const emit = defineEmits<{
 
 <style scoped>
 .form-dialog-body {
-  max-height: 60vh;
+  max-height: min(64dvh, 680px);
   overflow-y: auto;
-  padding-right: 4px;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+:deep(.form-dialog) {
+  display: flex;
+  max-height: calc(100dvh - 24px);
+  flex-direction: column;
+}
+
+:deep(.form-dialog .el-dialog__body) {
+  min-height: 0;
+  padding-right: 16px;
+}
+
+:deep(.form-dialog .el-dialog__footer) {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+:deep(.form-dialog .el-dialog__footer .el-button) {
+  margin: 0;
+}
+
+@media (max-width: 520px) {
+  :deep(.form-dialog .el-dialog__body) {
+    padding: 14px 12px;
+  }
+
+  :deep(.form-dialog .el-dialog__footer .el-button) {
+    flex: 1 1 120px;
+  }
 }
 </style>

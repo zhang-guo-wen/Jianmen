@@ -11,7 +11,7 @@
             v-model:page="sessionPage"
             v-model:page-size="sessionPageSize"
             v-model:search="sessionKeyword"
-            search-placeholder="搜索会话..."
+            search-placeholder="搜索会话…"
             @search="onSessionSearch"
           >
             <template #toolbar-extra>
@@ -65,226 +65,260 @@
       </el-tab-pane>
       <el-tab-pane v-if="canAccessRDPTab" :label="t('audit.scope.rdp')" name="rdp">
         <div class="page-container rdp-audit-page">
-          <template v-if="canViewRDPRecordings">
-            <el-alert
-              v-if="rdpError"
-              :title="rdpError"
-              type="error"
-              show-icon
-              style="margin-bottom: 12px"
-            />
-            <div class="rdp-filter-panel">
-              <el-input
-                v-model="rdpUserID"
-                clearable
-                placeholder="用户 ID"
-                @keyup.enter="applyRDPFilters"
-              />
-              <el-input
-                v-model="rdpAccountID"
-                clearable
-                placeholder="主机账号 ID"
-                @keyup.enter="applyRDPFilters"
-              />
-              <el-date-picker
-                v-model="rdpDateRange"
-                type="datetimerange"
-                range-separator="至"
-                start-placeholder="开始时间"
-                end-placeholder="结束时间"
-                value-format="YYYY-MM-DDTHH:mm:ss.SSSZ"
-              />
-              <el-select v-model="rdpOutcome" clearable placeholder="连接结果">
-                <el-option label="全部结果" value="" />
-                <el-option label="成功" value="succeeded" />
-                <el-option label="失败" value="failed" />
-                <el-option label="已拒绝" value="denied" />
-                <el-option label="已中止" value="terminated" />
-                <el-option label="进行中" value="active" />
-                <el-option label="连接中" value="connecting" />
-              </el-select>
-              <el-button type="primary" @click="applyRDPFilters">筛选</el-button>
-              <el-button @click="resetRDPFilters">重置</el-button>
-            </div>
-            <DataTableCard
-              :data="rdpSessions"
-              :loading="rdpLoading"
-              :total="rdpTotal"
-              v-model:page="rdpPage"
-              v-model:page-size="rdpPageSize"
-              :show-search="false"
-            >
-              <template #toolbar-extra>
-                <el-button :loading="rdpLoading" :icon="Refresh" @click="loadRDPSessions">
-                  {{ t('common.refresh') }}
-                </el-button>
-              </template>
-              <el-table-column label="Windows 主机" min-width="180" show-overflow-tooltip>
-                <template #default="{ row }">{{ rdpSessionTarget(row) }}</template>
-              </el-table-column>
-              <el-table-column label="主机账号" min-width="150" show-overflow-tooltip>
-                <template #default="{ row }">{{ rdpSessionAccount(row) }}</template>
-              </el-table-column>
-              <el-table-column label="操作用户" min-width="130" show-overflow-tooltip>
-                <template #default="{ row }">{{ row.username || row.user_id || '-' }}</template>
-              </el-table-column>
-              <el-table-column label="结果" width="100">
-                <template #default="{ row }">
-                  <el-tooltip
-                    :disabled="!row.failure_message"
-                    :content="row.failure_message || ''"
-                    placement="top"
-                  >
-                    <el-tag :type="rdpOutcomeTag(row.outcome)" size="small" effect="plain">
-                      {{ rdpOutcomeLabel(row.outcome) }}
-                    </el-tag>
-                  </el-tooltip>
-                </template>
-              </el-table-column>
-              <el-table-column label="开始时间" width="170" class-name="col-time">
-                <template #default="{ row }">{{ formatTime(row.started_at) }}</template>
-              </el-table-column>
-              <el-table-column label="时长" width="90">
-                <template #default="{ row }">
-                  {{ formatDurationSeconds(computeDuration(row.started_at, row.ended_at)) }}
-                </template>
-              </el-table-column>
-              <el-table-column label="录屏" width="100">
-                <template #default="{ row }">
-                  <el-tag :type="rdpRecordingTag(row.recording_status)" size="small" effect="plain">
-                    {{ rdpRecordingLabel(row.recording_status) }}
-                  </el-tag>
-                </template>
-              </el-table-column>
-              <el-table-column :label="t('common.actions')" fixed="right" width="90">
-                <template #default="{ row }">
-                  <el-button
-                    :disabled="!row.has_replay"
-                    link
-                    type="success"
-                    @click="openRDPReplay(row)"
-                  >
-                    回放
-                  </el-button>
-                </template>
-              </el-table-column>
-            </DataTableCard>
-          </template>
-
-          <el-divider v-if="canUseRDPApprovals" content-position="left">RDP 访问审批</el-divider>
-          <section v-if="canUseRDPApprovals" class="rdp-approval-panel">
-            <el-form
-              v-if="permission.canDo('rdp:connect')"
-              class="rdp-request-form"
-              label-position="top"
-              @submit.prevent
-            >
-              <el-form-item label="主机账号">
-                <el-select
-                  v-model="accessRequestForm.resource_id"
-                  filterable
-                  placeholder="选择需要审批的 RDP 账号"
-                  style="width: 100%"
-                >
-                  <el-option
-                    v-for="target in rdpTargets"
-                    :key="String(target.id || target.resource_id)"
-                    :label="`${target.name || target.username || target.id} · ${target.host || ''}`"
-                    :value="String(target.id || target.resource_id)"
+          <el-tabs v-model="rdpSection" class="rdp-section-tabs">
+            <el-tab-pane v-if="canViewRDPRecordings" label="会话记录" name="sessions">
+              <section class="rdp-section-pane rdp-session-pane">
+                <el-alert
+                  v-if="rdpError"
+                  :title="rdpError"
+                  type="error"
+                  show-icon
+                />
+                <div class="rdp-filter-panel" aria-label="RDP 审计筛选">
+                  <el-input
+                    v-model="rdpUserID"
+                    class="rdp-filter-user"
+                    clearable
+                    aria-label="用户 ID"
+                    placeholder="用户 ID"
+                    @keyup.enter="applyRDPFilters"
                   />
-                </el-select>
-              </el-form-item>
-              <el-form-item label="申请原因">
-                <el-input
-                  v-model="accessRequestForm.reason"
-                  maxlength="500"
-                  show-word-limit
-                  placeholder="说明本次 Windows 访问用途"
-                />
-              </el-form-item>
-              <el-form-item label="访问截止时间">
-                <el-date-picker
-                  v-model="accessRequestForm.access_expires_at"
-                  type="datetime"
-                  value-format="YYYY-MM-DDTHH:mm:ss.SSSZ"
-                  style="width: 100%"
-                />
-              </el-form-item>
-              <el-button
-                type="primary"
-                :loading="creatingAccessRequest"
-                @click="createRDPAccessRequest"
-              >
-                提交申请
-              </el-button>
-            </el-form>
-
-            <div class="rdp-request-list">
-              <div class="rdp-request-toolbar">
-                <el-select
-                  v-model="accessRequestStatus"
-                  clearable
-                  placeholder="全部状态"
-                  style="width: 140px"
-                  @change="loadAccessRequests"
+                  <el-input
+                    v-model="rdpAccountID"
+                    class="rdp-filter-account"
+                    clearable
+                    aria-label="主机账号 ID"
+                    placeholder="主机账号 ID"
+                    @keyup.enter="applyRDPFilters"
+                  />
+                  <el-date-picker
+                    v-model="rdpDateRange"
+                    class="rdp-filter-range"
+                    type="datetimerange"
+                    aria-label="RDP 会话时间范围"
+                    range-separator="至"
+                    start-placeholder="开始时间"
+                    end-placeholder="结束时间"
+                    value-format="YYYY-MM-DDTHH:mm:ss.SSSZ"
+                  />
+                  <el-select
+                    v-model="rdpOutcome"
+                    class="rdp-filter-outcome"
+                    clearable
+                    aria-label="连接结果"
+                    placeholder="连接结果"
+                  >
+                    <el-option label="全部结果" value="" />
+                    <el-option label="成功" value="succeeded" />
+                    <el-option label="失败" value="failed" />
+                    <el-option label="已拒绝" value="denied" />
+                    <el-option label="已中止" value="terminated" />
+                    <el-option label="进行中" value="active" />
+                    <el-option label="连接中" value="connecting" />
+                  </el-select>
+                  <div class="rdp-filter-actions">
+                    <el-button type="primary" @click="applyRDPFilters">筛选</el-button>
+                    <el-button @click="resetRDPFilters">重置</el-button>
+                  </div>
+                </div>
+                <DataTableCard
+                  :data="rdpSessions"
+                  :loading="rdpLoading"
+                  :total="rdpTotal"
+                  v-model:page="rdpPage"
+                  v-model:page-size="rdpPageSize"
+                  :show-search="false"
                 >
-                  <el-option label="待审批" value="pending" />
-                  <el-option label="已批准" value="approved" />
-                  <el-option label="已拒绝" value="rejected" />
-                  <el-option label="已取消" value="cancelled" />
-                </el-select>
-                <el-button :loading="accessRequestsLoading" :icon="Refresh" @click="loadAccessRequests">
-                  刷新审批
-                </el-button>
-              </div>
-              <el-table v-loading="accessRequestsLoading" :data="accessRequests" border>
-                <el-table-column prop="requester_id" label="申请用户" min-width="140" show-overflow-tooltip />
-                <el-table-column prop="resource_id" label="主机账号 ID" min-width="170" show-overflow-tooltip />
-                <el-table-column prop="reason" label="原因" min-width="180" show-overflow-tooltip />
-                <el-table-column label="权限范围" min-width="180" show-overflow-tooltip>
-                  <template #default="{ row }">{{ accessRequestActionsLabel(row.actions) }}</template>
-                </el-table-column>
-                <el-table-column label="有效期" min-width="170" class-name="col-time">
-                  <template #default="{ row }">{{ formatTime(row.access_expires_at) }}</template>
-                </el-table-column>
-                <el-table-column label="状态" width="100">
-                  <template #default="{ row }">
-                    <el-tag :type="accessRequestStatusTag(row.status)" size="small" effect="plain">
-                      {{ accessRequestStatusLabel(row.status) }}
-                    </el-tag>
-                  </template>
-                </el-table-column>
-                <el-table-column label="操作" fixed="right" width="180">
-                  <template #default="{ row }">
-                    <template v-if="row.status === 'pending' && permission.canDo('rdp:approval:manage')">
-                      <el-button link type="success" @click="decideRDPAccessRequest(row.id, 'approve')">
-                        批准
-                      </el-button>
-                      <el-button link type="danger" @click="decideRDPAccessRequest(row.id, 'reject')">
-                        拒绝
-                      </el-button>
-                    </template>
-                    <el-button
-                      v-else-if="row.status === 'pending' && permission.canDo('rdp:connect')"
-                      link
-                      type="danger"
-                      @click="decideRDPAccessRequest(row.id, 'cancel')"
-                    >
-                      取消
+                  <template #toolbar-extra>
+                    <el-button :loading="rdpLoading" :icon="Refresh" @click="loadRDPSessions">
+                      {{ t('common.refresh') }}
                     </el-button>
                   </template>
-                </el-table-column>
-              </el-table>
-              <el-pagination
-                v-if="accessRequestTotal > accessRequestPageSize"
-                v-model:current-page="accessRequestPage"
-                :page-size="accessRequestPageSize"
-                :total="accessRequestTotal"
-                layout="total, prev, pager, next"
-                style="margin-top: 12px; justify-content: flex-end"
-              />
-            </div>
-          </section>
+                  <el-table-column label="Windows 主机" min-width="180" show-overflow-tooltip>
+                    <template #default="{ row }">{{ rdpSessionTarget(row) }}</template>
+                  </el-table-column>
+                  <el-table-column label="主机账号" min-width="150" show-overflow-tooltip>
+                    <template #default="{ row }">{{ rdpSessionAccount(row) }}</template>
+                  </el-table-column>
+                  <el-table-column label="操作用户" min-width="130" show-overflow-tooltip>
+                    <template #default="{ row }">{{ row.username || row.user_id || '-' }}</template>
+                  </el-table-column>
+                  <el-table-column label="结果" width="100">
+                    <template #default="{ row }">
+                      <el-tooltip
+                        :disabled="!row.failure_message"
+                        :content="row.failure_message || ''"
+                        placement="top"
+                      >
+                        <el-tag
+                          :type="rdpOutcomeTag(row.outcome)"
+                          :tabindex="row.failure_message ? 0 : -1"
+                          :aria-label="row.failure_message
+                            ? `${rdpOutcomeLabel(row.outcome)}：${row.failure_message}`
+                            : rdpOutcomeLabel(row.outcome)"
+                          size="small"
+                          effect="plain"
+                        >
+                          {{ rdpOutcomeLabel(row.outcome) }}
+                        </el-tag>
+                      </el-tooltip>
+                    </template>
+                  </el-table-column>
+                  <el-table-column label="开始时间" width="170" class-name="col-time">
+                    <template #default="{ row }">{{ formatTime(row.started_at) }}</template>
+                  </el-table-column>
+                  <el-table-column label="时长" width="90">
+                    <template #default="{ row }">
+                      {{ formatDurationSeconds(computeDuration(row.started_at, row.ended_at)) }}
+                    </template>
+                  </el-table-column>
+                  <el-table-column label="录屏" width="100">
+                    <template #default="{ row }">
+                      <el-tag :type="rdpRecordingTag(row.recording_status)" size="small" effect="plain">
+                        {{ rdpRecordingLabel(row.recording_status) }}
+                      </el-tag>
+                    </template>
+                  </el-table-column>
+                  <el-table-column :label="t('common.actions')" fixed="right" width="90">
+                    <template #default="{ row }">
+                      <el-button
+                        :disabled="!row.has_replay"
+                        link
+                        type="success"
+                        @click="openRDPReplay(row)"
+                      >
+                        回放
+                      </el-button>
+                    </template>
+                  </el-table-column>
+                </DataTableCard>
+              </section>
+            </el-tab-pane>
+
+            <el-tab-pane v-if="canUseRDPApprovals" label="访问审批" name="approvals">
+              <section class="rdp-section-pane rdp-approval-panel">
+                <el-form
+                  v-if="permission.canDo('rdp:connect')"
+                  class="rdp-request-form"
+                  label-position="top"
+                  @submit.prevent="createRDPAccessRequest"
+                >
+                  <el-form-item label="主机账号">
+                    <el-select
+                      v-model="accessRequestForm.resource_id"
+                      filterable
+                      aria-label="选择需要审批的 RDP 账号"
+                      placeholder="选择需要审批的 RDP 账号"
+                      style="width: 100%"
+                    >
+                      <el-option
+                        v-for="target in rdpTargets"
+                        :key="String(target.id || target.resource_id)"
+                        :label="`${target.name || target.username || target.id} · ${target.host || ''}`"
+                        :value="String(target.id || target.resource_id)"
+                      />
+                    </el-select>
+                  </el-form-item>
+                  <el-form-item label="申请原因">
+                    <el-input
+                      v-model="accessRequestForm.reason"
+                      maxlength="500"
+                      show-word-limit
+                      placeholder="说明本次 Windows 访问用途"
+                    />
+                  </el-form-item>
+                  <el-form-item label="访问截止时间">
+                    <el-date-picker
+                      v-model="accessRequestForm.access_expires_at"
+                      type="datetime"
+                      aria-label="RDP 访问截止时间"
+                      value-format="YYYY-MM-DDTHH:mm:ss.SSSZ"
+                      style="width: 100%"
+                    />
+                  </el-form-item>
+                  <el-button
+                    native-type="submit"
+                    type="primary"
+                    :loading="creatingAccessRequest"
+                  >
+                    提交申请
+                  </el-button>
+                </el-form>
+
+                <DataTableCard
+                  class="rdp-request-list"
+                  :data="accessRequests"
+                  :loading="accessRequestsLoading"
+                  :total="accessRequestTotal"
+                  v-model:page="accessRequestPage"
+                  v-model:page-size="accessRequestPageSize"
+                  :page-sizes="[20, 50]"
+                  :show-search="false"
+                >
+                  <template #toolbar-extra>
+                    <el-select
+                      v-model="accessRequestStatus"
+                      clearable
+                      aria-label="审批状态"
+                      placeholder="全部状态"
+                      class="rdp-request-status"
+                      @change="applyAccessRequestStatus"
+                    >
+                      <el-option label="待审批" value="pending" />
+                      <el-option label="已批准" value="approved" />
+                      <el-option label="已拒绝" value="rejected" />
+                      <el-option label="已取消" value="cancelled" />
+                    </el-select>
+                    <el-button
+                      :loading="accessRequestsLoading"
+                      :icon="Refresh"
+                      @click="loadAccessRequests"
+                    >
+                      刷新
+                    </el-button>
+                  </template>
+                  <el-table-column prop="requester_id" label="申请用户" min-width="140" show-overflow-tooltip />
+                  <el-table-column prop="resource_id" label="主机账号 ID" min-width="170" show-overflow-tooltip />
+                  <el-table-column prop="reason" label="原因" min-width="180" show-overflow-tooltip />
+                  <el-table-column label="权限范围" min-width="180" show-overflow-tooltip>
+                    <template #default="{ row }">{{ accessRequestActionsLabel(row.actions) }}</template>
+                  </el-table-column>
+                  <el-table-column label="有效期" min-width="170" class-name="col-time">
+                    <template #default="{ row }">{{ formatTime(row.access_expires_at) }}</template>
+                  </el-table-column>
+                  <el-table-column label="状态" width="100">
+                    <template #default="{ row }">
+                      <el-tag :type="accessRequestStatusTag(row.status)" size="small" effect="plain">
+                        {{ accessRequestStatusLabel(row.status) }}
+                      </el-tag>
+                    </template>
+                  </el-table-column>
+                  <el-table-column label="操作" fixed="right" width="120" align="right">
+                    <template #default="{ row }">
+                      <div class="table-row-actions">
+                        <template v-if="row.status === 'pending' && permission.canDo('rdp:approval:manage')">
+                          <el-button link type="success" @click="decideRDPAccessRequest(row.id, 'approve')">
+                            批准
+                          </el-button>
+                          <el-button link type="danger" @click="decideRDPAccessRequest(row.id, 'reject')">
+                            拒绝
+                          </el-button>
+                        </template>
+                        <el-button
+                          v-else-if="row.status === 'pending' && permission.canDo('rdp:connect')"
+                          link
+                          type="danger"
+                          @click="decideRDPAccessRequest(row.id, 'cancel')"
+                        >
+                          取消
+                        </el-button>
+                      </div>
+                    </template>
+                  </el-table-column>
+                </DataTableCard>
+              </section>
+            </el-tab-pane>
+          </el-tabs>
         </div>
       </el-tab-pane>
       <el-tab-pane v-if="permission.canDo('db:audit:view')" :label="t('audit.scope.db')" name="db">
@@ -297,7 +331,7 @@
             v-model:page="dbPage"
             v-model:page-size="dbPageSize"
             v-model:search="dbKeyword"
-            search-placeholder="搜索数据库连接..."
+            search-placeholder="搜索数据库连接…"
             @search="onDBSearch"
           >
             <template #toolbar-extra>
@@ -700,25 +734,30 @@
       />
       <div v-loading="rdpReplayLoading" class="rdp-replay-panel">
         <div class="rdp-replay-controls">
-          <el-button
-            type="primary"
-            :disabled="rdpReplayDuration <= 0"
-            @click="toggleRDPReplay"
-          >
-            {{ rdpReplayPlaying ? '暂停' : '播放' }}
-          </el-button>
-          <el-button :disabled="rdpReplayDuration <= 0" @click="restartRDPReplay">
-            重播
-          </el-button>
-          <span>{{ formatRDPReplayTime(rdpReplayPosition) }}</span>
-          <el-slider
-            v-model="rdpReplayPosition"
-            :max="Math.max(rdpReplayDuration, 1)"
-            :show-tooltip="false"
-            :disabled="rdpReplayDuration <= 0"
-            @change="seekRDPReplay"
-          />
-          <span>{{ formatRDPReplayTime(rdpReplayDuration) }}</span>
+          <div class="rdp-replay-actions">
+            <el-button
+              type="primary"
+              :disabled="rdpReplayDuration <= 0"
+              @click="toggleRDPReplay"
+            >
+              {{ rdpReplayPlaying ? '暂停' : '播放' }}
+            </el-button>
+            <el-button :disabled="rdpReplayDuration <= 0" @click="restartRDPReplay">
+              重播
+            </el-button>
+          </div>
+          <div class="rdp-replay-timeline">
+            <span>{{ formatRDPReplayTime(rdpReplayPosition) }}</span>
+            <el-slider
+              v-model="rdpReplayPosition"
+              :max="Math.max(rdpReplayDuration, 1)"
+              :show-tooltip="false"
+              :disabled="rdpReplayDuration <= 0"
+              aria-label="RDP 回放进度"
+              @change="seekRDPReplay"
+            />
+            <span>{{ formatRDPReplayTime(rdpReplayDuration) }}</span>
+          </div>
         </div>
         <div ref="rdpReplayHostRef" class="rdp-replay-display">
           <el-empty v-if="!rdpReplayLoading && !rdpReplayDuration && !rdpReplayError" description="录屏中暂无可播放画面" />
@@ -863,6 +902,16 @@ const canUseRDPApprovals = computed(() =>
 const canAccessRDPTab = computed(() =>
   canViewRDPRecordings.value || canUseRDPApprovals.value
 );
+const rdpSection = ref<'sessions' | 'approvals'>(
+  canUseRDPApprovals.value
+  && (
+    !canViewRDPRecordings.value
+    || initialRDPAccountID
+    || route.query.section === 'approvals'
+  )
+    ? 'approvals'
+    : 'sessions'
+);
 const rdpSessions = ref<RDPAuditSessionRecord[]>([]);
 const rdpTotal = ref(0);
 const rdpPage = ref(1);
@@ -878,7 +927,7 @@ const rdpTargets = ref<TargetRecord[]>([]);
 const accessRequests = ref<AccessRequestRecord[]>([]);
 const accessRequestTotal = ref(0);
 const accessRequestPage = ref(1);
-const accessRequestPageSize = 20;
+const accessRequestPageSize = ref(20);
 const accessRequestStatus = ref('');
 const accessRequestsLoading = ref(false);
 const creatingAccessRequest = ref(false);
@@ -1220,7 +1269,7 @@ async function loadAccessRequests() {
       protocol: 'rdp',
       status: accessRequestStatus.value || undefined,
       page: accessRequestPage.value,
-      page_size: accessRequestPageSize,
+      page_size: accessRequestPageSize.value,
     });
     accessRequests.value = response.items ?? [];
     accessRequestTotal.value = response.total ?? 0;
@@ -1230,6 +1279,14 @@ async function loadAccessRequests() {
   } finally {
     accessRequestsLoading.value = false;
   }
+}
+
+function applyAccessRequestStatus() {
+  if (accessRequestPage.value === 1) {
+    void loadAccessRequests();
+    return;
+  }
+  accessRequestPage.value = 1;
 }
 
 function requestedRDPActions(target: TargetRecord | undefined): string[] {
@@ -1493,8 +1550,15 @@ function formatTime(value: unknown): string {
     if (!Number.isNaN(parsed)) d = new Date(parsed)
   }
   if (!d || Number.isNaN(d.getTime())) return t('common.none')
-  const pad = (n: number) => String(n).padStart(2, '0')
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
+  return new Intl.DateTimeFormat('zh-CN', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hourCycle: 'h23',
+  }).format(d)
 }
 
 function formatDuration(value: unknown): string {
@@ -2378,6 +2442,14 @@ function applyRouteAuditFilter() {
     if (rdpAccountID.value) {
       accessRequestForm.value.resource_id = rdpAccountID.value;
     }
+    if (
+      canUseRDPApprovals.value
+      && (rdpAccountID.value || route.query.section === 'approvals')
+    ) {
+      rdpSection.value = 'approvals';
+    } else if (canViewRDPRecordings.value) {
+      rdpSection.value = 'sessions';
+    }
     if (rdpPage.value === 1) void loadRDPSessions();
     else rdpPage.value = 1;
     return;
@@ -2438,7 +2510,7 @@ watch([sessionPage, sessionPageSize], () => {
 watch([rdpPage, rdpPageSize], () => {
   if (auditScope.value === 'rdp') void loadRDPSessions();
 });
-watch(accessRequestPage, () => {
+watch([accessRequestPage, accessRequestPageSize], () => {
   if (auditScope.value === 'rdp') void loadAccessRequests();
 });
 watch([loginAuditPage, loginAuditPageSize], () => {
@@ -2510,25 +2582,74 @@ onBeforeUnmount(() => {
 .rdp-audit-page {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 0;
+}
+
+.rdp-section-tabs,
+.rdp-section-pane {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+}
+
+.rdp-section-tabs :deep(.el-tabs__header) {
+  flex: none;
+  margin-bottom: 12px;
+}
+
+.rdp-section-tabs :deep(.el-tabs__content),
+.rdp-section-tabs :deep(.el-tab-pane) {
+  flex: 1;
+  min-height: 0;
+}
+
+.rdp-session-pane {
+  gap: 12px;
 }
 
 .rdp-filter-panel {
   display: grid;
-  grid-template-columns: 150px 180px minmax(300px, 1fr) 130px auto auto;
+  grid-template-columns: minmax(130px, 0.8fr) minmax(150px, 1fr) minmax(280px, 1.7fr) minmax(120px, 0.7fr) auto;
   gap: 8px;
   align-items: center;
-  margin-bottom: 12px;
+}
+
+.rdp-filter-panel > * {
+  min-width: 0;
+}
+
+.rdp-filter-range {
+  width: 100% !important;
+}
+
+.rdp-filter-actions,
+.rdp-replay-actions,
+.rdp-replay-timeline,
+.table-row-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.rdp-filter-actions,
+.table-row-actions {
+  justify-content: flex-end;
+}
+
+.rdp-filter-actions :deep(.el-button),
+.table-row-actions :deep(.el-button) {
+  margin: 0;
 }
 
 .rdp-approval-panel {
   display: grid;
-  grid-template-columns: minmax(260px, 340px) minmax(0, 1fr);
-  gap: 18px;
-  min-height: 260px;
+  grid-template-columns: minmax(260px, 320px) minmax(0, 1fr);
+  gap: 14px;
 }
 
 .rdp-request-form {
+  align-self: start;
   padding: 14px;
   border: 1px solid var(--color-border);
   border-radius: 10px;
@@ -2540,34 +2661,43 @@ onBeforeUnmount(() => {
 }
 
 .rdp-request-list {
+  height: 100%;
   min-width: 0;
 }
 
-.rdp-request-toolbar {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-  margin-bottom: 10px;
+.rdp-request-status {
+  width: 140px;
 }
 
 .rdp-replay-panel {
   display: flex;
-  min-height: min(70vh, 720px);
+  height: min(72dvh, 720px);
+  min-height: 0;
   flex-direction: column;
   gap: 12px;
 }
 
 .rdp-replay-controls {
-  display: grid;
-  grid-template-columns: auto auto auto minmax(160px, 1fr) auto;
-  gap: 10px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
   align-items: center;
+}
+
+.rdp-replay-timeline {
+  flex: 1 1 320px;
+  min-width: 0;
+}
+
+.rdp-replay-timeline :deep(.el-slider) {
+  flex: 1;
+  min-width: 120px;
 }
 
 .rdp-replay-display {
   display: grid;
   flex: 1;
-  min-height: 420px;
+  min-height: clamp(220px, 52dvh, 620px);
   place-items: center;
   overflow: hidden;
   border-radius: 10px;
@@ -2697,18 +2827,63 @@ onBeforeUnmount(() => {
   flex-shrink: 0;
 }
 
-@media (max-width: 720px) {
-  .rdp-filter-panel,
+@media (max-width: 1200px) {
+  .rdp-filter-panel {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .rdp-filter-range,
+  .rdp-filter-actions {
+    grid-column: 1 / -1;
+  }
+
   .rdp-approval-panel {
+    display: flex;
+    overflow-y: auto;
+    padding-right: 4px;
+    flex-direction: column;
+    overscroll-behavior: contain;
+  }
+
+  .rdp-request-form {
+    width: min(100%, 560px);
+  }
+
+  .rdp-request-list {
+    flex: 0 0 clamp(360px, 58dvh, 620px);
+  }
+}
+
+@media (max-width: 620px) {
+  .rdp-filter-panel {
     grid-template-columns: 1fr;
   }
 
-  .rdp-replay-controls {
-    grid-template-columns: auto auto 1fr;
+  .rdp-filter-range,
+  .rdp-filter-actions {
+    grid-column: 1 / -1;
   }
 
-  .rdp-replay-controls :deep(.el-slider) {
-    grid-column: 1 / -1;
+  .rdp-filter-actions {
+    justify-content: stretch;
+  }
+
+  .rdp-filter-actions :deep(.el-button) {
+    flex: 1;
+  }
+
+  .rdp-replay-actions,
+  .rdp-replay-timeline {
+    width: 100%;
+  }
+
+  .rdp-replay-actions :deep(.el-button) {
+    flex: 1;
+    margin: 0;
+  }
+
+  .rdp-request-list {
+    flex-basis: 300px;
   }
 
   .replay-controls {

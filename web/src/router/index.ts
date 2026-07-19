@@ -7,6 +7,7 @@ import { usePermissionStore } from '@/stores/permission';
 
 interface AppRouteMeta {
   public?: boolean;
+  immersive?: boolean;
   menuKey?: string;
   titleKey: TranslationKey;
   descriptionKey: TranslationKey;
@@ -57,6 +58,7 @@ const routes: RouteRecordRaw[] = [
     name: 'web-terminal',
     component: WebTerminalView,
     meta: {
+      immersive: true,
       titleKey: 'route.webTerminal.title',
       descriptionKey: 'route.webTerminal.description',
     } satisfies AppRouteMeta,
@@ -66,6 +68,7 @@ const routes: RouteRecordRaw[] = [
     name: 'web-rdp',
     component: WebRDPView,
     meta: {
+      immersive: true,
       titleKey: 'route.webRDP.title',
       descriptionKey: 'route.webRDP.description',
     } satisfies AppRouteMeta,

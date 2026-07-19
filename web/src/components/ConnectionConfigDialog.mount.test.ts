@@ -14,6 +14,14 @@ const mocks = vi.hoisted(() => ({
     fetch: vi.fn(),
     update: vi.fn(),
   },
+  databaseClient: {
+    configured: false,
+    value: {
+      client: '',
+      platform: 'windows',
+      executablePath: '',
+    },
+  },
   apiClient: {
     createUserSession: vi.fn(),
     createConnectionPassword: vi.fn(),
@@ -27,6 +35,10 @@ vi.mock('vue-router', () => ({
 
 vi.mock('@/stores/preferences', () => ({
   usePreferencesStore: () => mocks.preferences,
+}));
+
+vi.mock('@/stores/databaseClient', () => ({
+  useDatabaseClientStore: () => mocks.databaseClient,
 }));
 
 vi.mock('@/api/client', () => ({

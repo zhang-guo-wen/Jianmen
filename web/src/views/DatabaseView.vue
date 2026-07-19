@@ -6,28 +6,16 @@
       :total="instanceTotal"
       v-model:page="instancePage"
       v-model:page-size="instancePageSize"
-      search-placeholder="搜索实例名称、地址、协议..."
+      search-placeholder="搜索实例名称、地址、协议…"
       @search="onInstanceSearch"
     >
       <template #toolbar-extra>
-        <div class="instance-filter-bar">
-          <div class="instance-filter-options" :class="{ 'is-expanded': instanceFiltersExpanded }">
-            <el-button size="small" :type="instanceFilter === 'all' ? 'primary' : undefined" @click="setInstanceFilter('all')">全部</el-button>
-            <el-button size="small" :type="instanceFilter === 'popular' ? 'primary' : undefined" @click="setInstanceFilter('popular')">常用</el-button>
-            <el-button
-              v-for="option in visibleInstanceQuickGroupOptions"
-              :key="option.value"
-              size="small"
-              :type="instanceFilter === option.value ? 'primary' : undefined"
-              @click="setInstanceFilter(option.value)"
-            >
-              {{ option.label }}
-            </el-button>
-          </div>
-          <el-button v-if="instanceQuickGroupOptions.length > filterPreviewLimit" link size="small" class="instance-filter-more" @click="instanceFiltersExpanded = !instanceFiltersExpanded">
-            {{ instanceFiltersExpanded ? '收起' : '更多' }}
-          </el-button>
-        </div>
+        <ResourceFilterBar
+          :model-value="instanceFilter"
+          :options="instanceQuickGroupOptions"
+          :preview-limit="filterPreviewLimit"
+          @update:model-value="setInstanceFilter"
+        />
         <el-button v-if="permission.canDo('dbproxy:create')" type="primary" @click="openCreateInstance">新增实例</el-button>
       </template>
       <el-table-column prop="name" label="名称" min-width="130" show-overflow-tooltip />
@@ -59,7 +47,7 @@
         </template>
       </el-table-column>
       <el-table-column prop="remark" label="备注" min-width="120" show-overflow-tooltip />
-      <el-table-column label="操作" width="210" align="right">
+      <el-table-column label="操作" width="170" fixed="right" align="right">
         <template #default="{ row }">
           <div class="table-actions">
             <el-button v-if="permission.canDo('db:connect')" link type="success" size="small" @click="handleDBConnect(row)">连接</el-button>
@@ -83,7 +71,7 @@
 
     <!-- 创建/编辑实例弹窗 -->
     <FormDialog v-model:visible="showInstanceDialog" :title="editingInstance ? '编辑实例' : '新增实例'" width="640px" :loading="submitting" @submit="submitInstance">
-      <el-form :model="instanceForm" label-width="80px">
+      <el-form :model="instanceForm" class="database-resource-form" label-position="top">
         <el-form-item label="名称" required>
           <el-input v-model="instanceForm.name" />
         </el-form-item>
@@ -188,10 +176,12 @@
     <el-dialog
       v-model="accountsDialogVisible"
       :title="accountsDialogTitle"
+      class="accounts-dialog"
       destroy-on-close
       width="min(960px, calc(100vw - 32px))"
     >
       <DataTableCard
+        class="accounts-table"
         :data="accounts"
         :loading="accountsLoading"
         :total="accountTotal"
@@ -231,11 +221,13 @@
         <el-table-column label="备注" min-width="120" show-overflow-tooltip>
           <template #default="{ row }">{{ row.remark || '-' }}</template>
         </el-table-column>
-        <el-table-column label="操作" width="200" fixed="right">
+        <el-table-column label="操作" width="168" fixed="right" align="right">
           <template #default="{ row }">
-            <el-button v-if="permission.canDo('db:connect')" link type="success" size="small" @click="openConnectDialog(row)">连接</el-button>
-            <el-button v-if="row.can_manage && permission.canDo('dbproxy:update')" link type="primary" size="small" @click="editAccount(row)">编辑</el-button>
-            <el-button v-if="row.can_manage && permission.canDo('dbproxy:delete')" link type="danger" size="small" @click="deleteAccount(row)">删除</el-button>
+            <div class="table-actions">
+              <el-button v-if="permission.canDo('db:connect')" link type="success" size="small" @click="openConnectDialog(row)">连接</el-button>
+              <el-button v-if="row.can_manage && permission.canDo('dbproxy:update')" link type="primary" size="small" @click="editAccount(row)">编辑</el-button>
+              <el-button v-if="row.can_manage && permission.canDo('dbproxy:delete')" link type="danger" size="small" @click="deleteAccount(row)">删除</el-button>
+            </div>
           </template>
         </el-table-column>
       </DataTableCard>
@@ -249,7 +241,7 @@
       :loading="accountSubmitting"
       @submit="submitAccount"
     >
-      <el-form :model="accountForm" label-width="100px">
+      <el-form :model="accountForm" class="database-resource-form" label-position="top">
         <el-form-item :label="selectedInstance?.protocol === 'redis' ? '目标用户名' : '目标用户名'" :required="selectedInstance?.protocol !== 'redis'">
           <el-input v-model="accountForm.username" :placeholder="selectedInstance?.protocol === 'redis' ? 'Redis ACL 用户名（可选，留空则使用单一密码认证）' : '数据库登录用户名'" />
         </el-form-item>
@@ -277,7 +269,7 @@
           </div>
           <div v-if="editingAccount" class="test-connection-row saved-credential-row">
             <span class="test-connection-meta">已保存凭据：</span>
-            <el-tag v-if="savedCredentialTesting" type="info" size="small">测试中...</el-tag>
+            <el-tag v-if="savedCredentialTesting" type="info" size="small">测试中…</el-tag>
             <template v-else-if="savedCredentialTestResult">
               <el-tag :type="savedCredentialTestResult.ok ? 'success' : 'danger'" size="small">
                 {{ savedCredentialTestResult.ok ? '可达' : '不可达' }}
@@ -292,13 +284,13 @@
           </div>
         </el-form-item>
         <el-form-item label="有效期">
-          <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <div class="expiry-presets">
             <el-button v-for="opt in expiryOptions" :key="opt.label" size="small"
               :type="expiryPreset === opt.label ? 'primary' : ''"
               @click="setExpiry(opt)">{{ opt.label }}</el-button>
           </div>
           <el-date-picker v-model="accountForm.expiresAt" type="datetime"
-            placeholder="自定义时间" style="margin-top:8px;width:100%" />
+            class="expiry-picker" placeholder="自定义时间" />
         </el-form-item>
         <el-collapse v-model="accountMorePanels">
           <el-collapse-item name="more" title="更多设置">
@@ -336,7 +328,7 @@
       @closed="resetAutoProvision"
     >
       <template v-if="provisionStep === 1">
-        <el-form label-width="100px">
+        <el-form class="database-resource-form" label-position="top">
           <el-form-item label="管理员凭据">
             <el-select v-model="provision.adminAccountId" placeholder="选择用于创建账号的凭据" style="width:100%">
               <el-option
@@ -354,12 +346,12 @@
       </template>
 
       <template v-else-if="provisionStep === 2">
-        <div v-if="loadingDatabases" style="text-align:center;padding:30px 0">
+        <div v-if="loadingDatabases" class="provision-loading">
           <el-icon class="is-loading" :size="24"><Loading /></el-icon>
-          <p style="margin-top:8px;color:#999">正在获取数据库列表...</p>
+          <p>正在获取数据库列表…</p>
         </div>
         <template v-else>
-          <div style="margin-bottom:8px;display:flex;gap:8px">
+          <div class="grant-actions">
             <el-button size="small" @click="setAllDBGrants('readwrite')">全部读写</el-button>
             <el-button size="small" @click="setAllDBGrants('read')">全部只读</el-button>
             <el-button size="small" @click="setAllDBGrants('')">全部无</el-button>
@@ -380,13 +372,13 @@
       </template>
 
       <template v-else-if="provisionStep === 3">
-        <div v-if="provisioning" style="text-align:center;padding:30px 0">
+        <div v-if="provisioning" class="provision-loading">
           <el-icon class="is-loading" :size="28"><Loading /></el-icon>
-          <p style="margin-top:10px;color:#667085">正在目标 MySQL 上创建账号...</p>
+          <p>正在目标 MySQL 上创建账号…</p>
         </div>
         <template v-else-if="provisionResult">
           <el-alert type="success" title="账号创建成功" :closable="false" show-icon />
-          <el-descriptions :column="1" border size="small" style="margin-top:12px">
+          <el-descriptions class="provision-result" :column="1" border size="small">
             <el-descriptions-item label="资源标识">
               <code>{{ provisionResult.account.resource_id }}</code>
             </el-descriptions-item>
@@ -426,6 +418,7 @@ import { useRouter } from 'vue-router'
 import DataTableCard from '@/components/DataTableCard.vue'
 import FormDialog from '@/components/FormDialog.vue'
 import ConnectionConfigDialog from '@/components/ConnectionConfigDialog.vue'
+import ResourceFilterBar from '@/components/ResourceFilterBar.vue'
 import StatusSwitch from '@/components/StatusSwitch.vue'
 import * as api from '@/api/client'
 import { usePermissionStore } from '@/stores/permission'
@@ -470,7 +463,6 @@ const instancePage = ref(1)
 const instancePageSize = ref(50)
 const instanceSearchKeyword = ref('')
 const instanceFilter = ref('all')
-const instanceFiltersExpanded = ref(false)
 const instanceUsageCounts = ref<Record<string, number>>({})
 const filterPreviewLimit = 6
 const showInstanceDialog = ref(false)
@@ -552,16 +544,6 @@ const instanceQuickGroupOptions = computed(() => {
   })
   return Array.from(groups, ([label, count]) => ({ label, value: label, count }))
     .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label, 'zh-CN'))
-})
-
-const visibleInstanceQuickGroupOptions = computed(() => {
-  if (instanceFiltersExpanded.value) return instanceQuickGroupOptions.value
-  const options = instanceQuickGroupOptions.value.slice(0, filterPreviewLimit)
-  if (instanceFilter.value !== 'all' && instanceFilter.value !== 'popular' && !options.some(option => option.value === instanceFilter.value)) {
-    const selected = instanceQuickGroupOptions.value.find(option => option.value === instanceFilter.value)
-    if (selected) return [selected, ...options.slice(0, filterPreviewLimit - 1)]
-  }
-  return options
 })
 
 const filteredInstances = computed(() => {
@@ -685,7 +667,7 @@ async function loadInstances() {
   } catch (err) {
     if (!instanceRequests.isCurrent(request.token, key)) return
     instances.value = []
-    ElMessage.error(err instanceof Error ? err.message : '??????')
+    ElMessage.error(err instanceof Error ? err.message : '数据库实例加载失败')
   } finally {
     instancesLoading.value = instanceRequests.isLoading()
   }
@@ -1248,46 +1230,57 @@ function closeProvisionAndRefresh() {
 </script>
 
 <style scoped>
-.instance-filter-bar {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-  max-width: min(620px, 100%);
-}
-
-.instance-filter-options {
-  display: flex;
-  gap: 6px;
-  min-width: 0;
-  overflow: hidden;
-  white-space: nowrap;
-}
-
-.instance-filter-options.is-expanded {
-  flex-wrap: wrap;
-  overflow: visible;
-  white-space: normal;
-}
-
-.instance-filter-options .el-button,
-.instance-filter-more {
-  flex: 0 0 auto;
-  margin: 0;
-}
-
-.instance-filter-options .el-button {
-  padding-inline: 9px;
-}
-
-.instance-filter-more {
-  padding-inline: 4px;
-}
-
 .dialog-stack {
   display: flex;
   flex-direction: column;
   gap: 18px;
+}
+
+.accounts-table {
+  height: min(64dvh, 620px);
+  min-height: 360px;
+}
+
+.database-resource-form :deep(.el-select),
+.database-resource-form :deep(.el-input-number),
+.database-resource-form :deep(.el-date-editor) {
+  width: 100%;
+}
+
+.expiry-presets,
+.grant-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  width: 100%;
+}
+
+.expiry-presets :deep(.el-button),
+.grant-actions :deep(.el-button) {
+  margin: 0;
+}
+
+.expiry-picker {
+  width: 100%;
+  margin-top: 8px;
+}
+
+.provision-loading {
+  padding: 30px 0;
+  color: var(--color-text-secondary);
+  text-align: center;
+}
+
+.provision-loading p {
+  margin: 10px 0 0;
+}
+
+.grant-actions {
+  margin-bottom: 8px;
+}
+
+.provision-result {
+  margin-top: 12px;
 }
 
 .connect-section + .connect-section {
@@ -1414,6 +1407,11 @@ function closeProvisionAndRefresh() {
 }
 
 @media (max-width: 720px) {
+  .accounts-table {
+    height: min(66dvh, 520px);
+    min-height: 280px;
+  }
+
   .config-row {
     grid-template-columns: 1fr;
   }

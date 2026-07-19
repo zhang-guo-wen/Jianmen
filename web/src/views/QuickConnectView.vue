@@ -7,7 +7,10 @@
             <div class="page-card__search">
               <el-input
                 v-model="sshSearchInput"
-                placeholder="搜索主机、账号..."
+                name="quick_connect_host_search"
+                autocomplete="off"
+                aria-label="搜索主机和账号"
+                placeholder="搜索主机、账号…"
                 clearable
                 @keyup.enter="onSSHSearch(sshSearchInput)"
                 @clear="onSSHSearch('')"
@@ -17,25 +20,12 @@
                 </template>
               </el-input>
             </div>
-            <div class="quick-filter-bar">
-              <div class="quick-filter-options" :class="{ 'is-expanded': sshFiltersExpanded }">
-                <el-button size="small" :type="sshFilter === 'all' ? 'primary' : undefined" @click="setSSHFilter('all')">全部</el-button>
-                <el-button size="small" :type="sshFilter === 'popular' ? 'primary' : undefined" @click="setSSHFilter('popular')">常用</el-button>
-                <el-button
-                  v-for="option in visibleSSHGroupOptions"
-                  :key="option.value"
-                  size="small"
-                  :type="sshFilter === option.value ? 'primary' : undefined"
-                  @click="setSSHFilter(option.value)"
-                >
-                  {{ option.label }}
-                </el-button>
-              </div>
-              <el-button v-if="sshGroupOptions.length > filterPreviewLimit" link size="small" class="quick-filter-more" @click="sshFiltersExpanded = !sshFiltersExpanded">
-                {{ sshFiltersExpanded ? '收起' : '更多' }}
-              </el-button>
-            </div>
-            <div class="page-card__spacer"></div>
+            <ResourceFilterBar
+              :model-value="sshFilter"
+              :options="sshGroupOptions"
+              :preview-limit="filterPreviewLimit"
+              @update:model-value="setSSHFilter"
+            />
             <div class="page-card__actions">
               <el-button :loading="sshLoading" :icon="Refresh" @click="loadTargets">
                 {{ t('common.refresh') }}
@@ -91,10 +81,12 @@
                     <el-button
                       type="primary"
                       size="small"
+                      aria-label="复制包含临时密码的主机连接信息"
+                      title="包含临时密码，请妥善保管"
                       :loading="connectionState(target).loading"
                       @click="copyAllConnectionInfo(target)"
                     >
-                      复制
+                      复制凭据
                     </el-button>
                     <el-button
                       v-if="permission.canDo('session:connect')"
@@ -126,6 +118,7 @@
               :page-sizes="[20, 50, 100]"
               :total="sshFilteredTotal"
               layout="total, sizes, prev, pager, next"
+              :pager-count="5"
               size="small"
               background
             />
@@ -139,7 +132,10 @@
             <div class="page-card__search">
               <el-input
                 v-model="dbSearchInput"
-                placeholder="搜索实例、账号..."
+                name="quick_connect_database_search"
+                autocomplete="off"
+                aria-label="搜索数据库实例和账号"
+                placeholder="搜索实例、账号…"
                 clearable
                 @keyup.enter="onDBSearch(dbSearchInput)"
                 @clear="onDBSearch('')"
@@ -149,26 +145,16 @@
                 </template>
               </el-input>
             </div>
-            <div class="quick-filter-bar">
-              <div class="quick-filter-options" :class="{ 'is-expanded': dbFiltersExpanded }">
-                <el-button size="small" :type="dbFilter === 'all' ? 'primary' : undefined" @click="setDBFilter('all')">全部</el-button>
-                <el-button size="small" :type="dbFilter === 'popular' ? 'primary' : undefined" @click="setDBFilter('popular')">常用</el-button>
-                <el-button
-                  v-for="option in visibleDBGroupOptions"
-                  :key="option.value"
-                  size="small"
-                  :type="dbFilter === option.value ? 'primary' : undefined"
-                  @click="setDBFilter(option.value)"
-                >
-                  {{ option.label }}
-                </el-button>
-              </div>
-              <el-button v-if="dbGroupOptions.length > filterPreviewLimit" link size="small" class="quick-filter-more" @click="dbFiltersExpanded = !dbFiltersExpanded">
-                {{ dbFiltersExpanded ? '收起' : '更多' }}
-              </el-button>
-            </div>
-            <div class="page-card__spacer"></div>
+            <ResourceFilterBar
+              :model-value="dbFilter"
+              :options="dbGroupOptions"
+              :preview-limit="filterPreviewLimit"
+              @update:model-value="setDBFilter"
+            />
             <div class="page-card__actions">
+              <el-button @click="openDatabaseClientSettings">
+                本地客户端设置
+              </el-button>
               <el-button :loading="dbLoading" :icon="Refresh" @click="loadDBAccounts">
                 {{ t('common.refresh') }}
               </el-button>
@@ -209,10 +195,12 @@
                   <el-button
                     type="primary"
                     size="small"
+                    aria-label="复制包含临时密码的数据库连接信息"
+                    title="包含临时密码，请妥善保管"
                     :loading="databaseCopyLoading(account)"
                     @click="copyDBConnectionInfo(account)"
                   >
-                    复制
+                    复制凭据
                   </el-button>
                   <el-button
                     size="small"
@@ -222,7 +210,7 @@
                     下载 CA
                   </el-button>
                   <el-button size="small" @click="openDBConfig(account)">
-                    {{ t('quickConnect.action.connect') }}
+                    连接配置
                   </el-button>
                 </footer>
               </article>
@@ -238,6 +226,7 @@
               :page-sizes="[20, 50, 100]"
               :total="dbTotal"
               layout="total, sizes, prev, pager, next"
+              :pager-count="5"
               size="small"
               background
             />
@@ -278,11 +267,12 @@
 import { computed, onMounted, reactive, ref, watch } from 'vue';
 import { Refresh, Search } from '@element-plus/icons-vue';
 import { ElMessage } from 'element-plus';
-import { useRouter } from 'vue-router';
+import { useRoute, useRouter } from 'vue-router';
 
 import { apiClient, type DBAccountRecord, type HostView, type PageResponse, type TargetRecord } from '@/api/client';
 import ConnectionConfigDialog from '@/components/ConnectionConfigDialog.vue';
 import QuickContainerConnectPanel from '@/components/QuickContainerConnectPanel.vue';
+import ResourceFilterBar from '@/components/ResourceFilterBar.vue';
 import { useI18n } from '@/i18n';
 import { usePermissionStore } from '@/stores/permission';
 import { usePreferencesStore } from '@/stores/preferences';
@@ -335,6 +325,7 @@ type QuickDBTarget = DBAccountRecord & {
 const { t } = useI18n();
 const permission = usePermissionStore();
 const preferences = usePreferencesStore();
+const route = useRoute();
 const router = useRouter();
 const canConnectHost = computed(() =>
   permission.canDo('session:connect')
@@ -342,7 +333,19 @@ const canConnectHost = computed(() =>
   || permission.canDo('rdp:connect')
 );
 const canConnectContainer = computed(() => permission.canDo('container:connect'));
-const activeTab = ref(canConnectHost.value ? 'ssh' : permission.canDo('db:connect') ? 'db' : 'container');
+const defaultQuickConnectTab = canConnectHost.value ? 'ssh' : permission.canDo('db:connect') ? 'db' : 'container';
+const requestedQuickConnectTab = route.query.tab === 'db'
+  ? 'db'
+  : route.query.tab === 'container'
+    ? 'container'
+    : 'ssh';
+const activeTab = ref(
+  requestedQuickConnectTab === 'db' && permission.canDo('db:connect')
+    ? 'db'
+    : requestedQuickConnectTab === 'container' && canConnectContainer.value
+      ? 'container'
+      : defaultQuickConnectTab,
+);
 
 // SSH state
 const sshSearchInput = ref('');
@@ -362,7 +365,6 @@ const sshRequests = createLatestKeyedRequest<{
   usageCounts: Record<string, number>;
 }>();
 const sshFilter = ref('all');
-const sshFiltersExpanded = ref(false);
 
 // DB state
 const dbSearchInput = ref('');
@@ -374,7 +376,6 @@ const dbConnectionStates = reactive<InFlightCounters>({});
 const dbAccountsFlight = createSingleFlight<void>();
 const dbUsageCounts = ref<Record<string, number>>({});
 const dbFilter = ref('all');
-const dbFiltersExpanded = ref(false);
 const dbPage = ref(1);
 const dbPageSize = ref(50);
 
@@ -489,16 +490,6 @@ const sshGroupOptions = computed(() => {
   });
   return Array.from(groups, ([label, count]) => ({ label, value: label, count }))
     .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label, 'zh-CN'));
-});
-
-const visibleSSHGroupOptions = computed(() => {
-  if (sshFiltersExpanded.value) return sshGroupOptions.value;
-  const options = sshGroupOptions.value.slice(0, filterPreviewLimit);
-  if (sshFilter.value !== 'all' && sshFilter.value !== 'popular' && !options.some(option => option.value === sshFilter.value)) {
-    const selected = sshGroupOptions.value.find(option => option.value === sshFilter.value);
-    if (selected) return [selected, ...options.slice(0, filterPreviewLimit - 1)];
-  }
-  return options;
 });
 
 const sshFilteredTargets = computed(() => {
@@ -783,16 +774,6 @@ const dbGroupOptions = computed(() => {
     .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label, 'zh-CN'));
 });
 
-const visibleDBGroupOptions = computed(() => {
-  if (dbFiltersExpanded.value) return dbGroupOptions.value;
-  const options = dbGroupOptions.value.slice(0, filterPreviewLimit);
-  if (dbFilter.value !== 'all' && dbFilter.value !== 'popular' && !options.some(option => option.value === dbFilter.value)) {
-    const selected = dbGroupOptions.value.find(option => option.value === dbFilter.value);
-    if (selected) return [selected, ...options.slice(0, filterPreviewLimit - 1)];
-  }
-  return options;
-});
-
 const dbQuickFiltered = computed(() => {
   let items = dbFiltered.value;
   if (dbFilter.value !== 'all' && dbFilter.value !== 'popular') {
@@ -969,6 +950,13 @@ function openDBConfig(account: QuickDBTarget) {
   configVisible.value = true;
 }
 
+function openDatabaseClientSettings() {
+  void router.push({
+    path: '/settings',
+    query: { tab: 'database', return_to: router.currentRoute.value.fullPath },
+  });
+}
+
 watch([targetPage, targetPageSize, sshFilter], () => {
   void hydrateConnectionInfo(displayedTargets.value);
 });
@@ -977,11 +965,26 @@ watch(activeTab, tab => {
   if (tab === 'db' && permission.canDo('db:connect') && dbAccounts.value.length === 0) {
     loadDBAccounts();
   }
+  const queryTab = tab === 'ssh' ? 'host' : tab;
+  if (route.name === 'quick-connect' && route.query.tab !== queryTab) {
+    void router.replace({ query: { ...route.query, tab: queryTab } });
+  }
+});
+
+watch(() => route.query.tab, tab => {
+  const requested = tab === 'db' ? 'db' : tab === 'container' ? 'container' : 'ssh';
+  const allowed = requested === 'db'
+    ? permission.canDo('db:connect')
+    : requested === 'container'
+      ? canConnectContainer.value
+      : canConnectHost.value;
+  if (allowed && activeTab.value !== requested) activeTab.value = requested;
 });
 
 onMounted(() => {
-  if (canConnectHost.value) loadTargets();
-  else if (permission.canDo('db:connect')) loadDBAccounts();
+  if (activeTab.value === 'db') loadDBAccounts();
+  else if (activeTab.value === 'container') return;
+  else if (canConnectHost.value) loadTargets();
 });
 </script>
 
@@ -994,44 +997,6 @@ onMounted(() => {
 .quick-card-page {
   position: relative;
 }
-
-.quick-filter-bar {
-  display: flex;
-  align-items: center;
-  flex: 1 1 auto;
-  gap: 6px;
-  min-width: 0;
-}
-
-.quick-filter-options {
-  display: flex;
-  flex: 1 1 auto;
-  gap: 6px;
-  min-width: 0;
-  overflow: hidden;
-  white-space: nowrap;
-}
-
-.quick-filter-options.is-expanded {
-  flex-wrap: wrap;
-  overflow: visible;
-  white-space: normal;
-}
-
-.quick-filter-options .el-button,
-.quick-filter-more {
-  flex: 0 0 auto;
-  margin: 0;
-}
-
-.quick-filter-options .el-button {
-  padding-inline: 9px;
-}
-
-.quick-filter-more {
-  padding-inline: 4px;
-}
-
 
 .quick-card-body {
   padding: 18px;
@@ -1177,6 +1142,11 @@ onMounted(() => {
   font-size: 11px;
 }
 
+.connection-card__error span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 .connection-card__actions {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -1202,10 +1172,6 @@ onMounted(() => {
 }
 
 @media (max-width: 780px) {
-  .quick-filter-bar {
-    width: 100%;
-  }
-
   .quick-card-body {
     padding: 12px;
   }
@@ -1213,6 +1179,24 @@ onMounted(() => {
   .connection-card-grid,
   .database-card-grid {
     grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  }
+
+  .quick-card-page > .page-card__footer {
+    min-width: 0;
+    justify-content: center;
+    overflow-x: auto;
+    overscroll-behavior-inline: contain;
+  }
+
+  .quick-card-page > .page-card__footer :deep(.el-pagination) {
+    flex: 0 0 auto;
+  }
+}
+
+@media (max-width: 620px) {
+  .quick-card-page > .page-card__footer :deep(.el-pagination__total),
+  .quick-card-page > .page-card__footer :deep(.el-pagination__sizes) {
+    display: none;
   }
 }
 

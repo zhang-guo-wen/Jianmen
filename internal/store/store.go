@@ -3,6 +3,8 @@ package store
 import (
 	"strings"
 	"time"
+
+	"jianmen/internal/model"
 )
 
 type LoginName struct {
@@ -165,6 +167,17 @@ type DatabaseAccountView struct {
 	CreatedAt   string     `json:"created_at,omitempty"`
 	UpdatedAt   string     `json:"updated_at,omitempty"`
 	CanManage   bool       `json:"can_manage"`
+}
+
+// DatabaseAccountProbeMetadata is deliberately credential-free. Callers must
+// authorize against the account before asking for the associated secret.
+type DatabaseAccountProbeMetadata struct {
+	ID         string
+	InstanceID string
+	Username   string
+	Status     string
+	ExpiresAt  *time.Time
+	Instance   model.DatabaseInstance
 }
 
 type ApplicationView struct {

@@ -52,13 +52,7 @@ func (s *Server) withAuthAndUser(next http.HandlerFunc) http.HandlerFunc {
 				return
 			}
 		}
-		if isAuditableMutation(authenticatedRequest) {
-			aw := &auditResponseWriter{ResponseWriter: w}
-			next(aw, authenticatedRequest)
-			s.recordOperation(authenticatedRequest, aw.statusCode())
-			return
-		}
-		next(w, authenticatedRequest)
+		s.withOperationAudit(next)(w, authenticatedRequest)
 	}
 }
 

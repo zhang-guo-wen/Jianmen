@@ -144,6 +144,43 @@ func TestHandleSavedDatabaseAccountTestRequiresConnectionAuthorization(t *testin
 	}
 }
 
+func TestHandleSavedDatabaseAccountTestRejectsDisabledAndExpiredResources(t *testing.T) {
+	server, db := newAdminDBTestServer(t)
+	seedConnectionAction(t, db, "db-state-user", rbac.ActionDBConnect)
+	instance := model.DatabaseInstance{ID: "db-state-instance", Name: "db-state-instance", Protocol: "mysql", Address: "127.0.0.1", Port: 1, Status: "active"}
+	account := model.DatabaseAccount{ID: "db-state-account", InstanceID: instance.ID, UniqueName: "db-state-account", Username: "app", Status: "disabled"}
+	for _, value := range []any{&instance, &account, &model.ResourceGrant{PrincipalType: "user", PrincipalID: "db-state-user", ResourceType: model.ResourceTypeDatabaseAccount, ResourceID: account.ID, Effect: model.PermissionEffectAllow}} {
+		if err := db.Create(value).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	request := func() *httptest.ResponseRecorder {
+		req := withTestUser(httptest.NewRequest(http.MethodPost, "/api/db/accounts/test/"+account.ID, nil), "db-state-user", "db-state-user")
+		recorder := httptest.NewRecorder()
+		server.handleTestDBConnection(recorder, req)
+		return recorder
+	}
+	if recorder := request(); recorder.Code != http.StatusForbidden {
+		t.Fatalf("disabled account status = %d, want 403", recorder.Code)
+	}
+	expired := time.Now().UTC().Add(-time.Minute)
+	if err := db.Model(&model.DatabaseAccount{}).Where("id = ?", account.ID).Updates(map[string]any{"status": "active", "expires_at": expired}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if recorder := request(); recorder.Code != http.StatusForbidden {
+		t.Fatalf("expired account status = %d, want 403", recorder.Code)
+	}
+	if err := db.Model(&model.DatabaseAccount{}).Where("id = ?", account.ID).Update("expires_at", nil).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Model(&model.DatabaseInstance{}).Where("id = ?", instance.ID).Update("status", "disabled").Error; err != nil {
+		t.Fatal(err)
+	}
+	if recorder := request(); recorder.Code != http.StatusForbidden {
+		t.Fatalf("disabled instance status = %d, want 403", recorder.Code)
+	}
+}
+
 func TestHandleUnsavedDatabaseAccountTestRequiresCreatePermission(t *testing.T) {
 	server, _ := newAdminDBTestServer(t)
 	req := httptest.NewRequest(http.MethodPost, "/api/db/accounts/test", strings.NewReader(`{"instance_id":"db-instance","username":"app","password":"secret"}`))

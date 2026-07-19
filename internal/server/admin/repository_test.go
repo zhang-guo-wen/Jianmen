@@ -155,6 +155,7 @@ func TestAdminRepositoryBoundaryStaysStaticallyComposedAndDomainSplit(t *testing
 		"aiAccessTokens":         reflect.TypeOf((*service.AIAccessTokenService)(nil)),
 		"hostTargets":            reflect.TypeOf((*adminHostTargetRepository)(nil)).Elem(),
 		"databases":              reflect.TypeOf((*adminDatabaseRepository)(nil)).Elem(),
+		"databaseManagement":     reflect.TypeOf((*service.DatabaseManagementService)(nil)),
 		"applicationService":     reflect.TypeOf((*service.ApplicationService)(nil)),
 		"containers":             reflect.TypeOf((*adminContainerRepository)(nil)).Elem(),
 		"platformAccountService": reflect.TypeOf((*service.PlatformAccountService)(nil)),

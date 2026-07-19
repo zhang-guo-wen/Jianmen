@@ -17,10 +17,21 @@
 - **SSH Shell 代理** — 支持密码、公钥和 keyboard-interactive 认证，以及 PTY、窗口 Resize、Signal 转发。
 - **SFTP 文件代理** — 提供语义层文件代理，兼容 Xftp、WinSCP、FileZilla 等主流客户端。
 - **多协议数据库代理** — 支持 MySQL、PostgreSQL、Redis 连接代理，统一执行身份识别、资源授权和会话控制。
-- **数据库协议兼容基线** — 默认实库版本、已验证能力和明确边界见 [数据库真实协议兼容矩阵](docs/database-protocol-compatibility.md)。
 - **本地 SSH 客户端** — 可配置并调用系统默认客户端、Xshell、PuTTY 等本地程序快速发起连接。
 - **云端 SSH 客户端** — 可通过web快速发起ssh连接，支持tab提示词。
 - **Web RDP** — 通过 Apache Guacamole 在浏览器访问 Windows，凭据留在服务端，连接、剪贴板、上传、下载和磁盘映射分别授权。
+
+### 数据库协议与兼容版本
+
+以下版本均已使用官方 Docker 镜像和真实客户端通过 Jianmen 数据库网关完成自动化验证：
+
+| 协议 | 已验证版本 | 协议与认证 | 已验证能力 |
+|---|---|---|---|
+| MySQL | `5.7`、`8.0`、`8.4` | Protocol 4.1、SSLRequest/TLS；网关及 5.7 上游使用 `mysql_native_password`，8.x 上游支持 `caching_sha2_password` | 初始数据库、普通查询、预处理语句、事务、大报文和审计脱敏 |
+| PostgreSQL | `14`、`15`、`16`、`17`、`18` | Protocol 3.0、TLS/Direct TLS、上游 SCRAM-SHA-256；3.2 客户端可协商降级到 3.0 | 简单/扩展查询、预处理语句、事务、COPY、CancelRequest、大报文和错误恢复 |
+| Redis | `6.2`、`7.4`、`8.8` | RESP2/RESP3、双参数 `AUTH`、`HELLO 2 AUTH` / `HELLO 3 AUTH`，支持配置 TLS | 流水线、MULTI/EXEC、SELECT、Pub/Sub、RESP3 Push、大报文和审计脱敏 |
+
+以上是默认回归兼容范围；未列出的版本或扩展可能可以使用，但不作兼容承诺。认证路径、TLS 边界、明确不支持项和测试方法见 [数据库真实协议兼容矩阵](docs/database-protocol-compatibility.md)。
 
 ### 审计与追溯
 

@@ -93,6 +93,8 @@ func (s *DBStore) AddPlatformAccount(ctx context.Context, acc model.PlatformAcco
 	}
 	acc.GroupName = strings.TrimSpace(acc.GroupName)
 
+	var createdView PlatformAccountView
+	var loadErr error
 	if err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Create(&acc).Error; err != nil {
 			return err
@@ -100,16 +102,23 @@ func (s *DBStore) AddPlatformAccount(ctx context.Context, acc model.PlatformAcco
 		if err := ensureAccountGroup(tx, acc.GroupName); err != nil {
 			return err
 		}
-		return s.syncResourceTx(tx, model.ResourceTypePlatformAccount, acc.ID, acc.Name, "")
+		if err := s.syncResourceTx(tx, model.ResourceTypePlatformAccount, acc.ID, acc.Name, ""); err != nil {
+			return err
+		}
+		var created model.PlatformAccount
+		if err := tx.Preload("Owner").First(&created, "id = ?", acc.ID).Error; err != nil {
+			loadErr = fmt.Errorf("load created platform account: %w", err)
+			return loadErr
+		}
+		createdView = s.platformAccountView(created)
+		return nil
 	}); err != nil {
+		if loadErr != nil {
+			return PlatformAccountView{}, loadErr
+		}
 		return PlatformAccountView{}, fmt.Errorf("create platform account: %w", err)
 	}
-
-	var created model.PlatformAccount
-	if err := s.db.WithContext(ctx).Preload("Owner").First(&created, "id = ?", acc.ID).Error; err != nil {
-		return PlatformAccountView{}, fmt.Errorf("load created platform account: %w", err)
-	}
-	return s.platformAccountView(created), nil
+	return createdView, nil
 }
 
 func (s *DBStore) UpdatePlatformAccount(ctx context.Context, id string, acc model.PlatformAccount) (PlatformAccountView, error) {
@@ -146,6 +155,8 @@ func (s *DBStore) UpdatePlatformAccount(ctx context.Context, id string, acc mode
 		existing.ExpiresAt = acc.ExpiresAt
 	}
 
+	var updatedView PlatformAccountView
+	var loadErr error
 	if err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Save(&existing).Error; err != nil {
 			return err
@@ -153,16 +164,23 @@ func (s *DBStore) UpdatePlatformAccount(ctx context.Context, id string, acc mode
 		if err := ensureAccountGroup(tx, existing.GroupName); err != nil {
 			return err
 		}
-		return s.syncResourceTx(tx, model.ResourceTypePlatformAccount, existing.ID, existing.Name, "")
+		if err := s.syncResourceTx(tx, model.ResourceTypePlatformAccount, existing.ID, existing.Name, ""); err != nil {
+			return err
+		}
+		var updated model.PlatformAccount
+		if err := tx.Preload("Owner").First(&updated, "id = ?", id).Error; err != nil {
+			loadErr = fmt.Errorf("load updated platform account: %w", err)
+			return loadErr
+		}
+		updatedView = s.platformAccountView(updated)
+		return nil
 	}); err != nil {
+		if loadErr != nil {
+			return PlatformAccountView{}, loadErr
+		}
 		return PlatformAccountView{}, fmt.Errorf("update platform account: %w", err)
 	}
-
-	var updated model.PlatformAccount
-	if err := s.db.WithContext(ctx).Preload("Owner").First(&updated, "id = ?", id).Error; err != nil {
-		return PlatformAccountView{}, fmt.Errorf("load updated platform account: %w", err)
-	}
-	return s.platformAccountView(updated), nil
+	return updatedView, nil
 }
 
 func (s *DBStore) DeletePlatformAccount(ctx context.Context, id string) error {

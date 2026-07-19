@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -90,7 +91,9 @@ func (s *Server) handleCreatePlatformAccount(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	if err := s.grantCreatedResource(r, model.ResourceTypePlatformAccount, view.ID); err != nil {
-		if cleanupErr := s.platformAccounts.DeletePlatformAccount(r.Context(), view.ID); cleanupErr != nil {
+		cleanupCtx, cancelCleanup := context.WithTimeout(context.WithoutCancel(r.Context()), 5*time.Second)
+		defer cancelCleanup()
+		if cleanupErr := s.platformAccounts.DeletePlatformAccount(cleanupCtx, view.ID); cleanupErr != nil {
 			err = errors.Join(err, cleanupErr)
 		}
 		s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())

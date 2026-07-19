@@ -185,6 +185,11 @@ var migrations = []Migration{
 		Name:    "resource grant logical uniqueness",
 		Run:     migrateResourceGrantLogicalUniqueness,
 	},
+	{
+		Version: "202607190002",
+		Name:    "audit retention cleanup state",
+		Run:     migrateAuditRetentionCleanup,
+	},
 }
 
 func rejectDuplicateDatabaseAccounts(tx *gorm.DB) error {

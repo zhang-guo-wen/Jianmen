@@ -16,9 +16,12 @@ type AuditSession struct {
 	AccountUsername string     `gorm:"size:128" json:"account_username"`
 	ClientIP        string     `gorm:"size:128" json:"client_ip"`
 	StartedAt       time.Time  `gorm:"index:idx_audit_sessions_protocol_started,priority:2;index:idx_audit_sessions_user_started,priority:2;index:idx_audit_sessions_session_started,priority:2" json:"started_at"`
-	EndedAt         *time.Time `json:"ended_at,omitempty"`
+	EndedAt         *time.Time `gorm:"index:idx_audit_sessions_cleanup,priority:2" json:"ended_at,omitempty"`
 	State           string     `gorm:"size:32" json:"state"`
 	ReplayDir       string     `gorm:"size:512" json:"replay_dir,omitempty"`
+	CleanupStatus   string     `gorm:"index:idx_audit_sessions_cleanup,priority:1;size:16;not null;default:ready" json:"-"`
+	CleanupAt       *time.Time `gorm:"index" json:"-"`
+	CleanupError    string     `gorm:"type:text" json:"-"`
 	CreatedAt       time.Time  `json:"created_at"`
 	UpdatedAt       time.Time  `json:"updated_at"`
 }

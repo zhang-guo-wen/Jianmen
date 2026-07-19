@@ -14,7 +14,7 @@ import (
 
 	"jianmen/internal/model"
 	"jianmen/internal/rbac"
-	"jianmen/internal/store"
+	"jianmen/internal/service"
 )
 
 func TestTargetUpdatePermissionCannotMutateHostOwnershipOrEndpoint(t *testing.T) {
@@ -100,7 +100,11 @@ func TestTargetUpdatePermissionCannotMutateHostOwnershipOrEndpoint(t *testing.T)
 func TestCreateHostCanceledRequestStillUsesBoundedCleanupAndJoinsErrors(t *testing.T) {
 	cleanupErr := errors.New("delete host cleanup failed")
 	repository := &hostCreateCleanupRepository{cleanupErr: cleanupErr}
-	server := &Server{hostTargets: repository}
+	management, err := service.NewHostManagementService(repository, hostCreateCleanupAuthorizer{}, hostCreateCleanupGrant{})
+	if err != nil {
+		t.Fatalf("new host management service: %v", err)
+	}
+	server := &Server{hostManagement: management}
 
 	request := asTestUser(
 		httptest.NewRequest(
@@ -143,7 +147,7 @@ func TestCreateHostCanceledRequestStillUsesBoundedCleanupAndJoinsErrors(t *testi
 }
 
 type hostCreateCleanupRepository struct {
-	adminHostTargetRepository
+	service.HostManagementRepository
 
 	cleanupErr         error
 	deleteCalls        int
@@ -154,8 +158,8 @@ type hostCreateCleanupRepository struct {
 	cleanupUserID      string
 }
 
-func (r *hostCreateCleanupRepository) AddHost(context.Context, store.HostRecord) (store.HostView, error) {
-	return store.HostView{ID: "cleanup-host"}, nil
+func (r *hostCreateCleanupRepository) AddHost(context.Context, service.HostManagementHostRecord) (service.HostManagementHostView, error) {
+	return service.HostManagementHostView{ID: "cleanup-host"}, nil
 }
 
 func (r *hostCreateCleanupRepository) DeleteHost(ctx context.Context, id string) error {
@@ -169,6 +173,22 @@ func (r *hostCreateCleanupRepository) DeleteHost(ctx context.Context, id string)
 	}
 	r.cleanupUserID, _ = ctx.Value(ctxKeyUserID).(string)
 	return r.cleanupErr
+}
+
+type hostCreateCleanupAuthorizer struct{}
+
+func (hostCreateCleanupAuthorizer) AuthorizeConnection(context.Context, string, []string, string, string) (bool, error) {
+	return true, nil
+}
+
+func (hostCreateCleanupAuthorizer) AuthorizeBatch(context.Context, string, []service.AuthorizationRequest) ([]service.AuthorizationDecision, error) {
+	return nil, nil
+}
+
+type hostCreateCleanupGrant struct{}
+
+func (hostCreateCleanupGrant) GrantCreatedResource(context.Context, string, bool, string, string) error {
+	return errors.New("resource grant service unavailable")
 }
 
 func assertAdminHostState(t *testing.T, db *gorm.DB, want model.Host) {

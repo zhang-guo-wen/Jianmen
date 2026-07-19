@@ -22,6 +22,7 @@ type Server struct {
 	cfg                  *config.Config
 	aiTokens             adminAIAccessTokenRepository
 	hostTargets          adminHostTargetRepository
+	hostManagement       *service.HostManagementService
 	databases            adminDatabaseRepository
 	applications         adminApplicationRepository
 	containers           adminContainerRepository
@@ -139,9 +140,13 @@ func New(
 	if err != nil {
 		return nil, fmt.Errorf("initialize connection password service: %w", err)
 	}
+	hostManagement, err := service.NewHostManagementService(hostManagementRepositoryAdapter{repository: dependencies.hostTargets}, authorization, resourceGrants)
+	if err != nil {
+		return nil, fmt.Errorf("initialize host management service: %w", err)
+	}
 	return &Server{
 		cfg: cfg, db: db, logger: logger,
-		aiTokens: dependencies.aiTokens, hostTargets: dependencies.hostTargets, databases: dependencies.databases,
+		aiTokens: dependencies.aiTokens, hostTargets: dependencies.hostTargets, hostManagement: hostManagement, databases: dependencies.databases,
 		applications: dependencies.applications, containers: dependencies.containers, platformAccounts: dependencies.platformAccounts,
 		userSessionCreation: userSessionCreation, audit: dependencies.audit, connectionPassword: connectionPassword,
 		preferences: dependencies.preferences, temporaryRepository: dependencies.temporaryAccess,

@@ -697,6 +697,7 @@ func TestCreateHostAutomaticallyGrantsCreator(t *testing.T) {
 	if err := db.Create(&model.User{ID: "u1", Username: "alice", Status: "active"}).Error; err != nil {
 		t.Fatalf("create user: %v", err)
 	}
+	seedGlobalAction(t, db, "u1", rbac.ActionHostCreate)
 	body := bytes.NewBufferString(`{"name":"created","address":"10.0.0.9","port":22}`)
 	request := asTestUser(httptest.NewRequest(http.MethodPost, "/api/hosts", body), "u1", "alice")
 	recorder := httptest.NewRecorder()

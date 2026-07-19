@@ -249,6 +249,20 @@ func applyTestAdminDependencies(t *testing.T, server *Server, repository adminRe
 	}
 	server.aiTokens = dependencies.aiTokens
 	server.hostTargets = dependencies.hostTargets
+	if server.hostManagement == nil && server.resourceGrants != nil {
+		authorization := server.authorization
+		if isNilAdminAuthorization(authorization) {
+			authorization = repositoryTestAuthorization{}
+		}
+		server.hostManagement, err = service.NewHostManagementService(
+			hostManagementRepositoryAdapter{repository: dependencies.hostTargets},
+			authorization,
+			server.resourceGrants,
+		)
+		if err != nil {
+			t.Fatalf("new host management service: %v", err)
+		}
+	}
 	server.databases = dependencies.databases
 	server.applications = dependencies.applications
 	server.containers = dependencies.containers

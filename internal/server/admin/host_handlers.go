@@ -1,7 +1,6 @@
 package admin
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -11,33 +10,20 @@ import (
 	"golang.org/x/crypto/ssh"
 
 	"jianmen/internal/config"
-	"jianmen/internal/model"
-	"jianmen/internal/rbac"
+	"jianmen/internal/service"
 	"jianmen/internal/store"
 )
 
 func (s *Server) handleHosts(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
-		if !s.requireAuthenticatedUser(w, r) {
-			return
-		}
-		hosts, err := s.hostTargets.Hosts(r.Context())
+		hosts, err := s.hostManagement.ListHosts(r.Context(), hostManagementActor(r))
 		if err != nil {
-			s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
+			s.writeHostManagementError(w, r, err)
 			return
 		}
-		hosts, err = s.visibleHosts(r, hosts)
-		if err != nil {
-			s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
-			return
-		}
-		s.writeJSON(w, r, http.StatusOK, paginateHosts(hosts, r))
+		s.writeJSON(w, r, http.StatusOK, paginateHosts(storeHostViews(hosts), r))
 	case http.MethodPost:
-		if !s.requirePermission(r, rbac.ActionHostCreate) {
-			s.forbidden(w, r)
-			return
-		}
 		s.handleCreateHost(w, r)
 	default:
 		w.Header().Set("Allow", "GET, POST")
@@ -53,21 +39,12 @@ func (s *Server) handleCreateHost(w http.ResponseWriter, r *http.Request) {
 		s.writeErrorText(w, r, http.StatusBadRequest, err.Error())
 		return
 	}
-	view, err := s.hostTargets.AddHost(r.Context(), host)
+	view, err := s.hostManagement.CreateHost(r.Context(), hostManagementActor(r), hostManagementHostRecord(host))
 	if err != nil {
-		s.writeErrorText(w, r, http.StatusBadRequest, err.Error())
+		s.writeHostManagementError(w, r, err)
 		return
 	}
-	if err := s.grantCreatedResource(r, model.ResourceTypeHost, view.ID); err != nil {
-		cleanupCtx, cancelCleanup := context.WithTimeout(context.WithoutCancel(r.Context()), 5*time.Second)
-		defer cancelCleanup()
-		if cleanupErr := s.hostTargets.DeleteHost(cleanupCtx, view.ID); cleanupErr != nil {
-			err = errors.Join(err, cleanupErr)
-		}
-		s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
-		return
-	}
-	s.writeJSON(w, r, http.StatusCreated, view)
+	s.writeJSON(w, r, http.StatusCreated, storeHostView(view))
 }
 
 func (s *Server) handleHost(w http.ResponseWriter, r *http.Request) {
@@ -82,37 +59,13 @@ func (s *Server) handleHost(w http.ResponseWriter, r *http.Request) {
 			s.writeErrorText(w, r, http.StatusMethodNotAllowed, "method not allowed")
 			return
 		}
-		if !s.requireAuthenticatedUser(w, r) {
-			return
-		}
-		var actions []string
-		if connectableOnly(r) {
-			if !s.requireAnyPermission(r, rbac.ActionSessionConnect, rbac.ActionSFTPConnect, rbac.ActionRDPConnect) {
-				s.forbidden(w, r)
-				return
-			}
-		} else {
-			actions = []string{rbac.ActionTargetView}
-		}
-		accounts, err := s.resourceAccess.ListHostAccounts(r.Context(), id)
+		accounts, err := s.hostManagement.ListHostAccounts(r.Context(), hostManagementActor(r), id, connectableOnly(r))
 		if err != nil {
-			writeHostStoreError(w, r, err)
+			s.writeHostManagementError(w, r, err)
 			return
 		}
-		if connectableOnly(r) {
-			accounts, err = s.visibleConnectableTargets(r, accounts)
-		} else {
-			accounts, err = s.visibleTargetsForActions(r, accounts, actions)
-		}
-		if err != nil {
-			s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
-			return
-		}
-		resp := paginateSlice(accounts, r, func(v store.TargetView, q string) bool {
-			return strings.Contains(strings.ToLower(v.Username), q) ||
-				strings.Contains(strings.ToLower(v.Name), q) ||
-				strings.Contains(strings.ToLower(v.Group), q) ||
-				strings.Contains(strings.ToLower(v.Remark), q)
+		resp := paginateSlice(storeTargetViews(accounts), r, func(v store.TargetView, q string) bool {
+			return strings.Contains(strings.ToLower(v.Username), q) || strings.Contains(strings.ToLower(v.Name), q) || strings.Contains(strings.ToLower(v.Group), q) || strings.Contains(strings.ToLower(v.Remark), q)
 		})
 		s.writeJSON(w, r, http.StatusOK, resp)
 		return
@@ -124,32 +77,17 @@ func (s *Server) handleHost(w http.ResponseWriter, r *http.Request) {
 
 	switch r.Method {
 	case http.MethodGet:
-		visible, err := s.hostVisible(r, id)
+		view, err := s.hostManagement.Host(r.Context(), hostManagementActor(r), id)
 		if err != nil {
-			s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
+			s.writeHostManagementError(w, r, err)
 			return
 		}
-		if !visible {
-			s.forbidden(w, r)
-			return
-		}
-		view, err := s.hostTargets.Host(r.Context(), id)
-		if err != nil {
-			writeHostStoreError(w, r, err)
-			return
-		}
-		s.writeJSON(w, r, http.StatusOK, view)
+		s.writeJSON(w, r, http.StatusOK, storeHostView(view))
 	case http.MethodPut:
-		if !s.requireResourceAction(w, r, rbac.ActionHostUpdate, model.ResourceTypeHost, id) {
-			return
-		}
 		s.handleUpdateHost(w, r, id)
 	case http.MethodDelete:
-		if !s.requireResourceAction(w, r, rbac.ActionHostDelete, model.ResourceTypeHost, id) {
-			return
-		}
-		if err := s.hostTargets.DeleteHost(r.Context(), id); err != nil {
-			writeHostStoreError(w, r, err)
+		if err := s.hostManagement.DeleteHost(r.Context(), hostManagementActor(r), id); err != nil {
+			s.writeHostManagementError(w, r, err)
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)
@@ -167,57 +105,27 @@ func (s *Server) handleUpdateHost(w http.ResponseWriter, r *http.Request, id str
 		s.writeErrorText(w, r, http.StatusBadRequest, err.Error())
 		return
 	}
-	view, err := s.hostTargets.UpdateHost(r.Context(), id, host)
+	view, err := s.hostManagement.UpdateHost(r.Context(), hostManagementActor(r), id, hostManagementHostRecord(host))
 	if err != nil {
-		writeHostStoreError(w, r, err)
+		s.writeHostManagementError(w, r, err)
 		return
 	}
-	s.writeJSON(w, r, http.StatusOK, view)
+	s.writeJSON(w, r, http.StatusOK, storeHostView(view))
 }
 
 func (s *Server) handleTargets(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
-		if !s.requireAuthenticatedUser(w, r) {
-			return
-		}
-		var actions []string
-		if connectableOnly(r) {
-			if !s.requireAnyPermission(r, rbac.ActionSessionConnect, rbac.ActionSFTPConnect, rbac.ActionRDPConnect) {
-				s.forbidden(w, r)
-				return
-			}
-		} else {
-			actions = []string{rbac.ActionTargetView}
-		}
-		var err error
-		targets, err := s.hostTargets.Targets(r.Context())
+		targets, err := s.hostManagement.ListTargets(r.Context(), hostManagementActor(r), connectableOnly(r))
 		if err != nil {
-			s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
+			s.writeHostManagementError(w, r, err)
 			return
 		}
-		if connectableOnly(r) {
-			targets, err = s.visibleConnectableTargets(r, targets)
-		} else {
-			targets, err = s.visibleTargetsForActions(r, targets, actions)
-		}
-		if err != nil {
-			s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
-			return
-		}
-		resp := paginateSlice(targets, r, func(v store.TargetView, q string) bool {
-			return strings.Contains(strings.ToLower(v.Name), q) ||
-				strings.Contains(strings.ToLower(v.Username), q) ||
-				strings.Contains(strings.ToLower(v.Host), q) ||
-				strings.Contains(strings.ToLower(v.Group), q) ||
-				strings.Contains(strings.ToLower(v.Remark), q)
+		resp := paginateSlice(storeTargetViews(targets), r, func(v store.TargetView, q string) bool {
+			return strings.Contains(strings.ToLower(v.Name), q) || strings.Contains(strings.ToLower(v.Username), q) || strings.Contains(strings.ToLower(v.Host), q) || strings.Contains(strings.ToLower(v.Group), q) || strings.Contains(strings.ToLower(v.Remark), q)
 		})
 		s.writeJSON(w, r, http.StatusOK, resp)
 	case http.MethodPost:
-		if !s.requirePermission(r, rbac.ActionTargetCreate) {
-			s.forbidden(w, r)
-			return
-		}
 		s.handleCreateTarget(w, r)
 	default:
 		w.Header().Set("Allow", "GET, POST")
@@ -233,20 +141,12 @@ func (s *Server) handleCreateTarget(w http.ResponseWriter, r *http.Request) {
 		s.writeErrorText(w, r, http.StatusBadRequest, err.Error())
 		return
 	}
-	if strings.TrimSpace(target.HostID) == "" {
-		if !isSuperAdminRequest(r) {
-			s.writeErrorText(w, r, http.StatusBadRequest, "host_id is required")
-			return
-		}
-	} else if !s.requireResourceAction(w, r, rbac.ActionTargetCreate, model.ResourceTypeHost, target.HostID) {
-		return
-	}
-	view, err := s.hostTargets.AddTarget(r.Context(), target)
+	view, err := s.hostManagement.CreateTarget(r.Context(), hostManagementActor(r), target)
 	if err != nil {
-		s.writeErrorText(w, r, http.StatusBadRequest, err.Error())
+		s.writeHostManagementError(w, r, err)
 		return
 	}
-	s.writeJSON(w, r, http.StatusCreated, view)
+	s.writeJSON(w, r, http.StatusCreated, storeTargetView(view))
 }
 
 func (s *Server) handleTestConnection(w http.ResponseWriter, r *http.Request) {
@@ -255,150 +155,50 @@ func (s *Server) handleTestConnection(w http.ResponseWriter, r *http.Request) {
 		s.writeErrorText(w, r, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
-	if !s.requirePermission(r, rbac.ActionTargetCreate) {
-		s.forbidden(w, r)
-		return
-	}
 	defer r.Body.Close()
-	var raw map[string]json.RawMessage
-	if err := json.NewDecoder(r.Body).Decode(&raw); err != nil {
-		s.writeErrorText(w, r, http.StatusBadRequest, err.Error())
-		return
-	}
-	encoded, err := json.Marshal(raw)
-	if err != nil {
-		s.writeErrorText(w, r, http.StatusBadRequest, err.Error())
-		return
-	}
 	var target config.Target
-	if err := json.Unmarshal(encoded, &target); err != nil {
+	if err := json.NewDecoder(r.Body).Decode(&target); err != nil {
 		s.writeErrorText(w, r, http.StatusBadRequest, err.Error())
 		return
 	}
-	if target.ID != "" {
-		if !s.requireResourceAction(w, r, rbac.ActionTargetCreate, model.ResourceTypeHostAccount, target.ID) {
-			return
-		}
-	} else if target.HostID != "" && !s.requireResourceAction(w, r, rbac.ActionTargetCreate, model.ResourceTypeHost, target.HostID) {
+	targetCfg, err := s.hostManagement.ResolveConnectionTest(r.Context(), hostManagementActor(r), target)
+	if err != nil {
+		s.writeHostManagementError(w, r, err)
 		return
 	}
-	hostKeyConfigProvided := target.InsecureIgnoreHostKey || target.HostKeyFingerprint != "" || target.KnownHostsPath != ""
-
-	targetCfg := store.TargetConfig{
-		ID:                    target.ID,
-		Name:                  target.Name,
-		Host:                  target.Host,
-		Port:                  target.Port,
-		Protocol:              target.Protocol,
-		Username:              target.Username,
-		Domain:                target.Domain,
-		Password:              target.Password,
-		PrivateKeyPath:        target.PrivateKeyPath,
-		PrivateKeyPEM:         target.PrivateKeyPEM,
-		Passphrase:            target.Passphrase,
-		InsecureIgnoreHostKey: target.InsecureIgnoreHostKey,
-		HostKeyFingerprint:    target.HostKeyFingerprint,
-		KnownHostsPath:        target.KnownHostsPath,
-		RDPSecurity:           target.RDPSecurity,
-		RDPIgnoreCertificate:  target.RDPIgnoreCertificate,
-		RDPCertFingerprints:   target.RDPCertFingerprints,
-		Disabled:              target.Disabled,
-		ExpiresAt:             target.ExpiresAt,
-		HostID:                target.HostID,
-	}
-	if targetCfg.Password == "" && targetCfg.PrivateKeyPath == "" && targetCfg.PrivateKeyPEM == "" && targetCfg.ID != "" {
-		storedTarget, err := s.hostTargets.TargetConfig(r.Context(), targetCfg.ID)
-		if err != nil {
-			s.writeJSON(w, r, http.StatusOK, map[string]any{"ok": false, "message": "配置错误: " + err.Error()})
-			return
-		}
-		storedTarget.Host = firstNonEmpty(targetCfg.Host, storedTarget.Host)
-		if targetCfg.Port != 0 {
-			storedTarget.Port = targetCfg.Port
-		}
-		storedTarget.Username = firstNonEmpty(targetCfg.Username, storedTarget.Username)
-		storedTarget.Name = firstNonEmpty(targetCfg.Name, storedTarget.Name)
-		storedTarget.HostID = firstNonEmpty(targetCfg.HostID, storedTarget.HostID)
-		storedTarget.Protocol = firstNonEmpty(targetCfg.Protocol, storedTarget.Protocol)
-		storedTarget.Domain = firstNonEmpty(targetCfg.Domain, storedTarget.Domain)
-		storedTarget.RDPSecurity = firstNonEmpty(targetCfg.RDPSecurity, storedTarget.RDPSecurity)
-		storedTarget.RDPIgnoreCertificate = targetCfg.RDPIgnoreCertificate
-		storedTarget.RDPCertFingerprints = firstNonEmpty(
-			targetCfg.RDPCertFingerprints, storedTarget.RDPCertFingerprints,
-		)
-		if hostKeyConfigProvided {
-			storedTarget.InsecureIgnoreHostKey = targetCfg.InsecureIgnoreHostKey
-			storedTarget.HostKeyFingerprint = targetCfg.HostKeyFingerprint
-			storedTarget.KnownHostsPath = targetCfg.KnownHostsPath
-		}
-		storedTarget.Disabled = targetCfg.Disabled
-		storedTarget.ExpiresAt = targetCfg.ExpiresAt
-		targetCfg = storedTarget
-	}
-
-	if targetCfg.HostID != "" && (targetCfg.Host == "" || targetCfg.Port == 0) {
-		host, err := s.hostTargets.Host(r.Context(), targetCfg.HostID)
-		if err != nil {
-			s.writeJSON(w, r, http.StatusOK, map[string]any{"ok": false, "error": "configuration error: " + err.Error()})
-			return
-		}
-		targetCfg.Host = firstNonEmpty(targetCfg.Host, host.Address)
-		targetCfg.Protocol = firstNonEmpty(targetCfg.Protocol, host.Protocol)
-		if targetCfg.Port == 0 {
-			targetCfg.Port = host.Port
-		}
-	}
-
 	addr := targetCfg.Addr()
-	if addr == "" || targetCfg.Username == "" {
-		s.writeErrorText(w, r, http.StatusBadRequest, "host, port, and username are required")
-		return
-	}
 	if strings.EqualFold(targetCfg.Protocol, "rdp") {
 		if s.webRDP == nil {
-			s.writeJSON(w, r, http.StatusOK, map[string]any{
-				"ok": false, "error": "Web RDP 未启用，无法测试 RDP 账号",
-			})
+			s.writeJSON(w, r, http.StatusOK, map[string]any{"ok": false, "error": "Web RDP is not enabled"})
 			return
 		}
 		start := time.Now()
-		err := s.webRDP.TestConnection(r.Context(), targetCfg)
-		latencyMs := time.Since(start).Milliseconds()
+		err := s.webRDP.TestConnection(r.Context(), storeTargetConfig(targetCfg))
+		latencyMS := time.Since(start).Milliseconds()
 		if err != nil {
 			s.logger.Warn("RDP connection test failed", "target", targetCfg.ID, "address", addr, "error", err)
-			s.writeJSON(w, r, http.StatusOK, map[string]any{
-				"ok": false, "latency_ms": latencyMs, "verification_scope": "guacd_handshake",
-				"authentication_verified": false, "error": "RDP 代理握手失败",
-			})
+			s.writeJSON(w, r, http.StatusOK, map[string]any{"ok": false, "latency_ms": latencyMS, "verification_scope": "guacd_handshake", "authentication_verified": false, "error": "RDP proxy handshake failed"})
 			return
 		}
-		s.writeJSON(w, r, http.StatusOK, map[string]any{
-			"ok": true, "latency_ms": latencyMs, "verification_scope": "guacd_handshake",
-			"authentication_verified": false,
-			"message":                 "RDP 代理握手成功；目标 Windows 账号将在实际 Web RDP 会话中认证 (" + addr + ")",
-		})
+		s.writeJSON(w, r, http.StatusOK, map[string]any{"ok": true, "latency_ms": latencyMS, "verification_scope": "guacd_handshake", "authentication_verified": false, "message": "RDP proxy handshake succeeded (" + addr + ")"})
 		return
 	}
-
-	clientConfig, err := store.ClientConfigForTarget(targetCfg)
+	clientConfig, err := store.ClientConfigForTarget(storeTargetConfig(targetCfg))
 	if err != nil {
-		s.writeJSON(w, r, http.StatusOK, map[string]any{"ok": false, "error": "配置错误: " + err.Error()})
+		s.writeJSON(w, r, http.StatusOK, map[string]any{"ok": false, "error": "configuration error: " + err.Error()})
 		return
 	}
-
 	clientConfig.Timeout = 10 * time.Second
-
 	start := time.Now()
 	conn, err := ssh.Dial("tcp", addr, clientConfig)
-	elapsed := time.Since(start)
-	latencyMs := elapsed.Milliseconds()
+	latencyMS := time.Since(start).Milliseconds()
 	if err != nil {
 		s.logger.Warn("ssh connection test failed", "target", targetCfg.ID, "address", addr, "error", err)
-		s.writeJSON(w, r, http.StatusOK, map[string]any{"ok": false, "latency_ms": latencyMs, "error": "连接失败: " + friendlySSHError(err)})
+		s.writeJSON(w, r, http.StatusOK, map[string]any{"ok": false, "latency_ms": latencyMS, "error": "connection failed: " + friendlySSHError(err)})
 		return
 	}
-	conn.Close()
-	s.writeJSON(w, r, http.StatusOK, map[string]any{"ok": true, "latency_ms": latencyMs, "message": "连接成功 (" + addr + ")"})
+	_ = conn.Close()
+	s.writeJSON(w, r, http.StatusOK, map[string]any{"ok": true, "latency_ms": latencyMS, "message": "connection succeeded (" + addr + ")"})
 }
 
 func (s *Server) handleTarget(w http.ResponseWriter, r *http.Request) {
@@ -407,29 +207,19 @@ func (s *Server) handleTarget(w http.ResponseWriter, r *http.Request) {
 		s.writeErrorText(w, r, http.StatusNotFound, "not found")
 		return
 	}
-
 	switch r.Method {
 	case http.MethodGet:
-		if !s.requireResourceAction(w, r, rbac.ActionTargetView, model.ResourceTypeHostAccount, id) {
-			return
-		}
-		view, err := s.hostTargets.Target(r.Context(), id)
+		view, err := s.hostManagement.Target(r.Context(), hostManagementActor(r), id)
 		if err != nil {
-			writeTargetStoreError(w, r, err)
+			s.writeHostManagementError(w, r, err)
 			return
 		}
-		s.writeJSON(w, r, http.StatusOK, view)
+		s.writeJSON(w, r, http.StatusOK, storeTargetView(view))
 	case http.MethodPut:
-		if !s.requireResourceAction(w, r, rbac.ActionTargetUpdate, model.ResourceTypeHostAccount, id) {
-			return
-		}
 		s.handleUpdateTarget(w, r, id)
 	case http.MethodDelete:
-		if !s.requireResourceAction(w, r, rbac.ActionTargetDelete, model.ResourceTypeHostAccount, id) {
-			return
-		}
-		if err := s.hostTargets.DeleteTarget(r.Context(), id); err != nil {
-			writeTargetStoreError(w, r, err)
+		if err := s.hostManagement.DeleteTarget(r.Context(), hostManagementActor(r), id); err != nil {
+			s.writeHostManagementError(w, r, err)
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)
@@ -446,12 +236,65 @@ func (s *Server) handleUpdateTarget(w http.ResponseWriter, r *http.Request, id s
 		s.writeErrorText(w, r, http.StatusBadRequest, err.Error())
 		return
 	}
-	view, err := s.hostTargets.UpdateTarget(r.Context(), id, target)
+	view, err := s.hostManagement.UpdateTarget(r.Context(), hostManagementActor(r), id, target)
 	if err != nil {
-		writeTargetStoreError(w, r, err)
+		s.writeHostManagementError(w, r, err)
 		return
 	}
-	s.writeJSON(w, r, http.StatusOK, view)
+	s.writeJSON(w, r, http.StatusOK, storeTargetView(view))
 }
 
-// -- db gateway config --
+func hostManagementActor(r *http.Request) service.HostManagementActor {
+	return service.HostManagementActor{ID: userIDFromRequest(r), SuperAdmin: isSuperAdminRequest(r)}
+}
+
+func (s *Server) writeHostManagementError(w http.ResponseWriter, r *http.Request, err error) {
+	switch {
+	case errors.Is(err, service.ErrHostAccessDenied):
+		s.forbidden(w, r)
+	case errors.Is(err, service.ErrHostTargetUnavailable):
+		s.writeErrorText(w, r, http.StatusForbidden, "target is disabled, expired, or unavailable")
+	case errors.Is(err, service.ErrHostTargetInvalidInput):
+		s.writeErrorText(w, r, http.StatusBadRequest, err.Error())
+	case errors.Is(err, service.ErrHostGrantFailed):
+		s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
+	case errors.Is(err, store.ErrHostNotFound):
+		s.writeErrorText(w, r, http.StatusNotFound, "host not found")
+	case errors.Is(err, store.ErrTargetNotFound):
+		s.writeErrorText(w, r, http.StatusNotFound, "target not found")
+	default:
+		s.writeErrorText(w, r, http.StatusBadRequest, err.Error())
+	}
+}
+
+func hostManagementHostRecord(record store.HostRecord) service.HostManagementHostRecord {
+	return service.HostManagementHostRecord{ID: record.ID, Name: record.Name, Group: record.Group, Address: record.Address, Port: record.Port, Protocol: record.Protocol, Remark: record.Remark, Status: record.Status}
+}
+
+func storeHostViews(views []service.HostManagementHostView) []store.HostView {
+	result := make([]store.HostView, len(views))
+	for index := range views {
+		result[index] = storeHostView(views[index])
+	}
+	return result
+}
+
+func storeHostView(view service.HostManagementHostView) store.HostView {
+	return store.HostView{ID: view.ID, Name: view.Name, Group: view.Group, Address: view.Address, Port: view.Port, Protocol: view.Protocol, Remark: view.Remark, Status: view.Status, AccountCount: view.AccountCount, CreatedAt: view.CreatedAt, UpdatedAt: view.UpdatedAt, CanManage: view.CanManage}
+}
+
+func storeTargetViews(views []service.HostManagementTargetView) []store.TargetView {
+	result := make([]store.TargetView, len(views))
+	for index := range views {
+		result[index] = storeTargetView(views[index])
+	}
+	return result
+}
+
+func storeTargetView(view service.HostManagementTargetView) store.TargetView {
+	return store.TargetView{ID: view.ID, HostID: view.HostID, ResourceType: view.ResourceType, ResourceID: view.ResourceID, ResourceSeq: view.ResourceSeq, HostResourceID: view.HostResourceID, Name: view.Name, Group: view.Group, Remark: view.Remark, ExpiresAt: view.ExpiresAt, Status: view.Status, Host: view.Host, Port: view.Port, Protocol: view.Protocol, Username: view.Username, Domain: view.Domain, AuthMethods: view.AuthMethods, InsecureIgnoreHostKey: view.InsecureIgnoreHostKey, HostKeyFingerprint: view.HostKeyFingerprint, KnownHostsPath: view.KnownHostsPath, RDPSecurity: view.RDPSecurity, RDPIgnoreCertificate: view.RDPIgnoreCertificate, RDPCertFingerprints: view.RDPCertFingerprints, RDPApprovalRequired: view.RDPApprovalRequired, RDPClipboardRead: view.RDPClipboardRead, RDPClipboardWrite: view.RDPClipboardWrite, RDPFileUpload: view.RDPFileUpload, RDPFileDownload: view.RDPFileDownload, RDPDriveMapping: view.RDPDriveMapping, CanManage: view.CanManage}
+}
+
+func storeTargetConfig(config service.HostManagementTargetConfig) store.TargetConfig {
+	return store.TargetConfig{ID: config.ID, Name: config.Name, HostName: config.HostName, Host: config.Host, Port: config.Port, Protocol: config.Protocol, Username: config.Username, Domain: config.Domain, Password: config.Password, PrivateKeyPath: config.PrivateKeyPath, PrivateKeyPEM: config.PrivateKeyPEM, Passphrase: config.Passphrase, InsecureIgnoreHostKey: config.InsecureIgnoreHostKey, HostKeyFingerprint: config.HostKeyFingerprint, KnownHostsPath: config.KnownHostsPath, RDPSecurity: config.RDPSecurity, RDPIgnoreCertificate: config.RDPIgnoreCertificate, RDPCertFingerprints: config.RDPCertFingerprints, RDPApprovalRequired: config.RDPApprovalRequired, RDPClipboardRead: config.RDPClipboardRead, RDPClipboardWrite: config.RDPClipboardWrite, RDPFileUpload: config.RDPFileUpload, RDPFileDownload: config.RDPFileDownload, RDPDriveMapping: config.RDPDriveMapping, Disabled: config.Disabled, ExpiresAt: config.ExpiresAt, HostID: config.HostID}
+}

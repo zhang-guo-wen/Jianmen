@@ -23,14 +23,14 @@ type userSessionFinder interface {
 }
 
 type auditSessionWriter interface {
-	CreateAuditSession(session *model.AuditSession) error
-	EndAuditSession(id string) error
+	CreateAuditSession(context.Context, *model.AuditSession) error
+	EndAuditSession(context.Context, string) error
 }
 
 type auditEventWriter interface {
-	CreateAuditSSHCommand(command *model.AuditSSHCommand) error
-	CreateAuditSFTPEvent(event *model.AuditSFTPEvent) error
-	UpdateAuditProtocol(id, protocol string) error
+	CreateAuditSSHCommand(context.Context, *model.AuditSSHCommand) error
+	CreateAuditSFTPEvent(context.Context, *model.AuditSFTPEvent) error
+	UpdateAuditProtocol(context.Context, string, string) error
 }
 
 // runtimeRepository is the construction boundary. Server fields retain the

@@ -25,9 +25,11 @@ type auditRepositoryStub struct {
 	listTotal  int64
 	listErr    error
 	listParams []store.AuditListParams
+	listCtx    context.Context
 
 	session     *model.AuditSession
 	sessionErr  error
+	sessionCtx  context.Context
 	artifact    model.AuditArtifact
 	artifactErr error
 
@@ -81,13 +83,16 @@ func (s *auditRepositoryStub) CreateAuditRDPChannelEvent(
 	return nil
 }
 
-func (s *auditRepositoryStub) GetAuditSession(string) (*model.AuditSession, error) {
+func (s *auditRepositoryStub) GetAuditSession(ctx context.Context, _ string) (*model.AuditSession, error) {
+	s.sessionCtx = ctx
 	return s.session, s.sessionErr
 }
 
 func (s *auditRepositoryStub) ListAuditSessions(
+	ctx context.Context,
 	params store.AuditListParams,
 ) ([]store.AuditSessionView, int64, error) {
+	s.listCtx = ctx
 	s.listParams = append(s.listParams, params)
 	if s.listErr != nil {
 		return nil, 0, s.listErr
@@ -229,6 +234,9 @@ func TestAuditListFiltersEverySessionByResourcePermission(t *testing.T) {
 	if len(audit.listParams) != 1 {
 		t.Fatalf("list calls = %d, want 1", len(audit.listParams))
 	}
+	if audit.listCtx != request.Context() {
+		t.Fatal("audit list did not receive request context")
+	}
 	params := audit.listParams[0]
 	if params.Protocol != "rdp" ||
 		params.UserID != "user-1" ||
@@ -264,6 +272,9 @@ func TestRecordingDownloadRequiresResourceAuthorization(t *testing.T) {
 
 	if recorder.Code != http.StatusForbidden {
 		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusForbidden)
+	}
+	if audit.sessionCtx != request.Context() {
+		t.Fatal("audit item did not receive request context")
 	}
 	if len(objects.statKeys) != 0 || len(objects.openKeys) != 0 {
 		t.Fatal("recording object was accessed before authorization")

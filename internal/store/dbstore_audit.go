@@ -12,32 +12,27 @@ import (
 	"jianmen/internal/model"
 )
 
-func auditDateRange(date string) (time.Time, time.Time, bool) {
-	if strings.TrimSpace(date) == "" {
-		return time.Time{}, time.Time{}, false
-	}
-	start, err := time.ParseInLocation("2006-01-02", strings.TrimSpace(date), time.UTC)
-	if err != nil {
-		return time.Time{}, time.Time{}, false
-	}
-	return start, start.AddDate(0, 0, 1), true
-}
-
 // -- audit sessions --
 
-func (s *DBStore) CreateAuditSession(session *model.AuditSession) error {
+func (s *DBStore) CreateAuditSession(ctx context.Context, session *model.AuditSession) error {
+	if ctx == nil {
+		return errors.New("create audit session: nil context")
+	}
 	s.prepareAuditSessionLease(session)
-	if err := s.db.Create(session).Error; err != nil {
-		return err
+	if err := s.db.WithContext(ctx).Create(session).Error; err != nil {
+		return fmt.Errorf("create audit session: %w", err)
 	}
 	s.trackAuditSessionLease(session)
 	return nil
 }
 
-func (s *DBStore) EndAuditSession(id string) error {
+func (s *DBStore) EndAuditSession(ctx context.Context, id string) error {
 	s.untrackAuditSessionLease(id)
+	if ctx == nil {
+		return errors.New("end audit session: nil context")
+	}
 	now := time.Now().UTC()
-	result := s.db.Model(&model.AuditSession{}).
+	result := s.db.WithContext(ctx).Model(&model.AuditSession{}).
 		Where(
 			"id = ? AND state = ? AND lease_owner = ?",
 			strings.TrimSpace(id),
@@ -60,25 +55,40 @@ func (s *DBStore) EndAuditSession(id string) error {
 	return nil
 }
 
-func (s *DBStore) UpdateAuditProtocol(id string, protocol string) error {
-	return s.db.Model(&model.AuditSession{}).
+func (s *DBStore) UpdateAuditProtocol(ctx context.Context, id string, protocol string) error {
+	if ctx == nil {
+		return errors.New("update audit protocol: nil context")
+	}
+	if err := s.db.WithContext(ctx).Model(&model.AuditSession{}).
 		Where("id = ?", id).
-		Updates(map[string]any{"protocol": "ssh", "protocol_subtype": protocol}).Error
+		Updates(map[string]any{"protocol": "ssh", "protocol_subtype": protocol}).Error; err != nil {
+		return fmt.Errorf("update audit protocol: %w", err)
+	}
+	return nil
 }
 
-func (s *DBStore) GetAuditSession(id string) (*model.AuditSession, error) {
+func (s *DBStore) GetAuditSession(ctx context.Context, id string) (*model.AuditSession, error) {
+	if ctx == nil {
+		return nil, errors.New("get audit session: nil context")
+	}
 	var session model.AuditSession
-	if err := s.db.Where("id = ?", id).First(&session).Error; err != nil {
+	if err := s.db.WithContext(ctx).Where("id = ?", id).First(&session).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, fmt.Errorf("audit session %q: %w", id, err)
 		}
-		return nil, err
+		return nil, fmt.Errorf("get audit session %q: %w", id, err)
 	}
 	return &session, nil
 }
 
-func (s *DBStore) ListAuditSessions(params AuditListParams) ([]AuditSessionView, int64, error) {
-	q := s.db.Model(&model.AuditSession{})
+func (s *DBStore) ListAuditSessions(
+	ctx context.Context,
+	params AuditListParams,
+) ([]AuditSessionView, int64, error) {
+	if ctx == nil {
+		return nil, 0, errors.New("list audit sessions: nil context")
+	}
+	q := s.db.WithContext(ctx).Model(&model.AuditSession{})
 	if params.Protocol != "" {
 		protos := splitCSV(params.Protocol)
 		q = q.Where("protocol IN ?", protos)
@@ -131,7 +141,7 @@ func (s *DBStore) ListAuditSessions(params AuditListParams) ([]AuditSessionView,
 	}
 	var total int64
 	if err := q.Count(&total).Error; err != nil {
-		return nil, 0, err
+		return nil, 0, fmt.Errorf("count audit sessions: %w", err)
 	}
 	if params.Size <= 0 {
 		params.Size = 20
@@ -141,9 +151,9 @@ func (s *DBStore) ListAuditSessions(params AuditListParams) ([]AuditSessionView,
 	}
 	var sessions []model.AuditSession
 	if err := q.Order("started_at DESC").Offset((params.Page - 1) * params.Size).Limit(params.Size).Find(&sessions).Error; err != nil {
-		return nil, 0, err
+		return nil, 0, fmt.Errorf("list audit sessions: %w", err)
 	}
-	logCounts, err := s.auditLogCounts(sessions)
+	logCounts, err := s.auditLogCounts(ctx, sessions)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -286,7 +296,13 @@ type auditLogCountRow struct {
 	Count          int64  `gorm:"column:count"`
 }
 
-func (s *DBStore) auditLogCounts(sessions []model.AuditSession) (map[string]int64, error) {
+func (s *DBStore) auditLogCounts(
+	ctx context.Context,
+	sessions []model.AuditSession,
+) (map[string]int64, error) {
+	if ctx == nil {
+		return nil, errors.New("count audit logs: nil context")
+	}
 	counts := make(map[string]int64, len(sessions))
 	idsByKind := map[string][]string{
 		"ssh":  {},
@@ -312,7 +328,7 @@ func (s *DBStore) auditLogCounts(sessions []model.AuditSession) (map[string]int6
 			continue
 		}
 		var rows []auditLogCountRow
-		if err := s.db.Model(query.model).
+		if err := s.db.WithContext(ctx).Model(query.model).
 			Select("audit_session_id, COUNT(*) AS count").
 			Where("audit_session_id IN ?", ids).
 			Group("audit_session_id").
@@ -352,120 +368,72 @@ func splitCSV(s string) []string {
 
 // -- audit SSH commands --
 
-func (s *DBStore) CreateAuditSSHCommand(cmd *model.AuditSSHCommand) error {
-	return s.db.Create(cmd).Error
+func (s *DBStore) CreateAuditSSHCommand(ctx context.Context, cmd *model.AuditSSHCommand) error {
+	if ctx == nil {
+		return errors.New("create SSH audit command: nil context")
+	}
+	if err := s.db.WithContext(ctx).Create(cmd).Error; err != nil {
+		return fmt.Errorf("create SSH audit command: %w", err)
+	}
+	return nil
 }
 
-func (s *DBStore) ListAuditSSHCommands(sessionID string, opts PageOpts) ([]model.AuditSSHCommand, int64, error) {
-	q := s.db.Model(&model.AuditSSHCommand{}).Where("audit_session_id = ?", sessionID)
+func (s *DBStore) ListAuditSSHCommands(
+	ctx context.Context,
+	sessionID string,
+	opts PageOpts,
+) ([]model.AuditSSHCommand, int64, error) {
+	if ctx == nil {
+		return nil, 0, errors.New("list SSH audit commands: nil context")
+	}
+	q := s.db.WithContext(ctx).Model(&model.AuditSSHCommand{}).Where("audit_session_id = ?", sessionID)
 	var total int64
 	if err := q.Count(&total).Error; err != nil {
-		return nil, 0, err
+		return nil, 0, fmt.Errorf("count SSH audit commands: %w", err)
 	}
 	var cmds []model.AuditSSHCommand
 	if opts.Limit <= 0 {
 		opts.Limit = 500
 	}
 	if err := q.Order("timestamp ASC").Offset(opts.Offset).Limit(opts.Limit).Find(&cmds).Error; err != nil {
-		return nil, 0, err
+		return nil, 0, fmt.Errorf("list SSH audit commands: %w", err)
 	}
 	return cmds, total, nil
 }
 
 // -- audit SFTP events --
 
-func (s *DBStore) CreateAuditSFTPEvent(event *model.AuditSFTPEvent) error {
-	return s.db.Create(event).Error
+func (s *DBStore) CreateAuditSFTPEvent(ctx context.Context, event *model.AuditSFTPEvent) error {
+	if ctx == nil {
+		return errors.New("create SFTP audit event: nil context")
+	}
+	if err := s.db.WithContext(ctx).Create(event).Error; err != nil {
+		return fmt.Errorf("create SFTP audit event: %w", err)
+	}
+	return nil
 }
 
-func (s *DBStore) ListAuditSFTPEvents(sessionID string, opts PageOpts) ([]model.AuditSFTPEvent, int64, error) {
-	q := s.db.Model(&model.AuditSFTPEvent{}).Where("audit_session_id = ?", sessionID)
+func (s *DBStore) ListAuditSFTPEvents(
+	ctx context.Context,
+	sessionID string,
+	opts PageOpts,
+) ([]model.AuditSFTPEvent, int64, error) {
+	if ctx == nil {
+		return nil, 0, errors.New("list SFTP audit events: nil context")
+	}
+	q := s.db.WithContext(ctx).Model(&model.AuditSFTPEvent{}).Where("audit_session_id = ?", sessionID)
 	var total int64
 	if err := q.Count(&total).Error; err != nil {
-		return nil, 0, err
+		return nil, 0, fmt.Errorf("count SFTP audit events: %w", err)
 	}
 	var events []model.AuditSFTPEvent
 	if opts.Limit <= 0 {
 		opts.Limit = 1000
 	}
 	if err := q.Order("timestamp ASC").Offset(opts.Offset).Limit(opts.Limit).Find(&events).Error; err != nil {
-		return nil, 0, err
+		return nil, 0, fmt.Errorf("list SFTP audit events: %w", err)
 	}
 	return events, total, nil
-}
-
-// -- management and login audit logs --
-
-func (s *DBStore) CreateAuditEvent(event *model.AuditEvent) error {
-	return s.db.Create(event).Error
-}
-
-func (s *DBStore) ListAuditEvents(params AuditEventListParams) ([]model.AuditEvent, int64, error) {
-	q := s.db.Model(&model.AuditEvent{})
-	if params.Search != "" {
-		like := "%" + strings.ToLower(strings.TrimSpace(params.Search)) + "%"
-		q = q.Where("LOWER(actor_username) LIKE ? OR LOWER(action) LIKE ? OR LOWER(resource_type) LIKE ? OR LOWER(resource_name) LIKE ? OR LOWER(detail) LIKE ? OR LOWER(client_ip) LIKE ?", like, like, like, like, like, like)
-	}
-	if params.Action != "" {
-		q = q.Where("action = ?", params.Action)
-	}
-	if params.ResourceType != "" {
-		q = q.Where("resource_type = ?", params.ResourceType)
-	}
-	if start, end, ok := auditDateRange(params.Date); ok {
-		q = q.Where("created_at >= ? AND created_at < ?", start, end)
-	}
-	var total int64
-	if err := q.Count(&total).Error; err != nil {
-		return nil, 0, fmt.Errorf("count audit events: %w", err)
-	}
-	page, size := normalizeAuditPage(params.Page, params.Size)
-	var items []model.AuditEvent
-	if err := q.Order("created_at DESC").Offset((page - 1) * size).Limit(size).Find(&items).Error; err != nil {
-		return nil, 0, fmt.Errorf("list audit events: %w", err)
-	}
-	return items, total, nil
-}
-
-func (s *DBStore) CreateLoginAuditLog(log *model.LoginAuditLog) error {
-	return s.db.Create(log).Error
-}
-
-func (s *DBStore) ListLoginAuditLogs(params LoginAuditListParams) ([]model.LoginAuditLog, int64, error) {
-	q := s.db.Model(&model.LoginAuditLog{})
-	if params.Search != "" {
-		like := "%" + strings.ToLower(strings.TrimSpace(params.Search)) + "%"
-		q = q.Where("LOWER(username) LIKE ? OR LOWER(client_ip) LIKE ? OR LOWER(reason) LIKE ? OR LOWER(user_agent) LIKE ?", like, like, like, like)
-	}
-	if params.Outcome != "" {
-		q = q.Where("outcome = ?", params.Outcome)
-	}
-	if start, end, ok := auditDateRange(params.Date); ok {
-		q = q.Where("created_at >= ? AND created_at < ?", start, end)
-	}
-	var total int64
-	if err := q.Count(&total).Error; err != nil {
-		return nil, 0, fmt.Errorf("count login audit logs: %w", err)
-	}
-	page, size := normalizeAuditPage(params.Page, params.Size)
-	var items []model.LoginAuditLog
-	if err := q.Order("created_at DESC").Offset((page - 1) * size).Limit(size).Find(&items).Error; err != nil {
-		return nil, 0, fmt.Errorf("list login audit logs: %w", err)
-	}
-	return items, total, nil
-}
-
-func normalizeAuditPage(page, size int) (int, int) {
-	if page < 1 {
-		page = 1
-	}
-	if size <= 0 {
-		size = 50
-	}
-	if size > 200 {
-		size = 200
-	}
-	return page, size
 }
 
 // -- user session lookup --

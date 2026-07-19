@@ -120,20 +120,20 @@ type adminUserSessionCreationRepository interface {
 }
 
 type adminAuditRepository interface {
-	CreateAuditSession(*model.AuditSession) error
-	EndAuditSession(string) error
-	GetAuditSession(string) (*model.AuditSession, error)
-	ListAuditSessions(store.AuditListParams) ([]store.AuditSessionView, int64, error)
-	UpdateAuditProtocol(string, string) error
-	CreateAuditSSHCommand(*model.AuditSSHCommand) error
-	ListAuditSSHCommands(string, store.PageOpts) ([]model.AuditSSHCommand, int64, error)
-	CreateAuditSFTPEvent(*model.AuditSFTPEvent) error
-	ListAuditSFTPEvents(string, store.PageOpts) ([]model.AuditSFTPEvent, int64, error)
+	CreateAuditSession(context.Context, *model.AuditSession) error
+	EndAuditSession(context.Context, string) error
+	GetAuditSession(context.Context, string) (*model.AuditSession, error)
+	ListAuditSessions(context.Context, store.AuditListParams) ([]store.AuditSessionView, int64, error)
+	UpdateAuditProtocol(context.Context, string, string) error
+	CreateAuditSSHCommand(context.Context, *model.AuditSSHCommand) error
+	ListAuditSSHCommands(context.Context, string, store.PageOpts) ([]model.AuditSSHCommand, int64, error)
+	CreateAuditSFTPEvent(context.Context, *model.AuditSFTPEvent) error
+	ListAuditSFTPEvents(context.Context, string, store.PageOpts) ([]model.AuditSFTPEvent, int64, error)
 	ListAuditDBQueryPreviews(context.Context, string, store.AuditDBQueryPreviewParams) ([]store.AuditDBQueryPreview, int64, error)
-	CreateAuditEvent(*model.AuditEvent) error
-	ListAuditEvents(store.AuditEventListParams) ([]model.AuditEvent, int64, error)
-	CreateLoginAuditLog(*model.LoginAuditLog) error
-	ListLoginAuditLogs(store.LoginAuditListParams) ([]model.LoginAuditLog, int64, error)
+	CreateAuditEvent(context.Context, *model.AuditEvent) error
+	ListAuditEvents(context.Context, store.AuditEventListParams) ([]model.AuditEvent, int64, error)
+	CreateLoginAuditLog(context.Context, *model.LoginAuditLog) error
+	ListLoginAuditLogs(context.Context, store.LoginAuditListParams) ([]model.LoginAuditLog, int64, error)
 }
 
 type adminConnectionPasswordRepository interface {

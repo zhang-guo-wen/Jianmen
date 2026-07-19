@@ -1,21 +1,26 @@
 package admin
 
 import (
+	"context"
 	"sync"
 	"testing"
 	"time"
 
 	"jianmen/internal/model"
+	"jianmen/internal/online"
 )
 
 func TestWebTerminalAuditSinkPersistsNarrowEvents(t *testing.T) {
 	now := time.Now().UTC()
+	ctx := context.WithValue(context.Background(), webTerminalAuditContextKey{}, "session-value")
 	repo := &capturingWebTerminalAuditRepo{
 		sftpEvents: make(map[string]model.AuditSFTPEvent),
 	}
 	sink := &webTerminalAuditSink{
-		store:     repo,
-		sessionID: "session-1",
+		ctx:            ctx,
+		store:          repo,
+		sessionID:      "session-1",
+		onlineSessions: online.NewRegistry(),
 	}
 
 	if err := sink.WriteCommand("session-1", now, "whoami"); err != nil {
@@ -43,40 +48,51 @@ func TestWebTerminalAuditSinkPersistsNarrowEvents(t *testing.T) {
 	if repo.command.Timestamp.IsZero() || repo.protocol != "web-terminal" {
 		t.Fatalf("audit payload not captured")
 	}
+	if repo.commandContext != ctx || repo.fileContext != ctx || repo.protocolContext != ctx {
+		t.Fatal("web terminal audit sink did not preserve its active session context")
+	}
 }
+
+type webTerminalAuditContextKey struct{}
 
 type capturingWebTerminalAuditRepo struct {
-	mu         sync.Mutex
-	commands   int
-	events     int
-	protocol   string
-	command    model.AuditSSHCommand
-	sftpEvents map[string]model.AuditSFTPEvent
+	mu              sync.Mutex
+	commands        int
+	events          int
+	protocol        string
+	command         model.AuditSSHCommand
+	sftpEvents      map[string]model.AuditSFTPEvent
+	commandContext  context.Context
+	fileContext     context.Context
+	protocolContext context.Context
 }
 
-func (r *capturingWebTerminalAuditRepo) CreateAuditSSHCommand(cmd *model.AuditSSHCommand) error {
+func (r *capturingWebTerminalAuditRepo) CreateAuditSSHCommand(ctx context.Context, cmd *model.AuditSSHCommand) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.commands++
+	r.commandContext = ctx
 	if cmd != nil {
 		r.command = *cmd
 	}
 	return nil
 }
 
-func (r *capturingWebTerminalAuditRepo) CreateAuditSFTPEvent(event *model.AuditSFTPEvent) error {
+func (r *capturingWebTerminalAuditRepo) CreateAuditSFTPEvent(ctx context.Context, event *model.AuditSFTPEvent) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.events++
+	r.fileContext = ctx
 	if event != nil {
 		r.sftpEvents[event.AuditSessionID] = *event
 	}
 	return nil
 }
 
-func (r *capturingWebTerminalAuditRepo) UpdateAuditProtocol(id, protocol string) error {
+func (r *capturingWebTerminalAuditRepo) UpdateAuditProtocol(ctx context.Context, id, protocol string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.protocol = protocol
+	r.protocolContext = ctx
 	return nil
 }

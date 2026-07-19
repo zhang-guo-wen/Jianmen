@@ -50,7 +50,7 @@ func TestDBStoreAuditLeaseCoversAllUnifiedAuditSessionProducers(t *testing.T) {
 		session := model.AuditSession{
 			ID: protocol, Protocol: protocol, State: "started", StartedAt: now,
 		}
-		if err := repository.CreateAuditSession(&session); err != nil {
+		if err := repository.CreateAuditSession(context.Background(), &session); err != nil {
 			t.Fatalf("create %s audit session: %v", protocol, err)
 		}
 		assertAuditLease(t, session, now, now.Add(90*time.Second))
@@ -106,7 +106,7 @@ func TestDBStoreAuditLeaseEndFailureStopsFutureHeartbeats(t *testing.T) {
 	session := model.AuditSession{
 		ID: "end-failed", Protocol: "ssh", State: "started", StartedAt: now,
 	}
-	if err := repository.CreateAuditSession(&session); err != nil {
+	if err := repository.CreateAuditSession(context.Background(), &session); err != nil {
 		t.Fatalf("create audit session: %v", err)
 	}
 	if err := repository.db.Migrator().RenameTable(
@@ -115,7 +115,7 @@ func TestDBStoreAuditLeaseEndFailureStopsFutureHeartbeats(t *testing.T) {
 	); err != nil {
 		t.Fatalf("hide audit session table: %v", err)
 	}
-	if err := repository.EndAuditSession(session.ID); err == nil {
+	if err := repository.EndAuditSession(context.Background(), session.ID); err == nil {
 		t.Fatal("end audit session unexpectedly succeeded")
 	}
 	if ids := repository.activeAuditSessionIDs(); len(ids) != 0 {
@@ -149,7 +149,7 @@ func TestDBStoreAuditLeaseEndRequiresCurrentOwner(t *testing.T) {
 	session := model.AuditSession{
 		ID: "foreign-owner", Protocol: "ssh", State: "started", StartedAt: now,
 	}
-	if err := repository.CreateAuditSession(&session); err != nil {
+	if err := repository.CreateAuditSession(context.Background(), &session); err != nil {
 		t.Fatalf("create audit session: %v", err)
 	}
 	if err := repository.db.Model(&model.AuditSession{}).
@@ -158,7 +158,7 @@ func TestDBStoreAuditLeaseEndRequiresCurrentOwner(t *testing.T) {
 		t.Fatalf("transfer audit lease owner: %v", err)
 	}
 
-	err := repository.EndAuditSession(session.ID)
+	err := repository.EndAuditSession(context.Background(), session.ID)
 	if !errors.Is(err, gorm.ErrRecordNotFound) {
 		t.Fatalf("foreign owner end error = %v, want record not found", err)
 	}
@@ -247,7 +247,7 @@ func TestDBStoreAuditLeaseHeartbeatSerializesNormalEndWithActiveSnapshot(t *test
 	session := model.AuditSession{
 		ID: "heartbeat-end-race", Protocol: "ssh", State: "started", StartedAt: now,
 	}
-	if err := repository.CreateAuditSession(&session); err != nil {
+	if err := repository.CreateAuditSession(context.Background(), &session); err != nil {
 		t.Fatalf("create audit session: %v", err)
 	}
 	heartbeatStarted := make(chan struct{})
@@ -289,7 +289,7 @@ func TestDBStoreAuditLeaseHeartbeatSerializesNormalEndWithActiveSnapshot(t *test
 
 	endDone := make(chan error, 1)
 	go func() {
-		endDone <- repository.EndAuditSession(session.ID)
+		endDone <- repository.EndAuditSession(context.Background(), session.ID)
 	}()
 	select {
 	case err := <-endDone:

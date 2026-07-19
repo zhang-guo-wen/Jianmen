@@ -126,7 +126,9 @@ func (s *Server) logLogin(r *http.Request, username, userID, outcome, reason str
 		logger = slog.Default()
 	}
 	if s.audit != nil {
-		if err := s.audit.CreateLoginAuditLog(&model.LoginAuditLog{
+		ctx, cancel := detachedAuditWriteContext(r.Context())
+		defer cancel()
+		if err := s.audit.CreateLoginAuditLog(ctx, &model.LoginAuditLog{
 			UserID:    userID,
 			Username:  username,
 			Outcome:   outcome,

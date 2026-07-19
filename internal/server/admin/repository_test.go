@@ -156,7 +156,7 @@ func TestAdminRepositoryBoundaryStaysStaticallyComposedAndDomainSplit(t *testing
 		"hostTargets":         reflect.TypeOf((*adminHostTargetRepository)(nil)).Elem(),
 		"databases":           reflect.TypeOf((*adminDatabaseRepository)(nil)).Elem(),
 		"applicationService":  reflect.TypeOf((*service.ApplicationService)(nil)),
-		"containers":          reflect.TypeOf((*adminContainerRepository)(nil)).Elem(),
+		"containerManagement": reflect.TypeOf((*service.ContainerManagementService)(nil)),
 		"platformAccounts":    reflect.TypeOf((*adminPlatformAccountRepository)(nil)).Elem(),
 		"userSessionCreation": reflect.TypeOf((*service.UserSessionCreationService)(nil)),
 		"audit":               reflect.TypeOf((*adminAuditRepository)(nil)).Elem(),
@@ -265,7 +265,20 @@ func applyTestAdminDependencies(t *testing.T, server *Server, repository adminRe
 			t.Fatalf("new application service: %v", err)
 		}
 	}
-	server.containers = dependencies.containers
+	if server.containerManagement == nil {
+		authorization := server.authorization
+		if isNilAdminAuthorization(authorization) {
+			authorization = repositoryTestAuthorization{}
+		}
+		server.containerManagement, err = service.NewContainerManagementService(
+			dependencies.containers,
+			authorization,
+			service.NewContainerService(),
+		)
+		if err != nil {
+			t.Fatalf("new container management service: %v", err)
+		}
+	}
 	server.platformAccounts = dependencies.platformAccounts
 	if server.userSessionCreation == nil {
 		server.userSessionCreation, err = service.NewUserSessionCreationService(dependencies.userSessionCreation, repositoryTestAuthorization{})

@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"jianmen/internal/model"
+	"jianmen/internal/service"
 	"jianmen/internal/storage"
 )
 
@@ -19,6 +20,31 @@ func TestNormalizeContainerEndpointInputAllowsSSHWithoutAddress(t *testing.T) {
 	}
 	if input.Address != "" {
 		t.Fatalf("SSH address = %q, want empty", input.Address)
+	}
+}
+
+func TestCreateManagedContainerEndpointRollsBackWhenCreatorGrantCannotBeCreated(t *testing.T) {
+	db, err := storage.Open(storage.Config{Driver: storage.DriverSQLite, DSN: ":memory:"})
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	if err := storage.AutoMigrate(db); err != nil {
+		t.Fatalf("auto migrate: %v", err)
+	}
+	repository := NewDBStore(db)
+	_, err = repository.CreateManagedContainerEndpoint(context.Background(), service.ContainerEndpointRequest{ID: "endpoint-no-creator", Name: "endpoint", Runtime: model.ContainerRuntimeDocker, ConnectionMode: model.ContainerConnectionDockerAPI, Address: "http://127.0.0.1:2375", Status: "active"}, "missing-user")
+	if err == nil {
+		t.Fatal("create endpoint with missing creator succeeded")
+	}
+	var endpoints, resources int64
+	if err := db.Model(&model.ContainerEndpoint{}).Where("id = ?", "endpoint-no-creator").Count(&endpoints).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Model(&model.Resource{}).Where("type = ? AND resource_id = ?", model.ResourceTypeContainerEndpoint, "endpoint-no-creator").Count(&resources).Error; err != nil {
+		t.Fatal(err)
+	}
+	if endpoints != 0 || resources != 0 {
+		t.Fatalf("managed create left orphan endpoint=%d resource=%d", endpoints, resources)
 	}
 }
 

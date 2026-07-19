@@ -312,30 +312,6 @@ func (s *Server) visiblePlatformAccounts(r *http.Request, accounts []store.Platf
 	return result, nil
 }
 
-func (s *Server) visibleContainerEndpoints(r *http.Request, endpoints []store.ContainerEndpointView) ([]store.ContainerEndpointView, error) {
-	ids := make([]string, len(endpoints))
-	for index := range endpoints {
-		ids[index] = endpoints[index].ID
-	}
-	visible, err := s.authorizeResourceActionsBatch(r, []string{rbac.ActionContainerView, rbac.ActionContainerConnect}, model.ResourceTypeContainerEndpoint, ids)
-	if err != nil {
-		return nil, err
-	}
-	manageable, err := s.authorizeResourceActionsBatch(r, []string{rbac.ActionContainerUpdate, rbac.ActionContainerDelete}, model.ResourceTypeContainerEndpoint, ids)
-	if err != nil {
-		return nil, err
-	}
-	result := make([]store.ContainerEndpointView, 0, len(endpoints))
-	for index, endpoint := range endpoints {
-		if !visible[index] {
-			continue
-		}
-		endpoint.CanManage = manageable[index]
-		result = append(result, endpoint)
-	}
-	return result, nil
-}
-
 func (s *Server) authorizeResourceActionsBatch(r *http.Request, actions []string, resourceType string, ids []string) ([]bool, error) {
 	requests := make([]service.AuthorizationRequest, len(ids))
 	for index, id := range ids {

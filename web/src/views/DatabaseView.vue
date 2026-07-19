@@ -39,7 +39,7 @@
           <el-tag class="protocol-tag" size="small" :type="row.protocol === 'mysql' ? 'success' : row.protocol === 'redis' ? 'danger' : 'primary'" effect="light">{{ row.protocol === 'mysql' ? 'MySQL' : row.protocol === 'redis' ? 'Redis' : 'PostgreSQL' }}</el-tag>
         </template>
       </el-table-column>
-      <el-table-column label="TLS" min-width="145">
+      <el-table-column label="上游 TLS" min-width="145">
         <template #default="{ row }">
           <div class="tls-summary">
             <el-tag size="small" :type="tlsModeTagType(row.tls_mode)">{{ tlsModeLabel(row.tls_mode) }}</el-tag>
@@ -122,11 +122,11 @@
             <el-form-item label="备注">
               <el-input v-model="instanceForm.remark" type="textarea" />
             </el-form-item>
-            <el-form-item label="TLS 模式">
+            <el-form-item label="上游 TLS">
               <el-select v-model="instanceForm.tlsMode" @change="onTLSModeChange">
-                <el-option label="验证证书和主机名（推荐）" value="verify-full" />
+                <el-option label="不使用 TLS（默认）" value="disable" />
+                <el-option label="验证证书和主机名（最安全）" value="verify-full" />
                 <el-option label="仅验证证书" value="verify-ca" />
-                <el-option label="禁用 TLS（高风险）" value="disable" />
               </el-select>
               <div class="tls-mode-help">{{ tlsModeDescription(instanceForm.tlsMode) }}</div>
               <el-alert
@@ -136,11 +136,15 @@
                 :closable="false"
                 show-icon
               >
-                不加密且不校验证书，存在凭据被窃听风险；远程 Redis 实例会被后端拒绝。
+                当前只关闭 Jianmen 到实际数据库的 TLS，客户端到 Jianmen 的 TLS 不受影响。请确保上游链路位于可信网络。
               </el-alert>
             </el-form-item>
             <el-form-item label="TLS 主机名">
-              <el-input v-model="instanceForm.tlsServerName" placeholder="verify-full 时用于主机名校验，可留空使用地址" />
+              <el-input
+                v-model="instanceForm.tlsServerName"
+                :disabled="instanceForm.tlsMode !== 'verify-full'"
+                placeholder="verify-full 时用于主机名校验，可留空使用地址"
+              />
             </el-form-item>
             <el-form-item label="TLS CA">
               <div class="tls-ca-editor">
@@ -427,6 +431,11 @@ import * as api from '@/api/client'
 import { usePermissionStore } from '@/stores/permission'
 import { createProvisionIdempotencySession, type ProvisionRequest } from '@/utils/provisioningRequest'
 import { createLatestKeyedRequest } from '@/utils/connectionRequestState'
+import {
+  buildDatabaseUpstreamTLSPayload,
+  DEFAULT_DATABASE_UPSTREAM_TLS_MODE,
+  normalizeDatabaseUpstreamTLSMode,
+} from '@/utils/databaseUpstreamTLS'
 
 interface InstanceForm {
   name: string
@@ -471,7 +480,7 @@ const instanceMorePanels = ref<string[]>([])
 const instanceGroupOptions = ref<string[]>([])
 const accountGroupOptions = ref<string[]>([])
 const tlsCAFileInput = ref<HTMLInputElement | null>(null)
-const previousTLSMode = ref<api.DatabaseTLSMode>('verify-full')
+const previousTLSMode = ref<api.DatabaseTLSMode>(DEFAULT_DATABASE_UPSTREAM_TLS_MODE)
 const originalHasTLSCA = ref(false)
 const instanceForm = reactive<InstanceForm>({
   name: '',
@@ -480,7 +489,7 @@ const instanceForm = reactive<InstanceForm>({
   port: 3306,
   group: '',
   remark: '',
-  tlsMode: 'verify-full',
+  tlsMode: DEFAULT_DATABASE_UPSTREAM_TLS_MODE,
   tlsServerName: '',
   tlsCaPem: '',
   hasTlsCa: false,
@@ -616,12 +625,12 @@ function instanceEndpoint(inst: api.DatabaseInstanceView): string {
 }
 
 function normalizeTLSMode(value: unknown): api.DatabaseTLSMode {
-  return value === 'disable' || value === 'verify-ca' || value === 'verify-full' ? value : 'verify-full'
+  return normalizeDatabaseUpstreamTLSMode(value)
 }
 
 function tlsModeLabel(value: unknown): string {
   switch (normalizeTLSMode(value)) {
-    case 'disable': return '已禁用'
+    case 'disable': return '未加密'
     case 'verify-ca': return '验证 CA'
     default: return '验证 CA + 主机名'
   }
@@ -629,7 +638,7 @@ function tlsModeLabel(value: unknown): string {
 
 function tlsModeTagType(value: unknown): 'success' | 'warning' | 'danger' {
   switch (normalizeTLSMode(value)) {
-    case 'disable': return 'danger'
+    case 'disable': return 'warning'
     case 'verify-ca': return 'warning'
     default: return 'success'
   }
@@ -637,7 +646,7 @@ function tlsModeTagType(value: unknown): 'success' | 'warning' | 'danger' {
 
 function tlsModeDescription(value: api.DatabaseTLSMode): string {
   switch (value) {
-    case 'disable': return '不加密，也不校验证书；风险最高，仅适用于受控的本机链路。'
+    case 'disable': return 'Jianmen 到实际数据库不加密；适用于未启用 TLS 的数据库或可信内网。'
     case 'verify-ca': return '加密并验证 CA，但不校验主机名；安全性低于 verify-full。'
     default: return '加密并验证 CA 与主机名，可防止中间人攻击，推荐使用。'
   }
@@ -694,7 +703,7 @@ function openCreateInstance() {
   editingInstance.value = null
   instanceMorePanels.value = ['more']
   originalHasTLSCA.value = false
-  previousTLSMode.value = 'verify-full'
+  previousTLSMode.value = DEFAULT_DATABASE_UPSTREAM_TLS_MODE
   Object.assign(instanceForm, {
     name: '',
     protocol: 'mysql',
@@ -702,7 +711,7 @@ function openCreateInstance() {
     port: 3306,
     group: '',
     remark: '',
-    tlsMode: 'verify-full',
+    tlsMode: DEFAULT_DATABASE_UPSTREAM_TLS_MODE,
     tlsServerName: '',
     tlsCaPem: '',
     hasTlsCa: false,
@@ -745,6 +754,9 @@ function onProtocolChange(protocol: string) {
 
 async function onTLSModeChange(mode: api.DatabaseTLSMode) {
   if (mode !== 'disable') {
+    if (mode !== 'verify-full') {
+      instanceForm.tlsServerName = ''
+    }
     if (previousTLSMode.value === 'disable') {
       instanceForm.hasTlsCa = originalHasTLSCA.value
       instanceForm.clearTlsCa = false
@@ -754,15 +766,16 @@ async function onTLSModeChange(mode: api.DatabaseTLSMode) {
   }
   try {
     await ElMessageBox.confirm(
-      '禁用 TLS 会使上游凭据通过明文链路传输，远程 Redis 也会被后端拒绝。确定继续吗？',
-      '高风险设置',
-      { type: 'warning', confirmButtonText: '继续禁用', cancelButtonText: '取消' }
+      '关闭后，Jianmen 到实际数据库的凭据和数据将通过明文链路传输；客户端到 Jianmen 的 TLS 不受影响。确定关闭吗？',
+      '关闭上游 TLS',
+      { type: 'warning', confirmButtonText: '确认关闭', cancelButtonText: '取消' }
     )
   } catch {
     instanceForm.tlsMode = previousTLSMode.value
     return
   }
   instanceForm.tlsCaPem = ''
+  instanceForm.tlsServerName = ''
   instanceForm.hasTlsCa = false
   instanceForm.clearTlsCa = editingInstance.value ? originalHasTLSCA.value : false
   previousTLSMode.value = mode
@@ -812,16 +825,18 @@ async function submitInstance() {
   submitting.value = true
   try {
     const payload: api.DBInstancePayload = {
+      ...buildDatabaseUpstreamTLSPayload(
+        instanceForm.tlsMode,
+        instanceForm.tlsServerName,
+        instanceForm.tlsCaPem,
+      ),
       name: instanceForm.name.trim(),
       protocol: instanceForm.protocol,
       address: instanceForm.address.trim(),
       port: instanceForm.port,
-      tls_mode: instanceForm.tlsMode,
-      tls_server_name: instanceForm.tlsServerName.trim() || undefined,
       group: instanceForm.group.trim() || undefined,
       remark: instanceForm.remark.trim() || undefined
     }
-    if (instanceForm.tlsCaPem.trim()) payload.tls_ca_pem = instanceForm.tlsCaPem.trim()
     if (instanceForm.clearTlsCa) payload.clear_tls_ca = true
     if (editingInstance.value?.id) {
       await api.apiClient.updateDBInstance(editingInstance.value.id, payload)
@@ -843,14 +858,14 @@ async function toggleInstance(inst: api.DatabaseInstanceView) {
   const id = inst.id
   if (!id) return
   const newStatus = inst.status === 'active' ? 'disabled' : 'active'
+  const tlsPayload = buildDatabaseUpstreamTLSPayload(inst.tls_mode, inst.tls_server_name)
   try {
     await api.apiClient.updateDBInstance(id, {
+      ...tlsPayload,
       name: inst.name || '',
       protocol: inst.protocol || 'mysql',
       address: inst.address || '',
       port: inst.port,
-      tls_mode: normalizeTLSMode(inst.tls_mode),
-      tls_server_name: inst.tls_server_name || undefined,
       group: inst.group || undefined,
       remark: inst.remark || undefined,
       status: newStatus

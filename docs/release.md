@@ -68,8 +68,8 @@ The default container endpoints are:
 - SSH gateway: `HOST:47102`
 - Unified database gateway (default, MySQL/PostgreSQL/Redis): `HOST:33060`
 - Independent MySQL gateway: `HOST:33061`
-- Independent PostgreSQL gateway (TLS required): `HOST:33062`
-- Independent Redis gateway (remote AUTH requires TLS): `HOST:33063`
+- Independent PostgreSQL gateway (client TLS required): `HOST:33062`
+- Independent Redis gateway (remote client AUTH requires TLS): `HOST:33063`
 - Application gateways: `HOST:47110-47199`
 
 Mount a custom configuration file at `/app/config.json` when the defaults in
@@ -77,7 +77,8 @@ Mount a custom configuration file at `/app/config.json` when the defaults in
 plaintext Admin HTTP. For a reverse-proxy deployment, use
 `config.docker.proxy.example.json`, keep the Jianmen container and proxy on an
 isolated Docker network, and do not publish Jianmen's port `47100`. The complete
-Caddy command sequence is documented in `README.md`.
+Caddy command sequence and the Nginx Stream database-gateway precautions are
+documented in `README.md`.
 
 The default `unified` mode lets native MySQL, PostgreSQL, and Redis clients share port `33060`.
 MySQL connections wait for the 200 ms protocol-detection window; established-session throughput

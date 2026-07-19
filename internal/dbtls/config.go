@@ -26,7 +26,7 @@ type Config struct {
 func NormalizeMode(mode string) (string, error) {
 	mode = strings.ToLower(strings.TrimSpace(mode))
 	if mode == "" {
-		return ModeVerifyFull, nil
+		return ModeDisable, nil
 	}
 	switch mode {
 	case ModeDisable, ModeVerifyCA, ModeVerifyFull:

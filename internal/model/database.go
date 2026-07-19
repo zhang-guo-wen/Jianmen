@@ -13,7 +13,7 @@ type DatabaseInstance struct {
 	Protocol      string    `gorm:"index:idx_database_instances_endpoint,priority:1;size:32;not null;default:mysql" json:"protocol"`
 	Address       string    `gorm:"index:idx_database_instances_endpoint,priority:2;size:255;not null" json:"address"`
 	Port          int       `gorm:"index:idx_database_instances_endpoint,priority:3;not null;default:3306" json:"port"`
-	TLSMode       string    `gorm:"size:16;not null;default:verify-full" json:"tls_mode"`
+	TLSMode       string    `gorm:"size:16;not null;default:disable" json:"tls_mode"`
 	TLSServerName string    `gorm:"size:255" json:"tls_server_name,omitempty"`
 	TLSCAPEM      string    `gorm:"column:tls_ca_pem;type:text" json:"-"`
 	GroupName     string    `gorm:"size:128" json:"group"`

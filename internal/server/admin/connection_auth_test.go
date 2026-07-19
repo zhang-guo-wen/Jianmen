@@ -156,7 +156,7 @@ func TestHandleUnsavedDatabaseAccountTestRequiresCreatePermission(t *testing.T) 
 	}
 }
 
-func TestHandleUnsavedDatabaseAccountTestAppliesRedisTLSPolicy(t *testing.T) {
+func TestHandleUnsavedDatabaseAccountTestAllowsDisabledRedisUpstreamTLS(t *testing.T) {
 	server, db := newAdminDBTestServer(t)
 	seedTestSuperAdmin(t, db, "u-admin")
 	instance := model.DatabaseInstance{
@@ -165,14 +165,18 @@ func TestHandleUnsavedDatabaseAccountTestAppliesRedisTLSPolicy(t *testing.T) {
 	if err := db.Create(&instance).Error; err != nil {
 		t.Fatal(err)
 	}
-	req := httptest.NewRequest(http.MethodPost, "/api/db/accounts/test", strings.NewReader(`{"instance_id":"`+instance.ID+`","username":"default","password":"secret"}`))
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	req := httptest.NewRequestWithContext(ctx, http.MethodPost, "/api/db/accounts/test", strings.NewReader(`{"instance_id":"`+instance.ID+`","username":"default","password":"secret"}`))
 	req = asTestSuperAdmin(req)
 	rec := httptest.NewRecorder()
 
 	server.handleTestDBConnection(rec, req)
 
-	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "requires TLS") {
-		t.Fatalf("response = status %d body %s, want TLS-policy rejection", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusOK ||
+		!strings.Contains(rec.Body.String(), "database connection test failed") ||
+		strings.Contains(rec.Body.String(), "requires TLS") {
+		t.Fatalf("response = status %d body %s, want attempted plaintext connection", rec.Code, rec.Body.String())
 	}
 }
 
@@ -186,7 +190,7 @@ func TestDatabaseProbeErrorMessageDoesNotExposeUpstreamResponse(t *testing.T) {
 		t.Fatalf("probe response = %q, want fixed failure message", message)
 	}
 
-	tlsMessage := databaseProbeErrorMessage(errors.New("Redis remote upstream requires TLS"))
+	tlsMessage := databaseProbeErrorMessage(errors.New("verified TLS is required for database authentication"))
 	if tlsMessage != "database connection requires TLS" {
 		t.Fatalf("TLS policy response = %q", tlsMessage)
 	}

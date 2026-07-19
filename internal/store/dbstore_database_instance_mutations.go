@@ -25,6 +25,10 @@ func (s *DBStore) UpdateDatabaseInstance(ctx context.Context, id string, input D
 			}
 			return err
 		}
+		if strings.TrimSpace(input.TLSMode) == "" {
+			input.TLSMode = locked.TLSMode
+			input.TLSServerName = locked.TLSServerName
+		}
 		updated, err := normalizeDatabaseInstanceInput(input, locked.TLSCAPEM)
 		if err != nil {
 			return err

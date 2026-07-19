@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"net"
-	"strings"
 	"sync"
 	"time"
 
@@ -219,9 +218,6 @@ func dialRedisUpstream(ctx context.Context, instance model.DatabaseInstance) (ne
 	if err != nil {
 		return nil, err
 	}
-	if mode == dbtls.ModeDisable && !isLoopbackUpstream(instance.Address) {
-		return nil, errors.New("remote Redis upstream requires TLS")
-	}
 	connection, err := dialUpstream(ctx, instance)
 	if err != nil || mode == dbtls.ModeDisable {
 		return connection, err
@@ -232,15 +228,6 @@ func dialRedisUpstream(ctx context.Context, instance model.DatabaseInstance) (ne
 		return nil, fmt.Errorf("Redis upstream TLS handshake: %w", err)
 	}
 	return secured, nil
-}
-
-func isLoopbackUpstream(address string) bool {
-	address = strings.TrimSpace(address)
-	if strings.EqualFold(address, "localhost") {
-		return true
-	}
-	ip := net.ParseIP(strings.Trim(address, "[]"))
-	return ip != nil && ip.IsLoopback()
 }
 
 func requireVerifiedPostgresTLS(connection net.Conn) error {

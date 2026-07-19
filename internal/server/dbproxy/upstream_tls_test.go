@@ -5,7 +5,6 @@ import (
 	"crypto/tls"
 	"net"
 	"os"
-	"strings"
 	"testing"
 	"time"
 
@@ -13,14 +12,43 @@ import (
 	"jianmen/internal/model"
 )
 
-func TestRedisUpstreamRejectsRemotePlaintext(t *testing.T) {
-	_, err := dialRedisUpstream(context.Background(), model.DatabaseInstance{
-		Address: "192.0.2.10",
-		Port:    6379,
-		TLSMode: "disable",
+func TestRedisUpstreamDefaultsToPlaintext(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	received := make(chan byte, 1)
+	go func() {
+		connection, acceptErr := listener.Accept()
+		if acceptErr != nil {
+			return
+		}
+		defer connection.Close()
+		var first [1]byte
+		if _, readErr := connection.Read(first[:]); readErr == nil {
+			received <- first[0]
+		}
+	}()
+	host, port := splitTestListenerAddress(t, listener)
+	connection, err := dialRedisUpstream(context.Background(), model.DatabaseInstance{
+		Address: host,
+		Port:    port,
 	})
-	if err == nil || !strings.Contains(err.Error(), "requires TLS") {
-		t.Fatalf("dialRedisUpstream() error = %v, want remote plaintext rejection", err)
+	if err != nil {
+		t.Fatalf("dialRedisUpstream() error = %v", err)
+	}
+	defer connection.Close()
+	if _, err := connection.Write([]byte{'*'}); err != nil {
+		t.Fatalf("write plaintext Redis preface: %v", err)
+	}
+	select {
+	case first := <-received:
+		if first != '*' {
+			t.Fatalf("Redis upstream first byte = 0x%02x, want plaintext '*'", first)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Redis upstream did not receive plaintext preface")
 	}
 }
 

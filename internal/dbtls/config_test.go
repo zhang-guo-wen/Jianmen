@@ -49,6 +49,16 @@ func TestNormalizeRejectsUnknownMode(t *testing.T) {
 	}
 }
 
+func TestNormalizeDefaultsToDisabled(t *testing.T) {
+	mode, err := NormalizeMode("  ")
+	if err != nil {
+		t.Fatalf("NormalizeMode() error = %v", err)
+	}
+	if mode != ModeDisable {
+		t.Fatalf("NormalizeMode() = %q, want %q", mode, ModeDisable)
+	}
+}
+
 func testCertificatePEM(t *testing.T) string {
 	t.Helper()
 	key, err := rsa.GenerateKey(rand.Reader, 2048)

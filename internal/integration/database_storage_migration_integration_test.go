@@ -34,6 +34,7 @@ const (
 	systemSettingMigrationVersion             = "202607190005"
 	auditDBQueryLargePayloadMigrationVersion  = "202607190006"
 	databaseGatewayModeMigrationVersion       = "202607190007"
+	databaseTLSDefaultMigrationVersion        = "202607190008"
 )
 
 var currentStorageMigrationVersions = []string{
@@ -63,6 +64,7 @@ var currentStorageMigrationVersions = []string{
 	systemSettingMigrationVersion,
 	auditDBQueryLargePayloadMigrationVersion,
 	databaseGatewayModeMigrationVersion,
+	databaseTLSDefaultMigrationVersion,
 }
 
 type metadataDatabaseCase struct {
@@ -175,6 +177,113 @@ func TestStorageMigrationUpgradesLegacyDatabaseInstances(t *testing.T) {
 			}
 			assertOnlyMigrationVersionsAdded(t, beforeSecondMigration, loadMigrationVersionSet(t, db))
 			assertMigrationRecord(t, db, databaseInstanceTLSMigrationVersion, "database instance upstream TLS policy")
+		})
+	}
+}
+
+func TestStorageMigrationChangesDatabaseTLSDefaultWithoutRewritingRows(t *testing.T) {
+	for _, tt := range metadataDatabaseCases() {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			db := openMetadataDatabase(t, tt)
+			if err := db.Exec(`CREATE TABLE database_instances (
+				id VARCHAR(64) PRIMARY KEY,
+				name VARCHAR(255) NOT NULL,
+				protocol VARCHAR(32) NOT NULL,
+				address VARCHAR(255) NOT NULL,
+				port INTEGER NOT NULL,
+				tls_mode VARCHAR(16) NOT NULL DEFAULT 'verify-full',
+				tls_server_name VARCHAR(255),
+				tls_ca_pem TEXT,
+				status VARCHAR(32)
+			)`).Error; err != nil {
+				t.Fatalf("create previous database TLS schema: %v", err)
+			}
+			if err := db.Exec(`INSERT INTO database_instances
+				(id, name, protocol, address, port, tls_mode, status)
+				VALUES (?, ?, ?, ?, ?, ?, ?)`,
+				"existing-tls-instance",
+				"existing TLS instance",
+				"mysql",
+				"db.internal",
+				3306,
+				"verify-full",
+				"active",
+			).Error; err != nil {
+				t.Fatalf("seed existing database TLS policy: %v", err)
+			}
+			seedAllCurrentMigrationsExcept(t, db, databaseTLSDefaultMigrationVersion)
+			before := loadMigrationVersionSet(t, db)
+
+			if err := storage.Migrate(db); err != nil {
+				t.Fatalf("change database TLS default: %v", err)
+			}
+			assertOnlyMigrationVersionsAdded(
+				t,
+				before,
+				loadMigrationVersionSet(t, db),
+				databaseTLSDefaultMigrationVersion,
+			)
+			assertMigrationRecord(
+				t,
+				db,
+				databaseTLSDefaultMigrationVersion,
+				"database instance upstream TLS default",
+			)
+
+			var existingMode string
+			if err := db.Table("database_instances").
+				Select("tls_mode").
+				Where("id = ?", "existing-tls-instance").
+				Scan(&existingMode).Error; err != nil {
+				t.Fatalf("load existing database TLS policy: %v", err)
+			}
+			if existingMode != "verify-full" {
+				t.Fatalf("existing database TLS policy = %q, want verify-full", existingMode)
+			}
+			if err := db.Exec(`INSERT INTO database_instances
+				(id, name, protocol, address, port, status)
+				VALUES (?, ?, ?, ?, ?, ?)`,
+				"default-tls-instance",
+				"default TLS instance",
+				"mysql",
+				"db.internal",
+				3306,
+				"active",
+			).Error; err != nil {
+				t.Fatalf("insert database instance with default TLS policy: %v", err)
+			}
+			var defaultMode string
+			if err := db.Table("database_instances").
+				Select("tls_mode").
+				Where("id = ?", "default-tls-instance").
+				Scan(&defaultMode).Error; err != nil {
+				t.Fatalf("load default database TLS policy: %v", err)
+			}
+			if defaultMode != "disable" {
+				t.Fatalf("database TLS default = %q, want disable", defaultMode)
+			}
+			if err := db.Exec(`INSERT INTO database_instances
+				(id, name, protocol, address, port, tls_mode, status)
+				VALUES (?, ?, ?, ?, ?, NULL, ?)`,
+				"null-tls-instance",
+				"null TLS instance",
+				"mysql",
+				"db.internal",
+				3306,
+				"active",
+			).Error; err == nil {
+				t.Fatal("database accepted an explicit NULL TLS policy")
+			}
+			beforeSecondMigration := loadMigrationVersionSet(t, db)
+			if err := storage.Migrate(db); err != nil {
+				t.Fatalf("second database TLS default migration: %v", err)
+			}
+			assertOnlyMigrationVersionsAdded(
+				t,
+				beforeSecondMigration,
+				loadMigrationVersionSet(t, db),
+			)
 		})
 	}
 }
@@ -1152,8 +1261,8 @@ func assertMigratedDatabaseInstance(t *testing.T, db *gorm.DB, driver storage.Dr
 	if err := db.First(&instance, "id = ?", want.ID).Error; err != nil {
 		t.Fatalf("load migrated database instance: %v", err)
 	}
-	if instance.TLSMode != "verify-full" {
-		t.Fatalf("migrated TLS mode = %q, want verify-full", instance.TLSMode)
+	if instance.TLSMode != "disable" {
+		t.Fatalf("migrated TLS mode = %q, want disable", instance.TLSMode)
 	}
 	if instance.ID != want.ID ||
 		instance.Name != want.Name ||
@@ -1185,8 +1294,8 @@ func assertMigratedDatabaseInstance(t *testing.T, db *gorm.DB, driver storage.Dr
 		Take(&defaults).Error; err != nil {
 		t.Fatalf("load database-level TLS defaults: %v", err)
 	}
-	if defaults.TLSMode != "verify-full" || defaults.TLSServerName.Valid || defaults.TLSCAPEM.Valid {
-		t.Fatalf("database-level TLS defaults = %#v, want verify-full and NULL optional values", defaults)
+	if defaults.TLSMode != "disable" || defaults.TLSServerName.Valid || defaults.TLSCAPEM.Valid {
+		t.Fatalf("database-level TLS defaults = %#v, want disable and NULL optional values", defaults)
 	}
 	if err := db.Exec(`INSERT INTO database_instances
 		(id, name, protocol, address, port, status, tls_mode)

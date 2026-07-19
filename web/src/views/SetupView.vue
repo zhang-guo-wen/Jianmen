@@ -14,20 +14,6 @@
           <h3>{{ t('setup.alreadyInitialized') }}</h3>
           <p class="setup-desc">{{ t('setup.alreadyInitializedHint') }}</p>
         </div>
-        <div class="admin-summary">
-          <div class="admin-summary-row">
-            <span>{{ t('setup.username') }}</span>
-            <strong>{{ initAdmin.username || '-' }}</strong>
-          </div>
-          <div class="admin-summary-row">
-            <span>{{ t('users.displayName') }}</span>
-            <strong>{{ initAdmin.display_name || '-' }}</strong>
-          </div>
-          <div class="admin-summary-row">
-            <span>{{ t('setup.email') }}</span>
-            <strong>{{ initAdmin.email || '-' }}</strong>
-          </div>
-        </div>
         <el-button type="primary" class="setup-submit-btn" @click="handleFinish">
           {{ t('setup.goToLogin') }}
         </el-button>
@@ -160,11 +146,6 @@ const router = useRouter();
 const step = ref(1);
 const loadingStatus = ref(true);
 const alreadyInitialized = ref(false);
-const initAdmin = reactive({
-  username: '',
-  display_name: '',
-  email: '',
-});
 const submitting = ref(false);
 const encryptionKey = ref('');
 const encryptionKeyNeeded = ref(false);
@@ -213,9 +194,6 @@ async function loadInitStatus() {
   try {
     const status = await apiClient.getInitStatus();
     alreadyInitialized.value = status.initialized;
-    initAdmin.username = status.admin?.username ?? '';
-    initAdmin.display_name = status.admin?.display_name ?? '';
-    initAdmin.email = status.admin?.email ?? '';
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : t('setup.error.status');
     ElMessage.error(message);

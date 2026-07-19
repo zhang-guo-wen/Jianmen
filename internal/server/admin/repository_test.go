@@ -152,16 +152,17 @@ func TestAdminRepositoryBoundaryStaysStaticallyComposedAndDomainSplit(t *testing
 		t.Fatal("Server regained an application-wide store field")
 	}
 	expectedFields := map[string]reflect.Type{
-		"aiAccessTokens":      reflect.TypeOf((*service.AIAccessTokenService)(nil)),
-		"hostTargets":         reflect.TypeOf((*adminHostTargetRepository)(nil)).Elem(),
-		"databases":           reflect.TypeOf((*adminDatabaseRepository)(nil)).Elem(),
-		"applicationService":  reflect.TypeOf((*service.ApplicationService)(nil)),
-		"containerManagement": reflect.TypeOf((*service.ContainerManagementService)(nil)),
-		"platformAccounts":    reflect.TypeOf((*adminPlatformAccountRepository)(nil)).Elem(),
-		"userSessionCreation": reflect.TypeOf((*service.UserSessionCreationService)(nil)),
-		"audit":               reflect.TypeOf((*adminAuditRepository)(nil)).Elem(),
-		"connectionPassword":  reflect.TypeOf((*service.ConnectionPasswordService)(nil)),
-		"preferences":         reflect.TypeOf((*adminUserPreferenceRepository)(nil)).Elem(),
+		"aiAccessTokens":         reflect.TypeOf((*service.AIAccessTokenService)(nil)),
+		"hostTargets":            reflect.TypeOf((*adminHostTargetRepository)(nil)).Elem(),
+		"databases":              reflect.TypeOf((*adminDatabaseRepository)(nil)).Elem(),
+		"databaseManagement":     reflect.TypeOf((*service.DatabaseManagementService)(nil)),
+		"applicationService":     reflect.TypeOf((*service.ApplicationService)(nil)),
+		"containerManagement":    reflect.TypeOf((*service.ContainerManagementService)(nil)),
+		"platformAccountService": reflect.TypeOf((*service.PlatformAccountService)(nil)),
+		"userSessionCreation":    reflect.TypeOf((*service.UserSessionCreationService)(nil)),
+		"audit":                  reflect.TypeOf((*adminAuditRepository)(nil)).Elem(),
+		"connectionPassword":     reflect.TypeOf((*service.ConnectionPasswordService)(nil)),
+		"preferences":            reflect.TypeOf((*adminUserPreferenceRepository)(nil)).Elem(),
 	}
 	for name, want := range expectedFields {
 		field, found := serverType.FieldByName(name)
@@ -183,7 +184,7 @@ func TestAdminRepositoryBoundaryStaysStaticallyComposedAndDomainSplit(t *testing
 		"adminDatabaseRepository":            true,
 		"adminApplicationRepository":         true,
 		"adminContainerRepository":           true,
-		"adminPlatformAccountRepository":     true,
+		"service.PlatformAccountRepository":  true,
 		"adminUserSessionCreationRepository": true,
 		"adminAuditRepository":               true,
 		"adminConnectionPasswordRepository":  true,
@@ -279,7 +280,16 @@ func applyTestAdminDependencies(t *testing.T, server *Server, repository adminRe
 			t.Fatalf("new container management service: %v", err)
 		}
 	}
-	server.platformAccounts = dependencies.platformAccounts
+	if server.platformAccountService == nil {
+		authorization := server.authorization
+		if isNilAdminAuthorization(authorization) {
+			authorization = repositoryTestAuthorization{}
+		}
+		server.platformAccountService, err = service.NewPlatformAccountService(dependencies.platformAccounts, authorization)
+		if err != nil {
+			t.Fatalf("new platform account service: %v", err)
+		}
+	}
 	if server.userSessionCreation == nil {
 		server.userSessionCreation, err = service.NewUserSessionCreationService(dependencies.userSessionCreation, repositoryTestAuthorization{})
 		if err != nil {

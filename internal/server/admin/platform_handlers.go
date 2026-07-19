@@ -1,16 +1,13 @@
 package admin
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
-	"time"
 
-	"jianmen/internal/model"
 	"jianmen/internal/pkg/apiresp"
-	"jianmen/internal/rbac"
+	"jianmen/internal/service"
 	"jianmen/internal/store"
 )
 
@@ -29,12 +26,17 @@ func platformAccountPathParts(path string) (id, child string, ok bool) {
 	return "", "", false
 }
 
-func writePlatformStoreError(w http.ResponseWriter, r *http.Request, err error) {
-	if errors.Is(err, store.ErrPlatformAccountNotFound) {
+func (s *Server) writePlatformAccountServiceError(w http.ResponseWriter, r *http.Request, err error) {
+	switch {
+	case errors.Is(err, service.ErrPlatformAccountForbidden), errors.Is(err, service.ErrPlatformAccountUnavailable):
+		s.forbidden(w, r)
+	case errors.Is(err, store.ErrPlatformAccountNotFound):
 		apiresp.WriteError(w, http.StatusNotFound, apiresp.CodeNotFound, err.Error(), nil, apiresp.RequestID(r.Context()))
-		return
+	case errors.Is(err, service.ErrInvalidPlatformAccount):
+		apiresp.WriteError(w, http.StatusBadRequest, apiresp.CodeValidation, err.Error(), nil, apiresp.RequestID(r.Context()))
+	default:
+		s.writeErrorText(w, r, http.StatusInternalServerError, "platform account operation failed")
 	}
-	apiresp.WriteError(w, http.StatusBadRequest, apiresp.CodeValidation, err.Error(), nil, apiresp.RequestID(r.Context()))
 }
 
 func (s *Server) handlePlatformAccounts(w http.ResponseWriter, r *http.Request) {
@@ -42,10 +44,6 @@ func (s *Server) handlePlatformAccounts(w http.ResponseWriter, r *http.Request) 
 	case http.MethodGet:
 		s.handleListPlatformAccounts(w, r)
 	case http.MethodPost:
-		if !s.requirePermission(r, rbac.ActionPlatformAccountCreate) {
-			s.forbidden(w, r)
-			return
-		}
 		s.handleCreatePlatformAccount(w, r)
 	default:
 		w.Header().Set("Allow", "GET, POST")
@@ -57,22 +55,12 @@ func (s *Server) handleListPlatformAccounts(w http.ResponseWriter, r *http.Reque
 	if !s.requireAuthenticatedUser(w, r) {
 		return
 	}
-	params := store.PlatformAccountListParams{
-		Search:   r.URL.Query().Get("q"),
-		Platform: r.URL.Query().Get("platform"),
-		Unpaged:  true,
-	}
-	views, _, err := s.platformAccounts.PlatformAccounts(r.Context(), params)
+	views, err := s.platformAccountService.List(r.Context(), platformAccountActor(r), r.URL.Query().Get("q"), r.URL.Query().Get("platform"))
 	if err != nil {
-		s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
+		s.writePlatformAccountServiceError(w, r, err)
 		return
 	}
-	views, err = s.visiblePlatformAccounts(r, views)
-	if err != nil {
-		s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
-		return
-	}
-	resp := paginateSlice(views, r, func(store.PlatformAccountView, string) bool { return true })
+	resp := paginateSlice(views, r, func(service.PlatformAccount, string) bool { return true })
 	s.writeJSON(w, r, http.StatusOK, resp)
 }
 
@@ -81,22 +69,9 @@ func (s *Server) handleCreatePlatformAccount(w http.ResponseWriter, r *http.Requ
 	if !ok {
 		return
 	}
-	if strings.TrimSpace(payload.Username) == "" {
-		s.writeErrorText(w, r, http.StatusBadRequest, "username is required")
-		return
-	}
-	view, err := s.platformAccounts.AddPlatformAccount(r.Context(), platformAccountModel(payload, userIDFromRequest(r)))
+	view, err := s.platformAccountService.Create(r.Context(), platformAccountActor(r), platformAccountRequest(payload))
 	if err != nil {
-		writePlatformStoreError(w, r, err)
-		return
-	}
-	if err := s.grantCreatedResource(r, model.ResourceTypePlatformAccount, view.ID); err != nil {
-		cleanupCtx, cancelCleanup := context.WithTimeout(context.WithoutCancel(r.Context()), 5*time.Second)
-		defer cancelCleanup()
-		if cleanupErr := s.platformAccounts.DeletePlatformAccount(cleanupCtx, view.ID); cleanupErr != nil {
-			err = errors.Join(err, cleanupErr)
-		}
-		s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
+		s.writePlatformAccountServiceError(w, r, err)
 		return
 	}
 	s.writeJSON(w, r, http.StatusCreated, view)
@@ -119,26 +94,17 @@ func (s *Server) handlePlatformAccount(w http.ResponseWriter, r *http.Request) {
 
 	switch r.Method {
 	case http.MethodGet:
-		if !s.requireResourceAction(w, r, rbac.ActionPlatformAccountView, model.ResourceTypePlatformAccount, id) {
-			return
-		}
-		view, err := s.platformAccounts.PlatformAccount(r.Context(), id)
+		view, err := s.platformAccountService.Get(r.Context(), platformAccountActor(r), id)
 		if err != nil {
-			writePlatformStoreError(w, r, err)
+			s.writePlatformAccountServiceError(w, r, err)
 			return
 		}
 		s.writeJSON(w, r, http.StatusOK, view)
 	case http.MethodPut:
-		if !s.requireResourceAction(w, r, rbac.ActionPlatformAccountUpdate, model.ResourceTypePlatformAccount, id) {
-			return
-		}
 		s.handleUpdatePlatformAccount(w, r, id)
 	case http.MethodDelete:
-		if !s.requireResourceAction(w, r, rbac.ActionPlatformAccountDelete, model.ResourceTypePlatformAccount, id) {
-			return
-		}
-		if err := s.platformAccounts.DeletePlatformAccount(r.Context(), id); err != nil {
-			writePlatformStoreError(w, r, err)
+		if err := s.platformAccountService.Delete(r.Context(), platformAccountActor(r), id); err != nil {
+			s.writePlatformAccountServiceError(w, r, err)
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)
@@ -153,9 +119,9 @@ func (s *Server) handleUpdatePlatformAccount(w http.ResponseWriter, r *http.Requ
 	if !ok {
 		return
 	}
-	view, err := s.platformAccounts.UpdatePlatformAccount(r.Context(), id, platformAccountModel(payload, ""))
+	view, err := s.platformAccountService.Update(r.Context(), platformAccountActor(r), id, platformAccountRequest(payload))
 	if err != nil {
-		writePlatformStoreError(w, r, err)
+		s.writePlatformAccountServiceError(w, r, err)
 		return
 	}
 	s.writeJSON(w, r, http.StatusOK, view)
@@ -167,12 +133,9 @@ func (s *Server) handlePlatformAccountPassword(w http.ResponseWriter, r *http.Re
 		s.writeErrorText(w, r, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
-	if !s.requireResourceAction(w, r, rbac.ActionPlatformAccountUse, model.ResourceTypePlatformAccount, id) {
-		return
-	}
-	password, err := s.platformAccounts.GetPlatformAccountPassword(r.Context(), id)
+	password, err := s.platformAccountService.Password(r.Context(), platformAccountActor(r), id)
 	if err != nil {
-		writePlatformStoreError(w, r, err)
+		s.writePlatformAccountServiceError(w, r, err)
 		return
 	}
 	s.writeJSON(w, r, http.StatusOK, map[string]string{"password": password})
@@ -201,26 +164,13 @@ func (s *Server) decodePlatformAccountPayload(w http.ResponseWriter, r *http.Req
 	return payload, true
 }
 
-func platformAccountModel(payload platformAccountPayload, ownerID string) model.PlatformAccount {
-	platformName := strings.TrimSpace(payload.PlatformName)
-	if platformName == "" {
-		platformName = strings.TrimSpace(payload.URL)
+func platformAccountActor(r *http.Request) service.PlatformAccountActor {
+	return service.PlatformAccountActor{UserID: userIDFromRequest(r), SuperAdmin: isSuperAdminRequest(r)}
+}
+
+func platformAccountRequest(payload platformAccountPayload) service.PlatformAccountRequest {
+	return service.PlatformAccountRequest{
+		Name: payload.Name, PlatformName: payload.PlatformName, URL: payload.URL, Group: payload.Group,
+		Username: payload.Username, Password: payload.Password, Remark: payload.Remark, Status: payload.Status, ExpiresAt: payload.ExpiresAt,
 	}
-	account := model.PlatformAccount{
-		Name:         strings.TrimSpace(payload.Name),
-		PlatformName: platformName,
-		URL:          strings.TrimSpace(payload.URL),
-		GroupName:    strings.TrimSpace(payload.Group),
-		Username:     strings.TrimSpace(payload.Username),
-		Password:     model.NewEncryptedField(payload.Password),
-		Remark:       strings.TrimSpace(payload.Remark),
-		OwnerID:      ownerID,
-		Status:       strings.TrimSpace(payload.Status),
-	}
-	if payload.ExpiresAt != nil && *payload.ExpiresAt != "" {
-		if expiresAt, err := time.Parse(time.RFC3339, *payload.ExpiresAt); err == nil {
-			account.ExpiresAt = &expiresAt
-		}
-	}
-	return account
 }

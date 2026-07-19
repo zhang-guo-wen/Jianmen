@@ -97,9 +97,41 @@ type ApplicationGatewayConfig struct {
 }
 
 type RecordingConfig struct {
-	Enabled        bool `json:"enabled"`
-	RecordInput    bool `json:"record_input"`
-	RecordCommands bool `json:"record_commands"`
+	Enabled          bool  `json:"enabled"`
+	RecordInput      bool  `json:"record_input"`
+	RecordCommands   bool  `json:"record_commands"`
+	RetentionDays    int   `json:"retention_days"`
+	MaxReplayBytes   int64 `json:"max_replay_bytes"`
+	CleanupBatchSize int   `json:"cleanup_batch_size"`
+	maxReplayBytesSet bool
+}
+
+func (c *RecordingConfig) UnmarshalJSON(data []byte) error {
+	var value struct {
+		Enabled          bool   `json:"enabled"`
+		RecordInput      bool   `json:"record_input"`
+		RecordCommands   bool   `json:"record_commands"`
+		RetentionDays    int    `json:"retention_days"`
+		MaxReplayBytes   *int64 `json:"max_replay_bytes"`
+		CleanupBatchSize int    `json:"cleanup_batch_size"`
+	}
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&value); err != nil {
+		return err
+	}
+	*c = RecordingConfig{
+		Enabled:          value.Enabled,
+		RecordInput:      value.RecordInput,
+		RecordCommands:   value.RecordCommands,
+		RetentionDays:    value.RetentionDays,
+		CleanupBatchSize: value.CleanupBatchSize,
+	}
+	if value.MaxReplayBytes != nil {
+		c.MaxReplayBytes = *value.MaxReplayBytes
+		c.maxReplayBytesSet = true
+	}
+	return nil
 }
 
 type User struct {
@@ -193,6 +225,15 @@ func (c *Config) applyDefaults() {
 		c.Recording.Enabled = true
 		c.Recording.RecordCommands = true
 	}
+	if c.Recording.RetentionDays == 0 {
+		c.Recording.RetentionDays = 30
+	}
+	if c.Recording.CleanupBatchSize == 0 {
+		c.Recording.CleanupBatchSize = 100
+	}
+	if !c.Recording.maxReplayBytesSet && c.Recording.MaxReplayBytes == 0 {
+		c.Recording.MaxReplayBytes = 10 * 1024 * 1024 * 1024
+	}
 	if databaseEmpty {
 		c.Database.Enabled = true
 		c.Database.Driver = "sqlite"
@@ -251,6 +292,15 @@ func (c *Config) Validate() error {
 	}
 	if err := validateDatabaseGateway(c.DatabaseGateway); err != nil {
 		return err
+	}
+	if c.Recording.RetentionDays < 0 || c.Recording.RetentionDays > 3650 {
+		return fmt.Errorf("recording.retention_days must be between 1 and 3650")
+	}
+	if c.Recording.MaxReplayBytes < 0 {
+		return fmt.Errorf("recording.max_replay_bytes must not be negative")
+	}
+	if c.Recording.CleanupBatchSize < 0 || c.Recording.CleanupBatchSize > 1000 {
+		return fmt.Errorf("recording.cleanup_batch_size must be between 1 and 1000")
 	}
 	if c.ApplicationGateway.Enabled {
 		if c.ApplicationGateway.PortStart <= 0 || c.ApplicationGateway.PortStart > 65535 {

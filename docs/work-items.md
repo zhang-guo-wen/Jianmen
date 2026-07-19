@@ -113,7 +113,7 @@
 
 ### 本阶段必须完成
 
-当前数据库网关安全切片范围内的 P0/P1/P2 已清零，暂无未提交的阶段阻断项。“可以延期”表中的 P2 均不属于本切片。以下已验证修复不得因历史计划未勾选而重新列为开放问题：
+当前数据库网关与审计治理切片范围内的 P0/P1/P2 已清零，暂无未提交的阶段阻断项。“可以延期”表中的 P2 均不属于本切片。以下已验证修复不得因历史计划未勾选而重新列为开放问题：
 
 | 事项 | 结果 | 提交 | 验证证据 |
 |---|---|---|---|
@@ -121,6 +121,8 @@
 | 审计会话创建失败时仍允许转发 | 已完成 | `ebb3bd7` | [失败关闭测试](../internal/server/dbproxy/server_audit_gate_test.go) |
 | 大响应被完整缓冲 | 已完成 | `4f97f9b`、`64b311a` | [目标测试](../internal/server/dbproxy/observer_large_response_test.go)、[实库集成测试](../internal/integration/database_proxy_integration_test.go) |
 | 数据库审计 SQL 脱敏断言 | 已完成 | `2caaa32` | [实库集成测试](../internal/integration/database_proxy_integration_test.go) |
+| 审计保留、分批清理与回放字节配额 | 已完成 | `8b8b633`、`99cf3aa` | [保留服务测试](../internal/service/audit_retention_test.go)、[存储一致性测试](../internal/store/dbstore_audit_retention_test.go) |
+| 跨分片脱敏及审计录制失败关闭 | 已完成 | `c517a3b` | [流式脱敏测试](../internal/recording/stream_redactor_test.go)、[数据库录制失败测试](../internal/server/dbproxy/audit_replay_path_test.go) |
 
 ### 可以延期
 
@@ -128,12 +130,13 @@
 |---|---|---|---|---|---|---|
 | `DEF-20260719-001` | P2 | 已延期 | 启动烟测仍使用无验证码登录，导致认证 API 和前端代理检查被跳过 | 烟测通过正式挑战流程获得会话；登录失败时明确失败而非静默跳过关键检查 | 下次修改登录/启动流程时，最迟首个发布候选前 | `start.ps1:179-222` |
 | `TECH-20260719-001` | P2 | 已延期 | `internal/server/admin` 的 Handler、业务判断和持久层访问尚未完全分层 | 选定资源切片迁入 `handler -> service -> store`；Handler 不直接执行 SQL；目标包测试通过 | 修改对应资源行为或文件接近行数上限时 | [后端审计](./backend-audit-2026-07-18.md) |
-| `TECH-20260719-002` | P2 | 已延期 | `store.Store` 仍是 78 方法的聚合接口，部分方法缺少 `context.Context` | 按使用方拆小接口；迁移方法以 `context.Context` 为首参数；架构测试锁定边界 | 新增 Store 方法或出现取消/超时传播缺陷时 | [Phase 2 计划](./superpowers/plans/2026-07-18-core-stabilization-phase2-plan.md) |
+| `TECH-20260719-002` | P2 | 已延期 | `store.Store` 仍是 76 方法的聚合接口，部分方法缺少 `context.Context` | 按使用方拆小接口；迁移方法以 `context.Context` 为首参数；架构测试锁定边界 | 新增 Store 方法或出现取消/超时传播缺陷时 | [Phase 2 计划](./superpowers/plans/2026-07-18-core-stabilization-phase2-plan.md) |
 | `TECH-20260719-003` | P2 | 已延期 | 资源授权列表仍缺少批量查询能力，数据量增长后可能形成 N+1 | 提供批量授权查询；列表查询次数不随资源数线性增长；保留资源级拒绝语义 | 性能测试出现线性查询增长，最迟容量测试前 | [后端审计](./backend-audit-2026-07-18.md) |
-| `TECH-20260719-004` | P2 | 已延期 | 审计已实现写入前脱敏，但留存周期目前只有策略计算，缺少有界清理闭环 | 定时/手动清理有批次上限、可重试和可观测结果；数据库与文件记录处理规则一致 | 首个发布候选前，或审计数据达到容量阈值时 | `internal/service/audit_policy.go` |
+| `DEF-20260719-002` | P2 | 已延期 | 进程异常退出或结束状态写入失败后，审计会话可能长期保持 `started`，为避免误删活动会话，当前保留/配额任务不会清理它 | 增加带租约或心跳的会话恢复规则；仅回收可证明已失活的会话；覆盖重启和结束写入失败 | 首个发布候选前，或发现长期 `started` 会话时 | 审计治理切片复核 |
 | `TECH-20260719-005` | P3 | 已延期 | DTO、GORM Model 和 Store View 类型仍未彻底分离 | Model 不承载 API JSON 结构；Store 不堆放表现层 View；迁移不改变 API 行为 | 修改关联 API 或类型再次造成跨层依赖时 | [后端审计](./backend-audit-2026-07-18.md) |
 | `TEST-20260719-001` | P3 | 已延期 | 数据库协议缺少完整 Docker 实库矩阵和协议模糊测试 | 覆盖 MySQL/PostgreSQL/Redis 真实连接、监听生命周期、异常帧和大响应；环境缺失时显式跳过 | 修改协议适配器时，完整矩阵最迟首个发布候选前 | [Phase 2 计划](./superpowers/plans/2026-07-18-core-stabilization-phase2-plan.md) |
 | `TECH-20260719-006` | P3 | 已延期 | 前端生产构建仍有第三方 PURE 注释告警和主分包体积告警 | 先确认无功能风险；按页面拆分主包并记录体积基线；不为消除第三方告警修改依赖源码 | 主包继续增长或进入发布性能优化阶段时 | 最近一次阶段构建输出 |
+| `TECH-20260719-007` | P3 | 已延期 | 回放配额统计当前每小时遍历回放根目录，超大规模下耗时随文件数线性增长 | 记录会话关闭时的回放字节数并增量维护总量；以容量基准证明清理周期稳定 | 回放文件超过 100 万或扫描超过清理周期的 10% 时 | 审计治理切片复核 |
 
 ### 建议取消或关闭
 

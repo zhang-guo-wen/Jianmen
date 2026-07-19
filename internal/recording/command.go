@@ -2,6 +2,8 @@ package recording
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"os"
 	"strings"
 	"sync"
@@ -16,8 +18,10 @@ type CommandRecorder struct {
 	line            []rune
 	current         *commandEvent
 	sensitivePrompt bool
+	redactor        AuditRedactor
 	auditSink       AuditSink
 	sessionID       string
+	onFatal         func(error)
 }
 
 type commandEvent struct {
@@ -30,14 +34,32 @@ type commandEvent struct {
 	EndedAt    int64  `json:"ended_at"`
 }
 
-func NewCommandRecorder(file *os.File, startedAt time.Time, sink AuditSink, sessionID string) *CommandRecorder {
+func NewCommandRecorder(
+	file *os.File,
+	startedAt time.Time,
+	redactor AuditRedactor,
+	sink AuditSink,
+	sessionID string,
+	onFatal func(error),
+) *CommandRecorder {
 	return &CommandRecorder{
 		file:      file,
 		startedAt: startedAt,
 		line:      make([]rune, 0, 128),
+		redactor:  redactor,
 		auditSink: sink,
 		sessionID: sessionID,
+		onFatal:   onFatal,
 	}
+}
+
+func (r *CommandRecorder) MarkSensitivePrompt() {
+	if r == nil {
+		return
+	}
+	r.mu.Lock()
+	r.sensitivePrompt = true
+	r.mu.Unlock()
 }
 
 func (r *CommandRecorder) ObserveInput(data []byte) {
@@ -96,15 +118,13 @@ func (r *CommandRecorder) Close() error {
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if err := r.flushCurrentLocked(); err != nil {
-		return err
-	}
+	flushErr := r.flushCurrentLocked()
 	if r.file == nil {
-		return nil
+		return flushErr
 	}
-	err := r.file.Close()
+	closeErr := r.file.Close()
 	r.file = nil
-	return err
+	return errors.Join(flushErr, closeErr)
 }
 
 func (r *CommandRecorder) submitLineLocked() {
@@ -117,7 +137,13 @@ func (r *CommandRecorder) submitLineLocked() {
 		r.sensitivePrompt = false
 		return
 	}
-	_ = r.flushCurrentLocked()
+	command = r.redactor.Redact("command", command)
+	if err := r.flushCurrentLocked(); err != nil {
+		if r.onFatal != nil {
+			r.onFatal(fmt.Errorf("flush command audit event: %w", err))
+		}
+		return
+	}
 
 	r.seq++
 	now := time.Now().UTC()
@@ -131,12 +157,16 @@ func (r *CommandRecorder) submitLineLocked() {
 }
 
 func (r *CommandRecorder) flushCurrentLocked() error {
-	if r.current == nil || r.file == nil {
+	if r.current == nil {
 		return nil
+	}
+	if r.file == nil {
+		return errors.New("command audit file is unavailable")
 	}
 	now := time.Now().UTC()
 	r.current.EndedAt = now.UnixMilli()
 	r.current.Preview = strings.TrimSpace(stripControlPreview(r.current.Preview))
+	r.current.Preview = r.redactor.Redact("output", r.current.Preview)
 	raw, err := json.Marshal(r.current)
 	if err != nil {
 		return err
@@ -144,10 +174,13 @@ func (r *CommandRecorder) flushCurrentLocked() error {
 	if _, err := r.file.Write(append(raw, '\n')); err != nil {
 		return err
 	}
-	if r.auditSink != nil {
-		r.auditSink.WriteCommand(r.sessionID, time.UnixMilli(r.current.StartedAt), r.current.Command)
-	}
+	event := r.current
 	r.current = nil
+	if r.auditSink != nil {
+		if err := r.auditSink.WriteCommand(r.sessionID, time.UnixMilli(event.StartedAt), event.Command); err != nil {
+			return fmt.Errorf("write database command audit event: %w", err)
+		}
+	}
 	return nil
 }
 

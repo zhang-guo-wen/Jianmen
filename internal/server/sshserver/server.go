@@ -20,6 +20,7 @@ import (
 	"jianmen/internal/proxy/sshproxy"
 	"jianmen/internal/rbac"
 	"jianmen/internal/recording"
+	"jianmen/internal/service"
 	"jianmen/internal/store"
 )
 
@@ -214,7 +215,10 @@ func (s *Server) handleConn(ctx context.Context, rawConn net.Conn, serverConfig 
 		auditSession.UserSessionID = userSession.ID
 	}
 	auditSession.BeforeCreate(nil)
-	s.store.CreateAuditSession(&auditSession)
+	if err := s.store.CreateAuditSession(&auditSession); err != nil {
+		s.logger.Warn("failed to create SSH audit session", "session", session.ID, "error", err)
+		return
+	}
 
 	defer func() {
 		s.store.EndAuditSession(auditSession.ID)
@@ -227,14 +231,20 @@ func (s *Server) handleConn(ctx context.Context, rawConn net.Conn, serverConfig 
 			session,
 			s.cfg.Recording.RecordInput,
 			s.cfg.Recording.RecordCommands,
+			service.NewAuditPolicy(s.cfg.Recording.RetentionDays, s.cfg.Recording.RecordInput),
+			func(error) {
+				_ = targetClient.Close()
+				_ = serverConn.Close()
+				_ = rawConn.Close()
+			},
 			s.logger,
 			&auditStore{store: s.store, sessionID: auditSession.ID, onlineSessions: s.onlineSessions},
 		)
 		if err != nil {
 			s.logger.Warn("failed to initialize recorder", "session", session.ID, "error", err)
-		} else {
-			defer recorder.Close()
+			return
 		}
+		defer recorder.Close()
 	}
 
 	accountName := target.Name

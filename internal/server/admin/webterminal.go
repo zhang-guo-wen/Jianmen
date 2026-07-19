@@ -2,6 +2,7 @@ package admin
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -147,6 +148,11 @@ func (s *Server) handleWebTerminal(w http.ResponseWriter, r *http.Request) {
 
 	session := newWebTerminalSession(r, user, target)
 	auditSession := s.startWebTerminalAudit(session, target)
+	if auditSession == nil {
+		_ = targetClient.Close()
+		writeWebTerminalClose(conn, errors.New("audit service unavailable"))
+		return
+	}
 	if auditSession != nil {
 		defer func() {
 			if err := s.store.EndAuditSession(auditSession.ID); err != nil {
@@ -155,7 +161,16 @@ func (s *Server) handleWebTerminal(w http.ResponseWriter, r *http.Request) {
 		}()
 	}
 
-	recorder := s.newWebTerminalRecorder(session, auditSession)
+	recorder, err := s.newWebTerminalRecorder(session, auditSession, func(error) {
+		_ = conn.Close()
+		_ = targetClient.Close()
+	})
+	if err != nil {
+		_ = targetClient.Close()
+		writeWebTerminalClose(conn, errors.New("audit recorder unavailable"))
+		s.logger.Warn("failed to initialize web terminal recorder", "target", target.ID, "error", err)
+		return
+	}
 	if recorder != nil {
 		defer recorder.Close()
 	}

@@ -262,7 +262,10 @@ func TestWebTerminalRecorderUsesAuthenticatedIdentity(t *testing.T) {
 	if auditSession.AccountUsername != "root" || auditSession.AccountName != "operations" {
 		t.Fatalf("audit account = username:%q name:%q", auditSession.AccountUsername, auditSession.AccountName)
 	}
-	recorder := server.newWebTerminalRecorder(session, auditSession)
+	recorder, err := server.newWebTerminalRecorder(session, auditSession, func(error) {})
+	if err != nil {
+		t.Fatalf("newWebTerminalRecorder: %v", err)
+	}
 	if recorder == nil {
 		t.Fatal("web terminal recorder was not created")
 	}
@@ -305,6 +308,26 @@ func TestWebTerminalRecorderUsesAuthenticatedIdentity(t *testing.T) {
 	}
 	if storedCommand.Command != "whoami" || !storedCommand.Timestamp.Equal(commandAt) {
 		t.Fatalf("unexpected stored audit command: %#v", storedCommand)
+	}
+}
+
+func TestWebTerminalRecorderInitializationFailsClosed(t *testing.T) {
+	server, _ := newAdminDBTestServer(t)
+	rootFile := filepath.Join(t.TempDir(), "replay-file")
+	if err := os.WriteFile(rootFile, []byte("blocked"), 0o600); err != nil {
+		t.Fatalf("write replay root file: %v", err)
+	}
+	server.cfg = &config.Config{
+		ReplayDir: rootFile,
+		Recording: config.RecordingConfig{Enabled: true, RetentionDays: 30},
+	}
+	_, err := server.newWebTerminalRecorder(
+		model.Session{ID: "session-1"},
+		&model.AuditSession{ID: "audit-1"},
+		func(error) {},
+	)
+	if err == nil {
+		t.Fatal("web terminal recorder accepted a non-directory replay root")
 	}
 }
 

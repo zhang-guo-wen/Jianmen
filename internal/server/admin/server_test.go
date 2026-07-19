@@ -407,7 +407,7 @@ func TestProtectedHandlersFailClosedWithoutAuthenticatedUser(t *testing.T) {
 	}
 }
 
-func TestInitStatusReturnsSuperAdminSummaryAfterSetup(t *testing.T) {
+func TestInitStatusReturnsInitializedWithoutAdminSummary(t *testing.T) {
 	server, db := newAdminDBTestServer(t)
 	if err := db.Create(&model.User{
 		ID:       "normal-user",
@@ -440,11 +440,12 @@ func TestInitStatusReturnsSuperAdminSummaryAfterSetup(t *testing.T) {
 	if !got.Initialized {
 		t.Fatal("initialized = false, want true")
 	}
-	if got.Admin == nil {
-		t.Fatalf("admin summary is nil; body=%s", rec.Body.String())
+	var payload map[string]any
+	if err := decodeTestData(t, rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v; body=%s", err, rec.Body.String())
 	}
-	if got.Admin.Username != "admin" || got.Admin.DisplayName != "超级管理员" || got.Admin.Email != "admin@example.com" {
-		t.Fatalf("unexpected admin summary: %#v", got.Admin)
+	if _, ok := payload["admin"]; ok {
+		t.Fatalf("init status leaked admin field: %s", rec.Body.String())
 	}
 }
 

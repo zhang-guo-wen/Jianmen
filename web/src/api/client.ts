@@ -85,11 +85,6 @@ export interface LoginCaptchaChallenge {
 
 export interface InitStatusResponse {
   initialized: boolean;
-  admin?: {
-    username?: string;
-    display_name?: string;
-    email?: string;
-  };
 }
 
 export interface UserRecord {

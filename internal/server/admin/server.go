@@ -25,7 +25,7 @@ type Server struct {
 	databases              adminDatabaseRepository
 	databaseManagement     *service.DatabaseManagementService
 	applicationService     *service.ApplicationService
-	containers             adminContainerRepository
+	containerManagement    *service.ContainerManagementService
 	platformAccountService *service.PlatformAccountService
 	userSessionCreation    *service.UserSessionCreationService
 	audit                  adminAuditRepository
@@ -41,7 +41,6 @@ type Server struct {
 	loginLimiter           *loginLimiter
 	loginCaptcha           loginCaptchaVerifier
 	onlineSessions         *online.Registry
-	containerService       *service.ContainerService
 	identity               *service.IdentityService
 	authorization          authorizationService
 	resourceAccess         resourceAccessRepository
@@ -165,18 +164,26 @@ func New(
 	if err != nil {
 		return nil, fmt.Errorf("initialize platform account service: %w", err)
 	}
+	containerManagement, err := service.NewContainerManagementService(
+		dependencies.containers,
+		authorization,
+		service.NewContainerService(),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("initialize container management service: %w", err)
+	}
 	return &Server{
 		cfg: cfg, db: db, logger: logger,
 		aiAccessTokens: aiAccessTokens, hostTargets: dependencies.hostTargets, databases: dependencies.databases,
 		databaseManagement: databaseManagement, applicationService: applicationService,
-		containers: dependencies.containers, platformAccountService: platformAccountService,
+		containerManagement: containerManagement, platformAccountService: platformAccountService,
 		userSessionCreation: userSessionCreation, audit: dependencies.audit, connectionPassword: connectionPassword,
 		preferences: dependencies.preferences, temporaryRepository: dependencies.temporaryAccess,
 		userRepository: dependencies.users, userGroupRepository: dependencies.userGroups, roleRepository: dependencies.roles,
 		dataDir:      dataDir,
 		loginLimiter: newDefaultLoginLimiter(), loginCaptcha: loginCaptcha,
-		onlineSessions: onlineSessions, containerService: service.NewContainerService(),
-		identity: identity, authorization: authorization, resourceAccess: dependencies.resourceAccess,
+		onlineSessions: onlineSessions,
+		identity:       identity, authorization: authorization, resourceAccess: dependencies.resourceAccess,
 		resourceGrants: resourceGrants, resourceGroups: resourceGroups, userManagement: userManagement, userGroups: userGroups, roleManagement: roleManagement, databaseProvisioning: databaseProvisioning, temporaryAccess: temporaryAccess,
 		browserSessions: browserSessions,
 		webRDP:          webRDP, accessRequests: accessRequests,

@@ -171,8 +171,11 @@ and does not decide whether an expired subject may authenticate.
 - [ ] **Step 4: Remove runtime Map authorization**
 
 Replace `LoadSuperAdminIDs`, `isSuperAdmin` Map reads, and protocol-specific snapshots with
-database-backed identity lookup. Keep one startup-only legacy importer for `.super_admin_ids`;
-runtime request handling must not read the file.
+database-backed identity lookup. Because the product is unreleased and historical data compatibility
+is not required, startup must not read, create, or rename `.super_admin_ids`; the database field is
+the only runtime authority. If users exist but no active, unexpired super administrator exists,
+startup fails closed. An explicit config super administrator may seed or recover the database only
+while no valid database super administrator exists; it cannot override an existing database authority.
 
 - [ ] **Step 5: Verify GREEN**
 

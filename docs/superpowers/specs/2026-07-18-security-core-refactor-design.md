@@ -131,8 +131,8 @@ authenticate subject
 初始化向导创建的首个用户在同一数据库事务中写入 `is_super_admin=true`。配置文件用户
 只有明确设置 `super_admin=true` 才能成为超级管理员。
 
-为避免现有开发库锁死，启动时允许一次性导入 `.super_admin_ids`，导入成功后将文件重命名
-为 `.super_admin_ids.imported`；运行时不再读取该文件。
+产品尚未发布，不保留 `.super_admin_ids` 兼容导入。启动时不得读取、创建或重命名该文件；
+配置用户的显式 `super_admin` 仅作为首次写库种子，重复启动不得覆盖数据库中的管理员状态。
 
 ### 6.2 身份状态
 

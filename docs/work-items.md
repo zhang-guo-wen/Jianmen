@@ -123,6 +123,7 @@
 | 数据库审计 SQL 脱敏断言 | 已完成 | `2caaa32` | [实库集成测试](../internal/integration/database_proxy_integration_test.go) |
 | 审计保留、分批清理与回放字节配额 | 已完成 | `8b8b633`、`99cf3aa` | [保留服务测试](../internal/service/audit_retention_test.go)、[存储一致性测试](../internal/store/dbstore_audit_retention_test.go) |
 | 跨分片脱敏及审计录制失败关闭 | 已完成 | `c517a3b` | [流式脱敏测试](../internal/recording/stream_redactor_test.go)、[数据库录制失败测试](../internal/server/dbproxy/audit_replay_path_test.go) |
+| 超级管理员独立文件权威路径 | 已完成 | `15e9c28` | 启动不再读取或重命名 `.super_admin_ids`；[启动回归测试](../cmd/bastion-core/bootstrap_test.go) 验证遗留文件不能提升数据库用户 |
 
 ### 可以延期
 

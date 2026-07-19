@@ -52,8 +52,8 @@ func TestDatabaseTLSMigrationUpgradesExistingInstances(t *testing.T) {
 	if err := db.Raw("SELECT tls_mode FROM database_instances WHERE id = ?", "database-1").Scan(&tlsMode).Error; err != nil {
 		t.Fatalf("load migrated TLS mode: %v", err)
 	}
-	if tlsMode != "verify-full" {
-		t.Fatalf("migrated TLS mode = %q, want verify-full", tlsMode)
+	if tlsMode != "disable" {
+		t.Fatalf("migrated TLS mode = %q, want disable", tlsMode)
 	}
 	if err := Migrate(db); err != nil {
 		t.Fatalf("second migrate: %v", err)

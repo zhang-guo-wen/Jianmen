@@ -147,11 +147,23 @@ docker run -d \
 | `47102` | SSH/SFTP 堡垒机入口 |
 | `33060` | 统一数据库入口（默认，MySQL/PostgreSQL/Redis） |
 | `33061` | 独立模式 MySQL 入口 |
-| `33062` | 独立模式 PostgreSQL 入口（TLS 必须） |
-| `33063` | 独立模式 Redis 入口（远程 AUTH 必须使用 TLS） |
+| `33062` | 独立模式 PostgreSQL 入口（客户端连接必须使用 TLS） |
+| `33063` | 独立模式 Redis 入口（远程客户端 AUTH 必须使用 TLS） |
 | `47110-47199` | 内网应用动态代理端口范围 |
 
 默认统一模式只需发布 `33060`。若在系统设置中切换为独立端口模式，重启容器时还需增加 `-p 33061:33061 -p 33062:33062 -p 33063:33063`；Compose 部署同样需要在 `ports` 中增加这三个映射。
+
+### Jianmen 到实际数据库的上游 TLS
+
+数据库实例的上游 TLS 控制的是 `Jianmen → 实际数据库` 这一段链路，与客户端连接数据库网关时使用的 `客户端 → Jianmen` TLS 相互独立。新建实例默认选择 `disable`，以便连接仅提供 IP、未启用 TLS 或没有可用 CA 的数据库；已有实例会保留原来的 TLS 模式，不会因默认值变化被批量降级。
+
+| 模式 | 行为 | 适用场景 |
+|---|---|---|
+| `disable`（默认） | 不加密，不校验证书 | 数据库未启用 TLS，且 Jianmen 与数据库之间是受信任内网 |
+| `verify-ca` | 加密并验证证书链，不校验主机名 | 数据库证书没有匹配连接地址的 SAN |
+| `verify-full` | 加密并验证证书链与主机名 | 数据库证书和名称配置完整，安全性最高 |
+
+使用 `disable` 时，查询结果和认证数据都可能在上游网络中以明文传输，Redis 的 `AUTH` 凭据也不例外。跨公网、跨租户网络或其他不可信网络时，应配置数据库 TLS 并选择 `verify-ca` 或 `verify-full`。MySQL `caching_sha2_password` 完整认证和 PostgreSQL 明文密码认证仍要求经过验证的 TLS；遇到这些认证方式时，连接测试和实际代理连接都会拒绝不安全降级，需要启用 TLS 或调整数据库认证方式。
 
 ### 数据库网关 TLS 身份校验
 
@@ -174,6 +186,65 @@ docker run -d \
 
 上面的本机评估流程生成的数据库叶证书 SAN 包含 `localhost` 和 `127.0.0.1`，与默认配置的 `server_name: "localhost"` 一致。生产环境使用其他网关域名时，必须同时替换 `server_name`，并重新签发包含该 DNS 名称 SAN 的数据库叶证书。
 
+### 使用 Nginx 代理数据库网关
+
+Nginx 可以通过 Stream 模块代理统一数据库入口，但必须使用四层 TCP 透传。数据库原生 TLS 由 Jianmen 终结，Nginx 不解密流量：
+
+```text
+原生数据库客户端 == 数据库协议 TLS ==> Nginx -- TCP 透传 --> Jianmen
+Jianmen == 上游 TLS 或受信内网明文 ==> 实际数据库
+```
+
+下面是统一入口 `33060` 的完整最小 `nginx.conf`。已有 Nginx 配置时只需合并其中的 `stream {}`，不要重复定义 `events {}`；`stream {}` 必须放在顶层，不能放进 `http {}`：
+
+```nginx
+worker_processes auto;
+
+events {
+    worker_connections 4096;
+}
+
+stream {
+    log_format jianmen_database
+        '$remote_addr:$remote_port [$time_local] '
+        '$protocol $status $session_time '
+        '$bytes_sent $bytes_received '
+        '$upstream_addr $upstream_connect_time';
+
+    access_log /var/log/nginx/jianmen-database-access.log jianmen_database;
+
+    upstream jianmen_database_gateway {
+        server jianmen:33060;
+    }
+
+    server {
+        listen 33060 so_keepalive=on;
+
+        proxy_connect_timeout 5s;
+        proxy_timeout 1h;
+        proxy_socket_keepalive on;
+        proxy_protocol off;
+
+        proxy_pass jianmen_database_gateway;
+    }
+}
+```
+
+示例中的 `jianmen:33060` 适用于 Nginx 和 Jianmen 位于同一个 Docker/Compose 网络且 Jianmen 服务名为 `jianmen` 的情况。同机裸机部署应改为 `127.0.0.1:33060`，分机部署则改为 Jianmen 的受控内网地址。
+
+部署时必须注意：
+
+- 不要添加 `listen 33060 ssl`、`ssl_certificate`、`proxy_ssl on` 或 `ssl_preread on`。MySQL 由服务端先发送 Greeting，PostgreSQL 通常先发送明文 `SSLRequest`，Nginx 的通用 TLS 监听无法在同一个端口终结三种原生协议；Redis 虽然可以直接发送 TLS ClientHello，也不能解决 MySQL 和 PostgreSQL。Web 管理端是标准 HTTPS，可以单独由 Nginx 正常终结 TLS。
+- 数据库网关证书、私钥和 CA 仍配置在 Jianmen。证书 SAN 必须包含客户端实际连接的域名或 IP。Nginx 不会终结或改变 `客户端 → Jianmen` 的原生 TLS，也不能把 `Jianmen → 实际数据库` 的 `disable` 链路变成加密链路。
+- Jianmen 当前不解析 PROXY Protocol，必须保持 `proxy_protocol off`。开启后，Nginx 会在数据库协议前插入 `PROXY ...`，导致统一入口和独立入口握手失败。Jianmen 看到的 TCP 对端会是 Nginx，真实客户端地址应从 Nginx Stream 访问日志查询。
+- 不要依赖“回环地址允许本机明文开发”作为代理部署的安全边界。Nginx 转发到 `127.0.0.1` 时，外部连接在 Jianmen 看来同样来自回环地址；只要数据库入口会被外部访问，就必须给 Jianmen 配置网关证书。
+- Docker 部署时只让 Nginx 发布宿主机 `33060`，Jianmen 的 `33060` 只保留在隔离容器网络，不要再使用 `-p 33060:33060` 直接发布 Jianmen。若两者共享主机网络，不能同时监听 `0.0.0.0:33060`；可以让 Jianmen 监听 `127.0.0.1:33060`，让 Nginx 仅监听服务器的具体对外 IP。
+- `proxy_timeout` 是连接连续两次读写之间允许的最大空闲时间。默认值可能误断开长期空闲的数据库连接池，示例使用 1 小时，应按业务连接池寿命调整。每条数据库会话大约占用一个客户端连接和一个上游连接；`worker_connections` 是每个 worker 的上限，应结合 worker 数量按预期并发量的两倍预留，同时检查 `worker_rlimit_nofile` 和系统文件描述符限制。
+- 不要使用 HTTP 请求或通用 TLS ClientHello 检查统一数据库端口。容器存活检查继续使用 `/api/init/status`；端口就绪检查可以建立 TCP 连接后立即关闭。端到端检查应使用 MySQL、PostgreSQL 或 Redis 原生客户端和专用监控账号。
+- 独立端口模式使用相同的纯 TCP 配置，分别映射 `33061 → 33061`、`33062 → 33062`、`33063 → 33063`。修改配置后先执行 `nginx -t`，验证成功再重载。
+
+使用前应确认安装的 Nginx 包包含 Stream 模块。更多指令语义参见 [NGINX Stream TCP 代理](https://nginx.org/en/docs/stream/ngx_stream_proxy_module.html)、[Stream 核心模块](https://nginx.org/en/docs/stream/ngx_stream_core_module.html) 和 [Stream upstream 模块](https://nginx.org/en/docs/stream/ngx_stream_upstream_module.html)。
+
 浏览器访问：
 
 ```text
@@ -186,7 +257,8 @@ https://127.0.0.1:47100
 
 如在隔离 Docker 网络内由 Caddy 等反向代理终止 TLS，可使用仓库提供的
 `config.docker.proxy.example.json`。下面的完整示例不会把容器内的明文 `47100` 发布到
-宿主机；使用前请把示例域名替换为真实域名并完成 DNS 解析：
+宿主机；它只代理 Web 管理端，示例中的 `33060` 仍由 Jianmen 直接发布，不代表 Caddy
+同时代理数据库入口。使用前请把示例域名替换为真实域名并完成 DNS 解析：
 
 ```bash
 mkdir -p /opt/jianmen

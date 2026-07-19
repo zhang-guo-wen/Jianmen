@@ -215,6 +215,11 @@ var migrations = []Migration{
 		Name:    "database gateway mode system setting",
 		Run:     migrateDatabaseGatewayMode,
 	},
+	{
+		Version: databaseTLSDefaultMigrationVersion,
+		Name:    "database instance upstream TLS default",
+		Run:     migrateDatabaseTLSDefault,
+	},
 }
 
 func rejectDuplicateDatabaseAccounts(tx *gorm.DB) error {

@@ -53,7 +53,7 @@ func TestDatabaseGatewayRedisAgainstDocker(t *testing.T) {
 			host, port := splitAddress(t, upstreamAddr)
 			instance, err := fixture.store.AddDatabaseInstance(context.Background(), jmstore.DatabaseInstanceInput{
 				Name: "docker-redis-" + sanitizeTestName(image), Protocol: "redis",
-				Address: host, Port: port, TLSMode: "disable",
+				Address: host, Port: port,
 			})
 			if err != nil {
 				t.Fatalf("add Redis instance: %v", err)

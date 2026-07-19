@@ -3,8 +3,10 @@ package storage
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
@@ -14,6 +16,8 @@ import (
 	"jianmen/internal/model"
 	"jianmen/internal/util"
 )
+
+var ErrNoActiveSuperAdmin = errors.New("metadata contains users but no active super administrator")
 
 func BootstrapMetadata(db *gorm.DB, cfg *config.Config) error {
 	if db == nil {
@@ -25,16 +29,25 @@ func BootstrapMetadata(db *gorm.DB, cfg *config.Config) error {
 	if err := ReconcileMetadata(db); err != nil {
 		return fmt.Errorf("reconcile metadata: %w", err)
 	}
-	if err := bootstrapConfigUsers(db, cfg.Users); err != nil {
-		return err
-	}
-	if err := repairUserSessions(db); err != nil {
-		return fmt.Errorf("repair user sessions: %w", err)
-	}
-	return nil
+	return db.Transaction(func(tx *gorm.DB) error {
+		activeSuperAdmins, err := countActiveSuperAdmins(tx, time.Now().UTC())
+		if err != nil {
+			return fmt.Errorf("count active super administrators: %w", err)
+		}
+		if err := bootstrapConfigUsers(tx, cfg.Users, activeSuperAdmins == 0); err != nil {
+			return err
+		}
+		if err := requireActiveSuperAdminForExistingUsers(tx, time.Now().UTC()); err != nil {
+			return err
+		}
+		if err := repairUserSessions(tx); err != nil {
+			return fmt.Errorf("repair user sessions: %w", err)
+		}
+		return nil
+	})
 }
 
-func bootstrapConfigUsers(db *gorm.DB, users []config.User) error {
+func bootstrapConfigUsers(db *gorm.DB, users []config.User, allowSuperAdminSeed bool) error {
 	for _, cfgUser := range users {
 		userID := configUserID(cfgUser)
 		username := strings.TrimSpace(cfgUser.Username)
@@ -46,7 +59,7 @@ func bootstrapConfigUsers(db *gorm.DB, users []config.User) error {
 			ID:           userID,
 			Username:     username,
 			Status:       "active",
-			IsSuperAdmin: cfgUser.SuperAdmin,
+			IsSuperAdmin: allowSuperAdminSeed && cfgUser.SuperAdmin,
 		}
 		if pw := strings.TrimSpace(cfgUser.Password); pw != "" {
 			hash, err := bcrypt.GenerateFromPassword([]byte(pw), bcrypt.DefaultCost)
@@ -61,15 +74,19 @@ func bootstrapConfigUsers(db *gorm.DB, users []config.User) error {
 			user.TokenHash = hex.EncodeToString(hash[:])
 		}
 
+		updates := map[string]any{
+			"username":           user.Username,
+			"status":             user.Status,
+			"password_hash":      user.PasswordHash,
+			"my_sql_native_hash": user.MySQLNativeHash,
+			"token_hash":         user.TokenHash,
+		}
+		if allowSuperAdminSeed && cfgUser.SuperAdmin {
+			updates["is_super_admin"] = true
+		}
 		if err := db.Clauses(clause.OnConflict{
-			Columns: []clause.Column{{Name: "id"}},
-			DoUpdates: clause.Assignments(map[string]any{
-				"username":           user.Username,
-				"status":             user.Status,
-				"password_hash":      user.PasswordHash,
-				"my_sql_native_hash": user.MySQLNativeHash,
-				"token_hash":         user.TokenHash,
-			}),
+			Columns:   []clause.Column{{Name: "id"}},
+			DoUpdates: clause.Assignments(updates),
 		}).Create(&user).Error; err != nil {
 			return fmt.Errorf("bootstrap metadata user %q: %w", userID, err)
 		}
@@ -103,6 +120,35 @@ func bootstrapConfigUsers(db *gorm.DB, users []config.User) error {
 		}
 	}
 	return nil
+}
+
+func requireActiveSuperAdminForExistingUsers(db *gorm.DB, now time.Time) error {
+	var userCount int64
+	if err := db.Model(&model.User{}).Count(&userCount).Error; err != nil {
+		return fmt.Errorf("count metadata users: %w", err)
+	}
+	if userCount == 0 {
+		return nil
+	}
+	activeSuperAdmins, err := countActiveSuperAdmins(db, now)
+	if err != nil {
+		return fmt.Errorf("count active super administrators: %w", err)
+	}
+	if activeSuperAdmins == 0 {
+		return fmt.Errorf(
+			"%w; set super_admin=true for one config user to seed the database, or restore users.is_super_admin",
+			ErrNoActiveSuperAdmin,
+		)
+	}
+	return nil
+}
+
+func countActiveSuperAdmins(db *gorm.DB, now time.Time) (int64, error) {
+	var count int64
+	err := db.Model(&model.User{}).
+		Where("is_super_admin = ? AND status = ? AND (expires_at IS NULL OR expires_at > ?)", true, "active", now).
+		Count(&count).Error
+	return count, err
 }
 
 func repairUserSessions(db *gorm.DB) error {

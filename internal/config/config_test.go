@@ -123,6 +123,85 @@ func TestDockerImageAdminTransportIsSecureByDefault(t *testing.T) {
 	if err := cfg.Validate(); err != nil {
 		t.Fatalf("secure Docker configuration must validate: %v", err)
 	}
+	if cfg.Recording.RecordInput {
+		t.Fatal("Docker image must not record raw terminal input by default")
+	}
+	if cfg.Recording.RetentionDays != 30 || cfg.Recording.MaxReplayBytes != 10*1024*1024*1024 || cfg.Recording.CleanupBatchSize != 100 {
+		t.Fatalf("Docker audit governance defaults = %+v", cfg.Recording)
+	}
+}
+
+func TestRecordingGovernanceDefaultsAndValidation(t *testing.T) {
+	cfg := &Config{}
+	cfg.applyDefaults()
+	if cfg.Recording.RetentionDays != 30 ||
+		cfg.Recording.MaxReplayBytes != 10*1024*1024*1024 ||
+		cfg.Recording.CleanupBatchSize != 100 {
+		t.Fatalf("recording defaults = %+v", cfg.Recording)
+	}
+	if cfg.Recording.RecordInput {
+		t.Fatal("raw terminal input must default to disabled")
+	}
+
+	tests := []struct {
+		name      string
+		recording RecordingConfig
+		wantErr   string
+	}{
+		{name: "valid", recording: RecordingConfig{RetentionDays: 30, MaxReplayBytes: 1024, CleanupBatchSize: 10}},
+		{name: "retention too large", recording: RecordingConfig{RetentionDays: 3651}, wantErr: "retention_days"},
+		{name: "negative quota", recording: RecordingConfig{MaxReplayBytes: -1}, wantErr: "max_replay_bytes"},
+		{name: "batch too large", recording: RecordingConfig{CleanupBatchSize: 1001}, wantErr: "cleanup_batch_size"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			candidate := &Config{
+				ListenAddr: "127.0.0.1:47102",
+				Recording:  tt.recording,
+			}
+			err := candidate.Validate()
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatalf("Validate() error = %v", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("Validate() error = %v, want containing %q", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestRecordingGovernanceDistinguishesMissingAndExplicitZeroQuota(t *testing.T) {
+	var missing Config
+	if err := json.Unmarshal([]byte(`{
+		"listen_addr":"127.0.0.1:47102",
+		"recording":{"enabled":true,"record_input":false,"record_commands":true}
+	}`), &missing); err != nil {
+		t.Fatalf("decode old configuration: %v", err)
+	}
+	missing.applyDefaults()
+	if missing.Recording.MaxReplayBytes != 10*1024*1024*1024 {
+		t.Fatalf("missing quota default = %d", missing.Recording.MaxReplayBytes)
+	}
+
+	var disabled Config
+	if err := json.Unmarshal([]byte(`{
+		"listen_addr":"127.0.0.1:47102",
+		"recording":{
+			"enabled":true,
+			"record_input":false,
+			"record_commands":true,
+			"max_replay_bytes":0
+		}
+	}`), &disabled); err != nil {
+		t.Fatalf("decode explicit zero quota: %v", err)
+	}
+	disabled.applyDefaults()
+	if disabled.Recording.MaxReplayBytes != 0 {
+		t.Fatalf("explicit zero quota = %d, want disabled", disabled.Recording.MaxReplayBytes)
+	}
 }
 
 func TestDatabaseProtocolListenerValidation(t *testing.T) {

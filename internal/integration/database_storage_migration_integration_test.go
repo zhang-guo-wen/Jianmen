@@ -26,6 +26,7 @@ const (
 	databaseInstanceTLSMigrationVersion       = "202607180006"
 	databaseAccountUniquenessMigrationVersion = "202607180008"
 	databaseProvisioningSagaMigrationVersion  = "202607180009"
+	auditRetentionCleanupMigrationVersion     = "202607190002"
 )
 
 var currentStorageMigrationVersions = []string{
@@ -49,6 +50,7 @@ var currentStorageMigrationVersions = []string{
 	"202607180008",
 	"202607180009",
 	"202607190001",
+	"202607190002",
 }
 
 type metadataDatabaseCase struct {
@@ -201,6 +203,67 @@ func TestStorageMigrationUpgradesLegacyDatabaseAccounts(t *testing.T) {
 			}
 			assertOnlyMigrationVersionsAdded(t, beforeSecondMigration, loadMigrationVersionSet(t, db))
 			assertMigrationRecord(t, db, databaseAccountUniquenessMigrationVersion, "database account instance username uniqueness")
+		})
+	}
+}
+
+func TestStorageMigrationUpgradesLegacyAuditSessions(t *testing.T) {
+	for _, tt := range metadataDatabaseCases() {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			db := openMetadataDatabase(t, tt)
+			createCurrentSchemaWithOnlyMigrationPending(t, db, auditRetentionCleanupMigrationVersion)
+			seedAllCurrentMigrationsExcept(t, db, auditRetentionCleanupMigrationVersion)
+			assertOtherDatabaseMigrationsApplied(t, db, auditRetentionCleanupMigrationVersion)
+			now := time.Now().UTC()
+			if err := db.Exec(`INSERT INTO audit_sessions
+				(id, started_at, ended_at, state, replay_dir, created_at, updated_at)
+				VALUES (?, ?, ?, ?, ?, ?, ?)`,
+				"legacy-audit-session",
+				now.Add(-time.Hour),
+				now,
+				"ended",
+				"data/replay/ssh/legacy-audit-session",
+				now,
+				now,
+			).Error; err != nil {
+				t.Fatalf("seed legacy audit session: %v", err)
+			}
+
+			if db.Migrator().HasColumn(&model.AuditSession{}, "cleanup_status") {
+				t.Fatal("legacy audit schema unexpectedly contains cleanup_status")
+			}
+			beforeMigrations := loadMigrationVersionSet(t, db)
+			if err := storage.Migrate(db); err != nil {
+				t.Fatalf("migrate legacy audit schema: %v", err)
+			}
+			assertOnlyMigrationVersionsAdded(
+				t,
+				beforeMigrations,
+				loadMigrationVersionSet(t, db),
+				auditRetentionCleanupMigrationVersion,
+			)
+			for _, column := range []string{"cleanup_status", "cleanup_at", "cleanup_error"} {
+				if !db.Migrator().HasColumn(&model.AuditSession{}, column) {
+					t.Fatalf("audit retention column %s is missing", column)
+				}
+			}
+			if !db.Migrator().HasIndex(&model.AuditSession{}, "idx_audit_sessions_cleanup") {
+				t.Fatal("audit cleanup index is missing")
+			}
+			var session model.AuditSession
+			if err := db.First(&session, "id = ?", "legacy-audit-session").Error; err != nil {
+				t.Fatalf("load migrated audit session: %v", err)
+			}
+			if session.CleanupStatus != "ready" || session.ReplayDir != "data/replay/ssh/legacy-audit-session" {
+				t.Fatalf("migrated audit session = %#v", session)
+			}
+			assertMigrationRecord(t, db, auditRetentionCleanupMigrationVersion, "audit retention cleanup state")
+			beforeSecondMigration := loadMigrationVersionSet(t, db)
+			if err := storage.Migrate(db); err != nil {
+				t.Fatalf("second migration of legacy audit schema: %v", err)
+			}
+			assertOnlyMigrationVersionsAdded(t, beforeSecondMigration, loadMigrationVersionSet(t, db))
 		})
 	}
 }
@@ -380,6 +443,12 @@ func createCurrentSchemaWithOnlyMigrationPending(t *testing.T, db *gorm.DB, pend
 		if err := db.Migrator().DropIndex(&model.DatabaseAccount{}, "uidx_database_accounts_instance_username"); err != nil {
 			t.Fatalf("remove migration %s unique index from fixture: %v", pendingVersion, err)
 		}
+	case auditRetentionCleanupMigrationVersion:
+		for _, column := range []string{"cleanup_error", "cleanup_at", "cleanup_status"} {
+			if err := db.Migrator().DropColumn(&model.AuditSession{}, column); err != nil {
+				t.Fatalf("remove migration %s column %s from fixture: %v", pendingVersion, column, err)
+			}
+		}
 	default:
 		t.Fatalf("unsupported isolated migration version %s", pendingVersion)
 	}
@@ -400,6 +469,13 @@ func assertOtherDatabaseMigrationsApplied(t *testing.T, db *gorm.DB, pendingVers
 	if pendingVersion != databaseAccountUniquenessMigrationVersion &&
 		!db.Migrator().HasIndex(&model.DatabaseAccount{}, "uidx_database_accounts_instance_username") {
 		t.Fatalf("fixture for pending migration %s is missing applied 008 account unique index", pendingVersion)
+	}
+	if pendingVersion != auditRetentionCleanupMigrationVersion {
+		for _, column := range []string{"cleanup_status", "cleanup_at", "cleanup_error"} {
+			if !db.Migrator().HasColumn(&model.AuditSession{}, column) {
+				t.Fatalf("fixture for pending migration %s is missing applied audit column %s", pendingVersion, column)
+			}
+		}
 	}
 }
 
@@ -426,6 +502,7 @@ func seedAppliedMigrations(t *testing.T, db *gorm.DB, versions ...string) {
 		"202607180008": "database account instance username uniqueness",
 		"202607180009": "database provisioning saga recovery state",
 		"202607190001": "resource grant logical uniqueness",
+		"202607190002": "audit retention cleanup state",
 	}
 	for _, version := range versions {
 		name, ok := names[version]

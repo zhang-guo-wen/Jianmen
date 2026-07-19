@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"jianmen/internal/model"
@@ -75,6 +76,7 @@ type ApplicationService struct {
 	proxy              ApplicationProxy
 	portStart, portEnd int
 	sagaTimeout        time.Duration
+	mutationMu         sync.Mutex
 }
 
 func NewApplicationService(repository ApplicationRepository, authorizer ApplicationAuthorizer, proxy ApplicationProxy, portStart, portEnd int) (*ApplicationService, error) {
@@ -160,16 +162,14 @@ func (s *ApplicationService) Get(ctx context.Context, actor ApplicationActor, id
 	return applicationView(record), nil
 }
 
-func (s *ApplicationService) Create(
-	ctx context.Context,
-	actor ApplicationActor,
-	request ApplicationRequest,
-) (Application, error) {
+func (s *ApplicationService) Create(ctx context.Context, actor ApplicationActor, request ApplicationRequest) (Application, error) {
 	actor.UserID = strings.TrimSpace(actor.UserID)
 	if actor.UserID == "" {
 		return Application{}, ErrApplicationForbidden
 	}
-	input, err := s.applicationInput(ctx, request, 0)
+	s.mutationMu.Lock()
+	defer s.mutationMu.Unlock()
+	input, err := s.applicationInput(ctx, request, 0, "")
 	if err != nil {
 		return Application{}, err
 	}
@@ -197,22 +197,19 @@ func (s *ApplicationService) Create(
 	return application, nil
 }
 
-func (s *ApplicationService) Update(
-	ctx context.Context,
-	actor ApplicationActor,
-	id string,
-	request ApplicationRequest,
-) (Application, error) {
+func (s *ApplicationService) Update(ctx context.Context, actor ApplicationActor, id string, request ApplicationRequest) (Application, error) {
 	id = strings.TrimSpace(id)
 	if err := s.authorize(ctx, actor, rbac.ActionAppUpdate, id); err != nil {
 		return Application{}, err
 	}
+	s.mutationMu.Lock()
+	defer s.mutationMu.Unlock()
 	previousRecord, err := s.repository.GetApplication(ctx, id)
 	if err != nil {
 		return Application{}, fmt.Errorf("get application before update: %w", err)
 	}
 	previous := applicationView(previousRecord)
-	input, err := s.applicationInput(ctx, request, previous.ListenPort)
+	input, err := s.applicationInput(ctx, request, previous.ListenPort, previous.Status)
 	if err != nil {
 		return Application{}, err
 	}
@@ -235,6 +232,8 @@ func (s *ApplicationService) Delete(ctx context.Context, actor ApplicationActor,
 	if err := s.authorize(ctx, actor, rbac.ActionAppDelete, id); err != nil {
 		return err
 	}
+	s.mutationMu.Lock()
+	defer s.mutationMu.Unlock()
 	record, err := s.repository.GetApplication(ctx, id)
 	if err != nil {
 		return fmt.Errorf("get application before delete: %w", err)
@@ -274,11 +273,7 @@ func (s *ApplicationService) authorize(ctx context.Context, actor ApplicationAct
 	return nil
 }
 
-func (s *ApplicationService) applicationInput(
-	ctx context.Context,
-	request ApplicationRequest,
-	fallbackPort int,
-) (model.Application, error) {
+func (s *ApplicationService) applicationInput(ctx context.Context, request ApplicationRequest, fallbackPort int, fallbackStatus string) (model.Application, error) {
 	parsed, err := ParseApplicationAddress(request.Address)
 	if err != nil {
 		return model.Application{}, fmt.Errorf("%w: %v", ErrInvalidApplication, err)
@@ -301,6 +296,9 @@ func (s *ApplicationService) applicationInput(
 		name = parsed.Host
 	}
 	status := strings.ToLower(strings.TrimSpace(request.Status))
+	if status == "" {
+		status = strings.ToLower(strings.TrimSpace(fallbackStatus))
+	}
 	if status == "" {
 		status = "active"
 	}
@@ -359,11 +357,7 @@ func (s *ApplicationService) reconcileUpdatedProxy(previous, updated Application
 	return nil
 }
 
-func (s *ApplicationService) compensateCreatedApplication(
-	ctx context.Context,
-	application Application,
-	cause error,
-) error {
+func (s *ApplicationService) compensateCreatedApplication(ctx context.Context, application Application, cause error) error {
 	compensationCtx, cancel := s.compensationContext(ctx)
 	defer cancel()
 	if err := s.repository.DeleteManagedApplication(compensationCtx, application.ID); err != nil {
@@ -372,12 +366,7 @@ func (s *ApplicationService) compensateCreatedApplication(
 	return cause
 }
 
-func (s *ApplicationService) compensateApplicationUpdate(
-	ctx context.Context,
-	previous Application,
-	updated Application,
-	cause error,
-) error {
+func (s *ApplicationService) compensateApplicationUpdate(ctx context.Context, previous Application, updated Application, cause error) error {
 	compensationCtx, cancel := s.compensationContext(ctx)
 	defer cancel()
 

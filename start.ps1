@@ -220,7 +220,7 @@ try {
         captcha_payload = $captchaPayload
     } | ConvertTo-Json -Compress
     $loginResp = Invoke-RestMethod -Uri "http://127.0.0.1:47100/api/login" -Method Post -Body $loginBody -ContentType "application/json" -WebSession $webSession -TimeoutSec 5 -ErrorAction Stop
-    if ([string]::IsNullOrWhiteSpace([string]$loginResp.csrf_token)) {
+    if ([string]::IsNullOrWhiteSpace([string]$loginResp.data.csrf_token)) {
         throw "Login response did not include csrf_token"
     }
     $sessionCookie = $webSession.Cookies.GetCookies("http://127.0.0.1:47100/") | Where-Object { $_.Name -eq "jianmen_session" }

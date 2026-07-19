@@ -61,6 +61,7 @@ type ContainerManagementRepository interface {
 }
 
 type ContainerAuthorizer interface {
+	AuthorizeConnection(context.Context, string, []string, string, string) (bool, error)
 	AuthorizeBatch(context.Context, string, []AuthorizationRequest) ([]AuthorizationDecision, error)
 }
 
@@ -134,12 +135,20 @@ func (s *ContainerManagementService) Get(ctx context.Context, actor ContainerAct
 	if err != nil {
 		return ContainerEndpoint{}, fmt.Errorf("get container endpoint: %w", err)
 	}
-	item.CanManage = actor.SuperAdmin || s.allowed(ctx, actor, []string{rbac.ActionContainerUpdate, rbac.ActionContainerDelete}, model.ResourceTypeContainerEndpoint, id)
+	if actor.SuperAdmin {
+		item.CanManage = true
+		return item, nil
+	}
+	canManage, err := s.authorizationAllowed(ctx, actor, []string{rbac.ActionContainerUpdate, rbac.ActionContainerDelete}, model.ResourceTypeContainerEndpoint, id)
+	if err != nil {
+		return ContainerEndpoint{}, err
+	}
+	item.CanManage = canManage
 	return item, nil
 }
 
 func (s *ContainerManagementService) Create(ctx context.Context, actor ContainerActor, request ContainerEndpointRequest) (ContainerEndpoint, error) {
-	if err := s.authorize(ctx, actor, []string{rbac.ActionContainerCreate}, "", ""); err != nil {
+	if err := s.authorizeGlobal(ctx, actor, []string{rbac.ActionContainerCreate}); err != nil {
 		return ContainerEndpoint{}, err
 	}
 	if err := validateContainerRequest(request); err != nil {
@@ -164,13 +173,18 @@ func (s *ContainerManagementService) Update(ctx context.Context, actor Container
 	if err := s.authorize(ctx, actor, []string{rbac.ActionContainerUpdate}, model.ResourceTypeContainerEndpoint, id); err != nil {
 		return ContainerEndpoint{}, err
 	}
-	if err := validateContainerRequest(request); err != nil {
+	previous, err := s.repository.ManagedContainerEndpoint(ctx, strings.TrimSpace(id))
+	if err != nil {
+		return ContainerEndpoint{}, fmt.Errorf("get container endpoint before update: %w", err)
+	}
+	effective := mergeContainerEndpointRequest(containerRequest(previous), request)
+	if err := validateContainerRequest(effective); err != nil {
 		return ContainerEndpoint{}, err
 	}
-	if err := s.validateHostAccount(ctx, actor, request); err != nil {
+	if err := s.validateHostAccount(ctx, actor, effective); err != nil {
 		return ContainerEndpoint{}, err
 	}
-	item, err := s.repository.UpdateManagedContainerEndpoint(ctx, strings.TrimSpace(id), request)
+	item, err := s.repository.UpdateManagedContainerEndpoint(ctx, strings.TrimSpace(id), effective)
 	if err != nil {
 		return ContainerEndpoint{}, fmt.Errorf("update container endpoint: %w", err)
 	}
@@ -189,7 +203,16 @@ func (s *ContainerManagementService) Delete(ctx context.Context, actor Container
 }
 
 func (s *ContainerManagementService) Test(ctx context.Context, actor ContainerActor, request ContainerEndpointRequest) (ContainerTestResult, error) {
-	if err := s.authorize(ctx, actor, []string{rbac.ActionContainerCreate, rbac.ActionContainerUpdate}, "", ""); err != nil {
+	if endpointID := strings.TrimSpace(request.ID); endpointID != "" {
+		if err := s.authorize(ctx, actor, []string{rbac.ActionContainerUpdate}, model.ResourceTypeContainerEndpoint, endpointID); err != nil {
+			return ContainerTestResult{}, err
+		}
+		previous, err := s.repository.ManagedContainerEndpoint(ctx, endpointID)
+		if err != nil {
+			return ContainerTestResult{}, fmt.Errorf("get container endpoint before test: %w", err)
+		}
+		request = mergeContainerEndpointRequest(containerRequest(previous), request)
+	} else if err := s.authorizeGlobal(ctx, actor, []string{rbac.ActionContainerCreate, rbac.ActionContainerUpdate}); err != nil {
 		return ContainerTestResult{}, err
 	}
 	config, err := s.endpointConfig(ctx, actor, request, false)
@@ -297,27 +320,48 @@ func (s *ContainerManagementService) validateHostAccount(ctx context.Context, ac
 }
 
 func (s *ContainerManagementService) authorize(ctx context.Context, actor ContainerActor, actions []string, resourceType, resourceID string) error {
+	allowed, err := s.authorizationAllowed(ctx, actor, actions, resourceType, resourceID)
+	if err != nil {
+		return err
+	}
+	if !allowed {
+		return ErrContainerForbidden
+	}
+	return nil
+}
+
+func (s *ContainerManagementService) authorizeGlobal(ctx context.Context, actor ContainerActor, actions []string) error {
 	if strings.TrimSpace(actor.UserID) == "" {
 		return ErrContainerForbidden
 	}
 	if actor.SuperAdmin {
 		return nil
 	}
-	decisions, err := s.authorizer.AuthorizeBatch(ctx, actor.UserID, []AuthorizationRequest{{Actions: actions, ResourceType: resourceType, ResourceID: resourceID}})
+	allowed, err := s.authorizer.AuthorizeConnection(ctx, strings.TrimSpace(actor.UserID), actions, "", "")
 	if err != nil {
-		return fmt.Errorf("authorize container endpoint: %w", err)
+		return fmt.Errorf("authorize global container action: %w", err)
 	}
-	if len(decisions) != 1 {
-		return errors.New("authorize container endpoint: decision count mismatch")
-	}
-	if !decisions[0].Allowed {
+	if !allowed {
 		return ErrContainerForbidden
 	}
 	return nil
 }
 
-func (s *ContainerManagementService) allowed(ctx context.Context, actor ContainerActor, actions []string, resourceType, resourceID string) bool {
-	return s.authorize(ctx, actor, actions, resourceType, resourceID) == nil
+func (s *ContainerManagementService) authorizationAllowed(ctx context.Context, actor ContainerActor, actions []string, resourceType, resourceID string) (bool, error) {
+	if strings.TrimSpace(actor.UserID) == "" {
+		return false, nil
+	}
+	if actor.SuperAdmin {
+		return true, nil
+	}
+	decisions, err := s.authorizer.AuthorizeBatch(ctx, actor.UserID, []AuthorizationRequest{{Actions: actions, ResourceType: resourceType, ResourceID: resourceID}})
+	if err != nil {
+		return false, fmt.Errorf("authorize container endpoint: %w", err)
+	}
+	if len(decisions) != 1 {
+		return false, errors.New("authorize container endpoint: decision count mismatch")
+	}
+	return decisions[0].Allowed, nil
 }
 
 func validateContainerRequest(request ContainerEndpointRequest) error {
@@ -342,6 +386,41 @@ func validateContainerRequest(request ContainerEndpointRequest) error {
 
 func containerRequest(endpoint ContainerEndpoint) ContainerEndpointRequest {
 	return ContainerEndpointRequest{ID: endpoint.ID, Name: endpoint.Name, Group: endpoint.Group, Runtime: endpoint.Runtime, ConnectionMode: endpoint.ConnectionMode, Address: endpoint.Address, Port: endpoint.Port, HostID: endpoint.HostID, HostAccountID: endpoint.HostAccountID, Remark: endpoint.Remark, Status: endpoint.Status}
+}
+
+func mergeContainerEndpointRequest(previous, update ContainerEndpointRequest) ContainerEndpointRequest {
+	update.ID = previous.ID
+	if strings.TrimSpace(update.Name) == "" {
+		update.Name = previous.Name
+	}
+	if strings.TrimSpace(update.Group) == "" {
+		update.Group = previous.Group
+	}
+	if strings.TrimSpace(update.Runtime) == "" {
+		update.Runtime = previous.Runtime
+	}
+	if strings.TrimSpace(update.ConnectionMode) == "" {
+		update.ConnectionMode = previous.ConnectionMode
+	}
+	if strings.TrimSpace(update.Address) == "" {
+		update.Address = previous.Address
+	}
+	if update.Port == 0 {
+		update.Port = previous.Port
+	}
+	if strings.TrimSpace(update.HostID) == "" {
+		update.HostID = previous.HostID
+	}
+	if strings.TrimSpace(update.HostAccountID) == "" {
+		update.HostAccountID = previous.HostAccountID
+	}
+	if strings.TrimSpace(update.Remark) == "" {
+		update.Remark = previous.Remark
+	}
+	if strings.TrimSpace(update.Status) == "" {
+		update.Status = previous.Status
+	}
+	return update
 }
 func paginateContainerEndpoints(items []ContainerEndpoint, request ContainerListRequest) ContainerPage {
 	page, size := request.Page, request.PageSize

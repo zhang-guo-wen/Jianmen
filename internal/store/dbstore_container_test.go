@@ -48,6 +48,42 @@ func TestCreateManagedContainerEndpointRollsBackWhenCreatorGrantCannotBeCreated(
 	}
 }
 
+func TestUpdateManagedContainerEndpointInheritsOmittedFieldsInsideTransaction(t *testing.T) {
+	db, err := storage.Open(storage.Config{Driver: storage.DriverSQLite, DSN: ":memory:"})
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	if err := storage.AutoMigrate(db); err != nil {
+		t.Fatalf("auto migrate: %v", err)
+	}
+	host := model.Host{ID: "host-update", Name: "host", Address: "127.0.0.1", Port: 22, Status: "active"}
+	account := model.HostAccount{ID: "account-update", HostID: host.ID, Name: "root", Username: "root", Status: "active"}
+	endpoint := model.ContainerEndpoint{
+		ID: "endpoint-update", Name: "old", GroupName: "ops", Runtime: model.ContainerRuntimeDocker,
+		ConnectionMode: model.ContainerConnectionSSH, HostID: host.ID, HostAccountID: account.ID,
+		Remark: "keep", Status: "disabled",
+	}
+	if err := db.Create(&host).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&account).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&endpoint).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := NewDBStore(db).UpdateManagedContainerEndpoint(context.Background(), endpoint.ID, service.ContainerEndpointRequest{Name: "renamed"})
+	if err != nil {
+		t.Fatalf("partial managed update: %v", err)
+	}
+	if got.Name != "renamed" || got.Status != "disabled" || got.Runtime != model.ContainerRuntimeDocker ||
+		got.ConnectionMode != model.ContainerConnectionSSH || got.HostID != host.ID ||
+		got.HostAccountID != account.ID || got.Group != "ops" || got.Remark != "keep" {
+		t.Fatalf("partial managed update = %#v", got)
+	}
+}
+
 func TestNormalizeContainerEndpointInputRequiresSSHHostAndAccount(t *testing.T) {
 	_, err := normalizeContainerEndpointInput(ContainerEndpointInput{
 		Runtime: model.ContainerRuntimeDocker, ConnectionMode: model.ContainerConnectionSSH,

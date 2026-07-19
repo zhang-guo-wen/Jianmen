@@ -230,26 +230,26 @@ func (s *DBStore) AddContainerEndpoint(ctx context.Context, input ContainerEndpo
 
 func (s *DBStore) UpdateContainerEndpoint(ctx context.Context, id string, input ContainerEndpointInput) (ContainerEndpointView, error) {
 	var endpoint model.ContainerEndpoint
-	if err := s.db.WithContext(ctx).First(&endpoint, "id = ?", strings.TrimSpace(id)).Error; err != nil {
-		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-			return ContainerEndpointView{}, fmt.Errorf("find container endpoint for update: %w", err)
-		}
-		return ContainerEndpointView{}, fmt.Errorf("%w: %q", ErrContainerEndpointNotFound, id)
-	}
-	normalized, err := normalizeContainerEndpointInput(input)
-	if err != nil {
-		return ContainerEndpointView{}, err
-	}
-	endpoint.Name, endpoint.GroupName = normalized.Name, normalized.Group
-	endpoint.Runtime, endpoint.ConnectionMode = normalized.Runtime, normalized.ConnectionMode
-	endpoint.Address, endpoint.Port = normalized.Address, normalized.Port
-	endpoint.HostID, endpoint.HostAccountID = normalized.HostID, normalized.HostAccountID
-	endpoint.Remark, endpoint.Status = normalized.Remark, normalized.Status
 	if err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&endpoint, "id = ?", strings.TrimSpace(id)).Error; err != nil {
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				return fmt.Errorf("find container endpoint for update: %w", err)
+			}
+			return fmt.Errorf("%w: %q", ErrContainerEndpointNotFound, id)
+		}
+		normalized, err := normalizeContainerEndpointInput(mergeContainerEndpointUpdate(endpoint, input))
+		if err != nil {
+			return err
+		}
+		endpoint.Name, endpoint.GroupName = normalized.Name, normalized.Group
+		endpoint.Runtime, endpoint.ConnectionMode = normalized.Runtime, normalized.ConnectionMode
+		endpoint.Address, endpoint.Port = normalized.Address, normalized.Port
+		endpoint.HostID, endpoint.HostAccountID = normalized.HostID, normalized.HostAccountID
+		endpoint.Remark, endpoint.Status = normalized.Remark, normalized.Status
 		if err := tx.Save(&endpoint).Error; err != nil {
 			return err
 		}
-		if err := ensureResourceGroup(tx, normalized.Group); err != nil {
+		if err := ensureResourceGroup(tx, endpoint.GroupName); err != nil {
 			return err
 		}
 		return s.syncResourceTx(tx, model.ResourceTypeContainerEndpoint, endpoint.ID, endpoint.Name, "")
@@ -261,6 +261,43 @@ func (s *DBStore) UpdateContainerEndpoint(ctx context.Context, id string, input 
 		return ContainerEndpointView{}, err
 	}
 	return views[0], nil
+}
+
+// The current JSON contract cannot distinguish an omitted string from an
+// explicitly cleared string. Updates therefore preserve blank fields until the
+// API gains presence-aware inputs.
+func mergeContainerEndpointUpdate(previous model.ContainerEndpoint, update ContainerEndpointInput) ContainerEndpointInput {
+	if strings.TrimSpace(update.Name) == "" {
+		update.Name = previous.Name
+	}
+	if strings.TrimSpace(update.Group) == "" {
+		update.Group = previous.GroupName
+	}
+	if strings.TrimSpace(update.Runtime) == "" {
+		update.Runtime = previous.Runtime
+	}
+	if strings.TrimSpace(update.ConnectionMode) == "" {
+		update.ConnectionMode = previous.ConnectionMode
+	}
+	if strings.TrimSpace(update.Address) == "" {
+		update.Address = previous.Address
+	}
+	if update.Port == 0 {
+		update.Port = previous.Port
+	}
+	if strings.TrimSpace(update.HostID) == "" {
+		update.HostID = previous.HostID
+	}
+	if strings.TrimSpace(update.HostAccountID) == "" {
+		update.HostAccountID = previous.HostAccountID
+	}
+	if strings.TrimSpace(update.Remark) == "" {
+		update.Remark = previous.Remark
+	}
+	if strings.TrimSpace(update.Status) == "" {
+		update.Status = previous.Status
+	}
+	return update
 }
 
 func (s *DBStore) DeleteContainerEndpoint(ctx context.Context, id string) error {

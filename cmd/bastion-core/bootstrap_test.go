@@ -90,9 +90,10 @@ func TestInitializeMetadataRequiresEnabledDatabase(t *testing.T) {
 	}
 }
 
-func TestInitializeMetadataImportsLegacySuperAdministratorOnce(t *testing.T) {
+func TestInitializeMetadataDoesNotReadOrRenameLegacySuperAdministratorFile(t *testing.T) {
 	dataDir := t.TempDir()
-	legacyPath := filepath.Join(dataDir, storage.LegacySuperAdminIDsFile)
+	legacyPath := filepath.Join(dataDir, ".super_admin_ids")
+	importedPath := filepath.Join(dataDir, ".super_admin_ids.imported")
 	if err := os.WriteFile(legacyPath, []byte("legacy-admin\n"), 0o600); err != nil {
 		t.Fatalf("write legacy super administrator file: %v", err)
 	}
@@ -113,12 +114,19 @@ func TestInitializeMetadataImportsLegacySuperAdministratorOnce(t *testing.T) {
 
 	var user model.User
 	if err := db.First(&user, "id = ?", "legacy-admin").Error; err != nil {
-		t.Fatalf("find legacy administrator: %v", err)
+		t.Fatalf("find configured user: %v", err)
 	}
-	if !user.IsSuperAdmin {
-		t.Fatal("legacy administrator was not imported")
+	if user.IsSuperAdmin {
+		t.Fatal("legacy file promoted a database user to super administrator")
 	}
-	if _, err := os.Stat(legacyPath); !os.IsNotExist(err) {
-		t.Fatalf("legacy source still exists: %v", err)
+	raw, err := os.ReadFile(legacyPath)
+	if err != nil {
+		t.Fatalf("legacy source was removed or renamed: %v", err)
+	}
+	if string(raw) != "legacy-admin\n" {
+		t.Fatalf("legacy source was modified: %q", raw)
+	}
+	if _, err := os.Stat(importedPath); !os.IsNotExist(err) {
+		t.Fatalf("legacy imported marker was created: %v", err)
 	}
 }

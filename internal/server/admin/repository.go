@@ -25,6 +25,7 @@ type adminRepository interface {
 	adminContainerRepository
 	adminPlatformAccountRepository
 	adminUserSessionRepository
+	adminUserSessionCreationRepository
 	adminAuditRepository
 	adminConnectionPasswordRepository
 	adminUserPreferenceRepository
@@ -38,21 +39,22 @@ type adminRepository interface {
 // adminDependencies keeps the server coupled to resource-scoped repositories
 // instead of the application-wide repository aggregate.
 type adminDependencies struct {
-	aiTokens           adminAIAccessTokenRepository
-	hostTargets        adminHostTargetRepository
-	databases          adminDatabaseRepository
-	applications       adminApplicationRepository
-	containers         adminContainerRepository
-	platformAccounts   adminPlatformAccountRepository
-	userSessions       adminUserSessionRepository
-	audit              adminAuditRepository
-	connectionPassword adminConnectionPasswordRepository
-	preferences        adminUserPreferenceRepository
-	resourceAccess     resourceAccessRepository
-	temporaryAccess    service.TemporaryAccessRepository
-	users              service.UserRepository
-	userGroups         service.UserGroupRepository
-	roles              service.RoleManagementRepository
+	aiTokens            adminAIAccessTokenRepository
+	hostTargets         adminHostTargetRepository
+	databases           adminDatabaseRepository
+	applications        adminApplicationRepository
+	containers          adminContainerRepository
+	platformAccounts    adminPlatformAccountRepository
+	userSessions        adminUserSessionRepository
+	userSessionCreation adminUserSessionCreationRepository
+	audit               adminAuditRepository
+	connectionPassword  adminConnectionPasswordRepository
+	preferences         adminUserPreferenceRepository
+	resourceAccess      resourceAccessRepository
+	temporaryAccess     service.TemporaryAccessRepository
+	users               service.UserRepository
+	userGroups          service.UserGroupRepository
+	roles               service.RoleManagementRepository
 }
 
 type adminAIAccessTokenRepository interface {
@@ -120,6 +122,10 @@ type adminUserSessionRepository interface {
 	CreateUserSession(model.UserSession) (*model.UserSession, error)
 }
 
+type adminUserSessionCreationRepository interface {
+	service.UserSessionCreationRepository
+}
+
 type adminAuditRepository interface {
 	CreateAuditSession(*model.AuditSession) error
 	EndAuditSession(string) error
@@ -151,21 +157,22 @@ func resolveAdminDependencies(repository adminRepository) (adminDependencies, er
 		return adminDependencies{}, errAdminStoreRequired
 	}
 	return adminDependencies{
-		aiTokens:           repository,
-		hostTargets:        repository,
-		databases:          repository,
-		applications:       repository,
-		containers:         repository,
-		platformAccounts:   repository,
-		userSessions:       repository,
-		audit:              repository,
-		connectionPassword: repository,
-		preferences:        repository,
-		resourceAccess:     repository,
-		temporaryAccess:    repository,
-		users:              repository,
-		userGroups:         repository,
-		roles:              repository,
+		aiTokens:            repository,
+		hostTargets:         repository,
+		databases:           repository,
+		applications:        repository,
+		containers:          repository,
+		platformAccounts:    repository,
+		userSessions:        repository,
+		userSessionCreation: repository,
+		audit:               repository,
+		connectionPassword:  repository,
+		preferences:         repository,
+		resourceAccess:      repository,
+		temporaryAccess:     repository,
+		users:               repository,
+		userGroups:          repository,
+		roles:               repository,
 	}, nil
 }
 

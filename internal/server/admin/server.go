@@ -25,6 +25,7 @@ type Server struct {
 	containers           adminContainerRepository
 	platformAccounts     adminPlatformAccountRepository
 	userSessions         adminUserSessionRepository
+	userSessionCreation  *service.UserSessionCreationService
 	audit                adminAuditRepository
 	connectionPassword   adminConnectionPasswordRepository
 	preferences          adminUserPreferenceRepository
@@ -122,11 +123,15 @@ func New(
 	if err != nil {
 		return nil, err
 	}
+	userSessionCreation, err := service.NewUserSessionCreationService(dependencies.userSessionCreation, authorization)
+	if err != nil {
+		return nil, fmt.Errorf("initialize user session creation service: %w", err)
+	}
 	return &Server{
 		cfg: cfg, db: db, logger: logger,
 		aiTokens: dependencies.aiTokens, hostTargets: dependencies.hostTargets, databases: dependencies.databases,
 		applications: dependencies.applications, containers: dependencies.containers, platformAccounts: dependencies.platformAccounts,
-		userSessions: dependencies.userSessions, audit: dependencies.audit, connectionPassword: dependencies.connectionPassword,
+		userSessions: dependencies.userSessions, userSessionCreation: userSessionCreation, audit: dependencies.audit, connectionPassword: dependencies.connectionPassword,
 		preferences: dependencies.preferences, temporaryRepository: dependencies.temporaryAccess,
 		userRepository: dependencies.users, userGroupRepository: dependencies.userGroups, roleRepository: dependencies.roles,
 		dataDir:      dataDir,

@@ -23,6 +23,10 @@ type auditStreamRedactor struct {
 	inPrivateKey    bool
 }
 
+type auditStreamPrefixPolicy interface {
+	SafeStreamPrefix(kind, value string) int
+}
+
 func newAuditStreamRedactor(kind string, redactor AuditRedactor) *auditStreamRedactor {
 	return &auditStreamRedactor{kind: kind, redactor: redactor}
 }
@@ -54,6 +58,21 @@ func (s *auditStreamRedactor) Write(data []byte) ([]byte, error) {
 		line := string(s.pending[:delimiterEnd])
 		s.pending = s.pending[delimiterEnd:]
 		s.writeLine(&output, line)
+	}
+	if !s.inPrivateKey && len(s.pending) > 0 {
+		safePrefix := 0
+		if policy, ok := s.redactor.(auditStreamPrefixPolicy); ok {
+			safePrefix = policy.SafeStreamPrefix(s.kind, string(s.pending))
+			if safePrefix < 0 {
+				safePrefix = 0
+			} else if safePrefix > len(s.pending) {
+				safePrefix = len(s.pending)
+			}
+		}
+		if safePrefix > 0 {
+			output.WriteString(s.redactor.Redact(s.kind, string(s.pending[:safePrefix])))
+			s.pending = s.pending[safePrefix:]
+		}
 	}
 	return []byte(output.String()), nil
 }

@@ -1,4 +1,4 @@
-﻿export interface ConnectionTargetConnectionInfo {
+export interface ConnectionTargetConnectionInfo {
   host: string;
   port: number;
   compactUser: string;

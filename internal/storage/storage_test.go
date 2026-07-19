@@ -383,7 +383,7 @@ func TestBootstrapMetadataSeedsUsersOnly(t *testing.T) {
 
 	cfg := &config.Config{
 		Users: []config.User{
-			{ID: "u-admin", Username: "admin", Password: "admin-password"},
+			{ID: "u-admin", Username: "admin", Password: "admin-password", SuperAdmin: true},
 			{Username: "operator"},
 		},
 	}

@@ -98,7 +98,10 @@ func TestInitializeMetadataDoesNotReadOrRenameLegacySuperAdministratorFile(t *te
 		t.Fatalf("write legacy super administrator file: %v", err)
 	}
 	cfg := &config.Config{
-		Users: []config.User{{ID: "legacy-admin", Username: "legacy-admin"}},
+		Users: []config.User{
+			{ID: "database-admin", Username: "database-admin", SuperAdmin: true},
+			{ID: "legacy-admin", Username: "legacy-admin"},
+		},
 	}
 	cfg.Database.Enabled = true
 	cfg.Database.Driver = "sqlite"

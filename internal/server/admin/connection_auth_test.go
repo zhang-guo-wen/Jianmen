@@ -256,7 +256,7 @@ func TestWebTerminalRecorderUsesAuthenticatedIdentity(t *testing.T) {
 	target := store.TargetConfig{ID: "target-1", HostID: "host-1", Name: "operations", HostName: "application-host", Host: "127.0.0.1", Port: 22, Username: "root"}
 	req := httptest.NewRequest(http.MethodGet, webTerminalPath, nil)
 	session := newWebTerminalSession(req, user, target)
-	auditSession := server.startWebTerminalAudit(session, target)
+	auditSession := server.startWebTerminalAudit(context.Background(), session, target)
 	if auditSession == nil {
 		t.Fatal("web terminal audit session was not created")
 	}
@@ -266,7 +266,7 @@ func TestWebTerminalRecorderUsesAuthenticatedIdentity(t *testing.T) {
 	if auditSession.AccountUsername != "root" || auditSession.AccountName != "operations" {
 		t.Fatalf("audit account = username:%q name:%q", auditSession.AccountUsername, auditSession.AccountName)
 	}
-	recorder, err := server.newWebTerminalRecorder(session, auditSession, func(error) {})
+	recorder, err := server.newWebTerminalRecorder(context.Background(), session, auditSession, func(error) {})
 	if err != nil {
 		t.Fatalf("newWebTerminalRecorder: %v", err)
 	}
@@ -291,11 +291,14 @@ func TestWebTerminalRecorderUsesAuthenticatedIdentity(t *testing.T) {
 	}
 
 	commandAt := session.StartedAt.Add(time.Second)
-	sink := &webTerminalAuditSink{store: server.audit, sessionID: auditSession.ID}
+	sink := &webTerminalAuditSink{
+		ctx: context.Background(), store: server.audit, sessionID: auditSession.ID,
+		onlineSessions: server.onlineSessions,
+	}
 	if err := sink.WriteCommand(session.ID, commandAt, "whoami"); err != nil {
 		t.Fatalf("write web terminal audit command: %v", err)
 	}
-	if err := server.audit.EndAuditSession(auditSession.ID); err != nil {
+	if err := server.audit.EndAuditSession(context.Background(), auditSession.ID); err != nil {
 		t.Fatalf("end web terminal audit session: %v", err)
 	}
 
@@ -326,6 +329,7 @@ func TestWebTerminalRecorderInitializationFailsClosed(t *testing.T) {
 		Recording: config.RecordingConfig{Enabled: true, RetentionDays: 30},
 	}
 	_, err := server.newWebTerminalRecorder(
+		context.Background(),
 		model.Session{ID: "session-1"},
 		&model.AuditSession{ID: "audit-1"},
 		func(error) {},

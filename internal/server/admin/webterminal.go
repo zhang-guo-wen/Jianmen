@@ -21,9 +21,9 @@ import (
 )
 
 type webTerminalAuditSinkStore interface {
-	CreateAuditSSHCommand(event *model.AuditSSHCommand) error
-	CreateAuditSFTPEvent(event *model.AuditSFTPEvent) error
-	UpdateAuditProtocol(id, protocol string) error
+	CreateAuditSSHCommand(context.Context, *model.AuditSSHCommand) error
+	CreateAuditSFTPEvent(context.Context, *model.AuditSFTPEvent) error
+	UpdateAuditProtocol(context.Context, string, string) error
 }
 
 const (
@@ -46,13 +46,14 @@ type webTerminalOptions struct {
 }
 
 type webTerminalAuditSink struct {
+	ctx            context.Context
 	store          webTerminalAuditSinkStore
 	sessionID      string
 	onlineSessions *online.Registry
 }
 
 func (s *webTerminalAuditSink) WriteCommand(_ string, timestamp time.Time, command string) error {
-	return s.store.CreateAuditSSHCommand(&model.AuditSSHCommand{
+	return s.store.CreateAuditSSHCommand(s.ctx, &model.AuditSSHCommand{
 		AuditSessionID: s.sessionID,
 		Timestamp:      timestamp,
 		Command:        command,
@@ -60,7 +61,7 @@ func (s *webTerminalAuditSink) WriteCommand(_ string, timestamp time.Time, comma
 }
 
 func (s *webTerminalAuditSink) WriteFileEvent(_ string, timestamp time.Time, action, path string, size int64, result string) error {
-	return s.store.CreateAuditSFTPEvent(&model.AuditSFTPEvent{
+	return s.store.CreateAuditSFTPEvent(s.ctx, &model.AuditSFTPEvent{
 		AuditSessionID: s.sessionID,
 		Timestamp:      timestamp,
 		Action:         action,
@@ -72,7 +73,7 @@ func (s *webTerminalAuditSink) WriteFileEvent(_ string, timestamp time.Time, act
 
 func (s *webTerminalAuditSink) UpdateProtocol(_ string, protocol string) error {
 	s.onlineSessions.UpdateProtocolSubtype(s.sessionID, protocol)
-	return s.store.UpdateAuditProtocol(s.sessionID, protocol)
+	return s.store.UpdateAuditProtocol(s.ctx, s.sessionID, protocol)
 }
 
 func (s *Server) handleWebTerminal(w http.ResponseWriter, r *http.Request) {
@@ -157,21 +158,17 @@ func (s *Server) handleWebTerminal(w http.ResponseWriter, r *http.Request) {
 	defer conn.Close()
 
 	session := newWebTerminalSession(r, user, target)
-	auditSession := s.startWebTerminalAudit(session, target)
+	auditSession := s.startWebTerminalAudit(r.Context(), session, target)
 	if auditSession == nil {
 		_ = targetClient.Close()
 		writeWebTerminalClose(conn, errors.New("audit service unavailable"))
 		return
 	}
 	if auditSession != nil {
-		defer func() {
-			if err := s.audit.EndAuditSession(auditSession.ID); err != nil {
-				s.logger.Warn("failed to end web terminal audit session", "session", auditSession.ID, "error", err)
-			}
-		}()
+		defer s.endWebTerminalAudit(r.Context(), auditSession.ID)
 	}
 
-	recorder, err := s.newWebTerminalRecorder(session, auditSession, func(error) {
+	recorder, err := s.newWebTerminalRecorder(r.Context(), session, auditSession, func(error) {
 		_ = conn.Close()
 		_ = targetClient.Close()
 	})

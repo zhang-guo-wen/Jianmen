@@ -44,13 +44,14 @@ type connectionAuthorizer interface {
 
 // auditStore adapts the SSH audit event boundary to recording.AuditSink.
 type auditStore struct {
+	ctx            context.Context
 	store          auditEventWriter
 	sessionID      string
 	onlineSessions *online.Registry
 }
 
 func (a *auditStore) WriteCommand(sessionID string, timestamp time.Time, command string) error {
-	return a.store.CreateAuditSSHCommand(&model.AuditSSHCommand{
+	return a.store.CreateAuditSSHCommand(a.ctx, &model.AuditSSHCommand{
 		AuditSessionID: a.sessionID,
 		Timestamp:      timestamp,
 		Command:        command,
@@ -58,7 +59,7 @@ func (a *auditStore) WriteCommand(sessionID string, timestamp time.Time, command
 }
 
 func (a *auditStore) WriteFileEvent(sessionID string, timestamp time.Time, action, path string, size int64, result string) error {
-	return a.store.CreateAuditSFTPEvent(&model.AuditSFTPEvent{
+	return a.store.CreateAuditSFTPEvent(a.ctx, &model.AuditSFTPEvent{
 		AuditSessionID: a.sessionID,
 		Timestamp:      timestamp,
 		Action:         action,
@@ -70,7 +71,7 @@ func (a *auditStore) WriteFileEvent(sessionID string, timestamp time.Time, actio
 
 func (a *auditStore) UpdateProtocol(sessionID string, protocol string) error {
 	a.onlineSessions.UpdateProtocolSubtype(a.sessionID, protocol)
-	return a.store.UpdateAuditProtocol(a.sessionID, protocol)
+	return a.store.UpdateAuditProtocol(a.ctx, a.sessionID, protocol)
 }
 
 func New(cfg *config.Config, repository runtimeRepository, authorizer connectionAuthorizer, logger *slog.Logger, onlineSessions *online.Registry) (*Server, error) {
@@ -172,7 +173,25 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 }
 
 func (s *Server) handleConn(ctx context.Context, rawConn net.Conn, serverConfig *ssh.ServerConfig) {
-	defer rawConn.Close()
+	ctx, cancelSession := context.WithCancel(ctx)
+	defer cancelSession()
+
+	rawConn = &idempotentCloseConn{Conn: rawConn}
+	stopConnectionWatcher := make(chan struct{})
+	connectionWatcherDone := make(chan struct{})
+	go func() {
+		defer close(connectionWatcherDone)
+		select {
+		case <-ctx.Done():
+			_ = rawConn.Close()
+		case <-stopConnectionWatcher:
+		}
+	}()
+	defer func() {
+		close(stopConnectionWatcher)
+		_ = rawConn.Close()
+		<-connectionWatcherDone
+	}()
 
 	serverConn, chans, reqs, err := ssh.NewServerConn(rawConn, serverConfig)
 	if err != nil {
@@ -223,14 +242,12 @@ func (s *Server) handleConn(ctx context.Context, rawConn net.Conn, serverConfig 
 		auditSession.UserSessionID = userSession.ID
 	}
 	auditSession.BeforeCreate(nil)
-	if err := s.auditSessions.CreateAuditSession(&auditSession); err != nil {
+	if err := s.auditSessions.CreateAuditSession(ctx, &auditSession); err != nil {
 		s.logger.Warn("failed to create SSH audit session", "session", session.ID, "error", err)
 		return
 	}
 
-	defer func() {
-		s.auditSessions.EndAuditSession(auditSession.ID)
-	}()
+	defer s.endAuditSession(ctx, auditSession.ID)
 
 	var recorder *recording.SessionRecorder
 	if s.cfg.Recording.Enabled {
@@ -246,7 +263,10 @@ func (s *Server) handleConn(ctx context.Context, rawConn net.Conn, serverConfig 
 				_ = rawConn.Close()
 			},
 			s.logger,
-			&auditStore{store: s.auditEvents, sessionID: auditSession.ID, onlineSessions: s.onlineSessions},
+			&auditStore{
+				ctx: ctx, store: s.auditEvents, sessionID: auditSession.ID,
+				onlineSessions: s.onlineSessions,
+			},
 		)
 		if err != nil {
 			s.logger.Warn("failed to initialize recorder", "session", session.ID, "error", err)
@@ -299,6 +319,19 @@ func (s *Server) handleConn(ctx context.Context, rawConn net.Conn, serverConfig 
 		proxy := sshproxy.NewSession(targetClient, channel, requests, recorder, access, s.logger)
 		go proxy.Serve(ctx)
 	}
+}
+
+type idempotentCloseConn struct {
+	net.Conn
+	once sync.Once
+	err  error
+}
+
+func (c *idempotentCloseConn) Close() error {
+	c.once.Do(func() {
+		c.err = c.Conn.Close()
+	})
+	return c.err
 }
 
 func (s *Server) authorizeTarget(ctx context.Context, userID, targetID string) (sshproxy.Access, error) {

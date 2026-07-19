@@ -28,7 +28,7 @@ func (s *Server) handleAuditSSH(w http.ResponseWriter, r *http.Request) {
 	params.Page, _ = strconv.Atoi(r.URL.Query().Get("page"))
 	params.Size, _ = strconv.Atoi(firstNonEmpty(r.URL.Query().Get("page_size"), r.URL.Query().Get("size")))
 
-	items, total, err := s.audit.ListAuditSessions(params)
+	items, total, err := s.audit.ListAuditSessions(r.Context(), params)
 	if err != nil {
 		s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
 		return
@@ -56,7 +56,7 @@ func (s *Server) handleAuditDB(w http.ResponseWriter, r *http.Request) {
 	params.Page, _ = strconv.Atoi(r.URL.Query().Get("page"))
 	params.Size, _ = strconv.Atoi(firstNonEmpty(r.URL.Query().Get("page_size"), r.URL.Query().Get("size")))
 
-	items, total, err := s.audit.ListAuditSessions(params)
+	items, total, err := s.audit.ListAuditSessions(r.Context(), params)
 	if err != nil {
 		s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
 		return
@@ -81,7 +81,7 @@ func (s *Server) handleAuditArtifact(w http.ResponseWriter, r *http.Request) {
 		artifact = parts[2]
 	}
 
-	session, err := s.audit.GetAuditSession(sessionID)
+	session, err := s.audit.GetAuditSession(r.Context(), sessionID)
 	if err != nil {
 		s.writeErrorText(w, r, http.StatusNotFound, "audit session not found")
 		return
@@ -118,7 +118,7 @@ func (s *Server) handleAuditArtifact(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
-		items, total, err := s.audit.ListAuditSSHCommands(sessionID, store.PageOpts{Limit: limit, Offset: offset})
+		items, total, err := s.audit.ListAuditSSHCommands(r.Context(), sessionID, store.PageOpts{Limit: limit, Offset: offset})
 		if err != nil {
 			s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
 			return
@@ -126,7 +126,7 @@ func (s *Server) handleAuditArtifact(w http.ResponseWriter, r *http.Request) {
 		s.writeJSON(w, r, http.StatusOK, map[string]any{"items": items, "total": total})
 	case artifact == "files" && (protocol == "ssh" || protocol == "sftp"):
 		limit, offset := pageFromQuery(r)
-		items, total, err := s.audit.ListAuditSFTPEvents(sessionID, store.PageOpts{Limit: limit, Offset: offset})
+		items, total, err := s.audit.ListAuditSFTPEvents(r.Context(), sessionID, store.PageOpts{Limit: limit, Offset: offset})
 		if err != nil {
 			s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
 			return

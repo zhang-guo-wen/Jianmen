@@ -1,6 +1,7 @@
 package dbproxy
 
 import (
+	"context"
 	"errors"
 	"io"
 	"log/slog"
@@ -41,7 +42,7 @@ func TestHandleGatewayConnRejectsWhenAuditSessionCreationFails(t *testing.T) {
 
 	done := make(chan struct{})
 	go func() {
-		gateway.handleGatewayConn(client, conn)
+		gateway.handleGatewayConn(context.Background(), client, conn)
 		close(done)
 	}()
 
@@ -67,17 +68,154 @@ func TestHandleGatewayConnRejectsWhenAuditSessionCreationFails(t *testing.T) {
 	}
 }
 
+func TestFinishProtocolConnectionThreadsListenerContextAndBoundsAuditEnd(t *testing.T) {
+	audit := &auditContextWriter{
+		createObserved: make(chan auditContextObservation, 1),
+		endObserved:    make(chan auditContextObservation, 1),
+	}
+	limiter := newPendingHandshakeLimiter(1)
+	handshakeLease, acquired := limiter.tryAcquire()
+	if !acquired {
+		t.Fatal("acquire pending handshake lease")
+	}
+	client, clientPeer := net.Pipe()
+	upstream, upstreamPeer := net.Pipe()
+	defer clientPeer.Close()
+	defer upstreamPeer.Close()
+
+	gateway := &Gateway{
+		replayDir:         t.TempDir(),
+		logger:            slog.New(slog.NewTextHandler(io.Discard, nil)),
+		audit:             audit,
+		auditRequired:     true,
+		onlineSessions:    online.NewRegistry(),
+		pendingHandshakes: limiter,
+	}
+	connection := &gatewayConn{
+		protocol:     "redis",
+		accountID:    "account-1",
+		instanceID:   "instance-1",
+		accountName:  "account-name",
+		accountUser:  "upstream-user",
+		instanceName: "redis-instance",
+		userID:       "user-1",
+		upstream:     upstream,
+		upstreamAddr: "127.0.0.1:6379",
+	}
+	listenerCtx, cancelListener := context.WithCancel(
+		context.WithValue(context.Background(), auditContextKey{}, "listener-value"),
+	)
+	defer cancelListener()
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		gateway.finishProtocolConnection(
+			listenerCtx,
+			client,
+			connection,
+			databaseProtocolRedis,
+			handshakeLease,
+		)
+	}()
+
+	create := waitAuditContextObservation(t, audit.createObserved, "CreateAuditSession")
+	if create.err != nil || create.value != "listener-value" {
+		t.Fatalf("CreateAuditSession context = %#v, want active listener context", create)
+	}
+
+	cancelListener()
+	_ = clientPeer.Close()
+	_ = upstreamPeer.Close()
+
+	end := waitAuditContextObservation(t, audit.endObserved, "EndAuditSession")
+	if end.err != nil {
+		t.Fatalf("EndAuditSession context error = %v, want detached cancellation", end.err)
+	}
+	if end.value != "listener-value" {
+		t.Fatalf("EndAuditSession context value = %#v, want listener-value", end.value)
+	}
+	if !end.hasDeadline {
+		t.Fatal("EndAuditSession context has no deadline")
+	}
+	remaining := time.Until(end.deadline)
+	if remaining <= 0 || remaining > auditSessionEndTimeout {
+		t.Fatalf("EndAuditSession deadline remaining = %v, want (0, %v]", remaining, auditSessionEndTimeout)
+	}
+
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("gateway connection did not finish")
+	}
+}
+
 type auditGateWriter struct {
 	createErr    error
 	createCalled chan struct{}
 }
 
-func (w *auditGateWriter) CreateAuditSession(*model.AuditSession) error {
+func (w *auditGateWriter) CreateAuditSession(context.Context, *model.AuditSession) error {
 	close(w.createCalled)
 	return w.createErr
 }
-func (*auditGateWriter) EndAuditSession(string) error                 { return nil }
-func (*auditGateWriter) CreateAuditDBQuery(*model.AuditDBQuery) error { return nil }
+func (*auditGateWriter) EndAuditSession(context.Context, string) error { return nil }
+func (*auditGateWriter) CreateAuditDBQuery(context.Context, *model.AuditDBQuery) error {
+	return nil
+}
+
+type auditContextKey struct{}
+
+type auditContextObservation struct {
+	value       any
+	err         error
+	deadline    time.Time
+	hasDeadline bool
+}
+
+type auditContextWriter struct {
+	createObserved chan auditContextObservation
+	endObserved    chan auditContextObservation
+}
+
+func (w *auditContextWriter) CreateAuditSession(ctx context.Context, _ *model.AuditSession) error {
+	w.createObserved <- observeAuditContext(ctx)
+	return nil
+}
+
+func (w *auditContextWriter) EndAuditSession(ctx context.Context, _ string) error {
+	w.endObserved <- observeAuditContext(ctx)
+	return nil
+}
+
+func (*auditContextWriter) CreateAuditDBQuery(context.Context, *model.AuditDBQuery) error {
+	return nil
+}
+
+func observeAuditContext(ctx context.Context) auditContextObservation {
+	deadline, hasDeadline := ctx.Deadline()
+	return auditContextObservation{
+		value:       ctx.Value(auditContextKey{}),
+		err:         ctx.Err(),
+		deadline:    deadline,
+		hasDeadline: hasDeadline,
+	}
+}
+
+func waitAuditContextObservation(
+	t *testing.T,
+	observed <-chan auditContextObservation,
+	operation string,
+) auditContextObservation {
+	t.Helper()
+	select {
+	case observation := <-observed:
+		return observation
+	case <-time.After(time.Second):
+		t.Fatalf("%s was not called", operation)
+		return auditContextObservation{}
+	}
+}
 
 type auditGateConn struct {
 	mu     sync.Mutex
@@ -121,4 +259,5 @@ func (a auditGateAddr) Network() string { return "audit-gate" }
 func (a auditGateAddr) String() string  { return string(a) }
 
 var _ auditWriter = (*auditGateWriter)(nil)
+var _ auditWriter = (*auditContextWriter)(nil)
 var _ net.Conn = (*auditGateConn)(nil)

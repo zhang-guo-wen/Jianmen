@@ -71,7 +71,9 @@ func (s *Server) recordOperation(r *http.Request, status int) {
 	if err == nil {
 		event.Detail = string(detail)
 	}
-	if err := s.audit.CreateAuditEvent(event); err != nil {
+	ctx, cancel := detachedAuditWriteContext(r.Context())
+	defer cancel()
+	if err := s.audit.CreateAuditEvent(ctx, event); err != nil {
 		logger := s.logger
 		if logger == nil {
 			logger = slog.Default()

@@ -32,23 +32,23 @@ func (focusedRuntimeRepository) FindUserSessionByCompactUsername(string) (*model
 	return nil, nil
 }
 
-func (focusedRuntimeRepository) CreateAuditSession(*model.AuditSession) error {
+func (focusedRuntimeRepository) CreateAuditSession(context.Context, *model.AuditSession) error {
 	return nil
 }
 
-func (focusedRuntimeRepository) EndAuditSession(string) error {
+func (focusedRuntimeRepository) EndAuditSession(context.Context, string) error {
 	return nil
 }
 
-func (focusedRuntimeRepository) CreateAuditSSHCommand(*model.AuditSSHCommand) error {
+func (focusedRuntimeRepository) CreateAuditSSHCommand(context.Context, *model.AuditSSHCommand) error {
 	return nil
 }
 
-func (focusedRuntimeRepository) CreateAuditSFTPEvent(*model.AuditSFTPEvent) error {
+func (focusedRuntimeRepository) CreateAuditSFTPEvent(context.Context, *model.AuditSFTPEvent) error {
 	return nil
 }
 
-func (focusedRuntimeRepository) UpdateAuditProtocol(string, string) error {
+func (focusedRuntimeRepository) UpdateAuditProtocol(context.Context, string, string) error {
 	return nil
 }
 

@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"path/filepath"
@@ -25,7 +26,11 @@ func newWebTerminalSession(r *http.Request, user model.User, target store.Target
 	return session
 }
 
-func (s *Server) startWebTerminalAudit(session model.Session, target store.TargetConfig) *model.AuditSession {
+func (s *Server) startWebTerminalAudit(
+	ctx context.Context,
+	session model.Session,
+	target store.TargetConfig,
+) *model.AuditSession {
 	auditSession := &model.AuditSession{
 		UserID:          session.UserID,
 		Username:        session.UserUsername,
@@ -40,14 +45,23 @@ func (s *Server) startWebTerminalAudit(session model.Session, target store.Targe
 		State:           "started",
 		ReplayDir:       filepath.Join(s.cfg.ReplayDir, "ssh", session.ID),
 	}
-	if err := s.audit.CreateAuditSession(auditSession); err != nil {
+	if err := s.audit.CreateAuditSession(ctx, auditSession); err != nil {
 		s.logger.Warn("failed to create web terminal audit session", "session", session.ID, "error", err)
 		return nil
 	}
 	return auditSession
 }
 
+func (s *Server) endWebTerminalAudit(parent context.Context, sessionID string) {
+	ctx, cancel := detachedAuditWriteContext(parent)
+	defer cancel()
+	if err := s.audit.EndAuditSession(ctx, sessionID); err != nil {
+		s.logger.Warn("failed to end web terminal audit session", "session", sessionID, "error", err)
+	}
+}
+
 func (s *Server) newWebTerminalRecorder(
+	ctx context.Context,
 	session model.Session,
 	auditSession *model.AuditSession,
 	onFatal func(error),
@@ -66,7 +80,10 @@ func (s *Server) newWebTerminalRecorder(
 		service.NewAuditPolicy(s.cfg.Recording.RetentionDays, s.cfg.Recording.RecordInput),
 		onFatal,
 		s.logger,
-		&webTerminalAuditSink{store: s.audit, sessionID: auditSession.ID, onlineSessions: s.onlineSessions},
+		&webTerminalAuditSink{
+			ctx: ctx, store: s.audit, sessionID: auditSession.ID,
+			onlineSessions: s.onlineSessions,
+		},
 	)
 	if err != nil {
 		return nil, err

@@ -2,6 +2,7 @@ package dbproxy
 
 import (
 	"bytes"
+	"context"
 	"io"
 	"log/slog"
 	"net"
@@ -35,7 +36,7 @@ func TestHandleGatewayConnSerializesObserverErrorWithServerResponse(t *testing.T
 	}
 	done := make(chan struct{})
 	go func() {
-		gateway.handleGatewayConn(client, connection)
+		gateway.handleGatewayConn(context.Background(), client, connection)
 		close(done)
 	}()
 
@@ -92,7 +93,7 @@ func TestHandleGatewayConnClosesWhenObserverErrorWriterIsBlocked(t *testing.T) {
 
 	done := make(chan struct{})
 	go func() {
-		gateway.handleGatewayConn(client, connection)
+		gateway.handleGatewayConn(context.Background(), client, connection)
 		close(done)
 	}()
 
@@ -147,7 +148,7 @@ func TestHandleGatewayConnWaitsForFinishQueryAndBothRelays(t *testing.T) {
 
 	done := make(chan struct{})
 	go func() {
-		gateway.handleGatewayConn(client, connection)
+		gateway.handleGatewayConn(context.Background(), client, connection)
 		close(done)
 	}()
 
@@ -342,9 +343,11 @@ func newBlockingFinishAudit() *blockingFinishAudit {
 	}
 }
 
-func (a *blockingFinishAudit) CreateAuditSession(*model.AuditSession) error { return nil }
-func (a *blockingFinishAudit) EndAuditSession(string) error                 { return nil }
-func (a *blockingFinishAudit) CreateAuditDBQuery(*model.AuditDBQuery) error {
+func (a *blockingFinishAudit) CreateAuditSession(context.Context, *model.AuditSession) error {
+	return nil
+}
+func (a *blockingFinishAudit) EndAuditSession(context.Context, string) error { return nil }
+func (a *blockingFinishAudit) CreateAuditDBQuery(context.Context, *model.AuditDBQuery) error {
 	a.startOnce.Do(func() { close(a.finishStarted) })
 	<-a.releaseFinish
 	a.returnOnce.Do(func() { close(a.finishReturned) })

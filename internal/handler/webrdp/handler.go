@@ -63,8 +63,8 @@ type IdentityFinder interface {
 type AuditRepository interface {
 	service.RDPAuditRepository
 	CreateAuditRDPChannelEvent(ctx context.Context, event *model.AuditRDPChannelEvent) error
-	GetAuditSession(id string) (*model.AuditSession, error)
-	ListAuditSessions(params store.AuditListParams) ([]store.AuditSessionView, int64, error)
+	GetAuditSession(ctx context.Context, id string) (*model.AuditSession, error)
+	ListAuditSessions(ctx context.Context, params store.AuditListParams) ([]store.AuditSessionView, int64, error)
 	AuditArtifactBySession(ctx context.Context, sessionID, kind string) (model.AuditArtifact, error)
 }
 

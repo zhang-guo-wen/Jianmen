@@ -1,6 +1,7 @@
 package dbproxy
 
 import (
+	"context"
 	"io"
 	"log/slog"
 	"os"
@@ -16,7 +17,7 @@ func TestRetentionDatabaseReplayUsesAuditSessionID(t *testing.T) {
 		replayDir: root,
 		logger:    slog.New(slog.NewTextHandler(io.Discard, nil)),
 	}
-	recorder, err := gateway.newRecorder(&gatewayConn{
+	recorder, err := gateway.newRecorder(context.Background(), &gatewayConn{
 		protocol:     "mysql",
 		accountName:  "orders-reader",
 		accountUser:  "reader",
@@ -35,7 +36,7 @@ func TestRetentionDatabaseReplayUsesAuditSessionID(t *testing.T) {
 	if recorder.metaPath != wantMeta {
 		t.Fatalf("recorder meta path = %q, want %q", recorder.metaPath, wantMeta)
 	}
-	fallback, err := gateway.newRecorder(&gatewayConn{protocol: "mysql"}, "", func(error) {})
+	fallback, err := gateway.newRecorder(context.Background(), &gatewayConn{protocol: "mysql"}, "", func(error) {})
 	if err != nil {
 		t.Fatalf("newRecorder without audit session: %v", err)
 	}
@@ -54,6 +55,7 @@ func TestRetentionDatabaseRecorderFailsClosedOnReplayErrors(t *testing.T) {
 		}
 		gateway := &Gateway{replayDir: rootFile, logger: logger}
 		if _, err := gateway.newRecorder(
+			context.Background(),
 			&gatewayConn{protocol: "mysql"},
 			"audit-session",
 			func(error) {},
@@ -66,6 +68,7 @@ func TestRetentionDatabaseRecorderFailsClosedOnReplayErrors(t *testing.T) {
 		gateway := &Gateway{replayDir: t.TempDir(), logger: logger}
 		fatal := make(chan error, 1)
 		recorder, err := gateway.newRecorder(
+			context.Background(),
 			&gatewayConn{protocol: "mysql"},
 			"audit-session",
 			func(err error) { fatal <- err },

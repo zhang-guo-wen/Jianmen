@@ -39,7 +39,7 @@ func (h *Handler) AuditList(
 	params.Size = 200
 	visible := make([]store.AuditSessionView, 0)
 	for {
-		items, total, listErr := h.audit.ListAuditSessions(params)
+		items, total, listErr := h.audit.ListAuditSessions(r.Context(), params)
 		if listErr != nil {
 			writeError(w, http.StatusInternalServerError, "failed to list RDP audit sessions")
 			return
@@ -93,7 +93,7 @@ func (h *Handler) AuditItem(
 		writeError(w, http.StatusNotFound, "RDP recording not found")
 		return
 	}
-	session, err := h.audit.GetAuditSession(parts[0])
+	session, err := h.audit.GetAuditSession(r.Context(), parts[0])
 	if err != nil || !strings.EqualFold(session.Protocol, "rdp") {
 		writeError(w, http.StatusNotFound, "RDP recording not found")
 		return

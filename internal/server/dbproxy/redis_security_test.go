@@ -2,6 +2,7 @@ package dbproxy
 
 import (
 	"bytes"
+	"context"
 	"io"
 	"log/slog"
 	"net"
@@ -247,7 +248,7 @@ func TestHandleGatewayConnKeepsAuditIdentityWhenRedisReauthenticationIsRejected(
 				upstreamAddr:  "127.0.0.1:6379",
 			}
 
-			gateway.handleGatewayConn(client, connection)
+			gateway.handleGatewayConn(context.Background(), client, connection)
 
 			session, queryCount, endCount := audit.snapshot()
 			if session == nil {
@@ -287,7 +288,7 @@ type identityCaptureAudit struct {
 	endCount   int
 }
 
-func (a *identityCaptureAudit) CreateAuditSession(session *model.AuditSession) error {
+func (a *identityCaptureAudit) CreateAuditSession(_ context.Context, session *model.AuditSession) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	copied := *session
@@ -295,14 +296,14 @@ func (a *identityCaptureAudit) CreateAuditSession(session *model.AuditSession) e
 	return nil
 }
 
-func (a *identityCaptureAudit) EndAuditSession(string) error {
+func (a *identityCaptureAudit) EndAuditSession(context.Context, string) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.endCount++
 	return nil
 }
 
-func (a *identityCaptureAudit) CreateAuditDBQuery(*model.AuditDBQuery) error {
+func (a *identityCaptureAudit) CreateAuditDBQuery(context.Context, *model.AuditDBQuery) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.queryCount++

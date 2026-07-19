@@ -28,6 +28,10 @@ func TestListRecoverableRDPRecordingsScopesEndedAndInterrupted(t *testing.T) {
 	}
 	now := time.Date(2026, 7, 19, 14, 0, 0, 0, time.UTC)
 	endedAt := now.Add(-time.Minute)
+	expiredHeartbeat := now.Add(-2 * time.Minute)
+	expiredLease := now.Add(-time.Minute)
+	liveHeartbeat := now.Add(-time.Minute)
+	liveLease := now.Add(time.Minute)
 	sessions := []model.AuditSession{
 		{
 			ID: "ended-rdp", Protocol: "rdp", State: "ended",
@@ -35,8 +39,16 @@ func TestListRecoverableRDPRecordingsScopesEndedAndInterrupted(t *testing.T) {
 			EndedAt: &endedAt,
 		},
 		{
-			ID: "active-rdp", Protocol: "rdp", State: "active",
+			ID: "active-rdp", Protocol: "rdp", State: "started",
 			Outcome: model.AuditOutcomeActive, StartedAt: now.Add(-time.Hour),
+			LeaseOwner: "stopped-process", HeartbeatAt: &expiredHeartbeat,
+			LeaseExpiresAt: &expiredLease,
+		},
+		{
+			ID: "live-rdp", Protocol: "rdp", State: "started",
+			Outcome: model.AuditOutcomeActive, StartedAt: now.Add(-time.Hour),
+			LeaseOwner: "live-process", HeartbeatAt: &liveHeartbeat,
+			LeaseExpiresAt: &liveLease,
 		},
 		{
 			ID: "unrecoverable-rdp", Protocol: "rdp", State: "ended",
@@ -60,6 +72,7 @@ func TestListRecoverableRDPRecordingsScopesEndedAndInterrupted(t *testing.T) {
 	artifacts := []model.AuditArtifact{
 		recoveryArtifact("ended-rdp", model.RecordingStatusFailed, "", now.Add(-time.Hour)),
 		recoveryArtifact("active-rdp", model.RecordingStatusPending, "", now),
+		recoveryArtifact("live-rdp", model.RecordingStatusPending, "", now),
 		recoveryArtifact(
 			"unrecoverable-rdp",
 			model.RecordingStatusFailed,
@@ -150,8 +163,10 @@ func TestClaimRecoverableRDPRecordingsContinuesPastBatchLimit(t *testing.T) {
 	for index := 0; index < 205; index++ {
 		sessionID := fmt.Sprintf("interrupted-%03d", index)
 		session := model.AuditSession{
-			ID: sessionID, Protocol: "rdp", State: "active",
+			ID: sessionID, Protocol: "rdp", State: "started",
 			Outcome: model.AuditOutcomeActive, StartedAt: now.Add(-time.Hour),
+			LeaseOwner: "stopped-process", HeartbeatAt: auditLeaseTimePtr(now.Add(-2 * time.Minute)),
+			LeaseExpiresAt: auditLeaseTimePtr(now.Add(-time.Minute)),
 		}
 		if err := db.Create(&session).Error; err != nil {
 			t.Fatalf("create session %s: %v", sessionID, err)
@@ -187,6 +202,10 @@ func TestClaimRecoverableRDPRecordingsContinuesPastBatchLimit(t *testing.T) {
 	if !slices.Equal(batchSizes, []int{100, 100, 5}) {
 		t.Fatalf("recovery batch sizes = %#v, want 100, 100, 5", batchSizes)
 	}
+}
+
+func auditLeaseTimePtr(value time.Time) *time.Time {
+	return &value
 }
 
 func recoveryArtifact(

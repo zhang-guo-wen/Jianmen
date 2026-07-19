@@ -195,6 +195,11 @@ var migrations = []Migration{
 		Name:    "web RDP access control and audit schema",
 		Run:     migrateWebRDPAuditSchema,
 	},
+	{
+		Version: auditSessionLeaseMigrationVersion,
+		Name:    "audit session lease recovery",
+		Run:     migrateAuditSessionLease,
+	},
 }
 
 func rejectDuplicateDatabaseAccounts(tx *gorm.DB) error {

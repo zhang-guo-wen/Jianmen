@@ -26,13 +26,19 @@ func auditDateRange(date string) (time.Time, time.Time, bool) {
 // -- audit sessions --
 
 func (s *DBStore) CreateAuditSession(session *model.AuditSession) error {
-	return s.db.Create(session).Error
+	s.prepareAuditSessionLease(session)
+	if err := s.db.Create(session).Error; err != nil {
+		return err
+	}
+	s.trackAuditSessionLease(session)
+	return nil
 }
 
 func (s *DBStore) EndAuditSession(id string) error {
+	s.untrackAuditSessionLease(id)
 	now := time.Now().UTC()
 	return s.db.Model(&model.AuditSession{}).
-		Where("id = ?", id).
+		Where("id = ? AND state = ?", id, "started").
 		Updates(map[string]any{
 			"state": "ended", "ended_at": now,
 			"outcome": gorm.Expr(
@@ -171,10 +177,19 @@ func (s *DBStore) FinishAuditSession(
 	recordingStatus string,
 	endedAt time.Time,
 ) error {
+	s.untrackAuditSessionLease(id)
+	outcome = strings.TrimSpace(outcome)
 	result := s.db.WithContext(ctx).Model(&model.AuditSession{}).
 		Where("id = ?", strings.TrimSpace(id)).
+		Where(
+			"((state = ? AND lease_owner = ?) OR (state = ? AND outcome = ?))",
+			"started",
+			s.auditLeaseOwner,
+			"ended",
+			outcome,
+		).
 		Updates(map[string]any{
-			"state": "ended", "ended_at": endedAt.UTC(), "outcome": strings.TrimSpace(outcome),
+			"state": "ended", "ended_at": endedAt.UTC(), "outcome": outcome,
 			"failure_code": strings.TrimSpace(failureCode), "failure_message": strings.TrimSpace(failureMessage),
 			"recording_status": strings.TrimSpace(recordingStatus),
 		})

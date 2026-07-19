@@ -100,10 +100,10 @@ type adminApplicationRepository interface {
 
 type adminContainerRepository interface {
 	ListContainerEndpoints(context.Context, store.ContainerEndpointListParams) ([]store.ContainerEndpointView, int64, error)
-	ContainerEndpoint(string) (store.ContainerEndpointView, error)
-	AddContainerEndpoint(store.ContainerEndpointInput) (store.ContainerEndpointView, error)
-	UpdateContainerEndpoint(string, store.ContainerEndpointInput) (store.ContainerEndpointView, error)
-	DeleteContainerEndpoint(string) error
+	ContainerEndpoint(context.Context, string) (store.ContainerEndpointView, error)
+	AddContainerEndpoint(context.Context, store.ContainerEndpointInput) (store.ContainerEndpointView, error)
+	UpdateContainerEndpoint(context.Context, string, store.ContainerEndpointInput) (store.ContainerEndpointView, error)
+	DeleteContainerEndpoint(context.Context, string) error
 }
 
 type adminPlatformAccountRepository interface {

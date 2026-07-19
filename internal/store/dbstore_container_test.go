@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"jianmen/internal/model"
@@ -88,5 +89,59 @@ func TestListContainerEndpointsPaginatesAndIncludesHostMetadata(t *testing.T) {
 	got := items[0]
 	if got.ID != "endpoint-active" || got.HostName != host.Name || got.HostAddress != host.Address || got.HostGroup != host.GroupName || got.HostRemark != host.Remark || got.HostAccountName != account.Name {
 		t.Fatalf("container endpoint metadata = %#v", got)
+	}
+}
+
+func TestContainerEndpointReadAndCreateHonorCancelledContext(t *testing.T) {
+	db, err := storage.Open(storage.Config{Driver: storage.DriverSQLite, DSN: ":memory:"})
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	if err := storage.AutoMigrate(db); err != nil {
+		t.Fatalf("auto migrate: %v", err)
+	}
+	repository := NewDBStore(db)
+
+	if err := db.Create(&model.Host{
+		ID: "host-cancel", Name: "cancel-host", Address: "127.0.0.1", Port: 22, Status: "active",
+	}).Error; err != nil {
+		t.Fatalf("create host: %v", err)
+	}
+	if err := db.Create(&model.HostAccount{
+		ID: "account-cancel", HostID: "host-cancel", Name: "cancel-account", Username: "root", Status: "active",
+	}).Error; err != nil {
+		t.Fatalf("create host account: %v", err)
+	}
+	if err := db.Create(&model.ContainerEndpoint{
+		ID: "endpoint-existing", Name: "existing", Runtime: model.ContainerRuntimeDocker,
+		ConnectionMode: model.ContainerConnectionDockerAPI, Address: "http://127.0.0.1:2375", Status: "active",
+	}).Error; err != nil {
+		t.Fatalf("create container endpoint: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	if _, err := repository.ContainerEndpoint(ctx, "endpoint-existing"); !errors.Is(err, context.Canceled) {
+		t.Fatalf("container endpoint read with canceled context = %v, want context canceled", err)
+	}
+
+	if _, err := repository.AddContainerEndpoint(ctx, ContainerEndpointInput{
+		ID:             "endpoint-cancelled-add",
+		Name:           "cancelled",
+		Runtime:        model.ContainerRuntimeDocker,
+		ConnectionMode: model.ContainerConnectionDockerAPI,
+		Address:        "http://127.0.0.1:2375",
+		Status:         "active",
+	}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("container endpoint add with canceled context = %v, want context canceled", err)
+	}
+
+	var count int64
+	if err := db.Model(&model.ContainerEndpoint{}).Where("id = ?", "endpoint-cancelled-add").Count(&count).Error; err != nil {
+		t.Fatalf("count cancelled add endpoint: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("canceled context add should not persist record, got count=%d", count)
 	}
 }

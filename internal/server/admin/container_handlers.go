@@ -74,7 +74,7 @@ func (s *Server) handleContainerEndpoints(w http.ResponseWriter, r *http.Request
 		if !s.requireContainerHostAccount(w, r, payload.HostID, payload.HostAccountID) {
 			return
 		}
-		view, err := s.containers.AddContainerEndpoint(containerEndpointInput(payload))
+		view, err := s.containers.AddContainerEndpoint(r.Context(), containerEndpointInput(payload))
 		if err != nil {
 			writeContainerStoreError(w, r, err)
 			return
@@ -107,7 +107,7 @@ func (s *Server) handleContainerEndpoint(w http.ResponseWriter, r *http.Request)
 			s.forbidden(w, r)
 			return
 		}
-		view, err := s.containers.ContainerEndpoint(id)
+		view, err := s.containers.ContainerEndpoint(r.Context(), id)
 		if err != nil {
 			writeContainerStoreError(w, r, err)
 			return
@@ -127,7 +127,7 @@ func (s *Server) handleContainerEndpoint(w http.ResponseWriter, r *http.Request)
 		if !s.requireContainerHostAccount(w, r, payload.HostID, payload.HostAccountID) {
 			return
 		}
-		view, err := s.containers.UpdateContainerEndpoint(id, containerEndpointInput(payload))
+		view, err := s.containers.UpdateContainerEndpoint(r.Context(), id, containerEndpointInput(payload))
 		if err != nil {
 			writeContainerStoreError(w, r, err)
 			return
@@ -139,7 +139,7 @@ func (s *Server) handleContainerEndpoint(w http.ResponseWriter, r *http.Request)
 			s.forbidden(w, r)
 			return
 		}
-		if err := s.containers.DeleteContainerEndpoint(id); err != nil {
+		if err := s.containers.DeleteContainerEndpoint(r.Context(), id); err != nil {
 			writeContainerStoreError(w, r, err)
 			return
 		}
@@ -183,7 +183,7 @@ func (s *Server) handleContainerRuntime(w http.ResponseWriter, r *http.Request, 
 		s.forbidden(w, r)
 		return
 	}
-	view, err := s.containers.ContainerEndpoint(endpointID)
+	view, err := s.containers.ContainerEndpoint(r.Context(), endpointID)
 	if err != nil {
 		writeContainerStoreError(w, r, err)
 		return

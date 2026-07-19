@@ -256,8 +256,6 @@ func (s *Server) writeHostManagementError(w http.ResponseWriter, r *http.Request
 		s.writeErrorText(w, r, http.StatusForbidden, "target is disabled, expired, or unavailable")
 	case errors.Is(err, service.ErrHostTargetInvalidInput):
 		s.writeErrorText(w, r, http.StatusBadRequest, err.Error())
-	case errors.Is(err, service.ErrHostGrantFailed):
-		s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
 	case errors.Is(err, store.ErrHostNotFound):
 		s.writeErrorText(w, r, http.StatusNotFound, "host not found")
 	case errors.Is(err, store.ErrTargetNotFound):
@@ -292,7 +290,7 @@ func storeTargetViews(views []service.HostManagementTargetView) []store.TargetVi
 }
 
 func storeTargetView(view service.HostManagementTargetView) store.TargetView {
-	return store.TargetView{ID: view.ID, HostID: view.HostID, ResourceType: view.ResourceType, ResourceID: view.ResourceID, ResourceSeq: view.ResourceSeq, HostResourceID: view.HostResourceID, Name: view.Name, Group: view.Group, Remark: view.Remark, ExpiresAt: view.ExpiresAt, Status: view.Status, Host: view.Host, Port: view.Port, Protocol: view.Protocol, Username: view.Username, Domain: view.Domain, AuthMethods: view.AuthMethods, InsecureIgnoreHostKey: view.InsecureIgnoreHostKey, HostKeyFingerprint: view.HostKeyFingerprint, KnownHostsPath: view.KnownHostsPath, RDPSecurity: view.RDPSecurity, RDPIgnoreCertificate: view.RDPIgnoreCertificate, RDPCertFingerprints: view.RDPCertFingerprints, RDPApprovalRequired: view.RDPApprovalRequired, RDPClipboardRead: view.RDPClipboardRead, RDPClipboardWrite: view.RDPClipboardWrite, RDPFileUpload: view.RDPFileUpload, RDPFileDownload: view.RDPFileDownload, RDPDriveMapping: view.RDPDriveMapping, CanManage: view.CanManage}
+	return store.TargetView{ID: view.ID, HostID: view.HostID, ResourceType: view.ResourceType, ResourceID: view.ResourceID, ResourceSeq: view.ResourceSeq, HostResourceID: view.HostResourceID, Name: view.Name, Group: view.Group, Remark: view.Remark, ExpiresAt: view.ExpiresAt, Status: view.Status, HostStatus: view.HostStatus, Host: view.Host, Port: view.Port, Protocol: view.Protocol, Username: view.Username, Domain: view.Domain, AuthMethods: view.AuthMethods, InsecureIgnoreHostKey: view.InsecureIgnoreHostKey, HostKeyFingerprint: view.HostKeyFingerprint, KnownHostsPath: view.KnownHostsPath, RDPSecurity: view.RDPSecurity, RDPIgnoreCertificate: view.RDPIgnoreCertificate, RDPCertFingerprints: view.RDPCertFingerprints, RDPApprovalRequired: view.RDPApprovalRequired, RDPClipboardRead: view.RDPClipboardRead, RDPClipboardWrite: view.RDPClipboardWrite, RDPFileUpload: view.RDPFileUpload, RDPFileDownload: view.RDPFileDownload, RDPDriveMapping: view.RDPDriveMapping, CanManage: view.CanManage}
 }
 
 func storeTargetConfig(config service.HostManagementTargetConfig) store.TargetConfig {

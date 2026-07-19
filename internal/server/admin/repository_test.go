@@ -152,10 +152,11 @@ func TestAdminRepositoryBoundaryStaysStaticallyComposedAndDomainSplit(t *testing
 		t.Fatal("Server regained an application-wide store field")
 	}
 	expectedFields := map[string]reflect.Type{
-		"aiTokens":            reflect.TypeOf((*adminAIAccessTokenRepository)(nil)).Elem(),
+		"aiAccessTokens":      reflect.TypeOf((*service.AIAccessTokenService)(nil)),
 		"hostTargets":         reflect.TypeOf((*adminHostTargetRepository)(nil)).Elem(),
+		"hostManagement":      reflect.TypeOf((*service.HostManagementService)(nil)),
 		"databases":           reflect.TypeOf((*adminDatabaseRepository)(nil)).Elem(),
-		"applications":        reflect.TypeOf((*adminApplicationRepository)(nil)).Elem(),
+		"applicationService":  reflect.TypeOf((*service.ApplicationService)(nil)),
 		"containers":          reflect.TypeOf((*adminContainerRepository)(nil)).Elem(),
 		"platformAccounts":    reflect.TypeOf((*adminPlatformAccountRepository)(nil)).Elem(),
 		"userSessionCreation": reflect.TypeOf((*service.UserSessionCreationService)(nil)),
@@ -247,9 +248,8 @@ func applyTestAdminDependencies(t *testing.T, server *Server, repository adminRe
 	if err != nil {
 		t.Fatalf("resolve admin dependencies: %v", err)
 	}
-	server.aiTokens = dependencies.aiTokens
 	server.hostTargets = dependencies.hostTargets
-	if server.hostManagement == nil && server.resourceGrants != nil {
+	if server.hostManagement == nil {
 		authorization := server.authorization
 		if isNilAdminAuthorization(authorization) {
 			authorization = repositoryTestAuthorization{}
@@ -257,14 +257,28 @@ func applyTestAdminDependencies(t *testing.T, server *Server, repository adminRe
 		server.hostManagement, err = service.NewHostManagementService(
 			hostManagementRepositoryAdapter{repository: dependencies.hostTargets},
 			authorization,
-			server.resourceGrants,
 		)
 		if err != nil {
 			t.Fatalf("new host management service: %v", err)
 		}
 	}
 	server.databases = dependencies.databases
-	server.applications = dependencies.applications
+	if server.applicationService == nil {
+		authorization := server.authorization
+		if isNilAdminAuthorization(authorization) {
+			authorization = repositoryTestAuthorization{}
+		}
+		server.applicationService, err = service.NewApplicationService(
+			dependencies.applications,
+			authorization,
+			nil,
+			47110,
+			47199,
+		)
+		if err != nil {
+			t.Fatalf("new application service: %v", err)
+		}
+	}
 	server.containers = dependencies.containers
 	server.platformAccounts = dependencies.platformAccounts
 	if server.userSessionCreation == nil {
@@ -303,6 +317,12 @@ func applyTestAdminServices(t *testing.T, server *Server, repository adminReposi
 		server.temporaryAccess, err = service.NewTemporaryAccessService(dependencies.temporaryAccess)
 		if err != nil {
 			t.Fatalf("new temporary access service: %v", err)
+		}
+	}
+	if server.aiAccessTokens == nil {
+		server.aiAccessTokens, err = service.NewAIAccessTokenService(dependencies.aiTokens)
+		if err != nil {
+			t.Fatalf("new AI access token service: %v", err)
 		}
 	}
 	if server.userManagement == nil {

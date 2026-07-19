@@ -1,13 +1,11 @@
 package admin
 
 import (
-	"context"
 	"encoding/json"
-	"fmt"
+	"errors"
 	"net/http"
 	"strings"
 
-	"jianmen/internal/model"
 	"jianmen/internal/rbac"
 	"jianmen/internal/service"
 	"jianmen/internal/store"
@@ -28,12 +26,12 @@ func (s *Server) handleApplications(w http.ResponseWriter, r *http.Request) {
 		if !s.requireAuthenticatedUser(w, r) {
 			return
 		}
-		apps, err := s.visibleApplications(r, s.applications.Applications(r.Context()))
+		apps, err := s.applicationService.List(r.Context(), applicationActor(r))
 		if err != nil {
-			s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
+			s.writeApplicationServiceError(w, r, err)
 			return
 		}
-		resp := paginateSlice(apps, r, func(v store.ApplicationView, q string) bool {
+		resp := paginateSlice(apps, r, func(v service.Application, q string) bool {
 			return strings.Contains(strings.ToLower(v.Name), q) ||
 				strings.Contains(strings.ToLower(v.Address), q) ||
 				strings.Contains(strings.ToLower(v.AppGroup), q) ||
@@ -57,33 +55,10 @@ func (s *Server) handleCreateApplication(w http.ResponseWriter, r *http.Request)
 	if !ok {
 		return
 	}
-	if payload.ListenPort == 0 {
-		listenPort, err := s.nextApplicationListenPort(r.Context())
-		if err != nil {
-			s.writeErrorText(w, r, http.StatusBadRequest, err.Error())
-			return
-		}
-		payload.ListenPort = listenPort
-	}
-	input, err := applicationInput(payload)
+	view, err := s.applicationService.Create(r.Context(), applicationActor(r), applicationRequest(payload))
 	if err != nil {
-		s.writeErrorText(w, r, http.StatusBadRequest, err.Error())
+		s.writeApplicationServiceError(w, r, err)
 		return
-	}
-	view, err := s.applications.AddApplication(r.Context(), input)
-	if err != nil {
-		s.writeErrorText(w, r, http.StatusBadRequest, err.Error())
-		return
-	}
-	if err := s.grantCreatedResource(r, model.ResourceTypeApplication, view.ID); err != nil {
-		_ = s.applications.DeleteApplication(r.Context(), view.ID)
-		s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
-		return
-	}
-	if s.appProxy != nil && view.Status == "active" {
-		if err := s.appProxy.AddProxy(applicationModel(view)); err != nil {
-			s.logger.Warn("failed to start app proxy", "name", view.Name, "error", err)
-		}
 	}
 	s.writeJSON(w, r, http.StatusCreated, view)
 }
@@ -97,35 +72,18 @@ func (s *Server) handleApplication(w http.ResponseWriter, r *http.Request) {
 
 	switch r.Method {
 	case http.MethodGet:
-		if !s.requireResourceAction(w, r, rbac.ActionAppView, model.ResourceTypeApplication, id) {
-			return
-		}
-		view, err := s.applications.Application(r.Context(), id)
+		view, err := s.applicationService.Get(r.Context(), applicationActor(r), id)
 		if err != nil {
-			writeApplicationStoreError(w, r, err)
+			s.writeApplicationServiceError(w, r, err)
 			return
 		}
 		s.writeJSON(w, r, http.StatusOK, view)
 	case http.MethodPut:
-		if !s.requireResourceAction(w, r, rbac.ActionAppUpdate, model.ResourceTypeApplication, id) {
-			return
-		}
 		s.handleUpdateApplication(w, r, id)
 	case http.MethodDelete:
-		if !s.requireResourceAction(w, r, rbac.ActionAppDelete, model.ResourceTypeApplication, id) {
+		if err := s.applicationService.Delete(r.Context(), applicationActor(r), id); err != nil {
+			s.writeApplicationServiceError(w, r, err)
 			return
-		}
-		view, err := s.applications.Application(r.Context(), id)
-		if err != nil {
-			writeApplicationStoreError(w, r, err)
-			return
-		}
-		if err := s.applications.DeleteApplication(r.Context(), id); err != nil {
-			writeApplicationStoreError(w, r, err)
-			return
-		}
-		if s.appProxy != nil {
-			s.appProxy.RemoveProxy(view.ListenPort)
 		}
 		w.WriteHeader(http.StatusNoContent)
 	default:
@@ -135,36 +93,14 @@ func (s *Server) handleApplication(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleUpdateApplication(w http.ResponseWriter, r *http.Request, id string) {
-	previous, err := s.applications.Application(r.Context(), id)
-	if err != nil {
-		writeApplicationStoreError(w, r, err)
-		return
-	}
 	payload, ok := s.decodeApplicationPayload(w, r)
 	if !ok {
 		return
 	}
-	if payload.ListenPort == 0 {
-		payload.ListenPort = previous.ListenPort
-	}
-	input, err := applicationInput(payload)
+	view, err := s.applicationService.Update(r.Context(), applicationActor(r), id, applicationRequest(payload))
 	if err != nil {
-		s.writeErrorText(w, r, http.StatusBadRequest, err.Error())
+		s.writeApplicationServiceError(w, r, err)
 		return
-	}
-	view, err := s.applications.UpdateApplication(r.Context(), id, input)
-	if err != nil {
-		writeApplicationStoreError(w, r, err)
-		return
-	}
-	if s.appProxy != nil {
-		if view.Status == "active" {
-			if err := s.appProxy.UpdateProxy(previous.ListenPort, applicationModel(view)); err != nil {
-				s.logger.Warn("failed to update app proxy", "name", view.Name, "error", err)
-			}
-		} else {
-			s.appProxy.RemoveProxy(previous.ListenPort)
-		}
 	}
 	s.writeJSON(w, r, http.StatusOK, view)
 }
@@ -180,57 +116,35 @@ func (s *Server) decodeApplicationPayload(w http.ResponseWriter, r *http.Request
 	return payload, true
 }
 
-func applicationInput(payload applicationPayload) (store.ApplicationInput, error) {
-	parsed, err := service.ParseApplicationAddress(payload.Address)
-	if err != nil {
-		return store.ApplicationInput{}, err
-	}
-	name := strings.TrimSpace(payload.Name)
-	if name == "" {
-		name = parsed.Host
-	}
-	return store.ApplicationInput{
-		Name:           name,
-		Address:        parsed.Address,
-		EntryPath:      parsed.EntryPath,
-		InternalScheme: parsed.Scheme,
-		InternalHost:   parsed.Host,
-		InternalPort:   parsed.Port,
-		ListenPort:     payload.ListenPort,
-		AppGroup:       strings.TrimSpace(payload.Group),
-		Remark:         strings.TrimSpace(payload.Remark),
-		Status:         strings.TrimSpace(payload.Status),
-	}, nil
-}
-
-func applicationModel(view store.ApplicationView) model.Application {
-	return model.Application{
-		ID:             view.ID,
-		Name:           view.Name,
-		Address:        view.Address,
-		EntryPath:      view.EntryPath,
-		ListenPort:     view.ListenPort,
-		InternalScheme: view.InternalScheme,
-		InternalHost:   view.InternalHost,
-		InternalPort:   view.InternalPort,
-		Status:         view.Status,
+func applicationActor(r *http.Request) service.ApplicationActor {
+	return service.ApplicationActor{
+		UserID:     userIDFromRequest(r),
+		SuperAdmin: isSuperAdminRequest(r),
 	}
 }
 
-func (s *Server) nextApplicationListenPort(ctx context.Context) (int, error) {
-	start := s.cfg.ApplicationGateway.PortStart
-	end := s.cfg.ApplicationGateway.PortEnd
-	if start <= 0 || end < start {
-		start, end = 47110, 47199
+func applicationRequest(payload applicationPayload) service.ApplicationRequest {
+	return service.ApplicationRequest{
+		Name:       payload.Name,
+		Address:    payload.Address,
+		ListenPort: payload.ListenPort,
+		Group:      payload.Group,
+		Remark:     payload.Remark,
+		Status:     payload.Status,
 	}
-	used := make(map[int]struct{})
-	for _, app := range s.applications.Applications(ctx) {
-		used[app.ListenPort] = struct{}{}
+}
+
+func (s *Server) writeApplicationServiceError(w http.ResponseWriter, r *http.Request, err error) {
+	switch {
+	case errors.Is(err, service.ErrApplicationForbidden):
+		s.forbidden(w, r)
+	case errors.Is(err, store.ErrApplicationNotFound):
+		s.writeErrorText(w, r, http.StatusNotFound, err.Error())
+	case errors.Is(err, service.ErrInvalidApplication):
+		s.writeErrorText(w, r, http.StatusBadRequest, err.Error())
+	case errors.Is(err, service.ErrApplicationRuntime):
+		s.writeErrorText(w, r, http.StatusBadGateway, err.Error())
+	default:
+		s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
 	}
-	for port := start; port <= end; port++ {
-		if _, exists := used[port]; !exists {
-			return port, nil
-		}
-	}
-	return 0, fmt.Errorf("no available application proxy port in range %d-%d", start, end)
 }

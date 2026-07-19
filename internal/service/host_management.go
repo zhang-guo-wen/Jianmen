@@ -16,7 +16,6 @@ var (
 	ErrHostAccessDenied       = errors.New("host resource access denied")
 	ErrHostTargetUnavailable  = errors.New("host target is unavailable")
 	ErrHostTargetInvalidInput = errors.New("invalid host target input")
-	ErrHostGrantFailed        = errors.New("grant created host failed")
 )
 
 // HostManagementRepository is the persistence contract required by host and
@@ -25,6 +24,7 @@ type HostManagementRepository interface {
 	Hosts(context.Context) ([]HostManagementHostView, error)
 	Host(context.Context, string) (HostManagementHostView, error)
 	AddHost(context.Context, HostManagementHostRecord) (HostManagementHostView, error)
+	CreateManagedHost(context.Context, HostManagementHostRecord, string) (HostManagementHostView, error)
 	UpdateHost(context.Context, string, HostManagementHostRecord) (HostManagementHostView, error)
 	DeleteHost(context.Context, string) error
 	Targets(context.Context) ([]HostManagementTargetView, error)
@@ -41,25 +41,19 @@ type HostManagementAuthorizer interface {
 	AuthorizeBatch(context.Context, string, []AuthorizationRequest) ([]AuthorizationDecision, error)
 }
 
-type HostManagementGrants interface {
-	GrantCreatedResource(context.Context, string, bool, string, string) error
-}
-
 type HostManagementActor struct {
 	ID         string
 	SuperAdmin bool
 }
 
 type HostManagementService struct {
-	repository     HostManagementRepository
-	authorizer     HostManagementAuthorizer
-	resourceGrants HostManagementGrants
+	repository HostManagementRepository
+	authorizer HostManagementAuthorizer
 }
 
 func NewHostManagementService(
 	repository HostManagementRepository,
 	authorizer HostManagementAuthorizer,
-	resourceGrants HostManagementGrants,
 ) (*HostManagementService, error) {
 	if repository == nil {
 		return nil, errors.New("host management repository is required")
@@ -67,10 +61,7 @@ func NewHostManagementService(
 	if authorizer == nil {
 		return nil, errors.New("host management authorizer is required")
 	}
-	if resourceGrants == nil {
-		return nil, errors.New("host management resource grant service is required")
-	}
-	return &HostManagementService{repository: repository, authorizer: authorizer, resourceGrants: resourceGrants}, nil
+	return &HostManagementService{repository: repository, authorizer: authorizer}, nil
 }
 
 func (s *HostManagementService) ListHosts(ctx context.Context, actor HostManagementActor) ([]HostManagementHostView, error) {
@@ -152,46 +143,6 @@ func (s *HostManagementService) Host(ctx context.Context, actor HostManagementAc
 	return view, nil
 }
 
-func (s *HostManagementService) CreateHost(ctx context.Context, actor HostManagementActor, host HostManagementHostRecord) (HostManagementHostView, error) {
-	if err := s.require(ctx, actor, []string{rbac.ActionHostCreate}, "", ""); err != nil {
-		return HostManagementHostView{}, err
-	}
-	view, err := s.repository.AddHost(ctx, host)
-	if err != nil {
-		return HostManagementHostView{}, fmt.Errorf("create host: %w", err)
-	}
-	if err := s.resourceGrants.GrantCreatedResource(ctx, actor.ID, actor.SuperAdmin, model.ResourceTypeHost, view.ID); err != nil {
-		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-		defer cancel()
-		if cleanupErr := s.repository.DeleteHost(cleanupCtx, view.ID); cleanupErr != nil {
-			return HostManagementHostView{}, errors.Join(fmt.Errorf("%w: %v", ErrHostGrantFailed, err), fmt.Errorf("delete ungranted host: %w", cleanupErr))
-		}
-		return HostManagementHostView{}, fmt.Errorf("%w: %v", ErrHostGrantFailed, err)
-	}
-	return view, nil
-}
-
-func (s *HostManagementService) UpdateHost(ctx context.Context, actor HostManagementActor, hostID string, host HostManagementHostRecord) (HostManagementHostView, error) {
-	if err := s.require(ctx, actor, []string{rbac.ActionHostUpdate}, model.ResourceTypeHost, hostID); err != nil {
-		return HostManagementHostView{}, err
-	}
-	view, err := s.repository.UpdateHost(ctx, hostID, host)
-	if err != nil {
-		return HostManagementHostView{}, fmt.Errorf("update host: %w", err)
-	}
-	return view, nil
-}
-
-func (s *HostManagementService) DeleteHost(ctx context.Context, actor HostManagementActor, hostID string) error {
-	if err := s.require(ctx, actor, []string{rbac.ActionHostDelete}, model.ResourceTypeHost, hostID); err != nil {
-		return err
-	}
-	if err := s.repository.DeleteHost(ctx, hostID); err != nil {
-		return fmt.Errorf("delete host: %w", err)
-	}
-	return nil
-}
-
 func (s *HostManagementService) ListTargets(ctx context.Context, actor HostManagementActor, connectable bool) ([]HostManagementTargetView, error) {
 	if connectable {
 		if err := s.require(ctx, actor, []string{rbac.ActionSessionConnect, rbac.ActionSFTPConnect, rbac.ActionRDPConnect}, "", ""); err != nil {
@@ -222,146 +173,17 @@ func (s *HostManagementService) ListHostAccounts(ctx context.Context, actor Host
 	return s.filterTargets(ctx, actor, targets, connectable)
 }
 
-func (s *HostManagementService) Target(ctx context.Context, actor HostManagementActor, targetID string) (HostManagementTargetView, error) {
-	if err := s.require(ctx, actor, []string{rbac.ActionTargetView}, model.ResourceTypeHostAccount, targetID); err != nil {
-		return HostManagementTargetView{}, err
-	}
-	view, err := s.repository.Target(ctx, targetID)
-	if err != nil {
-		return HostManagementTargetView{}, fmt.Errorf("get host account: %w", err)
-	}
-	return view, nil
-}
-
-func (s *HostManagementService) CreateTarget(ctx context.Context, actor HostManagementActor, target config.Target) (HostManagementTargetView, error) {
-	if err := s.require(ctx, actor, []string{rbac.ActionTargetCreate}, "", ""); err != nil {
-		return HostManagementTargetView{}, err
-	}
-	if strings.TrimSpace(target.HostID) == "" {
-		if !actor.SuperAdmin {
-			return HostManagementTargetView{}, fmt.Errorf("%w: host_id is required", ErrHostTargetInvalidInput)
-		}
-	} else if err := s.require(ctx, actor, []string{rbac.ActionTargetCreate}, model.ResourceTypeHost, target.HostID); err != nil {
-		return HostManagementTargetView{}, err
-	}
-	view, err := s.repository.AddTarget(ctx, target)
-	if err != nil {
-		return HostManagementTargetView{}, fmt.Errorf("create host account: %w", err)
-	}
-	return view, nil
-}
-
-func (s *HostManagementService) UpdateTarget(ctx context.Context, actor HostManagementActor, targetID string, target config.Target) (HostManagementTargetView, error) {
-	if err := s.require(ctx, actor, []string{rbac.ActionTargetUpdate}, model.ResourceTypeHostAccount, targetID); err != nil {
-		return HostManagementTargetView{}, err
-	}
-	view, err := s.repository.UpdateTarget(ctx, targetID, target)
-	if err != nil {
-		return HostManagementTargetView{}, fmt.Errorf("update host account: %w", err)
-	}
-	return view, nil
-}
-
-func (s *HostManagementService) DeleteTarget(ctx context.Context, actor HostManagementActor, targetID string) error {
-	if err := s.require(ctx, actor, []string{rbac.ActionTargetDelete}, model.ResourceTypeHostAccount, targetID); err != nil {
-		return err
-	}
-	if err := s.repository.DeleteTarget(ctx, targetID); err != nil {
-		return fmt.Errorf("delete host account: %w", err)
-	}
-	return nil
-}
-
-func (s *HostManagementService) ResolveConnectionTest(ctx context.Context, actor HostManagementActor, input config.Target) (HostManagementTargetConfig, error) {
-	if err := s.require(ctx, actor, []string{rbac.ActionTargetCreate}, "", ""); err != nil {
-		return HostManagementTargetConfig{}, err
-	}
-	config := targetConfigFromInput(input)
-	if config.ID != "" {
-		if err := s.require(ctx, actor, []string{rbac.ActionTargetCreate}, model.ResourceTypeHostAccount, config.ID); err != nil {
-			return HostManagementTargetConfig{}, err
-		}
-		if config.Password == "" && config.PrivateKeyPath == "" && config.PrivateKeyPEM == "" {
-			stored, err := s.repository.TargetConfig(ctx, config.ID)
-			if err != nil {
-				return HostManagementTargetConfig{}, fmt.Errorf("load host account credentials: %w", err)
-			}
-			if config.HostID != "" && config.HostID != stored.HostID {
-				return HostManagementTargetConfig{}, fmt.Errorf("%w: target does not belong to host", ErrHostTargetInvalidInput)
-			}
-			config = mergeTargetConfig(config, stored, inputHostKeyConfigProvided(input))
-		}
-	} else if config.HostID != "" {
-		if err := s.require(ctx, actor, []string{rbac.ActionTargetCreate}, model.ResourceTypeHost, config.HostID); err != nil {
-			return HostManagementTargetConfig{}, err
-		}
-	}
-	if config.HostID != "" && (config.Host == "" || config.Port == 0) {
-		host, err := s.repository.Host(ctx, config.HostID)
-		if err != nil {
-			return HostManagementTargetConfig{}, fmt.Errorf("load host for connection test: %w", err)
-		}
-		if strings.EqualFold(host.Status, "disabled") {
-			return HostManagementTargetConfig{}, ErrHostTargetUnavailable
-		}
-		if config.Host == "" {
-			config.Host = host.Address
-		}
-		if config.Protocol == "" {
-			config.Protocol = host.Protocol
-		}
-		if config.Port == 0 {
-			config.Port = host.Port
-		}
-	}
-	if config.Disabled || config.Expired(time.Now().UTC()) {
-		return HostManagementTargetConfig{}, ErrHostTargetUnavailable
-	}
-	if config.Addr() == "" || strings.TrimSpace(config.Username) == "" {
-		return HostManagementTargetConfig{}, fmt.Errorf("%w: host, port, and username are required", ErrHostTargetInvalidInput)
-	}
-	return config, nil
-}
-
-func (s *HostManagementService) ResolveWebTerminalTarget(ctx context.Context, actor HostManagementActor, targetID string) (HostManagementTargetConfig, error) {
-	if strings.TrimSpace(targetID) != "" {
-		if err := s.require(ctx, actor, []string{rbac.ActionSessionConnect}, model.ResourceTypeHostAccount, targetID); err != nil {
-			return HostManagementTargetConfig{}, err
-		}
-		return s.loadConnectableTarget(ctx, targetID)
-	}
-	targets, err := s.repository.Targets(ctx)
-	if err != nil {
-		return HostManagementTargetConfig{}, fmt.Errorf("list default host accounts: %w", err)
-	}
-	for _, target := range targets {
-		if strings.EqualFold(target.Protocol, "rdp") || strings.EqualFold(target.Status, "disabled") || targetExpired(target) {
-			continue
-		}
-		allowed, err := s.authorize(ctx, actor, []string{rbac.ActionSessionConnect}, model.ResourceTypeHostAccount, target.ID)
-		if err != nil {
-			return HostManagementTargetConfig{}, err
-		}
-		if !allowed {
-			continue
-		}
-		return s.loadConnectableTarget(ctx, target.ID)
-	}
-	return HostManagementTargetConfig{}, ErrHostTargetUnavailable
-}
-
-func (s *HostManagementService) loadConnectableTarget(ctx context.Context, targetID string) (HostManagementTargetConfig, error) {
-	target, err := s.repository.TargetConfig(ctx, targetID)
-	if err != nil {
-		return HostManagementTargetConfig{}, fmt.Errorf("load host account credentials: %w", err)
-	}
-	if target.Disabled || target.Expired(time.Now().UTC()) || !strings.EqualFold(target.Protocol, "ssh") {
-		return HostManagementTargetConfig{}, ErrHostTargetUnavailable
-	}
-	return target, nil
-}
-
 func (s *HostManagementService) filterTargets(ctx context.Context, actor HostManagementActor, targets []HostManagementTargetView, connectable bool) ([]HostManagementTargetView, error) {
+	if connectable {
+		now := time.Now().UTC()
+		candidates := make([]HostManagementTargetView, 0, len(targets))
+		for _, target := range targets {
+			if targetLifecycleConnectable(target, now) {
+				candidates = append(candidates, target)
+			}
+		}
+		targets = candidates
+	}
 	requests := make([]AuthorizationRequest, len(targets))
 	for index, target := range targets {
 		actions := []string{rbac.ActionTargetView}
@@ -440,37 +262,6 @@ func (s *HostManagementService) authorizeRequests(ctx context.Context, actor Hos
 	return allowed, nil
 }
 
-func targetConfigFromInput(target config.Target) HostManagementTargetConfig {
-	return HostManagementTargetConfig{ID: target.ID, Name: target.Name, Host: target.Host, Port: target.Port, Protocol: target.Protocol, Username: target.Username, Domain: target.Domain, Password: target.Password, PrivateKeyPath: target.PrivateKeyPath, PrivateKeyPEM: target.PrivateKeyPEM, Passphrase: target.Passphrase, InsecureIgnoreHostKey: target.InsecureIgnoreHostKey, HostKeyFingerprint: target.HostKeyFingerprint, KnownHostsPath: target.KnownHostsPath, RDPSecurity: target.RDPSecurity, RDPIgnoreCertificate: target.RDPIgnoreCertificate, RDPCertFingerprints: target.RDPCertFingerprints, Disabled: target.Disabled, ExpiresAt: target.ExpiresAt, HostID: target.HostID}
-}
-
-func mergeTargetConfig(input, stored HostManagementTargetConfig, hostKeyConfigProvided bool) HostManagementTargetConfig {
-	stored.Host = firstNonEmpty(input.Host, stored.Host)
-	if input.Port != 0 {
-		stored.Port = input.Port
-	}
-	stored.Username = firstNonEmpty(input.Username, stored.Username)
-	stored.Name = firstNonEmpty(input.Name, stored.Name)
-	stored.HostID = firstNonEmpty(input.HostID, stored.HostID)
-	stored.Protocol = firstNonEmpty(input.Protocol, stored.Protocol)
-	stored.Domain = firstNonEmpty(input.Domain, stored.Domain)
-	stored.RDPSecurity = firstNonEmpty(input.RDPSecurity, stored.RDPSecurity)
-	stored.RDPIgnoreCertificate = input.RDPIgnoreCertificate
-	stored.RDPCertFingerprints = firstNonEmpty(input.RDPCertFingerprints, stored.RDPCertFingerprints)
-	if hostKeyConfigProvided {
-		stored.InsecureIgnoreHostKey = input.InsecureIgnoreHostKey
-		stored.HostKeyFingerprint = input.HostKeyFingerprint
-		stored.KnownHostsPath = input.KnownHostsPath
-	}
-	stored.Disabled = input.Disabled
-	stored.ExpiresAt = input.ExpiresAt
-	return stored
-}
-
-func inputHostKeyConfigProvided(target config.Target) bool {
-	return target.InsecureIgnoreHostKey || target.HostKeyFingerprint != "" || target.KnownHostsPath != ""
-}
-
 func targetIDs(targets []HostManagementTargetView) []string {
 	ids := make([]string, len(targets))
 	for index := range targets {
@@ -479,19 +270,13 @@ func targetIDs(targets []HostManagementTargetView) []string {
 	return ids
 }
 
-func targetExpired(target HostManagementTargetView) bool {
-	if strings.TrimSpace(target.ExpiresAt) == "" {
+func targetLifecycleConnectable(target HostManagementTargetView, now time.Time) bool {
+	if strings.EqualFold(target.Status, "disabled") || strings.EqualFold(target.HostStatus, "disabled") {
 		return false
 	}
-	expiresAt, err := time.Parse(time.RFC3339Nano, target.ExpiresAt)
-	return err == nil && !time.Now().UTC().Before(expiresAt)
-}
-
-func firstNonEmpty(values ...string) string {
-	for _, value := range values {
-		if strings.TrimSpace(value) != "" {
-			return value
-		}
+	if strings.TrimSpace(target.ExpiresAt) == "" {
+		return true
 	}
-	return ""
+	expiresAt, err := time.Parse(time.RFC3339Nano, target.ExpiresAt)
+	return err == nil && now.Before(expiresAt)
 }

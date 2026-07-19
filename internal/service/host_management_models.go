@@ -19,7 +19,7 @@ type HostManagementHostView struct {
 }
 
 type HostManagementTargetView struct {
-	ID, HostID, ResourceType, ResourceID, HostResourceID, Name, Group, Remark, ExpiresAt, Status, Host, Protocol, Username, Domain                                    string
+	ID, HostID, ResourceType, ResourceID, HostResourceID, Name, Group, Remark, ExpiresAt, Status, HostStatus, Host, Protocol, Username, Domain                        string
 	ResourceSeq                                                                                                                                                       int
 	Port                                                                                                                                                              int
 	AuthMethods                                                                                                                                                       []string

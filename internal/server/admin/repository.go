@@ -57,15 +57,13 @@ type adminDependencies struct {
 
 type adminAIAccessTokenRepository interface {
 	service.AIAccessTokenRepository
-	ListAIAccessTokens(context.Context, string) ([]model.AIAccessToken, error)
-	AuthenticateAIAccessToken(context.Context, string, time.Time) (model.AIAccessToken, error)
-	RevokeAIAccessToken(context.Context, string, string, time.Time) error
 }
 
 type adminHostTargetRepository interface {
 	Hosts(context.Context) ([]store.HostView, error)
 	Host(context.Context, string) (store.HostView, error)
 	AddHost(context.Context, store.HostRecord) (store.HostView, error)
+	CreateManagedHost(context.Context, store.HostRecord, string) (store.HostView, error)
 	UpdateHost(context.Context, string, store.HostRecord) (store.HostView, error)
 	DeleteHost(context.Context, string) error
 	Targets(context.Context) ([]store.TargetView, error)
@@ -99,6 +97,11 @@ func (a hostManagementRepositoryAdapter) Host(ctx context.Context, id string) (s
 
 func (a hostManagementRepositoryAdapter) AddHost(ctx context.Context, record service.HostManagementHostRecord) (service.HostManagementHostView, error) {
 	view, err := a.repository.AddHost(ctx, store.HostRecord{ID: record.ID, Name: record.Name, Group: record.Group, Address: record.Address, Port: record.Port, Protocol: record.Protocol, Remark: record.Remark, Status: record.Status})
+	return hostManagementHostView(view), err
+}
+
+func (a hostManagementRepositoryAdapter) CreateManagedHost(ctx context.Context, record service.HostManagementHostRecord, creatorID string) (service.HostManagementHostView, error) {
+	view, err := a.repository.CreateManagedHost(ctx, store.HostRecord{ID: record.ID, Name: record.Name, Group: record.Group, Address: record.Address, Port: record.Port, Protocol: record.Protocol, Remark: record.Remark, Status: record.Status}, creatorID)
 	return hostManagementHostView(view), err
 }
 
@@ -164,7 +167,7 @@ func hostManagementHostView(view store.HostView) service.HostManagementHostView 
 }
 
 func hostManagementTargetView(view store.TargetView) service.HostManagementTargetView {
-	return service.HostManagementTargetView{ID: view.ID, HostID: view.HostID, ResourceType: view.ResourceType, ResourceID: view.ResourceID, ResourceSeq: view.ResourceSeq, HostResourceID: view.HostResourceID, Name: view.Name, Group: view.Group, Remark: view.Remark, ExpiresAt: view.ExpiresAt, Status: view.Status, Host: view.Host, Port: view.Port, Protocol: view.Protocol, Username: view.Username, Domain: view.Domain, AuthMethods: view.AuthMethods, InsecureIgnoreHostKey: view.InsecureIgnoreHostKey, HostKeyFingerprint: view.HostKeyFingerprint, KnownHostsPath: view.KnownHostsPath, RDPSecurity: view.RDPSecurity, RDPIgnoreCertificate: view.RDPIgnoreCertificate, RDPCertFingerprints: view.RDPCertFingerprints, RDPApprovalRequired: view.RDPApprovalRequired, RDPClipboardRead: view.RDPClipboardRead, RDPClipboardWrite: view.RDPClipboardWrite, RDPFileUpload: view.RDPFileUpload, RDPFileDownload: view.RDPFileDownload, RDPDriveMapping: view.RDPDriveMapping, CanManage: view.CanManage}
+	return service.HostManagementTargetView{ID: view.ID, HostID: view.HostID, ResourceType: view.ResourceType, ResourceID: view.ResourceID, ResourceSeq: view.ResourceSeq, HostResourceID: view.HostResourceID, Name: view.Name, Group: view.Group, Remark: view.Remark, ExpiresAt: view.ExpiresAt, Status: view.Status, HostStatus: view.HostStatus, Host: view.Host, Port: view.Port, Protocol: view.Protocol, Username: view.Username, Domain: view.Domain, AuthMethods: view.AuthMethods, InsecureIgnoreHostKey: view.InsecureIgnoreHostKey, HostKeyFingerprint: view.HostKeyFingerprint, KnownHostsPath: view.KnownHostsPath, RDPSecurity: view.RDPSecurity, RDPIgnoreCertificate: view.RDPIgnoreCertificate, RDPCertFingerprints: view.RDPCertFingerprints, RDPApprovalRequired: view.RDPApprovalRequired, RDPClipboardRead: view.RDPClipboardRead, RDPClipboardWrite: view.RDPClipboardWrite, RDPFileUpload: view.RDPFileUpload, RDPFileDownload: view.RDPFileDownload, RDPDriveMapping: view.RDPDriveMapping, CanManage: view.CanManage}
 }
 
 func hostManagementTargetConfig(config store.TargetConfig) service.HostManagementTargetConfig {
@@ -185,11 +188,7 @@ type adminDatabaseRepository interface {
 }
 
 type adminApplicationRepository interface {
-	Applications(context.Context) []store.ApplicationView
-	Application(context.Context, string) (store.ApplicationView, error)
-	AddApplication(context.Context, store.ApplicationInput) (store.ApplicationView, error)
-	UpdateApplication(context.Context, string, store.ApplicationInput) (store.ApplicationView, error)
-	DeleteApplication(context.Context, string) error
+	service.ApplicationRepository
 }
 
 type adminContainerRepository interface {

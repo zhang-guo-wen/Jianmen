@@ -53,6 +53,7 @@ type TargetView struct {
 	Remark                string   `json:"remark,omitempty"`
 	ExpiresAt             string   `json:"expires_at,omitempty"`
 	Status                string   `json:"status"`
+	HostStatus            string   `json:"-"`
 	Host                  string   `json:"host"`
 	Port                  int      `json:"port"`
 	Protocol              string   `json:"protocol"`

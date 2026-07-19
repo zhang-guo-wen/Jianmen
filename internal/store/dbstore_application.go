@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"jianmen/internal/model"
 )
@@ -25,6 +26,14 @@ func (s *DBStore) Applications(ctx context.Context) []ApplicationView {
 	return views
 }
 
+func (s *DBStore) ListApplications(ctx context.Context) []model.Application {
+	var applications []model.Application
+	if err := s.db.WithContext(ctx).Order("name ASC").Find(&applications).Error; err != nil {
+		return nil
+	}
+	return applications
+}
+
 func (s *DBStore) Application(ctx context.Context, id string) (ApplicationView, error) {
 	id = strings.TrimSpace(id)
 	var app model.Application
@@ -35,6 +44,18 @@ func (s *DBStore) Application(ctx context.Context, id string) (ApplicationView, 
 		return ApplicationView{}, err
 	}
 	return applicationView(app), nil
+}
+
+func (s *DBStore) GetApplication(ctx context.Context, id string) (model.Application, error) {
+	id = strings.TrimSpace(id)
+	var application model.Application
+	if err := s.db.WithContext(ctx).First(&application, "id = ?", id).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return model.Application{}, fmt.Errorf("%w: %q", ErrApplicationNotFound, id)
+		}
+		return model.Application{}, err
+	}
+	return application, nil
 }
 
 func applicationView(app model.Application) ApplicationView {
@@ -61,8 +82,30 @@ func applicationView(app model.Application) ApplicationView {
 }
 
 func (s *DBStore) AddApplication(ctx context.Context, input ApplicationInput) (ApplicationView, error) {
-	if err := validateApplicationInput(input); err != nil {
+	application, err := s.createApplication(ctx, input, "")
+	if err != nil {
 		return ApplicationView{}, err
+	}
+	return applicationView(application), nil
+}
+
+// CreateManagedApplication atomically creates the application resource and, when
+// creatorID is provided, the creator's management grant.
+func (s *DBStore) CreateManagedApplication(
+	ctx context.Context,
+	input model.Application,
+	creatorID string,
+) (model.Application, error) {
+	return s.createApplication(ctx, applicationInputFromModel(input), creatorID)
+}
+
+func (s *DBStore) createApplication(
+	ctx context.Context,
+	input ApplicationInput,
+	creatorID string,
+) (model.Application, error) {
+	if err := validateApplicationInput(input); err != nil {
+		return model.Application{}, err
 	}
 	app := model.Application{
 		Name:           strings.TrimSpace(input.Name),
@@ -74,10 +117,12 @@ func (s *DBStore) AddApplication(ctx context.Context, input ApplicationInput) (A
 		ListenPort:     input.ListenPort,
 		AppGroup:       strings.TrimSpace(input.AppGroup),
 		Remark:         strings.TrimSpace(input.Remark),
+		Status:         strings.TrimSpace(input.Status),
 	}
 	if app.Name == "" {
 		app.Name = app.Address
 	}
+	creatorID = strings.TrimSpace(creatorID)
 	if err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Create(&app).Error; err != nil {
 			return err
@@ -85,27 +130,67 @@ func (s *DBStore) AddApplication(ctx context.Context, input ApplicationInput) (A
 		if err := ensureResourceGroup(tx, app.AppGroup); err != nil {
 			return err
 		}
-		return s.syncResourceTx(tx, model.ResourceTypeApplication, app.ID, app.Name, "")
+		if err := s.syncResourceTx(tx, model.ResourceTypeApplication, app.ID, app.Name, ""); err != nil {
+			return err
+		}
+		if creatorID == "" {
+			return nil
+		}
+		var creatorCount int64
+		if err := tx.Model(&model.User{}).Where("id = ?", creatorID).Count(&creatorCount).Error; err != nil {
+			return fmt.Errorf("check application creator: %w", err)
+		}
+		if creatorCount == 0 {
+			return fmt.Errorf("application creator not found: %q", creatorID)
+		}
+		grant := model.ResourceGrant{
+			PrincipalType: "user",
+			PrincipalID:   creatorID,
+			ResourceType:  model.ResourceTypeApplication,
+			ResourceID:    app.ID,
+			Effect:        model.PermissionEffectAllow,
+		}
+		if err := tx.Clauses(clause.OnConflict{
+			Columns: []clause.Column{
+				{Name: "principal_type"},
+				{Name: "principal_id"},
+				{Name: "resource_type"},
+				{Name: "resource_id"},
+				{Name: "effect"},
+			},
+			DoNothing: true,
+		}).Create(&grant).Error; err != nil {
+			return fmt.Errorf("create application creator grant: %w", err)
+		}
+		return nil
 	}); err != nil {
-		return ApplicationView{}, err
+		return model.Application{}, err
 	}
-	return applicationView(app), nil
+	return app, nil
 }
 
 func (s *DBStore) UpdateApplication(ctx context.Context, id string, input ApplicationInput) (ApplicationView, error) {
+	application, err := s.updateApplication(ctx, id, input)
+	if err != nil {
+		return ApplicationView{}, err
+	}
+	return applicationView(application), nil
+}
+
+func (s *DBStore) updateApplication(ctx context.Context, id string, input ApplicationInput) (model.Application, error) {
 	id = strings.TrimSpace(id)
 	var app model.Application
 	if err := s.db.WithContext(ctx).First(&app, "id = ?", id).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return ApplicationView{}, fmt.Errorf("%w: %q", ErrApplicationNotFound, id)
+			return model.Application{}, fmt.Errorf("%w: %q", ErrApplicationNotFound, id)
 		}
-		return ApplicationView{}, err
+		return model.Application{}, err
 	}
 	if input.ListenPort <= 0 {
 		input.ListenPort = app.ListenPort
 	}
 	if err := validateApplicationInput(input); err != nil {
-		return ApplicationView{}, err
+		return model.Application{}, err
 	}
 
 	app.Name = strings.TrimSpace(input.Name)
@@ -132,9 +217,17 @@ func (s *DBStore) UpdateApplication(ctx context.Context, id string, input Applic
 		}
 		return s.syncResourceTx(tx, model.ResourceTypeApplication, app.ID, app.Name, "")
 	}); err != nil {
-		return ApplicationView{}, err
+		return model.Application{}, err
 	}
-	return applicationView(app), nil
+	return app, nil
+}
+
+func (s *DBStore) UpdateManagedApplication(
+	ctx context.Context,
+	id string,
+	input model.Application,
+) (model.Application, error) {
+	return s.updateApplication(ctx, id, applicationInputFromModel(input))
 }
 
 func validateApplicationInput(input ApplicationInput) error {
@@ -182,4 +275,23 @@ func (s *DBStore) DeleteApplication(ctx context.Context, id string) error {
 		}
 		return tx.Delete(&app).Error
 	})
+}
+
+func (s *DBStore) DeleteManagedApplication(ctx context.Context, id string) error {
+	return s.DeleteApplication(ctx, id)
+}
+
+func applicationInputFromModel(input model.Application) ApplicationInput {
+	return ApplicationInput{
+		Name:           input.Name,
+		Address:        input.Address,
+		EntryPath:      input.EntryPath,
+		InternalScheme: input.InternalScheme,
+		InternalHost:   input.InternalHost,
+		InternalPort:   input.InternalPort,
+		ListenPort:     input.ListenPort,
+		AppGroup:       input.AppGroup,
+		Remark:         input.Remark,
+		Status:         input.Status,
+	}
 }

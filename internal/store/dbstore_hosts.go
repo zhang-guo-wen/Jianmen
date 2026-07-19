@@ -97,6 +97,16 @@ func hostIDs(hosts []model.Host) []string {
 }
 
 func (s *DBStore) AddHost(ctx context.Context, host HostRecord) (HostView, error) {
+	return s.createHost(ctx, host, "")
+}
+
+// CreateManagedHost atomically creates the host, its resource row, and the
+// non-super-administrator creator grant when creatorID is provided.
+func (s *DBStore) CreateManagedHost(ctx context.Context, host HostRecord, creatorID string) (HostView, error) {
+	return s.createHost(ctx, host, strings.TrimSpace(creatorID))
+}
+
+func (s *DBStore) createHost(ctx context.Context, host HostRecord, creatorID string) (HostView, error) {
 	if err := validateHostProtocol(host.Protocol); err != nil {
 		return HostView{}, err
 	}
@@ -120,7 +130,39 @@ func (s *DBStore) AddHost(ctx context.Context, host HostRecord) (HostView, error
 		if err := ensureResourceGroup(tx, normalized.Group); err != nil {
 			return err
 		}
-		return s.syncResourceTx(tx, model.ResourceTypeHost, m.ID, hostResourceName(m), "")
+		if err := s.syncResourceTx(tx, model.ResourceTypeHost, m.ID, hostResourceName(m), ""); err != nil {
+			return err
+		}
+		if creatorID == "" {
+			return nil
+		}
+		var creatorCount int64
+		if err := tx.Model(&model.User{}).Where("id = ?", creatorID).Count(&creatorCount).Error; err != nil {
+			return fmt.Errorf("check host creator: %w", err)
+		}
+		if creatorCount == 0 {
+			return fmt.Errorf("host creator not found: %q", creatorID)
+		}
+		grant := model.ResourceGrant{
+			PrincipalType: "user",
+			PrincipalID:   creatorID,
+			ResourceType:  model.ResourceTypeHost,
+			ResourceID:    m.ID,
+			Effect:        model.PermissionEffectAllow,
+		}
+		if err := tx.Clauses(clause.OnConflict{
+			Columns: []clause.Column{
+				{Name: "principal_type"},
+				{Name: "principal_id"},
+				{Name: "resource_type"},
+				{Name: "resource_id"},
+				{Name: "effect"},
+			},
+			DoNothing: true,
+		}).Create(&grant).Error; err != nil {
+			return fmt.Errorf("create host creator grant: %w", err)
+		}
+		return nil
 	}); err != nil {
 		return HostView{}, fmt.Errorf("create host: %w", err)
 	}

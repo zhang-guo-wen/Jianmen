@@ -149,7 +149,7 @@ func (s *Server) handleAITokens(w http.ResponseWriter, r *http.Request) {
 	}
 	switch r.Method {
 	case http.MethodGet:
-		tokens, err := s.aiTokens.ListAIAccessTokens(r.Context(), userID)
+		tokens, err := s.aiAccessTokens.List(r.Context(), userID)
 		if err != nil {
 			s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
 			return
@@ -244,7 +244,7 @@ func (s *Server) handleAIToken(w http.ResponseWriter, r *http.Request) {
 	id := parts[0]
 	switch r.Method {
 	case http.MethodGet:
-		token, err := s.aiTokens.AIAccessToken(r.Context(), userIDFromRequest(r), id)
+		token, err := s.aiAccessTokens.Get(r.Context(), userIDFromRequest(r), id)
 		if err != nil {
 			if errors.Is(err, store.ErrAIAccessTokenNotFound) {
 				s.writeErrorText(w, r, http.StatusNotFound, "token not found")
@@ -255,7 +255,7 @@ func (s *Server) handleAIToken(w http.ResponseWriter, r *http.Request) {
 		}
 		s.writeJSON(w, r, http.StatusOK, aiTokenResponse(token))
 	case http.MethodDelete:
-		if err := s.aiTokens.RevokeAIAccessToken(r.Context(), userIDFromRequest(r), id, time.Now().UTC()); err != nil {
+		if err := s.aiAccessTokens.Revoke(r.Context(), userIDFromRequest(r), id, time.Now().UTC()); err != nil {
 			if errors.Is(err, store.ErrAIAccessTokenNotFound) {
 				s.writeErrorText(w, r, http.StatusNotFound, "token not found")
 				return
@@ -278,12 +278,7 @@ func (s *Server) handleAIReissue(w http.ResponseWriter, r *http.Request, tokenID
 		return
 	}
 	now := time.Now().UTC()
-	tokenService, err := s.aiAccessTokenService()
-	if err != nil {
-		s.writeErrorText(w, r, http.StatusInternalServerError, "AI access token service is unavailable")
-		return
-	}
-	result, err := tokenService.Reissue(
+	result, err := s.aiAccessTokens.Reissue(
 		r.Context(),
 		userIDFromRequest(r),
 		tokenID,
@@ -312,10 +307,6 @@ func (s *Server) handleAIReissue(w http.ResponseWriter, r *http.Request, tokenID
 	})
 }
 
-func (s *Server) aiAccessTokenService() (*service.AIAccessTokenService, error) {
-	return service.NewAIAccessTokenService(s.aiTokens)
-}
-
 func (s *Server) handleAIRefresh(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		w.Header().Set("Allow", http.MethodPost)
@@ -327,30 +318,27 @@ func (s *Server) handleAIRefresh(w http.ResponseWriter, r *http.Request) {
 		s.writeErrorText(w, r, http.StatusBadRequest, "refresh_token is required")
 		return
 	}
-	accessTTL := aiAccessTokenDefaultTTL
-	refreshTTL := aiRefreshTokenDefaultTTL
-	issued, err := service.IssueAIAccessToken(time.Now().UTC(), accessTTL, refreshTTL)
+	result, err := s.aiAccessTokens.Refresh(
+		r.Context(),
+		request.RefreshToken,
+		time.Now().UTC(),
+		aiAccessTokenDefaultTTL,
+		aiRefreshTokenDefaultTTL,
+	)
 	if err != nil {
-		s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
-		return
-	}
-	rotated, err := s.aiTokens.RotateAIAccessToken(r.Context(), service.HashAIAccessToken(request.RefreshToken), model.AIAccessToken{
-		AccessTokenHash: issued.AccessTokenHash, RefreshTokenHash: issued.RefreshTokenHash,
-		AccessExpiresAt: issued.AccessExpiresAt, RefreshExpiresAt: issued.RefreshExpiresAt,
-	}, time.Now().UTC())
-	if err != nil {
-		if errors.Is(err, store.ErrAIAccessTokenInvalid) {
+		if errors.Is(err, store.ErrAIAccessTokenInvalid) || errors.Is(err, service.ErrInvalidAIAccessToken) {
 			s.writeErrorText(w, r, http.StatusUnauthorized, "invalid or expired refresh token")
 			return
 		}
 		s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
 		return
 	}
+	rotated := result.Token
 	s.logger.Info("AI access token refreshed", "user_id", rotated.UserID, "token_id", rotated.ID)
 	s.writeJSON(w, r, http.StatusOK, map[string]any{
 		"id": rotated.ID, "name": rotated.Name,
-		"access_token": issued.AccessToken, "refresh_token": issued.RefreshToken,
-		"access_expires_at": issued.AccessExpiresAt, "refresh_expires_at": issued.RefreshExpiresAt,
+		"access_token": result.AccessToken, "refresh_token": result.RefreshToken,
+		"access_expires_at": rotated.AccessExpiresAt, "refresh_expires_at": rotated.RefreshExpiresAt,
 	})
 }
 
@@ -373,13 +361,9 @@ func (s *Server) withAIToken(next http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 		now := time.Now().UTC()
-		stored, err := s.aiTokens.AuthenticateAIAccessToken(r.Context(), service.HashAIAccessToken(token), now)
+		stored, err := s.aiAccessTokens.Authenticate(r.Context(), token, now)
 		if err != nil {
 			s.writeErrorText(w, r, http.StatusUnauthorized, "invalid or expired AI token")
-			return
-		}
-		if stored.TemporaryAccountID != "" && (stored.TemporaryAccount.Status != "active" || (stored.TemporaryAccount.ExpiresAt != nil && !stored.TemporaryAccount.ExpiresAt.After(now))) {
-			s.writeErrorText(w, r, http.StatusUnauthorized, "AI authorization expired or disabled")
 			return
 		}
 		ctx := r.Context()

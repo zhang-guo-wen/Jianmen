@@ -78,6 +78,10 @@ func relayGatewayConnectionWithDrainTimeout(
 	observer queryObserver,
 	drainTimeout time.Duration,
 ) {
+	// The relay owns the concurrency boundary. Normalize every observer here so
+	// callers cannot accidentally expose a stateful protocol observer to both
+	// copy goroutines without synchronization.
+	observer = serializeRelayObserver(observer)
 	relay := newRelayCoordinator(client, upstream)
 	results := make(chan relayResult, 2)
 	go func() {

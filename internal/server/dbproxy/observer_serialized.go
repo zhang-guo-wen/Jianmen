@@ -38,7 +38,7 @@ func newQueryObserver(protocol string, sink querySink) queryObserver {
 	default:
 		return noopObserver{}
 	}
-	return &serializedQueryObserver{observer: observer}
+	return serializeRelayObserver(observer)
 }
 
 type noopObserver struct{}
@@ -52,6 +52,13 @@ func (noopObserver) ErrorResponse(_ queryDecision) []byte       { return nil }
 type serializedQueryObserver struct {
 	mu       sync.Mutex
 	observer queryObserver
+}
+
+func serializeRelayObserver(observer queryObserver) queryObserver {
+	if _, ok := observer.(*serializedQueryObserver); ok {
+		return observer
+	}
+	return &serializedQueryObserver{observer: observer}
 }
 
 func (o *serializedQueryObserver) ObserveClientBytes(data []byte) *queryDecision {

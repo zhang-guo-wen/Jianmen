@@ -24,7 +24,7 @@ func (a aiResourceRepositoryAdapter) ListHostAccounts(ctx context.Context) ([]se
 	}
 	hostStatuses := make(map[string]string, len(hosts))
 	for _, host := range hosts {
-		hostStatuses[host.ID] = host.Status
+		hostStatuses[host.ID] = host.LifecycleStatus
 	}
 	accounts := make([]service.AIHostAccountMetadata, 0, len(targets))
 	for _, target := range targets {
@@ -42,7 +42,7 @@ func (a aiResourceRepositoryAdapter) HostAccount(ctx context.Context, id string)
 	if err != nil {
 		return service.AIHostAccountMetadata{}, aiResourceRepositoryError(err)
 	}
-	return hostAccountMetadata(target, host.Status), nil
+	return hostAccountMetadata(target, host.LifecycleStatus), nil
 }
 
 func (a aiResourceRepositoryAdapter) ListDatabaseAccounts(ctx context.Context) ([]service.AIDatabaseAccountMetadata, error) {
@@ -81,9 +81,10 @@ func hostAccountMetadata(target store.TargetView, parentStatus string) service.A
 	return service.AIHostAccountMetadata{
 		ID: target.ID, HostID: target.HostID,
 		Name: target.Name, Group: target.Group, Remark: target.Remark,
-		Address: target.Host, Port: target.Port, Username: target.Username,
+		Address: target.Host, Port: target.Port, Protocol: target.Protocol, Username: target.Username,
 		ResourceID: target.ResourceID, ResourceSeq: target.ResourceSeq,
-		Status: target.Status, ExpiresAt: target.ExpiresAt, ParentStatus: parentStatus,
+		Status: target.Status, LifecycleStatus: target.LifecycleStatus,
+		ExpiresAt: target.ExpiresAt, ParentStatus: parentStatus,
 	}
 }
 

@@ -52,12 +52,12 @@ func (s *aiResourceDatabaseSourceStub) ListDatabaseInstances(context.Context) ([
 func TestAIResourceRepositoryAdapterBatchesParentMetadata(t *testing.T) {
 	hosts := &aiResourceHostSourceStub{
 		targets: []store.TargetView{
-			{ID: "ha-1", HostID: "h-1"},
-			{ID: "ha-2", HostID: "h-2"},
+			{ID: "ha-1", HostID: "h-1", Protocol: "ssh", LifecycleStatus: "active"},
+			{ID: "ha-2", HostID: "h-2", Protocol: "rdp", LifecycleStatus: "revoked"},
 		},
 		hosts: []store.HostView{
-			{ID: "h-1", Status: "active"},
-			{ID: "h-2", Status: "disabled"},
+			{ID: "h-1", Status: "active", LifecycleStatus: "active"},
+			{ID: "h-2", Status: "disabled", LifecycleStatus: "disabled"},
 		},
 	}
 	databases := &aiResourceDatabaseSourceStub{
@@ -86,7 +86,9 @@ func TestAIResourceRepositoryAdapterBatchesParentMetadata(t *testing.T) {
 	if databases.accountsCalls != 1 || databases.instancesCalls != 1 {
 		t.Fatalf("database source calls = accounts %d, instances %d", databases.accountsCalls, databases.instancesCalls)
 	}
-	if len(hostMetadata) != 2 || hostMetadata[0].ParentStatus != "active" || hostMetadata[1].ParentStatus != "disabled" {
+	if len(hostMetadata) != 2 ||
+		hostMetadata[0].LifecycleStatus != "active" || hostMetadata[0].ParentStatus != "active" || hostMetadata[0].Protocol != "ssh" ||
+		hostMetadata[1].LifecycleStatus != "revoked" || hostMetadata[1].ParentStatus != "disabled" || hostMetadata[1].Protocol != "rdp" {
 		t.Fatalf("host parent metadata = %#v", hostMetadata)
 	}
 	if len(databaseMetadata) != 2 || databaseMetadata[0].ParentStatus != "active" || databaseMetadata[1].ParentStatus != "disabled" {

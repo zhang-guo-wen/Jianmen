@@ -12,7 +12,7 @@ import (
 func TestAIResourceDependencyFailuresFailClosed(t *testing.T) {
 	now := time.Date(2026, 7, 20, 12, 0, 0, 0, time.UTC)
 	host := AIHostAccountMetadata{
-		ID: "host", Status: "enabled", ParentStatus: "active", ResourceID: "H001",
+		ID: "host", Protocol: "ssh", Status: "enabled", LifecycleStatus: "active", ParentStatus: "active", ResourceID: "H001",
 	}
 	repositoryErr := errors.New("repository unavailable")
 	authorizationErr := errors.New("authorization unavailable")
@@ -100,7 +100,7 @@ func TestAIResourceContextPropagatesToEveryBoundary(t *testing.T) {
 	ctx := context.WithValue(context.Background(), key, "expected")
 	repository := &aiResourceRepositoryStub{
 		hosts: []AIHostAccountMetadata{{
-			ID: "host", Status: "enabled", ParentStatus: "active", ResourceID: "H001",
+			ID: "host", Protocol: "ssh", Status: "enabled", LifecycleStatus: "active", ParentStatus: "active", ResourceID: "H001",
 		}},
 	}
 	authorizer := &aiResourceAuthorizerStub{allowed: map[string]bool{
@@ -119,6 +119,56 @@ func TestAIResourceContextPropagatesToEveryBoundary(t *testing.T) {
 		if got := received.Value(key); got != "expected" {
 			t.Fatalf("propagated context value = %v", got)
 		}
+	}
+}
+
+func TestAIResourceHostProtocolAndStatusFailClosed(t *testing.T) {
+	tests := []struct {
+		name         string
+		protocol     string
+		status       string
+		parentStatus string
+	}{
+		{name: "rdp protocol", protocol: "rdp", status: "enabled", parentStatus: "active"},
+		{name: "empty protocol", protocol: "", status: "enabled", parentStatus: "active"},
+		{name: "unknown protocol", protocol: "telnet", status: "enabled", parentStatus: "active"},
+		{name: "pending account", protocol: "ssh", status: "pending", parentStatus: "active"},
+		{name: "revoked account", protocol: "ssh", status: "revoked", parentStatus: "active"},
+		{name: "empty account status", protocol: "ssh", status: "", parentStatus: "active"},
+		{name: "unknown account status", protocol: "ssh", status: "unknown", parentStatus: "active"},
+		{name: "pending parent host", protocol: "ssh", status: "enabled", parentStatus: "pending"},
+		{name: "empty parent host status", protocol: "ssh", status: "enabled", parentStatus: ""},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			const resourceID = "host-unavailable"
+			repository := &aiResourceRepositoryStub{
+				hosts: []AIHostAccountMetadata{{
+					ID: resourceID, Protocol: test.protocol,
+					Status: "enabled", LifecycleStatus: test.status, ParentStatus: test.parentStatus,
+					ResourceID: "H001",
+				}},
+			}
+			authorizer := &aiResourceAuthorizerStub{allowed: map[string]bool{
+				model.ResourceTypeHostAccount + "/" + resourceID: true,
+			}}
+			sessions := &aiResourceSessionCreatorStub{session: AIResourceSession{ID: "abc12", Seq: 1}}
+			service := newAIResourceTestService(t, repository, authorizer, sessions, time.Now())
+
+			resources, err := service.List(context.Background(), "actor")
+			if err != nil || len(resources) != 0 {
+				t.Fatalf("list resources = %#v, error = %v", resources, err)
+			}
+			if _, err := service.Get(context.Background(), "actor", model.ResourceTypeHostAccount, resourceID); !errors.Is(err, ErrAIResourceNotFound) {
+				t.Fatalf("get error = %v, want not found", err)
+			}
+			if _, err := service.CreateSession(context.Background(), "actor", model.ResourceTypeHostAccount, resourceID); !errors.Is(err, ErrAIResourceNotFound) {
+				t.Fatalf("session error = %v, want not found", err)
+			}
+			if sessions.calls != 0 {
+				t.Fatalf("session creator called %d times", sessions.calls)
+			}
+		})
 	}
 }
 

@@ -122,11 +122,11 @@ func TestAIResourceListFiltersUnauthorizedAndUnavailableResources(t *testing.T) 
 	future := now.Add(time.Hour)
 	repository := &aiResourceRepositoryStub{
 		hosts: []AIHostAccountMetadata{
-			{ID: "host-visible", Status: "enabled", ParentStatus: "active", ResourceID: "H001"},
-			{ID: "host-other-user", Status: "enabled", ParentStatus: "active", ResourceID: "H002"},
-			{ID: "host-disabled", Status: "disabled", ParentStatus: "active"},
-			{ID: "host-expired", Status: "enabled", ParentStatus: "active", ExpiresAt: expired.Format(time.RFC3339Nano)},
-			{ID: "host-parent-disabled", Status: "enabled", ParentStatus: "disabled"},
+			{ID: "host-visible", Protocol: "ssh", Status: "enabled", LifecycleStatus: "active", ParentStatus: "active", ResourceID: "H001"},
+			{ID: "host-other-user", Protocol: "ssh", Status: "enabled", LifecycleStatus: "active", ParentStatus: "active", ResourceID: "H002"},
+			{ID: "host-disabled", Protocol: "ssh", Status: "disabled", LifecycleStatus: "disabled", ParentStatus: "active"},
+			{ID: "host-expired", Protocol: "ssh", Status: "enabled", LifecycleStatus: "active", ParentStatus: "active", ExpiresAt: expired.Format(time.RFC3339Nano)},
+			{ID: "host-parent-disabled", Protocol: "ssh", Status: "enabled", LifecycleStatus: "active", ParentStatus: "disabled"},
 		},
 		databases: []AIDatabaseAccountMetadata{
 			{ID: "db-visible", Status: "active", ParentStatus: "active", ResourceID: "D001", ExpiresAt: &future},
@@ -173,7 +173,7 @@ func TestAIResourceListFiltersUnauthorizedAndUnavailableResources(t *testing.T) 
 
 func TestAIResourceGetHidesUnauthorizedAndUnsupportedResources(t *testing.T) {
 	repository := &aiResourceRepositoryStub{
-		hosts: []AIHostAccountMetadata{{ID: "host-a", Status: "enabled", ParentStatus: "active"}},
+		hosts: []AIHostAccountMetadata{{ID: "host-a", Protocol: "ssh", Status: "enabled", LifecycleStatus: "active", ParentStatus: "active"}},
 	}
 	authorizer := &aiResourceAuthorizerStub{allowed: map[string]bool{}}
 	service := newAIResourceTestService(t, repository, authorizer, &aiResourceSessionCreatorStub{}, time.Now())
@@ -198,9 +198,9 @@ func TestAIResourceUnavailableAccountsCannotGetOrCreateSession(t *testing.T) {
 		host         AIHostAccountMetadata
 		database     AIDatabaseAccountMetadata
 	}{
-		{name: "disabled host account", resourceType: model.ResourceTypeHostAccount, resourceID: "host-disabled", host: AIHostAccountMetadata{ID: "host-disabled", Status: "disabled", ParentStatus: "active"}},
-		{name: "expired host account", resourceType: model.ResourceTypeHostAccount, resourceID: "host-expired", host: AIHostAccountMetadata{ID: "host-expired", Status: "enabled", ParentStatus: "active", ExpiresAt: expired.Format(time.RFC3339Nano)}},
-		{name: "disabled host", resourceType: model.ResourceTypeHostAccount, resourceID: "host-parent", host: AIHostAccountMetadata{ID: "host-parent", Status: "enabled", ParentStatus: "disabled"}},
+		{name: "disabled host account", resourceType: model.ResourceTypeHostAccount, resourceID: "host-disabled", host: AIHostAccountMetadata{ID: "host-disabled", Protocol: "ssh", Status: "disabled", LifecycleStatus: "disabled", ParentStatus: "active"}},
+		{name: "expired host account", resourceType: model.ResourceTypeHostAccount, resourceID: "host-expired", host: AIHostAccountMetadata{ID: "host-expired", Protocol: "ssh", Status: "enabled", LifecycleStatus: "active", ParentStatus: "active", ExpiresAt: expired.Format(time.RFC3339Nano)}},
+		{name: "disabled host", resourceType: model.ResourceTypeHostAccount, resourceID: "host-parent", host: AIHostAccountMetadata{ID: "host-parent", Protocol: "ssh", Status: "enabled", LifecycleStatus: "active", ParentStatus: "disabled"}},
 		{name: "disabled database account", resourceType: model.ResourceTypeDatabaseAccount, resourceID: "db-disabled", database: AIDatabaseAccountMetadata{ID: "db-disabled", Status: "disabled", ParentStatus: "active"}},
 		{name: "expired database account", resourceType: model.ResourceTypeDatabaseAccount, resourceID: "db-expired", database: AIDatabaseAccountMetadata{ID: "db-expired", Status: "active", ParentStatus: "active", ExpiresAt: &expired}},
 		{name: "disabled database instance", resourceType: model.ResourceTypeDatabaseAccount, resourceID: "db-parent", database: AIDatabaseAccountMetadata{ID: "db-parent", Status: "active", ParentStatus: "disabled"}},
@@ -236,7 +236,7 @@ func TestAIResourceUnavailableAccountsCannotGetOrCreateSession(t *testing.T) {
 func TestAIResourceSessionPreservesHostDatabaseAndRedisSemantics(t *testing.T) {
 	repository := &aiResourceRepositoryStub{
 		hosts: []AIHostAccountMetadata{{
-			ID: "host", Status: "enabled", ParentStatus: "active", ResourceID: "H001",
+			ID: "host", Protocol: "ssh", Status: "enabled", LifecycleStatus: "active", ParentStatus: "active", ResourceID: "H001",
 		}},
 		databases: []AIDatabaseAccountMetadata{
 			{ID: "database", Status: "active", ParentStatus: "active", ResourceID: "D001", ParentProtocol: "mysql"},

@@ -10,8 +10,12 @@ import (
 	"strings"
 	"time"
 
-	"jianmen/internal/model"
 	"jianmen/internal/service"
+)
+
+const (
+	aiResourceNotFoundMessage    = "resource not found or disabled"
+	aiResourceUnavailableMessage = "AI resource unavailable"
 )
 
 type aiResource struct {
@@ -70,9 +74,13 @@ func (s *Server) handleAIResources(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) listAIResources(w http.ResponseWriter, r *http.Request) {
+	if s.aiResources == nil {
+		s.writeAIResourceUnavailable(w, r, "list", errors.New("ai resource service unavailable"))
+		return
+	}
 	resources, err := s.aiResources.List(r.Context(), userIDFromRequest(r))
 	if err != nil {
-		s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
+		s.writeAIResourceUnavailable(w, r, "list", err)
 		return
 	}
 	items := make([]aiResource, len(resources))
@@ -83,9 +91,13 @@ func (s *Server) listAIResources(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) getAIResource(w http.ResponseWriter, r *http.Request, resourceType, resourceID string) {
+	if s.aiResources == nil {
+		s.writeAIResourceUnavailable(w, r, "get", errors.New("ai resource service unavailable"))
+		return
+	}
 	resource, err := s.aiResources.Get(r.Context(), userIDFromRequest(r), resourceType, resourceID)
 	if err != nil {
-		s.writeAIResourceError(w, r, err)
+		s.writeAIResourceError(w, r, "get", err)
 		return
 	}
 	s.writeJSON(w, r, http.StatusOK, aiResourceDetail{
@@ -99,12 +111,16 @@ func (s *Server) getAIResource(w http.ResponseWriter, r *http.Request, resourceT
 }
 
 func (s *Server) issueAIResourceCredential(w http.ResponseWriter, r *http.Request, resourceType, resourceID string) {
-	if resourceType != model.ResourceTypeHostAccount && resourceType != model.ResourceTypeDatabaseAccount {
-		s.writeErrorText(w, r, http.StatusNotFound, "unsupported resource type")
+	if s.aiResources == nil {
+		s.writeAIResourceUnavailable(w, r, "credentials", errors.New("ai resource service unavailable"))
+		return
+	}
+	if _, err := s.aiResources.Get(r.Context(), userIDFromRequest(r), resourceType, resourceID); err != nil {
+		s.writeAIResourceError(w, r, "credentials", err)
 		return
 	}
 	if s.connectionPassword == nil {
-		s.writeErrorText(w, r, http.StatusServiceUnavailable, "connection password service unavailable")
+		s.writeAIResourceUnavailable(w, r, "credentials", errors.New("connection password service unavailable"))
 		return
 	}
 	issued, err := s.connectionPassword.Issue(
@@ -116,7 +132,7 @@ func (s *Server) issueAIResourceCredential(w http.ResponseWriter, r *http.Reques
 		},
 	)
 	if err != nil {
-		s.writeConnectionPasswordServiceError(w, r, err)
+		s.writeAIResourceCredentialError(w, r, err)
 		return
 	}
 	s.writeJSON(w, r, http.StatusCreated, map[string]any{
@@ -126,9 +142,13 @@ func (s *Server) issueAIResourceCredential(w http.ResponseWriter, r *http.Reques
 }
 
 func (s *Server) issueAIResourceSession(w http.ResponseWriter, r *http.Request, resourceType, resourceID string) {
+	if s.aiResources == nil {
+		s.writeAIResourceUnavailable(w, r, "session", errors.New("ai resource service unavailable"))
+		return
+	}
 	result, err := s.aiResources.CreateSession(r.Context(), userIDFromRequest(r), resourceType, resourceID)
 	if err != nil {
-		s.writeAIResourceError(w, r, err)
+		s.writeAIResourceError(w, r, "session", err)
 		return
 	}
 	s.writeJSON(w, r, http.StatusCreated, map[string]any{
@@ -138,12 +158,35 @@ func (s *Server) issueAIResourceSession(w http.ResponseWriter, r *http.Request, 
 	})
 }
 
-func (s *Server) writeAIResourceError(w http.ResponseWriter, r *http.Request, err error) {
+func (s *Server) writeAIResourceError(w http.ResponseWriter, r *http.Request, operation string, err error) {
 	if errors.Is(err, service.ErrAIResourceNotFound) {
-		s.writeErrorText(w, r, http.StatusNotFound, "resource not found or disabled")
+		s.writeErrorText(w, r, http.StatusNotFound, aiResourceNotFoundMessage)
 		return
 	}
-	s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
+	s.writeAIResourceUnavailable(w, r, operation, err)
+}
+
+func (s *Server) writeAIResourceCredentialError(w http.ResponseWriter, r *http.Request, err error) {
+	if errors.Is(err, service.ErrConnectionPasswordTargetNotFound) ||
+		errors.Is(err, service.ErrConnectionPasswordForbidden) {
+		s.writeErrorText(w, r, http.StatusNotFound, aiResourceNotFoundMessage)
+		return
+	}
+	s.writeAIResourceUnavailable(w, r, "credentials", err)
+}
+
+func (s *Server) writeAIResourceUnavailable(w http.ResponseWriter, r *http.Request, operation string, err error) {
+	if s.logger != nil {
+		s.logger.Error(
+			"AI resource operation failed",
+			"operation", operation,
+			"user_id", userIDFromRequest(r),
+			"resource_type", operationResourceType(r.URL.Path),
+			"resource_id", operationResourceID(r.URL.Path),
+			"error", err,
+		)
+	}
+	s.writeErrorText(w, r, http.StatusInternalServerError, aiResourceUnavailableMessage)
 }
 
 func aiResourceResponse(resource service.AIResource) aiResource {

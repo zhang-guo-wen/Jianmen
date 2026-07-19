@@ -27,9 +27,10 @@ func (s *DBStore) hostView(ctx context.Context, m model.Host, accountCount ...in
 	return HostView{
 		ID: m.ID, Name: m.Name, Group: m.GroupName, Address: m.Address,
 		Port: m.Port, Protocol: normalizedHostProtocol(m.Protocol), Remark: m.Remark, Status: status,
-		AccountCount: count,
-		CreatedAt:    m.CreatedAt.Format(time.RFC3339),
-		UpdatedAt:    m.UpdatedAt.Format(time.RFC3339),
+		LifecycleStatus: strings.ToLower(strings.TrimSpace(m.Status)),
+		AccountCount:    count,
+		CreatedAt:       m.CreatedAt.Format(time.RFC3339),
+		UpdatedAt:       m.UpdatedAt.Format(time.RFC3339),
 	}
 }
 
@@ -226,6 +227,15 @@ func normalizedHostProtocol(protocol string) string {
 		return "rdp"
 	default:
 		return "ssh"
+	}
+}
+
+func storedResourceStatusActive(status string) bool {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "active", "enabled":
+		return true
+	default:
+		return false
 	}
 }
 

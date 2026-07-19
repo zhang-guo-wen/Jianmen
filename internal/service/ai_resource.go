@@ -34,19 +34,21 @@ type AIResource struct {
 
 // AIHostAccountMetadata is deliberately credential-free.
 type AIHostAccountMetadata struct {
-	ID           string
-	HostID       string
-	Name         string
-	Group        string
-	Remark       string
-	Address      string
-	Port         int
-	Username     string
-	ResourceID   string
-	ResourceSeq  int
-	Status       string
-	ExpiresAt    string
-	ParentStatus string
+	ID              string
+	HostID          string
+	Name            string
+	Group           string
+	Remark          string
+	Address         string
+	Port            int
+	Protocol        string
+	Username        string
+	ResourceID      string
+	ResourceSeq     int
+	Status          string
+	LifecycleStatus string
+	ExpiresAt       string
+	ParentStatus    string
 }
 
 // AIDatabaseAccountMetadata is deliberately credential-free and includes only
@@ -289,7 +291,8 @@ func supportedAIResourceType(resourceType string) bool {
 }
 
 func hostAccountAvailable(account AIHostAccountMetadata, now time.Time) bool {
-	return activeAIResourceStatus(account.Status) &&
+	return account.Protocol == "ssh" &&
+		activeAIResourceStatus(account.LifecycleStatus) &&
 		activeAIResourceStatus(account.ParentStatus) &&
 		unexpiredAIResourceTime(account.ExpiresAt, now)
 }

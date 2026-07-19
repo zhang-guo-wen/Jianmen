@@ -7,6 +7,8 @@ import (
 
 	"jianmen/internal/model"
 	"jianmen/internal/storage"
+
+	"gorm.io/gorm"
 )
 
 func TestApplicationsAndPlatformsCreateResourceGroups(t *testing.T) {
@@ -131,5 +133,85 @@ func TestApplicationWriteOperationsHonorsCanceledContext(t *testing.T) {
 	}
 	if err := db.First(&updated, "id = ?", "app-update").Error; err != nil {
 		t.Fatalf("application should still exist after canceled delete: %v", err)
+	}
+}
+
+func TestCreateManagedApplicationAtomicallyCreatesCreatorGrant(t *testing.T) {
+	db, err := storage.Open(storage.Config{Driver: storage.DriverSQLite, DSN: ":memory:"})
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	if err := storage.AutoMigrate(db); err != nil {
+		t.Fatalf("auto migrate: %v", err)
+	}
+	creator := model.User{ID: "creator-1", Username: "creator", Status: "active"}
+	if err := db.Create(&creator).Error; err != nil {
+		t.Fatalf("create creator: %v", err)
+	}
+	repository := NewDBStore(db)
+	application, err := repository.CreateManagedApplication(context.Background(), model.Application{
+		Name: "console", Address: "http://127.0.0.1:8080/", EntryPath: "/",
+		InternalScheme: "http", InternalHost: "127.0.0.1", InternalPort: 8080,
+		ListenPort: 47110, Status: "active",
+	}, creator.ID)
+	if err != nil {
+		t.Fatalf("create managed application: %v", err)
+	}
+	var grantCount int64
+	if err := db.Model(&model.ResourceGrant{}).
+		Where("principal_type = ? AND principal_id = ? AND resource_type = ? AND resource_id = ? AND effect = ?",
+			"user", creator.ID, model.ResourceTypeApplication, application.ID, model.PermissionEffectAllow).
+		Count(&grantCount).Error; err != nil {
+		t.Fatalf("count creator grants: %v", err)
+	}
+	if grantCount != 1 {
+		t.Fatalf("creator grant count = %d, want 1", grantCount)
+	}
+}
+
+func TestCreateManagedApplicationGrantFailureRollsBackApplication(t *testing.T) {
+	db, err := storage.Open(storage.Config{Driver: storage.DriverSQLite, DSN: ":memory:"})
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	if err := storage.AutoMigrate(db); err != nil {
+		t.Fatalf("auto migrate: %v", err)
+	}
+	creator := model.User{ID: "creator-rollback", Username: "creator-rollback", Status: "active"}
+	if err := db.Create(&creator).Error; err != nil {
+		t.Fatalf("create creator: %v", err)
+	}
+	const callbackName = "test:fail_application_creator_grant"
+	if err := db.Callback().Create().Before("gorm:create").Register(callbackName, func(tx *gorm.DB) {
+		if tx.Statement.Schema != nil && tx.Statement.Schema.Name == "ResourceGrant" {
+			tx.AddError(errors.New("injected creator grant failure"))
+		}
+	}); err != nil {
+		t.Fatalf("register create callback: %v", err)
+	}
+	defer db.Callback().Create().Remove(callbackName)
+
+	repository := NewDBStore(db)
+	_, err = repository.CreateManagedApplication(context.Background(), model.Application{
+		Name: "orphan", Address: "http://127.0.0.1:8080/", EntryPath: "/",
+		InternalScheme: "http", InternalHost: "127.0.0.1", InternalPort: 8080,
+		ListenPort: 47110, Status: "active",
+	}, creator.ID)
+	if err == nil {
+		t.Fatal("CreateManagedApplication() succeeded despite creator grant failure")
+	}
+	var applicationCount int64
+	if err := db.Model(&model.Application{}).Count(&applicationCount).Error; err != nil {
+		t.Fatalf("count applications: %v", err)
+	}
+	if applicationCount != 0 {
+		t.Fatalf("application count = %d, want 0 after transaction rollback", applicationCount)
+	}
+	var resourceCount int64
+	if err := db.Model(&model.Resource{}).Where("type = ?", model.ResourceTypeApplication).Count(&resourceCount).Error; err != nil {
+		t.Fatalf("count application resources: %v", err)
+	}
+	if resourceCount != 0 {
+		t.Fatalf("application resource count = %d, want 0 after transaction rollback", resourceCount)
 	}
 }

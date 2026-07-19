@@ -1,18 +1,17 @@
 package admin
 
 import (
-	"context"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	"jianmen/internal/model"
+	"jianmen/internal/service"
 	"jianmen/internal/storage"
+	"jianmen/internal/store"
 
 	"gorm.io/gorm"
 )
@@ -127,32 +126,6 @@ func TestInitSetupConcurrentRequestsCreateExactlyOneSuperAdministrator(t *testin
 	}
 }
 
-func TestAcquireSetupSlotHonorsContextCancellation(t *testing.T) {
-	server := &Server{}
-	release, err := server.acquireSetupSlot(context.Background())
-	if err != nil {
-		t.Fatalf("acquire setup slot: %v", err)
-	}
-	defer release()
-
-	ctx, cancel := context.WithCancel(context.Background())
-	result := make(chan error, 1)
-	go func() {
-		_, err := server.acquireSetupSlot(ctx)
-		result <- err
-	}()
-	cancel()
-
-	select {
-	case err := <-result:
-		if !errors.Is(err, context.Canceled) {
-			t.Fatalf("acquire canceled setup slot error = %v, want context canceled", err)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("acquire setup slot did not return after context cancellation")
-	}
-}
-
 func TestInitSetupAfterUpgradePreservesExistingUserAndRejectsSetup(t *testing.T) {
 	db, err := storage.Open(storage.Config{Driver: storage.DriverSQLite, DSN: ":memory:"})
 	if err != nil {
@@ -171,7 +144,7 @@ func TestInitSetupAfterUpgradePreservesExistingUserAndRejectsSetup(t *testing.T)
 
 	server, _ := newAdminDBTestServer(t)
 	server.db = db
-	server.dataDir = ""
+	replaceTestAdminAuth(t, server, db, server.browserSessions)
 	request := httptest.NewRequest(
 		http.MethodPost,
 		"/api/init/setup",
@@ -230,7 +203,12 @@ func newConcurrentInitSetupTestServers(t *testing.T) ([]*Server, *gorm.DB) {
 	for _, db := range []*gorm.DB{primaryDB, secondaryDB} {
 		server, _ := newAdminDBTestServer(t)
 		server.db = db
-		server.dataDir = ""
+		sessions, err := service.NewBrowserSessionService(store.NewDBStore(db))
+		if err != nil {
+			t.Fatalf("new concurrent browser session service: %v", err)
+		}
+		server.browserSessions = sessions
+		replaceTestAdminAuth(t, server, db, sessions)
 		servers = append(servers, server)
 		sqlDB, err := db.DB()
 		if err != nil {

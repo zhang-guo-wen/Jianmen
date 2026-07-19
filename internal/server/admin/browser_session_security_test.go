@@ -127,6 +127,7 @@ func TestSetupSessionFailureLeavesLoginRecoveryPath(t *testing.T) {
 		t.Fatal(err)
 	}
 	server.browserSessions = failingSessions
+	replaceTestAdminAuth(t, server, server.db, failingSessions)
 
 	setupRequest := httptest.NewRequest(http.MethodPost, "/api/init/setup", strings.NewReader(
 		`{"username":"recovery-admin","password":"Recovery-Password-123!","email":"admin@example.com"}`,
@@ -146,6 +147,7 @@ func TestSetupSessionFailureLeavesLoginRecoveryPath(t *testing.T) {
 	}
 
 	server.browserSessions = workingSessions
+	replaceTestAdminAuth(t, server, server.db, workingSessions)
 	loginRequest := httptest.NewRequest(http.MethodPost, "/api/login", strings.NewReader(
 		`{"username":"recovery-admin","password":"Recovery-Password-123!","captcha_payload":"verified"}`,
 	))

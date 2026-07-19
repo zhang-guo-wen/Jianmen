@@ -18,6 +18,7 @@ var errAdminStoreRequired = errors.New("admin store is required")
 // is composed from resource-scoped interfaces owned by the Admin consumer and
 // existing service repositories; Server retains the dependencies by domain.
 type adminRepository interface {
+	service.AdminAuthRepository
 	adminAIAccessTokenRepository
 	adminHostTargetRepository
 	adminDatabaseRepository
@@ -38,6 +39,7 @@ type adminRepository interface {
 // adminDependencies keeps the server coupled to resource-scoped repositories
 // instead of the application-wide repository aggregate.
 type adminDependencies struct {
+	adminAuth           service.AdminAuthRepository
 	aiTokens            adminAIAccessTokenRepository
 	hostTargets         adminHostTargetRepository
 	databases           adminDatabaseRepository
@@ -149,6 +151,7 @@ func resolveAdminDependencies(repository adminRepository) (adminDependencies, er
 		return adminDependencies{}, errAdminStoreRequired
 	}
 	return adminDependencies{
+		adminAuth:           repository,
 		aiTokens:            repository,
 		hostTargets:         repository,
 		databases:           repository,

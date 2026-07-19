@@ -874,8 +874,17 @@ func newAdminDBTestServer(t *testing.T) (*Server, *gorm.DB) {
 	if err != nil {
 		t.Fatalf("new browser session service: %v", err)
 	}
+	keyReader, err := store.NewFileAdminEncryptionKeyReader(dataDir)
+	if err != nil {
+		t.Fatalf("new admin encryption key reader: %v", err)
+	}
+	adminAuth, err := service.NewAdminAuthService(storeInst, browserSessions, keyReader)
+	if err != nil {
+		t.Fatalf("new admin auth service: %v", err)
+	}
 	server := &Server{
 		cfg:             cfg,
+		adminAuth:       adminAuth,
 		db:              db,
 		logger:          slog.New(slog.NewTextHandler(io.Discard, nil)),
 		dataDir:         dataDir,
@@ -899,6 +908,24 @@ func newAdminDBTestServer(t *testing.T) (*Server, *gorm.DB) {
 	applyTestAdminDependencies(t, server, storeInst)
 	applyTestAdminServices(t, server, storeInst)
 	return server, db
+}
+
+func replaceTestAdminAuth(
+	t *testing.T,
+	server *Server,
+	db *gorm.DB,
+	browserSessions *service.BrowserSessionService,
+) {
+	t.Helper()
+	keyReader, err := store.NewFileAdminEncryptionKeyReader(server.dataDir)
+	if err != nil {
+		t.Fatalf("replace admin encryption key reader: %v", err)
+	}
+	adminAuth, err := service.NewAdminAuthService(store.NewDBStore(db), browserSessions, keyReader)
+	if err != nil {
+		t.Fatalf("replace admin auth service: %v", err)
+	}
+	server.adminAuth = adminAuth
 }
 
 func asTestSuperAdmin(req *http.Request) *http.Request {

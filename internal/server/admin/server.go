@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log/slog"
 	"reflect"
-	"sync"
 
 	"jianmen/internal/config"
 	"jianmen/internal/handler/accessrequest"
@@ -14,12 +13,14 @@ import (
 	"jianmen/internal/online"
 	"jianmen/internal/server/appproxy"
 	"jianmen/internal/service"
+	"jianmen/internal/store"
 
 	"gorm.io/gorm"
 )
 
 type Server struct {
 	cfg                  *config.Config
+	adminAuth            *service.AdminAuthService
 	aiAccessTokens       *service.AIAccessTokenService
 	hostTargets          adminHostTargetRepository
 	databases            adminDatabaseRepository
@@ -56,8 +57,6 @@ type Server struct {
 	webRDP               *webrdp.Handler
 	accessRequests       *accessrequest.Handler
 	systemSettings       *systemsettings.Handler
-	setupOnce            sync.Once
-	setupSlot            chan struct{}
 }
 
 func New(
@@ -120,6 +119,14 @@ func New(
 	if err != nil {
 		return nil, fmt.Errorf("initialize AI access token service: %w", err)
 	}
+	keyReader, err := store.NewFileAdminEncryptionKeyReader(dataDir)
+	if err != nil {
+		return nil, fmt.Errorf("initialize admin encryption key reader: %w", err)
+	}
+	adminAuth, err := service.NewAdminAuthService(dependencies.adminAuth, browserSessions, keyReader)
+	if err != nil {
+		return nil, fmt.Errorf("initialize admin auth service: %w", err)
+	}
 	userManagement, err := service.NewUserService(dependencies.users)
 	if err != nil {
 		return nil, fmt.Errorf("initialize user service: %w", err)
@@ -163,7 +170,7 @@ func New(
 	}
 	return &Server{
 		cfg: cfg, db: db, logger: logger,
-		aiAccessTokens: aiAccessTokens, hostTargets: dependencies.hostTargets, databases: dependencies.databases,
+		adminAuth: adminAuth, aiAccessTokens: aiAccessTokens, hostTargets: dependencies.hostTargets, databases: dependencies.databases,
 		databaseManagement: databaseManagement, applicationService: applicationService,
 		containers: dependencies.containers, platformAccounts: dependencies.platformAccounts,
 		userSessionCreation: userSessionCreation, audit: dependencies.audit, connectionPassword: connectionPassword,

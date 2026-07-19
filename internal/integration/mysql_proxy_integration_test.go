@@ -68,7 +68,7 @@ func TestMySQLProxyCompatibilityAgainstDocker(t *testing.T) {
 
 			fixture := newMetadataFixture(t)
 			host, port := splitAddress(t, upstreamAddress)
-			instance, err := fixture.store.AddDatabaseInstance(jmstore.DatabaseInstanceInput{
+			instance, err := fixture.store.AddDatabaseInstance(context.Background(), jmstore.DatabaseInstanceInput{
 				Name:     "mysql-compat-" + sanitizeTestName(image),
 				Protocol: "mysql",
 				Address:  host,
@@ -80,6 +80,7 @@ func TestMySQLProxyCompatibilityAgainstDocker(t *testing.T) {
 				t.Fatalf("add MySQL compatibility instance: %v", err)
 			}
 			account, err := fixture.store.AddDatabaseAccount(
+				context.Background(),
 				instance.ID,
 				upstreamUser,
 				upstreamPassword,

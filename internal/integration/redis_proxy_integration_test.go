@@ -51,7 +51,7 @@ func TestDatabaseGatewayRedisAgainstDocker(t *testing.T) {
 
 			fixture := newMetadataFixture(t)
 			host, port := splitAddress(t, upstreamAddr)
-			instance, err := fixture.store.AddDatabaseInstance(jmstore.DatabaseInstanceInput{
+			instance, err := fixture.store.AddDatabaseInstance(context.Background(), jmstore.DatabaseInstanceInput{
 				Name: "docker-redis-" + sanitizeTestName(image), Protocol: "redis",
 				Address: host, Port: port, TLSMode: "disable",
 			})
@@ -59,6 +59,7 @@ func TestDatabaseGatewayRedisAgainstDocker(t *testing.T) {
 				t.Fatalf("add Redis instance: %v", err)
 			}
 			account, err := fixture.store.AddDatabaseAccount(
+				context.Background(),
 				instance.ID,
 				redisUpstreamUser,
 				redisUpstreamPassword,

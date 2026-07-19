@@ -215,7 +215,7 @@ func (s *Server) visibleDatabaseInstancesForActions(
 	if err != nil {
 		return nil, err
 	}
-	allAccounts, err := s.databases.DatabaseAccounts()
+	allAccounts, err := s.databases.DatabaseAccounts(r.Context())
 	if err != nil {
 		return nil, err
 	}

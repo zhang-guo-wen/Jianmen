@@ -218,7 +218,7 @@ func TestDatabaseProvisioningActivationMakesOldFenceUnableToDelete(t *testing.T)
 	); err != nil || deleted {
 		t.Fatalf("old fence deleted activated identity = %t, %v", deleted, err)
 	}
-	view, err := repository.DatabaseAccount(account.ID)
+	view, err := repository.DatabaseAccount(context.Background(), account.ID)
 	if err != nil || view.Status != "active" {
 		t.Fatalf("activated account was lost: %#v, %v", view, err)
 	}
@@ -337,7 +337,7 @@ func TestPendingProvisioningOperationIsInvisibleAndBlocksInstanceDelete(t *testi
 	now := time.Now().UTC()
 	operation := seedStoreProvisioningOperation(t, repository, db, now.Add(time.Minute))
 
-	accounts, err := repository.DatabaseAccounts()
+	accounts, err := repository.DatabaseAccounts(context.Background())
 	if err != nil {
 		t.Fatalf("list database accounts: %v", err)
 	}
@@ -346,18 +346,19 @@ func TestPendingProvisioningOperationIsInvisibleAndBlocksInstanceDelete(t *testi
 			t.Fatalf("pending operation appeared as ordinary account: %#v", account)
 		}
 	}
-	if _, err := repository.DatabaseAccount(operation.ID); !errors.Is(err, ErrDBAccountNotFound) {
+	if _, err := repository.DatabaseAccount(context.Background(), operation.ID); !errors.Is(err, ErrDBAccountNotFound) {
 		t.Fatalf("pending operation detail error = %v, want not found", err)
 	}
 	if _, err := repository.UpdateDatabaseAccount(
+		context.Background(),
 		operation.ID, "changed", "", "", "", nil, "active",
 	); !errors.Is(err, ErrDBAccountNotFound) {
 		t.Fatalf("pending operation update error = %v, want not found", err)
 	}
-	if err := repository.DeleteDatabaseAccount(operation.ID); !errors.Is(err, ErrDBAccountNotFound) {
+	if err := repository.DeleteDatabaseAccount(context.Background(), operation.ID); !errors.Is(err, ErrDBAccountNotFound) {
 		t.Fatalf("pending operation delete error = %v, want not found", err)
 	}
-	if err := repository.DeleteDatabaseInstance(operation.InstanceID); err == nil {
+	if err := repository.DeleteDatabaseInstance(context.Background(), operation.InstanceID); err == nil {
 		t.Fatal("instance with pending provisioning operation was deleted")
 	}
 	if _, err := repository.DatabaseProvisioningOperation(

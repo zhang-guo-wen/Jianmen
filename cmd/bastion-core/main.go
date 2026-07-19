@@ -21,9 +21,7 @@ import (
 func main() {
 	configPath := flag.String("config", "config.local.json", "path to config file")
 	flag.Parse()
-
 	logger := newRuntimeLogger()
-
 	cfg, err := config.Load(*configPath)
 	if err != nil {
 		logger.Error("failed to load config", "path", *configPath, "error", err)
@@ -35,7 +33,6 @@ func main() {
 		os.Exit(1)
 	}
 	defer cleanupMetadata()
-
 	appStore := store.NewDBStore(metadataDB)
 	logger.Info("using database-backed store")
 	identityService, err := service.NewIdentityService(appStore)
@@ -62,17 +59,19 @@ func main() {
 		logger.Error("failed to initialize database provisioning service")
 		os.Exit(1)
 	}
-
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-
 	errCh := make(chan error, 5)
 	onlineSessions := online.NewRegistry()
+	auditRetention, err := newAuditRetentionRuntime(cfg, appStore)
+	if err != nil {
+		logger.Error("failed to initialize audit retention", "error", err)
+		os.Exit(1)
+	}
+	startAuditRetentionRuntime(ctx, auditRetention, logger, auditRetentionInterval)
 	startDatabaseProvisioningReconciler(ctx, errCh, databaseProvisioning)
-
 	sshSrv, err := sshserver.New(cfg, appStore, authorizationService, logger, onlineSessions)
 	if err != nil {
 		logger.Error("failed to initialize SSH server", "error", err)

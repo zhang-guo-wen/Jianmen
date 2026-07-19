@@ -8,7 +8,7 @@ import (
 )
 
 func TestAuditQueryServiceDeniesBeforeRepositoryRead(t *testing.T) {
-	repository := &auditQueryTestRepository{}
+	repository := &auditQueryTestRepository{session: AuditSession{ID: "session-1", Protocol: "ssh", State: "ended"}}
 	service, err := NewAuditQueryService(repository, &auditQueryTestAuthorizer{allowed: false})
 	if err != nil {
 		t.Fatalf("new service: %v", err)
@@ -31,11 +31,11 @@ func TestAuditQueryServiceDeniesBeforeRepositoryRead(t *testing.T) {
 	if repository.listSessions != 0 || repository.events != 0 || repository.logins != 0 {
 		t.Fatalf("repository reads = sessions:%d events:%d logins:%d, want 0:0:0", repository.listSessions, repository.events, repository.logins)
 	}
-	if _, err := service.AuthorizedSession(context.Background(), "user-1", "ssh", "session-1"); !errors.Is(err, ErrAuditQueryForbidden) {
-		t.Fatalf("AuthorizedSession error = %v, want forbidden", err)
+	if _, err := service.AuthorizedSession(context.Background(), "user-1", "ssh", "session-1"); !errors.Is(err, ErrAuditArtifactUnavailable) {
+		t.Fatalf("AuthorizedSession error = %v, want unavailable", err)
 	}
-	if repository.getSession != 0 {
-		t.Fatalf("session reads = %d, want 0", repository.getSession)
+	if repository.metadataReads != 1 || repository.fullSessionReads != 0 {
+		t.Fatalf("session reads = metadata:%d full:%d, want 1:0", repository.metadataReads, repository.fullSessionReads)
 	}
 }
 
@@ -59,8 +59,8 @@ func TestAuditQueryServiceAppliesActiveAndEndedSessionPolicy(t *testing.T) {
 			}
 			_, err = service.AuthorizedSession(context.Background(), "user-1", tt.protocol, "session-1")
 			if tt.wantErr {
-				if !errors.Is(err, ErrAuditQueryForbidden) {
-					t.Fatalf("error = %v, want forbidden", err)
+				if !errors.Is(err, ErrAuditArtifactUnavailable) {
+					t.Fatalf("error = %v, want unavailable", err)
 				}
 				return
 			}
@@ -156,18 +156,28 @@ func (a *auditQueryTestAuthorizer) AuthorizeAuditQuery(_ context.Context, _ stri
 }
 
 type auditQueryTestRepository struct {
-	session                                  AuditSession
-	queries                                  []AuditDBQueryPreview
-	err                                      error
-	listSessions, getSession, events, logins int
+	session                                                       AuditSession
+	queries                                                       []AuditDBQueryPreview
+	err                                                           error
+	listSessions, metadataReads, fullSessionReads, events, logins int
 }
 
 func (r *auditQueryTestRepository) ListAuditSessions(context.Context, AuditSessionListParams) ([]AuditSessionListItem, int64, error) {
 	r.listSessions++
 	return nil, 0, r.err
 }
-func (r *auditQueryTestRepository) GetAuditSession(context.Context, string) (AuditSession, error) {
-	r.getSession++
+func (r *auditQueryTestRepository) GetAuditSessionAccessMetadata(context.Context, string) (AuditSessionAccessMetadata, error) {
+	r.metadataReads++
+	if r.err != nil {
+		return AuditSessionAccessMetadata{}, r.err
+	}
+	return AuditSessionAccessMetadata{
+		ID: r.session.ID, Protocol: r.session.Protocol,
+		ProtocolSubtype: r.session.ProtocolSubtype, State: r.session.State,
+	}, nil
+}
+func (r *auditQueryTestRepository) GetFullAuditSession(context.Context, string) (AuditSession, error) {
+	r.fullSessionReads++
 	if r.err != nil {
 		return AuditSession{}, r.err
 	}

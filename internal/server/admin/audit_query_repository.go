@@ -33,11 +33,24 @@ func (r adminAuditQueryRepository) ListAuditSessions(ctx context.Context, params
 	return result, total, nil
 }
 
-func (r adminAuditQueryRepository) GetAuditSession(ctx context.Context, id string) (service.AuditSession, error) {
+func (r adminAuditQueryRepository) GetAuditSessionAccessMetadata(ctx context.Context, id string) (service.AuditSessionAccessMetadata, error) {
+	item, err := r.repository.GetAuditSessionAccessMetadata(ctx, id)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return service.AuditSessionAccessMetadata{}, service.ErrAuditArtifactUnavailable
+		}
+		return service.AuditSessionAccessMetadata{}, err
+	}
+	return service.AuditSessionAccessMetadata{
+		ID: item.ID, Protocol: item.Protocol, ProtocolSubtype: item.ProtocolSubtype, State: item.State,
+	}, nil
+}
+
+func (r adminAuditQueryRepository) GetFullAuditSession(ctx context.Context, id string) (service.AuditSession, error) {
 	item, err := r.repository.GetAuditSession(ctx, id)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return service.AuditSession{}, service.ErrAuditSessionNotFound
+			return service.AuditSession{}, service.ErrAuditArtifactUnavailable
 		}
 		return service.AuditSession{}, err
 	}

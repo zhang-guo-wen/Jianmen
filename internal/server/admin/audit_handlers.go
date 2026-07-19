@@ -35,9 +35,8 @@ func (s *Server) handleAuditSSH(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleAuditDB(w http.ResponseWriter, r *http.Request) {
 	params := service.AuditSessionListParams{
-		Protocol: "mysql,postgres,redis",
-		Search:   strings.ToLower(firstNonEmpty(r.URL.Query().Get("q"), r.URL.Query().Get("search"))),
-		Date:     r.URL.Query().Get("date"),
+		Search: strings.ToLower(firstNonEmpty(r.URL.Query().Get("q"), r.URL.Query().Get("search"))),
+		Date:   r.URL.Query().Get("date"),
 	}
 	protocolFilter := r.URL.Query().Get("protocol")
 	if protocolFilter != "" {
@@ -61,7 +60,7 @@ func (s *Server) handleAuditArtifact(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimPrefix(r.URL.Path, "/api/audit/")
 	parts := strings.SplitN(path, "/", 3)
 	if len(parts) < 2 {
-		s.writeErrorText(w, r, http.StatusNotFound, "not found")
+		s.writeAuditArtifactUnavailable(w, r)
 		return
 	}
 	protocol := parts[0]
@@ -80,7 +79,7 @@ func (s *Server) handleAuditArtifact(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case artifact == "":
 		s.writeJSON(w, r, http.StatusOK, session)
-	case artifact == "commands" && (protocol == "ssh" || protocol == "sftp"):
+	case artifact == "commands" && session.ProtocolFamily == service.AuditProtocolFamilySSH:
 		limit, offset := pageFromQuery(r)
 		if session.ReplayDir != "" {
 			items, total, fileErr := readAuditSSHCommandPage(filepath.Join(session.ReplayDir, "commands.jsonl"), limit, offset)
@@ -99,7 +98,7 @@ func (s *Server) handleAuditArtifact(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		s.writeJSON(w, r, http.StatusOK, map[string]any{"items": items, "total": total})
-	case artifact == "files" && (protocol == "ssh" || protocol == "sftp"):
+	case artifact == "files" && session.ProtocolFamily == service.AuditProtocolFamilySSH:
 		limit, offset := pageFromQuery(r)
 		items, total, err := s.auditQuery.SFTPEvents(r.Context(), userIDFromRequest(r), protocol, sessionID, service.Page{Limit: limit, Offset: offset})
 		if err != nil {
@@ -107,7 +106,7 @@ func (s *Server) handleAuditArtifact(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		s.writeJSON(w, r, http.StatusOK, map[string]any{"items": items, "total": total})
-	case artifact == "file-summary" && (protocol == "ssh" || protocol == "sftp"):
+	case artifact == "file-summary" && session.ProtocolFamily == service.AuditProtocolFamilySSH:
 		if session.ReplayDir == "" {
 			s.writeJSON(w, r, http.StatusOK, []any{})
 			return
@@ -118,14 +117,14 @@ func (s *Server) handleAuditArtifact(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		s.writeAuditJSONFile(w, r, summaryPath)
-	case artifact == "replay" && (protocol == "ssh" || protocol == "sftp"):
+	case artifact == "replay" && session.ProtocolFamily == service.AuditProtocolFamilySSH:
 		replayPath := session.ReplayDir
 		if replayPath == "" {
 			s.writeErrorText(w, r, http.StatusNotFound, "no replay available")
 			return
 		}
 		s.writeAuditTextFile(w, r, filepath.Join(replayPath, "terminal.cast"), "application/x-asciicast; charset=utf-8")
-	case artifact == "queries" && (protocol == "db" || protocol == "mysql" || protocol == "postgres" || protocol == "redis"):
+	case artifact == "queries" && session.ProtocolFamily == service.AuditProtocolFamilyDB:
 		page, pageSize, offset := auditDBQueryPageFromQuery(r)
 		items, total, err := s.auditQuery.DBQueryEvents(
 			r.Context(),
@@ -150,7 +149,7 @@ func (s *Server) handleAuditArtifact(w http.ResponseWriter, r *http.Request) {
 			"page": page, "page_size": pageSize,
 		})
 	default:
-		s.writeErrorText(w, r, http.StatusNotFound, "not found")
+		s.writeAuditArtifactUnavailable(w, r)
 	}
 }
 
@@ -185,16 +184,22 @@ func auditDBQueryPageFromQuery(r *http.Request) (int, int, int) {
 
 func (s *Server) writeAuditQueryError(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
+	case errors.Is(err, service.ErrAuditQueryInvalidProtocol):
+		s.writeErrorText(w, r, http.StatusBadRequest, "invalid audit protocol")
+	case errors.Is(err, service.ErrAuditArtifactUnavailable):
+		s.writeAuditArtifactUnavailable(w, r)
 	case errors.Is(err, service.ErrAuditQueryForbidden):
 		s.forbidden(w, r)
-	case errors.Is(err, service.ErrAuditSessionNotFound):
-		s.writeErrorText(w, r, http.StatusNotFound, "audit session not found")
 	default:
 		if s.logger != nil {
 			s.logger.Error("audit query failed", "error", err)
 		}
 		s.writeErrorText(w, r, http.StatusInternalServerError, "audit query unavailable")
 	}
+}
+
+func (s *Server) writeAuditArtifactUnavailable(w http.ResponseWriter, r *http.Request) {
+	s.writeErrorText(w, r, http.StatusNotFound, "audit session unavailable")
 }
 
 func (s *Server) writeAuditJSONFile(w http.ResponseWriter, r *http.Request, path string) {

@@ -20,7 +20,10 @@ func bootstrapSystemSettings(
 	if cfg == nil || repository == nil {
 		return nil, fmt.Errorf("system settings runtime dependencies are required")
 	}
-	settings, err := service.NewSystemSettingsService(repository)
+	settings, err := service.NewSystemSettingsService(
+		repository,
+		cfg.DatabaseGateway.AvailableModes(),
+	)
 	if err != nil {
 		return nil, fmt.Errorf("initialize system settings service: %w", err)
 	}
@@ -43,6 +46,7 @@ func bootstrapSystemSettings(
 
 func systemSettingsFromConfig(cfg *config.Config) service.SystemSettings {
 	return service.SystemSettings{
+		DatabaseGatewayMode:           cfg.DatabaseGateway.EffectiveMode(),
 		WebRDPEnabled:                 cfg.WebRDP.Enabled,
 		WebRDPConnectTimeoutSeconds:   cfg.WebRDP.ConnectTimeoutSecs,
 		WebRDPAllowUnrecorded:         cfg.WebRDP.AllowUnrecorded,
@@ -57,6 +61,7 @@ func systemSettingsFromConfig(cfg *config.Config) service.SystemSettings {
 }
 
 func applySystemSettings(cfg *config.Config, settings service.SystemSettings) {
+	cfg.DatabaseGateway.Mode = settings.DatabaseGatewayMode
 	cfg.WebRDP.Enabled = settings.WebRDPEnabled
 	cfg.WebRDP.ConnectTimeoutSecs = settings.WebRDPConnectTimeoutSeconds
 	cfg.WebRDP.AllowUnrecorded = settings.WebRDPAllowUnrecorded

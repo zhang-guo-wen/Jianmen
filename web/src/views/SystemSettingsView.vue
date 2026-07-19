@@ -97,6 +97,34 @@
         <el-tabs v-model="activeTab" class="settings-tabs">
           <el-tab-pane label="代理与审计" name="policy">
             <div class="policy-grid">
+              <section class="settings-section settings-section--wide">
+                <div class="section-heading">
+                  <div>
+                    <h2>数据库网关入口</h2>
+                    <p>选择数据库客户端连接 Jianmen 时使用统一入口，或继续按协议使用独立端口；保存后需重启 Jianmen 才会应用。</p>
+                  </div>
+                </div>
+
+                <el-alert
+                  class="gateway-mode-alert"
+                  type="warning"
+                  :closable="false"
+                  show-icon
+                  title="统一入口的 MySQL 每次连接会增加约 200ms 建连时间。"
+                />
+
+                <div class="setting-row">
+                  <div class="setting-copy">
+                    <strong>入口模式</strong>
+                    <span>统一入口仅需开放一个数据库网关端口；独立端口为每种数据库协议分别监听。</span>
+                  </div>
+                  <el-radio-group v-model="form.database_gateway_mode" class="gateway-mode-control">
+                    <el-radio-button value="unified">统一入口（默认）</el-radio-button>
+                    <el-radio-button value="independent">独立端口</el-radio-button>
+                  </el-radio-group>
+                </div>
+              </section>
+
               <section class="settings-section">
                 <div class="section-heading">
                   <div>
@@ -448,6 +476,8 @@ import {
   DATABASE_MAX_CLIENT_MESSAGE_BYTES_DEFAULT,
   DATABASE_MAX_CLIENT_MESSAGE_BYTES_MAX,
   DATABASE_MAX_CLIENT_MESSAGE_BYTES_MIN,
+  SYSTEM_SETTINGS_FIELDS,
+  changedSystemSettingsFields,
   clientMessageBytesToMiB,
   clientMessageMiBToBytes,
   formatClientMessageBytes,
@@ -464,20 +494,8 @@ import {
 
 type DiagnosticKind = 'guacd' | 'object-storage';
 
-const SETTING_FIELDS: Array<keyof SystemSettingsValues> = [
-  'web_rdp_enabled',
-  'web_rdp_connect_timeout_seconds',
-  'web_rdp_allow_unrecorded',
-  'database_max_client_message_bytes',
-  'recording_enabled',
-  'recording_record_input',
-  'recording_record_commands',
-  'recording_retention_days',
-  'recording_max_replay_bytes',
-  'recording_cleanup_batch_size',
-];
-
 const FIELD_LABELS: Record<keyof SystemSettingsValues, string> = {
+  database_gateway_mode: '数据库网关入口模式',
   web_rdp_enabled: 'Web RDP',
   web_rdp_connect_timeout_seconds: '连接超时',
   web_rdp_allow_unrecorded: '未录制会话策略',
@@ -528,13 +546,13 @@ const maxClientMessageMiB = computed<number>({
 const hasUnsavedChanges = computed(() => {
   const desired = state.value?.desired;
   return desired
-    ? SETTING_FIELDS.some(field => form[field] !== desired[field])
+    ? changedSystemSettingsFields(desired, form).length > 0
     : false;
 });
 const pendingDifferences = computed(() => {
   const current = state.value;
   if (!current) return [];
-  return SETTING_FIELDS
+  return SYSTEM_SETTINGS_FIELDS
     .filter(field => current.desired[field] !== current.effective[field])
     .map(field => ({
       field,
@@ -550,6 +568,7 @@ onMounted(() => {
 
 function emptySettings(): SystemSettingsValues {
   return {
+    database_gateway_mode: 'unified',
     web_rdp_enabled: false,
     web_rdp_connect_timeout_seconds: 15,
     web_rdp_allow_unrecorded: false,
@@ -627,15 +646,23 @@ async function loadRevisions() {
 }
 
 function applyState(nextState: SystemSettingsState) {
+  const desired = { ...emptySettings(), ...nextState.desired };
+  const effective = { ...emptySettings(), ...nextState.effective };
   state.value = {
     ...nextState,
+    desired,
+    effective,
     infrastructure: nextState.infrastructure ?? state.value?.infrastructure ?? emptyInfrastructure(),
   };
-  Object.assign(form, nextState.desired);
+  Object.assign(form, desired);
 }
 
 function validateSettings(): SystemSettingsValues | null {
   const next = { ...form };
+  if (next.database_gateway_mode !== 'unified' && next.database_gateway_mode !== 'independent') {
+    ElMessage.warning('数据库网关入口模式必须是统一入口或独立端口');
+    return null;
+  }
   if (!isIntegerWithin(next.web_rdp_connect_timeout_seconds, 1, 300)) {
     ElMessage.warning('Web RDP 连接超时必须是 1-300 秒的整数');
     return null;
@@ -771,8 +798,9 @@ function configuredText(value: boolean): string {
 
 function formatSettingValue(
   field: keyof SystemSettingsValues,
-  value: boolean | number,
+  value: SystemSettingsValues[keyof SystemSettingsValues],
 ): string {
+  if (field === 'database_gateway_mode') return value === 'independent' ? '独立端口' : '统一入口';
   if (field === 'web_rdp_connect_timeout_seconds') return `${value} 秒`;
   if (field === 'recording_retention_days') return `${value} 天`;
   if (field === 'recording_cleanup_batch_size') return `${value} 条`;
@@ -960,6 +988,18 @@ function errorMessage(error: unknown, fallback: string): string {
   padding: 22px;
 }
 
+.settings-section--wide {
+  grid-column: 1 / -1;
+}
+
+.gateway-mode-alert {
+  margin-bottom: 8px;
+}
+
+.gateway-mode-control {
+  flex-shrink: 0;
+}
+
 .infrastructure-stack {
   display: grid;
   gap: 18px;
@@ -1124,7 +1164,8 @@ code {
   }
 
   .number-control,
-  .number-control .el-input-number {
+  .number-control .el-input-number,
+  .gateway-mode-control {
     width: 100%;
   }
 

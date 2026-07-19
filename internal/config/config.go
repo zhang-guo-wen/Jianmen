@@ -58,47 +58,6 @@ type DatabaseConfig struct {
 	ConnMaxLifetimeSeconds int    `json:"conn_max_lifetime_seconds"`
 }
 
-type DatabaseGatewayConfig struct {
-	Enabled               bool                     `json:"enabled"`
-	MaxClientMessageBytes int                      `json:"max_client_message_bytes"`
-	MySQL                 DatabaseProtocolListener `json:"mysql"`
-	PostgreSQL            DatabaseProtocolListener `json:"postgresql"`
-	Redis                 DatabaseProtocolListener `json:"redis"`
-	enabledSet            bool
-}
-
-func (c *DatabaseGatewayConfig) UnmarshalJSON(data []byte) error {
-	type alias DatabaseGatewayConfig
-	aux := struct {
-		Enabled *bool `json:"enabled"`
-		*alias
-	}{alias: (*alias)(c)}
-
-	c.enabledSet = false
-	decoder := json.NewDecoder(bytes.NewReader(data))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&aux); err != nil {
-		return err
-	}
-	if aux.Enabled != nil {
-		c.enabledSet = true
-		c.Enabled = *aux.Enabled
-	}
-	return nil
-}
-
-// DatabaseProtocolListener configures one protocol-specific database gateway listener.
-// TLS is negotiated by the protocol where applicable; a configured certificate and key
-// are always required together.
-type DatabaseProtocolListener struct {
-	Enabled    bool   `json:"enabled"`
-	Address    string `json:"listen_addr"`
-	CertFile   string `json:"cert_file"`
-	KeyFile    string `json:"key_file"`
-	CAFile     string `json:"ca_file"`
-	ServerName string `json:"server_name"`
-}
-
 type ApplicationGatewayConfig struct {
 	Enabled   bool `json:"enabled"`
 	PortStart int  `json:"port_start"`
@@ -276,18 +235,7 @@ func (c *Config) applyDefaults() {
 		c.Database.Driver = "sqlite"
 		c.Database.DSN = "data/bastion.db"
 	}
-	if !c.DatabaseGateway.Enabled &&
-		!c.DatabaseGateway.enabledSet &&
-		c.DatabaseGateway.MySQL == (DatabaseProtocolListener{}) &&
-		c.DatabaseGateway.PostgreSQL == (DatabaseProtocolListener{}) &&
-		c.DatabaseGateway.Redis == (DatabaseProtocolListener{}) {
-		c.DatabaseGateway.Enabled = true
-		c.DatabaseGateway.MySQL = DatabaseProtocolListener{Enabled: true, Address: "127.0.0.1:33060"}
-	}
-	if c.DatabaseGateway.MaxClientMessageBytes == 0 {
-		c.DatabaseGateway.MaxClientMessageBytes =
-			DefaultDatabaseGatewayMaxClientMessageBytes
-	}
+	c.DatabaseGateway.applyDefaults()
 	if !c.ApplicationGateway.Enabled && c.ApplicationGateway.PortStart == 0 && c.ApplicationGateway.PortEnd == 0 {
 		c.ApplicationGateway.Enabled = true
 		c.ApplicationGateway.PortStart = 47110
@@ -365,103 +313,6 @@ func (c *Config) Validate() error {
 	// Users may be empty — the setup wizard creates the first admin user.
 	if len(c.Users) == 0 {
 		// No hard error; admin user is created via the setup wizard at /api/init/setup
-	}
-	return nil
-}
-
-func validateDatabaseGateway(gateway DatabaseGatewayConfig) error {
-	maxClientMessageBytes := gateway.MaxClientMessageBytes
-	if maxClientMessageBytes == 0 {
-		maxClientMessageBytes = DefaultDatabaseGatewayMaxClientMessageBytes
-	}
-	if maxClientMessageBytes < MinDatabaseGatewayMaxClientMessageBytes ||
-		maxClientMessageBytes > MaxDatabaseGatewayMaxClientMessageBytes {
-		return fmt.Errorf(
-			"database_gateway.max_client_message_bytes must be between %d and %d",
-			MinDatabaseGatewayMaxClientMessageBytes,
-			MaxDatabaseGatewayMaxClientMessageBytes,
-		)
-	}
-	if !gateway.Enabled {
-		return nil
-	}
-	listeners := []struct {
-		name     string
-		listener DatabaseProtocolListener
-	}{
-		{name: "mysql", listener: gateway.MySQL},
-		{name: "postgresql", listener: gateway.PostgreSQL},
-		{name: "redis", listener: gateway.Redis},
-	}
-	addresses := make(map[string]string, len(listeners))
-	for _, item := range listeners {
-		if !item.listener.Enabled {
-			continue
-		}
-		if _, _, err := net.SplitHostPort(item.listener.Address); err != nil {
-			return fmt.Errorf("invalid database_gateway.%s.listen_addr %q: %w", item.name, item.listener.Address, err)
-		}
-		certConfigured := strings.TrimSpace(item.listener.CertFile) != ""
-		keyConfigured := strings.TrimSpace(item.listener.KeyFile) != ""
-		if certConfigured != keyConfigured {
-			return fmt.Errorf("database_gateway.%s cert_file and key_file must be configured together", item.name)
-		}
-		if strings.TrimSpace(item.listener.CAFile) != "" && !certConfigured {
-			return fmt.Errorf("database_gateway.%s ca_file requires cert_file and key_file", item.name)
-		}
-		if certConfigured && strings.TrimSpace(item.listener.ServerName) == "" {
-			return fmt.Errorf("database_gateway.%s server_name is required when TLS is configured", item.name)
-		}
-		if item.listener.ServerName != "" {
-			if err := validateDatabaseGatewayServerName(item.listener.ServerName); err != nil {
-				return fmt.Errorf("database_gateway.%s server_name is invalid: %w", item.name, err)
-			}
-		}
-		if item.name == "postgresql" && !certConfigured {
-			return fmt.Errorf("database_gateway.postgresql requires TLS cert_file and key_file")
-		}
-		if !certConfigured && !isLoopbackListenAddr(item.listener.Address) {
-			return fmt.Errorf("database_gateway.%s requires TLS cert_file and key_file on a non-loopback listener", item.name)
-		}
-		if other, exists := addresses[item.listener.Address]; exists {
-			return fmt.Errorf("database gateway listener addresses must be unique: %s and %s both use %q", other, item.name, item.listener.Address)
-		}
-		addresses[item.listener.Address] = item.name
-	}
-	if len(addresses) == 0 {
-		return fmt.Errorf("database gateway requires at least one enabled protocol listener")
-	}
-	return nil
-}
-
-func validateDatabaseGatewayServerName(serverName string) error {
-	if serverName == "" || serverName != strings.TrimSpace(serverName) {
-		return fmt.Errorf("must not be empty or contain surrounding whitespace")
-	}
-	if net.ParseIP(serverName) != nil {
-		return nil
-	}
-	if len(serverName) > 253 {
-		return fmt.Errorf("DNS name exceeds 253 bytes")
-	}
-	labels := strings.Split(serverName, ".")
-	for _, label := range labels {
-		if len(label) == 0 || len(label) > 63 {
-			return fmt.Errorf("DNS label length must be between 1 and 63 bytes")
-		}
-		if label[0] == '-' || label[len(label)-1] == '-' {
-			return fmt.Errorf("DNS label must not start or end with a hyphen")
-		}
-		for index := 0; index < len(label); index++ {
-			character := label[index]
-			if (character >= 'a' && character <= 'z') ||
-				(character >= 'A' && character <= 'Z') ||
-				(character >= '0' && character <= '9') ||
-				character == '-' {
-				continue
-			}
-			return fmt.Errorf("DNS label contains an invalid character")
-		}
 	}
 	return nil
 }

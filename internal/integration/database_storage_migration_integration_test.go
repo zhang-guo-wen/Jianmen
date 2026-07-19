@@ -33,6 +33,7 @@ const (
 	auditSessionLeaseMigrationVersion         = "202607190004"
 	systemSettingMigrationVersion             = "202607190005"
 	auditDBQueryLargePayloadMigrationVersion  = "202607190006"
+	databaseGatewayModeMigrationVersion       = "202607190007"
 )
 
 var currentStorageMigrationVersions = []string{
@@ -61,6 +62,7 @@ var currentStorageMigrationVersions = []string{
 	"202607190004",
 	systemSettingMigrationVersion,
 	auditDBQueryLargePayloadMigrationVersion,
+	databaseGatewayModeMigrationVersion,
 }
 
 type metadataDatabaseCase struct {
@@ -990,6 +992,7 @@ func seedAppliedMigrations(t *testing.T, db *gorm.DB, versions ...string) {
 		"202607190004":                           "audit session lease recovery",
 		systemSettingMigrationVersion:            "system configuration management",
 		auditDBQueryLargePayloadMigrationVersion: "large database proxy client message support",
+		databaseGatewayModeMigrationVersion:      "database gateway mode system setting",
 	}
 	for _, version := range versions {
 		name, ok := names[version]

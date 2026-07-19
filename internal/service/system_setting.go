@@ -29,6 +29,7 @@ var (
 )
 
 var systemSettingFieldNames = []string{
+	"database_gateway_mode",
 	"web_rdp_enabled",
 	"web_rdp_connect_timeout_seconds",
 	"web_rdp_allow_unrecorded",
@@ -42,6 +43,7 @@ var systemSettingFieldNames = []string{
 }
 
 type SystemSettings struct {
+	DatabaseGatewayMode           string
 	WebRDPEnabled                 bool
 	WebRDPConnectTimeoutSeconds   int
 	WebRDPAllowUnrecorded         bool
@@ -97,8 +99,9 @@ type SystemSettingsRepository interface {
 }
 
 type SystemSettingsService struct {
-	repository SystemSettingsRepository
-	now        func() time.Time
+	repository                    SystemSettingsRepository
+	availableDatabaseGatewayModes map[string]struct{}
+	now                           func() time.Time
 
 	mu                sync.RWMutex
 	effective         SystemSettings
@@ -106,13 +109,29 @@ type SystemSettingsService struct {
 	bootstrapped      bool
 }
 
-func NewSystemSettingsService(repository SystemSettingsRepository) (*SystemSettingsService, error) {
+func NewSystemSettingsService(
+	repository SystemSettingsRepository,
+	availableDatabaseGatewayModes []string,
+) (*SystemSettingsService, error) {
 	if repository == nil {
 		return nil, errors.New("system settings repository is required")
 	}
+	availableModes := make(map[string]struct{}, len(availableDatabaseGatewayModes))
+	for _, mode := range availableDatabaseGatewayModes {
+		switch mode {
+		case config.DatabaseGatewayModeUnified, config.DatabaseGatewayModeIndependent:
+			availableModes[mode] = struct{}{}
+		default:
+			return nil, fmt.Errorf("unsupported available database gateway mode %q", mode)
+		}
+	}
+	if len(availableModes) == 0 {
+		return nil, errors.New("at least one database gateway mode must be available")
+	}
 	return &SystemSettingsService{
-		repository: repository,
-		now:        time.Now,
+		repository:                    repository,
+		availableDatabaseGatewayModes: availableModes,
+		now:                           time.Now,
 	}, nil
 }
 
@@ -137,7 +156,7 @@ func (s *SystemSettingsService) Update(ctx context.Context, update SystemSetting
 	if err := s.requireBootstrapped(); err != nil {
 		return SystemSettingsState{}, err
 	}
-	if err := validateSystemSettings(update.Settings); err != nil {
+	if err := s.validateSystemSettings(update.Settings); err != nil {
 		return SystemSettingsState{}, err
 	}
 	if update.ExpectedRevision < 1 {
@@ -267,6 +286,14 @@ func (s *SystemSettingsService) stateFromModel(persisted model.SystemSetting) (S
 
 func validateSystemSettings(settings SystemSettings) error {
 	switch {
+	case settings.DatabaseGatewayMode != config.DatabaseGatewayModeUnified &&
+		settings.DatabaseGatewayMode != config.DatabaseGatewayModeIndependent:
+		return fmt.Errorf(
+			"%w: database gateway mode must be %q or %q",
+			ErrInvalidSystemSettings,
+			config.DatabaseGatewayModeUnified,
+			config.DatabaseGatewayModeIndependent,
+		)
 	case settings.WebRDPConnectTimeoutSeconds < 1 ||
 		settings.WebRDPConnectTimeoutSeconds > 300:
 		return fmt.Errorf("%w: web RDP connect timeout must be between 1 and 300 seconds",
@@ -294,8 +321,25 @@ func validateSystemSettings(settings SystemSettings) error {
 	}
 }
 
+func (s *SystemSettingsService) validateSystemSettings(settings SystemSettings) error {
+	if err := validateSystemSettings(settings); err != nil {
+		return err
+	}
+	if _, available := s.availableDatabaseGatewayModes[settings.DatabaseGatewayMode]; !available {
+		return fmt.Errorf(
+			"%w: database gateway mode %q is not configured and cannot become effective after restart",
+			ErrInvalidSystemSettings,
+			settings.DatabaseGatewayMode,
+		)
+	}
+	return nil
+}
+
 func changedSystemSettingFields(before, after SystemSettings) []string {
 	changed := make([]string, 0, len(systemSettingFieldNames))
+	if before.DatabaseGatewayMode != after.DatabaseGatewayMode {
+		changed = append(changed, "database_gateway_mode")
+	}
 	if before.WebRDPEnabled != after.WebRDPEnabled {
 		changed = append(changed, "web_rdp_enabled")
 	}
@@ -362,6 +406,7 @@ func replayQuotaTightened(before, after int64) bool {
 func systemSettingModel(settings SystemSettings, actor SystemSettingsActor) model.SystemSetting {
 	return model.SystemSetting{
 		ID:                            model.SystemSettingSingletonID,
+		DatabaseGatewayMode:           settings.DatabaseGatewayMode,
 		WebRDPEnabled:                 settings.WebRDPEnabled,
 		WebRDPConnectTimeoutSeconds:   settings.WebRDPConnectTimeoutSeconds,
 		WebRDPAllowUnrecorded:         settings.WebRDPAllowUnrecorded,
@@ -378,7 +423,12 @@ func systemSettingModel(settings SystemSettings, actor SystemSettingsActor) mode
 }
 
 func systemSettingsFromModel(setting model.SystemSetting) SystemSettings {
+	mode := strings.TrimSpace(setting.DatabaseGatewayMode)
+	if mode == "" {
+		mode = config.DatabaseGatewayModeUnified
+	}
 	return SystemSettings{
+		DatabaseGatewayMode:           mode,
 		WebRDPEnabled:                 setting.WebRDPEnabled,
 		WebRDPConnectTimeoutSeconds:   setting.WebRDPConnectTimeoutSeconds,
 		WebRDPAllowUnrecorded:         setting.WebRDPAllowUnrecorded,
@@ -389,68 +439,5 @@ func systemSettingsFromModel(setting model.SystemSetting) SystemSettings {
 		RecordingMaxReplayBytes:       setting.RecordingMaxReplayBytes,
 		RecordingCleanupBatchSize:     setting.RecordingCleanupBatchSize,
 		DatabaseMaxClientMessageBytes: setting.DatabaseMaxClientMessageBytes,
-	}
-}
-
-type systemSettingsSnapshot struct {
-	WebRDPEnabled                 bool  `json:"web_rdp_enabled"`
-	WebRDPConnectTimeoutSeconds   int   `json:"web_rdp_connect_timeout_seconds"`
-	WebRDPAllowUnrecorded         bool  `json:"web_rdp_allow_unrecorded"`
-	RecordingEnabled              bool  `json:"recording_enabled"`
-	RecordingRecordInput          bool  `json:"recording_record_input"`
-	RecordingRecordCommands       bool  `json:"recording_record_commands"`
-	RecordingRetentionDays        int   `json:"recording_retention_days"`
-	RecordingMaxReplayBytes       int64 `json:"recording_max_replay_bytes"`
-	RecordingCleanupBatchSize     int   `json:"recording_cleanup_batch_size"`
-	DatabaseMaxClientMessageBytes int   `json:"database_max_client_message_bytes"`
-}
-
-func marshalSystemSettings(settings SystemSettings) (string, error) {
-	encoded, err := json.Marshal(snapshotFromSystemSettings(settings))
-	if err != nil {
-		return "", fmt.Errorf("marshal system settings snapshot: %w", err)
-	}
-	return string(encoded), nil
-}
-
-func unmarshalSystemSettings(encoded string) (SystemSettings, error) {
-	var snapshot systemSettingsSnapshot
-	if err := json.Unmarshal([]byte(encoded), &snapshot); err != nil {
-		return SystemSettings{}, err
-	}
-	return snapshot.systemSettings(), nil
-}
-
-func snapshotFromSystemSettings(settings SystemSettings) systemSettingsSnapshot {
-	return systemSettingsSnapshot{
-		WebRDPEnabled:                 settings.WebRDPEnabled,
-		WebRDPConnectTimeoutSeconds:   settings.WebRDPConnectTimeoutSeconds,
-		WebRDPAllowUnrecorded:         settings.WebRDPAllowUnrecorded,
-		RecordingEnabled:              settings.RecordingEnabled,
-		RecordingRecordInput:          settings.RecordingRecordInput,
-		RecordingRecordCommands:       settings.RecordingRecordCommands,
-		RecordingRetentionDays:        settings.RecordingRetentionDays,
-		RecordingMaxReplayBytes:       settings.RecordingMaxReplayBytes,
-		RecordingCleanupBatchSize:     settings.RecordingCleanupBatchSize,
-		DatabaseMaxClientMessageBytes: settings.DatabaseMaxClientMessageBytes,
-	}
-}
-
-func (snapshot systemSettingsSnapshot) systemSettings() SystemSettings {
-	databaseMaxClientMessageBytes := snapshot.DatabaseMaxClientMessageBytes
-	if databaseMaxClientMessageBytes == 0 {
-		databaseMaxClientMessageBytes = defaultDatabaseMaxClientMessageBytes
-	}
-	return SystemSettings{
-		WebRDPEnabled:                 snapshot.WebRDPEnabled,
-		WebRDPConnectTimeoutSeconds:   snapshot.WebRDPConnectTimeoutSeconds,
-		WebRDPAllowUnrecorded:         snapshot.WebRDPAllowUnrecorded,
-		RecordingEnabled:              snapshot.RecordingEnabled,
-		RecordingRecordInput:          snapshot.RecordingRecordInput,
-		RecordingRecordCommands:       snapshot.RecordingRecordCommands,
-		RecordingRetentionDays:        snapshot.RecordingRetentionDays,
-		RecordingMaxReplayBytes:       snapshot.RecordingMaxReplayBytes,
-		RecordingCleanupBatchSize:     snapshot.RecordingCleanupBatchSize,
-		DatabaseMaxClientMessageBytes: databaseMaxClientMessageBytes,
 	}
 }

@@ -99,9 +99,17 @@ func (g *Gateway) handlePostgresTLSConnection(
 	if _, err := io.ReadFull(secured, firstByte); err != nil {
 		return nil
 	}
-	connection := g.handlePG(ctx, secured, firstByte[0])
+	return g.handlePostgresAfterTLS(ctx, secured, firstByte[0])
+}
+
+func (g *Gateway) handlePostgresAfterTLS(
+	ctx context.Context,
+	client net.Conn,
+	firstByte byte,
+) *gatewayConn {
+	connection := g.handlePG(ctx, client, firstByte)
 	if connection != nil {
-		connection.client = secured
+		connection.client = client
 	}
 	return connection
 }

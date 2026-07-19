@@ -8,8 +8,11 @@ import {
   REDIS_COMMAND_UNAVAILABLE_REASON,
   buildDatabaseGatewayConnection,
   databaseGatewayCAFileName,
+  databaseGatewayFallbackPort,
   hasDatabaseGatewayTLSIdentity,
   isSafeDatabaseCommandValue,
+  resolveDatabaseGatewayPort,
+  unifiedMySQLDetectionNotice,
   type DatabaseGatewayTLSIdentity,
 } from './databaseGatewayCommands.ts';
 import {
@@ -29,6 +32,49 @@ const secureGateway: DatabaseGatewayTLSIdentity = {
   tls_ca_pem: '-----BEGIN CERTIFICATE-----\nCA\n-----END CERTIFICATE-----',
   tls_cert_sha256: 'aa:bb',
 };
+
+test('database gateway fallback ports follow unified and independent modes', () => {
+  for (const protocol of ['mysql', 'postgres', 'postgresql', 'redis']) {
+    assert.equal(databaseGatewayFallbackPort(protocol, 'unified'), 33060);
+    assert.equal(databaseGatewayFallbackPort(protocol, undefined), 33060);
+  }
+
+  assert.equal(databaseGatewayFallbackPort('mysql', 'independent'), 33061);
+  assert.equal(databaseGatewayFallbackPort('postgres', 'independent'), 33062);
+  assert.equal(databaseGatewayFallbackPort('postgresql', 'independent'), 33062);
+  assert.equal(databaseGatewayFallbackPort('redis', 'independent'), 33063);
+});
+
+test('database gateway API port wins over every mode fallback', () => {
+  assert.equal(resolveDatabaseGatewayPort('mysql', { mode: 'independent', port: 44001 }), 44001);
+  assert.equal(resolveDatabaseGatewayPort('postgres', { mode: 'unified', port: 44002 }), 44002);
+  assert.equal(resolveDatabaseGatewayPort('redis', { mode: 'independent', port: 0 }), 33063);
+  assert.equal(resolveDatabaseGatewayPort('postgres', { mode: 'unified', port: 70000 }), 33060);
+});
+
+test('unified MySQL connection notice uses the API delay with a 200ms fallback', () => {
+  assert.equal(
+    unifiedMySQLDetectionNotice('mysql', { mode: 'unified', mysql_detection_delay_ms: 180 }),
+    '统一入口需要短暂等待以识别连接协议，MySQL 每次连接会增加约 180ms 建连时间。',
+  );
+  assert.match(
+    unifiedMySQLDetectionNotice('mysql', { mode: 'unified' }),
+    /增加约 200ms 建连时间/,
+  );
+  assert.equal(unifiedMySQLDetectionNotice('mysql', { mode: 'independent' }), '');
+  assert.equal(unifiedMySQLDetectionNotice('postgres', { mode: 'unified' }), '');
+});
+
+test('quick connect and connection dialog share the API-aware gateway resolver and MySQL notice', () => {
+  const quickConnect = readFileSync(new URL('../views/QuickConnectView.vue', import.meta.url), 'utf8');
+  const dialog = readFileSync(new URL('../components/ConnectionConfigDialog.vue', import.meta.url), 'utf8');
+
+  for (const source of [quickConnect, dialog]) {
+    assert.match(source, /resolveDatabaseGatewayPort/);
+    assert.match(source, /unifiedMySQLDetectionNotice/);
+    assert.doesNotMatch(source, /function databaseGatewayDefaultPort/);
+  }
+});
 
 test('PostgreSQL command has a bounded POSIX argv with dbname and GSS disabled', (context) => {
   const connection = buildDatabaseGatewayConnection({

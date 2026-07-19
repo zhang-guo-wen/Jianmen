@@ -33,6 +33,7 @@ func TestSystemSettingsBootstrapUpdateAndRestart(t *testing.T) {
 	}
 
 	desired := baseline
+	desired.DatabaseGatewayMode = "independent"
 	desired.WebRDPEnabled = true
 	desired.WebRDPConnectTimeoutSeconds = 30
 	updatedAt := startedAt.Add(time.Minute)
@@ -62,7 +63,11 @@ func TestSystemSettingsBootstrapUpdateAndRestart(t *testing.T) {
 	if len(revisions) != 2 || revisions[0].Revision != 2 {
 		t.Fatalf("revisions = %#v", revisions)
 	}
-	wantChanged := []string{"web_rdp_enabled", "web_rdp_connect_timeout_seconds"}
+	wantChanged := []string{
+		"database_gateway_mode",
+		"web_rdp_enabled",
+		"web_rdp_connect_timeout_seconds",
+	}
 	if !reflect.DeepEqual(revisions[0].ChangedFields, wantChanged) {
 		t.Fatalf("changed fields = %v, want %v", revisions[0].ChangedFields, wantChanged)
 	}
@@ -86,6 +91,56 @@ func TestSystemSettingsBootstrapUpdateAndRestart(t *testing.T) {
 	}
 	if state.AppliedAt == nil || !state.AppliedAt.Equal(restartedAt) {
 		t.Fatalf("restart applied at = %v, want %v", state.AppliedAt, restartedAt)
+	}
+}
+
+func TestSystemSettingsRejectsUnavailableDatabaseGatewayMode(t *testing.T) {
+	ctx := context.Background()
+	repository := &systemSettingsMemoryRepository{}
+	svc := newTestSystemSettingsServiceWithModes(
+		t,
+		repository,
+		time.Now(),
+		[]string{"unified"},
+	)
+	baseline := validSystemSettings()
+	if _, err := svc.Bootstrap(ctx, baseline); err != nil {
+		t.Fatalf("Bootstrap() error = %v", err)
+	}
+	desired := baseline
+	desired.DatabaseGatewayMode = "independent"
+	_, err := svc.Update(ctx, SystemSettingsUpdate{
+		Settings: desired, ExpectedRevision: 1,
+	})
+	if !errors.Is(err, ErrInvalidSystemSettings) ||
+		!strings.Contains(err.Error(), "not configured") {
+		t.Fatalf("Update() error = %v, want unavailable mode rejection", err)
+	}
+	if repository.setting.Revision != 1 || len(repository.revisions) != 1 {
+		t.Fatalf("unavailable mode was persisted: %#v", repository)
+	}
+}
+
+func TestSystemSettingsAllowsConfiguredDatabaseGatewayModeSwitch(t *testing.T) {
+	ctx := context.Background()
+	repository := &systemSettingsMemoryRepository{}
+	svc := newTestSystemSettingsService(t, repository, time.Now())
+	baseline := validSystemSettings()
+	if _, err := svc.Bootstrap(ctx, baseline); err != nil {
+		t.Fatalf("Bootstrap() error = %v", err)
+	}
+	desired := baseline
+	desired.DatabaseGatewayMode = "independent"
+	state, err := svc.Update(ctx, SystemSettingsUpdate{
+		Settings: desired, ExpectedRevision: 1,
+	})
+	if err != nil {
+		t.Fatalf("Update() error = %v", err)
+	}
+	if state.Desired.DatabaseGatewayMode != "independent" ||
+		state.Effective.DatabaseGatewayMode != "unified" ||
+		!state.PendingRestart {
+		t.Fatalf("mode switch state = %#v", state)
 	}
 }
 
@@ -177,6 +232,7 @@ func TestSystemSettingsValidation(t *testing.T) {
 		name  string
 		apply func(*SystemSettings)
 	}{
+		{name: "invalid database gateway mode", apply: func(s *SystemSettings) { s.DatabaseGatewayMode = "auto" }},
 		{name: "timeout below minimum", apply: func(s *SystemSettings) { s.WebRDPConnectTimeoutSeconds = 0 }},
 		{name: "timeout above maximum", apply: func(s *SystemSettings) { s.WebRDPConnectTimeoutSeconds = 301 }},
 		{name: "retention below minimum", apply: func(s *SystemSettings) { s.RecordingRetentionDays = 0 }},
@@ -206,6 +262,20 @@ func TestSystemSettingsValidation(t *testing.T) {
 				t.Fatalf("Bootstrap() error = %v, want invalid settings", err)
 			}
 		})
+	}
+}
+
+func TestUnmarshalLegacySystemSettingsSnapshotDefaultsGatewayMode(t *testing.T) {
+	settings, err := unmarshalSystemSettings(`{
+		"web_rdp_connect_timeout_seconds":15,
+		"recording_retention_days":30,
+		"recording_cleanup_batch_size":100
+	}`)
+	if err != nil {
+		t.Fatalf("unmarshalSystemSettings() error = %v", err)
+	}
+	if settings.DatabaseGatewayMode != "unified" {
+		t.Fatalf("database gateway mode = %q, want unified", settings.DatabaseGatewayMode)
 	}
 }
 
@@ -344,8 +414,22 @@ func newTestSystemSettingsService(
 	repository SystemSettingsRepository,
 	now time.Time,
 ) *SystemSettingsService {
+	return newTestSystemSettingsServiceWithModes(
+		t,
+		repository,
+		now,
+		[]string{"unified", "independent"},
+	)
+}
+
+func newTestSystemSettingsServiceWithModes(
+	t *testing.T,
+	repository SystemSettingsRepository,
+	now time.Time,
+	availableModes []string,
+) *SystemSettingsService {
 	t.Helper()
-	svc, err := NewSystemSettingsService(repository)
+	svc, err := NewSystemSettingsService(repository, availableModes)
 	if err != nil {
 		t.Fatalf("NewSystemSettingsService() error = %v", err)
 	}
@@ -355,6 +439,7 @@ func newTestSystemSettingsService(
 
 func validSystemSettings() SystemSettings {
 	return SystemSettings{
+		DatabaseGatewayMode:           "unified",
 		WebRDPConnectTimeoutSeconds:   15,
 		RecordingEnabled:              true,
 		RecordingRecordCommands:       true,

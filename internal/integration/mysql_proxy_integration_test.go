@@ -91,39 +91,44 @@ func TestMySQLProxyCompatibilityAgainstDocker(t *testing.T) {
 				t.Fatalf("add MySQL compatibility account: %v", err)
 			}
 
-			gatewayLogger, gatewayLogs := databaseGatewayDebugLogger()
-			gateway := startMySQLCompatibilityGateway(t, fixture, gatewayLogger)
-			clientTLSName := registerMySQLCompatibilityTLS(t, gateway.caFile)
-			compactUsername := util.PrefixDatabase + account.ResourceID + fixture.session.SessionID
-			clientConfig := mysqlDriver.Config{
-				User:                 compactUsername,
-				Passwd:               integrationPassword,
-				Net:                  "tcp",
-				Addr:                 gateway.address,
-				DBName:               "appdb",
-				Timeout:              3 * time.Second,
-				ReadTimeout:          30 * time.Second,
-				WriteTimeout:         10 * time.Second,
-				TLSConfig:            clientTLSName,
-				AllowNativePasswords: true,
-			}
-			client, err := sql.Open("mysql", clientConfig.FormatDSN())
-			if err != nil {
-				t.Fatalf("open MySQL compatibility client: %v", err)
-			}
-			t.Cleanup(func() {
-				if err := client.Close(); err != nil {
-					t.Errorf("close MySQL compatibility client: %v", err)
-				}
-			})
-			client.SetMaxOpenConns(1)
+			for _, mode := range databaseGatewayModes() {
+				mode := mode
+				t.Run(mode, func(t *testing.T) {
+					gatewayLogger, gatewayLogs := databaseGatewayDebugLogger()
+					gateway := startMySQLCompatibilityGateway(t, fixture, gatewayLogger, mode)
+					clientTLSName := registerMySQLCompatibilityTLS(t, gateway.caFile)
+					compactUsername := util.PrefixDatabase + account.ResourceID + fixture.session.SessionID
+					clientConfig := mysqlDriver.Config{
+						User:                 compactUsername,
+						Passwd:               integrationPassword,
+						Net:                  "tcp",
+						Addr:                 gateway.address,
+						DBName:               "appdb",
+						Timeout:              3 * time.Second,
+						ReadTimeout:          30 * time.Second,
+						WriteTimeout:         10 * time.Second,
+						TLSConfig:            clientTLSName,
+						AllowNativePasswords: true,
+					}
+					client, err := sql.Open("mysql", clientConfig.FormatDSN())
+					if err != nil {
+						t.Fatalf("open MySQL compatibility client: %v", err)
+					}
+					t.Cleanup(func() {
+						if err := client.Close(); err != nil {
+							t.Errorf("close MySQL compatibility client: %v", err)
+						}
+					})
+					client.SetMaxOpenConns(1)
 
-			assertMySQLCompatibilityLifecycle(t, client)
-			assertMySQLFragmentedResponse(t, client)
-			if !strings.Contains(image, ":5.7") {
-				assertMySQLCompatibilityFullAuth(t, gatewayLogs.String(), upstreamPassword)
+					assertMySQLCompatibilityLifecycle(t, client)
+					assertMySQLFragmentedResponse(t, client)
+					if !strings.Contains(image, ":5.7") {
+						assertMySQLCompatibilityFullAuth(t, gatewayLogs.String(), upstreamPassword)
+					}
+					assertDBAuditSQLContains(t, fixture.replayDir, "SELECT [REDACTED] AS audit_probe")
+				})
 			}
-			assertDBAuditSQLContains(t, fixture.replayDir, "SELECT [REDACTED] AS audit_probe")
 		})
 	}
 }
@@ -137,21 +142,21 @@ func startMySQLCompatibilityGateway(
 	t *testing.T,
 	fixture metadataFixture,
 	logger *slog.Logger,
+	mode string,
 ) mysqlCompatibilityGateway {
 	t.Helper()
 	address := freeTCPAddress(t)
 	certFile, keyFile, caFile := writeIntegrationTLSCertificate(t)
-	gatewayConfig := config.DatabaseGatewayConfig{
-		Enabled: true,
-		MySQL: config.DatabaseProtocolListener{
-			Enabled:    true,
-			Address:    address,
-			CertFile:   certFile,
-			KeyFile:    keyFile,
-			CAFile:     caFile,
-			ServerName: "127.0.0.1",
-		},
+	listener := config.DatabaseProtocolListener{
+		Enabled:    true,
+		Address:    address,
+		CertFile:   certFile,
+		KeyFile:    keyFile,
+		CAFile:     caFile,
+		ServerName: "127.0.0.1",
 	}
+	gatewayConfig := config.DatabaseGatewayConfig{Enabled: true}
+	configureDatabaseGatewayMode(t, &gatewayConfig, mode, "mysql", listener)
 	gateway := dbproxy.NewGateway(
 		gatewayConfig,
 		fixture.store,

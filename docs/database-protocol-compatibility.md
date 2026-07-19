@@ -4,13 +4,26 @@
 
 本矩阵描述 Jianmen 数据库网关已经纳入自动化验证的协议与版本边界。“实库”表示测试会启动官方 Docker 镜像，并使用真实客户端通过网关完成认证和数据交互；“协议测试”表示使用有界解析、畸形帧和模糊测试验证协议适配器，但不等同于对应产品版本的实库认证。
 
+## 入口模式与端口
+
+| 模式 | MySQL | PostgreSQL | Redis | 适用场景 |
+|---|---:|---:|---:|---|
+| 统一入口 `unified`（默认） | `33060` | `33060` | `33060` | 只开放一个数据库端口；使用原生客户端，无需安装 Connector |
+| 独立入口 `independent` | `33061` | `33062` | `33063` | 优先最低建连延迟，或希望按协议分别配置网络策略 |
+
+统一入口只影响连接建立阶段。MySQL 客户端必须先等待服务端 Greeting，网关用默认 200ms 的静默探测窗口区分它与会主动发送首包的 PostgreSQL/Redis，因此每次 MySQL 新连接约增加 200ms；连接建立后的 SQL、事务和数据转发没有这段固定等待。独立 MySQL 入口会立即发送 Greeting。
+
+统一入口不会使用账号名称猜测协议。路由只依据原生协议握手：静默到期且完全没有收到字节才进入 MySQL；`0x00` 首字节进入 PostgreSQL；`*` 首字节进入 Redis；TLS ClientHello 完成一次共享 TLS 握手后，再用 ALPN 与解密后的首包交叉确认 PostgreSQL Direct TLS 或 Redis TLS。只要已收到任何字节，后续超时或解析失败就关闭连接，不会回退为 MySQL。
+
+TLS 用于加密客户端到 Jianmen 之间的认证信息与数据库流量，并验证当前连接的确是目标 Jianmen 网关。非回环监听必须配置有效证书和私钥；回环地址允许无证书用于本机开发。PostgreSQL 仍要求 TLS，Redis 远程 AUTH 仍要求 TLS，MySQL 按标准 SSLRequest 升级为 TLS。
+
 ## 默认实库矩阵
 
 | 协议 | 官方镜像 | 客户端/认证路径 | 每个版本的必测场景 |
 |---|---|---|---|
 | MySQL | `mysql:5.7`、`mysql:8.0`、`mysql:8.4` | `go-sql-driver/mysql`；堡垒机 `mysql_native_password`；上游 5.7 `mysql_native_password`、8.x `caching_sha2_password` | 初始数据库、普通查询、预处理语句、提交/回滚、审计脱敏、超过 `0xFFFFFF` 的多物理包响应及恶意边界字节 |
 | PostgreSQL | `postgres:14-alpine` 至 `postgres:18-alpine` | `pgx/v5`、`database/sql` 和原始协议客户端；网关 TLS；上游 SCRAM-SHA-256（RFC 4013 SASLprep） | Startup 参数、简单/扩展查询、预处理语句、提交/回滚、ErrorResponse 后恢复、COPY、大 DataRow、CancelRequest |
-| Redis | `redis:6.2-alpine`、`redis:7.4-alpine`、`redis:8.8-alpine` | 原始 RESP 客户端；双参数 `AUTH`、`HELLO 2 AUTH`、`HELLO 3 AUTH` | RESP2/RESP3、流水线、MULTI/EXEC、SELECT、Map/Set/Boolean/Double、Pub/Sub 与 Push、多主题批量退订、临界大主题 ACK、大 Bulk String、审计脱敏 |
+| Redis | `redis:6.2-alpine`、`redis:7.4-alpine`、`redis:8.8-alpine` | 原始 RESP/TLS 客户端；统一和独立入口均验证 TLS、双参数 `AUTH`、`HELLO 2 AUTH`、`HELLO 3 AUTH` | RESP2/RESP3、流水线、MULTI/EXEC、SELECT、Map/Set/Boolean/Double、Pub/Sub 与 Push、多主题批量退订、临界大主题 ACK、大 Bulk String、审计脱敏 |
 
 默认矩阵由以下测试实现：
 
@@ -18,7 +31,7 @@
 - [PostgreSQL 实库矩阵](../internal/integration/postgres_proxy_integration_test.go)
 - [Redis 实库矩阵](../internal/integration/redis_proxy_integration_test.go)
 
-监听器的启动、关闭、部分绑定失败回收、握手超时和活动连接关闭另由 [监听器测试](../internal/server/dbproxy/listeners_test.go) 覆盖。
+每个镜像版本都会分别经过统一入口与独立入口；监听器的启动、关闭、部分绑定失败回收、握手超时、协议误判防护和活动连接关闭另由 [监听器测试](../internal/server/dbproxy/listeners_test.go) 覆盖。
 
 ## 协议能力边界
 
@@ -69,6 +82,7 @@ $env:JIANMEN_REDIS_IMAGES = 'redis:8.8-alpine'
 
 协议模糊入口：
 
+- 统一入口：`FuzzDetectUnifiedPreface`
 - MySQL：`FuzzMySQLPacketFrames`
 - PostgreSQL：`FuzzReadPostgresStartupMessage`、`FuzzReadPostgresTypedMessage`
 - Redis：`FuzzRedisRESPFrameLength`、`FuzzRedisObserverClientFrames`、`FuzzRedisAuthenticationCommandParser`

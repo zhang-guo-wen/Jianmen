@@ -34,6 +34,7 @@ func TestSystemSettingsBecomeEffectiveAfterRestartBootstrap(t *testing.T) {
 	}
 
 	desired := systemSettingsFromConfig(cfg)
+	desired.DatabaseGatewayMode = config.DatabaseGatewayModeIndependent
 	desired.WebRDPEnabled = true
 	desired.WebRDPConnectTimeoutSeconds = 42
 	desired.WebRDPAllowUnrecorded = true
@@ -55,8 +56,14 @@ func TestSystemSettingsBecomeEffectiveAfterRestartBootstrap(t *testing.T) {
 	if !state.PendingRestart || state.EffectiveRevision != 1 || state.Revision != 2 {
 		t.Fatalf("updated state = %#v, want revision 2 pending restart", state)
 	}
-	if cfg.WebRDP.Enabled || cfg.WebRDP.ConnectTimeoutSecs != 15 {
-		t.Fatalf("running config changed before restart: %#v", cfg.WebRDP)
+	if cfg.DatabaseGateway.EffectiveMode() != config.DatabaseGatewayModeUnified ||
+		cfg.WebRDP.Enabled ||
+		cfg.WebRDP.ConnectTimeoutSecs != 15 {
+		t.Fatalf(
+			"running config changed before restart: database mode=%q web_rdp=%#v",
+			cfg.DatabaseGateway.EffectiveMode(),
+			cfg.WebRDP,
+		)
 	}
 
 	invalidRestartConfig := validManagedSettingsConfig()
@@ -101,6 +108,17 @@ func TestSystemSettingsBecomeEffectiveAfterRestartBootstrap(t *testing.T) {
 func validManagedSettingsConfig() *config.Config {
 	return &config.Config{
 		ListenAddr: "127.0.0.1:47102",
+		DatabaseGateway: config.DatabaseGatewayConfig{
+			Enabled: true,
+			Mode:    config.DatabaseGatewayModeUnified,
+			Unified: config.DatabaseUnifiedListener{
+				Enabled: true, Address: "127.0.0.1:33060", DetectionTimeoutMS: 200,
+			},
+			MySQL: config.DatabaseProtocolListener{
+				Enabled: true, Address: "127.0.0.1:33061",
+			},
+			MaxClientMessageBytes: config.DefaultDatabaseGatewayMaxClientMessageBytes,
+		},
 		WebRDP: config.WebRDPConfig{
 			GuacdAddress: "127.0.0.1:4822", ConnectTimeoutSecs: 15,
 			SpoolDir: "data/rdp-spool", GuacdRecordingRoot: "data/rdp-spool",
@@ -112,9 +130,6 @@ func validManagedSettingsConfig() *config.Config {
 		Recording: config.RecordingConfig{
 			Enabled: true, RecordCommands: true, RetentionDays: 30,
 			MaxReplayBytes: 10 * 1024 * 1024 * 1024, CleanupBatchSize: 100,
-		},
-		DatabaseGateway: config.DatabaseGatewayConfig{
-			MaxClientMessageBytes: config.DefaultDatabaseGatewayMaxClientMessageBytes,
 		},
 	}
 }

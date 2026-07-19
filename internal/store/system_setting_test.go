@@ -104,7 +104,7 @@ func TestSystemSettingStoreLifecycle(t *testing.T) {
 	if len(revisions) != 2 || revisions[0].Revision != 2 || revisions[1].Revision != 1 {
 		t.Fatalf("revisions = %#v", revisions)
 	}
-	if revisions[0].SnapshotJSON != `{"web_rdp_enabled":true}` ||
+	if revisions[0].SnapshotJSON != `{"database_gateway_mode":"unified","web_rdp_enabled":true}` ||
 		revisions[0].ChangedFieldsJSON != `["web_rdp_enabled"]` {
 		t.Fatalf("revision payload = %#v", revisions[0])
 	}
@@ -175,6 +175,7 @@ func openSystemSettingStoreDatabase(t *testing.T) *gorm.DB {
 func systemSettingStoreFixture() model.SystemSetting {
 	return model.SystemSetting{
 		ID:                            model.SystemSettingSingletonID,
+		DatabaseGatewayMode:           "unified",
 		WebRDPConnectTimeoutSeconds:   15,
 		RecordingEnabled:              true,
 		RecordingRecordCommands:       true,
@@ -189,10 +190,10 @@ func systemSettingRevisionFixture(
 	revision int64,
 	createdAt time.Time,
 ) model.SystemSettingRevision {
-	snapshot := `{"web_rdp_enabled":false}`
-	changedFields := `["web_rdp_enabled","web_rdp_connect_timeout_seconds","web_rdp_allow_unrecorded","recording_enabled","recording_record_input","recording_record_commands","recording_retention_days","recording_max_replay_bytes","recording_cleanup_batch_size","database_max_client_message_bytes"]`
+	snapshot := `{"database_gateway_mode":"unified","web_rdp_enabled":false,"database_max_client_message_bytes":10485760}`
+	changedFields := `["database_gateway_mode","web_rdp_enabled","web_rdp_connect_timeout_seconds","web_rdp_allow_unrecorded","recording_enabled","recording_record_input","recording_record_commands","recording_retention_days","recording_max_replay_bytes","recording_cleanup_batch_size","database_max_client_message_bytes"]`
 	if revision == 2 {
-		snapshot = `{"web_rdp_enabled":true}`
+		snapshot = `{"database_gateway_mode":"unified","web_rdp_enabled":true}`
 		changedFields = `["web_rdp_enabled"]`
 	}
 	return model.SystemSettingRevision{

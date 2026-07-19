@@ -37,7 +37,7 @@ func (s *SystemSettingsService) PrepareBootstrap(
 	if ctx == nil {
 		return SystemSettingsBootstrap{}, errors.New("prepare system settings bootstrap: nil context")
 	}
-	if err := validateSystemSettings(baseline); err != nil {
+	if err := s.validateSystemSettings(baseline); err != nil {
 		return SystemSettingsBootstrap{}, err
 	}
 
@@ -77,7 +77,7 @@ func (s *SystemSettingsService) PrepareBootstrap(
 			ErrInvalidSystemSettings,
 		)
 	}
-	if err := validateSystemSettings(prepared.Settings); err != nil {
+	if err := s.validateSystemSettings(prepared.Settings); err != nil {
 		return SystemSettingsBootstrap{}, fmt.Errorf("validate persisted system settings: %w", err)
 	}
 	return prepared, nil
@@ -98,7 +98,7 @@ func (s *SystemSettingsService) ActivateBootstrap(
 			ErrInvalidSystemSettings,
 		)
 	}
-	if err := validateSystemSettings(prepared.Settings); err != nil {
+	if err := s.validateSystemSettings(prepared.Settings); err != nil {
 		return SystemSettingsState{}, err
 	}
 

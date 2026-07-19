@@ -285,7 +285,7 @@ function Register-Containers {
     Write-Host "  SSH:       ssh app@127.0.0.1 -p $SSH_PORT  (password: target123)"
     Write-Host ""
     Write-Host "  通过堡垒机连接 (需先获取 session):"
-    Write-Host "    MySQL:  mysql -u <prefix><resource_id><session_id> -p -h 127.0.0.1 -P 33060"
+    Write-Host "    MySQL:  mysql -u <prefix><resource_id><session_id> -p -h 127.0.0.1 -P 33060  (默认统一入口；独立模式使用 33061)"
     Write-Host "    SSH:    ssh <prefix><resource_id><session_id>@127.0.0.1 -p 47102"
 }
 

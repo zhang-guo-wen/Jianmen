@@ -26,9 +26,19 @@
   "database_gateway": {
     "enabled": true,
     "max_client_message_bytes": 10485760,
-    "mysql": {
+    "mode": "unified",
+    "unified": {
       "enabled": true,
       "listen_addr": "0.0.0.0:33060",
+      "cert_file": "/app/certs/database.crt",
+      "key_file": "/app/certs/database.key",
+      "ca_file": "/app/certs/database-ca.crt",
+      "server_name": "localhost",
+      "detection_timeout_ms": 200
+    },
+    "mysql": {
+      "enabled": true,
+      "listen_addr": "0.0.0.0:33061",
       "cert_file": "/app/certs/database.crt",
       "key_file": "/app/certs/database.key",
       "ca_file": "/app/certs/database-ca.crt",
@@ -36,7 +46,7 @@
     },
     "postgresql": {
       "enabled": true,
-      "listen_addr": "0.0.0.0:54330",
+      "listen_addr": "0.0.0.0:33062",
       "cert_file": "/app/certs/database.crt",
       "key_file": "/app/certs/database.key",
       "ca_file": "/app/certs/database-ca.crt",
@@ -44,7 +54,7 @@
     },
     "redis": {
       "enabled": true,
-      "listen_addr": "0.0.0.0:63790",
+      "listen_addr": "0.0.0.0:33063",
       "cert_file": "/app/certs/database.crt",
       "key_file": "/app/certs/database.key",
       "ca_file": "/app/certs/database-ca.crt",

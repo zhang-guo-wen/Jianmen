@@ -56,22 +56,72 @@ type databaseGatewayEndpoint struct {
 	caFile  string
 }
 
-func startDatabaseGateway(t *testing.T, fixture metadataFixture, protocol string, logger *slog.Logger) databaseGatewayEndpoint {
+func databaseGatewayModes() []string {
+	return []string{
+		config.DatabaseGatewayModeUnified,
+		config.DatabaseGatewayModeIndependent,
+	}
+}
+
+func configureDatabaseGatewayMode(
+	t *testing.T,
+	gatewayConfig *config.DatabaseGatewayConfig,
+	mode string,
+	protocol string,
+	listener config.DatabaseProtocolListener,
+) {
+	t.Helper()
+	gatewayConfig.Mode = mode
+	switch mode {
+	case config.DatabaseGatewayModeUnified:
+		gatewayConfig.Unified = config.DatabaseUnifiedListener{
+			Enabled:            true,
+			Address:            listener.Address,
+			CertFile:           listener.CertFile,
+			KeyFile:            listener.KeyFile,
+			CAFile:             listener.CAFile,
+			ServerName:         listener.ServerName,
+			DetectionTimeoutMS: 200,
+		}
+	case config.DatabaseGatewayModeIndependent:
+		switch protocol {
+		case "mysql":
+			gatewayConfig.MySQL = listener
+		case "postgresql":
+			gatewayConfig.PostgreSQL = listener
+		case "redis":
+			gatewayConfig.Redis = listener
+		default:
+			t.Fatalf("unsupported database gateway protocol %q", protocol)
+		}
+	default:
+		t.Fatalf("unsupported database gateway mode %q", mode)
+	}
+}
+
+func startDatabaseGateway(
+	t *testing.T,
+	fixture metadataFixture,
+	mode string,
+	protocol string,
+	logger *slog.Logger,
+) databaseGatewayEndpoint {
 	t.Helper()
 	addr := freeTCPAddress(t)
 	authorizer := newIntegrationAuthorizer(t, fixture)
 	gatewayConfig := config.DatabaseGatewayConfig{Enabled: true}
+	listener := config.DatabaseProtocolListener{Enabled: true, Address: addr}
 	switch protocol {
 	case "mysql":
-		gatewayConfig.MySQL = config.DatabaseProtocolListener{Enabled: true, Address: addr}
 	case "postgresql":
 		certFile, keyFile, caFile := writeIntegrationTLSCertificate(t)
-		gatewayConfig.PostgreSQL = config.DatabaseProtocolListener{
+		listener = config.DatabaseProtocolListener{
 			Enabled: true, Address: addr, CertFile: certFile, KeyFile: keyFile, CAFile: caFile, ServerName: "127.0.0.1",
 		}
 	default:
 		t.Fatalf("unsupported database gateway protocol %q", protocol)
 	}
+	configureDatabaseGatewayMode(t, &gatewayConfig, mode, protocol, listener)
 	gateway := dbproxy.NewGateway(
 		gatewayConfig,
 		fixture.store,
@@ -101,7 +151,7 @@ func startDatabaseGateway(t *testing.T, fixture metadataFixture, protocol string
 	waitServerTCP(t, addr, errCh)
 	endpoint := databaseGatewayEndpoint{address: addr}
 	if protocol == "postgresql" {
-		endpoint.caFile = gatewayConfig.PostgreSQL.CAFile
+		endpoint.caFile = listener.CAFile
 	}
 	return endpoint
 }

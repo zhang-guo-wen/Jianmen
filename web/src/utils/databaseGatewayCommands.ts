@@ -1,3 +1,5 @@
+import type { DatabaseGatewayMode } from '../api/systemSettings';
+
 export interface DatabaseGatewayTLSIdentity {
   enabled: boolean;
   tls_enabled: boolean;
@@ -16,6 +18,13 @@ export interface DatabaseGatewayConnectionInput {
 
 export const DATABASE_COMMAND_PLATFORM = 'Linux/macOS/Git Bash' as const;
 export const REDIS_COMMAND_UNAVAILABLE_REASON = 'redis-cli 无法验证主机名，安全命令暂不可用';
+export const DEFAULT_MYSQL_DETECTION_DELAY_MS = 200;
+
+export interface DatabaseGatewayEndpoint {
+  mode?: DatabaseGatewayMode;
+  port?: number;
+  mysql_detection_delay_ms?: number;
+}
 
 export interface DatabaseGatewayConnection {
   command: string | null;
@@ -41,6 +50,40 @@ export function databaseGatewayCAFileName(protocol: string): string {
 
 export function databaseGatewayCAFilePath(protocol: string): string {
   return `./${databaseGatewayCAFileName(protocol)}`;
+}
+
+export function databaseGatewayFallbackPort(
+  protocol: string,
+  mode: DatabaseGatewayMode | undefined,
+): number {
+  if (mode !== 'independent') return 33060;
+  const normalized = normalizedProtocol(protocol);
+  if (normalized === 'postgres') return 33062;
+  if (normalized === 'redis') return 33063;
+  return 33061;
+}
+
+export function resolveDatabaseGatewayPort(
+  protocol: string,
+  gateway: DatabaseGatewayEndpoint | null | undefined,
+): number {
+  const port = gateway?.port;
+  if (Number.isInteger(port) && Number(port) >= 1 && Number(port) <= 65535) {
+    return Number(port);
+  }
+  return databaseGatewayFallbackPort(protocol, gateway?.mode);
+}
+
+export function unifiedMySQLDetectionNotice(
+  protocol: string,
+  gateway: DatabaseGatewayEndpoint | null | undefined,
+): string {
+  if (normalizedProtocol(protocol) !== 'mysql' || gateway?.mode === 'independent') return '';
+  const configuredDelay = gateway?.mysql_detection_delay_ms;
+  const delay = Number.isInteger(configuredDelay) && Number(configuredDelay) > 0
+    ? Number(configuredDelay)
+    : DEFAULT_MYSQL_DETECTION_DELAY_MS;
+  return `统一入口需要短暂等待以识别连接协议，MySQL 每次连接会增加约 ${delay}ms 建连时间。`;
 }
 
 export function buildDatabaseGatewayConnection(input: DatabaseGatewayConnectionInput): DatabaseGatewayConnection | null {

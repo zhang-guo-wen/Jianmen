@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -415,8 +416,18 @@ func TestDatabaseGatewayServerNameValidation(t *testing.T) {
 	}
 }
 
-func TestDefaultDatabaseGatewayDoesNotEnableProtocolsThatNeedCertificates(t *testing.T) {
+func TestDefaultDatabaseGatewayUsesUnifiedLoopbackEntry(t *testing.T) {
 	cfg := defaultConfig()
+	if cfg.DatabaseGateway.EffectiveMode() != DatabaseGatewayModeUnified {
+		t.Fatalf("default database gateway mode = %q, want unified", cfg.DatabaseGateway.EffectiveMode())
+	}
+	if !cfg.DatabaseGateway.Unified.Enabled {
+		t.Fatal("default unified database gateway listener is disabled")
+	}
+	if cfg.DatabaseGateway.Unified.Address != "127.0.0.1:33060" ||
+		cfg.DatabaseGateway.Unified.DetectionTimeoutMS != 200 {
+		t.Fatalf("default unified listener = %#v", cfg.DatabaseGateway.Unified)
+	}
 	if cfg.DatabaseGateway.MaxClientMessageBytes !=
 		DefaultDatabaseGatewayMaxClientMessageBytes {
 		t.Fatalf(
@@ -428,8 +439,10 @@ func TestDefaultDatabaseGatewayDoesNotEnableProtocolsThatNeedCertificates(t *tes
 	if !cfg.DatabaseGateway.MySQL.Enabled {
 		t.Fatal("default database gateway must keep the certificate-optional MySQL listener enabled")
 	}
-	if !isLoopbackListenAddr(cfg.DatabaseGateway.MySQL.Address) {
-		t.Fatalf("default MySQL listener address = %q, want a loopback address", cfg.DatabaseGateway.MySQL.Address)
+	if cfg.DatabaseGateway.MySQL.Address != "127.0.0.1:33061" ||
+		cfg.DatabaseGateway.PostgreSQL.Address != "127.0.0.1:33062" ||
+		cfg.DatabaseGateway.Redis.Address != "127.0.0.1:33063" {
+		t.Fatalf("default independent listeners = %#v", cfg.DatabaseGateway)
 	}
 	if cfg.DatabaseGateway.PostgreSQL.Enabled || cfg.DatabaseGateway.Redis.Enabled {
 		t.Fatalf(
@@ -478,25 +491,29 @@ func TestLoadDatabaseGatewayEnabledDefaultsRespectFieldPresence(t *testing.T) {
 		wantPostgres  bool
 		wantRedis     bool
 		wantMySQLAddr string
+		wantUnified   bool
 	}{
 		{
-			name:          "field missing enables a loopback default mysql listener",
+			name:          "field missing enables the unified entry",
 			configJSON:    `{}`,
 			wantEnabled:   true,
 			wantMySQL:     true,
-			wantMySQLAddr: "127.0.0.1:33060",
+			wantMySQLAddr: "127.0.0.1:33061",
+			wantUnified:   true,
 		},
 		{
-			name:          "explicit true keeps configured listeners",
+			name:          "missing mode selects unified while preserving configured listeners",
 			configJSON:    `{"database_gateway":{"enabled":true,"mysql":{"enabled":true,"listen_addr":"127.0.0.1:33060"}}}`,
 			wantEnabled:   true,
 			wantMySQL:     true,
 			wantMySQLAddr: "127.0.0.1:33060",
+			wantUnified:   true,
 		},
 		{
-			name:        "explicit false disables gateway and every listener",
-			configJSON:  `{"database_gateway":{"enabled":false}}`,
-			wantEnabled: false,
+			name:          "explicit false disables gateway and every listener",
+			configJSON:    `{"database_gateway":{"enabled":false}}`,
+			wantEnabled:   false,
+			wantMySQLAddr: "127.0.0.1:33061",
 		},
 	}
 
@@ -523,6 +540,12 @@ func TestLoadDatabaseGatewayEnabledDefaultsRespectFieldPresence(t *testing.T) {
 			if cfg.DatabaseGateway.Redis.Enabled != tt.wantRedis {
 				t.Fatalf("Redis.Enabled = %t, want %t", cfg.DatabaseGateway.Redis.Enabled, tt.wantRedis)
 			}
+			if cfg.DatabaseGateway.Unified.Enabled != tt.wantUnified {
+				t.Fatalf("Unified.Enabled = %t, want %t", cfg.DatabaseGateway.Unified.Enabled, tt.wantUnified)
+			}
+			if cfg.DatabaseGateway.Mode != DatabaseGatewayModeUnified {
+				t.Fatalf("Mode = %q, want unified", cfg.DatabaseGateway.Mode)
+			}
 			if cfg.DatabaseGateway.MySQL.Address != tt.wantMySQLAddr {
 				t.Fatalf("MySQL.Address = %q, want %q", cfg.DatabaseGateway.MySQL.Address, tt.wantMySQLAddr)
 			}
@@ -533,6 +556,120 @@ func TestLoadDatabaseGatewayEnabledDefaultsRespectFieldPresence(t *testing.T) {
 					cfg.DatabaseGateway.MaxClientMessageBytes,
 					DefaultDatabaseGatewayMaxClientMessageBytes,
 				)
+			}
+		})
+	}
+}
+
+func TestUnifiedDatabaseGatewayValidation(t *testing.T) {
+	valid := DatabaseGatewayConfig{
+		Enabled: true,
+		Mode:    DatabaseGatewayModeUnified,
+		Unified: DatabaseUnifiedListener{
+			Enabled: true, Address: "127.0.0.1:33060", DetectionTimeoutMS: 200,
+		},
+	}
+	tests := []struct {
+		name    string
+		mutate  func(*DatabaseGatewayConfig)
+		wantErr string
+	}{
+		{name: "valid loopback unified listener"},
+		{
+			name: "invalid mode",
+			mutate: func(gateway *DatabaseGatewayConfig) {
+				gateway.Mode = "auto"
+			},
+			wantErr: "mode must be",
+		},
+		{
+			name: "timeout below minimum",
+			mutate: func(gateway *DatabaseGatewayConfig) {
+				gateway.Unified.DetectionTimeoutMS = 9
+			},
+			wantErr: "between 10 and 2000",
+		},
+		{
+			name: "timeout above maximum",
+			mutate: func(gateway *DatabaseGatewayConfig) {
+				gateway.Unified.DetectionTimeoutMS = 2001
+			},
+			wantErr: "between 10 and 2000",
+		},
+		{
+			name: "non-loopback requires TLS",
+			mutate: func(gateway *DatabaseGatewayConfig) {
+				gateway.Unified.Address = "0.0.0.0:33060"
+			},
+			wantErr: "unified requires TLS",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gateway := valid
+			if tt.mutate != nil {
+				tt.mutate(&gateway)
+			}
+			cfg := Config{
+				ListenAddr: "127.0.0.1:47102", DatabaseGateway: gateway,
+			}
+			err := cfg.Validate()
+			if tt.wantErr == "" && err != nil {
+				t.Fatalf("Validate() error = %v", err)
+			}
+			if tt.wantErr != "" && (err == nil || !strings.Contains(err.Error(), tt.wantErr)) {
+				t.Fatalf("Validate() error = %v, want containing %q", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestDatabaseGatewayAvailableModesReflectConfiguredListeners(t *testing.T) {
+	unified := DatabaseUnifiedListener{
+		Enabled: true, Address: "127.0.0.1:33060", DetectionTimeoutMS: 200,
+	}
+	mysql := DatabaseProtocolListener{
+		Enabled: true, Address: "127.0.0.1:33061",
+	}
+	tests := []struct {
+		name    string
+		gateway DatabaseGatewayConfig
+		want    []string
+	}{
+		{
+			name: "both modes configured",
+			gateway: DatabaseGatewayConfig{
+				Enabled: true, Unified: unified, MySQL: mysql,
+			},
+			want: []string{DatabaseGatewayModeUnified, DatabaseGatewayModeIndependent},
+		},
+		{
+			name: "only unified configured",
+			gateway: DatabaseGatewayConfig{
+				Enabled: true, Unified: unified,
+			},
+			want: []string{DatabaseGatewayModeUnified},
+		},
+		{
+			name: "only independent configured",
+			gateway: DatabaseGatewayConfig{
+				Enabled: true, MySQL: mysql,
+			},
+			want: []string{DatabaseGatewayModeIndependent},
+		},
+		{
+			name: "disabled gateway does not constrain preference",
+			gateway: DatabaseGatewayConfig{
+				Enabled: false,
+			},
+			want: []string{DatabaseGatewayModeUnified, DatabaseGatewayModeIndependent},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.gateway.AvailableModes()
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Fatalf("AvailableModes() = %v, want %v", got, tt.want)
 			}
 		})
 	}
@@ -550,7 +687,7 @@ func TestDockerfileExposesEveryDefaultDatabaseGatewayPort(t *testing.T) {
 			break
 		}
 	}
-	for _, port := range []string{"33060", "54330", "63790"} {
+	for _, port := range []string{"33060", "33061", "33062", "33063"} {
 		if !strings.Contains(exposeLine, port) {
 			t.Fatalf("Dockerfile EXPOSE line %q does not include database gateway port %s", exposeLine, port)
 		}

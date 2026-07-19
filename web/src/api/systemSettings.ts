@@ -4,7 +4,10 @@ export const DATABASE_MAX_CLIENT_MESSAGE_BYTES_MIN = 64 * 1024;
 export const DATABASE_MAX_CLIENT_MESSAGE_BYTES_MAX = 16 * BYTES_PER_MIB;
 export const DATABASE_MAX_CLIENT_MESSAGE_BYTES_DEFAULT = 10 * BYTES_PER_MIB;
 
+export type DatabaseGatewayMode = 'unified' | 'independent';
+
 export interface SystemSettingsValues {
+  database_gateway_mode: DatabaseGatewayMode;
   web_rdp_enabled: boolean;
   web_rdp_connect_timeout_seconds: number;
   web_rdp_allow_unrecorded: boolean;
@@ -16,6 +19,20 @@ export interface SystemSettingsValues {
   recording_max_replay_bytes: number;
   recording_cleanup_batch_size: number;
 }
+
+export const SYSTEM_SETTINGS_FIELDS = [
+  'database_gateway_mode',
+  'web_rdp_enabled',
+  'web_rdp_connect_timeout_seconds',
+  'web_rdp_allow_unrecorded',
+  'database_max_client_message_bytes',
+  'recording_enabled',
+  'recording_record_input',
+  'recording_record_commands',
+  'recording_retention_days',
+  'recording_max_replay_bytes',
+  'recording_cleanup_batch_size',
+] as const satisfies ReadonlyArray<keyof SystemSettingsValues>;
 
 export interface SystemSettingsGuacdInfrastructure {
   address: string;
@@ -100,6 +117,13 @@ export function replayBytesToGiB(bytes: number): number {
 export function replayGiBToBytes(gib: number): number {
   if (!Number.isFinite(gib) || gib <= 0) return 0;
   return Math.round(gib * BYTES_PER_GIB);
+}
+
+export function changedSystemSettingsFields(
+  current: SystemSettingsValues,
+  next: SystemSettingsValues,
+): Array<keyof SystemSettingsValues> {
+  return SYSTEM_SETTINGS_FIELDS.filter(field => current[field] !== next[field]);
 }
 
 export function clientMessageBytesToMiB(bytes: number): number {

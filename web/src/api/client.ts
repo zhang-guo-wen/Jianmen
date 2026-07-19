@@ -2,6 +2,7 @@
 
 import { withIdempotencyKey, type ProvisionRequest } from '@/utils/provisioningRequest';
 import type {
+  DatabaseGatewayMode,
   SystemSettingsDiagnosticResult,
   SystemSettingsRevisionResponse,
   SystemSettingsState,
@@ -9,6 +10,7 @@ import type {
 } from './systemSettings';
 
 export type {
+  DatabaseGatewayMode,
   SystemSettingsDiagnosticResult,
   SystemSettingsInfrastructure,
   SystemSettingsRevision,
@@ -479,10 +481,12 @@ export interface DBConnectionRecord {
 
 export interface DBGatewayConfig {
   enabled: boolean;
+  mode: DatabaseGatewayMode;
   protocol: string;
   listen_addr: string;
   host: string;
   port: number;
+  mysql_detection_delay_ms: number;
   tls_enabled: boolean;
   tls_server_name?: string;
   tls_ca_pem?: string;

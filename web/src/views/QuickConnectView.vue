@@ -292,6 +292,8 @@ import {
   buildDatabaseGatewayConnection,
   databaseGatewayCAFileName,
   hasDatabaseGatewayTLSIdentity,
+  resolveDatabaseGatewayPort,
+  unifiedMySQLDetectionNotice,
 } from '@/utils/databaseGatewayCommands';
 import {
 	beginInFlightIfIdle,
@@ -870,13 +872,6 @@ function onDBSearch(query: string) {
   dbPage.value = 1;
 }
 
-function databaseGatewayDefaultPort(protocol: string): number {
-  const normalized = protocol.toLowerCase();
-  if (normalized === 'redis') return 63790;
-  if (normalized === 'postgres' || normalized === 'postgresql') return 54330;
-  return 33060;
-}
-
 async function copyDBConnectionInfo(account: QuickDBTarget) {
   const targetID = String(account.id || account.resource_id || '');
   if (!targetID) {
@@ -903,7 +898,7 @@ async function copyDBConnectionInfo(account: QuickDBTarget) {
     if (!session || !credential) throw new Error('连接信息不完整');
     if (!gateway?.enabled) throw new Error(`${databaseProtocolLabel(protocol)} 数据库网关未启用`);
     const host = gateway?.tls_server_name || gateway?.host || window.location.hostname || '127.0.0.1';
-    const port = Number(gateway?.port) || databaseGatewayDefaultPort(protocol);
+    const port = resolveDatabaseGatewayPort(protocol, gateway);
     const compactUser = String(session.compact_username || '');
     const password = String(credential.password || '');
     if (!compactUser || !password) throw new Error('连接信息不完整');
@@ -917,6 +912,7 @@ async function copyDBConnectionInfo(account: QuickDBTarget) {
     if (!connection) throw new Error('TLS 身份材料不完整，无法复制安全连接命令。请联系管理员配置证书、ca_file 和 server_name。');
     if (!connection.command) throw new Error(connection.unavailableReason || '安全连接命令暂不可用');
 
+    const detectionNotice = unifiedMySQLDetectionNotice(protocol, gateway);
     const content = [
       `数据库实例：${account._instance_name || '-'}`,
       `实例分组：${databaseGroup(account)}`,
@@ -927,6 +923,7 @@ async function copyDBConnectionInfo(account: QuickDBTarget) {
       `连接临时密码：${password}`,
       `请先下载 CA：${connection.caFileName}`,
       `${connection.commandPlatform} 连接命令：${connection.command}`,
+      ...(detectionNotice ? [`建连提示：${detectionNotice}`] : []),
     ].join('\n');
     await writeClipboardText(content);
     ElMessage.success('数据库临时连接信息已复制');

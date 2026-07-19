@@ -56,8 +56,6 @@ docker run -d \
   -p 127.0.0.1:47100:47100 \
   -p 47102:47102 \
   -p 33060:33060 \
-  -p 54330:54330 \
-  -p 63790:63790 \
   -p 47110-47199:47110-47199 \
   -v jianmen-data:/app/data \
   -v jianmen-certs:/app/certs:ro \
@@ -68,9 +66,10 @@ The default container endpoints are:
 
 - Web administration (local evaluation only): `https://127.0.0.1:47100`
 - SSH gateway: `HOST:47102`
-- MySQL gateway: `HOST:33060`
-- PostgreSQL gateway (TLS required): `HOST:54330`
-- Redis gateway (remote AUTH requires TLS): `HOST:63790`
+- Unified database gateway (default, MySQL/PostgreSQL/Redis): `HOST:33060`
+- Independent MySQL gateway: `HOST:33061`
+- Independent PostgreSQL gateway (TLS required): `HOST:33062`
+- Independent Redis gateway (remote AUTH requires TLS): `HOST:33063`
 - Application gateways: `HOST:47110-47199`
 
 Mount a custom configuration file at `/app/config.json` when the defaults in
@@ -80,11 +79,17 @@ plaintext Admin HTTP. For a reverse-proxy deployment, use
 isolated Docker network, and do not publish Jianmen's port `47100`. The complete
 Caddy command sequence is documented in `README.md`.
 
-Database protocols use separate listener addresses. PostgreSQL must negotiate TLS before its
-cleartext password exchange, while Redis only permits plaintext AUTH from a loopback client for
-local development. The default Docker configuration therefore requires
-`/app/certs/database.crt` and `/app/certs/database.key` for PostgreSQL and Redis. For MySQL and
-PostgreSQL client identity verification, also mount the public CA at
+The default `unified` mode lets native MySQL, PostgreSQL, and Redis clients share port `33060`.
+MySQL connections wait for the 200 ms protocol-detection window; established-session throughput
+is unaffected. The alternative `independent` mode uses ports `33061`, `33062`, and `33063`.
+Only the selected mode binds its listeners. The default container command publishes only `33060`;
+when selecting `independent`, also publish `33061:33061`, `33062:33062`, and `33063:33063`
+(or add those mappings to Compose) before restarting the container.
+
+PostgreSQL must negotiate TLS before its cleartext password exchange, while Redis only permits
+plaintext AUTH from a loopback client for local development. The default Docker configuration
+therefore requires `/app/certs/database.crt` and `/app/certs/database.key`. For client identity
+verification, also mount the public CA at
 `/app/certs/database-ca.crt` and configure each listener's `ca_file` plus a `server_name` that
 matches a certificate SAN. The gateway API distributes only validated certificate PEM, the TLS
 server name, and the leaf-certificate SHA-256 fingerprint; it never exposes `key_file` or private

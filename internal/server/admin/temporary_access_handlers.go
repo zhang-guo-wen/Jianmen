@@ -179,14 +179,11 @@ func (s *Server) issueTemporaryConnection(r *http.Request, target service.Tempor
 }
 
 func databaseGatewayListenerAddress(gateway config.DatabaseGatewayConfig, protocol string) string {
-	switch strings.ToLower(protocol) {
-	case "postgres", "postgresql":
-		return gateway.PostgreSQL.Address
-	case "redis":
-		return gateway.Redis.Address
-	default:
-		return gateway.MySQL.Address
+	_, listener, ok := databaseProtocolListener(gateway, protocol)
+	if !ok {
+		_, listener, _ = databaseProtocolListener(gateway, "mysql")
 	}
+	return listener.Address
 }
 
 func requestHostnameFromPage(r *http.Request, baseURL string) string {

@@ -60,11 +60,13 @@ func TestSystemSettingMigrationCreatesSingletonAndRevisionSchema(t *testing.T) {
 			t.Fatalf("system setting column %s is missing", column)
 		}
 	}
-	if db.Migrator().HasColumn(
-		&model.SystemSetting{},
+	for _, column := range []string{
+		"DatabaseGatewayMode",
 		"DatabaseMaxClientMessageBytes",
-	) {
-		t.Fatal("historical system setting migration installed a future database limit column")
+	} {
+		if db.Migrator().HasColumn(&model.SystemSetting{}, column) {
+			t.Fatalf("historical system setting migration installed future column %s", column)
+		}
 	}
 	for _, column := range []string{
 		"revision",

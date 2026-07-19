@@ -10,13 +10,12 @@ import (
 	"strings"
 	"time"
 
-	"gorm.io/gorm"
-
-	"jianmen/internal/model"
-	"jianmen/internal/rbac"
 	"jianmen/internal/service"
-	"jianmen/internal/store"
-	"jianmen/internal/util"
+)
+
+const (
+	aiResourceNotFoundMessage    = "resource not found or disabled"
+	aiResourceUnavailableMessage = "AI resource unavailable"
 )
 
 type aiResource struct {
@@ -75,59 +74,34 @@ func (s *Server) handleAIResources(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) listAIResources(w http.ResponseWriter, r *http.Request) {
-	userID := userIDFromRequest(r)
-	resources := make([]aiResource, 0)
-	targets, err := s.hostTargets.Targets(r.Context())
-	if err != nil {
-		s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
+	if s.aiResources == nil {
+		s.writeAIResourceUnavailable(w, r, "list", errors.New("ai resource service unavailable"))
 		return
 	}
-	for _, target := range targets {
-		allowed, authErr := s.authorizeAnyConnection(r.Context(), userID, []string{rbac.ActionSessionConnect, rbac.ActionSFTPConnect}, model.ResourceTypeHostAccount, target.ID)
-		if authErr != nil {
-			s.writeErrorText(w, r, http.StatusInternalServerError, authErr.Error())
-			return
-		}
-		if allowed && aiResourceStatusActive(target.Status) && !aiExpiryPassed(target.ExpiresAt) {
-			resources = append(resources, hostAIResource(target))
-		}
-	}
-	accounts, err := s.databases.DatabaseAccounts(r.Context())
+	resources, err := s.aiResources.List(r.Context(), userIDFromRequest(r))
 	if err != nil {
-		s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
+		s.writeAIResourceUnavailable(w, r, "list", err)
 		return
 	}
-	for _, account := range accounts {
-		allowed, authErr := s.authorizeAnyConnection(r.Context(), userID, []string{rbac.ActionDBConnect}, model.ResourceTypeDatabaseAccount, account.ID)
-		if authErr != nil {
-			s.writeErrorText(w, r, http.StatusInternalServerError, authErr.Error())
-			return
-		}
-		if allowed && aiResourceStatusActive(account.Status) && (account.ExpiresAt == nil || time.Now().UTC().Before(*account.ExpiresAt)) {
-			instance, instanceErr := s.databases.DatabaseInstance(r.Context(), account.InstanceID)
-			if instanceErr != nil || !aiResourceStatusActive(instance.Status) {
-				continue
-			}
-			resources = append(resources, databaseAIResource(account, instance))
-		}
+	items := make([]aiResource, len(resources))
+	for index, resource := range resources {
+		items[index] = aiResourceResponse(resource)
 	}
-	s.writeJSON(w, r, http.StatusOK, map[string]any{"items": resources, "total": len(resources)})
+	s.writeJSON(w, r, http.StatusOK, map[string]any{"items": items, "total": len(items)})
 }
 
 func (s *Server) getAIResource(w http.ResponseWriter, r *http.Request, resourceType, resourceID string) {
-	resource, err := s.loadAIResource(r.Context(), resourceType, resourceID)
-	if err != nil {
-		s.writeAIResourceError(w, r, err)
+	if s.aiResources == nil {
+		s.writeAIResourceUnavailable(w, r, "get", errors.New("ai resource service unavailable"))
 		return
 	}
-	actions := aiResourceActions(resourceType)
-	allowed, authErr := s.authorizeAnyConnection(r.Context(), userIDFromRequest(r), actions, resourceType, resourceID)
-	if authErr != nil || !allowed {
-		s.forbidden(w, r)
+	resource, err := s.aiResources.Get(r.Context(), userIDFromRequest(r), resourceType, resourceID)
+	if err != nil {
+		s.writeAIResourceError(w, r, "get", err)
 		return
 	}
 	s.writeJSON(w, r, http.StatusOK, aiResourceDetail{
-		Resource: resource,
+		Resource: aiResourceResponse(resource),
 		Bastion:  s.aiBastionInfo(r, resource.Protocol),
 		Usage: map[string]string{
 			"session":     "POST /api/ai/resources/" + url.PathEscape(resourceType) + "/" + url.PathEscape(resourceID) + "/session",
@@ -137,12 +111,16 @@ func (s *Server) getAIResource(w http.ResponseWriter, r *http.Request, resourceT
 }
 
 func (s *Server) issueAIResourceCredential(w http.ResponseWriter, r *http.Request, resourceType, resourceID string) {
-	if resourceType != model.ResourceTypeHostAccount && resourceType != model.ResourceTypeDatabaseAccount {
-		s.writeErrorText(w, r, http.StatusNotFound, "unsupported resource type")
+	if s.aiResources == nil {
+		s.writeAIResourceUnavailable(w, r, "credentials", errors.New("ai resource service unavailable"))
+		return
+	}
+	if _, err := s.aiResources.Get(r.Context(), userIDFromRequest(r), resourceType, resourceID); err != nil {
+		s.writeAIResourceError(w, r, "credentials", err)
 		return
 	}
 	if s.connectionPassword == nil {
-		s.writeErrorText(w, r, http.StatusServiceUnavailable, "connection password service unavailable")
+		s.writeAIResourceUnavailable(w, r, "credentials", errors.New("connection password service unavailable"))
 		return
 	}
 	issued, err := s.connectionPassword.Issue(
@@ -154,7 +132,7 @@ func (s *Server) issueAIResourceCredential(w http.ResponseWriter, r *http.Reques
 		},
 	)
 	if err != nil {
-		s.writeConnectionPasswordServiceError(w, r, err)
+		s.writeAIResourceCredentialError(w, r, err)
 		return
 	}
 	s.writeJSON(w, r, http.StatusCreated, map[string]any{
@@ -164,85 +142,62 @@ func (s *Server) issueAIResourceCredential(w http.ResponseWriter, r *http.Reques
 }
 
 func (s *Server) issueAIResourceSession(w http.ResponseWriter, r *http.Request, resourceType, resourceID string) {
-	resource, err := s.loadAIResource(r.Context(), resourceType, resourceID)
+	if s.aiResources == nil {
+		s.writeAIResourceUnavailable(w, r, "session", errors.New("ai resource service unavailable"))
+		return
+	}
+	result, err := s.aiResources.CreateSession(r.Context(), userIDFromRequest(r), resourceType, resourceID)
 	if err != nil {
-		s.writeAIResourceError(w, r, err)
+		s.writeAIResourceError(w, r, "session", err)
 		return
 	}
-	allowed, authErr := s.authorizeAnyConnection(r.Context(), userIDFromRequest(r), aiResourceActions(resourceType), resourceType, resourceID)
-	if authErr != nil || !allowed {
-		s.forbidden(w, r)
-		return
-	}
-	session, err := s.userSessionCreation.GetOrCreateActivePermanentUserSession(r.Context(), userIDFromRequest(r))
-	if err != nil {
-		s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
-		return
-	}
-	prefix := util.PrefixHost
-	if resourceType == model.ResourceTypeDatabaseAccount {
-		prefix = util.PrefixDatabase
-		if strings.EqualFold(resource.Protocol, "redis") {
-			prefix = util.PrefixRedis
-		}
-	}
-	compactUsername := prefix + resource.ResourceID + session.SessionID
 	s.writeJSON(w, r, http.StatusCreated, map[string]any{
-		"resource_id": resourceID, "compact_username": compactUsername,
-		"session_id": session.SessionID, "session_seq": session.SessionSeq,
-		"bastion": s.aiBastionInfo(r, resource.Protocol),
+		"resource_id": resourceID, "compact_username": result.CompactUsername,
+		"session_id": result.SessionID, "session_seq": result.SessionSeq,
+		"bastion": s.aiBastionInfo(r, result.Resource.Protocol),
 	})
 }
 
-func (s *Server) loadAIResource(ctx context.Context, resourceType, resourceID string) (aiResource, error) {
-	if resourceType == model.ResourceTypeHostAccount {
-		target, err := s.hostTargets.Target(ctx, resourceID)
-		if err != nil {
-			return aiResource{}, err
-		}
-		if !aiResourceStatusActive(target.Status) || aiExpiryPassed(target.ExpiresAt) {
-			return aiResource{}, gorm.ErrRecordNotFound
-		}
-		return hostAIResource(target), nil
-	}
-	if resourceType == model.ResourceTypeDatabaseAccount {
-		account, err := s.databases.DatabaseAccount(ctx, resourceID)
-		if err != nil {
-			return aiResource{}, err
-		}
-		if !aiResourceStatusActive(account.Status) || (account.ExpiresAt != nil && time.Now().UTC().After(*account.ExpiresAt)) {
-			return aiResource{}, gorm.ErrRecordNotFound
-		}
-		instance, err := s.databases.DatabaseInstance(ctx, account.InstanceID)
-		if err != nil || !aiResourceStatusActive(instance.Status) {
-			return aiResource{}, gorm.ErrRecordNotFound
-		}
-		return databaseAIResource(account, instance), nil
-	}
-	return aiResource{}, fmt.Errorf("unsupported resource type")
-}
-
-func (s *Server) writeAIResourceError(w http.ResponseWriter, r *http.Request, err error) {
-	if errors.Is(err, gorm.ErrRecordNotFound) || errors.Is(err, store.ErrTargetNotFound) || errors.Is(err, store.ErrDBAccountNotFound) || errors.Is(err, store.ErrDBInstanceNotFound) {
-		s.writeErrorText(w, r, http.StatusNotFound, "resource not found or disabled")
+func (s *Server) writeAIResourceError(w http.ResponseWriter, r *http.Request, operation string, err error) {
+	if errors.Is(err, service.ErrAIResourceNotFound) {
+		s.writeErrorText(w, r, http.StatusNotFound, aiResourceNotFoundMessage)
 		return
 	}
-	s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
+	s.writeAIResourceUnavailable(w, r, operation, err)
 }
 
-func hostAIResource(target store.TargetView) aiResource {
-	return aiResource{ID: target.ID, Type: model.ResourceTypeHostAccount, Name: target.Name, Group: target.Group, Remark: target.Remark, Address: target.Host, Port: target.Port, Username: target.Username, ResourceID: target.ResourceID, ResourceSeq: target.ResourceSeq, Status: target.Status, ExpiresAt: target.ExpiresAt, Capabilities: []string{"ssh", "sftp", "temporary_password"}}
-}
-
-func databaseAIResource(account store.DatabaseAccountView, instance store.DatabaseInstanceView) aiResource {
-	return aiResource{ID: account.ID, Type: model.ResourceTypeDatabaseAccount, Name: account.UniqueName, Group: account.Group, Remark: account.Remark, Address: instance.Address, Port: instance.Port, Protocol: instance.Protocol, Username: account.Username, ResourceID: account.ResourceID, ResourceSeq: account.ResourceSeq, Status: account.Status, ExpiresAt: formatTimePtr(account.ExpiresAt), Capabilities: []string{"database", "temporary_password"}}
-}
-
-func aiResourceActions(resourceType string) []string {
-	if resourceType == model.ResourceTypeDatabaseAccount {
-		return []string{rbac.ActionDBConnect}
+func (s *Server) writeAIResourceCredentialError(w http.ResponseWriter, r *http.Request, err error) {
+	if errors.Is(err, service.ErrConnectionPasswordTargetNotFound) ||
+		errors.Is(err, service.ErrConnectionPasswordForbidden) {
+		s.writeErrorText(w, r, http.StatusNotFound, aiResourceNotFoundMessage)
+		return
 	}
-	return []string{rbac.ActionSessionConnect, rbac.ActionSFTPConnect}
+	s.writeAIResourceUnavailable(w, r, "credentials", err)
+}
+
+func (s *Server) writeAIResourceUnavailable(w http.ResponseWriter, r *http.Request, operation string, err error) {
+	if s.logger != nil {
+		s.logger.Error(
+			"AI resource operation failed",
+			"operation", operation,
+			"user_id", userIDFromRequest(r),
+			"resource_type", operationResourceType(r.URL.Path),
+			"resource_id", operationResourceID(r.URL.Path),
+			"error", err,
+		)
+	}
+	s.writeErrorText(w, r, http.StatusInternalServerError, aiResourceUnavailableMessage)
+}
+
+func aiResourceResponse(resource service.AIResource) aiResource {
+	return aiResource{
+		ID: resource.ID, Type: resource.Type, Name: resource.Name,
+		Group: resource.Group, Remark: resource.Remark,
+		Address: resource.Address, Port: resource.Port, Protocol: resource.Protocol,
+		Username: resource.Username, ResourceID: resource.ResourceID, ResourceSeq: resource.ResourceSeq,
+		Status: resource.Status, ExpiresAt: resource.ExpiresAt,
+		Capabilities: append([]string(nil), resource.Capabilities...),
+	}
 }
 
 func (s *Server) aiBastionInfo(r *http.Request, databaseProtocol string) map[string]any {
@@ -312,26 +267,6 @@ func aiTokenTTLs(request aiTokenRequest) (time.Duration, time.Duration, error) {
 		return 0, 0, fmt.Errorf("refresh TTL must be longer than access TTL")
 	}
 	return accessTTL, refreshTTL, nil
-}
-
-func aiResourceStatusActive(status string) bool {
-	return !strings.EqualFold(strings.TrimSpace(status), "disabled")
-}
-
-func aiExpiryPassed(value string) bool {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return false
-	}
-	expiresAt, err := time.Parse(time.RFC3339Nano, value)
-	return err == nil && !time.Now().UTC().Before(expiresAt)
-}
-
-func formatTimePtr(value *time.Time) string {
-	if value == nil {
-		return ""
-	}
-	return value.UTC().Format(time.RFC3339)
 }
 
 func contextWithString(ctx context.Context, key contextKey, value string) context.Context {

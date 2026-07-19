@@ -41,6 +41,7 @@ type adminRepository interface {
 type adminDependencies struct {
 	adminAuth           service.AdminAuthRepository
 	aiTokens            adminAIAccessTokenRepository
+	aiResources         service.AIResourceRepository
 	hostTargets         adminHostTargetRepository
 	databases           adminDatabaseRepository
 	applications        adminApplicationRepository
@@ -235,6 +236,7 @@ func resolveAdminDependencies(repository adminRepository) (adminDependencies, er
 	return adminDependencies{
 		adminAuth:           repository,
 		aiTokens:            repository,
+		aiResources:         aiResourceRepositoryAdapter{hostTargets: repository, databases: repository},
 		hostTargets:         repository,
 		databases:           repository,
 		applications:        repository,

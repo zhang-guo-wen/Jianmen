@@ -113,7 +113,11 @@
 
 ### 本阶段必须完成
 
-当前数据库网关与审计治理切片范围内的 P0/P1/P2 已清零，暂无未提交的阶段阻断项。“可以延期”表中的 P2 均不属于本切片。以下已验证修复不得因历史计划未勾选而重新列为开放问题：
+数据库网关与审计治理功能范围内的 P0/P1/P2 已清零。2026-07-19 阶段 Race 门禁新发现 `TEST-20260719-002`：生产路径已有串行化保护，安全复核定级为 P2，但当前 CI Race 门禁为红，未经确认不得顺手修复，也不得在门禁未通过时合并。以下已验证修复不得因历史计划未勾选而重新列为开放问题：
+
+| 当前阻塞项 | 优先级 | 状态 | 阻塞条件 | 解除条件 |
+|---|---|---|---|---|
+| `TEST-20260719-002` Redis Relay 测试绕过串行化边界 | P2 | 已阻塞 | Linux/CGO 执行 `go test -race ./internal/server/dbproxy ./internal/store -count=1 -timeout=10m` 时，两个 Redis Drain 测试直接传入裸 `redisObserver`，触发真实数据竞争；生产调用通过 `newQueryObserver` 包装，不存在已确认 P0/P1 | 用户确认一个独立最小门禁修复切片，或明确变更合并门禁决策；修复后目标 Race、全仓门禁与完整打包通过 |
 
 | 事项 | 结果 | 提交 | 验证证据 |
 |---|---|---|---|
@@ -124,7 +128,7 @@
 | 审计保留、分批清理与回放字节配额 | 已完成 | `8b8b633`、`99cf3aa` | [保留服务测试](../internal/service/audit_retention_test.go)、[存储一致性测试](../internal/store/dbstore_audit_retention_test.go) |
 | 跨分片脱敏及审计录制失败关闭 | 已完成 | `c517a3b` | [流式脱敏测试](../internal/recording/stream_redactor_test.go)、[数据库录制失败测试](../internal/server/dbproxy/audit_replay_path_test.go) |
 | 超级管理员独立文件权威路径与无管理员锁死 | 已完成 | `15e9c28`、`1c1b141` | 启动不再读取或重命名 `.super_admin_ids`；有用户但无有效超级管理员时失败关闭；显式配置只允许在无有效管理员时写库恢复；[启动回归测试](../cmd/bastion-core/bootstrap_test.go)、[存储事务测试](../internal/storage/super_admin_test.go) |
-| SSH 对聚合 Store 的直接依赖 | 已完成（首个拆分切片） | `a3e145a` | SSH 使用方定义认证、目标、用户会话、审计会话和审计事件 5 组窄接口，共 9 个方法；[最小依赖回归测试](../internal/server/sshserver/repository_test.go) |
+| SSH 对聚合 Store 的直接依赖 | 实现及复审完成，待阶段门禁 | `a3e145a` | SSH 使用方定义认证、目标、用户会话、审计会话和审计事件 5 组窄接口，共 9 个方法；[最小依赖回归测试](../internal/server/sshserver/repository_test.go) |
 
 ### 可以延期
 

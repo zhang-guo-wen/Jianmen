@@ -8,6 +8,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"gorm.io/gorm"
 
@@ -527,6 +528,62 @@ func TestConnectableDatabaseListUsesDBConnectWithoutView(t *testing.T) {
 	}
 	if len(page.Items) != 1 || page.Items[0].ID != "dba-account-only" {
 		t.Fatalf("unexpected connectable database list: %#v", page.Items)
+	}
+}
+
+func TestConnectableDatabaseListsExcludeDisabledAndExpiredResources(t *testing.T) {
+	server, db := newAdminDBTestServer(t)
+	const userID = "db-connectable-lifecycle-user"
+	seedConnectionAction(t, db, userID, rbac.ActionDBConnect)
+	expiredAt := time.Now().UTC().Add(-time.Minute)
+	instances := []model.DatabaseInstance{
+		{ID: "db-connectable-active", Name: "active", Protocol: "mysql", Address: "127.0.0.1", Port: 3306, Status: "active"},
+		{ID: "db-connectable-self", Name: "self", Protocol: "mysql", Address: "127.0.0.2", Port: 3306, Status: "active"},
+		{ID: "db-connectable-disabled", Name: "disabled", Protocol: "mysql", Address: "127.0.0.3", Port: 3306, Status: "disabled"},
+	}
+	for i := range instances {
+		if err := db.Create(&instances[i]).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	accounts := []model.DatabaseAccount{
+		{ID: "db-account-active", InstanceID: "db-connectable-active", UniqueName: "active", Username: "active", Status: "active", ResourceID: "D9101", ResourceSeq: 9101},
+		{ID: "db-account-disabled", InstanceID: "db-connectable-active", UniqueName: "disabled", Username: "disabled", Status: "disabled", ResourceID: "D9102", ResourceSeq: 9102},
+		{ID: "db-account-expired", InstanceID: "db-connectable-active", UniqueName: "expired", Username: "expired", Status: "active", ExpiresAt: &expiredAt, ResourceID: "D9103", ResourceSeq: 9103},
+		{ID: "db-account-disabled-parent", InstanceID: "db-connectable-disabled", UniqueName: "disabled-parent", Username: "disabled-parent", Status: "active", ResourceID: "D9104", ResourceSeq: 9104},
+	}
+	for i := range accounts {
+		if err := db.Create(&accounts[i]).Error; err != nil {
+			t.Fatal(err)
+		}
+		seedResourceGrant(t, db, userID, model.ResourceTypeDatabaseAccount, accounts[i].ID)
+	}
+	seedResourceGrant(t, db, userID, model.ResourceTypeDatabaseInstance, "db-connectable-self")
+	seedResourceGrant(t, db, userID, model.ResourceTypeDatabaseInstance, "db-connectable-disabled")
+
+	listedAccounts, err := server.databaseManagement.ListAccounts(context.Background(), userID, "", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(listedAccounts) != 1 || listedAccounts[0].ID != "db-account-active" {
+		t.Fatalf("connectable accounts = %#v, want only active account with active parent", listedAccounts)
+	}
+	listedInstances, err := server.databaseManagement.ListInstances(context.Background(), userID, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(listedInstances) != 2 {
+		t.Fatalf("connectable instances = %#v, want active account-backed and directly granted instances", listedInstances)
+	}
+	counts := make(map[string]int, len(listedInstances))
+	for _, instance := range listedInstances {
+		counts[instance.ID] = instance.AccountCount
+		if instance.ID == "db-connectable-disabled" {
+			t.Fatal("disabled instance appeared in connectable list")
+		}
+	}
+	if counts["db-connectable-active"] != 1 || counts["db-connectable-self"] != 0 {
+		t.Fatalf("connectable instance account counts = %#v, want only valid authorized accounts", counts)
 	}
 }
 

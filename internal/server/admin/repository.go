@@ -23,16 +23,16 @@ type adminRepository interface {
 	adminDatabaseRepository
 	adminApplicationRepository
 	adminContainerRepository
-	adminPlatformAccountRepository
+	service.PlatformAccountRepository
 	adminUserSessionCreationRepository
 	adminAuditRepository
 	adminConnectionPasswordRepository
-	adminUserPreferenceRepository
 	resourceAccessRepository
 	service.TemporaryAccessRepository
 	service.UserRepository
 	service.UserGroupRepository
 	service.RoleManagementRepository
+	service.UserPreferenceRepository
 }
 
 // adminDependencies keeps the server coupled to resource-scoped repositories
@@ -43,16 +43,16 @@ type adminDependencies struct {
 	databases           adminDatabaseRepository
 	applications        adminApplicationRepository
 	containers          adminContainerRepository
-	platformAccounts    adminPlatformAccountRepository
+	platformAccounts    service.PlatformAccountRepository
 	userSessionCreation adminUserSessionCreationRepository
 	audit               adminAuditRepository
 	connectionPassword  adminConnectionPasswordRepository
-	preferences         adminUserPreferenceRepository
 	resourceAccess      resourceAccessRepository
 	temporaryAccess     service.TemporaryAccessRepository
 	users               service.UserRepository
 	userGroups          service.UserGroupRepository
 	roles               service.RoleManagementRepository
+	userPreferences     service.UserPreferenceRepository
 }
 
 type adminAIAccessTokenRepository interface {
@@ -176,15 +176,21 @@ func hostManagementTargetConfig(config store.TargetConfig) service.HostManagemen
 
 type adminDatabaseRepository interface {
 	DatabaseInstances(context.Context) []store.DatabaseInstanceView
+	ListDatabaseInstances(context.Context) ([]store.DatabaseInstanceView, error)
 	DatabaseInstance(context.Context, string) (store.DatabaseInstanceView, error)
 	AddDatabaseInstance(context.Context, store.DatabaseInstanceInput) (store.DatabaseInstanceView, error)
 	UpdateDatabaseInstance(context.Context, string, store.DatabaseInstanceInput) (store.DatabaseInstanceView, error)
 	DeleteDatabaseInstance(context.Context, string) error
 	DatabaseAccounts(context.Context) ([]store.DatabaseAccountView, error)
+	ListDatabaseAccountsByInstance(context.Context, string) ([]store.DatabaseAccountView, error)
 	DatabaseAccount(context.Context, string) (store.DatabaseAccountView, error)
 	AddDatabaseAccount(context.Context, string, string, string, string, string, *time.Time) (store.DatabaseAccountView, error)
 	UpdateDatabaseAccount(context.Context, string, string, string, string, string, *time.Time, string) (store.DatabaseAccountView, error)
 	DeleteDatabaseAccount(context.Context, string) error
+	CreateDatabaseInstanceWithCreatorGrant(context.Context, store.DatabaseInstanceInput, string) (store.DatabaseInstanceView, error)
+	DatabaseAccountProbeMetadata(context.Context, string) (store.DatabaseAccountProbeMetadata, error)
+	DatabaseAccountProbePassword(context.Context, string) (string, error)
+	DatabaseInstanceForProbe(context.Context, string) (model.DatabaseInstance, error)
 }
 
 type adminApplicationRepository interface {
@@ -192,20 +198,7 @@ type adminApplicationRepository interface {
 }
 
 type adminContainerRepository interface {
-	ListContainerEndpoints(context.Context, store.ContainerEndpointListParams) ([]store.ContainerEndpointView, int64, error)
-	ContainerEndpoint(context.Context, string) (store.ContainerEndpointView, error)
-	AddContainerEndpoint(context.Context, store.ContainerEndpointInput) (store.ContainerEndpointView, error)
-	UpdateContainerEndpoint(context.Context, string, store.ContainerEndpointInput) (store.ContainerEndpointView, error)
-	DeleteContainerEndpoint(context.Context, string) error
-}
-
-type adminPlatformAccountRepository interface {
-	PlatformAccounts(context.Context, store.PlatformAccountListParams) ([]store.PlatformAccountView, int64, error)
-	PlatformAccount(context.Context, string) (store.PlatformAccountView, error)
-	AddPlatformAccount(context.Context, model.PlatformAccount) (store.PlatformAccountView, error)
-	UpdatePlatformAccount(context.Context, string, model.PlatformAccount) (store.PlatformAccountView, error)
-	DeletePlatformAccount(context.Context, string) error
-	GetPlatformAccountPassword(context.Context, string) (string, error)
+	service.ContainerManagementRepository
 }
 
 type adminUserSessionCreationRepository interface {
@@ -233,11 +226,6 @@ type adminConnectionPasswordRepository interface {
 	service.ConnectionPasswordRepository
 }
 
-type adminUserPreferenceRepository interface {
-	UserPreference(context.Context, string) (model.UserPreference, error)
-	SaveUserPreference(context.Context, model.UserPreference) (model.UserPreference, error)
-}
-
 func resolveAdminDependencies(repository adminRepository) (adminDependencies, error) {
 	if isNilAdminRepository(repository) {
 		return adminDependencies{}, errAdminStoreRequired
@@ -252,12 +240,12 @@ func resolveAdminDependencies(repository adminRepository) (adminDependencies, er
 		userSessionCreation: repository,
 		audit:               repository,
 		connectionPassword:  repository,
-		preferences:         repository,
 		resourceAccess:      repository,
 		temporaryAccess:     repository,
 		users:               repository,
 		userGroups:          repository,
 		roles:               repository,
+		userPreferences:     repository,
 	}, nil
 }
 

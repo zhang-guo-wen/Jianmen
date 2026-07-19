@@ -12,11 +12,14 @@ type PlatformAccount struct {
 	GroupName    string         `gorm:"size:128" json:"group,omitempty"`
 	Username     string         `gorm:"size:255;not null" json:"username"`
 	Password     EncryptedField `gorm:"type:text" json:"-"`
-	Remark       string         `gorm:"type:text" json:"remark,omitempty"`
-	OwnerID      string         `gorm:"index;size:64;not null" json:"owner_id"`
-	Status       string         `gorm:"index;size:32;not null;default:active" json:"status"`
-	ExpiresAt    *time.Time     `gorm:"index" json:"expires_at,omitempty"`
-	CreatedAt    time.Time      `json:"created_at"`
-	UpdatedAt    time.Time      `json:"updated_at"`
-	Owner        User           `gorm:"constraint:OnUpdate:CASCADE,OnDelete:CASCADE;" json:"-"`
+	// HasPassword is populated by credential-free metadata queries. It is not
+	// persisted and allows list/detail paths to avoid loading the password.
+	HasPassword bool       `gorm:"->;-:migration" json:"-"`
+	Remark      string     `gorm:"type:text" json:"remark,omitempty"`
+	OwnerID     string     `gorm:"index;size:64;not null" json:"owner_id"`
+	Status      string     `gorm:"index;size:32;not null;default:active" json:"status"`
+	ExpiresAt   *time.Time `gorm:"index" json:"expires_at,omitempty"`
+	CreatedAt   time.Time  `json:"created_at"`
+	UpdatedAt   time.Time  `json:"updated_at"`
+	Owner       User       `gorm:"constraint:OnUpdate:CASCADE,OnDelete:CASCADE;" json:"-"`
 }

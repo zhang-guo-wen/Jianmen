@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"errors"
 	"fmt"
 	"log/slog"
 	"math"
@@ -17,6 +18,9 @@ const (
 	loginFailureLimit  = 5
 	loginFailureWindow = 15 * time.Minute
 	loginLockout       = 5 * time.Minute
+
+	loginAuditOutcomePending = "pending"
+	loginAuditReasonIntent   = "intent"
 )
 
 type loginLimiter struct {
@@ -120,25 +124,69 @@ func setRetryAfter(w http.ResponseWriter, d time.Duration) {
 	w.Header().Set("Retry-After", fmt.Sprintf("%d", seconds))
 }
 
-func (s *Server) logLogin(r *http.Request, username, userID, outcome, reason string) {
+func (s *Server) beginLoginAudit(r *http.Request, username, userID string) (string, error) {
+	entry := s.newLoginAuditLog(r, username, userID, loginAuditOutcomePending, loginAuditReasonIntent)
+	entry.ID = model.NewID()
+	if err := s.createLoginAuditLog(r, entry); err != nil {
+		return "", err
+	}
+	return entry.ID, nil
+}
+
+func (s *Server) recordLoginAuditResult(r *http.Request, username, userID, intentID, outcome, reason string) error {
+	linkedReason := "intent_id=" + strings.TrimSpace(intentID)
+	if strings.TrimSpace(reason) != "" {
+		linkedReason += ";" + strings.TrimSpace(reason)
+	}
+	return s.createLoginAuditLog(r, s.newLoginAuditLog(r, username, userID, outcome, linkedReason))
+}
+
+func (s *Server) recordLoginAuditFailure(r *http.Request, username, userID, intentID, reason string) {
+	if err := s.recordLoginAuditResult(r, username, userID, intentID, "failure", reason); err != nil {
+		logger := s.loginLogger()
+		logger.Warn("failed to write login audit result", "username", username, "outcome", "failure", "intent_id", intentID, "error", err)
+	}
+}
+
+func (s *Server) logLogin(r *http.Request, username, userID, outcome, reason string) error {
+	auditErr := s.createLoginAuditLog(r, s.newLoginAuditLog(r, username, userID, outcome, reason))
+	logger := s.loginLogger()
+	if auditErr != nil {
+		logger.Warn("failed to write login audit log", "username", username, "outcome", outcome, "error", auditErr)
+	}
+	s.logLoginOutcome(logger, r, username, outcome, reason)
+	return auditErr
+}
+
+func (s *Server) newLoginAuditLog(r *http.Request, username, userID, outcome, reason string) *model.LoginAuditLog {
+	return &model.LoginAuditLog{
+		UserID:    userID,
+		Username:  username,
+		Outcome:   outcome,
+		Reason:    reason,
+		ClientIP:  requestClientIP(r),
+		UserAgent: r.UserAgent(),
+	}
+}
+
+func (s *Server) createLoginAuditLog(r *http.Request, entry *model.LoginAuditLog) error {
+	if s.audit == nil {
+		return errors.New("login audit unavailable")
+	}
+	ctx, cancel := detachedAuditWriteContext(r.Context())
+	defer cancel()
+	return s.audit.CreateLoginAuditLog(ctx, entry)
+}
+
+func (s *Server) loginLogger() *slog.Logger {
 	logger := s.logger
 	if logger == nil {
 		logger = slog.Default()
 	}
-	if s.audit != nil {
-		ctx, cancel := detachedAuditWriteContext(r.Context())
-		defer cancel()
-		if err := s.audit.CreateLoginAuditLog(ctx, &model.LoginAuditLog{
-			UserID:    userID,
-			Username:  username,
-			Outcome:   outcome,
-			Reason:    reason,
-			ClientIP:  requestClientIP(r),
-			UserAgent: r.UserAgent(),
-		}); err != nil {
-			logger.Warn("failed to write login audit log", "username", username, "outcome", outcome, "error", err)
-		}
-	}
+	return logger
+}
+
+func (s *Server) logLoginOutcome(logger *slog.Logger, r *http.Request, username, outcome, reason string) {
 	attrs := []any{
 		"username", username,
 		"client_ip", requestClientIP(r),

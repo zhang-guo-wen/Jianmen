@@ -19,45 +19,45 @@ import (
 )
 
 type Server struct {
-	cfg                  *config.Config
-	aiAccessTokens       *service.AIAccessTokenService
-	hostTargets          adminHostTargetRepository
-	hostManagement       *service.HostManagementService
-	databases            adminDatabaseRepository
-	applicationService   *service.ApplicationService
-	containers           adminContainerRepository
-	platformAccounts     adminPlatformAccountRepository
-	userSessionCreation  *service.UserSessionCreationService
-	audit                adminAuditRepository
-	connectionPassword   *service.ConnectionPasswordService
-	preferences          adminUserPreferenceRepository
-	temporaryRepository  service.TemporaryAccessRepository
-	userRepository       service.UserRepository
-	userGroupRepository  service.UserGroupRepository
-	roleRepository       service.RoleManagementRepository
-	db                   *gorm.DB
-	logger               *slog.Logger
-	dataDir              string
-	loginLimiter         *loginLimiter
-	loginCaptcha         loginCaptchaVerifier
-	onlineSessions       *online.Registry
-	containerService     *service.ContainerService
-	identity             *service.IdentityService
-	authorization        authorizationService
-	resourceAccess       resourceAccessRepository
-	resourceGrants       *service.ResourceGrantService
-	resourceGroups       *service.ResourceGroupService
-	userManagement       *service.UserService
-	userGroups           *service.UserGroupService
-	roleManagement       *service.RoleService
-	databaseProvisioning databaseProvisioningService
-	temporaryAccess      *service.TemporaryAccessService
-	browserSessions      *service.BrowserSessionService
-	webRDP               *webrdp.Handler
-	accessRequests       *accessrequest.Handler
-	systemSettings       *systemsettings.Handler
-	setupOnce            sync.Once
-	setupSlot            chan struct{}
+	cfg                    *config.Config
+	aiAccessTokens         *service.AIAccessTokenService
+	hostTargets            adminHostTargetRepository
+	hostManagement         *service.HostManagementService
+	databases              adminDatabaseRepository
+	databaseManagement     *service.DatabaseManagementService
+	applicationService     *service.ApplicationService
+	containerManagement    *service.ContainerManagementService
+	platformAccountService *service.PlatformAccountService
+	userSessionCreation    *service.UserSessionCreationService
+	audit                  adminAuditRepository
+	connectionPassword     *service.ConnectionPasswordService
+	preferences            *service.UserPreferenceService
+	temporaryRepository    service.TemporaryAccessRepository
+	userRepository         service.UserRepository
+	userGroupRepository    service.UserGroupRepository
+	roleRepository         service.RoleManagementRepository
+	db                     *gorm.DB
+	logger                 *slog.Logger
+	dataDir                string
+	loginLimiter           *loginLimiter
+	loginCaptcha           loginCaptchaVerifier
+	onlineSessions         *online.Registry
+	identity               *service.IdentityService
+	authorization          authorizationService
+	resourceAccess         resourceAccessRepository
+	resourceGrants         *service.ResourceGrantService
+	resourceGroups         *service.ResourceGroupService
+	userManagement         *service.UserService
+	userGroups             *service.UserGroupService
+	roleManagement         *service.RoleService
+	databaseProvisioning   databaseProvisioningService
+	temporaryAccess        *service.TemporaryAccessService
+	browserSessions        *service.BrowserSessionService
+	webRDP                 *webrdp.Handler
+	accessRequests         *accessrequest.Handler
+	systemSettings         *systemsettings.Handler
+	setupOnce              sync.Once
+	setupSlot              chan struct{}
 }
 
 func New(
@@ -147,6 +147,14 @@ func New(
 	if err != nil {
 		return nil, fmt.Errorf("initialize host management service: %w", err)
 	}
+	userPreferences, err := service.NewUserPreferenceService(dependencies.userPreferences)
+	if err != nil {
+		return nil, fmt.Errorf("initialize user preference service: %w", err)
+	}
+	databaseManagement, err := service.NewDatabaseManagementService(databaseManagementRepositoryAdapter{repository: dependencies.databases}, authorization, databaseProvisioning)
+	if err != nil {
+		return nil, fmt.Errorf("initialize database management service: %w", err)
+	}
 	var applicationProxy service.ApplicationProxy
 	if appProxy != nil {
 		applicationProxy = appProxy
@@ -161,17 +169,30 @@ func New(
 	if err != nil {
 		return nil, fmt.Errorf("initialize application service: %w", err)
 	}
+	platformAccountService, err := service.NewPlatformAccountService(dependencies.platformAccounts, authorization)
+	if err != nil {
+		return nil, fmt.Errorf("initialize platform account service: %w", err)
+	}
+	containerManagement, err := service.NewContainerManagementService(
+		dependencies.containers,
+		authorization,
+		service.NewContainerService(),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("initialize container management service: %w", err)
+	}
 	return &Server{
 		cfg: cfg, db: db, logger: logger,
 		aiAccessTokens: aiAccessTokens, hostTargets: dependencies.hostTargets, hostManagement: hostManagement, databases: dependencies.databases,
-		applicationService: applicationService, containers: dependencies.containers, platformAccounts: dependencies.platformAccounts,
+		databaseManagement: databaseManagement, applicationService: applicationService,
+		containerManagement: containerManagement, platformAccountService: platformAccountService,
 		userSessionCreation: userSessionCreation, audit: dependencies.audit, connectionPassword: connectionPassword,
-		preferences: dependencies.preferences, temporaryRepository: dependencies.temporaryAccess,
+		preferences: userPreferences, temporaryRepository: dependencies.temporaryAccess,
 		userRepository: dependencies.users, userGroupRepository: dependencies.userGroups, roleRepository: dependencies.roles,
 		dataDir:      dataDir,
 		loginLimiter: newDefaultLoginLimiter(), loginCaptcha: loginCaptcha,
-		onlineSessions: onlineSessions, containerService: service.NewContainerService(),
-		identity: identity, authorization: authorization, resourceAccess: dependencies.resourceAccess,
+		onlineSessions: onlineSessions,
+		identity:       identity, authorization: authorization, resourceAccess: dependencies.resourceAccess,
 		resourceGrants: resourceGrants, resourceGroups: resourceGroups, userManagement: userManagement, userGroups: userGroups, roleManagement: roleManagement, databaseProvisioning: databaseProvisioning, temporaryAccess: temporaryAccess,
 		browserSessions: browserSessions,
 		webRDP:          webRDP, accessRequests: accessRequests,

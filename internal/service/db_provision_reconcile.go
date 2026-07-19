@@ -89,11 +89,7 @@ func (s *DatabaseProvisioningService) claimForReconcile(
 	ctx context.Context,
 	candidate DatabaseProvisioningOperation,
 ) (DatabaseProvisioningOperation, bool, error) {
-	token, err := randomProvisioningString(
-		s.random,
-		20,
-		provisioningOperationAlphabet,
-	)
+	token, err := s.randomString(20, provisioningOperationAlphabet)
 	if err != nil {
 		return DatabaseProvisioningOperation{}, false,
 			errors.New("generate database provisioning claim token")

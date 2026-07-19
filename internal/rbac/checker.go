@@ -219,3 +219,88 @@ func isAllow(permission model.Permission) bool {
 func isDeny(permission model.Permission) bool {
 	return strings.EqualFold(permission.Effect, model.PermissionEffectDeny)
 }
+
+// BatchActionDecisionsContext loads all role permissions and resource-group
+// memberships once, then evaluates every requested resource in memory.
+func (c *Checker) BatchActionDecisionsContext(ctx context.Context, userID string, requests []BatchAuthorizationRequest) ([]BatchActionDecision, error) {
+	result := make([]BatchActionDecision, len(requests))
+	if c == nil || c.db == nil {
+		return nil, errors.New("rbac: nil database")
+	}
+	if len(requests) == 0 {
+		return result, nil
+	}
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return result, nil
+	}
+	permissions, err := (&Checker{db: c.db.WithContext(ctx)}).permissionsForUser(userID)
+	if err != nil {
+		return nil, err
+	}
+	facts, err := c.loadBatchFacts(ctx, requests, groupIDsFromPermissions(permissions))
+	if err != nil {
+		return nil, err
+	}
+	for index, request := range requests {
+		decision := result[index]
+		for _, action := range normalizedBatchActions(request.Actions) {
+			globalAllowed := false
+			globalDenied := false
+			resourceDenied := false
+			for _, permission := range permissions {
+				if !actionMatches(permission.Action, action) {
+					continue
+				}
+				if isActionOnly(permission) {
+					if isDeny(permission) {
+						globalDenied = true
+					}
+					if isAllow(permission) {
+						globalAllowed = true
+					}
+					continue
+				}
+				if isDeny(permission) && batchPermissionResourceMatches(permission, request, facts) {
+					resourceDenied = true
+				}
+			}
+			// HasPermissionContext(user, action, "", "") first applies
+			// action-only deny precedence, then requires an action-only allow.
+			// Keep that decision separate from a concrete resource deny so the
+			// service can preserve action_denied versus resource_denied.
+			if globalDenied || !globalAllowed {
+				continue
+			}
+			decision.ActionAllowed = true
+			if !resourceDenied {
+				decision.Allowed = true
+			}
+			if resourceDenied {
+				decision.Denied = true
+			}
+		}
+		if decision.Allowed {
+			decision.Denied = false
+		}
+		result[index] = decision
+	}
+	return result, nil
+}
+
+func normalizedBatchActions(actions []string) []string {
+	seen := map[string]struct{}{}
+	result := make([]string, 0, len(actions))
+	for _, action := range actions {
+		action = strings.TrimSpace(action)
+		if action == "" {
+			continue
+		}
+		if _, ok := seen[action]; ok {
+			continue
+		}
+		seen[action] = struct{}{}
+		result = append(result, action)
+	}
+	return result
+}

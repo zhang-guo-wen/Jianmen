@@ -26,6 +26,15 @@ var _ adminRepository = (*store.DBStore)(nil)
 
 type repositoryTestAuthorization struct{}
 
+type typedNilAuthorization struct{}
+
+func (*typedNilAuthorization) AuthorizeConnection(context.Context, string, []string, string, string) (bool, error) {
+	return false, nil
+}
+func (*typedNilAuthorization) AuthorizeBatch(context.Context, string, []service.AuthorizationRequest) ([]service.AuthorizationDecision, error) {
+	return nil, nil
+}
+
 func (repositoryTestAuthorization) AuthorizeConnection(
 	context.Context,
 	string,
@@ -34,6 +43,10 @@ func (repositoryTestAuthorization) AuthorizeConnection(
 	string,
 ) (bool, error) {
 	return false, nil
+}
+
+func (repositoryTestAuthorization) AuthorizeBatch(context.Context, string, []service.AuthorizationRequest) ([]service.AuthorizationDecision, error) {
+	return nil, nil
 }
 
 type repositoryTestProvisioning struct{}
@@ -80,6 +93,10 @@ func TestNewAcceptsCompleteDBStoreRepository(t *testing.T) {
 	resourceGroups, err := service.NewResourceGroupService(repository)
 	if err != nil {
 		t.Fatalf("new resource group service: %v", err)
+	}
+	var nilAuthorization *typedNilAuthorization
+	if _, err := New(&config.Config{}, repository, db, identity, browserSessions, nilAuthorization, resourceGrants, resourceGroups, repositoryTestProvisioning{}, slog.New(slog.NewTextHandler(io.Discard, nil)), t.TempDir(), nil, online.NewRegistry(), &webrdp.Handler{}, &accessrequest.Handler{}, nil); err == nil {
+		t.Fatal("New accepted typed-nil authorization service")
 	}
 
 	server, err := New(
@@ -135,16 +152,16 @@ func TestAdminRepositoryBoundaryStaysStaticallyComposedAndDomainSplit(t *testing
 		t.Fatal("Server regained an application-wide store field")
 	}
 	expectedFields := map[string]reflect.Type{
-		"aiTokens":           reflect.TypeOf((*adminAIAccessTokenRepository)(nil)).Elem(),
-		"hostTargets":        reflect.TypeOf((*adminHostTargetRepository)(nil)).Elem(),
-		"databases":          reflect.TypeOf((*adminDatabaseRepository)(nil)).Elem(),
-		"applications":       reflect.TypeOf((*adminApplicationRepository)(nil)).Elem(),
-		"containers":         reflect.TypeOf((*adminContainerRepository)(nil)).Elem(),
-		"platformAccounts":   reflect.TypeOf((*adminPlatformAccountRepository)(nil)).Elem(),
-		"userSessions":       reflect.TypeOf((*adminUserSessionRepository)(nil)).Elem(),
-		"audit":              reflect.TypeOf((*adminAuditRepository)(nil)).Elem(),
-		"connectionPassword": reflect.TypeOf((*adminConnectionPasswordRepository)(nil)).Elem(),
-		"preferences":        reflect.TypeOf((*adminUserPreferenceRepository)(nil)).Elem(),
+		"aiTokens":            reflect.TypeOf((*adminAIAccessTokenRepository)(nil)).Elem(),
+		"hostTargets":         reflect.TypeOf((*adminHostTargetRepository)(nil)).Elem(),
+		"databases":           reflect.TypeOf((*adminDatabaseRepository)(nil)).Elem(),
+		"applications":        reflect.TypeOf((*adminApplicationRepository)(nil)).Elem(),
+		"containers":          reflect.TypeOf((*adminContainerRepository)(nil)).Elem(),
+		"platformAccounts":    reflect.TypeOf((*adminPlatformAccountRepository)(nil)).Elem(),
+		"userSessionCreation": reflect.TypeOf((*service.UserSessionCreationService)(nil)),
+		"audit":               reflect.TypeOf((*adminAuditRepository)(nil)).Elem(),
+		"connectionPassword":  reflect.TypeOf((*adminConnectionPasswordRepository)(nil)).Elem(),
+		"preferences":         reflect.TypeOf((*adminUserPreferenceRepository)(nil)).Elem(),
 	}
 	for name, want := range expectedFields {
 		field, found := serverType.FieldByName(name)
@@ -161,21 +178,21 @@ func TestAdminRepositoryBoundaryStaysStaticallyComposedAndDomainSplit(t *testing
 		t.Fatalf("parse repository boundary: %v", err)
 	}
 	wantEmbedded := map[string]bool{
-		"adminAIAccessTokenRepository":      true,
-		"adminHostTargetRepository":         true,
-		"adminDatabaseRepository":           true,
-		"adminApplicationRepository":        true,
-		"adminContainerRepository":          true,
-		"adminPlatformAccountRepository":    true,
-		"adminUserSessionRepository":        true,
-		"adminAuditRepository":              true,
-		"adminConnectionPasswordRepository": true,
-		"adminUserPreferenceRepository":     true,
-		"resourceAccessRepository":          true,
-		"service.TemporaryAccessRepository": true,
-		"service.UserRepository":            true,
-		"service.UserGroupRepository":       true,
-		"service.RoleManagementRepository":  true,
+		"adminAIAccessTokenRepository":       true,
+		"adminHostTargetRepository":          true,
+		"adminDatabaseRepository":            true,
+		"adminApplicationRepository":         true,
+		"adminContainerRepository":           true,
+		"adminPlatformAccountRepository":     true,
+		"adminUserSessionCreationRepository": true,
+		"adminAuditRepository":               true,
+		"adminConnectionPasswordRepository":  true,
+		"adminUserPreferenceRepository":      true,
+		"resourceAccessRepository":           true,
+		"service.TemporaryAccessRepository":  true,
+		"service.UserRepository":             true,
+		"service.UserGroupRepository":        true,
+		"service.RoleManagementRepository":   true,
 	}
 	gotEmbedded := adminRepositoryEmbeddings(t, file)
 	if !reflect.DeepEqual(gotEmbedded, wantEmbedded) {
@@ -236,7 +253,12 @@ func applyTestAdminDependencies(t *testing.T, server *Server, repository adminRe
 	server.applications = dependencies.applications
 	server.containers = dependencies.containers
 	server.platformAccounts = dependencies.platformAccounts
-	server.userSessions = dependencies.userSessions
+	if server.userSessionCreation == nil {
+		server.userSessionCreation, err = service.NewUserSessionCreationService(dependencies.userSessionCreation, repositoryTestAuthorization{})
+		if err != nil {
+			t.Fatalf("new user session creation service: %v", err)
+		}
+	}
 	server.audit = dependencies.audit
 	server.connectionPassword = dependencies.connectionPassword
 	server.preferences = dependencies.preferences

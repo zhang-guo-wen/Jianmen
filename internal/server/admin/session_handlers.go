@@ -4,9 +4,6 @@ import (
 	"bufio"
 	"encoding/json"
 	"errors"
-	"jianmen/internal/model"
-	"jianmen/internal/rbac"
-	"jianmen/internal/util"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -14,7 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"gorm.io/gorm"
+	"jianmen/internal/rbac"
+	"jianmen/internal/service"
 )
 
 func (s *Server) handleUserSessions(w http.ResponseWriter, r *http.Request) {
@@ -28,7 +26,6 @@ func (s *Server) handleUserSessions(w http.ResponseWriter, r *http.Request) {
 		s.writeErrorText(w, r, http.StatusUnauthorized, "user not authenticated")
 		return
 	}
-
 	var req struct {
 		TargetID string `json:"target_id"`
 	}
@@ -40,95 +37,40 @@ func (s *Server) handleUserSessions(w http.ResponseWriter, r *http.Request) {
 		s.writeErrorText(w, r, http.StatusBadRequest, "target_id is required")
 		return
 	}
-
-	// Look up the target to determine resource type and resource_id
-	// 先尝试主机账号，再尝试数据库账号
-	compactPrefix := util.PrefixHost
-	resourceType := "host_account"
-	var resourceID string
-
-	var hostAccount model.HostAccount
-	connectionActions := []string{rbac.ActionSessionConnect, rbac.ActionSFTPConnect}
-	if err := s.db.Where("id = ? AND status = ?", req.TargetID, "active").First(&hostAccount).Error; err == nil {
-		// 主机账号
-		var host model.Host
-		if err := s.db.Where("id = ? AND status = ?", hostAccount.HostID, "active").First(&host).Error; err != nil {
-			s.writeErrorText(w, r, http.StatusForbidden, "host is disabled or not found")
-			return
-		}
-		resourceID = hostAccount.ResourceID
-	} else if errors.Is(err, gorm.ErrRecordNotFound) {
-		// 尝试数据库账号
-		var dbAccount model.DatabaseAccount
-		if err := s.db.Preload("Instance").Where("id = ? AND status = ?", req.TargetID, "active").First(&dbAccount).Error; err == nil {
-			// 验证数据库实例未被禁用
-			if dbAccount.Instance.Status == "disabled" {
-				s.writeErrorText(w, r, http.StatusForbidden, "database instance is disabled")
-				return
-			}
-			compactPrefix = util.PrefixDatabase
-			resourceType = "database_account"
-			connectionActions = []string{rbac.ActionDBConnect}
-			resourceID = dbAccount.ResourceID
-			// Redis 实例使用 R 前缀
-			if dbAccount.Instance.Protocol == "redis" {
-				compactPrefix = util.PrefixRedis
-			}
-		} else if errors.Is(err, gorm.ErrRecordNotFound) {
-			s.writeErrorText(w, r, http.StatusNotFound, "target account not found or disabled")
-			return
-		} else {
-			s.writeErrorText(w, r, http.StatusInternalServerError, "failed to look up target")
-			return
-		}
-	} else {
-		s.writeErrorText(w, r, http.StatusInternalServerError, "failed to look up target")
-		return
-	}
-	allowed, err := s.authorizeAnyConnection(r.Context(), userID, connectionActions, resourceType, req.TargetID)
-	if err != nil {
-		s.logger.Warn("connection configuration authorization failed", "user_id", userID, "resource_type", resourceType, "resource_id", req.TargetID, "error", err)
-		s.forbidden(w, r)
-		return
-	}
-	if !allowed {
-		s.forbidden(w, r)
-		return
-	}
-
-	// 使用用户的永久会话（session ID 固定），不每次新建
-	var permSession model.UserSession
-	if err := s.db.Where("user_id = ? AND type = ? AND status = ?", userID, "permanent", "active").
-		First(&permSession).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			// 尚未有永久会话则创建一个
-			newSess := model.UserSession{
-				UserID: userID,
-				Type:   "permanent",
-				Status: "active",
-			}
-			created, createErr := s.userSessions.CreateUserSession(newSess)
-			if createErr != nil {
-				s.writeErrorText(w, r, http.StatusInternalServerError, createErr.Error())
-				return
-			}
-			permSession = *created
-		} else {
-			s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
-			return
-		}
-	}
-
-	s.writeJSON(w, r, http.StatusCreated, map[string]any{
-		"id":               permSession.ID,
-		"session_id":       permSession.SessionID,
-		"session_seq":      permSession.SessionSeq,
-		"type":             permSession.Type,
-		"status":           permSession.Status,
-		"resource_id":      resourceID,
-		"compact_username": compactPrefix + resourceID + permSession.SessionID,
-		"resource_type":    resourceType,
+	result, err := s.userSessionCreation.Create(r.Context(), service.CreateUserSessionRequest{
+		UserID: userID, TargetID: req.TargetID,
 	})
+	if err != nil {
+		s.writeUserSessionCreationError(w, r, userID, req.TargetID, err)
+		return
+	}
+	s.writeJSON(w, r, http.StatusCreated, map[string]any{
+		"id": result.Session.ID, "session_id": result.Session.SessionID,
+		"session_seq": result.Session.SessionSeq, "type": result.Session.Type,
+		"status": result.Session.Status, "resource_id": result.ResourceID,
+		"compact_username": result.CompactUsername, "resource_type": result.ResourceType,
+	})
+}
+
+func (s *Server) writeUserSessionCreationError(w http.ResponseWriter, r *http.Request, userID, targetID string, err error) {
+	switch {
+	case errors.Is(err, service.ErrUserSessionTargetNotFound):
+		s.writeErrorText(w, r, http.StatusNotFound, "target account not found or disabled")
+	case errors.Is(err, service.ErrUserSessionHostInactive):
+		s.writeErrorText(w, r, http.StatusForbidden, "host is disabled or not found")
+	case errors.Is(err, service.ErrUserSessionDatabaseInactive):
+		s.writeErrorText(w, r, http.StatusForbidden, "database instance is disabled")
+	case errors.Is(err, service.ErrUserSessionForbidden):
+		s.forbidden(w, r)
+	case errors.Is(err, service.ErrUserSessionTargetLookup):
+		s.writeErrorText(w, r, http.StatusInternalServerError, "failed to look up target")
+	case errors.Is(err, service.ErrUserSessionAuthorization):
+		s.logger.Warn("connection configuration authorization failed", "user_id", userID, "target_id", targetID, "error", err)
+		s.forbidden(w, r)
+	default:
+		s.logger.Warn("connection configuration creation failed", "user_id", userID, "target_id", targetID, "error", err)
+		s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
+	}
 }
 
 func (s *Server) handleSessions(w http.ResponseWriter, r *http.Request) {

@@ -241,3 +241,73 @@ func (c *ResourceGrantChecker) groupContainsResource(groupID, resourceType, reso
 		return false
 	}
 }
+
+// BatchGrantsContext evaluates direct, user-group and temporary grants using a
+// bounded set of set-loading queries. It never calls HasGrantContext per item.
+func (c *ResourceGrantChecker) BatchGrantsContext(ctx context.Context, userID string, requests []BatchAuthorizationRequest) ([]bool, error) {
+	result := make([]bool, len(requests))
+	if c == nil || c.db == nil || len(requests) == 0 {
+		return result, nil
+	}
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return result, nil
+	}
+	scoped := &ResourceGrantChecker{db: c.db.WithContext(ctx)}
+	direct, err := scoped.directGrantsForUser(userID)
+	if err != nil {
+		return nil, err
+	}
+	groups, err := scoped.groupGrantsForUser(userID)
+	if err != nil {
+		return nil, err
+	}
+	temporary, err := scoped.temporaryGrantsForUser(userID)
+	if err != nil {
+		return nil, err
+	}
+	grants := append(append(direct, groups...), temporary...)
+	facts, err := (&Checker{db: c.db}).loadBatchFacts(ctx, requests, groupIDsFromGrants(grants))
+	if err != nil {
+		return nil, err
+	}
+	for index, request := range requests {
+		denied := false
+		allowed := false
+		for _, grant := range grants {
+			if !batchGrantMatches(grant, request, facts) {
+				continue
+			}
+			if grant.Effect == model.PermissionEffectDeny {
+				denied = true
+				break
+			}
+			if grant.Effect == model.PermissionEffectAllow {
+				allowed = true
+			}
+		}
+		result[index] = allowed && !denied
+	}
+	return result, nil
+}
+
+func batchGrantMatches(grant model.ResourceGrant, request BatchAuthorizationRequest, facts batchFacts) bool {
+	if resourceTypeMatches(grant.ResourceType, request.ResourceType) && resourceIDMatches(grant.ResourceID, request.ResourceID) {
+		return true
+	}
+	switch grant.ResourceType {
+	case model.ResourceTypeHost:
+		return request.ResourceType == model.ResourceTypeHostAccount && facts.hostOf[request.ResourceID] == grant.ResourceID
+	case model.ResourceTypeDatabaseInstance:
+		return request.ResourceType == model.ResourceTypeDatabaseAccount && facts.instanceOf[request.ResourceID] == grant.ResourceID
+	case model.ResourceTypeGroup:
+		if request.ResourceType == model.ResourceTypePlatformAccount {
+			return false
+		}
+		return facts.groupMatches(grant.ResourceID, request.ResourceType, request.ResourceID, false)
+	case model.ResourceTypeAccountGroup:
+		return facts.groupMatches(grant.ResourceID, request.ResourceType, request.ResourceID, true)
+	default:
+		return false
+	}
+}

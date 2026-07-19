@@ -93,8 +93,8 @@
     </div>
 
     <template #footer>
-      <el-button v-if="resourceType === 'host' && allowSSH" type="primary" :loading="preferences.loading" @click="openPreferredSSHClient">本地 SSH 客户端打开</el-button>
-      <el-button v-if="resourceType === 'host' && allowSSH" type="primary" @click="openInBrowser">在浏览器中打开</el-button>
+      <el-button data-testid="ssh-local-client" v-if="resourceType === 'host' && allowSsh" type="primary" :loading="preferences.loading" @click="openPreferredSSHClient">本地 SSH 客户端打开</el-button>
+      <el-button data-testid="ssh-browser" v-if="resourceType === 'host' && allowSsh" type="primary" @click="openInBrowser">在浏览器中打开</el-button>
       <el-button @click="visible = false">关闭</el-button>
     </template>
   </el-dialog>
@@ -154,6 +154,7 @@ import {
   type InFlightCounters,
 } from '@/utils/connectionRequestState';
 import { buildSSHDeepLink } from '@/utils/connectionLinks';
+import { buildConnectionCommands, type ConnectionCommandInput } from '@/utils/connectionConfigCommands';
 
 interface CommandItem {
   label: string;
@@ -203,7 +204,11 @@ const CommandRows = defineComponent({
       readonly: true,
       size: 'small',
     }, {
-      append: () => h(ElButton, { loading: componentProps.loadingFor(command.value), onClick: () => emit('copy', command.value) }, () => `复制${command.label}`),
+      append: () => h(ElButton, {
+        'data-testid': `connection-command-${command.label.includes('SFTP') ? 'sftp' : 'ssh'}`,
+        loading: componentProps.loadingFor(command.value),
+        onClick: () => emit('copy', command.value),
+      }, () => `复制${command.label}`),
     })));
   },
 });
@@ -216,10 +221,10 @@ const props = withDefaults(defineProps<{
   sourceAddress?: string;
   sourceAccount?: string;
   protocol?: string;
-  allowSSH?: boolean;
-  allowSFTP?: boolean;
+  allowSsh?: boolean;
+  allowSftp?: boolean;
 }>(), {
-  resourceName: '', sourceAddress: '', sourceAccount: '', protocol: 'mysql', allowSSH: true, allowSFTP: false,
+  resourceName: '', sourceAddress: '', sourceAccount: '', protocol: 'mysql', allowSsh: true, allowSftp: false,
 });
 
 const emit = defineEmits<{ (event: 'update:modelValue', value: boolean): void }>();
@@ -292,23 +297,16 @@ const databaseCommandUnavailableReason = computed(() => {
   if (!databaseConnectionPlan.value) return '连接参数包含不安全字符，无法生成安全命令。';
   return '';
 });
-const commands = computed<CommandItem[]>(() => buildCommands());
-
-function buildCommands(): CommandItem[] {
-  if (!connectionInfo.value) return [];
-  const { host, port, compactUser, tlsEnabled } = connectionInfo.value;
-  if (props.resourceType === 'host') {
-    const values: CommandItem[] = [];
-    if (props.allowSSH) values.push({ label: 'SSH 命令', value: `ssh ${compactUser}@${host} -p ${port}` });
-    if (props.allowSFTP) values.push({ label: 'XFTP/SFTP 命令', value: `sftp -P ${port} ${compactUser}@${host}` });
-    return values;
-  }
-  void tlsEnabled;
-  const connection = databaseConnectionPlan.value;
-  return connection?.command
-    ? [{ label: `${connection.commandPlatform} 安全连接命令`, value: connection.command }]
-    : [];
-}
+const commands = computed<CommandItem[]>(() => {
+  const input: ConnectionCommandInput = {
+    resourceType: props.resourceType,
+    allowSsh: props.allowSsh,
+    allowSftp: props.allowSftp,
+    connectionInfo: connectionInfo.value,
+    databaseConnection: databaseConnectionPlan.value,
+  };
+  return buildConnectionCommands(input);
+});
 
 function databaseGatewayDefaultPort(protocol: string): number {
   const normalized = protocol.toLowerCase();

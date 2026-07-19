@@ -19,4 +19,5 @@ type authorizationService interface {
 		resourceType string,
 		resourceID string,
 	) (bool, error)
+	AuthorizeBatch(context.Context, string, []service.AuthorizationRequest) ([]service.AuthorizationDecision, error)
 }

@@ -83,6 +83,59 @@ func TestMySQLTLSLoginCarriesSSLClientCapability(t *testing.T) {
 	}
 }
 
+func TestMySQLGatewayAndUpstreamLoginPreserveInitialDatabase(t *testing.T) {
+	client, server := net.Pipe()
+	defer client.Close()
+	defer server.Close()
+
+	writeResult := make(chan error, 1)
+	go func() {
+		_, err := sendFakeMySQLHandshake(server)
+		writeResult <- err
+	}()
+	greeting, err := readMySQLPacket(client)
+	if err != nil {
+		t.Fatalf("read fake MySQL handshake: %v", err)
+	}
+	if err := <-writeResult; err != nil {
+		t.Fatalf("write fake MySQL handshake: %v", err)
+	}
+	fakeHandshake, err := ParseMySQLHandshake(greeting.payload)
+	if err != nil {
+		t.Fatalf("parse fake MySQL handshake: %v", err)
+	}
+	if fakeHandshake.CapabilityFlags&mysqlClientConnectWithDB == 0 {
+		t.Fatal("fake MySQL handshake did not advertise CLIENT_CONNECT_WITH_DB")
+	}
+
+	upstreamHandshake := &MySQLHandshake{
+		CapabilityFlags: mysqlClientProtocol41 | mysqlClientSecureConnection |
+			mysqlClientPluginAuth | mysqlClientSSL | mysqlClientConnectWithDB,
+		CharacterSet:   45,
+		AuthPluginName: "caching_sha2_password",
+		AuthData:       []byte("12345678901234567890"),
+	}
+	login, err := buildMySQLUpstreamLogin(
+		upstreamHandshake,
+		"app",
+		"secret",
+		" appdb ",
+		upstreamHandshake.AuthPluginName,
+		2,
+	)
+	if err != nil {
+		t.Fatalf("build MySQL upstream database login: %v", err)
+	}
+	parser := &MySQLLoginParser{}
+	observation, ready, err := parser.Observe(login)
+	if err != nil {
+		t.Fatalf("parse MySQL upstream database login: %v", err)
+	}
+	if !ready || observation.User != "app" || observation.Database != " appdb " {
+		t.Fatalf("unexpected MySQL upstream login observation: ready=%v observation=%#v", ready, observation)
+	}
+}
+
 func TestBuildMySQLUpstreamLoginRejectsInvalidHandshake(t *testing.T) {
 	base := &MySQLHandshake{
 		ProtocolVersion: 10,

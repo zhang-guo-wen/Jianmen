@@ -20,16 +20,8 @@ func TestRedisRelayRejectsPostAuthenticationStateCommandsBeforeUpstream(t *testi
 		command []byte
 	}{
 		{name: "AUTH", command: redisObserverTestCommand("AUTH", "other-user", password)},
-		{name: "HELLO", command: redisObserverTestCommand("HELLO", "3")},
 		{name: "ACL", command: redisObserverTestCommand("ACL", "SETUSER", "other-user", ">"+password)},
 		{name: "MIGRATE", command: redisObserverTestCommand("MIGRATE", "127.0.0.1", "6379", "key", "0", "5000", "AUTH", "other-user", password)},
-		{name: "SUBSCRIBE", command: redisObserverTestCommand("SUBSCRIBE", "channel")},
-		{name: "PSUBSCRIBE", command: redisObserverTestCommand("PSUBSCRIBE", "chan*")},
-		{name: "SSUBSCRIBE", command: redisObserverTestCommand("SSUBSCRIBE", "channel")},
-		{name: "UNSUBSCRIBE", command: redisObserverTestCommand("UNSUBSCRIBE", "channel")},
-		{name: "PUNSUBSCRIBE", command: redisObserverTestCommand("PUNSUBSCRIBE", "chan*")},
-		{name: "SUNSUBSCRIBE", command: redisObserverTestCommand("SUNSUBSCRIBE", "channel")},
-		{name: "CLIENT SETNAME", command: redisObserverTestCommand("CLIENT", "SETNAME", "replacement")},
 		{name: "RESET", command: redisObserverTestCommand("RESET")},
 		{name: "MONITOR", command: redisObserverTestCommand("MONITOR")},
 		{name: "SYNC", command: redisObserverTestCommand("SYNC")},

@@ -92,7 +92,9 @@ func operationAction(r *http.Request) string {
 	if strings.Contains(path, "/revoke") || strings.Contains(path, "/disconnect") {
 		return "revoke"
 	}
-	if strings.Contains(path, "/test") || strings.Contains(path, "/check") {
+	if strings.Contains(path, "/test") ||
+		strings.Contains(path, "/check") ||
+		strings.Contains(path, "/diagnostics/") {
 		return "test"
 	}
 	switch r.Method {

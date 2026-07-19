@@ -8,6 +8,7 @@ import (
 
 	"jianmen/internal/config"
 	"jianmen/internal/handler/accessrequest"
+	"jianmen/internal/handler/systemsettings"
 	"jianmen/internal/handler/webrdp"
 	"jianmen/internal/online"
 	"jianmen/internal/server/appproxy"
@@ -53,6 +54,7 @@ type Server struct {
 	browserSessions      *service.BrowserSessionService
 	webRDP               *webrdp.Handler
 	accessRequests       *accessrequest.Handler
+	systemSettings       *systemsettings.Handler
 	setupOnce            sync.Once
 	setupSlot            chan struct{}
 }
@@ -73,6 +75,7 @@ func New(
 	onlineSessions *online.Registry,
 	webRDP *webrdp.Handler,
 	accessRequests *accessrequest.Handler,
+	systemSettings *systemsettings.Handler,
 ) (*Server, error) {
 	switch {
 	case cfg == nil:
@@ -97,6 +100,8 @@ func New(
 		return nil, errors.New("admin online session registry is required")
 	case webRDP == nil || accessRequests == nil:
 		return nil, errors.New("admin Web RDP audit and approval handlers are required")
+	case systemSettings == nil:
+		return nil, errors.New("admin system settings handler is required")
 	}
 	dependencies, err := resolveAdminDependencies(repository)
 	if err != nil {
@@ -136,5 +141,6 @@ func New(
 		resourceGrants: resourceGrants, resourceGroups: resourceGroups, userManagement: userManagement, userGroups: userGroups, roleManagement: roleManagement, databaseProvisioning: databaseProvisioning, temporaryAccess: temporaryAccess,
 		browserSessions: browserSessions,
 		webRDP:          webRDP, accessRequests: accessRequests,
+		systemSettings: systemSettings,
 	}, nil
 }

@@ -29,6 +29,7 @@ const (
 	auditRetentionCleanupMigrationVersion     = "202607190002"
 	webRDPAuditMigrationVersion               = "202607190003"
 	auditSessionLeaseMigrationVersion         = "202607190004"
+	systemSettingMigrationVersion             = "202607190005"
 )
 
 var currentStorageMigrationVersions = []string{
@@ -55,6 +56,7 @@ var currentStorageMigrationVersions = []string{
 	"202607190002",
 	"202607190003",
 	"202607190004",
+	systemSettingMigrationVersion,
 }
 
 type metadataDatabaseCase struct {
@@ -341,6 +343,54 @@ func TestStorageMigrationUpgradesLegacyAuditSessionLeases(t *testing.T) {
 	}
 }
 
+func TestStorageMigrationAddsSystemSettings(t *testing.T) {
+	for _, tt := range metadataDatabaseCases() {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			db := openMetadataDatabase(t, tt)
+			createCurrentSchemaWithOnlyMigrationPending(t, db, systemSettingMigrationVersion)
+			seedAllCurrentMigrationsExcept(t, db, systemSettingMigrationVersion)
+			assertOtherDatabaseMigrationsApplied(t, db, systemSettingMigrationVersion)
+			if db.Migrator().HasTable(&model.SystemSetting{}) ||
+				db.Migrator().HasTable(&model.SystemSettingRevision{}) {
+				t.Fatal("legacy schema unexpectedly contains system settings tables")
+			}
+
+			beforeMigrations := loadMigrationVersionSet(t, db)
+			if err := storage.Migrate(db); err != nil {
+				t.Fatalf("migrate system settings schema: %v", err)
+			}
+			assertOnlyMigrationVersionsAdded(
+				t,
+				beforeMigrations,
+				loadMigrationVersionSet(t, db),
+				systemSettingMigrationVersion,
+			)
+			if !db.Migrator().HasTable(&model.SystemSetting{}) ||
+				!db.Migrator().HasTable(&model.SystemSettingRevision{}) {
+				t.Fatal("system settings migration did not create both tables")
+			}
+			if !db.Migrator().HasIndex(
+				&model.SystemSettingRevision{},
+				"idx_system_setting_revisions_revision",
+			) {
+				t.Fatal("system settings revision unique index is missing")
+			}
+			assertMigrationRecord(
+				t,
+				db,
+				systemSettingMigrationVersion,
+				"system configuration management",
+			)
+			beforeSecondMigration := loadMigrationVersionSet(t, db)
+			if err := storage.Migrate(db); err != nil {
+				t.Fatalf("second system settings migration: %v", err)
+			}
+			assertOnlyMigrationVersionsAdded(t, beforeSecondMigration, loadMigrationVersionSet(t, db))
+		})
+	}
+}
+
 func TestStorageMigrationRejectsLegacyDatabaseAccountDuplicatesAndRetries(t *testing.T) {
 	for _, tt := range metadataDatabaseCases() {
 		tt := tt
@@ -528,6 +578,13 @@ func createCurrentSchemaWithOnlyMigrationPending(t *testing.T, db *gorm.DB, pend
 				t.Fatalf("remove migration %s column %s from fixture: %v", pendingVersion, column, err)
 			}
 		}
+	case systemSettingMigrationVersion:
+		if err := db.Migrator().DropTable(
+			&model.SystemSettingRevision{},
+			&model.SystemSetting{},
+		); err != nil {
+			t.Fatalf("remove migration %s tables from fixture: %v", pendingVersion, err)
+		}
 	default:
 		t.Fatalf("unsupported isolated migration version %s", pendingVersion)
 	}
@@ -563,34 +620,45 @@ func assertOtherDatabaseMigrationsApplied(t *testing.T, db *gorm.DB, pendingVers
 			}
 		}
 	}
+	if pendingVersion != systemSettingMigrationVersion {
+		for _, table := range []any{
+			&model.SystemSetting{},
+			&model.SystemSettingRevision{},
+		} {
+			if !db.Migrator().HasTable(table) {
+				t.Fatalf("fixture for pending migration %s is missing table for %T", pendingVersion, table)
+			}
+		}
+	}
 }
 
 func seedAppliedMigrations(t *testing.T, db *gorm.DB, versions ...string) {
 	t.Helper()
 	names := map[string]string{
-		"202606290001": "prepare metadata sequences",
-		"202606290002": "core metadata schema",
-		"202606290003": "reconcile metadata resources",
-		"202606290004": "global compact session identity",
-		"202606290005": "metadata query indexes",
-		"202607130001": "user groups and resource grants",
-		"202607160001": "AI access tokens",
-		"202607160002": "encrypted AI token values",
-		"202607170001": "container management endpoints",
-		"202607170002": "user expiry and temporary authorization metadata",
-		"202607180001": "database backed super administrator identity",
-		"202607180002": "temporary access connection password lifecycle",
-		"202607180003": "atomic system initialization guard",
-		"202607180004": "browser sessions and websocket tickets",
-		"202607180005": "remove reversible AI token secrets",
-		"202607180006": "database instance upstream TLS policy",
-		"202607180007": "permission logical uniqueness",
-		"202607180008": "database account instance username uniqueness",
-		"202607180009": "database provisioning saga recovery state",
-		"202607190001": "resource grant logical uniqueness",
-		"202607190002": "audit retention cleanup state",
-		"202607190003": "web RDP access control and audit schema",
-		"202607190004": "audit session lease recovery",
+		"202606290001":                "prepare metadata sequences",
+		"202606290002":                "core metadata schema",
+		"202606290003":                "reconcile metadata resources",
+		"202606290004":                "global compact session identity",
+		"202606290005":                "metadata query indexes",
+		"202607130001":                "user groups and resource grants",
+		"202607160001":                "AI access tokens",
+		"202607160002":                "encrypted AI token values",
+		"202607170001":                "container management endpoints",
+		"202607170002":                "user expiry and temporary authorization metadata",
+		"202607180001":                "database backed super administrator identity",
+		"202607180002":                "temporary access connection password lifecycle",
+		"202607180003":                "atomic system initialization guard",
+		"202607180004":                "browser sessions and websocket tickets",
+		"202607180005":                "remove reversible AI token secrets",
+		"202607180006":                "database instance upstream TLS policy",
+		"202607180007":                "permission logical uniqueness",
+		"202607180008":                "database account instance username uniqueness",
+		"202607180009":                "database provisioning saga recovery state",
+		"202607190001":                "resource grant logical uniqueness",
+		"202607190002":                "audit retention cleanup state",
+		"202607190003":                "web RDP access control and audit schema",
+		"202607190004":                "audit session lease recovery",
+		systemSettingMigrationVersion: "system configuration management",
 	}
 	for _, version := range versions {
 		name, ok := names[version]

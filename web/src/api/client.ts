@@ -1,6 +1,22 @@
 ﻿const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? '').replace(/\/$/, '');
 
 import { withIdempotencyKey, type ProvisionRequest } from '@/utils/provisioningRequest';
+import type {
+  SystemSettingsDiagnosticResult,
+  SystemSettingsRevisionResponse,
+  SystemSettingsState,
+  SystemSettingsUpdatePayload,
+} from './systemSettings';
+
+export type {
+  SystemSettingsDiagnosticResult,
+  SystemSettingsInfrastructure,
+  SystemSettingsRevision,
+  SystemSettingsRevisionResponse,
+  SystemSettingsState,
+  SystemSettingsUpdatePayload,
+  SystemSettingsValues,
+} from './systemSettings';
 
 const CSRF_KEY = 'jianmen_csrf';
 
@@ -1007,6 +1023,29 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 export const apiClient = {
   // health
   getHealth: () => request<HealthResponse>('/api/health'),
+
+  // system settings (super administrator only)
+  getSystemSettings: () =>
+    request<SystemSettingsState>('/api/system-settings'),
+  updateSystemSettings: (payload: SystemSettingsUpdatePayload) =>
+    request<SystemSettingsState>('/api/system-settings', {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    }),
+  getSystemSettingsRevisions: (limit = 20) =>
+    request<SystemSettingsRevisionResponse>(
+      `/api/system-settings/revisions${buildQS({ limit })}`,
+    ),
+  testSystemSettingsGuacd: () =>
+    request<SystemSettingsDiagnosticResult>(
+      '/api/system-settings/diagnostics/guacd',
+      { method: 'POST' },
+    ),
+  testSystemSettingsObjectStorage: () =>
+    request<SystemSettingsDiagnosticResult>(
+      '/api/system-settings/diagnostics/object-storage',
+      { method: 'POST' },
+    ),
 
   // users
   getUsers: (params?: { page?: number; page_size?: number; q?: string }) =>

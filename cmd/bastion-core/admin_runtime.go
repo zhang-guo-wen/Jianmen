@@ -7,6 +7,7 @@ import (
 	"gorm.io/gorm"
 
 	"jianmen/internal/config"
+	"jianmen/internal/handler/systemsettings"
 	"jianmen/internal/objectstore"
 	"jianmen/internal/online"
 	"jianmen/internal/rbac"
@@ -27,6 +28,8 @@ func startAdminRuntime(
 	browserSessions *service.BrowserSessionService,
 	authorization *service.AuthorizationService,
 	databaseProvisioning *service.DatabaseProvisioningService,
+	settings *service.SystemSettingsService,
+	diagnostics *service.SystemSettingsDiagnosticService,
 	logger *slog.Logger,
 	dataDir string,
 	onlineSessions *online.Registry,
@@ -48,6 +51,10 @@ func startAdminRuntime(
 	if err != nil {
 		return err
 	}
+	settingsHandler, err := systemsettings.New(settings, diagnostics)
+	if err != nil {
+		return err
+	}
 	webRuntime, err := newWebRDPRuntime(
 		ctx, cfg, objects, appStore, identity, browserSessions, authorization,
 		onlineSessions, logger,
@@ -59,6 +66,7 @@ func startAdminRuntime(
 		cfg, appStore, metadataDB, identity, browserSessions, authorization,
 		resourceGrants, resourceGroups, databaseProvisioning, logger, dataDir,
 		appProxy, onlineSessions, webRuntime.webRDP, webRuntime.accessRequests,
+		settingsHandler,
 	)
 	if err != nil {
 		return err

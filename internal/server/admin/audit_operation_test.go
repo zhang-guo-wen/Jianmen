@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"log/slog"
+	"net/http"
 	"net/http/httptest"
 	"testing"
 
@@ -42,5 +43,16 @@ func TestRecordOperationPersistsMutationMetadata(t *testing.T) {
 	}
 	if event.ClientIP != "192.0.2.10" || event.Detail == "" {
 		t.Fatalf("event metadata = %+v", event)
+	}
+}
+
+func TestOperationActionClassifiesDiagnosticsAsTest(t *testing.T) {
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/api/system-settings/diagnostics/object-storage",
+		nil,
+	)
+	if action := operationAction(request); action != "test" {
+		t.Fatalf("operationAction() = %q, want test", action)
 	}
 }

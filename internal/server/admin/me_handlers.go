@@ -81,7 +81,8 @@ func (s *Server) currentUserAccessContext(w http.ResponseWriter, r *http.Request
 	}
 	if isSuperAdminRequest(r) {
 		actions := []string{"*"}
-		return meAccessContextResponse{Actions: actions, Pages: appendSettingsPage(rbac.AccessiblePages(actions))}, true
+		pages := appendSettingsPage(rbac.AccessiblePages(actions))
+		return meAccessContextResponse{Actions: actions, Pages: appendSystemSettingsPage(pages)}, true
 	}
 	if s.db == nil {
 		return meAccessContextResponse{Actions: []string{}, Pages: appendSettingsPage(nil)}, true
@@ -101,4 +102,8 @@ func (s *Server) currentUserAccessContext(w http.ResponseWriter, r *http.Request
 
 func appendSettingsPage(pages []rbac.PageAccess) []rbac.PageAccess {
 	return append(pages, rbac.PageAccess{Key: "settings", Path: "/settings", Order: 90})
+}
+
+func appendSystemSettingsPage(pages []rbac.PageAccess) []rbac.PageAccess {
+	return append(pages, rbac.PageAccess{Key: "systemSettings", Path: "/system-settings", Order: 95})
 }

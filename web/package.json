@@ -8,7 +8,7 @@
     "build": "npm run test:connection-commands && vue-tsc --noEmit && vite build",
     "preview": "vite preview",
     "typecheck": "vue-tsc --noEmit",
-    "test:connection-commands": "tsx --test src/utils/databaseGatewayCommands.test.ts src/utils/provisioningRequest.test.ts src/utils/connectionLinks.test.ts src/utils/guacamoleProtocol.test.ts"
+    "test:connection-commands": "tsx --test src/utils/databaseGatewayCommands.test.ts src/utils/provisioningRequest.test.ts src/utils/connectionLinks.test.ts src/utils/guacamoleProtocol.test.ts src/api/systemSettings.test.ts"
   },
   "dependencies": {
     "@element-plus/icons-vue": "^2.3.1",

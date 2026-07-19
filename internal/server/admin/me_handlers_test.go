@@ -48,7 +48,8 @@ func TestMeAccessContextReturnsAllPagesForSuperAdmin(t *testing.T) {
 	if !reflect.DeepEqual(response.Actions, []string{"*"}) {
 		t.Fatalf("actions = %#v, want wildcard", response.Actions)
 	}
-	if !reflect.DeepEqual(response.Pages, appendSettingsPage(rbac.AccessiblePages([]string{"*"}))) {
+	wantPages := appendSystemSettingsPage(appendSettingsPage(rbac.AccessiblePages([]string{"*"})))
+	if !reflect.DeepEqual(response.Pages, wantPages) {
 		t.Fatalf("pages = %#v, want complete page catalog", response.Pages)
 	}
 }

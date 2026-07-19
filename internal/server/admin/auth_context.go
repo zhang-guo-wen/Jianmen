@@ -136,3 +136,13 @@ func (s *Server) withPermission(action string, next http.HandlerFunc) http.Handl
 		next(w, r)
 	}
 }
+
+func (s *Server) withSuperAdmin(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if !isSuperAdminRequest(r) {
+			s.forbidden(w, r)
+			return
+		}
+		next(w, r)
+	}
+}

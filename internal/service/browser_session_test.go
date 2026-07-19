@@ -49,20 +49,25 @@ func (r *browserSessionMemoryRepository) CreateWebSocketTicket(_ context.Context
 	return nil
 }
 
-func (r *browserSessionMemoryRepository) ConsumeWebSocketTicket(_ context.Context, secretHash, targetID string, now time.Time) (BrowserSessionSubject, bool, error) {
+func (r *browserSessionMemoryRepository) ConsumeWebSocketTicket(_ context.Context, secretHash, purpose, targetID string, now time.Time) (WebSocketTicketSubject, bool, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	ticket, ok := r.tickets[secretHash]
-	if !ok || ticket.TargetID != targetID || ticket.ConsumedAt != nil || !ticket.ExpiresAt.After(now) {
-		return BrowserSessionSubject{}, false, nil
+	if !ok || ticket.Purpose != purpose || ticket.TargetID != targetID || ticket.ConsumedAt != nil || !ticket.ExpiresAt.After(now) {
+		return WebSocketTicketSubject{}, false, nil
 	}
 	ticket.ConsumedAt = &now
 	r.tickets[secretHash] = ticket
 	session := r.sessions[ticket.SessionID]
 	if session.RevokedAt != nil || !session.ExpiresAt.After(now) {
-		return BrowserSessionSubject{}, false, nil
+		return WebSocketTicketSubject{}, false, nil
 	}
-	return BrowserSessionSubject{SessionID: session.ID, UserID: session.UserID, CSRFHash: session.CSRFHash}, true, nil
+	return WebSocketTicketSubject{
+		BrowserSessionSubject: BrowserSessionSubject{SessionID: session.ID, UserID: session.UserID, CSRFHash: session.CSRFHash},
+		Purpose:               ticket.Purpose,
+		TargetID:              ticket.TargetID,
+		ConnectionID:          ticket.ConnectionID,
+	}, true, nil
 }
 
 func TestBrowserSessionServiceLifecycle(t *testing.T) {
@@ -101,6 +106,17 @@ func TestBrowserSessionServiceLifecycle(t *testing.T) {
 	}
 	if _, found, err := service.ConsumeWebSocketTicket(context.Background(), ticket, "target-1"); err != nil || found {
 		t.Fatal("ticket was consumed more than once")
+	}
+	rdpTicket, err := service.CreateScopedWebSocketTicket(context.Background(), subject, WebSocketPurposeRDP, "target-1", "connection-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, found, err := service.ConsumeWebSocketTicket(context.Background(), rdpTicket, "target-1"); err != nil || found {
+		t.Fatal("RDP ticket was accepted by terminal consumer")
+	}
+	scoped, found, err := service.ConsumeScopedWebSocketTicket(context.Background(), rdpTicket, WebSocketPurposeRDP, "target-1")
+	if err != nil || !found || scoped.ConnectionID != "connection-1" {
+		t.Fatalf("consume scoped ticket = %#v, %v, %v", scoped, found, err)
 	}
 	if err := service.Revoke(context.Background(), subject.SessionID); err != nil {
 		t.Fatal(err)

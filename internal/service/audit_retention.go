@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"jianmen/internal/model"
@@ -24,7 +25,9 @@ type AuditRetentionRepository interface {
 		claimedAt time.Time,
 		staleBefore time.Time,
 		limit int,
+		replayOnly bool,
 	) ([]model.AuditSession, error)
+	ListAuditArtifactsForCleanup(ctx context.Context, sessionID string) ([]model.AuditArtifact, error)
 	MarkAuditSessionCleanupFailed(ctx context.Context, id string, failedAt time.Time, message string) error
 	DeleteClaimedAuditSession(ctx context.Context, id string) error
 }
@@ -35,10 +38,15 @@ type AuditReplayStorage interface {
 	DeleteSession(ctx context.Context, sessionDir string) (int64, error)
 }
 
+type AuditObjectStorage interface {
+	Delete(ctx context.Context, key string) error
+}
+
 type AuditRetentionOptions struct {
 	BatchSize       int
 	MaxReplayBytes  int64
 	ClaimStaleAfter time.Duration
+	ObjectStorage   AuditObjectStorage
 }
 
 type AuditRetentionResult struct {
@@ -56,6 +64,7 @@ type AuditRetentionService struct {
 	batchSize       int
 	maxReplayBytes  int64
 	claimStaleAfter time.Duration
+	objectStorage   AuditObjectStorage
 }
 
 func NewAuditRetentionService(
@@ -92,6 +101,7 @@ func NewAuditRetentionService(
 		batchSize:       options.BatchSize,
 		maxReplayBytes:  options.MaxReplayBytes,
 		claimStaleAfter: options.ClaimStaleAfter,
+		objectStorage:   options.ObjectStorage,
 	}, nil
 }
 
@@ -119,6 +129,7 @@ func (s *AuditRetentionService) RunOnce(ctx context.Context, now time.Time) (Aud
 		now,
 		staleBefore,
 		remaining,
+		false,
 	)
 	if err != nil {
 		return result, fmt.Errorf("claim expired audit sessions: %w", err)
@@ -157,6 +168,7 @@ func (s *AuditRetentionService) RunOnce(ctx context.Context, now time.Time) (Aud
 			now,
 			staleBefore,
 			1,
+			true,
 		)
 		if claimErr != nil {
 			cleanupErrors = append(cleanupErrors, fmt.Errorf("claim quota audit session: %w", claimErr))
@@ -201,13 +213,56 @@ func (s *AuditRetentionService) cleanupClaimedSession(
 	now time.Time,
 	session model.AuditSession,
 ) (removedBytes int64, deleted bool, err error) {
-	removedBytes, err = s.replayStorage.DeleteSession(ctx, session.ReplayDir)
+	artifacts, err := s.repository.ListAuditArtifactsForCleanup(ctx, session.ID)
 	if err != nil {
-		deleteErr := fmt.Errorf("delete audit session %q replay: %w", session.ID, err)
-		if markErr := s.repository.MarkAuditSessionCleanupFailed(ctx, session.ID, now, deleteErr.Error()); markErr != nil {
-			return 0, false, errors.Join(deleteErr, fmt.Errorf("record audit session %q cleanup failure: %w", session.ID, markErr))
+		return s.failClaimedSession(
+			ctx,
+			now,
+			session.ID,
+			0,
+			fmt.Errorf("load audit session %q artifacts: %w", session.ID, err),
+		)
+	}
+	if len(artifacts) > 0 && s.objectStorage == nil {
+		return s.failClaimedSession(
+			ctx,
+			now,
+			session.ID,
+			0,
+			fmt.Errorf("delete audit session %q objects: object storage is unavailable", session.ID),
+		)
+	}
+	if strings.TrimSpace(session.ReplayDir) != "" {
+		removedBytes, err = s.replayStorage.DeleteSession(ctx, session.ReplayDir)
+		if err != nil {
+			return s.failClaimedSession(
+				ctx,
+				now,
+				session.ID,
+				0,
+				fmt.Errorf("delete audit session %q replay: %w", session.ID, err),
+			)
 		}
-		return 0, false, deleteErr
+	}
+	for _, artifact := range artifacts {
+		if strings.TrimSpace(artifact.ObjectKey) == "" {
+			return s.failClaimedSession(
+				ctx,
+				now,
+				session.ID,
+				removedBytes,
+				fmt.Errorf("delete audit session %q object: artifact %q has no object key", session.ID, artifact.ID),
+			)
+		}
+		if err := s.objectStorage.Delete(ctx, artifact.ObjectKey); err != nil {
+			return s.failClaimedSession(
+				ctx,
+				now,
+				session.ID,
+				removedBytes,
+				fmt.Errorf("delete audit session %q object %q: %w", session.ID, artifact.ID, err),
+			)
+		}
 	}
 	if err := s.repository.DeleteClaimedAuditSession(ctx, session.ID); err != nil {
 		// The persisted pending claim is intentionally retained. A later pass
@@ -215,4 +270,29 @@ func (s *AuditRetentionService) cleanupClaimedSession(
 		return removedBytes, false, fmt.Errorf("delete audit session %q database records: %w", session.ID, err)
 	}
 	return removedBytes, true, nil
+}
+
+func (s *AuditRetentionService) failClaimedSession(
+	ctx context.Context,
+	now time.Time,
+	sessionID string,
+	removedBytes int64,
+	cause error,
+) (int64, bool, error) {
+	if markErr := s.repository.MarkAuditSessionCleanupFailed(
+		ctx,
+		sessionID,
+		now,
+		cause.Error(),
+	); markErr != nil {
+		return removedBytes, false, errors.Join(
+			cause,
+			fmt.Errorf(
+				"record audit session %q cleanup failure: %w",
+				sessionID,
+				markErr,
+			),
+		)
+	}
+	return removedBytes, false, cause
 }

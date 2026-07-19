@@ -10,8 +10,6 @@ import (
 	"jianmen/internal/config"
 	"jianmen/internal/online"
 	"jianmen/internal/rbac"
-	"jianmen/internal/server/admin"
-	"jianmen/internal/server/appproxy"
 	"jianmen/internal/server/dbproxy"
 	"jianmen/internal/server/sshserver"
 	"jianmen/internal/service"
@@ -65,7 +63,12 @@ func main() {
 	defer cancel()
 	errCh := make(chan error, 5)
 	onlineSessions := online.NewRegistry()
-	auditRetention, err := newAuditRetentionRuntime(cfg, appStore)
+	rdpObjects, err := newRDPObjectStore(ctx, cfg)
+	if err != nil {
+		logger.Error("failed to initialize RDP object storage", "error", err)
+		os.Exit(1)
+	}
+	auditRetention, err := newAuditRetentionRuntime(cfg, appStore, rdpObjects)
 	if err != nil {
 		logger.Error("failed to initialize audit retention", "error", err)
 		os.Exit(1)
@@ -84,50 +87,14 @@ func main() {
 	dbGateway := dbproxy.NewGateway(cfg.DatabaseGateway, appStore, cfg.ReplayDir, logger, metadataDB, authorizationService, onlineSessions, appStore)
 
 	if cfg.Admin.Enabled {
-		appProxy := appproxy.New(
-			cfg.ApplicationGateway,
-			cfg.Admin,
-			metadataDB,
-			identityService,
-			browserSessionService,
-			authorizationService,
-			logger,
-		)
-		go func() {
-			errCh <- appProxy.ListenAndServe(ctx)
-		}()
-		resourceGrants, err := service.NewResourceGrantService(appStore, rbac.NewResourceGrantChecker(metadataDB))
-		if err != nil {
-			logger.Error("failed to initialize resource grant service", "error", err)
-			os.Exit(1)
-		}
-		resourceGroups, err := service.NewResourceGroupService(appStore)
-		if err != nil {
-			logger.Error("failed to initialize resource group service", "error", err)
-			os.Exit(1)
-		}
-		adminSrv, err := admin.New(
-			cfg,
-			appStore,
-			metadataDB,
-			identityService,
-			browserSessionService,
-			authorizationService,
-			resourceGrants,
-			resourceGroups,
-			databaseProvisioning,
-			logger,
-			dataDir,
-			appProxy,
-			onlineSessions,
-		)
-		if err != nil {
+		if err := startAdminRuntime(
+			ctx, errCh, cfg, rdpObjects, appStore, metadataDB, identityService,
+			browserSessionService, authorizationService, databaseProvisioning,
+			logger, dataDir, onlineSessions,
+		); err != nil {
 			logger.Error("failed to initialize admin server", "error", err)
 			os.Exit(1)
 		}
-		go func() {
-			errCh <- adminSrv.ListenAndServe(ctx)
-		}()
 	}
 
 	go func() {

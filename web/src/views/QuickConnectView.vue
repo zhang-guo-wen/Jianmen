@@ -56,7 +56,9 @@
             <div v-if="displayedTargets.length" class="connection-card-grid">
               <article v-for="target in displayedTargets" :key="targetKey(target)" class="connection-card host-connection-card">
                 <div class="connection-card__summary">
-                  <div class="protocol-mark">SSH</div>
+                  <div class="protocol-mark" :class="{ 'protocol-mark--rdp': isRDPTarget(target) }">
+                    {{ targetProtocolLabel(target) }}
+                  </div>
                   <div class="connection-card__identity">
                     <h3>{{ quickHostName(target) }}</h3>
                     <p>{{ accountDisplayName(target) }}</p>
@@ -69,35 +71,47 @@
                   {{ quickHostRemark(target) }}
                 </div>
 
-                <div v-if="connectionState(target).error" class="connection-card__error">
+                <div v-if="!isRDPTarget(target) && connectionState(target).error" class="connection-card__error">
                   <span>{{ connectionState(target).error }}</span>
                   <el-button link type="primary" @click="retryConnectionInfo(target)">重试</el-button>
                 </div>
 
                 <footer class="connection-card__actions">
-                  <el-button
-                    type="primary"
-                    size="small"
-                    :loading="connectionState(target).loading"
-                    @click="copyAllConnectionInfo(target)"
-                  >
-                    复制
-                  </el-button>
-                  <el-button
-                    v-if="permission.canDo('session:connect')"
-                    size="small"
-                    @click="openWebConnection(target)"
-                  >
-                    Web
-                  </el-button>
-                  <el-button
-                    v-if="permission.canDo('session:connect')"
-                    size="small"
-                    :loading="connectionState(target).loading || preferences.loading"
-                    @click="openClientConnection(target)"
-                  >
-                    客户端
-                  </el-button>
+                  <template v-if="isRDPTarget(target)">
+                    <el-button
+                      v-if="permission.canDo('rdp:connect')"
+                      type="primary"
+                      size="small"
+                      @click="openWebConnection(target)"
+                    >
+                      Web RDP
+                    </el-button>
+                  </template>
+                  <template v-else>
+                    <el-button
+                      type="primary"
+                      size="small"
+                      :loading="connectionState(target).loading"
+                      @click="copyAllConnectionInfo(target)"
+                    >
+                      复制
+                    </el-button>
+                    <el-button
+                      v-if="permission.canDo('session:connect')"
+                      size="small"
+                      @click="openWebConnection(target)"
+                    >
+                      Web
+                    </el-button>
+                    <el-button
+                      v-if="permission.canDo('session:connect')"
+                      size="small"
+                      :loading="connectionState(target).loading || preferences.loading"
+                      @click="openClientConnection(target)"
+                    >
+                      客户端
+                    </el-button>
+                  </template>
                 </footer>
               </article>
             </div>
@@ -294,6 +308,7 @@ interface HostMeta {
   name: string;
   group: string;
   remark: string;
+  protocol: string;
 }
 
 interface SSHConnectionState {
@@ -319,7 +334,11 @@ const { t } = useI18n();
 const permission = usePermissionStore();
 const preferences = usePreferencesStore();
 const router = useRouter();
-const canConnectHost = computed(() => permission.canDo('session:connect') || permission.canDo('sftp:connect'));
+const canConnectHost = computed(() =>
+  permission.canDo('session:connect')
+  || permission.canDo('sftp:connect')
+  || permission.canDo('rdp:connect')
+);
 const canConnectContainer = computed(() => permission.canDo('container:connect'));
 const activeTab = ref(canConnectHost.value ? 'ssh' : permission.canDo('db:connect') ? 'db' : 'container');
 
@@ -372,7 +391,22 @@ function targetHost(target: TargetRecord): string {
 }
 
 function targetPort(target: TargetRecord): number {
-  return Number(target.port) || 22;
+  return Number(target.port) || (isRDPTarget(target) ? 3389 : 22);
+}
+
+function targetProtocol(target: TargetRecord): 'ssh' | 'rdp' {
+  const protocol = String(
+    target.protocol || hostMeta.value[String(target.host_id || '')]?.protocol || 'ssh'
+  ).toLowerCase();
+  return protocol === 'rdp' ? 'rdp' : 'ssh';
+}
+
+function isRDPTarget(target: TargetRecord): boolean {
+  return targetProtocol(target) === 'rdp';
+}
+
+function targetProtocolLabel(target: TargetRecord): string {
+  return isRDPTarget(target) ? 'RDP' : 'SSH';
 }
 
 function accountDisplayName(target: TargetRecord): string {
@@ -520,9 +554,9 @@ async function loadTargets() {
   try {
     const result = await request.promise;
     if (!sshRequests.isCurrent(request.token, keyword)) return;
-    result.items.forEach(initializeConnectionState);
-    targets.value = result.items;
     hostMeta.value = result.hostMeta;
+    result.items.filter(target => !isRDPTarget(target)).forEach(initializeConnectionState);
+    targets.value = result.items;
     sshUsageCounts.value = result.usageCounts;
     void hydrateConnectionInfo(displayedTargets.value);
   } catch (error) {
@@ -543,6 +577,7 @@ async function loadHostMeta(): Promise<Record<string, HostMeta>> {
         name: String(host.name || host.address || ''),
         group: String(host.group || ''),
         remark: String(host.remark || ''),
+        protocol: String(host.protocol || 'ssh').toLowerCase(),
       },
     ]));
   } catch {
@@ -551,7 +586,7 @@ async function loadHostMeta(): Promise<Record<string, HostMeta>> {
 }
 
 async function hydrateConnectionInfo(items: TargetRecord[]) {
-  const queue = [...items];
+  const queue = items.filter(target => !isRDPTarget(target));
   const workers = Array.from({ length: Math.min(6, queue.length) }, async () => {
     while (queue.length) {
       const target = queue.shift();
@@ -562,6 +597,9 @@ async function hydrateConnectionInfo(items: TargetRecord[]) {
 }
 
 function ensureConnectionInfo(target: TargetRecord, force = false): Promise<SSHConnectionState> {
+  if (isRDPTarget(target)) {
+    return Promise.resolve(initializeConnectionState(target));
+  }
   const key = targetKey(target);
   const state = connectionState(target);
   const expiryTime = Date.parse(state.expiresAt);
@@ -649,10 +687,17 @@ function openWebConnection(target: TargetRecord) {
     ElMessage.error('无法获取目标资源 ID');
     return;
   }
-  router.push({ path: '/web-terminal', query: { target_id: targetID } });
+  router.push({
+    path: isRDPTarget(target) ? '/web-rdp' : '/web-terminal',
+    query: { target_id: targetID },
+  });
 }
 
 async function openClientConnection(target: TargetRecord) {
+  if (isRDPTarget(target)) {
+    openWebConnection(target);
+    return;
+  }
   const state = await ensureConnectionInfo(target);
   if (state.error || !state.compactUser || !state.password) {
     ElMessage.error(state.error || '连接信息尚未生成');
@@ -1050,6 +1095,11 @@ onMounted(() => {
 
 .protocol-mark--mysql {
   background: linear-gradient(145deg, #2563eb, #0ea5e9);
+}
+
+.protocol-mark--rdp {
+  background: linear-gradient(145deg, #2563eb, #0ea5e9);
+  box-shadow: 0 6px 14px rgb(37 99 235 / 18%);
 }
 
 .protocol-mark--postgres,

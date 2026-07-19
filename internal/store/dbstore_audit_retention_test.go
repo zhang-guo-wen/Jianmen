@@ -27,6 +27,8 @@ func newAuditRetentionTestStore(t *testing.T) (*DBStore, func()) {
 		&model.AuditSSHCommand{},
 		&model.AuditDBQuery{},
 		&model.AuditSFTPEvent{},
+		&model.AuditRDPChannelEvent{},
+		&model.AuditArtifact{},
 	); err != nil {
 		t.Fatalf("migrate audit schema: %v", err)
 	}
@@ -51,11 +53,23 @@ func TestDBStoreAuditRetentionClaimsOnlyEligibleEndedSessions(t *testing.T) {
 		{ID: "fresh-pending", State: "ended", EndedAt: &old, StartedAt: old, CleanupStatus: "pending", CleanupAt: &freshClaim},
 		{ID: "recent", State: "ended", EndedAt: &recent, StartedAt: recent, CleanupStatus: "ready"},
 		{ID: "active", State: "started", StartedAt: old, CleanupStatus: "ready"},
+		{
+			ID: "uploading-rdp", Protocol: "rdp", State: "ended",
+			EndedAt: &old, StartedAt: old, CleanupStatus: "ready",
+		},
 	}
 	for index := range sessions {
 		if err := repository.db.Create(&sessions[index]).Error; err != nil {
 			t.Fatalf("create audit session %s: %v", sessions[index].ID, err)
 		}
+	}
+	if err := repository.db.Create(&model.AuditArtifact{
+		ID: "uploading-artifact", AuditSessionID: "uploading-rdp",
+		Kind: model.AuditArtifactKindRecording, Format: model.AuditArtifactFormatGuac,
+		ObjectKey: "rdp/uploading-rdp/recording.guac",
+		Status:    model.RecordingStatusUploading,
+	}).Error; err != nil {
+		t.Fatalf("create uploading RDP artifact: %v", err)
 	}
 
 	claimed, err := repository.ClaimAuditSessionsForCleanup(
@@ -64,6 +78,7 @@ func TestDBStoreAuditRetentionClaimsOnlyEligibleEndedSessions(t *testing.T) {
 		now,
 		now.Add(-15*time.Minute),
 		10,
+		false,
 	)
 	if err != nil {
 		t.Fatalf("claim cleanup sessions: %v", err)
@@ -77,6 +92,7 @@ func TestDBStoreAuditRetentionClaimsOnlyEligibleEndedSessions(t *testing.T) {
 		now.Add(time.Minute),
 		now.Add(-14*time.Minute),
 		10,
+		false,
 	)
 	if err != nil {
 		t.Fatalf("second claim: %v", err)
@@ -101,6 +117,12 @@ func TestDBStoreAuditRetentionDeletesClaimedAggregate(t *testing.T) {
 		&model.AuditSSHCommand{ID: "ssh-1", AuditSessionID: session.ID, Timestamp: now, Command: "ls"},
 		&model.AuditDBQuery{ID: "db-1", AuditSessionID: session.ID, Timestamp: now, SQLText: "select 1"},
 		&model.AuditSFTPEvent{ID: "sftp-1", AuditSessionID: session.ID, Timestamp: now, Action: "read"},
+		&model.AuditRDPChannelEvent{ID: "rdp-1", AuditSessionID: session.ID, Timestamp: now, Channel: "clipboard"},
+		&model.AuditArtifact{
+			ID: "artifact-1", AuditSessionID: session.ID,
+			Kind: model.AuditArtifactKindRecording, Format: model.AuditArtifactFormatGuac,
+			ObjectKey: "rdp/session-1/recording.guac", Status: model.RecordingStatusReady,
+		},
 	}
 	for _, child := range children {
 		if err := repository.db.Create(child).Error; err != nil {
@@ -116,6 +138,8 @@ func TestDBStoreAuditRetentionDeletesClaimedAggregate(t *testing.T) {
 		&model.AuditSSHCommand{},
 		&model.AuditDBQuery{},
 		&model.AuditSFTPEvent{},
+		&model.AuditRDPChannelEvent{},
+		&model.AuditArtifact{},
 	} {
 		var count int64
 		if err := repository.db.Model(table).Count(&count).Error; err != nil {
@@ -188,6 +212,7 @@ func TestDBStoreAuditRetentionFailureStateIsRetryableOnlyAfterDelay(t *testing.T
 
 	fresh, err := repository.ClaimAuditSessionsForCleanup(
 		context.Background(), now, now.Add(time.Minute), now.Add(-15*time.Minute), 1,
+		false,
 	)
 	if err != nil {
 		t.Fatalf("claim fresh failure: %v", err)
@@ -197,6 +222,7 @@ func TestDBStoreAuditRetentionFailureStateIsRetryableOnlyAfterDelay(t *testing.T
 	}
 	stale, err := repository.ClaimAuditSessionsForCleanup(
 		context.Background(), now.Add(time.Hour), now.Add(time.Hour), now.Add(45*time.Minute), 1,
+		false,
 	)
 	if err != nil {
 		t.Fatalf("claim stale failure: %v", err)

@@ -19,6 +19,7 @@ type fakeAuditRetentionRepository struct {
 	claimErr  error
 	deleteErr error
 	markErr   error
+	artifacts map[string][]model.AuditArtifact
 }
 
 func (f *fakeAuditRetentionRepository) ClaimAuditSessionsForCleanup(
@@ -27,6 +28,7 @@ func (f *fakeAuditRetentionRepository) ClaimAuditSessionsForCleanup(
 	claimedAt time.Time,
 	_ time.Time,
 	limit int,
+	replayOnly bool,
 ) ([]model.AuditSession, error) {
 	if f.claimErr != nil {
 		return nil, f.claimErr
@@ -43,11 +45,21 @@ func (f *fakeAuditRetentionRepository) ClaimAuditSessionsForCleanup(
 		if session.CleanupStatus != "" && session.CleanupStatus != "ready" {
 			continue
 		}
+		if replayOnly && strings.TrimSpace(session.ReplayDir) == "" {
+			continue
+		}
 		session.CleanupStatus = "pending"
 		session.CleanupAt = &claimedAt
 		claimed = append(claimed, *session)
 	}
 	return claimed, nil
+}
+
+func (f *fakeAuditRetentionRepository) ListAuditArtifactsForCleanup(
+	_ context.Context,
+	sessionID string,
+) ([]model.AuditArtifact, error) {
+	return append([]model.AuditArtifact(nil), f.artifacts[sessionID]...), nil
 }
 
 func (f *fakeAuditRetentionRepository) MarkAuditSessionCleanupFailed(

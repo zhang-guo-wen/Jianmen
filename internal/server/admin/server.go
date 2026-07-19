@@ -1,13 +1,14 @@
 package admin
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"log/slog"
 	"sync"
 
 	"jianmen/internal/config"
+	"jianmen/internal/handler/accessrequest"
+	"jianmen/internal/handler/webrdp"
 	"jianmen/internal/online"
 	"jianmen/internal/server/appproxy"
 	"jianmen/internal/service"
@@ -38,23 +39,10 @@ type Server struct {
 	databaseProvisioning databaseProvisioningService
 	temporaryAccess      *service.TemporaryAccessService
 	browserSessions      *service.BrowserSessionService
+	webRDP               *webrdp.Handler
+	accessRequests       *accessrequest.Handler
 	setupOnce            sync.Once
 	setupSlot            chan struct{}
-}
-
-type loginCaptchaVerifier interface {
-	CreateChallenge() (service.LoginCaptchaChallenge, error)
-	Verify(payload string) error
-}
-
-type authorizationService interface {
-	AuthorizeConnection(
-		ctx context.Context,
-		userID string,
-		actions []string,
-		resourceType string,
-		resourceID string,
-	) (bool, error)
 }
 
 func New(
@@ -71,6 +59,8 @@ func New(
 	dataDir string,
 	appProxy *appproxy.Server,
 	onlineSessions *online.Registry,
+	webRDP *webrdp.Handler,
+	accessRequests *accessrequest.Handler,
 ) (*Server, error) {
 	switch {
 	case cfg == nil:
@@ -95,6 +85,8 @@ func New(
 		return nil, errors.New("admin logger is required")
 	case onlineSessions == nil:
 		return nil, errors.New("admin online session registry is required")
+	case webRDP == nil || accessRequests == nil:
+		return nil, errors.New("admin Web RDP audit and approval handlers are required")
 	}
 	resourceAccess, ok := repository.(resourceAccessRepository)
 	if !ok {
@@ -144,5 +136,6 @@ func New(
 		identity: identity, authorization: authorization, resourceAccess: resourceAccess,
 		resourceGrants: resourceGrants, resourceGroups: resourceGroups, userManagement: userManagement, userGroups: userGroups, roleManagement: roleManagement, databaseProvisioning: databaseProvisioning, temporaryAccess: temporaryAccess,
 		browserSessions: browserSessions,
+		webRDP:          webRDP, accessRequests: accessRequests,
 	}, nil
 }

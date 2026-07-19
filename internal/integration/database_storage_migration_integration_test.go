@@ -27,6 +27,7 @@ const (
 	databaseAccountUniquenessMigrationVersion = "202607180008"
 	databaseProvisioningSagaMigrationVersion  = "202607180009"
 	auditRetentionCleanupMigrationVersion     = "202607190002"
+	webRDPAuditMigrationVersion               = "202607190003"
 )
 
 var currentStorageMigrationVersions = []string{
@@ -51,6 +52,7 @@ var currentStorageMigrationVersions = []string{
 	"202607180009",
 	"202607190001",
 	"202607190002",
+	"202607190003",
 }
 
 type metadataDatabaseCase struct {
@@ -503,6 +505,7 @@ func seedAppliedMigrations(t *testing.T, db *gorm.DB, versions ...string) {
 		"202607180009": "database provisioning saga recovery state",
 		"202607190001": "resource grant logical uniqueness",
 		"202607190002": "audit retention cleanup state",
+		"202607190003": "web RDP access control and audit schema",
 	}
 	for _, version := range versions {
 		name, ok := names[version]

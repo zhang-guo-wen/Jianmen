@@ -1,0 +1,65 @@
+services:
+  volume-init:
+    image: alpine:3.23
+    user: "0:0"
+    command:
+      - sh
+      - -ec
+      - chown -R 10001:10001 /app-data /recordings /drive
+    volumes:
+      - jianmen-data:/app-data
+      - rdp-recordings:/recordings
+      - rdp-drive:/drive
+    restart: "no"
+
+  guacd:
+    image: guacamole/guacd:1.6.0
+    user: "10001:10001"
+    expose:
+      - "4822"
+    volumes:
+      - rdp-recordings:/shared/recordings
+      - rdp-drive:/shared/drive
+    networks:
+      - jianmen-internal
+    depends_on:
+      volume-init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  jianmen:
+    build:
+      context: .
+    user: "10001:10001"
+    ports:
+      - "127.0.0.1:47100:47100"
+      - "47102:47102"
+      - "33060:33060"
+      - "54330:54330"
+      - "63790:63790"
+      - "47110-47199:47110-47199"
+    volumes:
+      - jianmen-data:/app/data
+      - jianmen-certs:/app/certs:ro
+      - rdp-recordings:/shared/recordings
+      - rdp-drive:/shared/drive
+      - ./config.docker.web-rdp.example.json:/app/config.json:ro
+    networks:
+      - jianmen-internal
+    depends_on:
+      volume-init:
+        condition: service_completed_successfully
+      guacd:
+        condition: service_started
+    restart: unless-stopped
+
+networks:
+  jianmen-internal:
+    driver: bridge
+
+volumes:
+  jianmen-data:
+  jianmen-certs:
+    external: true
+  rdp-recordings:
+  rdp-drive:

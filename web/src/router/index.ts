@@ -15,6 +15,7 @@ interface AppRouteMeta {
 const LoginView = () => import('@/views/LoginView.vue');
 const NoAccessView = () => import('@/views/NoAccessView.vue');
 const SetupView = () => import('@/views/SetupView.vue');
+const WebRDPView = () => import('@/views/WebRDPView.vue');
 const WebTerminalView = () => import('@/views/WebTerminalView.vue');
 
 const protectedRoutes: RouteRecordRaw[] = APP_NAV_ITEMS.map(item => ({
@@ -58,6 +59,15 @@ const routes: RouteRecordRaw[] = [
     meta: {
       titleKey: 'route.webTerminal.title',
       descriptionKey: 'route.webTerminal.description',
+    } satisfies AppRouteMeta,
+  },
+  {
+    path: '/web-rdp',
+    name: 'web-rdp',
+    component: WebRDPView,
+    meta: {
+      titleKey: 'route.webRDP.title',
+      descriptionKey: 'route.webRDP.description',
     } satisfies AppRouteMeta,
   },
   {

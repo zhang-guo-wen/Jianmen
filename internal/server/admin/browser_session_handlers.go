@@ -62,6 +62,10 @@ func (s *Server) handleWebTerminalTicket(w http.ResponseWriter, r *http.Request)
 		s.writeErrorText(w, r, http.StatusNotFound, "target not found")
 		return
 	}
+	if !strings.EqualFold(target.Protocol, "ssh") {
+		s.writeErrorText(w, r, http.StatusBadRequest, "target is not an SSH account")
+		return
+	}
 	ticket, err := s.browserSessions.CreateWebSocketTicket(r.Context(), session, target.ID)
 	if err != nil {
 		s.writeErrorText(w, r, http.StatusInternalServerError, "failed to create websocket ticket")

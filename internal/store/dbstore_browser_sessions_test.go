@@ -137,7 +137,7 @@ func TestDBStoreBrowserSessionTicketDoesNotBurnForRevokedOrExpiredSession(t *tes
 			if err := db.Create(&ticket).Error; err != nil {
 				t.Fatal(err)
 			}
-			if _, found, err := store.ConsumeWebSocketTicket(context.Background(), hashBrowserSessionTestValue(secret), "target-1", now); err != nil || found {
+			if _, found, err := store.ConsumeWebSocketTicket(context.Background(), hashBrowserSessionTestValue(secret), service.WebSocketPurposeTerminal, "target-1", now); err != nil || found {
 				t.Fatalf("invalid session ticket consume = found=%v err=%v", found, err)
 			}
 			var persisted model.WebSocketTicket

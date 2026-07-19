@@ -53,6 +53,30 @@
       "server_name": "localhost"
     }
   },
+  "web_rdp": {
+    "enabled": false,
+    "guacd_address": "127.0.0.1:4822",
+    "connect_timeout_seconds": 15,
+    "spool_dir": "data/rdp-spool",
+    "guacd_recording_root": "data/rdp-spool",
+    "local_drive_root": "data/rdp-drive",
+    "guacd_drive_root": "data/rdp-drive",
+    "allow_unrecorded": false
+  },
+  "object_storage": {
+    "provider": "filesystem",
+    "local_dir": "data/objects",
+    "endpoint": "",
+    "access_key_id": "",
+    "secret_access_key": "",
+    "session_token": "",
+    "bucket": "",
+    "region": "",
+    "prefix": "jianmen",
+    "secure": true,
+    "path_style": false,
+    "auto_create_bucket": false
+  },
   "recording": {
     "enabled": true,
     "record_input": false,

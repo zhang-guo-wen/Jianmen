@@ -63,6 +63,230 @@
           </DataTableCard>
         </div>
       </el-tab-pane>
+      <el-tab-pane v-if="canAccessRDPTab" :label="t('audit.scope.rdp')" name="rdp">
+        <div class="page-container rdp-audit-page">
+          <template v-if="canViewRDPRecordings">
+            <el-alert
+              v-if="rdpError"
+              :title="rdpError"
+              type="error"
+              show-icon
+              style="margin-bottom: 12px"
+            />
+            <div class="rdp-filter-panel">
+              <el-input
+                v-model="rdpUserID"
+                clearable
+                placeholder="用户 ID"
+                @keyup.enter="applyRDPFilters"
+              />
+              <el-input
+                v-model="rdpAccountID"
+                clearable
+                placeholder="主机账号 ID"
+                @keyup.enter="applyRDPFilters"
+              />
+              <el-date-picker
+                v-model="rdpDateRange"
+                type="datetimerange"
+                range-separator="至"
+                start-placeholder="开始时间"
+                end-placeholder="结束时间"
+                value-format="YYYY-MM-DDTHH:mm:ss.SSSZ"
+              />
+              <el-select v-model="rdpOutcome" clearable placeholder="连接结果">
+                <el-option label="全部结果" value="" />
+                <el-option label="成功" value="succeeded" />
+                <el-option label="失败" value="failed" />
+                <el-option label="已拒绝" value="denied" />
+                <el-option label="已中止" value="terminated" />
+                <el-option label="进行中" value="active" />
+                <el-option label="连接中" value="connecting" />
+              </el-select>
+              <el-button type="primary" @click="applyRDPFilters">筛选</el-button>
+              <el-button @click="resetRDPFilters">重置</el-button>
+            </div>
+            <DataTableCard
+              :data="rdpSessions"
+              :loading="rdpLoading"
+              :total="rdpTotal"
+              v-model:page="rdpPage"
+              v-model:page-size="rdpPageSize"
+              :show-search="false"
+            >
+              <template #toolbar-extra>
+                <el-button :loading="rdpLoading" :icon="Refresh" @click="loadRDPSessions">
+                  {{ t('common.refresh') }}
+                </el-button>
+              </template>
+              <el-table-column label="Windows 主机" min-width="180" show-overflow-tooltip>
+                <template #default="{ row }">{{ rdpSessionTarget(row) }}</template>
+              </el-table-column>
+              <el-table-column label="主机账号" min-width="150" show-overflow-tooltip>
+                <template #default="{ row }">{{ rdpSessionAccount(row) }}</template>
+              </el-table-column>
+              <el-table-column label="操作用户" min-width="130" show-overflow-tooltip>
+                <template #default="{ row }">{{ row.username || row.user_id || '-' }}</template>
+              </el-table-column>
+              <el-table-column label="结果" width="100">
+                <template #default="{ row }">
+                  <el-tooltip
+                    :disabled="!row.failure_message"
+                    :content="row.failure_message || ''"
+                    placement="top"
+                  >
+                    <el-tag :type="rdpOutcomeTag(row.outcome)" size="small" effect="plain">
+                      {{ rdpOutcomeLabel(row.outcome) }}
+                    </el-tag>
+                  </el-tooltip>
+                </template>
+              </el-table-column>
+              <el-table-column label="开始时间" width="170" class-name="col-time">
+                <template #default="{ row }">{{ formatTime(row.started_at) }}</template>
+              </el-table-column>
+              <el-table-column label="时长" width="90">
+                <template #default="{ row }">
+                  {{ formatDurationSeconds(computeDuration(row.started_at, row.ended_at)) }}
+                </template>
+              </el-table-column>
+              <el-table-column label="录屏" width="100">
+                <template #default="{ row }">
+                  <el-tag :type="rdpRecordingTag(row.recording_status)" size="small" effect="plain">
+                    {{ rdpRecordingLabel(row.recording_status) }}
+                  </el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column :label="t('common.actions')" fixed="right" width="90">
+                <template #default="{ row }">
+                  <el-button
+                    :disabled="!row.has_replay"
+                    link
+                    type="success"
+                    @click="openRDPReplay(row)"
+                  >
+                    回放
+                  </el-button>
+                </template>
+              </el-table-column>
+            </DataTableCard>
+          </template>
+
+          <el-divider v-if="canUseRDPApprovals" content-position="left">RDP 访问审批</el-divider>
+          <section v-if="canUseRDPApprovals" class="rdp-approval-panel">
+            <el-form
+              v-if="permission.canDo('rdp:connect')"
+              class="rdp-request-form"
+              label-position="top"
+              @submit.prevent
+            >
+              <el-form-item label="主机账号">
+                <el-select
+                  v-model="accessRequestForm.resource_id"
+                  filterable
+                  placeholder="选择需要审批的 RDP 账号"
+                  style="width: 100%"
+                >
+                  <el-option
+                    v-for="target in rdpTargets"
+                    :key="String(target.id || target.resource_id)"
+                    :label="`${target.name || target.username || target.id} · ${target.host || ''}`"
+                    :value="String(target.id || target.resource_id)"
+                  />
+                </el-select>
+              </el-form-item>
+              <el-form-item label="申请原因">
+                <el-input
+                  v-model="accessRequestForm.reason"
+                  maxlength="500"
+                  show-word-limit
+                  placeholder="说明本次 Windows 访问用途"
+                />
+              </el-form-item>
+              <el-form-item label="访问截止时间">
+                <el-date-picker
+                  v-model="accessRequestForm.access_expires_at"
+                  type="datetime"
+                  value-format="YYYY-MM-DDTHH:mm:ss.SSSZ"
+                  style="width: 100%"
+                />
+              </el-form-item>
+              <el-button
+                type="primary"
+                :loading="creatingAccessRequest"
+                @click="createRDPAccessRequest"
+              >
+                提交申请
+              </el-button>
+            </el-form>
+
+            <div class="rdp-request-list">
+              <div class="rdp-request-toolbar">
+                <el-select
+                  v-model="accessRequestStatus"
+                  clearable
+                  placeholder="全部状态"
+                  style="width: 140px"
+                  @change="loadAccessRequests"
+                >
+                  <el-option label="待审批" value="pending" />
+                  <el-option label="已批准" value="approved" />
+                  <el-option label="已拒绝" value="rejected" />
+                  <el-option label="已取消" value="cancelled" />
+                </el-select>
+                <el-button :loading="accessRequestsLoading" :icon="Refresh" @click="loadAccessRequests">
+                  刷新审批
+                </el-button>
+              </div>
+              <el-table v-loading="accessRequestsLoading" :data="accessRequests" border>
+                <el-table-column prop="requester_id" label="申请用户" min-width="140" show-overflow-tooltip />
+                <el-table-column prop="resource_id" label="主机账号 ID" min-width="170" show-overflow-tooltip />
+                <el-table-column prop="reason" label="原因" min-width="180" show-overflow-tooltip />
+                <el-table-column label="权限范围" min-width="180" show-overflow-tooltip>
+                  <template #default="{ row }">{{ accessRequestActionsLabel(row.actions) }}</template>
+                </el-table-column>
+                <el-table-column label="有效期" min-width="170" class-name="col-time">
+                  <template #default="{ row }">{{ formatTime(row.access_expires_at) }}</template>
+                </el-table-column>
+                <el-table-column label="状态" width="100">
+                  <template #default="{ row }">
+                    <el-tag :type="accessRequestStatusTag(row.status)" size="small" effect="plain">
+                      {{ accessRequestStatusLabel(row.status) }}
+                    </el-tag>
+                  </template>
+                </el-table-column>
+                <el-table-column label="操作" fixed="right" width="180">
+                  <template #default="{ row }">
+                    <template v-if="row.status === 'pending' && permission.canDo('rdp:approval:manage')">
+                      <el-button link type="success" @click="decideRDPAccessRequest(row.id, 'approve')">
+                        批准
+                      </el-button>
+                      <el-button link type="danger" @click="decideRDPAccessRequest(row.id, 'reject')">
+                        拒绝
+                      </el-button>
+                    </template>
+                    <el-button
+                      v-else-if="row.status === 'pending' && permission.canDo('rdp:connect')"
+                      link
+                      type="danger"
+                      @click="decideRDPAccessRequest(row.id, 'cancel')"
+                    >
+                      取消
+                    </el-button>
+                  </template>
+                </el-table-column>
+              </el-table>
+              <el-pagination
+                v-if="accessRequestTotal > accessRequestPageSize"
+                v-model:current-page="accessRequestPage"
+                :page-size="accessRequestPageSize"
+                :total="accessRequestTotal"
+                layout="total, prev, pager, next"
+                style="margin-top: 12px; justify-content: flex-end"
+              />
+            </div>
+          </section>
+        </div>
+      </el-tab-pane>
       <el-tab-pane v-if="permission.canDo('db:audit:view')" :label="t('audit.scope.db')" name="db">
         <el-alert v-if="dbError" :title="dbError" type="warning" show-icon style="margin-bottom: 12px" />
         <div class="page-container">
@@ -439,12 +663,55 @@
         <el-empty v-else :description="t('audit.empty.detail')" />
       </div>
     </el-drawer>
+
+    <el-dialog
+      v-model="rdpReplayVisible"
+      title="RDP 会话回放"
+      width="min(1180px, calc(100vw - 32px))"
+      destroy-on-close
+      @closed="destroyRDPReplay"
+    >
+      <el-alert
+        v-if="rdpReplayError"
+        :title="rdpReplayError"
+        type="error"
+        show-icon
+        style="margin-bottom: 12px"
+      />
+      <div v-loading="rdpReplayLoading" class="rdp-replay-panel">
+        <div class="rdp-replay-controls">
+          <el-button
+            type="primary"
+            :disabled="rdpReplayDuration <= 0"
+            @click="toggleRDPReplay"
+          >
+            {{ rdpReplayPlaying ? '暂停' : '播放' }}
+          </el-button>
+          <el-button :disabled="rdpReplayDuration <= 0" @click="restartRDPReplay">
+            重播
+          </el-button>
+          <span>{{ formatRDPReplayTime(rdpReplayPosition) }}</span>
+          <el-slider
+            v-model="rdpReplayPosition"
+            :max="Math.max(rdpReplayDuration, 1)"
+            :show-tooltip="false"
+            :disabled="rdpReplayDuration <= 0"
+            @change="seekRDPReplay"
+          />
+          <span>{{ formatRDPReplayTime(rdpReplayDuration) }}</span>
+        </div>
+        <div ref="rdpReplayHostRef" class="rdp-replay-display">
+          <el-empty v-if="!rdpReplayLoading && !rdpReplayDuration && !rdpReplayError" description="录屏中暂无可播放画面" />
+        </div>
+      </div>
+    </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
 import { Terminal } from '@xterm/xterm';
 import '@xterm/xterm/css/xterm.css';
+import Guacamole from 'guacamole-common-js';
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { Refresh } from '@element-plus/icons-vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
@@ -461,12 +728,16 @@ import {
   type SessionFileEventRecord,
   type SessionRecord,
   type LoginAuditRecord,
-  type OperationAuditRecord
+  type OperationAuditRecord,
+  type RDPAuditSessionRecord,
+  type AccessRequestRecord,
+  type TargetRecord,
 } from '@/api/client';
 import { useI18n } from '@/i18n';
 import { usePermissionStore } from '@/stores/permission';
+import { installUnicodeGuacamoleParser } from '@/utils/guacamoleProtocol';
 
-type AuditScope = 'logins' | 'operations' | 'ssh' | 'db' | 'online';
+type AuditScope = 'logins' | 'operations' | 'ssh' | 'rdp' | 'db' | 'online';
 type DetailKind = '' | 'meta' | 'commands' | 'files' | 'file-summary' | 'queries' | 'replay';
 type ReplayFrame = {
   time: number;
@@ -478,6 +749,44 @@ type ReplayData = {
   frames: ReplayFrame[];
   raw: string;
 };
+
+interface RDPReplayDisplay {
+  getElement(): HTMLDivElement;
+  getWidth(): number;
+  getHeight(): number;
+  scale(scale: number): void;
+}
+
+interface RDPRecording {
+  connect(data?: string): void;
+  disconnect(): void;
+  abort(): void;
+  play(): void;
+  pause(): void;
+  seek(position: number, callback?: () => void): void;
+  isPlaying(): boolean;
+  getPosition(): number;
+  getDuration(): number;
+  getDisplay(): RDPReplayDisplay;
+  onload: (() => void) | null;
+  onerror: ((message: string) => void) | null;
+  onprogress: ((duration: number, parsedSize: number) => void) | null;
+  onplay: (() => void) | null;
+  onpause: (() => void) | null;
+  onseek: ((position: number) => void) | null;
+}
+
+interface GuacamoleReplayRuntime {
+  StaticHTTPTunnel: new (
+    url: string,
+    crossDomain?: boolean,
+    headers?: Record<string, string>,
+  ) => unknown;
+  SessionRecording: new (source: unknown) => RDPRecording;
+}
+
+const GuacamoleReplay = Guacamole as unknown as GuacamoleReplayRuntime;
+installUnicodeGuacamoleParser(Guacamole);
 
 const { t } = useI18n();
 const permission = usePermissionStore();
@@ -494,8 +803,18 @@ function permittedAuditScope(value: unknown): AuditScope {
   if (requested === 'operations' && permission.canDo('audit:view')) return 'operations';
   if (requested === 'online' && permission.canDo('session:view')) return 'online';
   if (requested === 'db' && permission.canDo('db:audit:view')) return 'db';
+  if (requested === 'rdp' && (
+    permission.canDo('rdp:recording:view')
+    || permission.canDo('rdp:approval:manage')
+    || permission.canDo('rdp:connect')
+  )) return 'rdp';
   if (requested === 'ssh' && permission.canDo('audit:view')) return 'ssh';
   if (permission.canDo('audit:view')) return 'ssh';
+  if (
+    permission.canDo('rdp:recording:view')
+    || permission.canDo('rdp:approval:manage')
+    || permission.canDo('rdp:connect')
+  ) return 'rdp';
   if (permission.canDo('db:audit:view')) return 'db';
   return 'online';
 }
@@ -505,6 +824,7 @@ const initialAuditKeyword = routeQueryValue(route.query.q);
 const auditScope = ref<AuditScope>(initialAuditScope);
 const initialOnlineResourceType = initialAuditScope === 'online' ? routeQueryValue(route.query.resource_type) : '';
 const initialOnlineResourceID = initialAuditScope === 'online' ? routeQueryValue(route.query.resource_id) : '';
+const initialRDPAccountID = initialAuditScope === 'rdp' ? routeQueryValue(route.query.account_id) : '';
 
 // ── SSH session list state ──
 const sessions = ref<SessionRecord[]>([]);
@@ -514,6 +834,49 @@ const sessionPageSize = ref(50);
 const sessionKeyword = ref(initialAuditScope === 'ssh' ? initialAuditKeyword : '');
 const sessionsLoading = ref(false);
 const sessionError = ref('');
+
+// ── RDP audit, replay and approval state ──
+const canViewRDPRecordings = computed(() => permission.canDo('rdp:recording:view'));
+const canUseRDPApprovals = computed(() =>
+  permission.canDo('rdp:connect') || permission.canDo('rdp:approval:manage')
+);
+const canAccessRDPTab = computed(() =>
+  canViewRDPRecordings.value || canUseRDPApprovals.value
+);
+const rdpSessions = ref<RDPAuditSessionRecord[]>([]);
+const rdpTotal = ref(0);
+const rdpPage = ref(1);
+const rdpPageSize = ref(50);
+const rdpUserID = ref('');
+const rdpAccountID = ref(initialRDPAccountID);
+const rdpOutcome = ref('');
+const rdpDateRange = ref<string[]>([]);
+const rdpLoading = ref(false);
+const rdpError = ref('');
+
+const rdpTargets = ref<TargetRecord[]>([]);
+const accessRequests = ref<AccessRequestRecord[]>([]);
+const accessRequestTotal = ref(0);
+const accessRequestPage = ref(1);
+const accessRequestPageSize = 20;
+const accessRequestStatus = ref('');
+const accessRequestsLoading = ref(false);
+const creatingAccessRequest = ref(false);
+const accessRequestForm = ref({
+  resource_id: initialRDPAccountID,
+  reason: '',
+  access_expires_at: accessExpiryAfterHours(8),
+});
+
+const rdpReplayVisible = ref(false);
+const rdpReplayLoading = ref(false);
+const rdpReplayError = ref('');
+const rdpReplayHostRef = ref<HTMLElement>();
+const rdpReplayPlaying = ref(false);
+const rdpReplayPosition = ref(0);
+const rdpReplayDuration = ref(0);
+let rdpRecording: RDPRecording | undefined;
+let rdpReplayResizeObserver: ResizeObserver | undefined;
 
 // Login and management operation audit state
 const loginAuditLogs = ref<LoginAuditRecord[]>([]);
@@ -698,6 +1061,361 @@ const replayTerminalMessage = computed(() => {
   return '';
 });
 
+function accessExpiryAfterHours(hours: number): string {
+  return new Date(Date.now() + hours * 60 * 60 * 1000).toISOString();
+}
+
+function rdpSessionTarget(session: RDPAuditSessionRecord): string {
+  return displayAuditIdentity(session.target_address || session.host_id, session.target_name);
+}
+
+function rdpSessionAccount(session: RDPAuditSessionRecord): string {
+  return displayAuditIdentity(session.account_username || session.account_id, session.account_name);
+}
+
+function rdpOutcomeLabel(outcome: unknown): string {
+  switch (String(outcome || '').toLowerCase()) {
+    case 'succeeded': return '成功';
+    case 'failed': return '失败';
+    case 'denied': return '已拒绝';
+    case 'terminated': return '已中止';
+    case 'active': return '进行中';
+    case 'connecting': return '连接中';
+    default: return '未知';
+  }
+}
+
+function rdpOutcomeTag(outcome: unknown): 'success' | 'warning' | 'danger' | 'info' {
+  switch (String(outcome || '').toLowerCase()) {
+    case 'succeeded': return 'success';
+    case 'failed': return 'danger';
+    case 'denied':
+    case 'terminated': return 'warning';
+    default: return 'info';
+  }
+}
+
+function rdpRecordingLabel(status: unknown): string {
+  switch (String(status || '').toLowerCase()) {
+    case 'ready': return '可回放';
+    case 'pending': return '录制中';
+    case 'uploading': return '上传中';
+    case 'failed': return '失败';
+    case 'none': return '未录制';
+    default: return '未知';
+  }
+}
+
+function rdpRecordingTag(status: unknown): 'success' | 'warning' | 'danger' | 'info' {
+  switch (String(status || '').toLowerCase()) {
+    case 'ready': return 'success';
+    case 'pending':
+    case 'uploading': return 'warning';
+    case 'failed': return 'danger';
+    default: return 'info';
+  }
+}
+
+async function loadRDPSessions() {
+  if (!canViewRDPRecordings.value) return;
+  rdpLoading.value = true;
+  rdpError.value = '';
+  try {
+    const response = await apiClient.getRDPSessions({
+      user_id: rdpUserID.value.trim() || undefined,
+      account_id: rdpAccountID.value.trim() || undefined,
+      from: rdpDateRange.value[0] || undefined,
+      to: rdpDateRange.value[1] || undefined,
+      outcome: rdpOutcome.value || undefined,
+      page: rdpPage.value,
+      page_size: rdpPageSize.value,
+    });
+    rdpSessions.value = response.items ?? [];
+    rdpTotal.value = response.total ?? 0;
+  } catch (error) {
+    rdpSessions.value = [];
+    rdpError.value = error instanceof Error ? error.message : '加载 RDP 审计失败';
+  } finally {
+    rdpLoading.value = false;
+  }
+}
+
+function applyRDPFilters() {
+  if (rdpPage.value === 1) {
+    void loadRDPSessions();
+  } else {
+    rdpPage.value = 1;
+  }
+}
+
+function resetRDPFilters() {
+  rdpUserID.value = '';
+  rdpAccountID.value = '';
+  rdpOutcome.value = '';
+  rdpDateRange.value = [];
+  applyRDPFilters();
+}
+
+async function loadRDPTargets() {
+  if (!permission.canDo('rdp:connect')) return;
+  try {
+    const targets: TargetRecord[] = [];
+    let page = 1;
+    let total = 0;
+    do {
+      const response = await apiClient.getTargets({
+        page,
+        page_size: 200,
+        connectable: true,
+      });
+      const items = response.items ?? [];
+      targets.push(...items);
+      total = response.total ?? targets.length;
+      page += 1;
+      if (!items.length) break;
+    } while (targets.length < total);
+    rdpTargets.value = targets.filter(
+      target => String(target.protocol || '').toLowerCase() === 'rdp'
+    );
+  } catch {
+    rdpTargets.value = [];
+  }
+}
+
+async function loadAccessRequests() {
+  if (!canUseRDPApprovals.value) return;
+  accessRequestsLoading.value = true;
+  try {
+    const response = await apiClient.getAccessRequests({
+      resource_type: 'host_account',
+      protocol: 'rdp',
+      status: accessRequestStatus.value || undefined,
+      page: accessRequestPage.value,
+      page_size: accessRequestPageSize,
+    });
+    accessRequests.value = response.items ?? [];
+    accessRequestTotal.value = response.total ?? 0;
+  } catch (error) {
+    accessRequests.value = [];
+    ElMessage.error(error instanceof Error ? error.message : '加载 RDP 审批失败');
+  } finally {
+    accessRequestsLoading.value = false;
+  }
+}
+
+function requestedRDPActions(target: TargetRecord | undefined): string[] {
+  const actions = ['rdp:connect'];
+  const driveAllowed = target?.rdp_drive_mapping === true
+    && permission.canDo('rdp:drive:map');
+  const candidates: Array<[boolean, string]> = [
+    [target?.rdp_clipboard_read === true, 'rdp:clipboard:read'],
+    [target?.rdp_clipboard_write === true, 'rdp:clipboard:write'],
+    [driveAllowed, 'rdp:drive:map'],
+    [driveAllowed && target?.rdp_file_upload === true, 'rdp:file:upload'],
+    [driveAllowed && target?.rdp_file_download === true, 'rdp:file:download'],
+  ];
+  for (const [enabled, action] of candidates) {
+    if (enabled && permission.canDo(action)) actions.push(action);
+  }
+  return actions;
+}
+
+async function createRDPAccessRequest() {
+  const resourceID = accessRequestForm.value.resource_id.trim();
+  const reason = accessRequestForm.value.reason.trim();
+  if (!resourceID || !reason) {
+    ElMessage.warning('请选择主机账号并填写申请原因');
+    return;
+  }
+  const target = rdpTargets.value.find(
+    item => String(item.id || item.resource_id) === resourceID
+  );
+  creatingAccessRequest.value = true;
+  try {
+    await apiClient.createAccessRequest({
+      resource_type: 'host_account',
+      resource_id: resourceID,
+      protocol: 'rdp',
+      actions: requestedRDPActions(target),
+      reason,
+      access_expires_at: accessRequestForm.value.access_expires_at || undefined,
+    });
+    ElMessage.success('RDP 访问申请已提交');
+    accessRequestForm.value.reason = '';
+    accessRequestForm.value.access_expires_at = accessExpiryAfterHours(8);
+    await loadAccessRequests();
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : '提交 RDP 访问申请失败');
+  } finally {
+    creatingAccessRequest.value = false;
+  }
+}
+
+async function decideRDPAccessRequest(
+  id: string,
+  decision: 'approve' | 'reject' | 'cancel',
+) {
+  const labels = { approve: '批准', reject: '拒绝', cancel: '取消' };
+  try {
+    await ElMessageBox.confirm(
+      `确认${labels[decision]}这条 RDP 访问申请？`,
+      `${labels[decision]}申请`,
+      { type: decision === 'approve' ? 'success' : 'warning' },
+    );
+  } catch {
+    return;
+  }
+  try {
+    await apiClient.decideAccessRequest(id, decision);
+    ElMessage.success(`申请已${labels[decision]}`);
+    await loadAccessRequests();
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : `${labels[decision]}申请失败`);
+  }
+}
+
+function accessRequestActionsLabel(actions: unknown): string {
+  if (!Array.isArray(actions)) return '-';
+  const labels: Record<string, string> = {
+    'rdp:connect': '连接',
+    'rdp:clipboard:read': '读剪贴板',
+    'rdp:clipboard:write': '写剪贴板',
+    'rdp:file:upload': '上传',
+    'rdp:file:download': '下载',
+    'rdp:drive:map': '磁盘映射',
+  };
+  return actions.map(action => labels[String(action)] || String(action)).join('、') || '-';
+}
+
+function accessRequestStatusLabel(status: unknown): string {
+  const labels: Record<string, string> = {
+    pending: '待审批',
+    approved: '已批准',
+    rejected: '已拒绝',
+    cancelled: '已取消',
+  };
+  return labels[String(status || '')] || String(status || '-');
+}
+
+function accessRequestStatusTag(
+  status: unknown,
+): 'success' | 'warning' | 'danger' | 'info' {
+  switch (String(status || '')) {
+    case 'approved': return 'success';
+    case 'pending': return 'warning';
+    case 'rejected': return 'danger';
+    default: return 'info';
+  }
+}
+
+async function openRDPReplay(session: RDPAuditSessionRecord) {
+  if (!session.id || !session.has_replay) return;
+  destroyRDPReplay();
+  rdpReplayVisible.value = true;
+  rdpReplayLoading.value = true;
+  rdpReplayError.value = '';
+  await nextTick();
+
+  const host = rdpReplayHostRef.value;
+  if (!host) {
+    rdpReplayLoading.value = false;
+    rdpReplayError.value = '无法初始化回放画布';
+    return;
+  }
+
+  const recordingURL = new URL(
+    apiClient.getRDPRecordingURL(session.id),
+    window.location.href,
+  );
+  const tunnel = new GuacamoleReplay.StaticHTTPTunnel(
+    recordingURL.toString(),
+    recordingURL.origin !== window.location.origin,
+  );
+  const recording = new GuacamoleReplay.SessionRecording(tunnel);
+  rdpRecording = recording;
+
+  const display = recording.getDisplay();
+  const displayElement = display.getElement();
+  displayElement.classList.add('rdp-recording-canvas');
+  host.replaceChildren(displayElement);
+  const scaleDisplay = () => {
+    const width = display.getWidth();
+    const height = display.getHeight();
+    if (!width || !height || !host.clientWidth || !host.clientHeight) return;
+    display.scale(Math.min(host.clientWidth / width, host.clientHeight / height));
+  };
+  rdpReplayResizeObserver = new ResizeObserver(scaleDisplay);
+  rdpReplayResizeObserver.observe(host);
+
+  recording.onprogress = duration => {
+    rdpReplayDuration.value = duration;
+    rdpReplayLoading.value = false;
+    scaleDisplay();
+  };
+  recording.onload = () => {
+    rdpReplayDuration.value = recording.getDuration();
+    rdpReplayLoading.value = false;
+    scaleDisplay();
+  };
+  recording.onerror = message => {
+    rdpReplayLoading.value = false;
+    rdpReplayError.value = message || '加载 RDP 录屏失败';
+  };
+  recording.onplay = () => {
+    rdpReplayPlaying.value = true;
+  };
+  recording.onpause = () => {
+    rdpReplayPlaying.value = false;
+    rdpReplayPosition.value = recording.getPosition();
+  };
+  recording.onseek = position => {
+    rdpReplayPosition.value = position;
+    rdpReplayDuration.value = recording.getDuration();
+  };
+  recording.connect();
+}
+
+function toggleRDPReplay() {
+  if (!rdpRecording) return;
+  if (rdpRecording.isPlaying()) rdpRecording.pause();
+  else rdpRecording.play();
+}
+
+function seekRDPReplay(position: number) {
+  rdpRecording?.seek(position);
+}
+
+function restartRDPReplay() {
+  if (!rdpRecording) return;
+  rdpRecording.pause();
+  rdpRecording.seek(0, () => rdpRecording?.play());
+}
+
+function formatRDPReplayTime(milliseconds: number): string {
+  const seconds = Math.max(0, Math.round(milliseconds / 1000));
+  const minutes = Math.floor(seconds / 60);
+  const remainder = String(seconds % 60).padStart(2, '0');
+  return `${minutes}:${remainder}`;
+}
+
+function destroyRDPReplay() {
+  rdpReplayResizeObserver?.disconnect();
+  rdpReplayResizeObserver = undefined;
+  if (rdpRecording) {
+    try {
+      rdpRecording.abort();
+    } catch {
+      rdpRecording.disconnect();
+    }
+  }
+  rdpRecording = undefined;
+  rdpReplayPlaying.value = false;
+  rdpReplayPosition.value = 0;
+  rdpReplayDuration.value = 0;
+  rdpReplayLoading.value = false;
+  rdpReplayHostRef.value?.replaceChildren();
+}
+
 // ── Helpers ──
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -733,7 +1451,8 @@ function sessionUser(session: SessionRecord): string {
 }
 
 function hasReplay(session: SessionRecord): boolean {
-  return typeof session.replay_dir === 'string' && session.replay_dir.length > 0;
+  return session.has_replay === true
+    || (typeof session.replay_dir === 'string' && session.replay_dir.length > 0);
 }
 
 function formatTime(value: unknown): string {
@@ -1414,6 +2133,7 @@ function utf8ByteLength(value: string): number {
 
 function onlineProtocol(row: OnlineSessionRecord): string {
   if (row.resource_type === 'database_instance') return formatDatabaseProtocol(row.protocol);
+  if (String(row.protocol).toLowerCase() === 'rdp') return 'RDP';
   if (row.protocol_subtype === 'sftp') return 'SFTP';
   if (row.protocol_subtype === 'web-terminal') return 'Web';
   return 'SSH';
@@ -1421,18 +2141,35 @@ function onlineProtocol(row: OnlineSessionRecord): string {
 
 function onlineProtocolTag(row: OnlineSessionRecord): 'primary' | 'success' | 'warning' | 'info' | 'danger' | '' {
   if (row.resource_type === 'database_instance') return databaseProtocolTag(row.protocol);
+  if (String(row.protocol).toLowerCase() === 'rdp') return 'primary';
   if (row.protocol_subtype === 'sftp') return 'warning';
   if (row.protocol_subtype === 'web-terminal') return 'success';
   return 'info';
 }
 
 function loadOnlineReplay(row: OnlineSessionRecord) {
+  if (String(row.protocol).toLowerCase() === 'rdp') {
+    void openRDPReplay({
+      id: row.audit_session_id,
+      protocol: 'rdp',
+      target_name: row.instance,
+      account_name: row.account,
+      username: row.operator,
+      started_at: row.started_at,
+      has_replay: row.has_replay,
+    });
+    return;
+  }
   void loadSessionArtifact({ id: row.audit_session_id, replay_dir: row.has_replay ? 'online' : '' }, 'replay');
 }
 
 function loadOnlineLog(row: OnlineSessionRecord) {
   if (row.resource_type === 'database_instance') {
     void loadDBArtifact({ id: row.audit_session_id }, 'queries');
+    return;
+  }
+  if (String(row.protocol).toLowerCase() === 'rdp') {
+    ElMessage.info('RDP 通道审计已记录元数据，不展示剪贴板或文件内容');
     return;
   }
   const kind = row.protocol_subtype === 'sftp' ? 'files' : 'commands';
@@ -1517,6 +2254,15 @@ function applyRouteAuditFilter() {
     else onlinePage.value = 1;
     return;
   }
+  if (scope === 'rdp') {
+    rdpAccountID.value = routeQueryValue(route.query.account_id);
+    if (rdpAccountID.value) {
+      accessRequestForm.value.resource_id = rdpAccountID.value;
+    }
+    if (rdpPage.value === 1) void loadRDPSessions();
+    else rdpPage.value = 1;
+    return;
+  }
   onlineKeyword.value = '';
   onlineResourceType.value = '';
   onlineResourceID.value = '';
@@ -1538,6 +2284,11 @@ onMounted(() => {
     void loadOperationAuditLogs();
   }
   if (permission.canDo('db:audit:view')) void loadDBConnections();
+  if (canViewRDPRecordings.value) void loadRDPSessions();
+  if (canUseRDPApprovals.value) {
+    void loadAccessRequests();
+    void loadRDPTargets();
+  }
   if (permission.canDo('session:view')) {
     void loadOnlineSessions();
     onlineRefreshTimer = window.setInterval(() => {
@@ -1565,6 +2316,12 @@ watch(isReplay, async (value) => {
 watch([sessionPage, sessionPageSize], () => {
   if (auditScope.value === 'ssh') loadSessions();
 });
+watch([rdpPage, rdpPageSize], () => {
+  if (auditScope.value === 'rdp') void loadRDPSessions();
+});
+watch(accessRequestPage, () => {
+  if (auditScope.value === 'rdp') void loadAccessRequests();
+});
 watch([loginAuditPage, loginAuditPageSize], () => {
   if (auditScope.value === 'logins') loadLoginAuditLogs();
 });
@@ -1582,6 +2339,7 @@ onBeforeUnmount(() => {
   if (onlineRefreshTimer !== undefined) window.clearInterval(onlineRefreshTimer);
   stopReplay();
   destroyReplayTerminal();
+  destroyRDPReplay();
 });
 </script>
 
@@ -1618,6 +2376,78 @@ onBeforeUnmount(() => {
   flex-direction: column;
   flex: 1;
   min-height: 0;
+}
+
+.rdp-audit-page {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.rdp-filter-panel {
+  display: grid;
+  grid-template-columns: 150px 180px minmax(300px, 1fr) 130px auto auto;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.rdp-approval-panel {
+  display: grid;
+  grid-template-columns: minmax(260px, 340px) minmax(0, 1fr);
+  gap: 18px;
+  min-height: 260px;
+}
+
+.rdp-request-form {
+  padding: 14px;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  background: var(--color-surface-muted);
+}
+
+.rdp-request-form :deep(.el-form-item) {
+  margin-bottom: 12px;
+}
+
+.rdp-request-list {
+  min-width: 0;
+}
+
+.rdp-request-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.rdp-replay-panel {
+  display: flex;
+  min-height: min(70vh, 720px);
+  flex-direction: column;
+  gap: 12px;
+}
+
+.rdp-replay-controls {
+  display: grid;
+  grid-template-columns: auto auto auto minmax(160px, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+}
+
+.rdp-replay-display {
+  display: grid;
+  flex: 1;
+  min-height: 420px;
+  place-items: center;
+  overflow: hidden;
+  border-radius: 10px;
+  background: #090f1d;
+}
+
+.rdp-replay-display :deep(.rdp-recording-canvas) {
+  position: relative;
+  transform-origin: center center;
 }
 
 .replay-panel {
@@ -1718,6 +2548,19 @@ onBeforeUnmount(() => {
 }
 
 @media (max-width: 720px) {
+  .rdp-filter-panel,
+  .rdp-approval-panel {
+    grid-template-columns: 1fr;
+  }
+
+  .rdp-replay-controls {
+    grid-template-columns: auto auto 1fr;
+  }
+
+  .rdp-replay-controls :deep(.el-slider) {
+    grid-column: 1 / -1;
+  }
+
   .replay-controls {
     flex-direction: column;
     align-items: stretch;

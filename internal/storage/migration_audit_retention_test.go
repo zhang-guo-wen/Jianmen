@@ -43,6 +43,11 @@ func TestAuditRetentionMigrationAddsCleanupStateWithoutLosingSessions(t *testing
 			t.Fatalf("audit retention column %s is missing", column)
 		}
 	}
+	for _, column := range []string{"resource_type", "account_id", "recording_status"} {
+		if db.Migrator().HasColumn(&model.AuditSession{}, column) {
+			t.Fatalf("audit retention migration installed future column %s", column)
+		}
+	}
 	if !db.Migrator().HasIndex(&model.AuditSession{}, "idx_audit_sessions_cleanup") {
 		t.Fatal("audit cleanup index is missing")
 	}

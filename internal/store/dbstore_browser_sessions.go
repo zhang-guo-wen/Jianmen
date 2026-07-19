@@ -52,33 +52,33 @@ func (s *DBStore) CreateWebSocketTicket(ctx context.Context, ticket model.WebSoc
 	})
 }
 
-func (s *DBStore) ConsumeWebSocketTicket(ctx context.Context, secretHash, targetID string, now time.Time) (service.BrowserSessionSubject, bool, error) {
-	var subject service.BrowserSessionSubject
+func (s *DBStore) ConsumeWebSocketTicket(ctx context.Context, secretHash, purpose, targetID string, now time.Time) (service.WebSocketTicketSubject, bool, error) {
+	var subject service.WebSocketTicketSubject
 	err := s.withBrowserSessionWrite(ctx, func() error {
 		var found bool
 		var err error
-		subject, found, err = s.consumeWebSocketTicketOnce(ctx, secretHash, targetID, now)
+		subject, found, err = s.consumeWebSocketTicketOnce(ctx, secretHash, purpose, targetID, now)
 		if err == nil && !found {
 			return gorm.ErrRecordNotFound
 		}
 		return err
 	})
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return service.BrowserSessionSubject{}, false, nil
+		return service.WebSocketTicketSubject{}, false, nil
 	}
 	if err != nil {
-		return service.BrowserSessionSubject{}, false, fmt.Errorf("consume websocket ticket: %w", err)
+		return service.WebSocketTicketSubject{}, false, fmt.Errorf("consume websocket ticket: %w", err)
 	}
 	return subject, true, nil
 }
 
-func (s *DBStore) consumeWebSocketTicketOnce(ctx context.Context, secretHash, targetID string, now time.Time) (service.BrowserSessionSubject, bool, error) {
+func (s *DBStore) consumeWebSocketTicketOnce(ctx context.Context, secretHash, purpose, targetID string, now time.Time) (service.WebSocketTicketSubject, bool, error) {
 	var ticket model.WebSocketTicket
 	var session model.AdminSession
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		ticketQuery := tx.Where(
-			"secret_hash = ? AND target_id = ? AND consumed_at IS NULL AND expires_at > ?",
-			strings.TrimSpace(secretHash), strings.TrimSpace(targetID), now,
+			"secret_hash = ? AND purpose = ? AND target_id = ? AND consumed_at IS NULL AND expires_at > ?",
+			strings.TrimSpace(secretHash), strings.TrimSpace(purpose), strings.TrimSpace(targetID), now,
 		)
 		if s.db.Dialector.Name() != "sqlite" {
 			ticketQuery = ticketQuery.Clauses(clause.Locking{Strength: "UPDATE"})
@@ -109,12 +109,21 @@ func (s *DBStore) consumeWebSocketTicketOnce(ctx context.Context, secretHash, ta
 		return nil
 	})
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return service.BrowserSessionSubject{}, false, nil
+		return service.WebSocketTicketSubject{}, false, nil
 	}
 	if err != nil {
-		return service.BrowserSessionSubject{}, false, err
+		return service.WebSocketTicketSubject{}, false, err
 	}
-	return service.BrowserSessionSubject{SessionID: session.ID, UserID: session.UserID, CSRFHash: session.CSRFHash}, true, nil
+	return service.WebSocketTicketSubject{
+		BrowserSessionSubject: service.BrowserSessionSubject{
+			SessionID: session.ID,
+			UserID:    session.UserID,
+			CSRFHash:  session.CSRFHash,
+		},
+		Purpose:      ticket.Purpose,
+		TargetID:     ticket.TargetID,
+		ConnectionID: ticket.ConnectionID,
+	}, true, nil
 }
 
 func (s *DBStore) withBrowserSessionWrite(ctx context.Context, operation func() error) error {

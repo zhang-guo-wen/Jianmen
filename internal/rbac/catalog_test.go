@@ -8,6 +8,9 @@ import (
 func TestPermissionCatalogContainsEveryAction(t *testing.T) {
 	expected := []string{
 		ActionDBConnect, ActionSessionConnect, ActionSFTPConnect,
+		ActionRDPConnect, ActionRDPClipboardRead, ActionRDPClipboardWrite,
+		ActionRDPFileUpload, ActionRDPFileDownload, ActionRDPDriveMap,
+		ActionRDPRecordingView, ActionRDPApprovalManage,
 		ActionAuditView, ActionDBAuditView,
 		ActionHostCreate, ActionHostUpdate, ActionHostDelete, ActionHostView,
 		ActionTargetCreate, ActionTargetUpdate, ActionTargetDelete, ActionTargetView,
@@ -73,6 +76,78 @@ func TestSFTPConnectDoesNotGrantSSHConnect(t *testing.T) {
 	want := []string{ActionSFTPConnect}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("actions = %#v, want %#v", got, want)
+	}
+}
+
+func TestRDPConnectDoesNotGrantHighRiskChannels(t *testing.T) {
+	got, err := ValidateAssignableActions([]string{ActionRDPConnect})
+	if err != nil {
+		t.Fatalf("ValidateAssignableActions() error = %v", err)
+	}
+	want := []string{ActionRDPConnect}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("actions = %#v, want %#v", got, want)
+	}
+}
+
+func TestRDPChannelActionsRequireConnect(t *testing.T) {
+	got, err := ValidateAssignableActions([]string{
+		ActionRDPClipboardRead,
+		ActionRDPClipboardWrite,
+		ActionRDPFileUpload,
+		ActionRDPFileDownload,
+		ActionRDPDriveMap,
+	})
+	if err != nil {
+		t.Fatalf("ValidateAssignableActions() error = %v", err)
+	}
+	want := []string{
+		ActionRDPClipboardRead,
+		ActionRDPClipboardWrite,
+		ActionRDPConnect,
+		ActionRDPDriveMap,
+		ActionRDPFileDownload,
+		ActionRDPFileUpload,
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("actions = %#v, want %#v", got, want)
+	}
+}
+
+func TestRDPActionsAreScopedAndDiscoverable(t *testing.T) {
+	actions := []string{
+		ActionRDPConnect,
+		ActionRDPClipboardRead,
+		ActionRDPClipboardWrite,
+		ActionRDPFileUpload,
+		ActionRDPFileDownload,
+		ActionRDPDriveMap,
+		ActionRDPRecordingView,
+		ActionRDPApprovalManage,
+	}
+	for _, actionKey := range actions {
+		item, ok := FindPermissionDefinition(actionKey)
+		if !ok {
+			t.Fatalf("catalog entry for %q is missing", actionKey)
+		}
+		wantResourceTypes := []string{"host_account"}
+		if !reflect.DeepEqual(item.ResourceTypes, wantResourceTypes) {
+			t.Fatalf("resource types for %q = %#v, want %#v", actionKey, item.ResourceTypes, wantResourceTypes)
+		}
+	}
+
+	wantConnectPages := []PageAccess{
+		{Key: "quickConnect", Path: "/quick-connect", Order: 10},
+		{Key: "audit", Path: "/audit", Order: 60},
+	}
+	if pages := AccessiblePages([]string{ActionRDPConnect}); !reflect.DeepEqual(pages, wantConnectPages) {
+		t.Fatalf("RDP connect pages = %#v, want %#v", pages, wantConnectPages)
+	}
+	wantAudit := []PageAccess{{Key: "audit", Path: "/audit", Order: 60}}
+	for _, actionKey := range []string{ActionRDPRecordingView, ActionRDPApprovalManage} {
+		if pages := AccessiblePages([]string{actionKey}); !reflect.DeepEqual(pages, wantAudit) {
+			t.Fatalf("%s pages = %#v, want %#v", actionKey, pages, wantAudit)
+		}
 	}
 }
 

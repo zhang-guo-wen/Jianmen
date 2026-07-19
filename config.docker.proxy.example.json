@@ -55,6 +55,21 @@
     "port_start": 47110,
     "port_end": 47199
   },
+  "web_rdp": {
+    "enabled": false,
+    "guacd_address": "127.0.0.1:4822",
+    "connect_timeout_seconds": 15,
+    "spool_dir": "/app/data/rdp-spool",
+    "guacd_recording_root": "/app/data/rdp-spool",
+    "local_drive_root": "/app/data/rdp-drive",
+    "guacd_drive_root": "/app/data/rdp-drive",
+    "allow_unrecorded": false
+  },
+  "object_storage": {
+    "provider": "filesystem",
+    "local_dir": "/app/data/objects",
+    "prefix": "jianmen"
+  },
   "recording": {
     "enabled": true,
     "record_input": false,

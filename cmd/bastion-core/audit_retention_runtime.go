@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"jianmen/internal/config"
+	"jianmen/internal/objectstore"
 	"jianmen/internal/recording"
 	"jianmen/internal/service"
 	"jianmen/internal/store"
@@ -21,6 +22,7 @@ type auditRetentionRunner interface {
 func newAuditRetentionRuntime(
 	cfg *config.Config,
 	repository *store.DBStore,
+	objects objectstore.Store,
 ) (*service.AuditRetentionService, error) {
 	replayStorage, err := recording.NewReplayStorage(cfg.ReplayDir)
 	if err != nil {
@@ -33,6 +35,7 @@ func newAuditRetentionRuntime(
 		service.AuditRetentionOptions{
 			BatchSize:      cfg.Recording.CleanupBatchSize,
 			MaxReplayBytes: cfg.Recording.MaxReplayBytes,
+			ObjectStorage:  objects,
 		},
 	)
 	if err != nil {

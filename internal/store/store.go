@@ -22,13 +22,14 @@ type UserView struct {
 }
 
 type HostRecord struct {
-	ID      string `json:"id"`
-	Name    string `json:"name"`
-	Group   string `json:"group"`
-	Address string `json:"address"`
-	Port    int    `json:"port"`
-	Remark  string `json:"remark"`
-	Status  string `json:"status"`
+	ID       string `json:"id"`
+	Name     string `json:"name"`
+	Group    string `json:"group"`
+	Address  string `json:"address"`
+	Port     int    `json:"port"`
+	Protocol string `json:"protocol"`
+	Remark   string `json:"remark"`
+	Status   string `json:"status"`
 }
 
 type HostView struct {
@@ -37,6 +38,7 @@ type HostView struct {
 	Group        string `json:"group"`
 	Address      string `json:"address"`
 	Port         int    `json:"port"`
+	Protocol     string `json:"protocol"`
 	Remark       string `json:"remark"`
 	Status       string `json:"status"`
 	AccountCount int    `json:"account_count"`
@@ -59,22 +61,36 @@ type TargetView struct {
 	Status                string   `json:"status"`
 	Host                  string   `json:"host"`
 	Port                  int      `json:"port"`
+	Protocol              string   `json:"protocol"`
 	Username              string   `json:"username"`
+	Domain                string   `json:"domain,omitempty"`
 	AuthMethods           []string `json:"auth_methods"`
 	InsecureIgnoreHostKey bool     `json:"insecure_ignore_host_key"`
 	HostKeyFingerprint    string   `json:"host_key_fingerprint"`
 	KnownHostsPath        string   `json:"known_hosts_path"`
+	RDPSecurity           string   `json:"rdp_security,omitempty"`
+	RDPIgnoreCertificate  bool     `json:"rdp_ignore_certificate"`
+	RDPCertFingerprints   string   `json:"rdp_cert_fingerprints,omitempty"`
+	RDPApprovalRequired   bool     `json:"rdp_approval_required"`
+	RDPClipboardRead      bool     `json:"rdp_clipboard_read"`
+	RDPClipboardWrite     bool     `json:"rdp_clipboard_write"`
+	RDPFileUpload         bool     `json:"rdp_file_upload"`
+	RDPFileDownload       bool     `json:"rdp_file_download"`
+	RDPDriveMapping       bool     `json:"rdp_drive_mapping"`
 	CanManage             bool     `json:"can_manage"`
 }
 
-// TargetConfig carries enough info to dial a target host via SSH.
+// TargetConfig carries secret-bearing connection data for a single target
+// account. It must never be serialized to an API response.
 type TargetConfig struct {
 	ID                    string
 	Name                  string
 	HostName              string
 	Host                  string
 	Port                  int
+	Protocol              string
 	Username              string
+	Domain                string
 	Password              string
 	PrivateKeyPath        string
 	PrivateKeyPEM         string
@@ -82,6 +98,15 @@ type TargetConfig struct {
 	InsecureIgnoreHostKey bool
 	HostKeyFingerprint    string
 	KnownHostsPath        string
+	RDPSecurity           string
+	RDPIgnoreCertificate  bool
+	RDPCertFingerprints   string
+	RDPApprovalRequired   bool
+	RDPClipboardRead      bool
+	RDPClipboardWrite     bool
+	RDPFileUpload         bool
+	RDPFileDownload       bool
+	RDPDriveMapping       bool
 	Disabled              bool
 	ExpiresAt             string
 	HostID                string
@@ -283,19 +308,30 @@ func errSentinel(msg string) error { return &sentinelError{msg: msg} }
 
 // AuditListParams 审计列表查询参数。
 type AuditListParams struct {
-	Protocol string // 空表示不过滤，可逗号分隔多个协议
-	Search   string // 模糊搜索用户名/目标名
-	Date     string // YYYY-MM-DD 格式
-	Page     int
-	Size     int
+	Protocol        string // 空表示不过滤，可逗号分隔多个协议
+	Search          string // 模糊搜索用户名/目标名
+	Date            string // 兼容旧接口的 YYYY-MM-DD 过滤
+	UserID          string
+	AccountID       string
+	Outcome         string
+	RecordingStatus string
+	StartedFrom     *time.Time
+	StartedTo       *time.Time
+	Page            int
+	Size            int
 }
 
 // AuditSessionView 审计列表视图。
 type AuditSessionView struct {
 	ID              string `json:"id"`
+	UserID          string `json:"user_id,omitempty"`
 	Username        string `json:"username"`
 	Protocol        string `json:"protocol"`
 	ProtocolSubtype string `json:"protocol_subtype,omitempty"`
+	ResourceType    string `json:"resource_type,omitempty"`
+	ResourceID      string `json:"resource_id,omitempty"`
+	HostID          string `json:"host_id,omitempty"`
+	AccountID       string `json:"account_id,omitempty"`
 	TargetName      string `json:"target_name"`
 	TargetAddress   string `json:"target_address,omitempty"`
 	AccountName     string `json:"account_name,omitempty"`
@@ -304,7 +340,11 @@ type AuditSessionView struct {
 	StartedAt       string `json:"started_at"`
 	EndedAt         string `json:"ended_at,omitempty"`
 	State           string `json:"state"`
-	ReplayDir       string `json:"replay_dir,omitempty"`
+	Outcome         string `json:"outcome,omitempty"`
+	FailureCode     string `json:"failure_code,omitempty"`
+	FailureMessage  string `json:"failure_message,omitempty"`
+	RecordingStatus string `json:"recording_status,omitempty"`
+	HasReplay       bool   `json:"has_replay"`
 	LogCount        int64  `json:"log_count"`
 }
 
@@ -421,10 +461,17 @@ type Store interface {
 	// -- audit --
 
 	CreateAuditSession(session *model.AuditSession) error
+	BeginRDPAuditSession(ctx context.Context, session *model.AuditSession, artifact *model.AuditArtifact) error
+	ActivateRDPAuditSession(ctx context.Context, id string) error
 	EndAuditSession(id string) error
 	GetAuditSession(id string) (*model.AuditSession, error)
 	ListAuditSessions(params AuditListParams) ([]AuditSessionView, int64, error)
 	UpdateAuditProtocol(id string, protocol string) error
+	FinishAuditSession(ctx context.Context, id, outcome, failureCode, failureMessage, recordingStatus string, endedAt time.Time) error
+	CreateAuditArtifact(ctx context.Context, artifact *model.AuditArtifact) error
+	UpdateAuditArtifact(ctx context.Context, artifact *model.AuditArtifact) error
+	AuditArtifactBySession(ctx context.Context, sessionID, kind string) (model.AuditArtifact, error)
+	CreateAuditRDPChannelEvent(ctx context.Context, event *model.AuditRDPChannelEvent) error
 
 	CreateAuditSSHCommand(cmd *model.AuditSSHCommand) error
 	ListAuditSSHCommands(sessionID string, opts PageOpts) ([]model.AuditSSHCommand, int64, error)

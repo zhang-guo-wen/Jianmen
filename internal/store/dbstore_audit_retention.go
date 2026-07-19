@@ -28,6 +28,7 @@ func (s *DBStore) ClaimAuditSessionsForCleanup(
 	claimedAt time.Time,
 	staleBefore time.Time,
 	limit int,
+	replayOnly bool,
 ) ([]model.AuditSession, error) {
 	if ctx == nil {
 		return nil, errors.New("claim audit cleanup sessions: nil context")
@@ -41,23 +42,34 @@ func (s *DBStore) ClaimAuditSessionsForCleanup(
 
 	claimed := make([]model.AuditSession, 0, limit)
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		hasArtifacts := tx.Migrator().HasTable(&model.AuditArtifact{})
 		var candidates []model.AuditSession
 		query := auditCleanupEligible(tx.Model(&model.AuditSession{}), staleBefore).
 			Select("id", "replay_dir", "ended_at", "cleanup_status", "cleanup_at").
 			Where("state = ? AND ended_at IS NOT NULL AND ended_at <= ?", "ended", cutoff).
 			Order("ended_at ASC, id ASC").
 			Limit(limit)
+		if hasArtifacts {
+			query = withoutRecoverableRDPArtifact(query)
+		}
+		if replayOnly {
+			query = query.Where("replay_dir IS NOT NULL AND replay_dir <> ''")
+		}
 		if err := query.Find(&candidates).Error; err != nil {
 			return fmt.Errorf("list audit cleanup candidates: %w", err)
 		}
 
 		for _, candidate := range candidates {
-			update := auditCleanupEligible(
+			updateQuery := auditCleanupEligible(
 				tx.Model(&model.AuditSession{}).
 					Where("id = ? AND state = ? AND ended_at IS NOT NULL AND ended_at <= ?",
 						candidate.ID, "ended", cutoff),
 				staleBefore,
-			).Updates(map[string]any{
+			)
+			if hasArtifacts {
+				updateQuery = withoutRecoverableRDPArtifact(updateQuery)
+			}
+			update := updateQuery.Updates(map[string]any{
 				"cleanup_status": auditCleanupPending,
 				"cleanup_at":     claimedAt,
 				"cleanup_error":  "",
@@ -79,6 +91,52 @@ func (s *DBStore) ClaimAuditSessionsForCleanup(
 		return nil, err
 	}
 	return claimed, nil
+}
+
+func withoutRecoverableRDPArtifact(query *gorm.DB) *gorm.DB {
+	return query.Where(
+		`NOT EXISTS (
+			SELECT 1 FROM audit_artifacts
+			WHERE audit_artifacts.audit_session_id = audit_sessions.id
+			AND (
+				audit_artifacts.status IN ?
+				OR (
+					audit_artifacts.status = ?
+					AND COALESCE(audit_artifacts.error_message, '') NOT LIKE ?
+				)
+			)
+		)`,
+		[]string{
+			model.RecordingStatusPending,
+			model.RecordingStatusUploading,
+		},
+		model.RecordingStatusFailed,
+		recoveryUnavailableMessagePrefix,
+	)
+}
+
+func (s *DBStore) ListAuditArtifactsForCleanup(
+	ctx context.Context,
+	sessionID string,
+) ([]model.AuditArtifact, error) {
+	if ctx == nil {
+		return nil, errors.New("list audit cleanup artifacts: nil context")
+	}
+	if !s.db.Migrator().HasTable(&model.AuditArtifact{}) {
+		return []model.AuditArtifact{}, nil
+	}
+	var artifacts []model.AuditArtifact
+	if err := s.db.WithContext(ctx).
+		Where("audit_session_id = ?", strings.TrimSpace(sessionID)).
+		Order("id ASC").
+		Find(&artifacts).Error; err != nil {
+		return nil, fmt.Errorf(
+			"list audit session %q cleanup artifacts: %w",
+			sessionID,
+			err,
+		)
+	}
+	return artifacts, nil
 }
 
 func auditCleanupEligible(query *gorm.DB, staleBefore time.Time) *gorm.DB {
@@ -148,7 +206,12 @@ func (s *DBStore) DeleteClaimedAuditSession(ctx context.Context, id string) erro
 			&model.AuditSSHCommand{},
 			&model.AuditDBQuery{},
 			&model.AuditSFTPEvent{},
+			&model.AuditRDPChannelEvent{},
+			&model.AuditArtifact{},
 		} {
+			if !tx.Migrator().HasTable(child) {
+				continue
+			}
 			if err := tx.Where("audit_session_id = ?", id).Delete(child).Error; err != nil {
 				return fmt.Errorf("delete audit session %q child records: %w", id, err)
 			}

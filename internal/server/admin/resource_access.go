@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"jianmen/internal/model"
 	"jianmen/internal/rbac"
@@ -143,6 +144,36 @@ func (s *Server) visibleTargetsForActions(r *http.Request, targets []store.Targe
 			continue
 		}
 		target.CanManage, err = s.authorizeResourceActions(r, []string{rbac.ActionTargetUpdate, rbac.ActionTargetDelete}, model.ResourceTypeHostAccount, target.ID)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, target)
+	}
+	return result, nil
+}
+
+func (s *Server) visibleConnectableTargets(r *http.Request, targets []store.TargetView) ([]store.TargetView, error) {
+	result := make([]store.TargetView, 0, len(targets))
+	for _, target := range targets {
+		actions := []string{rbac.ActionSessionConnect, rbac.ActionSFTPConnect}
+		if strings.EqualFold(target.Protocol, "rdp") {
+			actions = []string{rbac.ActionRDPConnect}
+		}
+		allowed, err := s.authorizeResourceActions(
+			r, actions, model.ResourceTypeHostAccount, target.ID,
+		)
+		if err != nil {
+			return nil, err
+		}
+		if !allowed {
+			continue
+		}
+		target.CanManage, err = s.authorizeResourceActions(
+			r,
+			[]string{rbac.ActionTargetUpdate, rbac.ActionTargetDelete},
+			model.ResourceTypeHostAccount,
+			target.ID,
+		)
 		if err != nil {
 			return nil, err
 		}

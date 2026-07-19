@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -138,6 +139,37 @@ func TestDBStoreAuditLeaseEndFailureStopsFutureHeartbeats(t *testing.T) {
 		t.Fatalf("load audit session: %v", err)
 	}
 	assertAuditLease(t, stored, now, now.Add(90*time.Second))
+}
+
+func TestDBStoreAuditLeaseEndRequiresCurrentOwner(t *testing.T) {
+	now := time.Date(2026, 7, 19, 15, 0, 0, 0, time.UTC)
+	repository, closeStore := newAuditLeaseTestStore(t, now)
+	defer closeStore()
+
+	session := model.AuditSession{
+		ID: "foreign-owner", Protocol: "ssh", State: "started", StartedAt: now,
+	}
+	if err := repository.CreateAuditSession(&session); err != nil {
+		t.Fatalf("create audit session: %v", err)
+	}
+	if err := repository.db.Model(&model.AuditSession{}).
+		Where("id = ?", session.ID).
+		Update("lease_owner", "other-process").Error; err != nil {
+		t.Fatalf("transfer audit lease owner: %v", err)
+	}
+
+	err := repository.EndAuditSession(session.ID)
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		t.Fatalf("foreign owner end error = %v, want record not found", err)
+	}
+	var stored model.AuditSession
+	if err := repository.db.First(&stored, "id = ?", session.ID).Error; err != nil {
+		t.Fatalf("load foreign-owner session: %v", err)
+	}
+	if stored.State != "started" || stored.EndedAt != nil ||
+		stored.LeaseOwner != "other-process" {
+		t.Fatalf("foreign owner ended live audit session: %#v", stored)
+	}
 }
 
 func TestDBStoreAuditLeaseHeartbeatBatchesAndRequiresExactRowCount(t *testing.T) {
@@ -400,12 +432,24 @@ func TestDBStoreAuditLeaseRecoveryFencesLateRDPFinish(t *testing.T) {
 		context.Background(),
 		session.ID,
 		recovered.Outcome,
-		recovered.FailureCode,
-		recovered.FailureMessage,
+		"late_process",
+		"late process attempted to replace lease-expired evidence",
 		model.RecordingStatusReady,
-		*recovered.EndedAt,
+		now,
 	); err != nil {
 		t.Fatalf("finish recovered RDP recording: %v", err)
+	}
+	var finalized model.AuditSession
+	if err := repository.db.First(&finalized, "id = ?", session.ID).Error; err != nil {
+		t.Fatalf("load finalized RDP audit session: %v", err)
+	}
+	if finalized.Outcome != model.AuditOutcomeTerminated ||
+		finalized.FailureCode != auditLeaseExpiredFailureCode ||
+		finalized.FailureMessage != auditLeaseExpiredFailureMessage ||
+		finalized.EndedAt == nil ||
+		!finalized.EndedAt.Equal(expiredAt) ||
+		finalized.RecordingStatus != model.RecordingStatusReady {
+		t.Fatalf("recording finalization replaced lease-expired evidence: %#v", finalized)
 	}
 }
 

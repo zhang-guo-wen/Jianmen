@@ -37,15 +37,27 @@ func (s *DBStore) CreateAuditSession(session *model.AuditSession) error {
 func (s *DBStore) EndAuditSession(id string) error {
 	s.untrackAuditSessionLease(id)
 	now := time.Now().UTC()
-	return s.db.Model(&model.AuditSession{}).
-		Where("id = ? AND state = ?", id, "started").
+	result := s.db.Model(&model.AuditSession{}).
+		Where(
+			"id = ? AND state = ? AND lease_owner = ?",
+			strings.TrimSpace(id),
+			"started",
+			s.auditLeaseOwner,
+		).
 		Updates(map[string]any{
 			"state": "ended", "ended_at": now,
 			"outcome": gorm.Expr(
 				"CASE WHEN outcome IS NULL OR outcome = '' OR outcome IN (?, ?) THEN ? ELSE outcome END",
 				model.AuditOutcomeConnecting, model.AuditOutcomeActive, model.AuditOutcomeSucceeded,
 			),
-		}).Error
+		})
+	if result.Error != nil {
+		return fmt.Errorf("end audit session: %w", result.Error)
+	}
+	if result.RowsAffected != 1 {
+		return fmt.Errorf("end audit session %q: %w", id, gorm.ErrRecordNotFound)
+	}
+	return nil
 }
 
 func (s *DBStore) UpdateAuditProtocol(id string, protocol string) error {
@@ -178,16 +190,10 @@ func (s *DBStore) FinishAuditSession(
 	endedAt time.Time,
 ) error {
 	s.untrackAuditSessionLease(id)
+	id = strings.TrimSpace(id)
 	outcome = strings.TrimSpace(outcome)
 	result := s.db.WithContext(ctx).Model(&model.AuditSession{}).
-		Where("id = ?", strings.TrimSpace(id)).
-		Where(
-			"((state = ? AND lease_owner = ?) OR (state = ? AND outcome = ?))",
-			"started",
-			s.auditLeaseOwner,
-			"ended",
-			outcome,
-		).
+		Where("id = ? AND state = ? AND lease_owner = ?", id, "started", s.auditLeaseOwner).
 		Updates(map[string]any{
 			"state": "ended", "ended_at": endedAt.UTC(), "outcome": outcome,
 			"failure_code": strings.TrimSpace(failureCode), "failure_message": strings.TrimSpace(failureMessage),
@@ -196,7 +202,35 @@ func (s *DBStore) FinishAuditSession(
 	if result.Error != nil {
 		return fmt.Errorf("finish audit session: %w", result.Error)
 	}
-	if result.RowsAffected != 1 {
+	if result.RowsAffected == 1 {
+		return nil
+	}
+
+	recordingStatus = strings.TrimSpace(recordingStatus)
+	result = s.db.WithContext(ctx).Model(&model.AuditSession{}).
+		Where("id = ? AND state = ? AND outcome = ?", id, "ended", outcome).
+		Update("recording_status", recordingStatus)
+	if result.Error != nil {
+		return fmt.Errorf("finish ended audit recording: %w", result.Error)
+	}
+	if result.RowsAffected == 1 {
+		return nil
+	}
+
+	var matching int64
+	if err := s.db.WithContext(ctx).
+		Model(&model.AuditSession{}).
+		Where(
+			"id = ? AND state = ? AND outcome = ? AND recording_status = ?",
+			id,
+			"ended",
+			outcome,
+			recordingStatus,
+		).
+		Count(&matching).Error; err != nil {
+		return fmt.Errorf("verify ended audit recording: %w", err)
+	}
+	if matching != 1 {
 		return fmt.Errorf("finish audit session %q: %w", id, gorm.ErrRecordNotFound)
 	}
 	return nil

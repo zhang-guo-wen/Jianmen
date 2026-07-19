@@ -28,6 +28,7 @@ const (
 	databaseProvisioningSagaMigrationVersion  = "202607180009"
 	auditRetentionCleanupMigrationVersion     = "202607190002"
 	webRDPAuditMigrationVersion               = "202607190003"
+	auditSessionLeaseMigrationVersion         = "202607190004"
 )
 
 var currentStorageMigrationVersions = []string{
@@ -53,6 +54,7 @@ var currentStorageMigrationVersions = []string{
 	"202607190001",
 	"202607190002",
 	"202607190003",
+	"202607190004",
 }
 
 type metadataDatabaseCase struct {
@@ -270,6 +272,75 @@ func TestStorageMigrationUpgradesLegacyAuditSessions(t *testing.T) {
 	}
 }
 
+func TestStorageMigrationUpgradesLegacyAuditSessionLeases(t *testing.T) {
+	for _, tt := range metadataDatabaseCases() {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			db := openMetadataDatabase(t, tt)
+			createCurrentSchemaWithOnlyMigrationPending(t, db, auditSessionLeaseMigrationVersion)
+			seedAllCurrentMigrationsExcept(t, db, auditSessionLeaseMigrationVersion)
+			assertOtherDatabaseMigrationsApplied(t, db, auditSessionLeaseMigrationVersion)
+			now := time.Now().UTC()
+			if err := db.Exec(`INSERT INTO audit_sessions
+				(id, started_at, state, cleanup_status, created_at, updated_at)
+				VALUES (?, ?, ?, ?, ?, ?)`,
+				"legacy-started-audit-session",
+				now.Add(-time.Hour),
+				"started",
+				"ready",
+				now,
+				now,
+			).Error; err != nil {
+				t.Fatalf("seed legacy started audit session: %v", err)
+			}
+
+			for _, column := range []string{"lease_owner", "heartbeat_at", "lease_expires_at"} {
+				if db.Migrator().HasColumn(&model.AuditSession{}, column) {
+					t.Fatalf("legacy audit schema unexpectedly contains lease column %s", column)
+				}
+			}
+			beforeMigrations := loadMigrationVersionSet(t, db)
+			if err := storage.Migrate(db); err != nil {
+				t.Fatalf("migrate legacy audit lease schema: %v", err)
+			}
+			assertOnlyMigrationVersionsAdded(
+				t,
+				beforeMigrations,
+				loadMigrationVersionSet(t, db),
+				auditSessionLeaseMigrationVersion,
+			)
+			for _, column := range []string{"lease_owner", "heartbeat_at", "lease_expires_at"} {
+				if !db.Migrator().HasColumn(&model.AuditSession{}, column) {
+					t.Fatalf("audit lease column %s is missing", column)
+				}
+			}
+			for _, index := range []string{
+				"idx_audit_sessions_lease_owner_state",
+				"idx_audit_sessions_lease_expiry",
+			} {
+				if !db.Migrator().HasIndex(&model.AuditSession{}, index) {
+					t.Fatalf("audit lease index %s is missing", index)
+				}
+			}
+			var session model.AuditSession
+			if err := db.First(&session, "id = ?", "legacy-started-audit-session").Error; err != nil {
+				t.Fatalf("load migrated legacy audit session: %v", err)
+			}
+			if session.LeaseOwner != "" ||
+				session.HeartbeatAt != nil ||
+				session.LeaseExpiresAt != nil {
+				t.Fatalf("audit lease migration guessed legacy activity: %#v", session)
+			}
+			assertMigrationRecord(t, db, auditSessionLeaseMigrationVersion, "audit session lease recovery")
+			beforeSecondMigration := loadMigrationVersionSet(t, db)
+			if err := storage.Migrate(db); err != nil {
+				t.Fatalf("second migration of legacy audit lease schema: %v", err)
+			}
+			assertOnlyMigrationVersionsAdded(t, beforeSecondMigration, loadMigrationVersionSet(t, db))
+		})
+	}
+}
+
 func TestStorageMigrationRejectsLegacyDatabaseAccountDuplicatesAndRetries(t *testing.T) {
 	for _, tt := range metadataDatabaseCases() {
 		tt := tt
@@ -451,6 +522,12 @@ func createCurrentSchemaWithOnlyMigrationPending(t *testing.T, db *gorm.DB, pend
 				t.Fatalf("remove migration %s column %s from fixture: %v", pendingVersion, column, err)
 			}
 		}
+	case auditSessionLeaseMigrationVersion:
+		for _, column := range []string{"lease_expires_at", "heartbeat_at", "lease_owner"} {
+			if err := db.Migrator().DropColumn(&model.AuditSession{}, column); err != nil {
+				t.Fatalf("remove migration %s column %s from fixture: %v", pendingVersion, column, err)
+			}
+		}
 	default:
 		t.Fatalf("unsupported isolated migration version %s", pendingVersion)
 	}
@@ -476,6 +553,13 @@ func assertOtherDatabaseMigrationsApplied(t *testing.T, db *gorm.DB, pendingVers
 		for _, column := range []string{"cleanup_status", "cleanup_at", "cleanup_error"} {
 			if !db.Migrator().HasColumn(&model.AuditSession{}, column) {
 				t.Fatalf("fixture for pending migration %s is missing applied audit column %s", pendingVersion, column)
+			}
+		}
+	}
+	if pendingVersion != auditSessionLeaseMigrationVersion {
+		for _, column := range []string{"lease_owner", "heartbeat_at", "lease_expires_at"} {
+			if !db.Migrator().HasColumn(&model.AuditSession{}, column) {
+				t.Fatalf("fixture for pending migration %s is missing applied lease column %s", pendingVersion, column)
 			}
 		}
 	}
@@ -506,6 +590,7 @@ func seedAppliedMigrations(t *testing.T, db *gorm.DB, versions ...string) {
 		"202607190001": "resource grant logical uniqueness",
 		"202607190002": "audit retention cleanup state",
 		"202607190003": "web RDP access control and audit schema",
+		"202607190004": "audit session lease recovery",
 	}
 	for _, version := range versions {
 		name, ok := names[version]

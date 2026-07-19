@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"time"
 
@@ -23,6 +24,7 @@ type webRDPRuntime struct {
 func newWebRDPRuntime(
 	ctx context.Context,
 	cfg *config.Config,
+	objects objectstore.Store,
 	appStore *store.DBStore,
 	identity *service.IdentityService,
 	browserSessions *service.BrowserSessionService,
@@ -30,20 +32,8 @@ func newWebRDPRuntime(
 	onlineSessions *online.Registry,
 	logger *slog.Logger,
 ) (webRDPRuntime, error) {
-	if !cfg.WebRDP.Enabled {
-		return webRDPRuntime{}, nil
-	}
-	objects, err := objectstore.New(ctx, objectstore.Config{
-		Provider: cfg.ObjectStorage.Provider, LocalDir: cfg.ObjectStorage.LocalDir,
-		Endpoint: cfg.ObjectStorage.Endpoint, AccessKeyID: cfg.ObjectStorage.AccessKeyID,
-		SecretAccessKey: cfg.ObjectStorage.SecretAccessKey,
-		SessionToken:    cfg.ObjectStorage.SessionToken, Bucket: cfg.ObjectStorage.Bucket,
-		Region: cfg.ObjectStorage.Region, Prefix: cfg.ObjectStorage.Prefix,
-		Secure: cfg.ObjectStorage.Secure, PathStyle: cfg.ObjectStorage.PathStyle,
-		AutoCreateBucket: cfg.ObjectStorage.AutoCreateBucket,
-	})
-	if err != nil {
-		return webRDPRuntime{}, err
+	if objects == nil {
+		return webRDPRuntime{}, errors.New("RDP recording object store is required")
 	}
 	approvals, err := service.NewAccessRequestService(appStore)
 	if err != nil {
@@ -68,7 +58,10 @@ func newWebRDPRuntime(
 	connector := rdpproxy.NewConnector(cfg.WebRDP.GuacdAddress)
 	connector.Timeout = time.Duration(cfg.WebRDP.ConnectTimeoutSecs) * time.Second
 	webRDPHandler, err := webrdp.New(
-		webrdp.Config{Enabled: true, ConnectTimeout: connector.Timeout},
+		webrdp.Config{
+			Enabled:        cfg.WebRDP.Enabled,
+			ConnectTimeout: connector.Timeout,
+		},
 		browserSessions, identity, control, recording, connector, appStore,
 		objects, authorization, onlineSessions, logger,
 	)
@@ -80,6 +73,21 @@ func newWebRDPRuntime(
 		return webRDPRuntime{}, err
 	}
 	return webRDPRuntime{webRDP: webRDPHandler, accessRequests: accessHandler}, nil
+}
+
+func newRDPObjectStore(
+	ctx context.Context,
+	cfg *config.Config,
+) (objectstore.Store, error) {
+	return objectstore.New(ctx, objectstore.Config{
+		Provider: cfg.ObjectStorage.Provider, LocalDir: cfg.ObjectStorage.LocalDir,
+		Endpoint: cfg.ObjectStorage.Endpoint, AccessKeyID: cfg.ObjectStorage.AccessKeyID,
+		SecretAccessKey: cfg.ObjectStorage.SecretAccessKey,
+		SessionToken:    cfg.ObjectStorage.SessionToken, Bucket: cfg.ObjectStorage.Bucket,
+		Region: cfg.ObjectStorage.Region, Prefix: cfg.ObjectStorage.Prefix,
+		Secure: cfg.ObjectStorage.Secure, PathStyle: cfg.ObjectStorage.PathStyle,
+		AutoCreateBucket: cfg.ObjectStorage.AutoCreateBucket,
+	})
 }
 
 func startRDPRecordingRecovery(

@@ -85,8 +85,8 @@ func New(
 		return nil, errors.New("admin logger is required")
 	case onlineSessions == nil:
 		return nil, errors.New("admin online session registry is required")
-	case cfg.WebRDP.Enabled && (webRDP == nil || accessRequests == nil):
-		return nil, errors.New("admin Web RDP handlers are required")
+	case webRDP == nil || accessRequests == nil:
+		return nil, errors.New("admin Web RDP audit and approval handlers are required")
 	}
 	resourceAccess, ok := repository.(resourceAccessRepository)
 	if !ok {

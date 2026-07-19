@@ -19,26 +19,60 @@ type redisResponseStream struct {
 	stack             []int64
 	line              []byte
 	bulkRemaining     int64
+	bulkLength        int64
+	bulkType          byte
+	verbatimPrefix    [4]byte
 	bulkTerminator    [2]byte
 	bulkTerminatorLen int
 	rootStarted       bool
+	rootType          byte
+	unsolicited       bool
+	pubSubCapture     *redisStreamPubSubCapture
 	finish            queryFinish
 }
 
-func newRedisResponseStream() *redisResponseStream {
-	return &redisResponseStream{
-		stack:  []int64{1},
-		finish: queryFinish{Status: queryStatusSuccess},
+func newRedisResponseStream(primaryType byte) *redisResponseStream {
+	stream := &redisResponseStream{
+		stack:    []int64{1},
+		rootType: primaryType,
+		finish:   queryFinish{Status: queryStatusSuccess},
 	}
+	if primaryType == '-' || primaryType == '!' {
+		stream.finish = queryFinish{
+			Status:       queryStatusError,
+			ErrorCode:    "REDIS_ERROR",
+			ErrorMessage: "redis upstream error",
+		}
+	}
+	return stream
 }
 
 func (o *redisObserver) promoteRedisResponseStream() ([]byte, *queryDecision) {
-	if len(o.slots) == 0 {
+	primaryType := redisRESPPrimaryPrefixType(o.serverBuf)
+	if primaryType == 0 {
+		return nil, o.fail(observerErrorBufferLimit, "Redis response attributes exceed the protocol limit")
+	}
+	unsolicited := primaryType == '>' ||
+		(o.protocolVersion != 3 &&
+			o.subscriptions.active() &&
+			primaryType == '*' &&
+			isRedisRESP2PubSubMessagePrefix(o.serverBuf))
+	potentialPubSubAck := len(o.slots) > 0 &&
+		isRedisPubSubStateCommand(o.slots[0].command) &&
+		(primaryType == '*' || primaryType == '>')
+	if potentialPubSubAck && primaryType == '>' {
+		unsolicited = false
+	}
+	if len(o.slots) == 0 && !unsolicited {
 		return nil, o.fail(observerErrorProtocol, "unexpected Redis response without a matching command")
 	}
 	buffered := o.serverBuf
 	o.serverBuf = nil
-	o.serverStream = newRedisResponseStream()
+	o.serverStream = newRedisResponseStream(primaryType)
+	o.serverStream.unsolicited = unsolicited
+	if potentialPubSubAck && !unsolicited {
+		o.serverStream.pubSubCapture = newRedisStreamPubSubCapture(primaryType)
+	}
 	forward, consumed, complete, decision := o.consumeRedisResponseStream(buffered)
 	if consumed < len(buffered) {
 		o.serverBuf = append(o.serverBuf, buffered[consumed:]...)
@@ -85,7 +119,7 @@ func (o *redisObserver) consumeRedisResponseStream(data []byte) (
 			stream.line = nil
 			if !stream.rootStarted {
 				stream.rootStarted = true
-				if line[0] == '-' {
+				if stream.rootType == line[0] && (line[0] == '-' || line[0] == '!') {
 					stream.finish = redisResponseFinish(line)
 				}
 			}
@@ -93,6 +127,7 @@ func (o *redisObserver) consumeRedisResponseStream(data []byte) (
 			if lineDecision != nil {
 				return forward, consumed, false, lineDecision
 			}
+			stream.pubSubCapture.consumeHeader(line)
 			forward = append(forward, line...)
 			if lineComplete {
 				return forward, consumed, true, nil
@@ -103,6 +138,14 @@ func (o *redisObserver) consumeRedisResponseStream(data []byte) (
 				length = stream.bulkRemaining
 			}
 			end := consumed + int(length)
+			if stream.bulkType == '=' {
+				copied := stream.bulkLength - stream.bulkRemaining
+				for index := consumed; index < end && copied < int64(len(stream.verbatimPrefix)); index++ {
+					stream.verbatimPrefix[copied] = data[index]
+					copied++
+				}
+			}
+			stream.pubSubCapture.consumeBulk(data[consumed:end])
 			forward = append(forward, data[consumed:end]...)
 			consumed = end
 			stream.bulkRemaining -= length
@@ -121,9 +164,16 @@ func (o *redisObserver) consumeRedisResponseStream(data []byte) (
 			if stream.bulkTerminator != [2]byte{'\r', '\n'} {
 				return forward, consumed, false, newObserverFatalDecision(observerErrorProtocol, "malformed Redis response")
 			}
+			if stream.bulkType == '=' && stream.verbatimPrefix[3] != ':' {
+				return forward, consumed, false, newObserverFatalDecision(observerErrorProtocol, "malformed Redis response")
+			}
+			stream.pubSubCapture.finishBulk()
 			forward = append(forward, stream.bulkTerminator[:]...)
 			stream.bulkTerminator = [2]byte{}
 			stream.bulkTerminatorLen = 0
+			stream.bulkLength = 0
+			stream.bulkType = 0
+			stream.verbatimPrefix = [4]byte{}
 			stream.mode = redisResponseStreamHeader
 			if stream.valueComplete() {
 				return forward, consumed, true, nil
@@ -146,32 +196,73 @@ func (s *redisResponseStream) consumeHeader(line []byte) (bool, *queryDecision) 
 			return false, newObserverFatalDecision(observerErrorProtocol, "malformed Redis response")
 		}
 		return s.valueComplete(), nil
-	case '$':
-		length, ok := parseCanonicalRESPNullable(value, maxRedisProtocolBulkBytes)
+	case '_':
+		if len(value) != 0 {
+			return false, newObserverFatalDecision(observerErrorProtocol, "malformed Redis response")
+		}
+		return s.valueComplete(), nil
+	case '#':
+		if len(value) != 1 || (value[0] != 't' && value[0] != 'f') {
+			return false, newObserverFatalDecision(observerErrorProtocol, "malformed Redis response")
+		}
+		return s.valueComplete(), nil
+	case ',':
+		if !validRedisRESPDouble(value) {
+			return false, newObserverFatalDecision(observerErrorProtocol, "malformed Redis response")
+		}
+		return s.valueComplete(), nil
+	case '(':
+		if !validRedisRESPBigNumber(value) {
+			return false, newObserverFatalDecision(observerErrorProtocol, "malformed Redis response")
+		}
+		return s.valueComplete(), nil
+	case '$', '!', '=':
+		var length int64
+		var ok bool
+		if line[0] == '$' {
+			length, ok = parseCanonicalRESPNullable(value, maxRedisProtocolBulkBytes)
+		} else {
+			length, ok = parseCanonicalRESPUnsigned(value, maxRedisProtocolBulkBytes)
+		}
 		if !ok {
+			return false, newObserverFatalDecision(observerErrorProtocol, "malformed Redis response")
+		}
+		if line[0] == '=' && length < 4 {
 			return false, newObserverFatalDecision(observerErrorProtocol, "malformed Redis response")
 		}
 		if length == -1 {
 			return s.valueComplete(), nil
 		}
 		s.bulkRemaining = length
+		s.bulkLength = length
+		s.bulkType = line[0]
 		s.mode = redisResponseStreamBulk
 		if length == 0 {
 			s.mode = redisResponseStreamBulkTerminator
 		}
 		return false, nil
-	case '*':
+	case '*', '~', '>', '%', '|':
 		count, ok := parseCanonicalRESPNullableNumber(value)
 		if !ok {
 			return false, newObserverFatalDecision(observerErrorProtocol, "malformed Redis response")
 		}
-		if count <= 0 {
+		if count == -1 {
+			if line[0] != '*' {
+				return false, newObserverFatalDecision(observerErrorProtocol, "malformed Redis response")
+			}
+			return s.valueComplete(), nil
+		}
+		elementCount, ok := redisRESPAggregateElementCount(line[0], count)
+		if !ok || elementCount > maxRedisObserverArrayElements {
+			return false, newObserverFatalDecision(observerErrorBufferLimit, "Redis response aggregate exceeds the protocol limit")
+		}
+		if elementCount == 0 {
 			return s.valueComplete(), nil
 		}
 		if len(s.stack) > maxRedisObserverNestingDepth {
 			return false, newObserverFatalDecision(observerErrorBufferLimit, "Redis response nesting exceeds the protocol limit")
 		}
-		s.stack = append(s.stack, count)
+		s.stack = append(s.stack, elementCount)
 		return false, nil
 	default:
 		return false, newObserverFatalDecision(observerErrorProtocol, "malformed Redis response")
@@ -193,7 +284,37 @@ func (s *redisResponseStream) valueComplete() bool {
 func (o *redisObserver) completeRedisResponseStream() *queryDecision {
 	stream := o.serverStream
 	o.serverStream = nil
-	if stream == nil || len(o.slots) == 0 {
+	if stream == nil {
+		return o.fail(observerErrorProtocol, "unexpected Redis response without a matching command")
+	}
+	if event, ok := stream.pubSubCapture.capturedEvent(); ok {
+		handled, decision := o.consumeRedisPubSubEvent(event)
+		if decision != nil {
+			return decision
+		}
+		if handled {
+			if len(o.slots) == 0 && o.deferred != nil {
+				deferred := o.deferred
+				o.deferred = nil
+				return o.failDecision(deferred)
+			}
+			return nil
+		}
+	}
+	if stream.pubSubCapture != nil {
+		if stream.rootType == '>' {
+			o.protocolVersion = 3
+			return nil
+		}
+		return o.fail(observerErrorProtocol, "malformed streamed Redis Pub/Sub acknowledgement")
+	}
+	if stream.unsolicited {
+		if stream.rootType == '>' {
+			o.protocolVersion = 3
+		}
+		return nil
+	}
+	if len(o.slots) == 0 {
 		return o.fail(observerErrorProtocol, "unexpected Redis response without a matching command")
 	}
 	slot := &o.slots[0]

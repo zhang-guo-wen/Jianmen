@@ -42,6 +42,10 @@ func metadataModelsBeforeDatabaseProvisioning() []any {
 			beforeProvisioning = append(beforeProvisioning, &databaseAccountBeforeProvisioning{})
 			continue
 		}
+		if _, isAuditSession := item.(*model.AuditSession); isAuditSession {
+			beforeProvisioning = append(beforeProvisioning, &auditSessionBeforeRetention{})
+			continue
+		}
 		beforeProvisioning = append(beforeProvisioning, item)
 	}
 	return beforeProvisioning

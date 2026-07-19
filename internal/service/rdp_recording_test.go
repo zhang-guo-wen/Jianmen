@@ -29,20 +29,22 @@ type rdpAuditFinishCall struct {
 }
 
 type rdpAuditRepositoryFake struct {
-	order          []string
-	beginSession   *model.AuditSession
-	beginArtifact  *model.AuditArtifact
-	artifactStates []model.AuditArtifact
-	finish         *rdpAuditFinishCall
-	beginErr       error
-	activateErr    error
-	updateErrAt    map[int]error
-	finishErr      error
-	updateCalls    int
-	activateCalls  int
-	recoveryItems  []RDPRecordingRecoveryItem
-	recoveryErr    error
-	recoveryCalls  []bool
+	order           []string
+	beginSession    *model.AuditSession
+	beginArtifact   *model.AuditArtifact
+	artifactStates  []model.AuditArtifact
+	finish          *rdpAuditFinishCall
+	beginErr        error
+	activateErr     error
+	updateErrAt     map[int]error
+	finishErr       error
+	updateCalls     int
+	activateCalls   int
+	recoveryItems   []RDPRecordingRecoveryItem
+	recoveryBatches [][]RDPRecordingRecoveryItem
+	recoveryErr     error
+	recoveryCalls   []bool
+	finishCalls     int
 }
 
 func (r *rdpAuditRepositoryFake) BeginRDPAuditSession(
@@ -86,6 +88,7 @@ func (r *rdpAuditRepositoryFake) FinishAuditSession(
 	endedAt time.Time,
 ) error {
 	r.order = append(r.order, "audit.finish")
+	r.finishCalls++
 	r.finish = &rdpAuditFinishCall{
 		id: id, outcome: outcome, failureCode: failureCode,
 		failureMessage:  failureMessage,
@@ -108,15 +111,24 @@ func (r *rdpAuditRepositoryFake) UpdateAuditArtifact(
 	return nil
 }
 
-func (r *rdpAuditRepositoryFake) ListRecoverableRDPRecordings(
+func (r *rdpAuditRepositoryFake) ClaimRecoverableRDPRecordings(
 	_ context.Context,
 	includeInterrupted bool,
+	_ time.Time,
+	_ time.Time,
 ) ([]RDPRecordingRecoveryItem, error) {
 	r.recoveryCalls = append(r.recoveryCalls, includeInterrupted)
 	if r.recoveryErr != nil {
 		return nil, r.recoveryErr
 	}
-	return append([]RDPRecordingRecoveryItem(nil), r.recoveryItems...), nil
+	if len(r.recoveryBatches) > 0 {
+		items := r.recoveryBatches[0]
+		r.recoveryBatches = r.recoveryBatches[1:]
+		return append([]RDPRecordingRecoveryItem(nil), items...), nil
+	}
+	items := append([]RDPRecordingRecoveryItem(nil), r.recoveryItems...)
+	r.recoveryItems = nil
+	return items, nil
 }
 
 type rdpObjectStoreFake struct {

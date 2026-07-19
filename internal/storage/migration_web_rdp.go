@@ -9,7 +9,7 @@ import (
 	"jianmen/internal/model"
 )
 
-const webRDPAuditMigrationVersion = "202607190002"
+const webRDPAuditMigrationVersion = "202607190003"
 
 // These schema types freeze the tables changed by the Web RDP migration.
 // Historical migrations must not use the current runtime models because doing

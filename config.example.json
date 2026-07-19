@@ -79,8 +79,11 @@
   },
   "recording": {
     "enabled": true,
-    "record_input": true,
-    "record_commands": true
+    "record_input": false,
+    "record_commands": true,
+    "retention_days": 30,
+    "max_replay_bytes": 10737418240,
+    "cleanup_batch_size": 100
   },
   "users": []
 }

@@ -7,6 +7,7 @@ import (
 	"gorm.io/gorm"
 
 	"jianmen/internal/config"
+	"jianmen/internal/objectstore"
 	"jianmen/internal/online"
 	"jianmen/internal/rbac"
 	"jianmen/internal/server/admin"
@@ -19,6 +20,7 @@ func startAdminRuntime(
 	ctx context.Context,
 	errCh chan<- error,
 	cfg *config.Config,
+	objects objectstore.Store,
 	appStore *store.DBStore,
 	metadataDB *gorm.DB,
 	identity *service.IdentityService,
@@ -47,7 +49,7 @@ func startAdminRuntime(
 		return err
 	}
 	webRuntime, err := newWebRDPRuntime(
-		ctx, cfg, appStore, identity, browserSessions, authorization,
+		ctx, cfg, objects, appStore, identity, browserSessions, authorization,
 		onlineSessions, logger,
 	)
 	if err != nil {

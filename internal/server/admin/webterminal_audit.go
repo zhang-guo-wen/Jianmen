@@ -1,11 +1,13 @@
 package admin
 
 import (
+	"errors"
 	"net/http"
 	"path/filepath"
 
 	"jianmen/internal/model"
 	"jianmen/internal/recording"
+	"jianmen/internal/service"
 	"jianmen/internal/store"
 )
 
@@ -45,31 +47,34 @@ func (s *Server) startWebTerminalAudit(session model.Session, target store.Targe
 	return auditSession
 }
 
-func (s *Server) newWebTerminalRecorder(session model.Session, auditSession *model.AuditSession) *recording.SessionRecorder {
+func (s *Server) newWebTerminalRecorder(
+	session model.Session,
+	auditSession *model.AuditSession,
+	onFatal func(error),
+) (*recording.SessionRecorder, error) {
 	if s == nil || s.cfg == nil || !s.cfg.Recording.Enabled {
-		return nil
+		return nil, nil
 	}
-	var sink recording.AuditSink
-	if auditSession != nil {
-		sink = &webTerminalAuditSink{store: s.store, sessionID: auditSession.ID, onlineSessions: s.onlineSessions}
+	if auditSession == nil {
+		return nil, errors.New("web terminal audit session is required")
 	}
-
 	recorder, err := recording.NewSessionRecorder(
 		s.cfg.ReplayDir,
 		session,
 		s.cfg.Recording.RecordInput,
 		s.cfg.Recording.RecordCommands,
+		service.NewAuditPolicy(s.cfg.Recording.RetentionDays, s.cfg.Recording.RecordInput),
+		onFatal,
 		s.logger,
-		sink,
+		&webTerminalAuditSink{store: s.store, sessionID: auditSession.ID, onlineSessions: s.onlineSessions},
 	)
 	if err != nil {
-		s.logger.Warn("failed to initialize web terminal recorder", "target", session.TargetID, "error", err)
-		return nil
+		return nil, err
 	}
 	s.logger.Info("web terminal recording started",
 		"session", session.ID,
 		"target", session.Target,
 		"client", session.ClientIP,
 	)
-	return recorder
+	return recorder, nil
 }

@@ -228,6 +228,17 @@ func TestLoadRejectsNegativeWebRDPTimeout(t *testing.T) {
 	}
 }
 
+func TestDisabledWebRDPStillValidatesAuditObjectStorage(t *testing.T) {
+	cfg := defaultConfig()
+	cfg.WebRDP.Enabled = false
+	cfg.ObjectStorage.Provider = "unsupported"
+
+	err := cfg.Validate()
+	if err == nil || !strings.Contains(err.Error(), "object_storage.provider") {
+		t.Fatalf("Validate() error = %v, want invalid object storage provider", err)
+	}
+}
+
 func TestConfigurationExamplesLoadAndValidate(t *testing.T) {
 	examples := []string{
 		"config.example.json",

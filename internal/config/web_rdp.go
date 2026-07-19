@@ -62,6 +62,33 @@ func (c *Config) applyWebRDPDefaults() {
 }
 
 func (c *Config) validateWebRDP() error {
+	objectStorage := c.ObjectStorage
+	if objectStorage == (ObjectStorageConfig{}) {
+		objectStorage.Provider = "filesystem"
+		objectStorage.LocalDir = defaultObjectStorageDir
+	}
+	switch objectStorage.Provider {
+	case "filesystem":
+		if strings.TrimSpace(objectStorage.LocalDir) == "" || filepath.Clean(objectStorage.LocalDir) == "." {
+			return errors.New("object_storage.local_dir is required for filesystem provider")
+		}
+	case "s3":
+		endpoint := strings.TrimSpace(objectStorage.Endpoint)
+		if endpoint == "" {
+			return errors.New("object_storage.endpoint is required for s3 provider")
+		}
+		if strings.Contains(endpoint, "://") || strings.ContainsAny(endpoint, "/?#") {
+			return errors.New("object_storage.endpoint must be host[:port] without scheme or path")
+		}
+		if strings.TrimSpace(objectStorage.Bucket) == "" {
+			return errors.New("object_storage.bucket is required for s3 provider")
+		}
+		if strings.TrimSpace(objectStorage.AccessKeyID) == "" || strings.TrimSpace(objectStorage.SecretAccessKey) == "" {
+			return errors.New("object_storage access_key_id and secret_access_key are required for s3 provider")
+		}
+	default:
+		return fmt.Errorf("object_storage.provider %q is not supported", objectStorage.Provider)
+	}
 	if !c.WebRDP.Enabled {
 		return nil
 	}
@@ -80,28 +107,6 @@ func (c *Config) validateWebRDP() error {
 		if strings.TrimSpace(value) == "" || filepath.Clean(value) == "." {
 			return fmt.Errorf("%s is required", name)
 		}
-	}
-	switch c.ObjectStorage.Provider {
-	case "filesystem":
-		if strings.TrimSpace(c.ObjectStorage.LocalDir) == "" || filepath.Clean(c.ObjectStorage.LocalDir) == "." {
-			return errors.New("object_storage.local_dir is required for filesystem provider")
-		}
-	case "s3":
-		endpoint := strings.TrimSpace(c.ObjectStorage.Endpoint)
-		if endpoint == "" {
-			return errors.New("object_storage.endpoint is required for s3 provider")
-		}
-		if strings.Contains(endpoint, "://") || strings.ContainsAny(endpoint, "/?#") {
-			return errors.New("object_storage.endpoint must be host[:port] without scheme or path")
-		}
-		if strings.TrimSpace(c.ObjectStorage.Bucket) == "" {
-			return errors.New("object_storage.bucket is required for s3 provider")
-		}
-		if strings.TrimSpace(c.ObjectStorage.AccessKeyID) == "" || strings.TrimSpace(c.ObjectStorage.SecretAccessKey) == "" {
-			return errors.New("object_storage access_key_id and secret_access_key are required for s3 provider")
-		}
-	default:
-		return fmt.Errorf("object_storage.provider %q is not supported", c.ObjectStorage.Provider)
 	}
 	return nil
 }

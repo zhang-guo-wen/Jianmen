@@ -186,6 +186,11 @@ var migrations = []Migration{
 		Run:     migrateResourceGrantLogicalUniqueness,
 	},
 	{
+		Version: "202607190002",
+		Name:    "audit retention cleanup state",
+		Run:     migrateAuditRetentionCleanup,
+	},
+	{
 		Version: webRDPAuditMigrationVersion,
 		Name:    "web RDP access control and audit schema",
 		Run:     migrateWebRDPAuditSchema,

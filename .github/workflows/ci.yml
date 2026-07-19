@@ -77,10 +77,42 @@ jobs:
       - name: Run dbproxy and store race tests
         run: go test -race ./internal/server/dbproxy ./internal/store -count=1 -timeout=10m
 
+  protocol-fuzz:
+    name: Database protocol fuzz smoke tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Download backend dependencies
+        run: go mod download
+
+      - name: Fuzz MySQL packet framing
+        run: go test ./internal/proxy/mysqlwire -run=^$ -fuzz=^FuzzMySQLPacketFrames$ -fuzztime=10s
+
+      - name: Fuzz PostgreSQL startup and typed messages
+        run: |
+          go test ./internal/server/dbproxy -run=^$ -fuzz=^FuzzReadPostgresStartupMessage$ -fuzztime=10s
+          go test ./internal/server/dbproxy -run=^$ -fuzz=^FuzzReadPostgresTypedMessage$ -fuzztime=10s
+
+      - name: Fuzz Redis frames, commands, and authentication
+        run: |
+          go test ./internal/server/dbproxy -run=^$ -fuzz=^FuzzRedisRESPFrameLength$ -fuzztime=10s
+          go test ./internal/server/dbproxy -run=^$ -fuzz=^FuzzRedisObserverClientFrames$ -fuzztime=10s
+          go test ./internal/server/dbproxy -run=^$ -fuzz=^FuzzRedisAuthenticationCommandParser$ -fuzztime=10s
+
   integration:
     name: Docker integration tests
     runs-on: ubuntu-latest
     needs: backend
+    timeout-minutes: 60
     env:
       JIANMEN_REQUIRE_DOCKER: "1"
     steps:
@@ -96,8 +128,42 @@ jobs:
       - name: Download backend dependencies
         run: go mod download
 
+      - name: Pre-pull database protocol matrix images
+        shell: bash
+        run: |
+          images=(
+            mysql:5.7
+            mysql:8.0
+            mysql:8.4
+            postgres:14-alpine
+            postgres:15-alpine
+            postgres:16-alpine
+            postgres:17-alpine
+            postgres:18-alpine
+            redis:6.2-alpine
+            redis:7.4-alpine
+            redis:8.8-alpine
+          )
+          for image in "${images[@]}"; do
+            pulled=false
+            for attempt in 1 2 3; do
+              if docker pull "$image"; then
+                pulled=true
+                break
+              fi
+              echo "pull $image failed on attempt $attempt" >&2
+              if [[ "$attempt" -lt 3 ]]; then
+                sleep $((attempt * 5))
+              fi
+            done
+            if [[ "$pulled" != true ]]; then
+              echo "failed to pull $image after 3 attempts" >&2
+              exit 1
+            fi
+          done
+
       - name: Test Docker-backed integration package
-        run: go test -tags=integration ./internal/integration -count=1 -timeout=15m
+        run: go test -tags=integration ./internal/integration -count=1 -timeout=35m
 
   container:
     name: Container build

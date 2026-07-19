@@ -1,11 +1,19 @@
 package dbproxy
 
-const maxMySQLObservedPacketPrefixBytes = 64
+const (
+	maxMySQLObservedPacketPrefixBytes  = 64
+	maxMySQLPhysicalPacketPayloadBytes = 0xFFFFFF
+)
+
+type mysqlServerLogicalPacket struct {
+	prefix []byte
+}
 
 type mysqlServerPacketStream struct {
-	remaining int
-	sequence  byte
-	prefix    []byte
+	remaining     int
+	sequence      byte
+	collectPrefix bool
+	finalFragment bool
 }
 
 func (o *mysqlObserver) consumeMySQLServerPacketStream(data []byte) ([]byte, int, *queryDecision) {
@@ -18,12 +26,14 @@ func (o *mysqlObserver) consumeMySQLServerPacketStream(data []byte) ([]byte, int
 		consume = len(data)
 	}
 	chunk := data[:consume]
-	if remainingPrefix := maxMySQLObservedPacketPrefixBytes - len(stream.prefix); remainingPrefix > 0 {
+	logical := o.serverLogical
+	if stream.collectPrefix && logical != nil {
+		remainingPrefix := maxMySQLObservedPacketPrefixBytes - len(logical.prefix)
 		prefixLength := len(chunk)
 		if prefixLength > remainingPrefix {
 			prefixLength = remainingPrefix
 		}
-		stream.prefix = append(stream.prefix, chunk[:prefixLength]...)
+		logical.prefix = append(logical.prefix, chunk[:prefixLength]...)
 	}
 	stream.remaining -= consume
 	if stream.remaining > 0 {
@@ -31,15 +41,35 @@ func (o *mysqlObserver) consumeMySQLServerPacketStream(data []byte) ([]byte, int
 	}
 
 	o.serverStream = nil
-	if decision := o.handleServerPacket(stream.prefix); decision != nil {
-		return chunk, consume, decision
+	if stream.finalFragment {
+		if decision := o.finishMySQLServerLogicalPacket(stream.sequence); decision != nil {
+			return chunk, consume, decision
+		}
+		if o.fatal != nil {
+			return chunk, consume, o.fatal
+		}
+	} else {
+		o.nextErrorSeq = stream.sequence + 1
+		o.hasErrorSeq = true
+	}
+	return chunk, consume, nil
+}
+
+func (o *mysqlObserver) finishMySQLServerLogicalPacket(sequence byte) *queryDecision {
+	logical := o.serverLogical
+	if logical == nil {
+		return o.fail(observerErrorProtocol, "malformed MySQL logical packet")
+	}
+	o.serverLogical = nil
+	if decision := o.handleServerPacket(logical.prefix); decision != nil {
+		return decision
 	}
 	if o.fatal != nil {
-		return chunk, consume, o.fatal
+		return o.fatal
 	}
-	o.nextErrorSeq = stream.sequence + 1
+	o.nextErrorSeq = sequence + 1
 	o.hasErrorSeq = true
-	return chunk, consume, nil
+	return nil
 }
 
 type postgresFrameStream struct {

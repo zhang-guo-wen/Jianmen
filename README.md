@@ -17,6 +17,7 @@
 - **SSH Shell 代理** — 支持密码、公钥和 keyboard-interactive 认证，以及 PTY、窗口 Resize、Signal 转发。
 - **SFTP 文件代理** — 提供语义层文件代理，兼容 Xftp、WinSCP、FileZilla 等主流客户端。
 - **多协议数据库代理** — 支持 MySQL、PostgreSQL、Redis 连接代理，统一执行身份识别、资源授权和会话控制。
+- **数据库协议兼容基线** — 默认实库版本、已验证能力和明确边界见 [数据库真实协议兼容矩阵](docs/database-protocol-compatibility.md)。
 - **本地 SSH 客户端** — 可配置并调用系统默认客户端、Xshell、PuTTY 等本地程序快速发起连接。
 - **云端 SSH 客户端** — 可通过web快速发起ssh连接，支持tab提示词。
 - **Web RDP** — 通过 Apache Guacamole 在浏览器访问 Windows，凭据留在服务端，连接、剪贴板、上传、下载和磁盘映射分别授权。
@@ -28,6 +29,7 @@
 - **文件审计** — 记录 SFTP 文件操作，并按文件句柄统计上传、下载和读写字节。
 - **数据库审计** — 记录数据库连接和可观察的查询事件，支持按会话检索。
 - **RDP 图形录像** — guacd 生成 `.guac` 录像，上传对象存储；审计页可按用户、主机账号、时间和结果筛选并回放。
+- **审计治理** — 支持保留期、回放字节配额、分批一致性清理和敏感字段脱敏。
 
 ### 其他
 
@@ -39,6 +41,26 @@
 
 Web RDP 需要独立的 `guacd`，其 4822 端口只能位于私有网络。完整权限边界、
 对象存储配置和 Compose 示例见 [Web RDP 部署与安全边界](docs/web-rdp.md)。
+
+### 审计保留与回放配额
+
+审计清理在服务启动时执行一次，之后每小时执行；单次处理数量受批次限制。清理流程会先在数据库记录清理意图，再删除 SSH/数据库回放目录或 RDP 对象存储录像，最后在一个事务内删除会话、录像索引及关联事件。外部录像删除失败时不会删除数据库记录；录像已不存在则按已删除处理。
+
+```json
+"recording": {
+  "enabled": true,
+  "record_input": false,
+  "record_commands": true,
+  "retention_days": 30,
+  "max_replay_bytes": 10737418240,
+  "cleanup_batch_size": 100
+}
+```
+
+- `record_input` 默认关闭，避免保存终端原始输入。
+- `retention_days` 范围为 1–3650 天。
+- `max_replay_bytes` 为回放根目录字节上限，设为 `0` 时不启用配额清理。
+- `cleanup_batch_size` 范围为 1–1000；配额超限时按会话结束时间从旧到新清理。
 
 ### Docker 部署
 

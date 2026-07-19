@@ -7,11 +7,15 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"jianmen/internal/model"
 )
 
-const recoveryUnavailableMessage = "recording spool unavailable for recovery"
+const (
+	recoveryUnavailableMessage = "recording spool unavailable for recovery"
+	recoveryClaimStaleAfter    = 5 * time.Minute
+)
 
 type RDPRecordingRecoveryItem struct {
 	Session  model.AuditSession
@@ -19,9 +23,11 @@ type RDPRecordingRecoveryItem struct {
 }
 
 type rdpRecordingRecoveryRepository interface {
-	ListRecoverableRDPRecordings(
+	ClaimRecoverableRDPRecordings(
 		ctx context.Context,
 		includeInterrupted bool,
+		claimedAt time.Time,
+		staleBefore time.Time,
 	) ([]RDPRecordingRecoveryItem, error)
 }
 
@@ -36,24 +42,36 @@ func (s *RDPRecordingService) Recover(
 	if !ok {
 		return errors.New("RDP audit repository does not support recording recovery")
 	}
-	items, err := repository.ListRecoverableRDPRecordings(
-		ctx,
-		includeInterrupted,
-	)
-	if err != nil {
-		return fmt.Errorf("list recoverable RDP recordings: %w", err)
-	}
 	var recoveryErrors []error
-	for index := range items {
-		if err := s.recoverRecording(ctx, &items[index]); err != nil {
+	for {
+		claimedAt := s.now().UTC()
+		items, err := repository.ClaimRecoverableRDPRecordings(
+			ctx,
+			includeInterrupted,
+			claimedAt,
+			claimedAt.Add(-recoveryClaimStaleAfter),
+		)
+		if err != nil {
 			recoveryErrors = append(
 				recoveryErrors,
-				fmt.Errorf(
-					"recover RDP recording %q: %w",
-					items[index].Session.ID,
-					err,
-				),
+				fmt.Errorf("list recoverable RDP recordings: %w", err),
 			)
+			break
+		}
+		if len(items) == 0 {
+			break
+		}
+		for index := range items {
+			if err := s.recoverRecording(ctx, &items[index]); err != nil {
+				recoveryErrors = append(
+					recoveryErrors,
+					fmt.Errorf(
+						"recover RDP recording %q: %w",
+						items[index].Session.ID,
+						err,
+					),
+				)
+			}
 		}
 	}
 	return errors.Join(recoveryErrors...)

@@ -5,19 +5,28 @@ import (
 )
 
 type redisObserver struct {
-	sink         querySink
-	buf          []byte
-	serverBuf    []byte
-	serverStream *redisResponseStream
-	slots        []redisResponseSlot
-	fatal        *queryDecision
-	deferred     *queryDecision
+	sink               querySink
+	buf                []byte
+	serverBuf          []byte
+	serverStream       *redisResponseStream
+	slots              []redisResponseSlot
+	fatal              *queryDecision
+	deferred           *queryDecision
+	subscriptions      redisSubscriptionState
+	subscriptionIntent redisSubscriptionState
+	protocolVersion    int
 }
 
 type redisResponseSlot struct {
-	record       queryRecord
-	recorded     bool
-	finishFailed bool
+	record            queryRecord
+	recorded          bool
+	finishFailed      bool
+	command           string
+	pubSubArgs        []string
+	remaining         int
+	unsubscribeAll    bool
+	unsubscribeTopics map[string]struct{}
+	helloVersion      int
 }
 
 func (o *redisObserver) ObserveClientBytes(data []byte) *queryDecision {
@@ -125,13 +134,19 @@ parseCommands:
 		}
 		cmd := strings.ToUpper(args[0])
 		auditCommand, auditable := redisAuditCommandChecked(args)
-		if !isAllowedRedisPostAuthCommand(cmd) || !auditable {
+		if !isAllowedRedisPostAuthCommandArgs(args) || !auditable {
 			return o.rejectClientBytes(forward, newObserverFatalDecision(observerErrorProtocol, "Redis command is not supported after gateway authentication"))
 		}
 		if len(o.slots) >= maxObserverPendingQueries {
 			return o.rejectClientBytes(forward, newObserverFatalDecision(observerErrorPendingLimit, "too many in-flight Redis commands"))
 		}
-		slot := redisResponseSlot{}
+		slot := redisResponseSlot{command: cmd, remaining: 1}
+		if cmd == "HELLO" {
+			slot.helloVersion = int(args[1][0] - '0')
+		}
+		if isRedisPubSubStateCommand(cmd) {
+			slot.pubSubArgs = append([]string(nil), args...)
+		}
 		if shouldRecordRedisCommand(cmd) && o.sink != nil {
 			record, decision, ok := startObservedQuery(o.sink, auditCommand, map[string]any{
 				"protocol": "redis",
@@ -146,6 +161,8 @@ parseCommands:
 			slot.record = record
 			slot.recorded = true
 		}
+		slot.remaining, slot.unsubscribeAll, slot.unsubscribeTopics =
+			o.planRedisPubSubResponse(cmd, args)
 		o.slots = append(o.slots, slot)
 		forward = append(forward, o.buf[:pos]...)
 		o.buf = o.buf[pos:]
@@ -236,11 +253,18 @@ func (o *redisObserver) observeServerRelayBytes(data []byte) ([]byte, *queryDeci
 		case redisRESPMalformed:
 			return forward, o.fail(observerErrorProtocol, "malformed Redis response")
 		}
-		if len(o.slots) == 0 {
-			return forward, o.fail(observerErrorProtocol, "unexpected Redis response without a matching command")
-		}
 		frame := o.serverBuf[:frameLen]
-		o.consumeOrdinaryResponse(frame)
+		o.observeRedisRESPVersion(frame)
+		handled, decision := o.consumeRedisPubSubFrame(frame)
+		if decision != nil {
+			return forward, decision
+		}
+		if !handled {
+			if len(o.slots) == 0 {
+				return forward, o.fail(observerErrorProtocol, "unexpected Redis response without a matching command")
+			}
+			o.consumeOrdinaryResponse(frame)
+		}
 		if o.fatal != nil {
 			return forward, o.fatal
 		}
@@ -259,10 +283,20 @@ func (o *redisObserver) consumeOrdinaryResponse(frame []byte) {
 		return
 	}
 	slot := &o.slots[0]
-	if !o.finishSlot(slot, frame) {
+	if slot.remaining <= 0 {
+		slot.remaining = 1
+	}
+	finish := redisResponseFinish(frame)
+	if !o.finishSlotWithResult(slot, finish) {
 		slot.finishFailed = true
 		o.failDecision(auditSinkFailureDecision())
 		return
+	}
+	if finish.Status == queryStatusError && isRedisPubSubStateCommand(slot.command) {
+		o.rebuildRedisSubscriptionIntent(1)
+	}
+	if slot.helloVersion != 0 && finish.Status != queryStatusError {
+		o.protocolVersion = slot.helloVersion
 	}
 	o.slots = o.slots[1:]
 }
@@ -327,7 +361,7 @@ func (o *redisObserver) ErrorResponse(_ queryDecision) []byte {
 
 func shouldRecordRedisCommand(cmd string) bool {
 	switch cmd {
-	case "AUTH", "PING", "QUIT", "ECHO", "SELECT", "HELLO", "COMMAND":
+	case "AUTH", "PING", "QUIT", "ECHO", "SELECT", "HELLO", "COMMAND", "CLIENT":
 		return false
 	default:
 		return true

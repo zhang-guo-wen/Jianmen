@@ -151,6 +151,50 @@ func TestProtocolListenersFailStartupForUnreadableTLSConfiguration(t *testing.T)
 	}
 }
 
+func TestProtocolListenersReleaseEarlierBindingsWhenLaterBindFails(t *testing.T) {
+	firstReservation, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	firstAddress := firstReservation.Addr().String()
+	if err := firstReservation.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	blocked, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer blocked.Close()
+
+	gateway := &Gateway{
+		cfg: config.DatabaseGatewayConfig{
+			Enabled: true,
+			MySQL: config.DatabaseProtocolListener{
+				Enabled: true,
+				Address: firstAddress,
+			},
+			Redis: config.DatabaseProtocolListener{
+				Enabled: true,
+				Address: blocked.Addr().String(),
+			},
+		},
+		logger: slog.Default(),
+	}
+	err = gateway.listenAndServeProtocolListeners(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "listen redis database gateway") {
+		t.Fatalf("listenAndServeProtocolListeners() error = %v, want Redis bind failure", err)
+	}
+
+	rebound, err := net.Listen("tcp", firstAddress)
+	if err != nil {
+		t.Fatalf("earlier MySQL listener was not released after Redis bind failure: %v", err)
+	}
+	if err := rebound.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestProtocolListenerTLSIdentityValidation(t *testing.T) {
 	certFile, keyFile := writeListenerCertificate(t)
 	valid := protocolListener{

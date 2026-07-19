@@ -94,7 +94,7 @@ func TestDialMySQLUpstreamContextCancellationInterruptsSilentGreeting(t *testing
 			Address:  host,
 			Port:     port,
 			TLSMode:  dbtls.ModeDisable,
-		})
+		}, "")
 		result <- err
 	}()
 

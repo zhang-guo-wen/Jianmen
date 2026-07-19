@@ -179,6 +179,71 @@ func TestDBStoreUpdatePlatformAccountRollsBackWhenContextCancelledDuringReload(t
 	}
 }
 
+func TestCreateManagedPlatformAccountRollsBackWhenCreatorGrantFails(t *testing.T) {
+	db, err := storage.Open(storage.Config{Driver: storage.DriverSQLite, DSN: ":memory:"})
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	if err := storage.AutoMigrate(db); err != nil {
+		t.Fatalf("automigrate: %v", err)
+	}
+	repository := NewDBStore(db)
+	if err := db.Create(&model.User{ID: "creator", Username: "creator", Status: "active"}).Error; err != nil {
+		t.Fatalf("create creator: %v", err)
+	}
+	if err := db.Exec(`CREATE TRIGGER fail_platform_creator_grant
+		BEFORE INSERT ON resource_grants
+		BEGIN SELECT RAISE(ABORT, 'injected resource grant failure'); END;`).Error; err != nil {
+		t.Fatalf("create grant failure trigger: %v", err)
+	}
+	if _, err := repository.CreateManagedPlatformAccount(context.Background(), model.PlatformAccount{
+		Name: "Git", PlatformName: "Git", Username: "alice", OwnerID: "creator", Status: "active",
+	}, "creator"); err == nil {
+		t.Fatal("CreateManagedPlatformAccount() succeeded despite creator grant failure")
+	}
+	var accountCount, resourceCount int64
+	if err := db.Model(&model.PlatformAccount{}).Count(&accountCount).Error; err != nil {
+		t.Fatalf("count platform accounts: %v", err)
+	}
+	if err := db.Model(&model.Resource{}).Where("type = ?", model.ResourceTypePlatformAccount).Count(&resourceCount).Error; err != nil {
+		t.Fatalf("count platform resources: %v", err)
+	}
+	if accountCount != 0 || resourceCount != 0 {
+		t.Fatalf("orphan platform rows after grant failure: accounts=%d resources=%d", accountCount, resourceCount)
+	}
+}
+
+func TestCreateManagedPlatformAccountSkipsWriteOnCancelledContext(t *testing.T) {
+	db, err := storage.Open(storage.Config{Driver: storage.DriverSQLite, DSN: ":memory:"})
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	if err := storage.AutoMigrate(db); err != nil {
+		t.Fatalf("automigrate: %v", err)
+	}
+	repository := NewDBStore(db)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := repository.CreateManagedPlatformAccount(ctx, model.PlatformAccount{
+		Name: "Git", PlatformName: "Git", Username: "alice", OwnerID: "creator", Status: "active",
+	}, "creator"); err == nil {
+		t.Fatal("CreateManagedPlatformAccount() succeeded with cancelled context")
+	}
+	var accountCount, resourceCount, grantCount int64
+	if err := db.Model(&model.PlatformAccount{}).Count(&accountCount).Error; err != nil {
+		t.Fatalf("count platform accounts: %v", err)
+	}
+	if err := db.Model(&model.Resource{}).Where("type = ?", model.ResourceTypePlatformAccount).Count(&resourceCount).Error; err != nil {
+		t.Fatalf("count platform resources: %v", err)
+	}
+	if err := db.Model(&model.ResourceGrant{}).Where("resource_type = ?", model.ResourceTypePlatformAccount).Count(&grantCount).Error; err != nil {
+		t.Fatalf("count platform grants: %v", err)
+	}
+	if accountCount != 0 || resourceCount != 0 || grantCount != 0 {
+		t.Fatalf("cancelled creation left rows: accounts=%d resources=%d grants=%d", accountCount, resourceCount, grantCount)
+	}
+}
+
 func newPlatformAtomicTestStore(t *testing.T) (*DBStore, *gorm.DB) {
 	t.Helper()
 	dsn := filepath.ToSlash(filepath.Join(t.TempDir(), "platform-atomic.db"))

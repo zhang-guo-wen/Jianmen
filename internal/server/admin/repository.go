@@ -23,7 +23,7 @@ type adminRepository interface {
 	adminDatabaseRepository
 	adminApplicationRepository
 	adminContainerRepository
-	adminPlatformAccountRepository
+	service.PlatformAccountRepository
 	adminUserSessionCreationRepository
 	adminAuditRepository
 	adminConnectionPasswordRepository
@@ -43,7 +43,7 @@ type adminDependencies struct {
 	databases           adminDatabaseRepository
 	applications        adminApplicationRepository
 	containers          adminContainerRepository
-	platformAccounts    adminPlatformAccountRepository
+	platformAccounts    service.PlatformAccountRepository
 	userSessionCreation adminUserSessionCreationRepository
 	audit               adminAuditRepository
 	connectionPassword  adminConnectionPasswordRepository
@@ -97,15 +97,6 @@ type adminContainerRepository interface {
 	AddContainerEndpoint(context.Context, store.ContainerEndpointInput) (store.ContainerEndpointView, error)
 	UpdateContainerEndpoint(context.Context, string, store.ContainerEndpointInput) (store.ContainerEndpointView, error)
 	DeleteContainerEndpoint(context.Context, string) error
-}
-
-type adminPlatformAccountRepository interface {
-	PlatformAccounts(context.Context, store.PlatformAccountListParams) ([]store.PlatformAccountView, int64, error)
-	PlatformAccount(context.Context, string) (store.PlatformAccountView, error)
-	AddPlatformAccount(context.Context, model.PlatformAccount) (store.PlatformAccountView, error)
-	UpdatePlatformAccount(context.Context, string, model.PlatformAccount) (store.PlatformAccountView, error)
-	DeletePlatformAccount(context.Context, string) error
-	GetPlatformAccountPassword(context.Context, string) (string, error)
 }
 
 type adminUserSessionCreationRepository interface {

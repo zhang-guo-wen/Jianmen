@@ -293,25 +293,6 @@ func (s *Server) visibleDatabaseAccountsForActions(r *http.Request, accounts []s
 	return result, nil
 }
 
-func (s *Server) visiblePlatformAccounts(r *http.Request, accounts []store.PlatformAccountView) ([]store.PlatformAccountView, error) {
-	ids := make([]string, len(accounts))
-	for index := range accounts {
-		ids[index] = accounts[index].ID
-	}
-	visible, err := s.authorizeResourceActionsBatch(r, []string{rbac.ActionPlatformAccountView}, model.ResourceTypePlatformAccount, ids)
-	if err != nil {
-		return nil, err
-	}
-	result := make([]store.PlatformAccountView, 0, len(accounts))
-	for index, account := range accounts {
-		if !visible[index] {
-			continue
-		}
-		result = append(result, account)
-	}
-	return result, nil
-}
-
 func (s *Server) visibleContainerEndpoints(r *http.Request, endpoints []store.ContainerEndpointView) ([]store.ContainerEndpointView, error) {
 	ids := make([]string, len(endpoints))
 	for index := range endpoints {

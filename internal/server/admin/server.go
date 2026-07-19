@@ -19,44 +19,44 @@ import (
 )
 
 type Server struct {
-	cfg                  *config.Config
-	aiAccessTokens       *service.AIAccessTokenService
-	hostTargets          adminHostTargetRepository
-	databases            adminDatabaseRepository
-	applicationService   *service.ApplicationService
-	containers           adminContainerRepository
-	platformAccounts     adminPlatformAccountRepository
-	userSessionCreation  *service.UserSessionCreationService
-	audit                adminAuditRepository
-	connectionPassword   *service.ConnectionPasswordService
-	preferences          adminUserPreferenceRepository
-	temporaryRepository  service.TemporaryAccessRepository
-	userRepository       service.UserRepository
-	userGroupRepository  service.UserGroupRepository
-	roleRepository       service.RoleManagementRepository
-	db                   *gorm.DB
-	logger               *slog.Logger
-	dataDir              string
-	loginLimiter         *loginLimiter
-	loginCaptcha         loginCaptchaVerifier
-	onlineSessions       *online.Registry
-	containerService     *service.ContainerService
-	identity             *service.IdentityService
-	authorization        authorizationService
-	resourceAccess       resourceAccessRepository
-	resourceGrants       *service.ResourceGrantService
-	resourceGroups       *service.ResourceGroupService
-	userManagement       *service.UserService
-	userGroups           *service.UserGroupService
-	roleManagement       *service.RoleService
-	databaseProvisioning databaseProvisioningService
-	temporaryAccess      *service.TemporaryAccessService
-	browserSessions      *service.BrowserSessionService
-	webRDP               *webrdp.Handler
-	accessRequests       *accessrequest.Handler
-	systemSettings       *systemsettings.Handler
-	setupOnce            sync.Once
-	setupSlot            chan struct{}
+	cfg                    *config.Config
+	aiAccessTokens         *service.AIAccessTokenService
+	hostTargets            adminHostTargetRepository
+	databases              adminDatabaseRepository
+	applicationService     *service.ApplicationService
+	containers             adminContainerRepository
+	platformAccountService *service.PlatformAccountService
+	userSessionCreation    *service.UserSessionCreationService
+	audit                  adminAuditRepository
+	connectionPassword     *service.ConnectionPasswordService
+	preferences            adminUserPreferenceRepository
+	temporaryRepository    service.TemporaryAccessRepository
+	userRepository         service.UserRepository
+	userGroupRepository    service.UserGroupRepository
+	roleRepository         service.RoleManagementRepository
+	db                     *gorm.DB
+	logger                 *slog.Logger
+	dataDir                string
+	loginLimiter           *loginLimiter
+	loginCaptcha           loginCaptchaVerifier
+	onlineSessions         *online.Registry
+	containerService       *service.ContainerService
+	identity               *service.IdentityService
+	authorization          authorizationService
+	resourceAccess         resourceAccessRepository
+	resourceGrants         *service.ResourceGrantService
+	resourceGroups         *service.ResourceGroupService
+	userManagement         *service.UserService
+	userGroups             *service.UserGroupService
+	roleManagement         *service.RoleService
+	databaseProvisioning   databaseProvisioningService
+	temporaryAccess        *service.TemporaryAccessService
+	browserSessions        *service.BrowserSessionService
+	webRDP                 *webrdp.Handler
+	accessRequests         *accessrequest.Handler
+	systemSettings         *systemsettings.Handler
+	setupOnce              sync.Once
+	setupSlot              chan struct{}
 }
 
 func New(
@@ -156,10 +156,14 @@ func New(
 	if err != nil {
 		return nil, fmt.Errorf("initialize application service: %w", err)
 	}
+	platformAccountService, err := service.NewPlatformAccountService(dependencies.platformAccounts, authorization)
+	if err != nil {
+		return nil, fmt.Errorf("initialize platform account service: %w", err)
+	}
 	return &Server{
 		cfg: cfg, db: db, logger: logger,
 		aiAccessTokens: aiAccessTokens, hostTargets: dependencies.hostTargets, databases: dependencies.databases,
-		applicationService: applicationService, containers: dependencies.containers, platformAccounts: dependencies.platformAccounts,
+		applicationService: applicationService, containers: dependencies.containers, platformAccountService: platformAccountService,
 		userSessionCreation: userSessionCreation, audit: dependencies.audit, connectionPassword: connectionPassword,
 		preferences: dependencies.preferences, temporaryRepository: dependencies.temporaryAccess,
 		userRepository: dependencies.users, userGroupRepository: dependencies.userGroups, roleRepository: dependencies.roles,

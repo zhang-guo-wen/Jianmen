@@ -187,6 +187,9 @@ func operationResourceType(path string) string {
 	if len(parts) == 0 {
 		return "api"
 	}
+	if parts[0] == "ai" && len(parts) > 2 && parts[1] == "resources" {
+		return parts[2]
+	}
 	if parts[0] == "db" && len(parts) > 1 {
 		return "db/" + parts[1]
 	}
@@ -202,7 +205,9 @@ func operationResourceID(path string) string {
 		return ""
 	}
 	index := 1
-	if parts[0] == "db" || parts[0] == "rbac" {
+	if parts[0] == "ai" && len(parts) > 2 && parts[1] == "resources" {
+		index = 3
+	} else if parts[0] == "db" || parts[0] == "rbac" {
 		index = 2
 	}
 	if len(parts) <= index || isOperationPathPart(parts[index]) {

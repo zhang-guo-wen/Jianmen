@@ -327,23 +327,50 @@ func (s *Server) handleAIRefresh(w http.ResponseWriter, r *http.Request) {
 		s.writeErrorText(w, r, http.StatusBadRequest, "refresh_token is required")
 		return
 	}
+	refreshFingerprint := service.HashAIAccessToken(request.RefreshToken)
+	intentID, err := s.recordAIRefreshIntent(r, refreshFingerprint)
+	if err != nil {
+		s.logger.Error("AI refresh audit gate failed", "error", err)
+		s.writeErrorText(w, r, http.StatusServiceUnavailable, "operation audit unavailable")
+		return
+	}
 	accessTTL := aiAccessTokenDefaultTTL
 	refreshTTL := aiRefreshTokenDefaultTTL
 	issued, err := service.IssueAIAccessToken(time.Now().UTC(), accessTTL, refreshTTL)
 	if err != nil {
+		if auditErr := s.recordAIRefreshResult(r, intentID, refreshFingerprint, nil, http.StatusInternalServerError, "token_issue_failed"); auditErr != nil {
+			s.logger.Warn("failed to write AI refresh failure audit", "intent_id", intentID, "error", auditErr)
+		}
 		s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
 		return
 	}
-	rotated, err := s.aiTokens.RotateAIAccessToken(r.Context(), service.HashAIAccessToken(request.RefreshToken), model.AIAccessToken{
+	rotated, err := s.aiTokens.RotateAIAccessToken(r.Context(), refreshFingerprint, model.AIAccessToken{
 		AccessTokenHash: issued.AccessTokenHash, RefreshTokenHash: issued.RefreshTokenHash,
 		AccessExpiresAt: issued.AccessExpiresAt, RefreshExpiresAt: issued.RefreshExpiresAt,
 	}, time.Now().UTC())
 	if err != nil {
+		status := http.StatusInternalServerError
+		reason := "token_rotate_failed"
 		if errors.Is(err, store.ErrAIAccessTokenInvalid) {
+			status = http.StatusUnauthorized
+			reason = "invalid_or_expired"
+		}
+		if auditErr := s.recordAIRefreshResult(r, intentID, refreshFingerprint, nil, status, reason); auditErr != nil {
+			s.logger.Warn("failed to write AI refresh failure audit", "intent_id", intentID, "error", auditErr)
+		}
+		if status == http.StatusUnauthorized {
 			s.writeErrorText(w, r, http.StatusUnauthorized, "invalid or expired refresh token")
 			return
 		}
 		s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if err := s.recordAIRefreshResult(r, intentID, refreshFingerprint, &rotated, http.StatusOK, ""); err != nil {
+		s.logger.Error("AI refresh result audit failed", "user_id", rotated.UserID, "token_id", rotated.ID, "intent_id", intentID, "error", err)
+		if auditErr := s.recordAIRefreshResult(r, intentID, refreshFingerprint, &rotated, http.StatusServiceUnavailable, "success_audit_failed"); auditErr != nil {
+			s.logger.Warn("failed to write AI refresh delivery failure audit", "intent_id", intentID, "error", auditErr)
+		}
+		s.writeErrorText(w, r, http.StatusServiceUnavailable, "operation audit unavailable")
 		return
 	}
 	s.logger.Info("AI access token refreshed", "user_id", rotated.UserID, "token_id", rotated.ID)

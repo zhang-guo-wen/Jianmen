@@ -134,5 +134,8 @@ npm run build
 - 新增版本化迁移 `202607190002 audit retention cleanup state`。
 - 超级管理员运行及启动权威统一为数据库；删除 `.super_admin_ids` 兼容导入和重命名路径；有用户但无有效超级管理员时启动失败关闭，并提供仅在无有效管理员时可用的显式配置写库恢复。
 - SSH Server 已移除对 76 方法 `store.Store` 的直接依赖，改为使用方定义的 5 组窄接口（共 9 个方法）；剩余聚合依赖集中在 Admin，Context 传播继续保留在 `TECH-20260719-002`。
+- Redis Relay 在并发所有者边界幂等强制串行化 Observer，原始 Drain 竞态路径及全 `dbproxy` 包 Race 测试通过。
+- 启动烟测改用正式 ALTCHA challenge 和浏览器会话，认证失败不再静默跳过 Admin API 或前端代理验证，且不输出 Token。
+- Admin Web Terminal 审计与角色服务 helper 已脱离聚合 `store.Store`；直接生产依赖仅剩 Admin Server 字段和构造参数。
 
-本阶段新发现但未顺手实现的问题已登记为 `DEF-20260719-002`、`TECH-20260719-007` 和 `TEST-20260719-002`。前两项不属于当前切片阻断项；`TEST-20260719-002` 不构成已确认生产 P0/P1，但会使 CI Race 门禁失败，须经用户确认后作为独立最小切片处理。
+本阶段仍未顺手实现的问题已登记为 `DEF-20260719-002`、`TECH-20260719-007` 和 `TEST-20260719-003`，均不属于当前切片 P0/P1/P2 阻断项。

@@ -58,13 +58,13 @@ func TestProvisioningReferencedAdministratorProtection(t *testing.T) {
 		{name: "disabled", status: "disabled"},
 	} {
 		t.Run(update.name, func(t *testing.T) {
-			_, err := repository.UpdateDatabaseAccount(administrator.ID, update.username, update.password, "", "", nil, update.status)
+			_, err := repository.UpdateDatabaseAccount(context.Background(), administrator.ID, update.username, update.password, "", "", nil, update.status)
 			if !errors.Is(err, ErrReferencedDatabaseAdministrator) {
 				t.Fatalf("update error = %v, want reference conflict", err)
 			}
 		})
 	}
-	if err := repository.DeleteDatabaseAccount(administrator.ID); !errors.Is(err, ErrReferencedDatabaseAdministrator) {
+	if err := repository.DeleteDatabaseAccount(context.Background(), administrator.ID); !errors.Is(err, ErrReferencedDatabaseAdministrator) {
 		t.Fatalf("delete error = %v, want reference conflict", err)
 	}
 	var unchanged model.DatabaseAccount
@@ -76,13 +76,13 @@ func TestProvisioningReferencedAdministratorProtection(t *testing.T) {
 	}
 
 	expires := time.Now().UTC().Add(time.Hour)
-	if _, err := repository.UpdateDatabaseAccount(administrator.ID, "", "", "ops", "recovery only", &expires, "active"); err != nil {
+	if _, err := repository.UpdateDatabaseAccount(context.Background(), administrator.ID, "", "", "ops", "recovery only", &expires, "active"); err != nil {
 		t.Fatalf("metadata update: %v", err)
 	}
 	if err := db.Delete(&operation).Error; err != nil {
 		t.Fatal(err)
 	}
-	if _, err := repository.UpdateDatabaseAccount(administrator.ID, "renamed", "changed", "", "", nil, "active"); err != nil {
+	if _, err := repository.UpdateDatabaseAccount(context.Background(), administrator.ID, "renamed", "changed", "", "", nil, "active"); err != nil {
 		t.Fatalf("update after operation removal: %v", err)
 	}
 }
@@ -91,7 +91,7 @@ func TestProvisioningReferencedInstanceBlocksDeleteBeforeAccountMutation(t *test
 	repository, db := newDatabaseProvisioningStoreTest(t)
 	instance, administrator := seedProvisioningStoreAdministrator(t, db)
 	seedReferencedProvisioningOperation(t, db, instance.ID, administrator.ID)
-	if err := repository.DeleteDatabaseInstance(instance.ID); !errors.Is(err, ErrReferencedDatabaseInstance) {
+	if err := repository.DeleteDatabaseInstance(context.Background(), instance.ID); !errors.Is(err, ErrReferencedDatabaseInstance) {
 		t.Fatalf("delete instance error = %v, want reference conflict", err)
 	}
 	var retainedInstance model.DatabaseInstance
@@ -118,12 +118,12 @@ func TestProvisioningReferencedInstanceBlocksCriticalUpdateButAllowsMetadata(t *
 		TLSMode: current.TLSMode, TLSServerName: current.TLSServerName, TLSCAPEM: &ca,
 		Group: "operations", Remark: "retained operation", Status: current.Status,
 	}
-	if _, err := repository.UpdateDatabaseInstance(current.ID, metadata); err != nil {
+	if _, err := repository.UpdateDatabaseInstance(context.Background(), current.ID, metadata); err != nil {
 		t.Fatalf("metadata update: %v", err)
 	}
 	critical := metadata
 	critical.Address = "127.0.0.2"
-	if _, err := repository.UpdateDatabaseInstance(current.ID, critical); !errors.Is(err, ErrReferencedDatabaseInstance) {
+	if _, err := repository.UpdateDatabaseInstance(context.Background(), current.ID, critical); !errors.Is(err, ErrReferencedDatabaseInstance) {
 		t.Fatalf("critical update error = %v, want reference conflict", err)
 	}
 }

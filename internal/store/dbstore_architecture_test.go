@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -198,16 +199,16 @@ func TestDBStoreRejectsDuplicateAccountNamesPerParent(t *testing.T) {
 		t.Fatalf("duplicate target error = %v, want already exists", err)
 	}
 
-	instance, err := st.AddDatabaseInstance(DatabaseInstanceInput{
+	instance, err := st.AddDatabaseInstance(context.Background(), DatabaseInstanceInput{
 		Name: "orders", Protocol: "mysql", Address: "127.0.0.1", Port: 3306, TLSMode: "disable",
 	})
 	if err != nil {
 		t.Fatalf("add database instance: %v", err)
 	}
-	if _, err := st.AddDatabaseAccount(instance.ID, "app", "pass1", "", "", nil); err != nil {
+	if _, err := st.AddDatabaseAccount(context.Background(), instance.ID, "app", "pass1", "", "", nil); err != nil {
 		t.Fatalf("add database account: %v", err)
 	}
-	_, err = st.AddDatabaseAccount(instance.ID, "app", "pass2", "", "", nil)
+	_, err = st.AddDatabaseAccount(context.Background(), instance.ID, "app", "pass2", "", "", nil)
 	if err == nil || !strings.Contains(err.Error(), "already exists") {
 		t.Fatalf("duplicate database account error = %v, want already exists", err)
 	}
@@ -280,7 +281,7 @@ func TestDBStoreListCountsAndDefaultTargetAreSetBased(t *testing.T) {
 	if err := db.Create(&dbAccounts).Error; err != nil {
 		t.Fatalf("create database accounts: %v", err)
 	}
-	instanceViews := st.DatabaseInstances()
+	instanceViews := st.DatabaseInstances(context.Background())
 	countByInstance := make(map[string]int, len(instanceViews))
 	for _, view := range instanceViews {
 		countByInstance[view.ID] = view.AccountCount
@@ -319,5 +320,134 @@ func TestDBStoreTokenAuthRequiresActiveUser(t *testing.T) {
 	}
 	if _, err := st.Authenticate(context.Background(), "not-compact", "disabled-token"); err == nil {
 		t.Fatal("disabled token authenticated successfully")
+	}
+}
+
+func TestDatabaseInstanceWriteUsesCancellationAwareContext(t *testing.T) {
+	db, err := storage.Open(storage.Config{
+		Driver: storage.DriverSQLite,
+		DSN:    ":memory:",
+	})
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	if err := storage.AutoMigrate(db); err != nil {
+		t.Fatalf("auto migrate: %v", err)
+	}
+	st := NewDBStore(db)
+
+	var beforeInstanceCount, beforeResourceCount, beforeGroupCount int64
+	if err := db.Model(&model.DatabaseInstance{}).Count(&beforeInstanceCount).Error; err != nil {
+		t.Fatalf("count database instances: %v", err)
+	}
+	if err := db.Model(&model.Resource{}).Where("type = ?", model.ResourceTypeDatabaseInstance).Count(&beforeResourceCount).Error; err != nil {
+		t.Fatalf("count database instance resources: %v", err)
+	}
+	if err := db.Model(&model.ResourceGroup{}).Where("name = ? AND group_type = ?", "cancel-instance-group", model.ResourceGroupTypeResource).Count(&beforeGroupCount).Error; err != nil {
+		t.Fatalf("count database instance group: %v", err)
+	}
+
+	cancelCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err = st.AddDatabaseInstance(cancelCtx, DatabaseInstanceInput{
+		Name:     "canceled-instance",
+		Protocol: "mysql",
+		Address:  "127.0.0.1",
+		Port:     3306,
+		Group:    "cancel-instance-group",
+		Status:   "active",
+	})
+	if err == nil || !errors.Is(err, context.Canceled) {
+		t.Fatalf("add database instance with canceled context err=%v, want context canceled", err)
+	}
+
+	var afterInstanceCount, afterResourceCount, afterGroupCount int64
+	if err := db.Model(&model.DatabaseInstance{}).Count(&afterInstanceCount).Error; err != nil {
+		t.Fatalf("count database instances: %v", err)
+	}
+	if err := db.Model(&model.Resource{}).Where("type = ?", model.ResourceTypeDatabaseInstance).Count(&afterResourceCount).Error; err != nil {
+		t.Fatalf("count database instance resources: %v", err)
+	}
+	if err := db.Model(&model.ResourceGroup{}).Where("name = ? AND group_type = ?", "cancel-instance-group", model.ResourceGroupTypeResource).Count(&afterGroupCount).Error; err != nil {
+		t.Fatalf("count database instance group: %v", err)
+	}
+	if beforeInstanceCount != afterInstanceCount {
+		t.Fatalf("database instance count changed: before=%d after=%d", beforeInstanceCount, afterInstanceCount)
+	}
+	if beforeResourceCount != afterResourceCount {
+		t.Fatalf("database instance resource count changed: before=%d after=%d", beforeResourceCount, afterResourceCount)
+	}
+	if beforeGroupCount != afterGroupCount {
+		t.Fatalf("database instance group count changed: before=%d after=%d", beforeGroupCount, afterGroupCount)
+	}
+}
+
+func TestDatabaseAccountWriteUsesCancellationAwareContext(t *testing.T) {
+	db, err := storage.Open(storage.Config{
+		Driver: storage.DriverSQLite,
+		DSN:    ":memory:",
+	})
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	if err := storage.AutoMigrate(db); err != nil {
+		t.Fatalf("auto migrate: %v", err)
+	}
+	st := NewDBStore(db)
+
+	instance, err := st.AddDatabaseInstance(context.Background(), DatabaseInstanceInput{
+		Name:     "target-instance",
+		Protocol: "mysql",
+		Address:  "127.0.0.1",
+		Port:     3306,
+	})
+	if err != nil {
+		t.Fatalf("add database instance: %v", err)
+	}
+
+	var beforeAccountCount, beforeResourceCount, beforeGroupCount int64
+	if err := db.Model(&model.DatabaseAccount{}).Count(&beforeAccountCount).Error; err != nil {
+		t.Fatalf("count database accounts: %v", err)
+	}
+	if err := db.Model(&model.Resource{}).Where("type = ?", model.ResourceTypeDatabaseAccount).Count(&beforeResourceCount).Error; err != nil {
+		t.Fatalf("count database account resources: %v", err)
+	}
+	if err := db.Model(&model.ResourceGroup{}).Where("name = ? AND group_type = ?", "cancel-account-group", model.ResourceGroupTypeAccount).Count(&beforeGroupCount).Error; err != nil {
+		t.Fatalf("count database account group: %v", err)
+	}
+
+	cancelCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err = st.AddDatabaseAccount(
+		cancelCtx,
+		instance.ID,
+		"app",
+		"pass",
+		"cancel-account-group",
+		"",
+		nil,
+	)
+	if err == nil || !errors.Is(err, context.Canceled) {
+		t.Fatalf("add database account with canceled context err=%v, want context canceled", err)
+	}
+
+	var afterAccountCount, afterResourceCount, afterGroupCount int64
+	if err := db.Model(&model.DatabaseAccount{}).Count(&afterAccountCount).Error; err != nil {
+		t.Fatalf("count database accounts: %v", err)
+	}
+	if err := db.Model(&model.Resource{}).Where("type = ?", model.ResourceTypeDatabaseAccount).Count(&afterResourceCount).Error; err != nil {
+		t.Fatalf("count database account resources: %v", err)
+	}
+	if err := db.Model(&model.ResourceGroup{}).Where("name = ? AND group_type = ?", "cancel-account-group", model.ResourceGroupTypeAccount).Count(&afterGroupCount).Error; err != nil {
+		t.Fatalf("count database account group: %v", err)
+	}
+	if beforeAccountCount != afterAccountCount {
+		t.Fatalf("database account count changed: before=%d after=%d", beforeAccountCount, afterAccountCount)
+	}
+	if beforeResourceCount != afterResourceCount {
+		t.Fatalf("database account resource count changed: before=%d after=%d", beforeResourceCount, afterResourceCount)
+	}
+	if beforeGroupCount != afterGroupCount {
+		t.Fatalf("database account group count changed: before=%d after=%d", beforeGroupCount, afterGroupCount)
 	}
 }

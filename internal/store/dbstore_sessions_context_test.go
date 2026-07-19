@@ -5,6 +5,7 @@ import (
 	"errors"
 	"sync"
 	"testing"
+	"time"
 
 	"jianmen/internal/model"
 	"jianmen/internal/storage"
@@ -29,6 +30,21 @@ func TestUserSessionCreationQueriesHonorCanceledContext(t *testing.T) {
 
 	if _, _, err := repository.FindActiveHostAccount(ctx, "host-account"); !errors.Is(err, context.Canceled) {
 		t.Fatalf("find active host account error = %v, want context canceled", err)
+	}
+	if _, _, err := repository.FindActiveHost(ctx, "host"); !errors.Is(err, context.Canceled) {
+		t.Fatalf("find active host error = %v, want context canceled", err)
+	}
+	if _, _, err := repository.FindActiveDatabaseAccount(ctx, "database-account"); !errors.Is(err, context.Canceled) {
+		t.Fatalf("find active database account error = %v, want context canceled", err)
+	}
+	if err := repository.CreateConnectionPassword(ctx, model.ConnectionPassword{
+		UserID:       "user",
+		ResourceType: model.ResourceTypeHostAccount,
+		ResourceID:   "host-account",
+		SecretHash:   "hash",
+		ExpiresAt:    time.Now().UTC().Add(time.Minute),
+	}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("create connection password error = %v, want context canceled", err)
 	}
 	if _, _, err := repository.FindActivePermanentUserSession(ctx, "user"); !errors.Is(err, context.Canceled) {
 		t.Fatalf("find permanent session error = %v, want context canceled", err)

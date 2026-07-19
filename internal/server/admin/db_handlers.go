@@ -159,11 +159,20 @@ func (s *Server) handleCreateDBInstance(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if err := s.grantCreatedResource(r, model.ResourceTypeDatabaseInstance, view.ID); err != nil {
-		_ = s.databases.DeleteDatabaseInstance(context.Background(), view.ID)
+		err = s.cleanupCreatedDatabaseInstance(r, view.ID, err)
 		s.writeDatabaseOperationError(w, r, http.StatusInternalServerError, "database operation failed", err)
 		return
 	}
 	s.writeJSON(w, r, http.StatusCreated, view)
+}
+
+func (s *Server) cleanupCreatedDatabaseInstance(r *http.Request, id string, grantErr error) error {
+	cleanupCtx, cancelCleanup := context.WithTimeout(context.WithoutCancel(r.Context()), 5*time.Second)
+	defer cancelCleanup()
+	if cleanupErr := s.databases.DeleteDatabaseInstance(cleanupCtx, id); cleanupErr != nil {
+		return errors.Join(grantErr, cleanupErr)
+	}
+	return grantErr
 }
 
 func (s *Server) handleDBInstance(w http.ResponseWriter, r *http.Request) {

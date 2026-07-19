@@ -7,7 +7,6 @@ import (
 	"net/http"
 
 	"jianmen/internal/service"
-	"jianmen/internal/store"
 )
 
 type roleActionsService interface {
@@ -26,15 +25,11 @@ func (s *Server) roleManagementService() (*service.RoleService, error) {
 	if !ok {
 		return nil, errors.New("role management service is unavailable")
 	}
-	return service.NewRoleService(repository)
+	return newRoleManagementService(repository)
 }
 
-func newRoleManagementService(repository store.Store) (*service.RoleService, error) {
-	roles, ok := repository.(service.RoleManagementRepository)
-	if !ok {
-		return nil, errors.New("admin store does not support role management")
-	}
-	roleManagement, err := service.NewRoleService(roles)
+func newRoleManagementService(repository service.RoleManagementRepository) (*service.RoleService, error) {
+	roleManagement, err := service.NewRoleService(repository)
 	if err != nil {
 		return nil, fmt.Errorf("initialize role service: %w", err)
 	}

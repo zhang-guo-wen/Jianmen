@@ -113,7 +113,7 @@
 
 ### 本阶段必须完成
 
-当前数据库网关与审计治理切片范围内的 P0/P1/P2 已清零，暂无未提交的阶段阻断项。“可以延期”表中的 P2 均不属于本切片。以下已验证修复不得因历史计划未勾选而重新列为开放问题：
+数据库网关、审计治理及当前 Store 消费方拆分范围内的 P0/P1/P2 已清零；组合阶段门禁、完整打包和容器构建已经通过，当前仅剩合并和主目录运行烟测。以下已验证修复不得因历史计划未勾选而重新列为开放问题：
 
 | 事项 | 结果 | 提交 | 验证证据 |
 |---|---|---|---|
@@ -124,20 +124,25 @@
 | 审计保留、分批清理与回放字节配额 | 已完成 | `8b8b633`、`99cf3aa` | [保留服务测试](../internal/service/audit_retention_test.go)、[存储一致性测试](../internal/store/dbstore_audit_retention_test.go) |
 | 跨分片脱敏及审计录制失败关闭 | 已完成 | `c517a3b` | [流式脱敏测试](../internal/recording/stream_redactor_test.go)、[数据库录制失败测试](../internal/server/dbproxy/audit_replay_path_test.go) |
 | 超级管理员独立文件权威路径与无管理员锁死 | 已完成 | `15e9c28`、`1c1b141` | 启动不再读取或重命名 `.super_admin_ids`；有用户但无有效超级管理员时失败关闭；显式配置只允许在无有效管理员时写库恢复；[启动回归测试](../cmd/bastion-core/bootstrap_test.go)、[存储事务测试](../internal/storage/super_admin_test.go) |
+| SSH 对聚合 Store 的直接依赖 | 已完成，阶段门禁通过 | `a3e145a` | SSH 使用方定义认证、目标、用户会话、审计会话和审计事件 5 组窄接口，共 9 个方法；[最小依赖回归测试](../internal/server/sshserver/repository_test.go) |
 | `TEST-20260719-001` 数据库真实协议兼容矩阵与模糊测试 | 已完成 | 本次提交 | [兼容矩阵](./database-protocol-compatibility.md)、[MySQL 实库](../internal/integration/mysql_proxy_integration_test.go)、[PostgreSQL 实库](../internal/integration/postgres_proxy_integration_test.go)、[Redis 实库](../internal/integration/redis_proxy_integration_test.go)、[监听生命周期](../internal/server/dbproxy/listeners_test.go) |
+| `TEST-20260719-002` Redis Relay 并发边界 | 已完成，阶段门禁通过 | `5dd41e0` | Relay 入口幂等强制串行化 Observer；原始 Redis Drain 竞态用例、全 `dbproxy` 包及组合 Linux/CGO Race 测试通过；无 P0/P1/P2 |
+| `DEF-20260719-001` 启动烟测绕过正式登录 | 实现及复审完成，待运行烟测 | `7c80f1a` | `start.ps1` 使用正式 ALTCHA challenge 和浏览器会话；失败硬退出；不再跳过 Admin/前端代理检查或输出 Token；脚本解析与求解器烟测通过 |
+| Admin 非 Server 聚合 Store 依赖 | 已完成，阶段门禁通过 | `1f8acb9` | Web Terminal 审计改为 3 方法使用方接口；角色服务 helper 直接依赖 `service.RoleManagementRepository`；目标包及全仓测试通过 |
+| `OPS-20260719-001` Linux Node 24 锁文件不完整 | 已完成，容器门禁通过 | `9070af0` | `node:24-bookworm-slim` 曾因缺少 `@emnapi/core/runtime@1.11.2` 锁记录拒绝 `npm ci`；按同一镜像 npm 仅重建锁元数据，Linux 容器完整构建、Windows `npm ci` 与类型检查通过；独立复审无 P0/P1/P2 |
 
 ### 可以延期
 
 | ID | 优先级 | 状态 | 工作项 | 验收摘要 | 复评时间/触发条件 | 来源 |
 |---|---|---|---|---|---|---|
-| `DEF-20260719-001` | P2 | 已延期 | 启动烟测仍使用无验证码登录，导致认证 API 和前端代理检查被跳过 | 烟测通过正式挑战流程获得会话；登录失败时明确失败而非静默跳过关键检查 | 下次修改登录/启动流程时，最迟首个发布候选前 | `start.ps1:179-222` |
 | `TECH-20260719-001` | P2 | 已延期 | `internal/server/admin` 的 Handler、业务判断和持久层访问尚未完全分层 | 选定资源切片迁入 `handler -> service -> store`；Handler 不直接执行 SQL；目标包测试通过 | 修改对应资源行为或文件接近行数上限时 | [后端审计](./backend-audit-2026-07-18.md) |
-| `TECH-20260719-002` | P2 | 已延期 | `store.Store` 仍是 76 方法的聚合接口，部分方法缺少 `context.Context` | 按使用方拆小接口；迁移方法以 `context.Context` 为首参数；架构测试锁定边界 | 新增 Store 方法或出现取消/超时传播缺陷时 | [Phase 2 计划](./superpowers/plans/2026-07-18-core-stabilization-phase2-plan.md) |
+| `TECH-20260719-002` | P2 | 已延期 | `store.Store` 仍是 76 方法的聚合接口；SSH 与 Admin 的 Web Terminal/角色 helper 已迁移到使用方接口，直接生产依赖仅剩 Admin Server 字段和构造参数，且部分方法仍缺少 `context.Context` | 按 Admin 资源域继续拆小接口；迁移方法以 `context.Context` 为首参数；架构测试锁定边界；最终删除聚合接口 | 新增 Store 方法、修改 Admin 资源域或出现取消/超时传播缺陷时 | [Phase 2 计划](./superpowers/plans/2026-07-18-core-stabilization-phase2-plan.md) |
 | `TECH-20260719-003` | P2 | 已延期 | 资源授权列表仍缺少批量查询能力，数据量增长后可能形成 N+1 | 提供批量授权查询；列表查询次数不随资源数线性增长；保留资源级拒绝语义 | 性能测试出现线性查询增长，最迟容量测试前 | [后端审计](./backend-audit-2026-07-18.md) |
 | `DEF-20260719-002` | P2 | 已延期 | 进程异常退出或结束状态写入失败后，审计会话可能长期保持 `started`，为避免误删活动会话，当前保留/配额任务不会清理它 | 增加带租约或心跳的会话恢复规则；仅回收可证明已失活的会话；覆盖重启和结束写入失败 | 首个发布候选前，或发现长期 `started` 会话时 | 审计治理切片复核 |
 | `TECH-20260719-005` | P3 | 已延期 | DTO、GORM Model 和 Store View 类型仍未彻底分离 | Model 不承载 API JSON 结构；Store 不堆放表现层 View；迁移不改变 API 行为 | 修改关联 API 或类型再次造成跨层依赖时 | [后端审计](./backend-audit-2026-07-18.md) |
 | `TECH-20260719-006` | P3 | 已延期 | 前端生产构建仍有第三方 PURE 注释告警和主分包体积告警 | 先确认无功能风险；按页面拆分主包并记录体积基线；不为消除第三方告警修改依赖源码 | 主包继续增长或进入发布性能优化阶段时 | 最近一次阶段构建输出 |
 | `TECH-20260719-007` | P3 | 已延期 | 回放配额统计当前每小时遍历回放根目录，超大规模下耗时随文件数线性增长 | 记录会话关闭时的回放字节数并增量维护总量；以容量基准证明清理周期稳定 | 回放文件超过 100 万或扫描超过清理周期的 10% 时 | 审计治理切片复核 |
+| `TEST-20260719-003` | P3 | 已延期 | Admin 窄接口回归测试尚未显式覆盖“不支持角色仓库”的 Server 构造失败，以及 Web Terminal 审计底层报错传播 | 在不扩大生产代码的前提下补失败路径断言；保持原错误语义和失败关闭行为 | 下次修改 Admin 构造或 Web Terminal 审计适配器时 | `1f8acb9` 独立复审 |
 
 ### 建议取消或关闭
 

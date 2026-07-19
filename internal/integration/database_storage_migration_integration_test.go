@@ -512,11 +512,16 @@ func TestStorageMigrationExpandsDatabaseAuditQueryPayload(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			db := openMetadataDatabase(t, tt)
 
-			// Build the legacy schema by executing every historical migration
-			// through 202607190005. Pre-recording 006 makes Migrate skip only
-			// that migration without creating the latest schema and manually
-			// downgrading it.
-			seedAppliedMigrations(t, db, auditDBQueryLargePayloadMigrationVersion)
+			// Build the legacy schema by executing historical migrations through
+			// 202607190005. Pre-recording 006/007/008 skips all future
+			// migrations, then manually downgrading 006 keeps only 006 pending.
+			seedAppliedMigrations(
+				t,
+				db,
+				auditDBQueryLargePayloadMigrationVersion,
+				databaseGatewayModeMigrationVersion,
+				databaseTLSDefaultMigrationVersion,
+			)
 			if err := storage.Migrate(db); err != nil {
 				t.Fatalf("build schema from historical migrations through 005: %v", err)
 			}
@@ -580,7 +585,7 @@ func TestStorageMigrationExpandsDatabaseAuditQueryPayload(t *testing.T) {
 				Revision:                    2,
 				AppliedRevision:             1,
 			}
-			if err := db.Omit("DatabaseMaxClientMessageBytes").
+			if err := db.Omit("DatabaseMaxClientMessageBytes", "DatabaseGatewayMode").
 				Create(&legacySettings).Error; err != nil {
 				t.Fatalf("seed legacy system settings: %v", err)
 			}
@@ -1102,6 +1107,7 @@ func seedAppliedMigrations(t *testing.T, db *gorm.DB, versions ...string) {
 		systemSettingMigrationVersion:            "system configuration management",
 		auditDBQueryLargePayloadMigrationVersion: "large database proxy client message support",
 		databaseGatewayModeMigrationVersion:      "database gateway mode system setting",
+		databaseTLSDefaultMigrationVersion:       "database instance upstream TLS default",
 	}
 	for _, version := range versions {
 		name, ok := names[version]

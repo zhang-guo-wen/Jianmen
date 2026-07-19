@@ -318,6 +318,13 @@ func (s *Server) handleAIRefresh(w http.ResponseWriter, r *http.Request) {
 		s.writeErrorText(w, r, http.StatusBadRequest, "refresh_token is required")
 		return
 	}
+	refreshFingerprint := service.HashAIAccessToken(request.RefreshToken)
+	intentID, err := s.recordAIRefreshIntent(r, refreshFingerprint)
+	if err != nil {
+		s.logger.Error("AI refresh audit gate failed", "error", err)
+		s.writeErrorText(w, r, http.StatusServiceUnavailable, "operation audit unavailable")
+		return
+	}
 	result, err := s.aiAccessTokens.Refresh(
 		r.Context(),
 		request.RefreshToken,
@@ -326,7 +333,16 @@ func (s *Server) handleAIRefresh(w http.ResponseWriter, r *http.Request) {
 		aiRefreshTokenDefaultTTL,
 	)
 	if err != nil {
+		status := http.StatusInternalServerError
+		reason := "token_rotate_failed"
 		if errors.Is(err, store.ErrAIAccessTokenInvalid) || errors.Is(err, service.ErrInvalidAIAccessToken) {
+			status = http.StatusUnauthorized
+			reason = "invalid_or_expired"
+		}
+		if auditErr := s.recordAIRefreshResult(r, intentID, refreshFingerprint, nil, status, reason); auditErr != nil {
+			s.logger.Warn("failed to write AI refresh failure audit", "intent_id", intentID, "error", auditErr)
+		}
+		if status == http.StatusUnauthorized {
 			s.writeErrorText(w, r, http.StatusUnauthorized, "invalid or expired refresh token")
 			return
 		}
@@ -334,6 +350,14 @@ func (s *Server) handleAIRefresh(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rotated := result.Token
+	if err := s.recordAIRefreshResult(r, intentID, refreshFingerprint, &rotated, http.StatusOK, ""); err != nil {
+		s.logger.Error("AI refresh result audit failed", "user_id", rotated.UserID, "token_id", rotated.ID, "intent_id", intentID, "error", err)
+		if auditErr := s.recordAIRefreshResult(r, intentID, refreshFingerprint, &rotated, http.StatusServiceUnavailable, "success_audit_failed"); auditErr != nil {
+			s.logger.Warn("failed to write AI refresh delivery failure audit", "intent_id", intentID, "error", auditErr)
+		}
+		s.writeErrorText(w, r, http.StatusServiceUnavailable, "operation audit unavailable")
+		return
+	}
 	s.logger.Info("AI access token refreshed", "user_id", rotated.UserID, "token_id", rotated.ID)
 	s.writeJSON(w, r, http.StatusOK, map[string]any{
 		"id": rotated.ID, "name": rotated.Name,

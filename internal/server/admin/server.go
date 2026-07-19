@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"reflect"
 	"sync"
 
 	"jianmen/internal/config"
@@ -87,7 +88,7 @@ func New(
 		return nil, errors.New("admin identity service is required")
 	case browserSessions == nil:
 		return nil, errors.New("admin browser session service is required")
-	case authorization == nil:
+	case isNilAdminAuthorization(authorization):
 		return nil, errors.New("admin authorization service is required")
 	case resourceGrants == nil:
 		return nil, errors.New("admin resource grant service is required")
@@ -148,4 +149,17 @@ func New(
 		webRDP:          webRDP, accessRequests: accessRequests,
 		systemSettings: systemSettings,
 	}, nil
+}
+
+func isNilAdminAuthorization(authorization authorizationService) bool {
+	if authorization == nil {
+		return true
+	}
+	value := reflect.ValueOf(authorization)
+	switch value.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
+		return value.IsNil()
+	default:
+		return false
+	}
 }

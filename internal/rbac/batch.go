@@ -14,7 +14,11 @@ type BatchAuthorizationRequest struct {
 	Actions      []string
 }
 
-type BatchActionDecision struct{ Allowed, Denied bool }
+type BatchActionDecision struct {
+	ActionAllowed bool
+	Allowed       bool
+	Denied        bool
+}
 
 func BatchResourceKey(resourceType, resourceID string) string {
 	return resourceType + "\x00" + resourceID

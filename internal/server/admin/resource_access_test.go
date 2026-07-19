@@ -13,8 +13,24 @@ import (
 
 	"jianmen/internal/model"
 	"jianmen/internal/rbac"
+	"jianmen/internal/service"
 	"jianmen/internal/store"
 )
+
+type batchOnlyAuthorization struct{ batchCalls, singleCalls int }
+
+func (a *batchOnlyAuthorization) AuthorizeConnection(context.Context, string, []string, string, string) (bool, error) {
+	a.singleCalls++
+	return false, nil
+}
+func (a *batchOnlyAuthorization) AuthorizeBatch(_ context.Context, _ string, requests []service.AuthorizationRequest) ([]service.AuthorizationDecision, error) {
+	a.batchCalls++
+	decisions := make([]service.AuthorizationDecision, len(requests))
+	for index := range decisions {
+		decisions[index] = service.AuthorizationDecision{Allowed: true, Reason: service.AuthorizationReasonAllowed}
+	}
+	return decisions, nil
+}
 
 func TestResourceAccessHasNoDirectDatabaseOrAggregateStoreQueries(t *testing.T) {
 	source, err := os.ReadFile("resource_access.go")
@@ -407,6 +423,75 @@ func TestConnectableHostListUsesConnectionActionWithoutTargetView(t *testing.T) 
 	}
 	if len(page.Items) != 1 || page.Items[0].ID != "ha-account" {
 		t.Fatalf("unexpected connectable host list: %#v", page.Items)
+	}
+}
+
+func TestConnectableHostAccountListUsesBatchConnectionDecision(t *testing.T) {
+	server, db := newAdminDBTestServer(t)
+	seedResourceAccessTestData(t, db)
+	seedConnectionAction(t, db, "host-account-connect-user", rbac.ActionSessionConnect)
+	seedResourceGrant(t, db, "host-account-connect-user", model.ResourceTypeHostAccount, "ha-account")
+	request := withTestUser(httptest.NewRequest(http.MethodGet, "/api/hosts/host-account/accounts?connectable=true", nil), "host-account-connect-user", "host-account-connect-user")
+	recorder := httptest.NewRecorder()
+	server.handleHost(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	var page struct {
+		Items []store.TargetView `json:"items"`
+	}
+	if err := decodeTestData(t, recorder.Body.Bytes(), &page); err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Items) != 1 || page.Items[0].ID != "ha-account" {
+		t.Fatalf("unexpected connectable host accounts: %#v", page.Items)
+	}
+}
+
+func TestVisibleConnectableTargetsUsesOnlyTwoBatchDecisions(t *testing.T) {
+	server, _ := newAdminDBTestServer(t)
+	authorization := &batchOnlyAuthorization{}
+	server.authorization = authorization
+	request := withTestUser(httptest.NewRequest(http.MethodGet, "/api/targets?connectable=true", nil), "u1", "u1")
+	items, err := server.visibleConnectableTargets(request, []store.TargetView{{ID: "ssh", Protocol: "ssh"}, {ID: "rdp", Protocol: "rdp"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 2 || authorization.batchCalls != 2 || authorization.singleCalls != 0 {
+		t.Fatalf("items=%#v batch=%d single=%d", items, authorization.batchCalls, authorization.singleCalls)
+	}
+}
+
+func TestPlatformListRequiresAccountGroupNotResourceGroup(t *testing.T) {
+	server, db := newAdminDBTestServer(t)
+	if err := db.Create(&model.User{ID: "platform-user", Username: "platform-user", Status: "active"}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&model.PlatformAccount{ID: "platform-account", Name: "platform", PlatformName: "git", GroupName: "shared", Username: "root", OwnerID: "platform-user", Status: "active"}).Error; err != nil {
+		t.Fatal(err)
+	}
+	seedGlobalAction(t, db, "platform-user", rbac.ActionPlatformAccountView)
+	for _, value := range []any{&model.ResourceGroup{ID: "resource-shared", Name: "shared", GroupType: model.ResourceGroupTypeResource}, &model.ResourceGroup{ID: "account-shared", Name: "shared", GroupType: model.ResourceGroupTypeAccount}, &model.ResourceGrant{ID: "platform-resource", PrincipalType: "user", PrincipalID: "platform-user", ResourceType: model.ResourceTypeGroup, ResourceID: "resource-shared", Effect: model.PermissionEffectAllow}} {
+		if err := db.Create(value).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	request := withTestUser(httptest.NewRequest(http.MethodGet, "/api/platform-accounts", nil), "platform-user", "platform-user")
+	recorder := httptest.NewRecorder()
+	server.handlePlatformAccounts(recorder, request)
+	var page struct {
+		Items []store.PlatformAccountView `json:"items"`
+	}
+	if recorder.Code != http.StatusOK || decodeTestData(t, recorder.Body.Bytes(), &page) != nil || len(page.Items) != 0 {
+		t.Fatalf("resource group exposed platform account: status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	if err := db.Create(&model.ResourceGrant{ID: "platform-account-group", PrincipalType: "user", PrincipalID: "platform-user", ResourceType: model.ResourceTypeAccountGroup, ResourceID: "account-shared", Effect: model.PermissionEffectAllow}).Error; err != nil {
+		t.Fatal(err)
+	}
+	recorder = httptest.NewRecorder()
+	server.handlePlatformAccounts(recorder, request)
+	if recorder.Code != http.StatusOK || decodeTestData(t, recorder.Body.Bytes(), &page) != nil || len(page.Items) != 1 {
+		t.Fatalf("account group did not expose platform account: status=%d body=%s", recorder.Code, recorder.Body.String())
 	}
 }
 

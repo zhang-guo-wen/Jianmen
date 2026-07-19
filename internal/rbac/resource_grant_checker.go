@@ -244,8 +244,8 @@ func (c *ResourceGrantChecker) groupContainsResource(groupID, resourceType, reso
 
 // BatchGrantsContext evaluates direct, user-group and temporary grants using a
 // bounded set of set-loading queries. It never calls HasGrantContext per item.
-func (c *ResourceGrantChecker) BatchGrantsContext(ctx context.Context, userID string, requests []BatchAuthorizationRequest) (map[string]bool, error) {
-	result := make(map[string]bool, len(requests))
+func (c *ResourceGrantChecker) BatchGrantsContext(ctx context.Context, userID string, requests []BatchAuthorizationRequest) ([]bool, error) {
+	result := make([]bool, len(requests))
 	if c == nil || c.db == nil || len(requests) == 0 {
 		return result, nil
 	}
@@ -271,8 +271,7 @@ func (c *ResourceGrantChecker) BatchGrantsContext(ctx context.Context, userID st
 	if err != nil {
 		return nil, err
 	}
-	for _, request := range requests {
-		key := BatchResourceKey(request.ResourceType, request.ResourceID)
+	for index, request := range requests {
 		denied := false
 		allowed := false
 		for _, grant := range grants {
@@ -287,7 +286,7 @@ func (c *ResourceGrantChecker) BatchGrantsContext(ctx context.Context, userID st
 				allowed = true
 			}
 		}
-		result[key] = allowed && !denied
+		result[index] = allowed && !denied
 	}
 	return result, nil
 }
@@ -302,6 +301,9 @@ func batchGrantMatches(grant model.ResourceGrant, request BatchAuthorizationRequ
 	case model.ResourceTypeDatabaseInstance:
 		return request.ResourceType == model.ResourceTypeDatabaseAccount && facts.instanceOf[request.ResourceID] == grant.ResourceID
 	case model.ResourceTypeGroup:
+		if request.ResourceType == model.ResourceTypePlatformAccount {
+			return false
+		}
 		return facts.groupMatches(grant.ResourceID, request.ResourceType, request.ResourceID, false)
 	case model.ResourceTypeAccountGroup:
 		return facts.groupMatches(grant.ResourceID, request.ResourceType, request.ResourceID, true)

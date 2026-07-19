@@ -163,30 +163,32 @@ func (s *Server) visibleTargetsForActions(r *http.Request, targets []store.Targe
 }
 
 func (s *Server) visibleConnectableTargets(r *http.Request, targets []store.TargetView) ([]store.TargetView, error) {
-	result := make([]store.TargetView, 0, len(targets))
-	for _, target := range targets {
+	requests := make([]service.AuthorizationRequest, len(targets))
+	for index, target := range targets {
 		actions := []string{rbac.ActionSessionConnect, rbac.ActionSFTPConnect}
 		if strings.EqualFold(target.Protocol, "rdp") {
 			actions = []string{rbac.ActionRDPConnect}
 		}
-		allowed, err := s.authorizeResourceActions(
-			r, actions, model.ResourceTypeHostAccount, target.ID,
-		)
-		if err != nil {
-			return nil, err
-		}
-		if !allowed {
+		requests[index] = service.AuthorizationRequest{Actions: actions, ResourceType: model.ResourceTypeHostAccount, ResourceID: target.ID}
+	}
+	visible, err := s.authorizeResourceRequestsBatch(r, requests)
+	if err != nil {
+		return nil, err
+	}
+	manageRequests := make([]service.AuthorizationRequest, len(targets))
+	for index, target := range targets {
+		manageRequests[index] = service.AuthorizationRequest{Actions: []string{rbac.ActionTargetUpdate, rbac.ActionTargetDelete}, ResourceType: model.ResourceTypeHostAccount, ResourceID: target.ID}
+	}
+	manageable, err := s.authorizeResourceRequestsBatch(r, manageRequests)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]store.TargetView, 0, len(targets))
+	for index, target := range targets {
+		if !visible[index] {
 			continue
 		}
-		target.CanManage, err = s.authorizeResourceActions(
-			r,
-			[]string{rbac.ActionTargetUpdate, rbac.ActionTargetDelete},
-			model.ResourceTypeHostAccount,
-			target.ID,
-		)
-		if err != nil {
-			return nil, err
-		}
+		target.CanManage = manageable[index]
 		result = append(result, target)
 	}
 	return result, nil
@@ -356,25 +358,31 @@ func (s *Server) visibleContainerEndpoints(r *http.Request, endpoints []store.Co
 }
 
 func (s *Server) authorizeResourceActionsBatch(r *http.Request, actions []string, resourceType string, ids []string) ([]bool, error) {
-	allowed := make([]bool, len(ids))
-	if len(ids) == 0 {
+	requests := make([]service.AuthorizationRequest, len(ids))
+	for index, id := range ids {
+		requests[index] = service.AuthorizationRequest{Actions: actions, ResourceType: resourceType, ResourceID: id}
+	}
+	return s.authorizeResourceRequestsBatch(r, requests)
+}
+
+func (s *Server) authorizeResourceRequestsBatch(r *http.Request, requests []service.AuthorizationRequest) ([]bool, error) {
+	allowed := make([]bool, len(requests))
+	if len(requests) == 0 {
 		return allowed, nil
 	}
 	userID := userIDFromRequest(r)
 	if userID == "" {
 		return allowed, nil
 	}
-	batch, ok := s.authorization.(batchAuthorizationService)
-	if !ok {
+	if s.authorization == nil {
 		return nil, errors.New("batch authorization service unavailable")
 	}
-	requests := make([]service.AuthorizationRequest, len(ids))
-	for index, id := range ids {
-		requests[index] = service.AuthorizationRequest{Actions: actions, ResourceType: resourceType, ResourceID: id}
-	}
-	decisions, err := batch.AuthorizeBatch(r.Context(), userID, requests)
+	decisions, err := s.authorization.AuthorizeBatch(r.Context(), userID, requests)
 	if err != nil {
 		return nil, fmt.Errorf("batch authorize resource actions: %w", err)
+	}
+	if len(decisions) != len(requests) {
+		return nil, errors.New("batch authorization decision count mismatch")
 	}
 	for index, decision := range decisions {
 		allowed[index] = decision.Allowed

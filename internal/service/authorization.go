@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 
 	"jianmen/internal/rbac"
@@ -68,11 +69,11 @@ func NewAuthorizationService(
 	resources ResourceAuthorizer,
 ) (*AuthorizationService, error) {
 	switch {
-	case identity == nil:
+	case isNilAuthorizationDependency(identity):
 		return nil, errors.New("authorization identity is required")
-	case actions == nil:
+	case isNilAuthorizationDependency(actions):
 		return nil, errors.New("action authorizer is required")
-	case resources == nil:
+	case isNilAuthorizationDependency(resources):
 		return nil, errors.New("resource authorizer is required")
 	default:
 		return &AuthorizationService{
@@ -80,6 +81,19 @@ func NewAuthorizationService(
 			actions:   actions,
 			resources: resources,
 		}, nil
+	}
+}
+
+func isNilAuthorizationDependency(dependency any) bool {
+	if dependency == nil {
+		return true
+	}
+	value := reflect.ValueOf(dependency)
+	switch value.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
+		return value.IsNil()
+	default:
+		return false
 	}
 }
 
@@ -210,11 +224,11 @@ func normalizedActions(actions []string) []string {
 }
 
 type BatchActionAuthorizer interface {
-	BatchActionDecisionsContext(context.Context, string, []rbac.BatchAuthorizationRequest) (map[string]rbac.BatchActionDecision, error)
+	BatchActionDecisionsContext(context.Context, string, []rbac.BatchAuthorizationRequest) ([]rbac.BatchActionDecision, error)
 }
 
 type BatchResourceAuthorizer interface {
-	BatchGrantsContext(context.Context, string, []rbac.BatchAuthorizationRequest) (map[string]bool, error)
+	BatchGrantsContext(context.Context, string, []rbac.BatchAuthorizationRequest) ([]bool, error)
 }
 
 // AuthorizeBatch resolves the identity once and authorizes every concrete
@@ -238,13 +252,16 @@ func (s *AuthorizationService) AuthorizeBatch(ctx context.Context, userID string
 	if err != nil {
 		return nil, fmt.Errorf("authorize identity: %w", err)
 	}
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("authorization context: %w", err)
+	}
 	if !found {
 		for i := range decisions {
 			decisions[i] = AuthorizationDecision{Reason: AuthorizationReasonInvalidIdentity}
 		}
 		return decisions, nil
 	}
-	batch := make([]rbac.BatchAuthorizationRequest, 0, len(requests))
+	batch := make([]rbac.BatchAuthorizationRequest, len(requests))
 	valid := make([]bool, len(requests))
 	for i, request := range requests {
 		resourceType := strings.TrimSpace(request.ResourceType)
@@ -259,7 +276,7 @@ func (s *AuthorizationService) AuthorizeBatch(ctx context.Context, userID string
 			continue
 		}
 		valid[i] = true
-		batch = append(batch, rbac.BatchAuthorizationRequest{ResourceType: resourceType, ResourceID: resourceID, Actions: actions})
+		batch[i] = rbac.BatchAuthorizationRequest{ResourceType: resourceType, ResourceID: resourceID, Actions: actions}
 	}
 	if subject.SuperAdmin {
 		for i := range decisions {
@@ -285,13 +302,19 @@ func (s *AuthorizationService) AuthorizeBatch(ctx context.Context, userID string
 	if err != nil {
 		return nil, fmt.Errorf("batch authorize resources: %w", err)
 	}
-	for i, request := range requests {
+	if len(actionDecisions) != len(requests) || len(grantDecisions) != len(requests) {
+		return nil, errors.New("batch authorization decision count mismatch")
+	}
+	for i := range requests {
 		if !valid[i] {
 			continue
 		}
-		key := rbac.BatchResourceKey(strings.TrimSpace(request.ResourceType), strings.TrimSpace(request.ResourceID))
-		action := actionDecisions[key]
-		if !action.Allowed || !grantDecisions[key] {
+		action := actionDecisions[i]
+		if !action.ActionAllowed {
+			decisions[i] = AuthorizationDecision{Reason: AuthorizationReasonActionDenied}
+			continue
+		}
+		if !action.Allowed || !grantDecisions[i] {
 			decisions[i] = AuthorizationDecision{Reason: AuthorizationReasonResourceDenied}
 			continue
 		}

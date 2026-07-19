@@ -72,7 +72,11 @@ type fakeResourceAuthorizer struct {
 	calls   int
 }
 
-type fakeBatchActionAuthorizer struct{ calls int }
+type fakeBatchActionAuthorizer struct {
+	calls     int
+	decisions []rbac.BatchActionDecision
+	err       error
+}
 
 func (*fakeBatchActionAuthorizer) HasPermissionContext(context.Context, string, string, string, string) (bool, error) {
 	return false, nil
@@ -81,26 +85,42 @@ func (*fakeBatchActionAuthorizer) HasDenyContext(context.Context, string, string
 	return false, nil
 }
 
-func (f *fakeBatchActionAuthorizer) BatchActionDecisionsContext(_ context.Context, _ string, requests []rbac.BatchAuthorizationRequest) (map[string]rbac.BatchActionDecision, error) {
+func (f *fakeBatchActionAuthorizer) BatchActionDecisionsContext(_ context.Context, _ string, requests []rbac.BatchAuthorizationRequest) ([]rbac.BatchActionDecision, error) {
 	f.calls++
-	result := make(map[string]rbac.BatchActionDecision, len(requests))
-	for _, request := range requests {
-		result[rbac.BatchResourceKey(request.ResourceType, request.ResourceID)] = rbac.BatchActionDecision{Allowed: true}
+	if f.err != nil {
+		return nil, f.err
+	}
+	if f.decisions != nil {
+		return f.decisions, nil
+	}
+	result := make([]rbac.BatchActionDecision, len(requests))
+	for index := range requests {
+		result[index] = rbac.BatchActionDecision{ActionAllowed: true, Allowed: true}
 	}
 	return result, nil
 }
 
-type fakeBatchResourceAuthorizer struct{ calls int }
+type fakeBatchResourceAuthorizer struct {
+	calls     int
+	decisions []bool
+	err       error
+}
 
 func (*fakeBatchResourceAuthorizer) HasGrantContext(context.Context, string, string, string) (bool, error) {
 	return false, nil
 }
 
-func (f *fakeBatchResourceAuthorizer) BatchGrantsContext(_ context.Context, _ string, requests []rbac.BatchAuthorizationRequest) (map[string]bool, error) {
+func (f *fakeBatchResourceAuthorizer) BatchGrantsContext(_ context.Context, _ string, requests []rbac.BatchAuthorizationRequest) ([]bool, error) {
 	f.calls++
-	result := make(map[string]bool, len(requests))
-	for _, request := range requests {
-		result[rbac.BatchResourceKey(request.ResourceType, request.ResourceID)] = true
+	if f.err != nil {
+		return nil, f.err
+	}
+	if f.decisions != nil {
+		return f.decisions, nil
+	}
+	result := make([]bool, len(requests))
+	for index := range requests {
+		result[index] = true
 	}
 	return result, nil
 }
@@ -453,6 +473,34 @@ func TestAuthorizationServiceResourcePermissionDenyOverridesResourceGrantAllow(t
 	if decision.Allowed {
 		t.Fatalf("resource permission deny was bypassed: %#v", decision)
 	}
+	if err := db.Create(&model.ResourceGrant{ID: "grant-visible", PrincipalType: "user", PrincipalID: user.ID, ResourceType: model.ResourceTypeHostAccount, ResourceID: "account-visible", Effect: model.PermissionEffectAllow}).Error; err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		name    string
+		request AuthorizationRequest
+		reason  string
+		allowed bool
+	}{
+		{name: "allowed", request: AuthorizationRequest{UserID: user.ID, Actions: []string{rbac.ActionSessionConnect}, ResourceType: model.ResourceTypeHostAccount, ResourceID: "account-visible"}, reason: AuthorizationReasonAllowed, allowed: true},
+		{name: "action denied", request: AuthorizationRequest{UserID: user.ID, Actions: []string{"missing:action"}, ResourceType: model.ResourceTypeHostAccount, ResourceID: "account-visible"}, reason: AuthorizationReasonActionDenied},
+		{name: "resource denied", request: AuthorizationRequest{UserID: user.ID, Actions: []string{rbac.ActionSessionConnect}, ResourceType: model.ResourceTypeHostAccount, ResourceID: "account-denied"}, reason: AuthorizationReasonResourceDenied},
+		{name: "missing grant", request: AuthorizationRequest{UserID: user.ID, Actions: []string{rbac.ActionSessionConnect}, ResourceType: model.ResourceTypeHostAccount, ResourceID: "account-missing"}, reason: AuthorizationReasonResourceDenied},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			single, err := authorizer.Authorize(context.Background(), test.request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			batch, err := authorizer.AuthorizeBatch(context.Background(), user.ID, []AuthorizationRequest{test.request})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(batch) != 1 || batch[0] != single || batch[0].Allowed != test.allowed || batch[0].Reason != test.reason {
+				t.Fatalf("single=%#v batch=%#v", single, batch)
+			}
+		})
+	}
 }
 
 func TestNewAuthorizationServiceRejectsNilDependencies(t *testing.T) {
@@ -476,6 +524,71 @@ func TestNewAuthorizationServiceRejectsNilDependencies(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestNewAuthorizationServiceRejectsTypedNilDependencies(t *testing.T) {
+	var identity *fakeAuthorizationIdentity
+	var actions *fakeActionAuthorizer
+	var resources *fakeResourceAuthorizer
+	if _, err := NewAuthorizationService(identity, &fakeActionAuthorizer{}, &fakeResourceAuthorizer{}); err == nil {
+		t.Fatal("typed-nil identity was accepted")
+	}
+	if _, err := NewAuthorizationService(&fakeAuthorizationIdentity{}, actions, &fakeResourceAuthorizer{}); err == nil {
+		t.Fatal("typed-nil action authorizer was accepted")
+	}
+	if _, err := NewAuthorizationService(&fakeAuthorizationIdentity{}, &fakeActionAuthorizer{}, resources); err == nil {
+		t.Fatal("typed-nil resource authorizer was accepted")
+	}
+}
+
+func TestAuthorizationServiceBatchPreservesDecisionClassificationAndRejectsMismatchedResults(t *testing.T) {
+	identity := &fakeAuthorizationIdentity{subject: IdentitySubject{ID: "u1"}, found: true}
+	actions := &fakeBatchActionAuthorizer{decisions: []rbac.BatchActionDecision{{ActionAllowed: false}, {ActionAllowed: true, Allowed: false, Denied: true}, {ActionAllowed: true, Allowed: true}}}
+	resources := &fakeBatchResourceAuthorizer{decisions: []bool{true, true, false}}
+	authorizer, err := NewAuthorizationService(identity, actions, resources)
+	if err != nil {
+		t.Fatal(err)
+	}
+	requests := []AuthorizationRequest{{Actions: []string{"view"}, ResourceType: "host", ResourceID: "a"}, {Actions: []string{"view"}, ResourceType: "host", ResourceID: "b"}, {Actions: []string{"view"}, ResourceType: "host", ResourceID: "c"}}
+	got, err := authorizer.AuthorizeBatch(context.Background(), "u1", requests)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{AuthorizationReasonActionDenied, AuthorizationReasonResourceDenied, AuthorizationReasonResourceDenied}
+	for index := range want {
+		if got[index].Reason != want[index] || got[index].Allowed {
+			t.Fatalf("decision[%d]=%#v want %s", index, got[index], want[index])
+		}
+	}
+	actions.decisions = actions.decisions[:2]
+	if _, err := authorizer.AuthorizeBatch(context.Background(), "u1", requests); err == nil {
+		t.Fatal("mismatched batch decision length was accepted")
+	}
+}
+
+func TestAuthorizationServiceBatchChecksContextAfterIdentity(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	identity := &fakeAuthorizationIdentity{subject: IdentitySubject{ID: "admin", SuperAdmin: true}, found: true}
+	identity.err = nil
+	identityCancel := AuthorizationIdentity(identityAfterContext{identity: identity, cancel: cancel})
+	authorizer, err := NewAuthorizationService(identityCancel, &fakeBatchActionAuthorizer{}, &fakeBatchResourceAuthorizer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := authorizer.AuthorizeBatch(ctx, "admin", []AuthorizationRequest{{Actions: []string{"view"}, ResourceType: "host", ResourceID: "h1"}}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("error=%v want context canceled", err)
+	}
+}
+
+type identityAfterContext struct {
+	identity *fakeAuthorizationIdentity
+	cancel   context.CancelFunc
+}
+
+func (i identityAfterContext) FindIdentitySubject(ctx context.Context, userID string) (IdentitySubject, bool, error) {
+	subject, found, err := i.identity.FindIdentitySubject(ctx, userID)
+	i.cancel()
+	return subject, found, err
 }
 
 func TestAuthorizationServiceAuthorizeConnectionUsesUnifiedDecision(t *testing.T) {

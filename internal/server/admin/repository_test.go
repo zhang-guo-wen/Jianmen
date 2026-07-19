@@ -26,6 +26,15 @@ var _ adminRepository = (*store.DBStore)(nil)
 
 type repositoryTestAuthorization struct{}
 
+type typedNilAuthorization struct{}
+
+func (*typedNilAuthorization) AuthorizeConnection(context.Context, string, []string, string, string) (bool, error) {
+	return false, nil
+}
+func (*typedNilAuthorization) AuthorizeBatch(context.Context, string, []service.AuthorizationRequest) ([]service.AuthorizationDecision, error) {
+	return nil, nil
+}
+
 func (repositoryTestAuthorization) AuthorizeConnection(
 	context.Context,
 	string,
@@ -34,6 +43,10 @@ func (repositoryTestAuthorization) AuthorizeConnection(
 	string,
 ) (bool, error) {
 	return false, nil
+}
+
+func (repositoryTestAuthorization) AuthorizeBatch(context.Context, string, []service.AuthorizationRequest) ([]service.AuthorizationDecision, error) {
+	return nil, nil
 }
 
 type repositoryTestProvisioning struct{}
@@ -80,6 +93,10 @@ func TestNewAcceptsCompleteDBStoreRepository(t *testing.T) {
 	resourceGroups, err := service.NewResourceGroupService(repository)
 	if err != nil {
 		t.Fatalf("new resource group service: %v", err)
+	}
+	var nilAuthorization *typedNilAuthorization
+	if _, err := New(&config.Config{}, repository, db, identity, browserSessions, nilAuthorization, resourceGrants, resourceGroups, repositoryTestProvisioning{}, slog.New(slog.NewTextHandler(io.Discard, nil)), t.TempDir(), nil, online.NewRegistry(), &webrdp.Handler{}, &accessrequest.Handler{}); err == nil {
+		t.Fatal("New accepted typed-nil authorization service")
 	}
 
 	server, err := New(

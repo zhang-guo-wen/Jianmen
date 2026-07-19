@@ -222,8 +222,8 @@ func isDeny(permission model.Permission) bool {
 
 // BatchActionDecisionsContext loads all role permissions and resource-group
 // memberships once, then evaluates every requested resource in memory.
-func (c *Checker) BatchActionDecisionsContext(ctx context.Context, userID string, requests []BatchAuthorizationRequest) (map[string]BatchActionDecision, error) {
-	result := make(map[string]BatchActionDecision, len(requests))
+func (c *Checker) BatchActionDecisionsContext(ctx context.Context, userID string, requests []BatchAuthorizationRequest) ([]BatchActionDecision, error) {
+	result := make([]BatchActionDecision, len(requests))
 	if c == nil || c.db == nil {
 		return nil, errors.New("rbac: nil database")
 	}
@@ -242,9 +242,8 @@ func (c *Checker) BatchActionDecisionsContext(ctx context.Context, userID string
 	if err != nil {
 		return nil, err
 	}
-	for _, request := range requests {
-		key := BatchResourceKey(request.ResourceType, request.ResourceID)
-		decision := result[key]
+	for index, request := range requests {
+		decision := result[index]
 		for _, action := range normalizedBatchActions(request.Actions) {
 			actionAllowed := false
 			actionDenied := false
@@ -260,6 +259,9 @@ func (c *Checker) BatchActionDecisionsContext(ctx context.Context, userID string
 					actionAllowed = true
 				}
 			}
+			if actionAllowed {
+				decision.ActionAllowed = true
+			}
 			if actionAllowed && !actionDenied {
 				decision.Allowed = true
 			}
@@ -267,7 +269,7 @@ func (c *Checker) BatchActionDecisionsContext(ctx context.Context, userID string
 				decision.Denied = true
 			}
 		}
-		result[key] = decision
+		result[index] = decision
 	}
 	return result, nil
 }

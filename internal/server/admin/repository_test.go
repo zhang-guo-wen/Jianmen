@@ -13,6 +13,7 @@ import (
 
 	"jianmen/internal/config"
 	"jianmen/internal/handler/accessrequest"
+	"jianmen/internal/handler/systemsettings"
 	"jianmen/internal/handler/webrdp"
 	"jianmen/internal/online"
 	"jianmen/internal/rbac"
@@ -97,6 +98,7 @@ func TestNewAcceptsCompleteDBStoreRepository(t *testing.T) {
 		online.NewRegistry(),
 		&webrdp.Handler{},
 		&accessrequest.Handler{},
+		&systemsettings.Handler{},
 	)
 	if err != nil {
 		t.Fatalf("new admin server: %v", err)

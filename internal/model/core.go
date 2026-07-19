@@ -96,6 +96,8 @@ func AllModels() []any {
 		&AdminSession{},
 		&WebSocketTicket{},
 		&SystemInitialization{},
+		&SystemSetting{},
+		&SystemSettingRevision{},
 		&UserPublicKey{},
 		&Role{},
 		&Permission{},

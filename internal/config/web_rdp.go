@@ -1,6 +1,8 @@
 package config
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -44,6 +46,29 @@ type ObjectStorageConfig struct {
 	Secure           bool   `json:"secure"`
 	PathStyle        bool   `json:"path_style"`
 	AutoCreateBucket bool   `json:"auto_create_bucket"`
+	secureSet        bool
+}
+
+func (c *ObjectStorageConfig) UnmarshalJSON(data []byte) error {
+	type alias ObjectStorageConfig
+	*c = ObjectStorageConfig{}
+	value := struct {
+		Secure *bool `json:"secure"`
+		*alias
+	}{
+		alias: (*alias)(c),
+	}
+
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&value); err != nil {
+		return err
+	}
+	if value.Secure != nil {
+		c.Secure = *value.Secure
+		c.secureSet = true
+	}
+	return nil
 }
 
 func (c *Config) applyWebRDPDefaults() {
@@ -59,6 +84,9 @@ func (c *Config) applyWebRDPDefaults() {
 	c.ObjectStorage.Provider = strings.ToLower(valueOrDefault(c.ObjectStorage.Provider, "filesystem"))
 	c.ObjectStorage.LocalDir = valueOrDefault(c.ObjectStorage.LocalDir, defaultObjectStorageDir)
 	c.ObjectStorage.Prefix = strings.Trim(strings.TrimSpace(c.ObjectStorage.Prefix), "/")
+	if c.ObjectStorage.Provider == "s3" && !c.ObjectStorage.secureSet {
+		c.ObjectStorage.Secure = true
+	}
 }
 
 func (c *Config) validateWebRDP() error {

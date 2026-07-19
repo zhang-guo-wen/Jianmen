@@ -99,20 +99,23 @@ type ApplicationGatewayConfig struct {
 }
 
 type RecordingConfig struct {
-	Enabled          bool  `json:"enabled"`
-	RecordInput      bool  `json:"record_input"`
-	RecordCommands   bool  `json:"record_commands"`
-	RetentionDays    int   `json:"retention_days"`
-	MaxReplayBytes   int64 `json:"max_replay_bytes"`
-	CleanupBatchSize int   `json:"cleanup_batch_size"`
+	Enabled           bool  `json:"enabled"`
+	RecordInput       bool  `json:"record_input"`
+	RecordCommands    bool  `json:"record_commands"`
+	RetentionDays     int   `json:"retention_days"`
+	MaxReplayBytes    int64 `json:"max_replay_bytes"`
+	CleanupBatchSize  int   `json:"cleanup_batch_size"`
+	enabledSet        bool
+	recordInputSet    bool
+	recordCommandsSet bool
 	maxReplayBytesSet bool
 }
 
 func (c *RecordingConfig) UnmarshalJSON(data []byte) error {
 	var value struct {
-		Enabled          bool   `json:"enabled"`
-		RecordInput      bool   `json:"record_input"`
-		RecordCommands   bool   `json:"record_commands"`
+		Enabled          *bool  `json:"enabled"`
+		RecordInput      *bool  `json:"record_input"`
+		RecordCommands   *bool  `json:"record_commands"`
 		RetentionDays    int    `json:"retention_days"`
 		MaxReplayBytes   *int64 `json:"max_replay_bytes"`
 		CleanupBatchSize int    `json:"cleanup_batch_size"`
@@ -123,11 +126,20 @@ func (c *RecordingConfig) UnmarshalJSON(data []byte) error {
 		return err
 	}
 	*c = RecordingConfig{
-		Enabled:          value.Enabled,
-		RecordInput:      value.RecordInput,
-		RecordCommands:   value.RecordCommands,
 		RetentionDays:    value.RetentionDays,
 		CleanupBatchSize: value.CleanupBatchSize,
+	}
+	if value.Enabled != nil {
+		c.Enabled = *value.Enabled
+		c.enabledSet = true
+	}
+	if value.RecordInput != nil {
+		c.RecordInput = *value.RecordInput
+		c.recordInputSet = true
+	}
+	if value.RecordCommands != nil {
+		c.RecordCommands = *value.RecordCommands
+		c.recordCommandsSet = true
 	}
 	if value.MaxReplayBytes != nil {
 		c.MaxReplayBytes = *value.MaxReplayBytes
@@ -234,8 +246,13 @@ func (c *Config) applyDefaults() {
 		c.Admin.Enabled = true
 		c.Admin.CORSAllowedOrigins = []string{"http://127.0.0.1:47101", "http://localhost:47101"}
 	}
-	if !c.Recording.Enabled && !c.Recording.RecordCommands && !c.Recording.RecordInput {
+	if !c.Recording.enabledSet {
 		c.Recording.Enabled = true
+	}
+	if !c.Recording.recordInputSet {
+		c.Recording.RecordInput = false
+	}
+	if !c.Recording.recordCommandsSet {
 		c.Recording.RecordCommands = true
 	}
 	if c.Recording.RetentionDays == 0 {

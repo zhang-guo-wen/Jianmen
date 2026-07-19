@@ -33,6 +33,11 @@ func main() {
 	defer cleanupMetadata()
 	appStore := store.NewDBStore(metadataDB)
 	logger.Info("using database-backed store")
+	systemSettings, err := bootstrapSystemSettings(context.Background(), cfg, appStore)
+	if err != nil {
+		logger.Error("failed to initialize system settings", "error", err)
+		os.Exit(1)
+	}
 	identityService, err := service.NewIdentityService(appStore)
 	if err != nil {
 		logger.Error("failed to initialize identity service", "error", err)
@@ -84,6 +89,11 @@ func main() {
 		logger.Error("failed to initialize RDP object storage", "error", err)
 		os.Exit(1)
 	}
+	systemSettingsDiagnostics, err := newSystemSettingsDiagnostics(cfg, rdpObjects)
+	if err != nil {
+		logger.Error("failed to initialize system settings diagnostics", "error", err)
+		os.Exit(1)
+	}
 	auditRetention, err := newAuditRetentionRuntime(cfg, appStore, rdpObjects)
 	if err != nil {
 		logger.Error("failed to initialize audit retention", "error", err)
@@ -106,7 +116,7 @@ func main() {
 		if err := startAdminRuntime(
 			ctx, errCh, cfg, rdpObjects, appStore, metadataDB, identityService,
 			browserSessionService, authorizationService, databaseProvisioning,
-			logger, dataDir, onlineSessions,
+			systemSettings, systemSettingsDiagnostics, logger, dataDir, onlineSessions,
 		); err != nil {
 			logger.Error("failed to initialize admin server", "error", err)
 			os.Exit(1)

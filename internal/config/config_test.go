@@ -204,6 +204,90 @@ func TestRecordingGovernanceDistinguishesMissingAndExplicitZeroQuota(t *testing.
 	}
 }
 
+func TestLoadRecordingBooleanDefaultsRespectFieldPresence(t *testing.T) {
+	tests := []struct {
+		name               string
+		configJSON         string
+		wantEnabled        bool
+		wantRecordInput    bool
+		wantRecordCommands bool
+	}{
+		{
+			name:               "recording section omitted",
+			configJSON:         `{}`,
+			wantEnabled:        true,
+			wantRecordCommands: true,
+		},
+		{
+			name:               "recording fields omitted",
+			configJSON:         `{"recording":{}}`,
+			wantEnabled:        true,
+			wantRecordCommands: true,
+		},
+		{
+			name:               "all booleans explicitly disabled",
+			configJSON:         `{"recording":{"enabled":false,"record_input":false,"record_commands":false}}`,
+			wantEnabled:        false,
+			wantRecordInput:    false,
+			wantRecordCommands: false,
+		},
+		{
+			name:               "disabled recording keeps missing command default",
+			configJSON:         `{"recording":{"enabled":false}}`,
+			wantEnabled:        false,
+			wantRecordCommands: true,
+		},
+		{
+			name:               "disabled commands keep missing enabled default",
+			configJSON:         `{"recording":{"record_commands":false}}`,
+			wantEnabled:        true,
+			wantRecordCommands: false,
+		},
+		{
+			name:               "explicit input recording is retained",
+			configJSON:         `{"recording":{"record_input":true}}`,
+			wantEnabled:        true,
+			wantRecordInput:    true,
+			wantRecordCommands: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "config.json")
+			if err := os.WriteFile(path, []byte(tt.configJSON), 0o600); err != nil {
+				t.Fatalf("write config: %v", err)
+			}
+
+			cfg, err := Load(path)
+			if err != nil {
+				t.Fatalf("Load() error = %v", err)
+			}
+			if cfg.Recording.Enabled != tt.wantEnabled {
+				t.Fatalf("Recording.Enabled = %t, want %t", cfg.Recording.Enabled, tt.wantEnabled)
+			}
+			if cfg.Recording.RecordInput != tt.wantRecordInput {
+				t.Fatalf("Recording.RecordInput = %t, want %t", cfg.Recording.RecordInput, tt.wantRecordInput)
+			}
+			if cfg.Recording.RecordCommands != tt.wantRecordCommands {
+				t.Fatalf("Recording.RecordCommands = %t, want %t", cfg.Recording.RecordCommands, tt.wantRecordCommands)
+			}
+		})
+	}
+}
+
+func TestLoadRejectsUnknownRecordingField(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(path, []byte(`{"recording":{"unexpected":true}}`), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	_, err := Load(path)
+	if err == nil || !strings.Contains(err.Error(), `unknown field "unexpected"`) {
+		t.Fatalf("Load() error = %v, want unknown recording field", err)
+	}
+}
+
 func TestDatabaseProtocolListenerValidation(t *testing.T) {
 	tests := []struct {
 		name    string

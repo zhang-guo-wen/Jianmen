@@ -77,6 +77,77 @@ func TestWebRDPDefaultsNormalizeConfiguredValues(t *testing.T) {
 	}
 }
 
+func TestLoadObjectStorageSecureDefaultRespectsFieldPresence(t *testing.T) {
+	tests := []struct {
+		name       string
+		configJSON string
+		wantSecure bool
+	}{
+		{
+			name: "S3 secure defaults to enabled",
+			configJSON: `{"object_storage":{
+				"provider":"s3",
+				"endpoint":"s3.internal.example:9000",
+				"access_key_id":"access-key",
+				"secret_access_key":"secret-key",
+				"bucket":"recordings"
+			}}`,
+			wantSecure: true,
+		},
+		{
+			name: "S3 explicit insecure transport is retained",
+			configJSON: `{"object_storage":{
+				"provider":"s3",
+				"endpoint":"s3.internal.example:9000",
+				"access_key_id":"access-key",
+				"secret_access_key":"secret-key",
+				"bucket":"recordings",
+				"secure":false
+			}}`,
+			wantSecure: false,
+		},
+		{
+			name:       "filesystem omitted secure remains disabled",
+			configJSON: `{"object_storage":{"provider":"filesystem","local_dir":"data/objects"}}`,
+			wantSecure: false,
+		},
+		{
+			name:       "filesystem explicit secure value is retained",
+			configJSON: `{"object_storage":{"provider":"filesystem","local_dir":"data/objects","secure":true}}`,
+			wantSecure: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "config.json")
+			if err := os.WriteFile(path, []byte(tt.configJSON), 0o600); err != nil {
+				t.Fatalf("write config: %v", err)
+			}
+
+			cfg, err := Load(path)
+			if err != nil {
+				t.Fatalf("Load() error = %v", err)
+			}
+			if cfg.ObjectStorage.Secure != tt.wantSecure {
+				t.Fatalf("ObjectStorage.Secure = %t, want %t", cfg.ObjectStorage.Secure, tt.wantSecure)
+			}
+		})
+	}
+}
+
+func TestLoadRejectsUnknownObjectStorageField(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(path, []byte(`{"object_storage":{"unexpected":true}}`), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	_, err := Load(path)
+	if err == nil || !strings.Contains(err.Error(), `unknown field "unexpected"`) {
+		t.Fatalf("Load() error = %v, want unknown object storage field", err)
+	}
+}
+
 func TestWebRDPValidation(t *testing.T) {
 	tests := []struct {
 		name    string

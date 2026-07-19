@@ -7,6 +7,7 @@
   Monitor,
   Box,
   Setting,
+  Tools,
 } from '@element-plus/icons-vue';
 import type { Component } from 'vue';
 import type { RouteRecordRaw } from 'vue-router';
@@ -104,6 +105,16 @@ export const APP_NAV_ITEMS: AppNavigationItem[] = [
     titleKey: 'route.rbac.title',
     descriptionKey: 'route.rbac.description',
     component: () => import('@/views/UnifiedRBACView.vue'),
+  },
+  {
+    key: 'systemSettings',
+    path: '/system-settings',
+    name: 'system-settings',
+    icon: Tools,
+    labelKey: 'nav.systemSettings',
+    titleKey: 'route.systemSettings.title',
+    descriptionKey: 'route.systemSettings.description',
+    component: () => import('@/views/SystemSettingsView.vue'),
   },
   {
     key: 'settings',

@@ -200,6 +200,11 @@ var migrations = []Migration{
 		Name:    "audit session lease recovery",
 		Run:     migrateAuditSessionLease,
 	},
+	{
+		Version: systemSettingMigrationVersion,
+		Name:    "system configuration management",
+		Run:     migrateSystemSettings,
+	},
 }
 
 func rejectDuplicateDatabaseAccounts(tx *gorm.DB) error {

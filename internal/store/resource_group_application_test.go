@@ -25,7 +25,7 @@ func TestApplicationsAndPlatformsCreateResourceGroups(t *testing.T) {
 	if err := db.Create(&owner).Error; err != nil {
 		t.Fatalf("create owner: %v", err)
 	}
-	if _, err := store.AddPlatformAccount(model.PlatformAccount{
+	if _, err := store.AddPlatformAccount(context.Background(), model.PlatformAccount{
 		Name: "gitlab", PlatformName: "GitLab", Username: "gitlab-user",
 		GroupName: "platforms", OwnerID: owner.ID, Status: "active",
 	}); err != nil {

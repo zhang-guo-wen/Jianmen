@@ -107,12 +107,12 @@ type adminContainerRepository interface {
 }
 
 type adminPlatformAccountRepository interface {
-	PlatformAccounts(store.PlatformAccountListParams) ([]store.PlatformAccountView, int64, error)
-	PlatformAccount(string) (store.PlatformAccountView, error)
-	AddPlatformAccount(model.PlatformAccount) (store.PlatformAccountView, error)
-	UpdatePlatformAccount(string, model.PlatformAccount) (store.PlatformAccountView, error)
-	DeletePlatformAccount(string) error
-	GetPlatformAccountPassword(string) (string, error)
+	PlatformAccounts(context.Context, store.PlatformAccountListParams) ([]store.PlatformAccountView, int64, error)
+	PlatformAccount(context.Context, string) (store.PlatformAccountView, error)
+	AddPlatformAccount(context.Context, model.PlatformAccount) (store.PlatformAccountView, error)
+	UpdatePlatformAccount(context.Context, string, model.PlatformAccount) (store.PlatformAccountView, error)
+	DeletePlatformAccount(context.Context, string) error
+	GetPlatformAccountPassword(context.Context, string) (string, error)
 }
 
 type adminUserSessionCreationRepository interface {

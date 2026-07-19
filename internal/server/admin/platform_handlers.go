@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -61,7 +62,7 @@ func (s *Server) handleListPlatformAccounts(w http.ResponseWriter, r *http.Reque
 		Platform: r.URL.Query().Get("platform"),
 		Unpaged:  true,
 	}
-	views, _, err := s.platformAccounts.PlatformAccounts(params)
+	views, _, err := s.platformAccounts.PlatformAccounts(r.Context(), params)
 	if err != nil {
 		s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
 		return
@@ -84,13 +85,15 @@ func (s *Server) handleCreatePlatformAccount(w http.ResponseWriter, r *http.Requ
 		s.writeErrorText(w, r, http.StatusBadRequest, "username is required")
 		return
 	}
-	view, err := s.platformAccounts.AddPlatformAccount(platformAccountModel(payload, userIDFromRequest(r)))
+	view, err := s.platformAccounts.AddPlatformAccount(r.Context(), platformAccountModel(payload, userIDFromRequest(r)))
 	if err != nil {
 		writePlatformStoreError(w, r, err)
 		return
 	}
 	if err := s.grantCreatedResource(r, model.ResourceTypePlatformAccount, view.ID); err != nil {
-		if cleanupErr := s.platformAccounts.DeletePlatformAccount(view.ID); cleanupErr != nil {
+		cleanupCtx, cancelCleanup := context.WithTimeout(context.WithoutCancel(r.Context()), 5*time.Second)
+		defer cancelCleanup()
+		if cleanupErr := s.platformAccounts.DeletePlatformAccount(cleanupCtx, view.ID); cleanupErr != nil {
 			err = errors.Join(err, cleanupErr)
 		}
 		s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
@@ -119,7 +122,7 @@ func (s *Server) handlePlatformAccount(w http.ResponseWriter, r *http.Request) {
 		if !s.requireResourceAction(w, r, rbac.ActionPlatformAccountView, model.ResourceTypePlatformAccount, id) {
 			return
 		}
-		view, err := s.platformAccounts.PlatformAccount(id)
+		view, err := s.platformAccounts.PlatformAccount(r.Context(), id)
 		if err != nil {
 			writePlatformStoreError(w, r, err)
 			return
@@ -134,7 +137,7 @@ func (s *Server) handlePlatformAccount(w http.ResponseWriter, r *http.Request) {
 		if !s.requireResourceAction(w, r, rbac.ActionPlatformAccountDelete, model.ResourceTypePlatformAccount, id) {
 			return
 		}
-		if err := s.platformAccounts.DeletePlatformAccount(id); err != nil {
+		if err := s.platformAccounts.DeletePlatformAccount(r.Context(), id); err != nil {
 			writePlatformStoreError(w, r, err)
 			return
 		}
@@ -150,7 +153,7 @@ func (s *Server) handleUpdatePlatformAccount(w http.ResponseWriter, r *http.Requ
 	if !ok {
 		return
 	}
-	view, err := s.platformAccounts.UpdatePlatformAccount(id, platformAccountModel(payload, ""))
+	view, err := s.platformAccounts.UpdatePlatformAccount(r.Context(), id, platformAccountModel(payload, ""))
 	if err != nil {
 		writePlatformStoreError(w, r, err)
 		return
@@ -167,7 +170,7 @@ func (s *Server) handlePlatformAccountPassword(w http.ResponseWriter, r *http.Re
 	if !s.requireResourceAction(w, r, rbac.ActionPlatformAccountUse, model.ResourceTypePlatformAccount, id) {
 		return
 	}
-	password, err := s.platformAccounts.GetPlatformAccountPassword(id)
+	password, err := s.platformAccounts.GetPlatformAccountPassword(r.Context(), id)
 	if err != nil {
 		writePlatformStoreError(w, r, err)
 		return

@@ -28,6 +28,7 @@
   },
   "database_gateway": {
     "enabled": true,
+    "max_client_message_bytes": 10485760,
     "mode": "unified",
     "unified": {
       "enabled": true,

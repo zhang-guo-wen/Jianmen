@@ -181,7 +181,7 @@ func (g *Gateway) handleGatewayConn(client net.Conn, conn *gatewayConn) {
 	})
 	defer unregisterOnline()
 
-	observer := newQueryObserver(conn.protocol, recorder)
+	observer := newQueryObserverWithLimit(conn.protocol, recorder, g.cfg.MaxClientMessageBytes)
 	relayGatewayConnection(client, conn.upstream, observer)
 }
 

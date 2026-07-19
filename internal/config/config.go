@@ -10,6 +10,12 @@ import (
 	"strings"
 )
 
+const (
+	DefaultDatabaseGatewayMaxClientMessageBytes = 10 * 1024 * 1024
+	MinDatabaseGatewayMaxClientMessageBytes     = 64 * 1024
+	MaxDatabaseGatewayMaxClientMessageBytes     = 16 * 1024 * 1024
+)
+
 type Config struct {
 	ListenAddr         string                   `json:"listen_addr"`
 	HostKeyPath        string                   `json:"host_key_path"`

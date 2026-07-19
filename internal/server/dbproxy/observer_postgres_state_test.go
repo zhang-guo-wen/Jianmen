@@ -116,7 +116,9 @@ func TestPostgresObserverAllowsEmptyPreparedStatement(t *testing.T) {
 		t.Fatalf("executed audit entries = %#v, want one empty statement", sink.queries)
 	}
 
-	response := append(postgresMessage('I', nil), postgresMessage('Z', []byte{'I'})...)
+	response := append(postgresMessage('1', nil), postgresMessage('2', nil)...)
+	response = append(response, postgresMessage('I', nil)...)
+	response = append(response, postgresMessage('Z', []byte{'I'})...)
 	if decision := observer.ObserveServerBytes(response); decision != nil {
 		t.Fatalf("empty prepared response denied: %#v", decision)
 	}

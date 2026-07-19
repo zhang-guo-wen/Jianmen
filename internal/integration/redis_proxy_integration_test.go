@@ -78,7 +78,7 @@ func TestDatabaseGatewayRedisAgainstDocker(t *testing.T) {
 
 					resp2 := newRedisGatewayProtocolClient(t, gateway)
 					resp2.authenticateRESP2(t, compactUsername, integrationPassword)
-					exerciseRedisCommonCompatibility(t, resp2, "resp2", 2)
+					exerciseRedisCommonCompatibility(t, resp2, "resp2:"+mode, 2)
 					exerciseRedisPubSubCompatibility(t, resp2, gateway, upstreamAddr, compactUsername, 2)
 					resp2.close(t)
 
@@ -89,13 +89,13 @@ func TestDatabaseGatewayRedisAgainstDocker(t *testing.T) {
 
 					resp3 := newRedisGatewayProtocolClient(t, gateway)
 					resp3.authenticateRESP3(t, compactUsername, integrationPassword)
-					exerciseRedisCommonCompatibility(t, resp3, "resp3", 3)
-					exerciseRedisRESP3Types(t, resp3)
+					exerciseRedisCommonCompatibility(t, resp3, "resp3:"+mode, 3)
+					exerciseRedisRESP3Types(t, resp3, "resp3:"+mode)
 					exerciseRedisPubSubCompatibility(t, resp3, gateway, upstreamAddr, compactUsername, 3)
 					resp3.close(t)
 
-					assertDBAuditSQLContains(t, fixture.replayDir, "SET resp2:value [REDACTED]")
-					assertDBAuditSQLContains(t, fixture.replayDir, "SET resp3:value [REDACTED]")
+					assertDBAuditSQLContains(t, fixture.replayDir, "SET resp2:"+mode+":value [REDACTED]")
+					assertDBAuditSQLContains(t, fixture.replayDir, "SET resp3:"+mode+":value [REDACTED]")
 				})
 			}
 		})
@@ -268,25 +268,25 @@ func exerciseRedisCommonCompatibility(t *testing.T, client *redisProtocolClient,
 	}
 }
 
-func exerciseRedisRESP3Types(t *testing.T, client *redisProtocolClient) {
+func exerciseRedisRESP3Types(t *testing.T, client *redisProtocolClient, prefix string) {
 	t.Helper()
-	client.expectInteger(t, client.command(t, "HSET", "resp3:hash", "field", "value"), 1)
-	hash := client.command(t, "HGETALL", "resp3:hash")
+	client.expectInteger(t, client.command(t, "HSET", prefix+":hash", "field", "value"), 1)
+	hash := client.command(t, "HGETALL", prefix+":hash")
 	if hash.kind != '%' || len(hash.values) != 2 || hash.values[0].text != "field" || hash.values[1].text != "value" {
 		t.Fatalf("RESP3 map = %#v", hash)
 	}
-	client.expectInteger(t, client.command(t, "SADD", "resp3:set", "member"), 1)
-	set := client.command(t, "SMEMBERS", "resp3:set")
+	client.expectInteger(t, client.command(t, "SADD", prefix+":set", "member"), 1)
+	set := client.command(t, "SMEMBERS", prefix+":set")
 	if set.kind != '~' || len(set.values) != 1 || set.values[0].text != "member" {
 		t.Fatalf("RESP3 set = %#v", set)
 	}
-	client.expectInteger(t, client.command(t, "SISMEMBER", "resp3:set", "member"), 1)
+	client.expectInteger(t, client.command(t, "SISMEMBER", prefix+":set", "member"), 1)
 	boolean := client.command(t, "EVAL", "redis.setresp(3); return true", "0")
 	if boolean.kind != '#' || boolean.text != "t" {
 		t.Fatalf("RESP3 boolean = %#v", boolean)
 	}
-	client.expectInteger(t, client.command(t, "ZADD", "resp3:zset", "1.5", "member"), 1)
-	double := client.command(t, "ZSCORE", "resp3:zset", "member")
+	client.expectInteger(t, client.command(t, "ZADD", prefix+":zset", "1.5", "member"), 1)
+	double := client.command(t, "ZSCORE", prefix+":zset", "member")
 	if double.kind != ',' || double.text != "1.5" {
 		t.Fatalf("RESP3 double = %#v", double)
 	}

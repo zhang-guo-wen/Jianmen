@@ -92,6 +92,12 @@ func TestCollectionReturnsStateAndRedactedInfrastructure(t *testing.T) {
 		envelope.Data.Effective.DatabaseGatewayMode != "unified" {
 		t.Fatalf("database gateway modes were not mapped: %#v", envelope.Data)
 	}
+	if envelope.Data.Desired.DatabaseMaxClientMessageBytes != 10*1024*1024 {
+		t.Fatalf(
+			"database client message limit = %d",
+			envelope.Data.Desired.DatabaseMaxClientMessageBytes,
+		)
+	}
 	storage := envelope.Data.Infrastructure.ObjectStorage
 	if !storage.CredentialsConfigured || storage.AccessKeyIDConfigured != true {
 		t.Fatalf("object storage response = %#v", storage)
@@ -112,7 +118,8 @@ func TestCollectionUpdatesWithAuthenticatedActor(t *testing.T) {
 			"recording_record_commands": true,
 			"recording_retention_days": 30,
 			"recording_max_replay_bytes": 1024,
-			"recording_cleanup_batch_size": 100
+			"recording_cleanup_batch_size": 100,
+			"database_max_client_message_bytes": 10485760
 		},
 		"expected_revision": 3,
 		"confirm_risk": true
@@ -131,6 +138,12 @@ func TestCollectionUpdatesWithAuthenticatedActor(t *testing.T) {
 		settings.update.ExpectedRevision != 3 ||
 		!settings.update.ConfirmRisk {
 		t.Fatalf("update = %#v", settings.update)
+	}
+	if settings.update.Settings.DatabaseMaxClientMessageBytes != 10*1024*1024 {
+		t.Fatalf(
+			"database client message limit = %d",
+			settings.update.Settings.DatabaseMaxClientMessageBytes,
+		)
 	}
 }
 
@@ -179,7 +192,8 @@ func TestCollectionRejectsIncompleteSettings(t *testing.T) {
 			"web_rdp_connect_timeout_seconds":15,
 			"recording_retention_days":30,
 			"recording_max_replay_bytes":1024,
-			"recording_cleanup_batch_size":100
+			"recording_cleanup_batch_size":100,
+			"database_max_client_message_bytes":10485760
 		},
 		"expected_revision":3
 	}`)
@@ -307,6 +321,7 @@ func testSystemSettingsState() service.SystemSettingsState {
 		WebRDPConnectTimeoutSeconds: 15, RecordingEnabled: true,
 		RecordingRecordCommands: true, RecordingRetentionDays: 30,
 		RecordingMaxReplayBytes: 1024, RecordingCleanupBatchSize: 100,
+		DatabaseMaxClientMessageBytes: 10 * 1024 * 1024,
 	}
 	return service.SystemSettingsState{
 		Desired: values, Effective: values, Revision: 3, EffectiveRevision: 2,
@@ -326,7 +341,8 @@ func validUpdateBody() []byte {
 			"recording_record_commands":true,
 			"recording_retention_days":30,
 			"recording_max_replay_bytes":1024,
-			"recording_cleanup_batch_size":100
+			"recording_cleanup_batch_size":100,
+			"database_max_client_message_bytes":10485760
 		},
 		"expected_revision":3,
 		"confirm_risk":true

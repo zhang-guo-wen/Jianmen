@@ -206,6 +206,11 @@ var migrations = []Migration{
 		Run:     migrateSystemSettings,
 	},
 	{
+		Version: auditDBQueryLargePayloadMigrationVersion,
+		Name:    "large database proxy client message support",
+		Run:     migrateAuditDBQueryLargePayload,
+	},
+	{
 		Version: databaseGatewayModeMigrationVersion,
 		Name:    "database gateway mode system setting",
 		Run:     migrateDatabaseGatewayMode,

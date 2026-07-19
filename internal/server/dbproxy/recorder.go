@@ -362,27 +362,34 @@ func writeRelayBytes(connection net.Conn, data []byte) error {
 }
 
 type connectionRecorder struct {
-	mu             sync.Mutex
-	id             string
-	protocol       string
-	metaPath       string
-	meta           DBConnectionMeta
-	file           *os.File
-	seq            int64
-	startedAt      time.Time
-	audit          auditWriter
-	auditSessionID string
-	onFatal        func(error)
-	fatalOnce      sync.Once
-	logger         *slog.Logger
+	mu                    sync.Mutex
+	id                    string
+	protocol              string
+	maxClientMessageBytes int
+	metaPath              string
+	meta                  DBConnectionMeta
+	file                  *os.File
+	seq                   int64
+	startedAt             time.Time
+	audit                 auditWriter
+	auditSessionID        string
+	onFatal               func(error)
+	fatalOnce             sync.Once
+	logger                *slog.Logger
 }
 
 func (r *connectionRecorder) StartQuery(sql string, detail map[string]any) (queryRecord, queryDecision) {
 	if r == nil || strings.TrimSpace(sql) == "" {
 		return queryRecord{}, allowQuery()
 	}
+	sqlAudit := databaseSQLAudit{text: sql, originalBytes: int64(len(sql))}
 	if r.protocol == "mysql" || r.protocol == "postgres" {
-		sql = redactDatabaseSQL(sql)
+		sqlAudit, detail = normalizeDatabaseSQLAudit(
+			sql,
+			detail,
+			r.maxClientMessageBytes,
+		)
+		sql = sqlAudit.text
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -390,12 +397,14 @@ func (r *connectionRecorder) StartQuery(sql string, detail map[string]any) (quer
 	startedAt := time.Now().UTC()
 	queryKind := classifyQueryKind(sql)
 	record := queryRecord{
-		seq:       r.seq,
-		protocol:  r.protocol,
-		sql:       sql,
-		queryKind: queryKind,
-		detail:    detail,
-		startedAt: startedAt,
+		seq:              r.seq,
+		protocol:         r.protocol,
+		sql:              sql,
+		originalSQLBytes: sqlAudit.originalBytes,
+		sqlTruncated:     sqlAudit.truncated,
+		queryKind:        queryKind,
+		detail:           detail,
+		startedAt:        startedAt,
 	}
 	decision := allowQuery()
 	startDetail := mergeDetails(detail, map[string]any{"query_kind": queryKind})
@@ -460,11 +469,13 @@ func (r *connectionRecorder) writeFinishLocked(record queryRecord, finish queryF
 	}
 	if r.audit != nil && r.auditSessionID != "" {
 		if err := r.audit.CreateAuditDBQuery(&model.AuditDBQuery{
-			AuditSessionID: r.auditSessionID,
-			Timestamp:      completedAt,
-			SQLText:        record.sql,
-			QueryKind:      record.queryKind,
-			DurationMs:     completedAt.Sub(record.startedAt).Milliseconds(),
+			AuditSessionID:   r.auditSessionID,
+			Timestamp:        completedAt,
+			SQLText:          record.sql,
+			OriginalSQLBytes: record.originalSQLBytes,
+			SQLTruncated:     record.sqlTruncated,
+			QueryKind:        record.queryKind,
+			DurationMs:       completedAt.Sub(record.startedAt).Milliseconds(),
 		}); err != nil {
 			r.reportFatal(fmt.Errorf("write database query audit record: %w", err))
 		}

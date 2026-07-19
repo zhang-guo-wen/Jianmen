@@ -46,16 +46,17 @@ func bootstrapSystemSettings(
 
 func systemSettingsFromConfig(cfg *config.Config) service.SystemSettings {
 	return service.SystemSettings{
-		DatabaseGatewayMode:         cfg.DatabaseGateway.EffectiveMode(),
-		WebRDPEnabled:               cfg.WebRDP.Enabled,
-		WebRDPConnectTimeoutSeconds: cfg.WebRDP.ConnectTimeoutSecs,
-		WebRDPAllowUnrecorded:       cfg.WebRDP.AllowUnrecorded,
-		RecordingEnabled:            cfg.Recording.Enabled,
-		RecordingRecordInput:        cfg.Recording.RecordInput,
-		RecordingRecordCommands:     cfg.Recording.RecordCommands,
-		RecordingRetentionDays:      cfg.Recording.RetentionDays,
-		RecordingMaxReplayBytes:     cfg.Recording.MaxReplayBytes,
-		RecordingCleanupBatchSize:   cfg.Recording.CleanupBatchSize,
+		DatabaseGatewayMode:           cfg.DatabaseGateway.EffectiveMode(),
+		WebRDPEnabled:                 cfg.WebRDP.Enabled,
+		WebRDPConnectTimeoutSeconds:   cfg.WebRDP.ConnectTimeoutSecs,
+		WebRDPAllowUnrecorded:         cfg.WebRDP.AllowUnrecorded,
+		RecordingEnabled:              cfg.Recording.Enabled,
+		RecordingRecordInput:          cfg.Recording.RecordInput,
+		RecordingRecordCommands:       cfg.Recording.RecordCommands,
+		RecordingRetentionDays:        cfg.Recording.RetentionDays,
+		RecordingMaxReplayBytes:       cfg.Recording.MaxReplayBytes,
+		RecordingCleanupBatchSize:     cfg.Recording.CleanupBatchSize,
+		DatabaseMaxClientMessageBytes: cfg.DatabaseGateway.MaxClientMessageBytes,
 	}
 }
 
@@ -70,6 +71,8 @@ func applySystemSettings(cfg *config.Config, settings service.SystemSettings) {
 	cfg.Recording.RetentionDays = settings.RecordingRetentionDays
 	cfg.Recording.MaxReplayBytes = settings.RecordingMaxReplayBytes
 	cfg.Recording.CleanupBatchSize = settings.RecordingCleanupBatchSize
+	cfg.DatabaseGateway.MaxClientMessageBytes =
+		settings.DatabaseMaxClientMessageBytes
 }
 
 func newSystemSettingsDiagnostics(

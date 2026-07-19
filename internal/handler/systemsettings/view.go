@@ -8,16 +8,17 @@ import (
 )
 
 type settingsValues struct {
-	DatabaseGatewayMode         string `json:"database_gateway_mode"`
-	WebRDPEnabled               bool   `json:"web_rdp_enabled"`
-	WebRDPConnectTimeoutSeconds int    `json:"web_rdp_connect_timeout_seconds"`
-	WebRDPAllowUnrecorded       bool   `json:"web_rdp_allow_unrecorded"`
-	RecordingEnabled            bool   `json:"recording_enabled"`
-	RecordingRecordInput        bool   `json:"recording_record_input"`
-	RecordingRecordCommands     bool   `json:"recording_record_commands"`
-	RecordingRetentionDays      int    `json:"recording_retention_days"`
-	RecordingMaxReplayBytes     int64  `json:"recording_max_replay_bytes"`
-	RecordingCleanupBatchSize   int    `json:"recording_cleanup_batch_size"`
+	DatabaseGatewayMode           string `json:"database_gateway_mode"`
+	WebRDPEnabled                 bool   `json:"web_rdp_enabled"`
+	WebRDPConnectTimeoutSeconds   int    `json:"web_rdp_connect_timeout_seconds"`
+	WebRDPAllowUnrecorded         bool   `json:"web_rdp_allow_unrecorded"`
+	RecordingEnabled              bool   `json:"recording_enabled"`
+	RecordingRecordInput          bool   `json:"recording_record_input"`
+	RecordingRecordCommands       bool   `json:"recording_record_commands"`
+	RecordingRetentionDays        int    `json:"recording_retention_days"`
+	RecordingMaxReplayBytes       int64  `json:"recording_max_replay_bytes"`
+	RecordingCleanupBatchSize     int    `json:"recording_cleanup_batch_size"`
+	DatabaseMaxClientMessageBytes int    `json:"database_max_client_message_bytes"`
 }
 
 type updateRequest struct {
@@ -27,16 +28,17 @@ type updateRequest struct {
 }
 
 type settingsValuesRequest struct {
-	DatabaseGatewayMode         *string `json:"database_gateway_mode"`
-	WebRDPEnabled               *bool   `json:"web_rdp_enabled"`
-	WebRDPConnectTimeoutSeconds *int    `json:"web_rdp_connect_timeout_seconds"`
-	WebRDPAllowUnrecorded       *bool   `json:"web_rdp_allow_unrecorded"`
-	RecordingEnabled            *bool   `json:"recording_enabled"`
-	RecordingRecordInput        *bool   `json:"recording_record_input"`
-	RecordingRecordCommands     *bool   `json:"recording_record_commands"`
-	RecordingRetentionDays      *int    `json:"recording_retention_days"`
-	RecordingMaxReplayBytes     *int64  `json:"recording_max_replay_bytes"`
-	RecordingCleanupBatchSize   *int    `json:"recording_cleanup_batch_size"`
+	DatabaseGatewayMode           *string `json:"database_gateway_mode"`
+	WebRDPEnabled                 *bool   `json:"web_rdp_enabled"`
+	WebRDPConnectTimeoutSeconds   *int    `json:"web_rdp_connect_timeout_seconds"`
+	WebRDPAllowUnrecorded         *bool   `json:"web_rdp_allow_unrecorded"`
+	RecordingEnabled              *bool   `json:"recording_enabled"`
+	RecordingRecordInput          *bool   `json:"recording_record_input"`
+	RecordingRecordCommands       *bool   `json:"recording_record_commands"`
+	RecordingRetentionDays        *int    `json:"recording_retention_days"`
+	RecordingMaxReplayBytes       *int64  `json:"recording_max_replay_bytes"`
+	RecordingCleanupBatchSize     *int    `json:"recording_cleanup_batch_size"`
+	DatabaseMaxClientMessageBytes *int    `json:"database_max_client_message_bytes"`
 }
 
 type stateResponse struct {
@@ -112,35 +114,38 @@ func (v settingsValuesRequest) toService() (service.SystemSettings, error) {
 		v.WebRDPAllowUnrecorded == nil || v.RecordingEnabled == nil ||
 		v.RecordingRecordInput == nil || v.RecordingRecordCommands == nil ||
 		v.RecordingRetentionDays == nil || v.RecordingMaxReplayBytes == nil ||
-		v.RecordingCleanupBatchSize == nil {
+		v.RecordingCleanupBatchSize == nil ||
+		v.DatabaseMaxClientMessageBytes == nil {
 		return service.SystemSettings{}, errors.New("all system settings fields are required")
 	}
 	return service.SystemSettings{
-		DatabaseGatewayMode:         *v.DatabaseGatewayMode,
-		WebRDPEnabled:               *v.WebRDPEnabled,
-		WebRDPConnectTimeoutSeconds: *v.WebRDPConnectTimeoutSeconds,
-		WebRDPAllowUnrecorded:       *v.WebRDPAllowUnrecorded,
-		RecordingEnabled:            *v.RecordingEnabled,
-		RecordingRecordInput:        *v.RecordingRecordInput,
-		RecordingRecordCommands:     *v.RecordingRecordCommands,
-		RecordingRetentionDays:      *v.RecordingRetentionDays,
-		RecordingMaxReplayBytes:     *v.RecordingMaxReplayBytes,
-		RecordingCleanupBatchSize:   *v.RecordingCleanupBatchSize,
+		DatabaseGatewayMode:           *v.DatabaseGatewayMode,
+		WebRDPEnabled:                 *v.WebRDPEnabled,
+		WebRDPConnectTimeoutSeconds:   *v.WebRDPConnectTimeoutSeconds,
+		WebRDPAllowUnrecorded:         *v.WebRDPAllowUnrecorded,
+		RecordingEnabled:              *v.RecordingEnabled,
+		RecordingRecordInput:          *v.RecordingRecordInput,
+		RecordingRecordCommands:       *v.RecordingRecordCommands,
+		RecordingRetentionDays:        *v.RecordingRetentionDays,
+		RecordingMaxReplayBytes:       *v.RecordingMaxReplayBytes,
+		RecordingCleanupBatchSize:     *v.RecordingCleanupBatchSize,
+		DatabaseMaxClientMessageBytes: *v.DatabaseMaxClientMessageBytes,
 	}, nil
 }
 
 func mapValues(value service.SystemSettings) settingsValues {
 	return settingsValues{
-		DatabaseGatewayMode:         value.DatabaseGatewayMode,
-		WebRDPEnabled:               value.WebRDPEnabled,
-		WebRDPConnectTimeoutSeconds: value.WebRDPConnectTimeoutSeconds,
-		WebRDPAllowUnrecorded:       value.WebRDPAllowUnrecorded,
-		RecordingEnabled:            value.RecordingEnabled,
-		RecordingRecordInput:        value.RecordingRecordInput,
-		RecordingRecordCommands:     value.RecordingRecordCommands,
-		RecordingRetentionDays:      value.RecordingRetentionDays,
-		RecordingMaxReplayBytes:     value.RecordingMaxReplayBytes,
-		RecordingCleanupBatchSize:   value.RecordingCleanupBatchSize,
+		DatabaseGatewayMode:           value.DatabaseGatewayMode,
+		WebRDPEnabled:                 value.WebRDPEnabled,
+		WebRDPConnectTimeoutSeconds:   value.WebRDPConnectTimeoutSeconds,
+		WebRDPAllowUnrecorded:         value.WebRDPAllowUnrecorded,
+		RecordingEnabled:              value.RecordingEnabled,
+		RecordingRecordInput:          value.RecordingRecordInput,
+		RecordingRecordCommands:       value.RecordingRecordCommands,
+		RecordingRetentionDays:        value.RecordingRetentionDays,
+		RecordingMaxReplayBytes:       value.RecordingMaxReplayBytes,
+		RecordingCleanupBatchSize:     value.RecordingCleanupBatchSize,
+		DatabaseMaxClientMessageBytes: value.DatabaseMaxClientMessageBytes,
 	}
 }
 

@@ -7,6 +7,18 @@ import (
 )
 
 func validateDatabaseGateway(gateway DatabaseGatewayConfig) error {
+	maxClientMessageBytes := gateway.MaxClientMessageBytes
+	if maxClientMessageBytes == 0 {
+		maxClientMessageBytes = DefaultDatabaseGatewayMaxClientMessageBytes
+	}
+	if maxClientMessageBytes < MinDatabaseGatewayMaxClientMessageBytes ||
+		maxClientMessageBytes > MaxDatabaseGatewayMaxClientMessageBytes {
+		return fmt.Errorf(
+			"database_gateway.max_client_message_bytes must be between %d and %d",
+			MinDatabaseGatewayMaxClientMessageBytes,
+			MaxDatabaseGatewayMaxClientMessageBytes,
+		)
+	}
 	return gateway.ValidateMode(gateway.EffectiveMode())
 }
 

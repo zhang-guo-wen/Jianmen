@@ -9,8 +9,10 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"jianmen/internal/model"
+	"jianmen/internal/server/dbproxy"
 	"jianmen/internal/store"
 )
 
@@ -168,6 +170,214 @@ func TestHandleAuditListsIncludeLogCounts(t *testing.T) {
 	assertCounts("/api/audit/db?page_size=20", server.handleAuditDB, map[string]int64{
 		dbSession.ID: 2,
 	})
+}
+
+func TestHandleAuditDBQueriesUsesBoundedServerPagination(t *testing.T) {
+	server, db := newAdminDBTestServer(t)
+	seedTestSuperAdmin(t, db, "u-admin")
+
+	now := time.Now().UTC()
+	session := model.AuditSession{
+		ID: "audit-query-page", UserID: "u1", Username: "alice",
+		Protocol: "mysql", TargetName: "db-a", StartedAt: now, State: "ended",
+	}
+	if err := db.Create(&session).Error; err != nil {
+		t.Fatalf("create audit session: %v", err)
+	}
+	queries := []model.AuditDBQuery{
+		{ID: "query-1", AuditSessionID: session.ID, Timestamp: now, SQLText: "SELECT 1"},
+		{ID: "query-2", AuditSessionID: session.ID, Timestamp: now.Add(time.Second), SQLText: "SELECT 2"},
+		{ID: "query-3", AuditSessionID: session.ID, Timestamp: now.Add(2 * time.Second), SQLText: "SELECT 3"},
+	}
+	if err := db.Create(&queries).Error; err != nil {
+		t.Fatalf("create database queries: %v", err)
+	}
+
+	req := asTestSuperAdmin(httptest.NewRequest(
+		http.MethodGet,
+		"/api/audit/mysql/"+session.ID+"/queries?page=2&page_size=1",
+		nil,
+	))
+	rec := httptest.NewRecorder()
+	server.handleAuditArtifact(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+
+	var page struct {
+		Items    []dbproxy.DBQueryEvent `json:"items"`
+		Total    int64                  `json:"total"`
+		Page     int                    `json:"page"`
+		PageSize int                    `json:"page_size"`
+	}
+	if err := decodeTestData(t, rec.Body.Bytes(), &page); err != nil {
+		t.Fatalf("decode query page: %v", err)
+	}
+	if page.Total != 3 || page.Page != 2 || page.PageSize != 1 || len(page.Items) != 2 {
+		t.Fatalf("unexpected query page: %#v", page)
+	}
+	started, finished := page.Items[0], page.Items[1]
+	if started.Type != "query_started" || started.Seq != 1 || started.SQL != "SELECT 2" {
+		t.Fatalf("unexpected query started event: %#v", started)
+	}
+	if finished.Type != "query_finished" || finished.Seq != 1 || finished.SQL != "" {
+		t.Fatalf("query finished event duplicated SQL: %#v", finished)
+	}
+}
+
+func TestHandleAuditDBQueriesReturnsUTF8SafeTruncatedPreviewMetadata(t *testing.T) {
+	server, db := newAdminDBTestServer(t)
+	seedTestSuperAdmin(t, db, "u-admin")
+
+	now := time.Now().UTC()
+	session := model.AuditSession{
+		ID: "audit-query-preview", UserID: "u1", Username: "alice",
+		Protocol: "postgres", TargetName: "db-a", StartedAt: now, State: "ended",
+	}
+	if err := db.Create(&session).Error; err != nil {
+		t.Fatalf("create audit session: %v", err)
+	}
+	sqlText := "SELECT '" + strings.Repeat("界", auditDBQuerySQLPreviewByteLimit/3+100) + "'"
+	query := model.AuditDBQuery{
+		ID: "query-large", AuditSessionID: session.ID, Timestamp: now,
+		SQLText: sqlText, OriginalSQLBytes: 10 * 1024 * 1024,
+		SQLTruncated: true,
+	}
+	if err := db.Create(&query).Error; err != nil {
+		t.Fatalf("create database query: %v", err)
+	}
+
+	req := asTestSuperAdmin(httptest.NewRequest(
+		http.MethodGet,
+		"/api/audit/postgres/"+session.ID+"/queries?page_size=1000",
+		nil,
+	))
+	rec := httptest.NewRecorder()
+	server.handleAuditArtifact(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+
+	var page struct {
+		Items    []dbproxy.DBQueryEvent `json:"items"`
+		Total    int64                  `json:"total"`
+		PageSize int                    `json:"page_size"`
+	}
+	if err := decodeTestData(t, rec.Body.Bytes(), &page); err != nil {
+		t.Fatalf("decode query preview page: %v", err)
+	}
+	if page.Total != 1 || page.PageSize != auditDBQueryMaxPageSize || len(page.Items) != 2 {
+		t.Fatalf("unexpected query preview page: %#v", page)
+	}
+	started, finished := page.Items[0], page.Items[1]
+	if len(started.SQL) > auditDBQuerySQLPreviewByteLimit {
+		t.Fatalf("preview bytes = %d, want <= %d", len(started.SQL), auditDBQuerySQLPreviewByteLimit)
+	}
+	if !utf8.ValidString(started.SQL) {
+		t.Fatalf("preview is not valid UTF-8")
+	}
+	if !strings.HasSuffix(started.SQL, auditDBQuerySQLTruncatedMarker) {
+		t.Fatalf("preview lacks explicit truncation marker: %q", started.SQL[len(started.SQL)-64:])
+	}
+	if finished.SQL != "" {
+		t.Fatalf("finished event duplicated %d SQL bytes", len(finished.SQL))
+	}
+	if got, _ := started.Detail["sql_truncated"].(bool); !got {
+		t.Fatalf("sql_truncated = %#v, want true", started.Detail["sql_truncated"])
+	}
+	if got, _ := started.Detail["sql_audit_truncated"].(bool); !got {
+		t.Fatalf("sql_audit_truncated = %#v, want true", started.Detail["sql_audit_truncated"])
+	}
+	if got, _ := started.Detail["sql_preview_truncated"].(bool); !got {
+		t.Fatalf("sql_preview_truncated = %#v, want true", started.Detail["sql_preview_truncated"])
+	}
+	if got := int64(started.Detail["sql_original_bytes"].(float64)); got != query.OriginalSQLBytes {
+		t.Fatalf("sql_original_bytes = %d, want %d", got, query.OriginalSQLBytes)
+	}
+	if got := int64(started.Detail["sql_stored_bytes"].(float64)); got != int64(len(sqlText)) {
+		t.Fatalf("sql_stored_bytes = %d, want %d", got, len(sqlText))
+	}
+	if got := int(started.Detail["sql_preview_bytes"].(float64)); got != len(started.SQL) {
+		t.Fatalf("sql_preview_bytes = %d, want %d", got, len(started.SQL))
+	}
+	if _, exposed := started.Detail["sql_sha256"]; exposed {
+		t.Fatalf("audit response exposed a reversible SQL fingerprint: %#v", started.Detail)
+	}
+	if rec.Body.Len() > auditDBQuerySQLPreviewByteLimit+8*1024 {
+		t.Fatalf("bounded single-query response bytes = %d, want <= %d", rec.Body.Len(), auditDBQuerySQLPreviewByteLimit+8*1024)
+	}
+}
+
+func TestHandleAuditDBQueriesSearchesBeforePagination(t *testing.T) {
+	server, db := newAdminDBTestServer(t)
+	seedTestSuperAdmin(t, db, "u-admin")
+
+	now := time.Now().UTC()
+	session := model.AuditSession{
+		ID: "audit-query-search", UserID: "u1", Username: "alice",
+		Protocol: "redis", TargetName: "cache-a", StartedAt: now, State: "ended",
+	}
+	if err := db.Create(&session).Error; err != nil {
+		t.Fatalf("create audit session: %v", err)
+	}
+	queries := []model.AuditDBQuery{
+		{ID: "query-search-1", AuditSessionID: session.ID, Timestamp: now, SQLText: "GET customer:1"},
+		{ID: "query-search-2", AuditSessionID: session.ID, Timestamp: now.Add(time.Second), SQLText: "GET session:1"},
+		{ID: "query-search-3", AuditSessionID: session.ID, Timestamp: now.Add(2 * time.Second), SQLText: "DEL CUSTOMER:2"},
+	}
+	if err := db.Create(&queries).Error; err != nil {
+		t.Fatalf("create database queries: %v", err)
+	}
+
+	req := asTestSuperAdmin(httptest.NewRequest(
+		http.MethodGet,
+		"/api/audit/redis/"+session.ID+"/queries?q=customer&page=1&page_size=1",
+		nil,
+	))
+	rec := httptest.NewRecorder()
+	server.handleAuditArtifact(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	var page struct {
+		Items []dbproxy.DBQueryEvent `json:"items"`
+		Total int64                  `json:"total"`
+	}
+	if err := decodeTestData(t, rec.Body.Bytes(), &page); err != nil {
+		t.Fatalf("decode query search page: %v", err)
+	}
+	if page.Total != 2 || len(page.Items) != 2 || page.Items[0].SQL != "GET customer:1" {
+		t.Fatalf("unexpected query search page: %#v", page)
+	}
+}
+
+func TestAuditDBQueryUTF8PrefixRepairsInvalidInputWithinByteLimit(t *testing.T) {
+	got, changed := auditDBQueryUTF8Prefix("ab\xff\xfe界tail", 8)
+	if !changed {
+		t.Fatal("invalid and truncated input was not reported as changed")
+	}
+	if !utf8.ValidString(got) {
+		t.Fatalf("prefix is not valid UTF-8: %q", got)
+	}
+	if len(got) > 8 {
+		t.Fatalf("prefix bytes = %d, want <= 8", len(got))
+	}
+}
+
+func TestAuditDBQuerySQLPreviewMarksInvalidUTF8AsTruncated(t *testing.T) {
+	preview, detail := auditDBQuerySQLPreview(store.AuditDBQueryPreview{
+		SQLText:        "SELECT \xff",
+		SQLStoredBytes: int64(len("SELECT \xff")),
+	})
+	if !utf8.ValidString(preview) {
+		t.Fatalf("preview is not valid UTF-8: %q", preview)
+	}
+	if !strings.HasSuffix(preview, auditDBQuerySQLTruncatedMarker) {
+		t.Fatalf("preview lacks truncation marker: %q", preview)
+	}
+	if got, _ := detail["sql_preview_truncated"].(bool); !got {
+		t.Fatalf("sql_preview_truncated = %#v, want true", detail["sql_preview_truncated"])
+	}
 }
 
 func TestHandleAuditSSHCommandsLoadsOutputFromRecordingFile(t *testing.T) {

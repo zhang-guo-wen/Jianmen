@@ -428,6 +428,14 @@ func TestDefaultDatabaseGatewayUsesUnifiedLoopbackEntry(t *testing.T) {
 		cfg.DatabaseGateway.Unified.DetectionTimeoutMS != 200 {
 		t.Fatalf("default unified listener = %#v", cfg.DatabaseGateway.Unified)
 	}
+	if cfg.DatabaseGateway.MaxClientMessageBytes !=
+		DefaultDatabaseGatewayMaxClientMessageBytes {
+		t.Fatalf(
+			"default database client message limit = %d, want %d",
+			cfg.DatabaseGateway.MaxClientMessageBytes,
+			DefaultDatabaseGatewayMaxClientMessageBytes,
+		)
+	}
 	if !cfg.DatabaseGateway.MySQL.Enabled {
 		t.Fatal("default database gateway must keep the certificate-optional MySQL listener enabled")
 	}
@@ -442,6 +450,35 @@ func TestDefaultDatabaseGatewayUsesUnifiedLoopbackEntry(t *testing.T) {
 			cfg.DatabaseGateway.PostgreSQL.Enabled,
 			cfg.DatabaseGateway.Redis.Enabled,
 		)
+	}
+}
+
+func TestDatabaseGatewayClientMessageLimitValidation(t *testing.T) {
+	tests := []struct {
+		name    string
+		limit   int
+		wantErr bool
+	}{
+		{name: "omitted uses default"},
+		{name: "minimum", limit: MinDatabaseGatewayMaxClientMessageBytes},
+		{name: "ten MiB", limit: 10 * 1024 * 1024},
+		{name: "maximum", limit: MaxDatabaseGatewayMaxClientMessageBytes},
+		{name: "below minimum", limit: MinDatabaseGatewayMaxClientMessageBytes - 1, wantErr: true},
+		{name: "above maximum", limit: MaxDatabaseGatewayMaxClientMessageBytes + 1, wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateDatabaseGateway(DatabaseGatewayConfig{
+				MaxClientMessageBytes: tt.limit,
+			})
+			if tt.wantErr && (err == nil ||
+				!strings.Contains(err.Error(), "max_client_message_bytes")) {
+				t.Fatalf("validateDatabaseGateway() error = %v", err)
+			}
+			if !tt.wantErr && err != nil {
+				t.Fatalf("validateDatabaseGateway() error = %v", err)
+			}
+		})
 	}
 }
 
@@ -511,6 +548,14 @@ func TestLoadDatabaseGatewayEnabledDefaultsRespectFieldPresence(t *testing.T) {
 			}
 			if cfg.DatabaseGateway.MySQL.Address != tt.wantMySQLAddr {
 				t.Fatalf("MySQL.Address = %q, want %q", cfg.DatabaseGateway.MySQL.Address, tt.wantMySQLAddr)
+			}
+			if cfg.DatabaseGateway.MaxClientMessageBytes !=
+				DefaultDatabaseGatewayMaxClientMessageBytes {
+				t.Fatalf(
+					"MaxClientMessageBytes = %d, want %d",
+					cfg.DatabaseGateway.MaxClientMessageBytes,
+					DefaultDatabaseGatewayMaxClientMessageBytes,
+				)
 			}
 		})
 	}

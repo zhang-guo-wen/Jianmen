@@ -14,8 +14,11 @@ import (
 )
 
 const (
-	defaultSystemSettingRevisionLimit = 20
-	maxSystemSettingRevisionLimit     = 100
+	defaultSystemSettingRevisionLimit    = 20
+	maxSystemSettingRevisionLimit        = 100
+	defaultDatabaseMaxClientMessageBytes = config.DefaultDatabaseGatewayMaxClientMessageBytes
+	minDatabaseMaxClientMessageBytes     = config.MinDatabaseGatewayMaxClientMessageBytes
+	maxDatabaseMaxClientMessageBytes     = config.MaxDatabaseGatewayMaxClientMessageBytes
 )
 
 var (
@@ -36,19 +39,21 @@ var systemSettingFieldNames = []string{
 	"recording_retention_days",
 	"recording_max_replay_bytes",
 	"recording_cleanup_batch_size",
+	"database_max_client_message_bytes",
 }
 
 type SystemSettings struct {
-	DatabaseGatewayMode         string
-	WebRDPEnabled               bool
-	WebRDPConnectTimeoutSeconds int
-	WebRDPAllowUnrecorded       bool
-	RecordingEnabled            bool
-	RecordingRecordInput        bool
-	RecordingRecordCommands     bool
-	RecordingRetentionDays      int
-	RecordingMaxReplayBytes     int64
-	RecordingCleanupBatchSize   int
+	DatabaseGatewayMode           string
+	WebRDPEnabled                 bool
+	WebRDPConnectTimeoutSeconds   int
+	WebRDPAllowUnrecorded         bool
+	RecordingEnabled              bool
+	RecordingRecordInput          bool
+	RecordingRecordCommands       bool
+	RecordingRetentionDays        int
+	RecordingMaxReplayBytes       int64
+	RecordingCleanupBatchSize     int
+	DatabaseMaxClientMessageBytes int
 }
 
 type SystemSettingsActor struct {
@@ -303,6 +308,14 @@ func validateSystemSettings(settings SystemSettings) error {
 		settings.RecordingCleanupBatchSize > 1000:
 		return fmt.Errorf("%w: recording cleanup batch size must be between 1 and 1000",
 			ErrInvalidSystemSettings)
+	case settings.DatabaseMaxClientMessageBytes < minDatabaseMaxClientMessageBytes ||
+		settings.DatabaseMaxClientMessageBytes > maxDatabaseMaxClientMessageBytes:
+		return fmt.Errorf(
+			"%w: database client message size must be between %d and %d bytes",
+			ErrInvalidSystemSettings,
+			minDatabaseMaxClientMessageBytes,
+			maxDatabaseMaxClientMessageBytes,
+		)
 	default:
 		return nil
 	}
@@ -354,6 +367,9 @@ func changedSystemSettingFields(before, after SystemSettings) []string {
 	if before.RecordingCleanupBatchSize != after.RecordingCleanupBatchSize {
 		changed = append(changed, "recording_cleanup_batch_size")
 	}
+	if before.DatabaseMaxClientMessageBytes != after.DatabaseMaxClientMessageBytes {
+		changed = append(changed, "database_max_client_message_bytes")
+	}
 	return changed
 }
 
@@ -377,6 +393,9 @@ func riskySystemSettingFields(before, after SystemSettings) []string {
 	if replayQuotaTightened(before.RecordingMaxReplayBytes, after.RecordingMaxReplayBytes) {
 		risky = append(risky, "recording_max_replay_bytes")
 	}
+	if before.DatabaseMaxClientMessageBytes != after.DatabaseMaxClientMessageBytes {
+		risky = append(risky, "database_max_client_message_bytes")
+	}
 	return risky
 }
 
@@ -386,19 +405,20 @@ func replayQuotaTightened(before, after int64) bool {
 
 func systemSettingModel(settings SystemSettings, actor SystemSettingsActor) model.SystemSetting {
 	return model.SystemSetting{
-		ID:                          model.SystemSettingSingletonID,
-		DatabaseGatewayMode:         settings.DatabaseGatewayMode,
-		WebRDPEnabled:               settings.WebRDPEnabled,
-		WebRDPConnectTimeoutSeconds: settings.WebRDPConnectTimeoutSeconds,
-		WebRDPAllowUnrecorded:       settings.WebRDPAllowUnrecorded,
-		RecordingEnabled:            settings.RecordingEnabled,
-		RecordingRecordInput:        settings.RecordingRecordInput,
-		RecordingRecordCommands:     settings.RecordingRecordCommands,
-		RecordingRetentionDays:      settings.RecordingRetentionDays,
-		RecordingMaxReplayBytes:     settings.RecordingMaxReplayBytes,
-		RecordingCleanupBatchSize:   settings.RecordingCleanupBatchSize,
-		UpdatedByID:                 strings.TrimSpace(actor.ID),
-		UpdatedByUsername:           strings.TrimSpace(actor.Username),
+		ID:                            model.SystemSettingSingletonID,
+		DatabaseGatewayMode:           settings.DatabaseGatewayMode,
+		WebRDPEnabled:                 settings.WebRDPEnabled,
+		WebRDPConnectTimeoutSeconds:   settings.WebRDPConnectTimeoutSeconds,
+		WebRDPAllowUnrecorded:         settings.WebRDPAllowUnrecorded,
+		RecordingEnabled:              settings.RecordingEnabled,
+		RecordingRecordInput:          settings.RecordingRecordInput,
+		RecordingRecordCommands:       settings.RecordingRecordCommands,
+		RecordingRetentionDays:        settings.RecordingRetentionDays,
+		RecordingMaxReplayBytes:       settings.RecordingMaxReplayBytes,
+		RecordingCleanupBatchSize:     settings.RecordingCleanupBatchSize,
+		DatabaseMaxClientMessageBytes: settings.DatabaseMaxClientMessageBytes,
+		UpdatedByID:                   strings.TrimSpace(actor.ID),
+		UpdatedByUsername:             strings.TrimSpace(actor.Username),
 	}
 }
 
@@ -408,77 +428,16 @@ func systemSettingsFromModel(setting model.SystemSetting) SystemSettings {
 		mode = config.DatabaseGatewayModeUnified
 	}
 	return SystemSettings{
-		DatabaseGatewayMode:         mode,
-		WebRDPEnabled:               setting.WebRDPEnabled,
-		WebRDPConnectTimeoutSeconds: setting.WebRDPConnectTimeoutSeconds,
-		WebRDPAllowUnrecorded:       setting.WebRDPAllowUnrecorded,
-		RecordingEnabled:            setting.RecordingEnabled,
-		RecordingRecordInput:        setting.RecordingRecordInput,
-		RecordingRecordCommands:     setting.RecordingRecordCommands,
-		RecordingRetentionDays:      setting.RecordingRetentionDays,
-		RecordingMaxReplayBytes:     setting.RecordingMaxReplayBytes,
-		RecordingCleanupBatchSize:   setting.RecordingCleanupBatchSize,
-	}
-}
-
-type systemSettingsSnapshot struct {
-	DatabaseGatewayMode         string `json:"database_gateway_mode"`
-	WebRDPEnabled               bool   `json:"web_rdp_enabled"`
-	WebRDPConnectTimeoutSeconds int    `json:"web_rdp_connect_timeout_seconds"`
-	WebRDPAllowUnrecorded       bool   `json:"web_rdp_allow_unrecorded"`
-	RecordingEnabled            bool   `json:"recording_enabled"`
-	RecordingRecordInput        bool   `json:"recording_record_input"`
-	RecordingRecordCommands     bool   `json:"recording_record_commands"`
-	RecordingRetentionDays      int    `json:"recording_retention_days"`
-	RecordingMaxReplayBytes     int64  `json:"recording_max_replay_bytes"`
-	RecordingCleanupBatchSize   int    `json:"recording_cleanup_batch_size"`
-}
-
-func marshalSystemSettings(settings SystemSettings) (string, error) {
-	encoded, err := json.Marshal(snapshotFromSystemSettings(settings))
-	if err != nil {
-		return "", fmt.Errorf("marshal system settings snapshot: %w", err)
-	}
-	return string(encoded), nil
-}
-
-func unmarshalSystemSettings(encoded string) (SystemSettings, error) {
-	var snapshot systemSettingsSnapshot
-	if err := json.Unmarshal([]byte(encoded), &snapshot); err != nil {
-		return SystemSettings{}, err
-	}
-	if snapshot.DatabaseGatewayMode == "" {
-		snapshot.DatabaseGatewayMode = config.DatabaseGatewayModeUnified
-	}
-	return snapshot.systemSettings(), nil
-}
-
-func snapshotFromSystemSettings(settings SystemSettings) systemSettingsSnapshot {
-	return systemSettingsSnapshot{
-		DatabaseGatewayMode:         settings.DatabaseGatewayMode,
-		WebRDPEnabled:               settings.WebRDPEnabled,
-		WebRDPConnectTimeoutSeconds: settings.WebRDPConnectTimeoutSeconds,
-		WebRDPAllowUnrecorded:       settings.WebRDPAllowUnrecorded,
-		RecordingEnabled:            settings.RecordingEnabled,
-		RecordingRecordInput:        settings.RecordingRecordInput,
-		RecordingRecordCommands:     settings.RecordingRecordCommands,
-		RecordingRetentionDays:      settings.RecordingRetentionDays,
-		RecordingMaxReplayBytes:     settings.RecordingMaxReplayBytes,
-		RecordingCleanupBatchSize:   settings.RecordingCleanupBatchSize,
-	}
-}
-
-func (snapshot systemSettingsSnapshot) systemSettings() SystemSettings {
-	return SystemSettings{
-		DatabaseGatewayMode:         snapshot.DatabaseGatewayMode,
-		WebRDPEnabled:               snapshot.WebRDPEnabled,
-		WebRDPConnectTimeoutSeconds: snapshot.WebRDPConnectTimeoutSeconds,
-		WebRDPAllowUnrecorded:       snapshot.WebRDPAllowUnrecorded,
-		RecordingEnabled:            snapshot.RecordingEnabled,
-		RecordingRecordInput:        snapshot.RecordingRecordInput,
-		RecordingRecordCommands:     snapshot.RecordingRecordCommands,
-		RecordingRetentionDays:      snapshot.RecordingRetentionDays,
-		RecordingMaxReplayBytes:     snapshot.RecordingMaxReplayBytes,
-		RecordingCleanupBatchSize:   snapshot.RecordingCleanupBatchSize,
+		DatabaseGatewayMode:           mode,
+		WebRDPEnabled:                 setting.WebRDPEnabled,
+		WebRDPConnectTimeoutSeconds:   setting.WebRDPConnectTimeoutSeconds,
+		WebRDPAllowUnrecorded:         setting.WebRDPAllowUnrecorded,
+		RecordingEnabled:              setting.RecordingEnabled,
+		RecordingRecordInput:          setting.RecordingRecordInput,
+		RecordingRecordCommands:       setting.RecordingRecordCommands,
+		RecordingRetentionDays:        setting.RecordingRetentionDays,
+		RecordingMaxReplayBytes:       setting.RecordingMaxReplayBytes,
+		RecordingCleanupBatchSize:     setting.RecordingCleanupBatchSize,
+		DatabaseMaxClientMessageBytes: setting.DatabaseMaxClientMessageBytes,
 	}
 }

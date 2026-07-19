@@ -5,16 +5,17 @@ import (
 )
 
 type redisObserver struct {
-	sink               querySink
-	buf                []byte
-	serverBuf          []byte
-	serverStream       *redisResponseStream
-	slots              []redisResponseSlot
-	fatal              *queryDecision
-	deferred           *queryDecision
-	subscriptions      redisSubscriptionState
-	subscriptionIntent redisSubscriptionState
-	protocolVersion    int
+	sink                  querySink
+	maxClientMessageBytes int
+	buf                   []byte
+	serverBuf             []byte
+	serverStream          *redisResponseStream
+	slots                 []redisResponseSlot
+	fatal                 *queryDecision
+	deferred              *queryDecision
+	subscriptions         redisSubscriptionState
+	subscriptionIntent    redisSubscriptionState
+	protocolVersion       int
 }
 
 type redisResponseSlot struct {
@@ -48,6 +49,7 @@ func (o *redisObserver) observeClientBytes(data []byte) ([]byte, *queryDecision)
 	if len(data) == 0 {
 		return nil, nil
 	}
+	maxClientMessageBytes := normalizeMaxClientMessageBytes(o.maxClientMessageBytes)
 	var forward []byte
 parseCommands:
 	for {
@@ -55,7 +57,7 @@ parseCommands:
 			if len(data) == 0 {
 				return forward, nil
 			}
-			if !appendObserverBufferChunk(&o.buf, &data, maxRedisObserverBufferBytes) {
+			if !appendObserverBufferChunk(&o.buf, &data, maxClientMessageBytes) {
 				return forward, o.fail(observerErrorBufferLimit, "Redis observer frame exceeds the audit limit")
 			}
 			continue
@@ -68,7 +70,7 @@ parseCommands:
 			if len(data) == 0 {
 				return forward, nil
 			}
-			if !appendObserverBufferChunk(&o.buf, &data, maxRedisObserverBufferBytes) {
+			if !appendObserverBufferChunk(&o.buf, &data, maxClientMessageBytes) {
 				return o.rejectClientBytes(forward, newObserverFatalDecision(observerErrorBufferLimit, "Redis observer frame exceeds the audit limit"))
 			}
 			continue
@@ -85,7 +87,7 @@ parseCommands:
 				if len(data) == 0 {
 					return forward, nil
 				}
-				if !appendObserverBufferChunk(&o.buf, &data, maxRedisObserverBufferBytes) {
+				if !appendObserverBufferChunk(&o.buf, &data, maxClientMessageBytes) {
 					return o.rejectClientBytes(forward, newObserverFatalDecision(observerErrorBufferLimit, "Redis observer frame exceeds the audit limit"))
 				}
 				continue parseCommands
@@ -98,7 +100,7 @@ parseCommands:
 				if len(data) == 0 {
 					return forward, nil
 				}
-				if !appendObserverBufferChunk(&o.buf, &data, maxRedisObserverBufferBytes) {
+				if !appendObserverBufferChunk(&o.buf, &data, maxClientMessageBytes) {
 					return o.rejectClientBytes(forward, newObserverFatalDecision(observerErrorBufferLimit, "Redis observer frame exceeds the audit limit"))
 				}
 				continue parseCommands
@@ -107,7 +109,7 @@ parseCommands:
 			if !ok {
 				return o.rejectClientBytes(forward, newObserverFatalDecision(observerErrorProtocol, "malformed Redis command"))
 			}
-			if argLenValue > maxRedisObserverBufferBytes {
+			if argLenValue > int64(maxClientMessageBytes) {
 				return o.rejectClientBytes(forward, newObserverFatalDecision(observerErrorBufferLimit, "Redis observer frame exceeds the audit limit"))
 			}
 			argLen := int(argLenValue)
@@ -117,7 +119,7 @@ parseCommands:
 				if len(data) == 0 {
 					return forward, nil
 				}
-				if !appendObserverBufferChunk(&o.buf, &data, maxRedisObserverBufferBytes) {
+				if !appendObserverBufferChunk(&o.buf, &data, maxClientMessageBytes) {
 					return o.rejectClientBytes(forward, newObserverFatalDecision(observerErrorBufferLimit, "Redis observer frame exceeds the audit limit"))
 				}
 				continue parseCommands
@@ -139,6 +141,17 @@ parseCommands:
 		}
 		if len(o.slots) >= maxObserverPendingQueries {
 			return o.rejectClientBytes(forward, newObserverFatalDecision(observerErrorPendingLimit, "too many in-flight Redis commands"))
+		}
+		if isRedisPubSubStateCommand(cmd) &&
+			(!o.pendingRedisPubSubWithinLimit(args) ||
+				!o.canPlanRedisPubSubResponse(cmd, args)) {
+			return o.rejectClientBytes(
+				forward,
+				newObserverFatalDecision(
+					observerErrorPendingLimit,
+					"Redis subscription audit state exceeds the configured limit",
+				),
+			)
 		}
 		slot := redisResponseSlot{command: cmd, remaining: 1}
 		if cmd == "HELLO" {

@@ -41,7 +41,6 @@ func TestSystemSettingMigrationCreatesSingletonAndRevisionSchema(t *testing.T) {
 		}
 	}
 	for _, column := range []string{
-		"database_gateway_mode",
 		"web_rdp_enabled",
 		"web_rdp_connect_timeout_seconds",
 		"web_rdp_allow_unrecorded",
@@ -59,6 +58,14 @@ func TestSystemSettingMigrationCreatesSingletonAndRevisionSchema(t *testing.T) {
 	} {
 		if !db.Migrator().HasColumn(&model.SystemSetting{}, column) {
 			t.Fatalf("system setting column %s is missing", column)
+		}
+	}
+	for _, column := range []string{
+		"DatabaseGatewayMode",
+		"DatabaseMaxClientMessageBytes",
+	} {
+		if db.Migrator().HasColumn(&model.SystemSetting{}, column) {
+			t.Fatalf("historical system setting migration installed future column %s", column)
 		}
 	}
 	for _, column := range []string{

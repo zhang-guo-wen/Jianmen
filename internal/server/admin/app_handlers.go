@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -27,7 +28,7 @@ func (s *Server) handleApplications(w http.ResponseWriter, r *http.Request) {
 		if !s.requireAuthenticatedUser(w, r) {
 			return
 		}
-		apps, err := s.visibleApplications(r, s.applications.Applications())
+		apps, err := s.visibleApplications(r, s.applications.Applications(r.Context()))
 		if err != nil {
 			s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
 			return
@@ -57,7 +58,7 @@ func (s *Server) handleCreateApplication(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	if payload.ListenPort == 0 {
-		listenPort, err := s.nextApplicationListenPort()
+		listenPort, err := s.nextApplicationListenPort(r.Context())
 		if err != nil {
 			s.writeErrorText(w, r, http.StatusBadRequest, err.Error())
 			return
@@ -69,13 +70,13 @@ func (s *Server) handleCreateApplication(w http.ResponseWriter, r *http.Request)
 		s.writeErrorText(w, r, http.StatusBadRequest, err.Error())
 		return
 	}
-	view, err := s.applications.AddApplication(input)
+	view, err := s.applications.AddApplication(r.Context(), input)
 	if err != nil {
 		s.writeErrorText(w, r, http.StatusBadRequest, err.Error())
 		return
 	}
 	if err := s.grantCreatedResource(r, model.ResourceTypeApplication, view.ID); err != nil {
-		_ = s.applications.DeleteApplication(view.ID)
+		_ = s.applications.DeleteApplication(r.Context(), view.ID)
 		s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -99,7 +100,7 @@ func (s *Server) handleApplication(w http.ResponseWriter, r *http.Request) {
 		if !s.requireResourceAction(w, r, rbac.ActionAppView, model.ResourceTypeApplication, id) {
 			return
 		}
-		view, err := s.applications.Application(id)
+		view, err := s.applications.Application(r.Context(), id)
 		if err != nil {
 			writeApplicationStoreError(w, r, err)
 			return
@@ -114,12 +115,12 @@ func (s *Server) handleApplication(w http.ResponseWriter, r *http.Request) {
 		if !s.requireResourceAction(w, r, rbac.ActionAppDelete, model.ResourceTypeApplication, id) {
 			return
 		}
-		view, err := s.applications.Application(id)
+		view, err := s.applications.Application(r.Context(), id)
 		if err != nil {
 			writeApplicationStoreError(w, r, err)
 			return
 		}
-		if err := s.applications.DeleteApplication(id); err != nil {
+		if err := s.applications.DeleteApplication(r.Context(), id); err != nil {
 			writeApplicationStoreError(w, r, err)
 			return
 		}
@@ -134,7 +135,7 @@ func (s *Server) handleApplication(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleUpdateApplication(w http.ResponseWriter, r *http.Request, id string) {
-	previous, err := s.applications.Application(id)
+	previous, err := s.applications.Application(r.Context(), id)
 	if err != nil {
 		writeApplicationStoreError(w, r, err)
 		return
@@ -151,7 +152,7 @@ func (s *Server) handleUpdateApplication(w http.ResponseWriter, r *http.Request,
 		s.writeErrorText(w, r, http.StatusBadRequest, err.Error())
 		return
 	}
-	view, err := s.applications.UpdateApplication(id, input)
+	view, err := s.applications.UpdateApplication(r.Context(), id, input)
 	if err != nil {
 		writeApplicationStoreError(w, r, err)
 		return
@@ -216,14 +217,14 @@ func applicationModel(view store.ApplicationView) model.Application {
 	}
 }
 
-func (s *Server) nextApplicationListenPort() (int, error) {
+func (s *Server) nextApplicationListenPort(ctx context.Context) (int, error) {
 	start := s.cfg.ApplicationGateway.PortStart
 	end := s.cfg.ApplicationGateway.PortEnd
 	if start <= 0 || end < start {
 		start, end = 47110, 47199
 	}
 	used := make(map[int]struct{})
-	for _, app := range s.applications.Applications() {
+	for _, app := range s.applications.Applications(ctx) {
 		used[app.ListenPort] = struct{}{}
 	}
 	for port := start; port <= end; port++ {

@@ -14,13 +14,14 @@ const (
 )
 
 type DatabaseGatewayConfig struct {
-	Enabled    bool                     `json:"enabled"`
-	Mode       string                   `json:"mode"`
-	Unified    DatabaseUnifiedListener  `json:"unified"`
-	MySQL      DatabaseProtocolListener `json:"mysql"`
-	PostgreSQL DatabaseProtocolListener `json:"postgresql"`
-	Redis      DatabaseProtocolListener `json:"redis"`
-	enabledSet bool
+	Enabled               bool                     `json:"enabled"`
+	MaxClientMessageBytes int                      `json:"max_client_message_bytes"`
+	Mode                  string                   `json:"mode"`
+	Unified               DatabaseUnifiedListener  `json:"unified"`
+	MySQL                 DatabaseProtocolListener `json:"mysql"`
+	PostgreSQL            DatabaseProtocolListener `json:"postgresql"`
+	Redis                 DatabaseProtocolListener `json:"redis"`
+	enabledSet            bool
 }
 
 // DatabaseUnifiedListener accepts MySQL, PostgreSQL and Redis on one address.
@@ -111,6 +112,9 @@ func (c *DatabaseGatewayConfig) applyDefaults() {
 	}
 	if strings.TrimSpace(c.Redis.Address) == "" {
 		c.Redis.Address = "127.0.0.1:33063"
+	}
+	if c.MaxClientMessageBytes == 0 {
+		c.MaxClientMessageBytes = DefaultDatabaseGatewayMaxClientMessageBytes
 	}
 	if c.Enabled && c.EffectiveMode() == DatabaseGatewayModeUnified {
 		c.Unified.Enabled = true

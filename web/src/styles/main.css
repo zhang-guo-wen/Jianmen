@@ -454,13 +454,23 @@ body {
     gap: 6px;
     padding: 0 12px;
     overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: none;
+    scroll-snap-type: x proximity;
+    overscroll-behavior-inline: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+  .nav-menu::-webkit-scrollbar {
+    display: none;
   }
   .app-nav {
     display: block;
     flex: none;
+    overflow: hidden;
   }
   .nav-menu .el-menu-item {
     flex: 0 0 auto;
+    scroll-snap-align: start;
   }
   .sidebar-footer {
     padding: 8px 12px 12px;

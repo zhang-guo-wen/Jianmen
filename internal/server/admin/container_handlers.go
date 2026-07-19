@@ -167,7 +167,7 @@ func (s *Server) handleContainerConnectionTest(w http.ResponseWriter, r *http.Re
 	if !s.requireContainerHostAccount(w, r, payload.HostID, payload.HostAccountID) {
 		return
 	}
-	config, err := s.containerServiceConfig(containerEndpointInput(payload))
+	config, err := s.containerServiceConfig(r, containerEndpointInput(payload))
 	if err != nil {
 		writeContainerStoreError(w, r, err)
 		return
@@ -192,7 +192,7 @@ func (s *Server) handleContainerRuntime(w http.ResponseWriter, r *http.Request, 
 		s.writeErrorText(w, r, http.StatusConflict, "container endpoint is disabled")
 		return
 	}
-	config, err := s.containerServiceConfig(store.ContainerEndpointInput{
+	config, err := s.containerServiceConfig(r, store.ContainerEndpointInput{
 		Name: view.Name, Runtime: view.Runtime, ConnectionMode: view.ConnectionMode,
 		Address: view.Address, Port: view.Port, HostID: view.HostID, HostAccountID: view.HostAccountID,
 	})
@@ -280,12 +280,12 @@ func containerEndpointInput(payload containerEndpointPayload) store.ContainerEnd
 	}
 }
 
-func (s *Server) containerServiceConfig(input store.ContainerEndpointInput) (service.ContainerEndpointConfig, error) {
+func (s *Server) containerServiceConfig(r *http.Request, input store.ContainerEndpointInput) (service.ContainerEndpointConfig, error) {
 	config := service.ContainerEndpointConfig{
 		Runtime: input.Runtime, ConnectionMode: input.ConnectionMode, Address: input.Address, Port: input.Port,
 	}
 	if input.ConnectionMode == model.ContainerConnectionSSH || input.ConnectionMode == model.ContainerConnectionContainerd {
-		target, err := s.hostTargets.TargetConfig(input.HostAccountID)
+		target, err := s.hostTargets.TargetConfig(r.Context(), input.HostAccountID)
 		if err != nil {
 			return service.ContainerEndpointConfig{}, err
 		}
@@ -318,11 +318,11 @@ func (s *Server) requireContainerHostAccount(w http.ResponseWriter, r *http.Requ
 		s.writeErrorText(w, r, http.StatusBadRequest, "host_id and host_account_id must be provided together")
 		return false
 	}
-	if _, err := s.hostTargets.Host(hostID); err != nil {
+	if _, err := s.hostTargets.Host(r.Context(), hostID); err != nil {
 		writeContainerStoreError(w, r, err)
 		return false
 	}
-	target, err := s.hostTargets.TargetConfig(hostAccountID)
+	target, err := s.hostTargets.TargetConfig(r.Context(), hostAccountID)
 	if err != nil {
 		writeContainerStoreError(w, r, err)
 		return false

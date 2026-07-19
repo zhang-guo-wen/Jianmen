@@ -90,7 +90,10 @@ func (s *Server) visibleHosts(r *http.Request, hosts []store.HostView) ([]store.
 	if err != nil {
 		return nil, err
 	}
-	allTargets := s.hostTargets.Targets()
+	allTargets, err := s.hostTargets.Targets(r.Context())
+	if err != nil {
+		return nil, err
+	}
 	visibleTargets, err := s.visibleTargets(r, allTargets)
 	if err != nil {
 		return nil, err

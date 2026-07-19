@@ -314,7 +314,7 @@ func TestHandleTestConnectionResolvesHostContainerForNewAccount(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse ssh port: %v", err)
 	}
-	if _, err := server.hostTargets.AddHost(store.HostRecord{
+	if _, err := server.hostTargets.AddHost(context.Background(), store.HostRecord{
 		ID:      "new-account-host",
 		Name:    "new-account-host",
 		Address: host,

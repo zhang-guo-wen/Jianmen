@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
@@ -13,7 +14,7 @@ import (
 
 // -- hosts --
 
-func (s *DBStore) hostView(m model.Host, accountCount ...int) HostView {
+func (s *DBStore) hostView(ctx context.Context, m model.Host, accountCount ...int) HostView {
 	status := m.Status
 	if status == "" {
 		status = "active"
@@ -21,10 +22,6 @@ func (s *DBStore) hostView(m model.Host, accountCount ...int) HostView {
 	count := 0
 	if len(accountCount) > 0 {
 		count = accountCount[0]
-	} else {
-		var total int64
-		_ = s.db.Model(&model.HostAccount{}).Where("host_id = ?", m.ID).Count(&total).Error
-		count = int(total)
 	}
 	return HostView{
 		ID: m.ID, Name: m.Name, Group: m.GroupName, Address: m.Address,
@@ -35,31 +32,38 @@ func (s *DBStore) hostView(m model.Host, accountCount ...int) HostView {
 	}
 }
 
-func (s *DBStore) Hosts() []HostView {
+func (s *DBStore) Hosts(ctx context.Context) ([]HostView, error) {
 	var hosts []model.Host
-	if err := s.db.Order("created_at DESC").Find(&hosts).Error; err != nil {
-		return nil
+	if err := s.db.WithContext(ctx).Order("created_at DESC").Find(&hosts).Error; err != nil {
+		return nil, err
 	}
-	counts, err := s.hostAccountCounts(hostIDs(hosts))
+	counts, err := s.hostAccountCounts(ctx, hostIDs(hosts))
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	out := make([]HostView, len(hosts))
 	for i := range hosts {
-		out[i] = s.hostView(hosts[i], counts[hosts[i].ID])
+		out[i] = s.hostView(ctx, hosts[i], counts[hosts[i].ID])
 	}
-	return out
+	return out, nil
 }
 
-func (s *DBStore) Host(id string) (HostView, error) {
+func (s *DBStore) Host(ctx context.Context, id string) (HostView, error) {
 	var m model.Host
-	if err := s.db.First(&m, "id = ?", id).Error; err != nil {
+	if err := s.db.WithContext(ctx).First(&m, "id = ?", id).Error; err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return HostView{}, err
+		}
 		return HostView{}, fmt.Errorf("%w: %q", ErrHostNotFound, id)
 	}
-	return s.hostView(m), nil
+	counts, err := s.hostAccountCounts(ctx, []string{m.ID})
+	if err != nil {
+		return HostView{}, err
+	}
+	return s.hostView(ctx, m, counts[m.ID]), nil
 }
 
-func (s *DBStore) hostAccountCounts(ids []string) (map[string]int, error) {
+func (s *DBStore) hostAccountCounts(ctx context.Context, ids []string) (map[string]int, error) {
 	counts := make(map[string]int, len(ids))
 	if len(ids) == 0 {
 		return counts, nil
@@ -68,7 +72,7 @@ func (s *DBStore) hostAccountCounts(ids []string) (map[string]int, error) {
 		HostID string
 		Count  int64
 	}
-	if err := s.db.Model(&model.HostAccount{}).
+	if err := s.db.WithContext(ctx).Model(&model.HostAccount{}).
 		Select("host_id, COUNT(*) AS count").
 		Where("host_id IN ?", ids).
 		Group("host_id").
@@ -91,7 +95,7 @@ func hostIDs(hosts []model.Host) []string {
 	return ids
 }
 
-func (s *DBStore) AddHost(host HostRecord) (HostView, error) {
+func (s *DBStore) AddHost(ctx context.Context, host HostRecord) (HostView, error) {
 	if err := validateHostProtocol(host.Protocol); err != nil {
 		return HostView{}, err
 	}
@@ -108,7 +112,7 @@ func (s *DBStore) AddHost(host HostRecord) (HostView, error) {
 	if normalized.Status == "disabled" {
 		m.Status = "disabled"
 	}
-	if err := s.db.Transaction(func(tx *gorm.DB) error {
+	if err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Create(&m).Error; err != nil {
 			return err
 		}
@@ -119,12 +123,12 @@ func (s *DBStore) AddHost(host HostRecord) (HostView, error) {
 	}); err != nil {
 		return HostView{}, fmt.Errorf("create host: %w", err)
 	}
-	return s.hostView(m), nil
+	return s.hostView(ctx, m), nil
 }
 
-func (s *DBStore) UpdateHost(id string, host HostRecord) (HostView, error) {
+func (s *DBStore) UpdateHost(ctx context.Context, id string, host HostRecord) (HostView, error) {
 	var m model.Host
-	if err := s.db.First(&m, "id = ?", id).Error; err != nil {
+	if err := s.db.WithContext(ctx).First(&m, "id = ?", id).Error; err != nil {
 		return HostView{}, fmt.Errorf("%w: %q", ErrHostNotFound, id)
 	}
 	if err := validateHostProtocol(host.Protocol); err != nil {
@@ -133,7 +137,7 @@ func (s *DBStore) UpdateHost(id string, host HostRecord) (HostView, error) {
 	normalized := normalizeHostRecord(host)
 	if normalizedHostProtocol(m.Protocol) != normalized.Protocol {
 		var accountCount int64
-		if err := s.db.Model(&model.HostAccount{}).Where("host_id = ?", m.ID).Count(&accountCount).Error; err != nil {
+		if err := s.db.WithContext(ctx).Model(&model.HostAccount{}).Where("host_id = ?", m.ID).Count(&accountCount).Error; err != nil {
 			return HostView{}, fmt.Errorf("count host accounts: %w", err)
 		}
 		if accountCount != 0 {
@@ -150,7 +154,7 @@ func (s *DBStore) UpdateHost(id string, host HostRecord) (HostView, error) {
 	if normalized.Status == "disabled" {
 		m.Status = "disabled"
 	}
-	if err := s.db.Transaction(func(tx *gorm.DB) error {
+	if err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Save(&m).Error; err != nil {
 			return err
 		}
@@ -161,11 +165,11 @@ func (s *DBStore) UpdateHost(id string, host HostRecord) (HostView, error) {
 	}); err != nil {
 		return HostView{}, fmt.Errorf("update host: %w", err)
 	}
-	return s.hostView(m), nil
+	return s.hostView(ctx, m), nil
 }
 
-func (s *DBStore) DeleteHost(id string) error {
-	return s.db.Transaction(func(tx *gorm.DB) error {
+func (s *DBStore) DeleteHost(ctx context.Context, id string) error {
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var host model.Host
 		if err := tx.First(&host, "id = ?", id).Error; err != nil {
 			return fmt.Errorf("%w: %q", ErrHostNotFound, id)

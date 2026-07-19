@@ -77,7 +77,11 @@ func (s *Server) handleAIResources(w http.ResponseWriter, r *http.Request) {
 func (s *Server) listAIResources(w http.ResponseWriter, r *http.Request) {
 	userID := userIDFromRequest(r)
 	resources := make([]aiResource, 0)
-	targets := s.hostTargets.Targets()
+	targets, err := s.hostTargets.Targets(r.Context())
+	if err != nil {
+		s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
+		return
+	}
 	for _, target := range targets {
 		allowed, authErr := s.authorizeAnyConnection(r.Context(), userID, []string{rbac.ActionSessionConnect, rbac.ActionSFTPConnect}, model.ResourceTypeHostAccount, target.ID)
 		if authErr != nil {
@@ -111,7 +115,7 @@ func (s *Server) listAIResources(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) getAIResource(w http.ResponseWriter, r *http.Request, resourceType, resourceID string) {
-	resource, err := s.loadAIResource(resourceType, resourceID)
+	resource, err := s.loadAIResource(r, resourceType, resourceID)
 	if err != nil {
 		s.writeAIResourceError(w, r, err)
 		return
@@ -160,7 +164,7 @@ func (s *Server) issueAIResourceCredential(w http.ResponseWriter, r *http.Reques
 }
 
 func (s *Server) issueAIResourceSession(w http.ResponseWriter, r *http.Request, resourceType, resourceID string) {
-	resource, err := s.loadAIResource(resourceType, resourceID)
+	resource, err := s.loadAIResource(r, resourceType, resourceID)
 	if err != nil {
 		s.writeAIResourceError(w, r, err)
 		return
@@ -190,9 +194,9 @@ func (s *Server) issueAIResourceSession(w http.ResponseWriter, r *http.Request, 
 	})
 }
 
-func (s *Server) loadAIResource(resourceType, resourceID string) (aiResource, error) {
+func (s *Server) loadAIResource(r *http.Request, resourceType, resourceID string) (aiResource, error) {
 	if resourceType == model.ResourceTypeHostAccount {
-		target, err := s.hostTargets.Target(resourceID)
+		target, err := s.hostTargets.Target(r.Context(), resourceID)
 		if err != nil {
 			return aiResource{}, err
 		}

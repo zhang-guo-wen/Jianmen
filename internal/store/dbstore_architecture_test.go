@@ -42,7 +42,7 @@ func TestDBStoreSyncsResourcesAndUsesSequenceFloor(t *testing.T) {
 	}
 
 	st := NewDBStore(db)
-	target, err := st.AddTarget(config.Target{
+	target, err := st.AddTarget(context.Background(), config.Target{
 		ID:       "acct-8",
 		HostID:   host.ID,
 		Host:     host.Address,
@@ -59,7 +59,7 @@ func TestDBStoreSyncsResourcesAndUsesSequenceFloor(t *testing.T) {
 	if target.Name != "operations" || target.Username != "root" {
 		t.Fatalf("target identity = name:%q username:%q", target.Name, target.Username)
 	}
-	targetConfig, err := st.TargetConfig(target.ID)
+	targetConfig, err := st.TargetConfig(context.Background(), target.ID)
 	if err != nil {
 		t.Fatalf("load target config: %v", err)
 	}
@@ -80,7 +80,7 @@ func TestDBStoreSyncsResourcesAndUsesSequenceFloor(t *testing.T) {
 		t.Fatalf("load host resource: %v", err)
 	}
 
-	if err := st.DeleteTarget(target.ID); err != nil {
+	if err := st.DeleteTarget(context.Background(), target.ID); err != nil {
 		t.Fatalf("delete target: %v", err)
 	}
 	var count int64
@@ -177,7 +177,7 @@ func TestDBStoreRejectsDuplicateAccountNamesPerParent(t *testing.T) {
 	}
 	st := NewDBStore(db)
 
-	_, err = st.AddTarget(config.Target{
+	_, err = st.AddTarget(context.Background(), config.Target{
 		ID:       "host-acct-1",
 		HostID:   "host-dup",
 		Host:     "127.0.0.1",
@@ -187,7 +187,7 @@ func TestDBStoreRejectsDuplicateAccountNamesPerParent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("add target: %v", err)
 	}
-	_, err = st.AddTarget(config.Target{
+	_, err = st.AddTarget(context.Background(), config.Target{
 		ID:       "host-acct-2",
 		HostID:   "host-dup",
 		Host:     "127.0.0.1",
@@ -248,7 +248,10 @@ func TestDBStoreListCountsAndDefaultTargetAreSetBased(t *testing.T) {
 	}
 
 	st := NewDBStore(db)
-	hostViews := st.Hosts()
+	hostViews, err := st.Hosts(context.Background())
+	if err != nil {
+		t.Fatalf("hosts: %v", err)
+	}
 	countByHost := make(map[string]int, len(hostViews))
 	for _, view := range hostViews {
 		countByHost[view.ID] = view.AccountCount

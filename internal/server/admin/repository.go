@@ -63,17 +63,17 @@ type adminAIAccessTokenRepository interface {
 }
 
 type adminHostTargetRepository interface {
-	Hosts() []store.HostView
-	Host(string) (store.HostView, error)
-	AddHost(store.HostRecord) (store.HostView, error)
-	UpdateHost(string, store.HostRecord) (store.HostView, error)
-	DeleteHost(string) error
-	Targets() []store.TargetView
-	Target(string) (store.TargetView, error)
-	TargetConfig(string) (store.TargetConfig, error)
-	AddTarget(config.Target) (store.TargetView, error)
-	UpdateTarget(string, config.Target) (store.TargetView, error)
-	DeleteTarget(string) error
+	Hosts(context.Context) ([]store.HostView, error)
+	Host(context.Context, string) (store.HostView, error)
+	AddHost(context.Context, store.HostRecord) (store.HostView, error)
+	UpdateHost(context.Context, string, store.HostRecord) (store.HostView, error)
+	DeleteHost(context.Context, string) error
+	Targets(context.Context) ([]store.TargetView, error)
+	Target(context.Context, string) (store.TargetView, error)
+	TargetConfig(context.Context, string) (store.TargetConfig, error)
+	AddTarget(context.Context, config.Target) (store.TargetView, error)
+	UpdateTarget(context.Context, string, config.Target) (store.TargetView, error)
+	DeleteTarget(context.Context, string) error
 	DefaultTarget(context.Context, model.User) (store.TargetConfig, error)
 }
 

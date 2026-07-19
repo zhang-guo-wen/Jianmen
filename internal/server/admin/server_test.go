@@ -324,7 +324,6 @@ func TestHandleTestConnectionResolvesHostContainerForNewAccount(t *testing.T) {
 	}
 
 	testReq := httptest.NewRequest(http.MethodPost, "/api/targets/test-connection", bytes.NewBufferString(`{
-		"id": "unsaved-account",
 		"host_id": "new-account-host",
 		"username": "root",
 		"password": "secret",

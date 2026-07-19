@@ -22,6 +22,7 @@ type Server struct {
 	cfg                    *config.Config
 	aiAccessTokens         *service.AIAccessTokenService
 	hostTargets            adminHostTargetRepository
+	hostManagement         *service.HostManagementService
 	databases              adminDatabaseRepository
 	databaseManagement     *service.DatabaseManagementService
 	applicationService     *service.ApplicationService
@@ -142,6 +143,10 @@ func New(
 	if err != nil {
 		return nil, fmt.Errorf("initialize connection password service: %w", err)
 	}
+	hostManagement, err := service.NewHostManagementService(hostManagementRepositoryAdapter{repository: dependencies.hostTargets}, authorization)
+	if err != nil {
+		return nil, fmt.Errorf("initialize host management service: %w", err)
+	}
 	userPreferences, err := service.NewUserPreferenceService(dependencies.userPreferences)
 	if err != nil {
 		return nil, fmt.Errorf("initialize user preference service: %w", err)
@@ -178,7 +183,7 @@ func New(
 	}
 	return &Server{
 		cfg: cfg, db: db, logger: logger,
-		aiAccessTokens: aiAccessTokens, hostTargets: dependencies.hostTargets, databases: dependencies.databases,
+		aiAccessTokens: aiAccessTokens, hostTargets: dependencies.hostTargets, hostManagement: hostManagement, databases: dependencies.databases,
 		databaseManagement: databaseManagement, applicationService: applicationService,
 		containerManagement: containerManagement, platformAccountService: platformAccountService,
 		userSessionCreation: userSessionCreation, audit: dependencies.audit, connectionPassword: connectionPassword,

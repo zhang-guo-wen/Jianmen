@@ -77,7 +77,7 @@ func (s *Server) handleAIResources(w http.ResponseWriter, r *http.Request) {
 func (s *Server) listAIResources(w http.ResponseWriter, r *http.Request) {
 	userID := userIDFromRequest(r)
 	resources := make([]aiResource, 0)
-	targets := s.store.Targets()
+	targets := s.hostTargets.Targets()
 	for _, target := range targets {
 		allowed, authErr := s.authorizeAnyConnection(r.Context(), userID, []string{rbac.ActionSessionConnect, rbac.ActionSFTPConnect}, model.ResourceTypeHostAccount, target.ID)
 		if authErr != nil {
@@ -88,7 +88,7 @@ func (s *Server) listAIResources(w http.ResponseWriter, r *http.Request) {
 			resources = append(resources, hostAIResource(target))
 		}
 	}
-	accounts, err := s.store.DatabaseAccounts()
+	accounts, err := s.databases.DatabaseAccounts()
 	if err != nil {
 		s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
 		return
@@ -100,7 +100,7 @@ func (s *Server) listAIResources(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if allowed && aiResourceStatusActive(account.Status) && (account.ExpiresAt == nil || time.Now().UTC().Before(*account.ExpiresAt)) {
-			instance, instanceErr := s.store.DatabaseInstance(account.InstanceID)
+			instance, instanceErr := s.databases.DatabaseInstance(account.InstanceID)
 			if instanceErr != nil || !aiResourceStatusActive(instance.Status) {
 				continue
 			}
@@ -151,7 +151,7 @@ func (s *Server) issueAIResourceCredential(w http.ResponseWriter, r *http.Reques
 		s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
 		return
 	}
-	if err := s.store.CreateConnectionPassword(r.Context(), model.ConnectionPassword{
+	if err := s.connectionPassword.CreateConnectionPassword(r.Context(), model.ConnectionPassword{
 		UserID: userIDFromRequest(r), ResourceType: resourceType, ResourceID: resourceID,
 		SecretHash: issued.Hash, MySQLNativeHash: issued.MySQLNativeHash, ExpiresAt: issued.ExpiresAt,
 	}); err != nil {
@@ -175,7 +175,7 @@ func (s *Server) issueAIResourceSession(w http.ResponseWriter, r *http.Request, 
 		s.forbidden(w, r)
 		return
 	}
-	sessions, err := s.store.UserSessions(userIDFromRequest(r))
+	sessions, err := s.userSessions.UserSessions(userIDFromRequest(r))
 	if err != nil {
 		s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
 		return
@@ -188,7 +188,7 @@ func (s *Server) issueAIResourceSession(w http.ResponseWriter, r *http.Request, 
 		}
 	}
 	if session == nil {
-		created, createErr := s.store.CreateUserSession(model.UserSession{UserID: userIDFromRequest(r), Type: "permanent", Status: "active"})
+		created, createErr := s.userSessions.CreateUserSession(model.UserSession{UserID: userIDFromRequest(r), Type: "permanent", Status: "active"})
 		if createErr != nil {
 			s.writeErrorText(w, r, http.StatusInternalServerError, createErr.Error())
 			return
@@ -212,7 +212,7 @@ func (s *Server) issueAIResourceSession(w http.ResponseWriter, r *http.Request, 
 
 func (s *Server) loadAIResource(resourceType, resourceID string) (aiResource, error) {
 	if resourceType == model.ResourceTypeHostAccount {
-		target, err := s.store.Target(resourceID)
+		target, err := s.hostTargets.Target(resourceID)
 		if err != nil {
 			return aiResource{}, err
 		}
@@ -222,14 +222,14 @@ func (s *Server) loadAIResource(resourceType, resourceID string) (aiResource, er
 		return hostAIResource(target), nil
 	}
 	if resourceType == model.ResourceTypeDatabaseAccount {
-		account, err := s.store.DatabaseAccount(resourceID)
+		account, err := s.databases.DatabaseAccount(resourceID)
 		if err != nil {
 			return aiResource{}, err
 		}
 		if !aiResourceStatusActive(account.Status) || (account.ExpiresAt != nil && time.Now().UTC().After(*account.ExpiresAt)) {
 			return aiResource{}, gorm.ErrRecordNotFound
 		}
-		instance, err := s.store.DatabaseInstance(account.InstanceID)
+		instance, err := s.databases.DatabaseInstance(account.InstanceID)
 		if err != nil || !aiResourceStatusActive(instance.Status) {
 			return aiResource{}, gorm.ErrRecordNotFound
 		}

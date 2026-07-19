@@ -38,7 +38,7 @@ func TestMePreferencesDefaultsAndPersists(t *testing.T) {
 		t.Fatalf("put preferences status = %d, body=%s", putRecorder.Code, putRecorder.Body.String())
 	}
 
-	stored, err := server.store.UserPreference(putRequest.Context(), "u1")
+	stored, err := server.preferences.UserPreference(putRequest.Context(), "u1")
 	if err != nil {
 		t.Fatalf("read stored preference: %v", err)
 	}

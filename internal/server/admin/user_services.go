@@ -10,20 +10,18 @@ func (s *Server) userManagementService() (*service.UserService, error) {
 	if s.userManagement != nil {
 		return s.userManagement, nil
 	}
-	repository, ok := s.store.(service.UserRepository)
-	if !ok {
+	if s.userRepository == nil {
 		return nil, errors.New("user management service is unavailable")
 	}
-	return service.NewUserService(repository)
+	return service.NewUserService(s.userRepository)
 }
 
 func (s *Server) userGroupManagementService() (*service.UserGroupService, error) {
 	if s.userGroups != nil {
 		return s.userGroups, nil
 	}
-	repository, ok := s.store.(service.UserGroupRepository)
-	if !ok {
+	if s.userGroupRepository == nil {
 		return nil, errors.New("user group management service is unavailable")
 	}
-	return service.NewUserGroupService(repository)
+	return service.NewUserGroupService(s.userGroupRepository)
 }

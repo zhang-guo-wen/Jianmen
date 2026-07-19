@@ -165,7 +165,7 @@ func (s *Server) handleWebTerminal(w http.ResponseWriter, r *http.Request) {
 	}
 	if auditSession != nil {
 		defer func() {
-			if err := s.store.EndAuditSession(auditSession.ID); err != nil {
+			if err := s.audit.EndAuditSession(auditSession.ID); err != nil {
 				s.logger.Warn("failed to end web terminal audit session", "session", auditSession.ID, "error", err)
 			}
 		}()
@@ -218,7 +218,7 @@ func (s *Server) handleWebTerminal(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) resolveWebTerminalTarget(ctx context.Context, user model.User, targetID string) (store.TargetConfig, error) {
 	user.RequestedTargetID = targetID
-	target, err := s.store.DefaultTarget(ctx, user)
+	target, err := s.hostTargets.DefaultTarget(ctx, user)
 	if err != nil {
 		return store.TargetConfig{}, err
 	}

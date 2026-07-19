@@ -125,8 +125,8 @@ func (s *Server) logLogin(r *http.Request, username, userID, outcome, reason str
 	if logger == nil {
 		logger = slog.Default()
 	}
-	if s.store != nil {
-		if err := s.store.CreateLoginAuditLog(&model.LoginAuditLog{
+	if s.audit != nil {
+		if err := s.audit.CreateLoginAuditLog(&model.LoginAuditLog{
 			UserID:    userID,
 			Username:  username,
 			Outcome:   outcome,

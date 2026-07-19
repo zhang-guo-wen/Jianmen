@@ -57,7 +57,7 @@ func (s *Server) handleDBAccounts(w http.ResponseWriter, r *http.Request) {
 		}
 		actions = []string{rbac.ActionDBConnect}
 	}
-	accounts, err := s.store.DatabaseAccounts()
+	accounts, err := s.databases.DatabaseAccounts()
 	if err != nil {
 		s.writeDatabaseOperationError(w, r, http.StatusInternalServerError, "database operation failed", err)
 		return
@@ -68,7 +68,7 @@ func (s *Server) handleDBAccounts(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	instances := make(map[string]store.DatabaseInstanceView)
-	for _, instance := range s.store.DatabaseInstances() {
+	for _, instance := range s.databases.DatabaseInstances() {
 		instances[instance.ID] = instance
 	}
 	resources := make([]databaseAccountResourceView, 0, len(accounts))
@@ -104,7 +104,7 @@ func (s *Server) handleDBInstances(w http.ResponseWriter, r *http.Request) {
 			}
 			actions = []string{rbac.ActionDBConnect}
 		}
-		instances, err := s.visibleDatabaseInstancesForActions(r, s.store.DatabaseInstances(), actions)
+		instances, err := s.visibleDatabaseInstancesForActions(r, s.databases.DatabaseInstances(), actions)
 		if err != nil {
 			s.writeDatabaseOperationError(w, r, http.StatusInternalServerError, "database operation failed", err)
 			return
@@ -148,7 +148,7 @@ func (s *Server) handleCreateDBInstance(w http.ResponseWriter, r *http.Request) 
 		s.writeErrorText(w, r, http.StatusBadRequest, "invalid database request")
 		return
 	}
-	view, err := s.store.AddDatabaseInstance(store.DatabaseInstanceInput{
+	view, err := s.databases.AddDatabaseInstance(store.DatabaseInstanceInput{
 		Name: payload.Name, Protocol: payload.Protocol, Address: payload.Address, Port: payload.Port,
 		TLSMode: payload.TLSMode, TLSServerName: payload.TLSServerName, TLSCAPEM: payload.TLSCAPEM, ClearTLSCA: payload.ClearTLSCA,
 		Group: payload.Group, Remark: payload.Remark,
@@ -158,7 +158,7 @@ func (s *Server) handleCreateDBInstance(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if err := s.grantCreatedResource(r, model.ResourceTypeDatabaseInstance, view.ID); err != nil {
-		_ = s.store.DeleteDatabaseInstance(view.ID)
+		_ = s.databases.DeleteDatabaseInstance(view.ID)
 		s.writeDatabaseOperationError(w, r, http.StatusInternalServerError, "database operation failed", err)
 		return
 	}
@@ -254,7 +254,7 @@ func (s *Server) handleDBInstance(w http.ResponseWriter, r *http.Request) {
 			s.forbidden(w, r)
 			return
 		}
-		view, err := s.store.DatabaseInstance(id)
+		view, err := s.databases.DatabaseInstance(id)
 		if err != nil {
 			writeDBStoreError(w, r, err)
 			return
@@ -269,7 +269,7 @@ func (s *Server) handleDBInstance(w http.ResponseWriter, r *http.Request) {
 		if !s.requireResourceAction(w, r, rbac.ActionDBProxyDelete, model.ResourceTypeDatabaseInstance, id) {
 			return
 		}
-		if err := s.store.DeleteDatabaseInstance(id); err != nil {
+		if err := s.databases.DeleteDatabaseInstance(id); err != nil {
 			writeDBStoreError(w, r, err)
 			return
 		}
@@ -300,7 +300,7 @@ func (s *Server) handleUpdateDBInstance(w http.ResponseWriter, r *http.Request, 
 		s.writeErrorText(w, r, http.StatusBadRequest, "invalid database request")
 		return
 	}
-	view, err := s.store.UpdateDatabaseInstance(id, store.DatabaseInstanceInput{
+	view, err := s.databases.UpdateDatabaseInstance(id, store.DatabaseInstanceInput{
 		Name: payload.Name, Protocol: payload.Protocol, Address: payload.Address, Port: payload.Port,
 		TLSMode: payload.TLSMode, TLSServerName: payload.TLSServerName, TLSCAPEM: payload.TLSCAPEM, ClearTLSCA: payload.ClearTLSCA,
 		Group: payload.Group, Remark: payload.Remark, Status: payload.Status,
@@ -329,7 +329,7 @@ func (s *Server) handleCreateDBAccount(w http.ResponseWriter, r *http.Request, i
 		s.writeErrorText(w, r, http.StatusBadRequest, "password is required")
 		return
 	}
-	view, err := s.store.AddDatabaseAccount(instanceID, payload.Username, payload.Password, payload.Group, payload.Remark, payload.ExpiresAt)
+	view, err := s.databases.AddDatabaseAccount(instanceID, payload.Username, payload.Password, payload.Group, payload.Remark, payload.ExpiresAt)
 	if err != nil {
 		writeDBStoreError(w, r, err)
 		return
@@ -351,7 +351,7 @@ func (s *Server) handleDBAccount(w http.ResponseWriter, r *http.Request) {
 		if !s.requireResourceAction(w, r, rbac.ActionDBProxyView, model.ResourceTypeDatabaseAccount, id) {
 			return
 		}
-		view, err := s.store.DatabaseAccount(id)
+		view, err := s.databases.DatabaseAccount(id)
 		if err != nil {
 			writeDBStoreError(w, r, err)
 			return
@@ -371,7 +371,7 @@ func (s *Server) handleDBAccount(w http.ResponseWriter, r *http.Request) {
 				s.writeDatabaseDeprovisionServiceError(w, r, err)
 				return
 			}
-			if err := s.store.DeleteDatabaseAccount(id); err != nil {
+			if err := s.databases.DeleteDatabaseAccount(id); err != nil {
 				writeDBStoreError(w, r, err)
 				return
 			}
@@ -397,7 +397,7 @@ func (s *Server) handleUpdateDBAccount(w http.ResponseWriter, r *http.Request, i
 		s.writeErrorText(w, r, http.StatusBadRequest, "invalid database request")
 		return
 	}
-	view, err := s.store.UpdateDatabaseAccount(id, payload.Username, payload.Password, payload.Group, payload.Remark, payload.ExpiresAt, payload.Status)
+	view, err := s.databases.UpdateDatabaseAccount(id, payload.Username, payload.Password, payload.Group, payload.Remark, payload.ExpiresAt, payload.Status)
 	if err != nil {
 		writeDBStoreError(w, r, err)
 		return

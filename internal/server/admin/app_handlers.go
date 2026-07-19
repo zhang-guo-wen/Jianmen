@@ -27,7 +27,7 @@ func (s *Server) handleApplications(w http.ResponseWriter, r *http.Request) {
 		if !s.requireAuthenticatedUser(w, r) {
 			return
 		}
-		apps, err := s.visibleApplications(r, s.store.Applications())
+		apps, err := s.visibleApplications(r, s.applications.Applications())
 		if err != nil {
 			s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
 			return
@@ -69,13 +69,13 @@ func (s *Server) handleCreateApplication(w http.ResponseWriter, r *http.Request)
 		s.writeErrorText(w, r, http.StatusBadRequest, err.Error())
 		return
 	}
-	view, err := s.store.AddApplication(input)
+	view, err := s.applications.AddApplication(input)
 	if err != nil {
 		s.writeErrorText(w, r, http.StatusBadRequest, err.Error())
 		return
 	}
 	if err := s.grantCreatedResource(r, model.ResourceTypeApplication, view.ID); err != nil {
-		_ = s.store.DeleteApplication(view.ID)
+		_ = s.applications.DeleteApplication(view.ID)
 		s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -99,7 +99,7 @@ func (s *Server) handleApplication(w http.ResponseWriter, r *http.Request) {
 		if !s.requireResourceAction(w, r, rbac.ActionAppView, model.ResourceTypeApplication, id) {
 			return
 		}
-		view, err := s.store.Application(id)
+		view, err := s.applications.Application(id)
 		if err != nil {
 			writeApplicationStoreError(w, r, err)
 			return
@@ -114,12 +114,12 @@ func (s *Server) handleApplication(w http.ResponseWriter, r *http.Request) {
 		if !s.requireResourceAction(w, r, rbac.ActionAppDelete, model.ResourceTypeApplication, id) {
 			return
 		}
-		view, err := s.store.Application(id)
+		view, err := s.applications.Application(id)
 		if err != nil {
 			writeApplicationStoreError(w, r, err)
 			return
 		}
-		if err := s.store.DeleteApplication(id); err != nil {
+		if err := s.applications.DeleteApplication(id); err != nil {
 			writeApplicationStoreError(w, r, err)
 			return
 		}
@@ -134,7 +134,7 @@ func (s *Server) handleApplication(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleUpdateApplication(w http.ResponseWriter, r *http.Request, id string) {
-	previous, err := s.store.Application(id)
+	previous, err := s.applications.Application(id)
 	if err != nil {
 		writeApplicationStoreError(w, r, err)
 		return
@@ -151,7 +151,7 @@ func (s *Server) handleUpdateApplication(w http.ResponseWriter, r *http.Request,
 		s.writeErrorText(w, r, http.StatusBadRequest, err.Error())
 		return
 	}
-	view, err := s.store.UpdateApplication(id, input)
+	view, err := s.applications.UpdateApplication(id, input)
 	if err != nil {
 		writeApplicationStoreError(w, r, err)
 		return
@@ -223,7 +223,7 @@ func (s *Server) nextApplicationListenPort() (int, error) {
 		start, end = 47110, 47199
 	}
 	used := make(map[int]struct{})
-	for _, app := range s.store.Applications() {
+	for _, app := range s.applications.Applications() {
 		used[app.ListenPort] = struct{}{}
 	}
 	for port := start; port <= end; port++ {

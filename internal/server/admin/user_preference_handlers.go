@@ -32,7 +32,7 @@ func (s *Server) handleMePreferences(w http.ResponseWriter, r *http.Request) {
 	}
 	switch r.Method {
 	case http.MethodGet:
-		preference, err := s.store.UserPreference(r.Context(), userID)
+		preference, err := s.preferences.UserPreference(r.Context(), userID)
 		if err != nil {
 			s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
 			return
@@ -56,7 +56,7 @@ func (s *Server) updateMePreferences(w http.ResponseWriter, r *http.Request, use
 		s.writeErrorText(w, r, http.StatusBadRequest, err.Error())
 		return
 	}
-	preference, err := s.store.UserPreference(r.Context(), userID)
+	preference, err := s.preferences.UserPreference(r.Context(), userID)
 	if err != nil {
 		s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
 		return
@@ -66,7 +66,7 @@ func (s *Server) updateMePreferences(w http.ResponseWriter, r *http.Request, use
 		s.writeErrorText(w, r, http.StatusBadRequest, message)
 		return
 	}
-	preference, err = s.store.SaveUserPreference(r.Context(), preference)
+	preference, err = s.preferences.SaveUserPreference(r.Context(), preference)
 	if err != nil {
 		s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
 		return

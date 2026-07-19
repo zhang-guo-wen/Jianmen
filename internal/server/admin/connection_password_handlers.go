@@ -71,7 +71,7 @@ func (s *Server) handleConnectionPasswords(w http.ResponseWriter, r *http.Reques
 		MySQLNativeHash: issued.MySQLNativeHash,
 		ExpiresAt:       issued.ExpiresAt,
 	}
-	if err := s.store.CreateConnectionPassword(r.Context(), credential); err != nil {
+	if err := s.connectionPassword.CreateConnectionPassword(r.Context(), credential); err != nil {
 		s.writeErrorText(w, r, http.StatusInternalServerError, "failed to save connection password")
 		return
 	}

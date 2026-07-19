@@ -5,6 +5,8 @@ import (
 	"strings"
 )
 
+const maxRedisSubscriptionTopics = 1024
+
 type redisSubscriptionState struct {
 	channels map[string]struct{}
 	patterns map[string]struct{}
@@ -20,20 +22,41 @@ type redisPubSubEvent struct {
 }
 
 type redisStreamPubSubCapture struct {
-	rootType    byte
-	rootSeen    bool
-	nextElement int
-	bulkElement int
-	bulkValue   []byte
-	event       redisPubSubEvent
-	kindReady   bool
-	topicReady  bool
-	countReady  bool
-	invalid     bool
+	rootType        byte
+	maxTopicBytes   int
+	expectedCommand string
+	expectedTopics  []string
+	allowNullTopic  bool
+	rootSeen        bool
+	nextElement     int
+	bulkElement     int
+	bulkValue       []byte
+	topicOffset     int
+	event           redisPubSubEvent
+	kindReady       bool
+	topicReady      bool
+	countReady      bool
+	invalid         bool
 }
 
 func (s *redisSubscriptionState) active() bool {
 	return len(s.channels)+len(s.patterns)+len(s.sharded) > 0
+}
+
+func (s *redisSubscriptionState) withinLimit(limit int) bool {
+	limit = normalizeMaxClientMessageBytes(limit)
+	count := 0
+	bytes := 0
+	for _, topics := range []map[string]struct{}{s.channels, s.patterns, s.sharded} {
+		for topic := range topics {
+			count++
+			if count > maxRedisSubscriptionTopics || len(topic) > limit-bytes {
+				return false
+			}
+			bytes += len(topic)
+		}
+	}
+	return true
 }
 
 func (s redisSubscriptionState) clone() redisSubscriptionState {
@@ -114,7 +137,15 @@ func (o *redisObserver) planRedisPubSubResponse(
 	command string,
 	args []string,
 ) (remaining int, unsubscribeAll bool, unsubscribeTopics map[string]struct{}) {
-	target := o.subscriptionIntent.category(command)
+	return planRedisPubSubResponseForState(&o.subscriptionIntent, command, args)
+}
+
+func planRedisPubSubResponseForState(
+	state *redisSubscriptionState,
+	command string,
+	args []string,
+) (remaining int, unsubscribeAll bool, unsubscribeTopics map[string]struct{}) {
+	target := state.category(command)
 	if target == nil {
 		return 1, false, nil
 	}
@@ -143,6 +174,32 @@ func (o *redisObserver) planRedisPubSubResponse(
 	default:
 		return 1, false, nil
 	}
+}
+
+func (o *redisObserver) canPlanRedisPubSubResponse(command string, args []string) bool {
+	candidate := o.subscriptionIntent.clone()
+	planRedisPubSubResponseForState(&candidate, command, args)
+	return candidate.withinLimit(o.maxClientMessageBytes)
+}
+
+func (o *redisObserver) pendingRedisPubSubWithinLimit(args []string) bool {
+	limit := normalizeMaxClientMessageBytes(o.maxClientMessageBytes)
+	bytes := 0
+	add := func(values []string) bool {
+		for _, value := range values {
+			if len(value) > limit-bytes {
+				return false
+			}
+			bytes += len(value)
+		}
+		return true
+	}
+	for index := range o.slots {
+		if !add(o.slots[index].pubSubArgs) {
+			return false
+		}
+	}
+	return add(args)
 }
 
 func (o *redisObserver) rebuildRedisSubscriptionIntent(start int) {
@@ -238,8 +295,28 @@ func (o *redisObserver) consumeRedisPubSubEvent(event redisPubSubEvent) (bool, *
 	if event.push {
 		o.protocolVersion = 3
 	}
-	if len(o.slots) > 0 && redisPubSubAckMatchesCommand(event.kind, o.slots[0].command) {
+	if redisPubSubAckMatchesAny(event.kind) {
+		if len(o.slots) == 0 || !redisPubSubAckMatchesCommand(event.kind, o.slots[0].command) {
+			return true, o.fail(
+				observerErrorProtocol,
+				"Redis Pub/Sub acknowledgement does not match the pending command",
+			)
+		}
 		slot := &o.slots[0]
+		if !consumeRedisPubSubACKTopic(slot, event) {
+			return true, o.fail(
+				observerErrorProtocol,
+				"Redis Pub/Sub acknowledgement topic does not match the pending command",
+			)
+		}
+		candidate := o.subscriptions.clone()
+		candidate.apply(event)
+		if !candidate.withinLimit(o.maxClientMessageBytes) {
+			return true, o.fail(
+				observerErrorPendingLimit,
+				"Redis subscription audit state exceeds the configured limit",
+			)
+		}
 		o.subscriptions.apply(event)
 		complete := false
 		if slot.unsubscribeAll {
@@ -271,111 +348,30 @@ func (o *redisObserver) consumeRedisPubSubEvent(event redisPubSubEvent) (bool, *
 	return false, nil
 }
 
-func newRedisStreamPubSubCapture(rootType byte) *redisStreamPubSubCapture {
-	return &redisStreamPubSubCapture{rootType: rootType, bulkElement: -1}
-}
-
-func (c *redisStreamPubSubCapture) consumeHeader(line []byte) {
-	if c == nil || c.invalid || len(line) < 3 {
-		return
+func consumeRedisPubSubACKTopic(slot *redisResponseSlot, event redisPubSubEvent) bool {
+	if slot == nil {
+		return false
 	}
-	if !c.rootSeen {
-		if line[0] == c.rootType {
-			c.rootSeen = true
+	if slot.unsubscribeAll {
+		if event.topicNull {
+			return len(slot.unsubscribeTopics) == 0
 		}
-		return
+		_, exists := slot.unsubscribeTopics[event.topic]
+		return exists
 	}
-	element := c.nextElement
-	c.nextElement++
-	value := line[1 : len(line)-2]
-	switch line[0] {
-	case '+':
-		c.setScalar(element, string(value), false)
-	case '_':
-		c.setScalar(element, "", true)
-	case '$', '=':
-		length, ok := parseCanonicalRESPNullableNumber(value)
-		if !ok {
-			c.invalid = true
-			return
+	if event.topicNull {
+		return false
+	}
+	for index := 1; index < len(slot.pubSubArgs); index++ {
+		if slot.pubSubArgs[index] != event.topic {
+			continue
 		}
-		if length == -1 {
-			c.setScalar(element, "", true)
-			return
-		}
-		if (element == 0 && length > 32) ||
-			(element == 1 && length > maxRedisObserverBufferBytes) {
-			c.invalid = true
-			return
-		}
-		c.bulkElement = element
-		if element <= 1 {
-			c.bulkValue = make([]byte, 0, int(length))
-		}
-	case ':':
-		if element != 2 {
-			c.invalid = true
-			return
-		}
-		count, err := strconv.ParseInt(string(value), 10, 64)
-		if err != nil {
-			c.invalid = true
-			return
-		}
-		c.event.count = count
-		c.countReady = true
-	default:
-		c.invalid = true
+		copy(slot.pubSubArgs[index:], slot.pubSubArgs[index+1:])
+		slot.pubSubArgs[len(slot.pubSubArgs)-1] = ""
+		slot.pubSubArgs = slot.pubSubArgs[:len(slot.pubSubArgs)-1]
+		return true
 	}
-}
-
-func (c *redisStreamPubSubCapture) consumeBulk(data []byte) {
-	if c == nil || c.invalid || c.bulkElement < 0 || c.bulkElement > 1 {
-		return
-	}
-	c.bulkValue = append(c.bulkValue, data...)
-}
-
-func (c *redisStreamPubSubCapture) finishBulk() {
-	if c == nil || c.invalid || c.bulkElement < 0 {
-		return
-	}
-	element := c.bulkElement
-	c.bulkElement = -1
-	if element <= 1 {
-		c.setScalar(element, string(c.bulkValue), false)
-	}
-	c.bulkValue = nil
-}
-
-func (c *redisStreamPubSubCapture) setScalar(element int, value string, null bool) {
-	switch element {
-	case 0:
-		if null {
-			c.invalid = true
-			return
-		}
-		c.event.kind = strings.ToLower(value)
-		c.kindReady = true
-	case 1:
-		c.event.topic = value
-		c.event.topicNull = null
-		c.topicReady = true
-	}
-}
-
-func (c *redisStreamPubSubCapture) capturedEvent() (redisPubSubEvent, bool) {
-	if c == nil || c.invalid || !c.kindReady {
-		return redisPubSubEvent{}, false
-	}
-	c.event.push = c.rootType == '>'
-	if redisPubSubAckMatchesAny(c.event.kind) {
-		return c.event, c.topicReady && c.countReady
-	}
-	if isRedisPubSubMessage(c.event.kind) {
-		return c.event, c.topicReady
-	}
-	return c.event, true
+	return false
 }
 
 func parseRedisPubSubEvent(frame []byte) (redisPubSubEvent, bool) {

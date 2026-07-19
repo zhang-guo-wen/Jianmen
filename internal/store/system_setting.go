@@ -228,18 +228,19 @@ func validateSystemSettingRevisionPayload(revision model.SystemSettingRevision) 
 
 func systemSettingUpdateColumns(setting model.SystemSetting) map[string]any {
 	return map[string]any{
-		"web_rdp_enabled":                 setting.WebRDPEnabled,
-		"web_rdp_connect_timeout_seconds": setting.WebRDPConnectTimeoutSeconds,
-		"web_rdp_allow_unrecorded":        setting.WebRDPAllowUnrecorded,
-		"recording_enabled":               setting.RecordingEnabled,
-		"recording_record_input":          setting.RecordingRecordInput,
-		"recording_record_commands":       setting.RecordingRecordCommands,
-		"recording_retention_days":        setting.RecordingRetentionDays,
-		"recording_max_replay_bytes":      setting.RecordingMaxReplayBytes,
-		"recording_cleanup_batch_size":    setting.RecordingCleanupBatchSize,
-		"revision":                        setting.Revision,
-		"updated_by_id":                   strings.TrimSpace(setting.UpdatedByID),
-		"updated_by_username":             strings.TrimSpace(setting.UpdatedByUsername),
-		"updated_at":                      setting.UpdatedAt,
+		"web_rdp_enabled":                   setting.WebRDPEnabled,
+		"web_rdp_connect_timeout_seconds":   setting.WebRDPConnectTimeoutSeconds,
+		"web_rdp_allow_unrecorded":          setting.WebRDPAllowUnrecorded,
+		"recording_enabled":                 setting.RecordingEnabled,
+		"recording_record_input":            setting.RecordingRecordInput,
+		"recording_record_commands":         setting.RecordingRecordCommands,
+		"recording_retention_days":          setting.RecordingRetentionDays,
+		"recording_max_replay_bytes":        setting.RecordingMaxReplayBytes,
+		"recording_cleanup_batch_size":      setting.RecordingCleanupBatchSize,
+		"database_max_client_message_bytes": setting.DatabaseMaxClientMessageBytes,
+		"revision":                          setting.Revision,
+		"updated_by_id":                     strings.TrimSpace(setting.UpdatedByID),
+		"updated_by_username":               strings.TrimSpace(setting.UpdatedByUsername),
+		"updated_at":                        setting.UpdatedAt,
 	}
 }

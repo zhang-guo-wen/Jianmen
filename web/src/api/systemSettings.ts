@@ -1,9 +1,14 @@
 export const BYTES_PER_GIB = 1024 ** 3;
+export const BYTES_PER_MIB = 1024 ** 2;
+export const DATABASE_MAX_CLIENT_MESSAGE_BYTES_MIN = 64 * 1024;
+export const DATABASE_MAX_CLIENT_MESSAGE_BYTES_MAX = 16 * BYTES_PER_MIB;
+export const DATABASE_MAX_CLIENT_MESSAGE_BYTES_DEFAULT = 10 * BYTES_PER_MIB;
 
 export interface SystemSettingsValues {
   web_rdp_enabled: boolean;
   web_rdp_connect_timeout_seconds: number;
   web_rdp_allow_unrecorded: boolean;
+  database_max_client_message_bytes: number;
   recording_enabled: boolean;
   recording_record_input: boolean;
   recording_record_commands: boolean;
@@ -97,6 +102,25 @@ export function replayGiBToBytes(gib: number): number {
   return Math.round(gib * BYTES_PER_GIB);
 }
 
+export function clientMessageBytesToMiB(bytes: number): number {
+  if (!Number.isFinite(bytes) || bytes <= 0) return 0;
+  return Number((bytes / BYTES_PER_MIB).toFixed(4));
+}
+
+export function clientMessageMiBToBytes(mib: number): number {
+  if (!Number.isFinite(mib) || mib <= 0) return 0;
+  return Math.round(mib * BYTES_PER_MIB);
+}
+
+export function formatClientMessageBytes(bytes: number): string {
+  if (!Number.isSafeInteger(bytes) || bytes <= 0) return '0 MiB';
+  const mib = clientMessageBytesToMiB(bytes);
+  const roundedBytes = clientMessageMiBToBytes(mib);
+  return roundedBytes === bytes
+    ? `${mib} MiB`
+    : `${mib} MiB（${bytes} 字节）`;
+}
+
 export function weakerProtectionReasons(
   current: SystemSettingsValues,
   next: SystemSettingsValues,
@@ -127,6 +151,18 @@ export function weakerProtectionReasons(
     )
   ) {
     reasons.push('降低本地回放容量上限，可能触发更积极的旧录像清理');
+  }
+  if (
+    current.database_max_client_message_bytes
+    !== next.database_max_client_message_bytes
+  ) {
+    reasons.push(
+      `数据库与 Redis 客户端报文上限从 ${
+        formatClientMessageBytes(current.database_max_client_message_bytes)
+      } 调整为 ${
+        formatClientMessageBytes(next.database_max_client_message_bytes)
+      }`,
+    );
   }
 
   return reasons;

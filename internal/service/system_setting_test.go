@@ -119,6 +119,13 @@ func TestSystemSettingsUpdateRequiresRiskConfirmation(t *testing.T) {
 			name: "tighten replay quota", field: "recording_max_replay_bytes",
 			apply: func(settings *SystemSettings) { settings.RecordingMaxReplayBytes /= 2 },
 		},
+		{
+			name:  "change database client message size",
+			field: "database_max_client_message_bytes",
+			apply: func(settings *SystemSettings) {
+				settings.DatabaseMaxClientMessageBytes = 12 * 1024 * 1024
+			},
+		},
 	}
 
 	for _, tt := range tests {
@@ -177,6 +184,12 @@ func TestSystemSettingsValidation(t *testing.T) {
 		{name: "negative replay quota", apply: func(s *SystemSettings) { s.RecordingMaxReplayBytes = -1 }},
 		{name: "batch below minimum", apply: func(s *SystemSettings) { s.RecordingCleanupBatchSize = 0 }},
 		{name: "batch above maximum", apply: func(s *SystemSettings) { s.RecordingCleanupBatchSize = 1001 }},
+		{name: "database message below minimum", apply: func(s *SystemSettings) {
+			s.DatabaseMaxClientMessageBytes = minDatabaseMaxClientMessageBytes - 1
+		}},
+		{name: "database message above maximum", apply: func(s *SystemSettings) {
+			s.DatabaseMaxClientMessageBytes = maxDatabaseMaxClientMessageBytes + 1
+		}},
 	}
 
 	for _, tt := range tests {
@@ -242,6 +255,31 @@ func TestSystemSettingsNoopDoesNotCreateRevision(t *testing.T) {
 	}
 	if state.Revision != 1 || len(repository.revisions) != 1 {
 		t.Fatalf("no-op state/revisions = %#v/%d", state, len(repository.revisions))
+	}
+}
+
+func TestLegacySystemSettingRevisionUsesTenMiBDatabaseLimit(t *testing.T) {
+	settings, err := unmarshalSystemSettings(`{
+		"web_rdp_enabled":false,
+		"web_rdp_connect_timeout_seconds":15,
+		"web_rdp_allow_unrecorded":false,
+		"recording_enabled":true,
+		"recording_record_input":false,
+		"recording_record_commands":true,
+		"recording_retention_days":30,
+		"recording_max_replay_bytes":10485760,
+		"recording_cleanup_batch_size":100
+	}`)
+	if err != nil {
+		t.Fatalf("unmarshalSystemSettings() error = %v", err)
+	}
+	if settings.DatabaseMaxClientMessageBytes !=
+		defaultDatabaseMaxClientMessageBytes {
+		t.Fatalf(
+			"legacy database client message limit = %d, want %d",
+			settings.DatabaseMaxClientMessageBytes,
+			defaultDatabaseMaxClientMessageBytes,
+		)
 	}
 }
 
@@ -317,12 +355,13 @@ func newTestSystemSettingsService(
 
 func validSystemSettings() SystemSettings {
 	return SystemSettings{
-		WebRDPConnectTimeoutSeconds: 15,
-		RecordingEnabled:            true,
-		RecordingRecordCommands:     true,
-		RecordingRetentionDays:      30,
-		RecordingMaxReplayBytes:     10 * 1024 * 1024,
-		RecordingCleanupBatchSize:   100,
+		WebRDPConnectTimeoutSeconds:   15,
+		RecordingEnabled:              true,
+		RecordingRecordCommands:       true,
+		RecordingRetentionDays:        30,
+		RecordingMaxReplayBytes:       10 * 1024 * 1024,
+		RecordingCleanupBatchSize:     100,
+		DatabaseMaxClientMessageBytes: defaultDatabaseMaxClientMessageBytes,
 	}
 }
 

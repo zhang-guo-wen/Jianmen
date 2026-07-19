@@ -50,12 +50,14 @@ type DBQueryEvent struct {
 }
 
 type queryRecord struct {
-	seq       int64
-	protocol  string
-	sql       string
-	queryKind string
-	detail    map[string]any
-	startedAt time.Time
+	seq              int64
+	protocol         string
+	sql              string
+	originalSQLBytes int64
+	sqlTruncated     bool
+	queryKind        string
+	detail           map[string]any
+	startedAt        time.Time
 }
 
 type queryFinish struct {

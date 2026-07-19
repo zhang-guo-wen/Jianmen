@@ -3,9 +3,19 @@ package dbproxy
 import (
 	"regexp"
 	"strings"
+	"unicode/utf8"
 )
 
-const sqlAuditRedacted = "[REDACTED]"
+const (
+	sqlAuditRedacted          = "[REDACTED]"
+	sqlAuditPreparedDetailKey = "_sql_audit_prepared"
+)
+
+type databaseSQLAudit struct {
+	text          string
+	originalBytes int64
+	truncated     bool
+}
 
 var sensitiveSQLAssignment = regexp.MustCompile(
 	`(?i)\b(password|passwd|pwd|secret|token|authorization|api_key|access_token|refresh_token|client_secret)\b(\s*(?:=|:|\bBY\b)\s*)([A-Za-z_][A-Za-z0-9_./+\-]*)`,
@@ -18,68 +28,255 @@ var sensitiveSQLAuthorization = regexp.MustCompile(
 // redactDatabaseSQL is deliberately stricter than a SQL formatter. The relay
 // still forwards the original bytes; only this audit copy is transformed.
 func redactDatabaseSQL(sql string) string {
-	var out strings.Builder
-	out.Grow(len(sql))
+	redacted, _ := redactDatabaseSQLWithLimit(sql, 0)
+	return redacted
+}
+
+func prepareDatabaseSQLAudit(sql string, limit int) databaseSQLAudit {
+	redacted, truncated := redactDatabaseSQLWithLimit(
+		sql,
+		normalizeMaxClientMessageBytes(limit),
+	)
+	return databaseSQLAudit{
+		text:          redacted,
+		originalBytes: int64(len(sql)),
+		truncated:     truncated,
+	}
+}
+
+func (a databaseSQLAudit) withDetail(detail map[string]any) map[string]any {
+	return mergeDetails(detail, map[string]any{
+		sqlAuditPreparedDetailKey: true,
+		"sql_original_bytes":      a.originalBytes,
+		"sql_truncated":           a.truncated,
+		"sql_audit_bytes":         len(a.text),
+	})
+}
+
+func normalizeDatabaseSQLAudit(
+	sql string,
+	detail map[string]any,
+	limit int,
+) (databaseSQLAudit, map[string]any) {
+	audit, prepared := preparedDatabaseSQLAudit(sql, detail)
+	if !prepared {
+		audit = prepareDatabaseSQLAudit(sql, limit)
+	}
+	cleanDetail := make(map[string]any, len(detail)+4)
+	for key, value := range detail {
+		if key != sqlAuditPreparedDetailKey {
+			cleanDetail[key] = value
+		}
+	}
+	cleanDetail["sql_original_bytes"] = audit.originalBytes
+	cleanDetail["sql_truncated"] = audit.truncated
+	cleanDetail["sql_audit_bytes"] = len(audit.text)
+	return audit, cleanDetail
+}
+
+func preparedDatabaseSQLAudit(sql string, detail map[string]any) (databaseSQLAudit, bool) {
+	prepared, ok := detail[sqlAuditPreparedDetailKey].(bool)
+	if !ok || !prepared {
+		return databaseSQLAudit{}, false
+	}
+	originalBytes, ok := detail["sql_original_bytes"].(int64)
+	if !ok || originalBytes < 0 {
+		return databaseSQLAudit{}, false
+	}
+	truncated, ok := detail["sql_truncated"].(bool)
+	if !ok {
+		return databaseSQLAudit{}, false
+	}
+	auditBytes, ok := detail["sql_audit_bytes"].(int)
+	if !ok || auditBytes != len(sql) {
+		return databaseSQLAudit{}, false
+	}
+	return databaseSQLAudit{
+		text:          sql,
+		originalBytes: originalBytes,
+		truncated:     truncated,
+	}, true
+}
+
+func redactDatabaseSQLWithLimit(sql string, limit int) (string, bool) {
+	out := newSQLRedactionBuilder(limit, len(sql))
 	for index := 0; index < len(sql); {
 		switch {
 		case sql[index] == '-' && index+1 < len(sql) && sql[index+1] == '-':
 			end := strings.IndexByte(sql[index:], '\n')
 			if end < 0 {
-				out.WriteString("-- ")
-				out.WriteString(sqlAuditRedacted)
+				out.writeString("-- ")
+				out.writeString(sqlAuditRedacted)
 				index = len(sql)
 				continue
 			}
-			out.WriteString("-- ")
-			out.WriteString(sqlAuditRedacted)
-			out.WriteByte('\n')
+			out.writeString("-- ")
+			out.writeString(sqlAuditRedacted)
+			out.writeByte('\n')
 			index += end + 1
 		case sql[index] == '#':
 			end := strings.IndexByte(sql[index:], '\n')
 			if end < 0 {
-				out.WriteString("# ")
-				out.WriteString(sqlAuditRedacted)
+				out.writeString("# ")
+				out.writeString(sqlAuditRedacted)
 				index = len(sql)
 				continue
 			}
-			out.WriteString("# ")
-			out.WriteString(sqlAuditRedacted)
-			out.WriteByte('\n')
+			out.writeString("# ")
+			out.writeString(sqlAuditRedacted)
+			out.writeByte('\n')
 			index += end + 1
 		case sql[index] == '/' && index+1 < len(sql) && sql[index+1] == '*':
 			end := strings.Index(sql[index+2:], "*/")
-			out.WriteString("/* ")
-			out.WriteString(sqlAuditRedacted)
-			out.WriteString(" */")
+			out.writeString("/* ")
+			out.writeString(sqlAuditRedacted)
+			out.writeString(" */")
 			if end < 0 {
 				index = len(sql)
 			} else {
 				index += end + 4
 			}
 		case sql[index] == '\'' || sql[index] == '"':
-			index = redactSQLQuotedLiteral(&out, sql, index, sql[index])
+			index = redactSQLQuotedLiteral(out, sql, index, sql[index])
 		case sql[index] == '$':
-			if next, ok := redactSQLDollarLiteral(&out, sql, index); ok {
+			if next, ok := redactSQLDollarLiteral(out, sql, index); ok {
 				index = next
 			} else {
-				out.WriteByte(sql[index])
+				out.writeByte(sql[index])
 				index++
 			}
 		case startsSQLNumericLiteral(sql, index):
-			out.WriteString(sqlAuditRedacted)
+			out.writeString(sqlAuditRedacted)
 			index = consumeSQLNumericLiteral(sql, index)
 		default:
-			out.WriteByte(sql[index])
+			out.writeByte(sql[index])
 			index++
 		}
 	}
-	redacted := sensitiveSQLAuthorization.ReplaceAllString(out.String(), `${1}${2}`+sqlAuditRedacted)
-	return sensitiveSQLAssignment.ReplaceAllString(redacted, `${1}${2}`+sqlAuditRedacted)
+	redacted, authorizationTruncated := redactSensitiveSQLPattern(
+		out.String(),
+		sensitiveSQLAuthorization,
+		limit,
+	)
+	redacted, assignmentTruncated := redactSensitiveSQLPattern(
+		redacted,
+		sensitiveSQLAssignment,
+		limit,
+	)
+	redacted, utf8Adjusted := normalizeAuditSQLUTF8(redacted, limit)
+	return redacted, out.truncated ||
+		authorizationTruncated ||
+		assignmentTruncated ||
+		utf8Adjusted
 }
 
-func redactSQLQuotedLiteral(out *strings.Builder, sql string, start int, quote byte) int {
-	out.WriteByte(quote)
-	out.WriteString(sqlAuditRedacted)
+type sqlRedactionBuilder struct {
+	builder   strings.Builder
+	limit     int
+	truncated bool
+}
+
+func newSQLRedactionBuilder(limit, capacity int) *sqlRedactionBuilder {
+	result := &sqlRedactionBuilder{limit: limit}
+	if limit > 0 && capacity > limit {
+		capacity = limit
+	}
+	if capacity > 0 {
+		result.builder.Grow(capacity)
+	}
+	return result
+}
+
+func (b *sqlRedactionBuilder) writeString(value string) {
+	if value == "" {
+		return
+	}
+	if b.limit <= 0 {
+		b.builder.WriteString(value)
+		return
+	}
+	remaining := b.limit - b.builder.Len()
+	if remaining <= 0 {
+		b.truncated = true
+		return
+	}
+	if len(value) > remaining {
+		value = value[:remaining]
+		b.truncated = true
+	}
+	b.builder.WriteString(value)
+}
+
+func (b *sqlRedactionBuilder) writeByte(value byte) {
+	if b.limit > 0 && b.builder.Len() >= b.limit {
+		b.truncated = true
+		return
+	}
+	b.builder.WriteByte(value)
+}
+
+func (b *sqlRedactionBuilder) String() string {
+	return b.builder.String()
+}
+
+func redactSensitiveSQLPattern(input string, pattern *regexp.Regexp, limit int) (string, bool) {
+	out := newSQLRedactionBuilder(limit, len(input))
+	cursor := 0
+	for cursor < len(input) {
+		match := pattern.FindStringSubmatchIndex(input[cursor:])
+		if match == nil {
+			break
+		}
+		out.writeString(input[cursor : cursor+match[0]])
+		for group := 1; group <= 2; group++ {
+			start := match[group*2]
+			end := match[group*2+1]
+			if start >= 0 && end >= start {
+				out.writeString(input[cursor+start : cursor+end])
+			}
+		}
+		out.writeString(sqlAuditRedacted)
+		cursor += match[1]
+		if limit > 0 && out.builder.Len() >= limit && cursor < len(input) {
+			out.truncated = true
+			return out.String(), true
+		}
+	}
+	out.writeString(input[cursor:])
+	return out.String(), out.truncated
+}
+
+func normalizeAuditSQLUTF8(value string, limit int) (string, bool) {
+	if utf8.ValidString(value) && (limit <= 0 || len(value) <= limit) {
+		return value, false
+	}
+	capacity := len(value)
+	if limit > 0 && capacity > limit {
+		capacity = limit
+	}
+	var out strings.Builder
+	out.Grow(capacity)
+	adjusted := false
+	for len(value) > 0 {
+		r, size := utf8.DecodeRuneInString(value)
+		next := value[:size]
+		if r == utf8.RuneError && size == 1 {
+			next = "\uFFFD"
+			adjusted = true
+		}
+		if limit > 0 && len(next) > limit-out.Len() {
+			adjusted = true
+			break
+		}
+		out.WriteString(next)
+		value = value[size:]
+	}
+	return out.String(), adjusted
+}
+
+func redactSQLQuotedLiteral(out *sqlRedactionBuilder, sql string, start int, quote byte) int {
+	out.writeByte(quote)
+	out.writeString(sqlAuditRedacted)
 	for index := start + 1; index < len(sql); index++ {
 		if sql[index] == '\\' && index+1 < len(sql) {
 			index++
@@ -92,13 +289,13 @@ func redactSQLQuotedLiteral(out *strings.Builder, sql string, start int, quote b
 			index++
 			continue
 		}
-		out.WriteByte(quote)
+		out.writeByte(quote)
 		return index + 1
 	}
 	return len(sql)
 }
 
-func redactSQLDollarLiteral(out *strings.Builder, sql string, start int) (int, bool) {
+func redactSQLDollarLiteral(out *sqlRedactionBuilder, sql string, start int) (int, bool) {
 	delimiterEnd := start + 1
 	for delimiterEnd < len(sql) && sql[delimiterEnd] != '$' {
 		value := sql[delimiterEnd]
@@ -114,12 +311,12 @@ func redactSQLDollarLiteral(out *strings.Builder, sql string, start int) (int, b
 	delimiter := sql[start : delimiterEnd+1]
 	contentStart := delimiterEnd + 1
 	closingOffset := strings.Index(sql[contentStart:], delimiter)
-	out.WriteString(delimiter)
-	out.WriteString(sqlAuditRedacted)
+	out.writeString(delimiter)
+	out.writeString(sqlAuditRedacted)
 	if closingOffset < 0 {
 		return len(sql), true
 	}
-	out.WriteString(delimiter)
+	out.writeString(delimiter)
 	return contentStart + closingOffset + len(delimiter), true
 }
 

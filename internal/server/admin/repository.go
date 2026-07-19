@@ -130,7 +130,7 @@ type adminAuditRepository interface {
 	ListAuditSSHCommands(string, store.PageOpts) ([]model.AuditSSHCommand, int64, error)
 	CreateAuditSFTPEvent(*model.AuditSFTPEvent) error
 	ListAuditSFTPEvents(string, store.PageOpts) ([]model.AuditSFTPEvent, int64, error)
-	ListAuditDBQueryEvents(string) ([]model.AuditDBQuery, error)
+	ListAuditDBQueryPreviews(context.Context, string, store.AuditDBQueryPreviewParams) ([]store.AuditDBQueryPreview, int64, error)
 	CreateAuditEvent(*model.AuditEvent) error
 	ListAuditEvents(store.AuditEventListParams) ([]model.AuditEvent, int64, error)
 	CreateLoginAuditLog(*model.LoginAuditLog) error

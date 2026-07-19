@@ -22,6 +22,14 @@ func startObservedQuery(sink querySink, sql string, detail map[string]any) (
 	return record, decision, true
 }
 
+func startPreparedObservedSQLQuery(
+	sink querySink,
+	audit databaseSQLAudit,
+	detail map[string]any,
+) (queryRecord, queryDecision, bool) {
+	return startObservedQuery(sink, audit.text, audit.withDetail(detail))
+}
+
 func finishObservedQuery(sink querySink, record queryRecord, finish queryFinish) (ok bool) {
 	if sink == nil {
 		return true

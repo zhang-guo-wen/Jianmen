@@ -128,6 +128,8 @@ func TestPostgresPortalSuspendedCompletesOnlyCurrentExecute(t *testing.T) {
 		t.Fatalf("client decision = %#v", decision)
 	}
 
+	observer.ObserveServerBytes(postgresMessage('1', nil))
+	observer.ObserveServerBytes(postgresMessage('2', nil))
 	observer.ObserveServerBytes(postgresMessage('s', nil))
 	observer.ObserveServerBytes(postgresMessage('C', []byte("SELECT 8\x00")))
 	observer.ObserveServerBytes(postgresMessage('Z', []byte{'I'}))

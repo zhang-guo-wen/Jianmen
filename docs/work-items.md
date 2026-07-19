@@ -124,6 +124,7 @@
 | 审计保留、分批清理与回放字节配额 | 已完成 | `8b8b633`、`99cf3aa` | [保留服务测试](../internal/service/audit_retention_test.go)、[存储一致性测试](../internal/store/dbstore_audit_retention_test.go) |
 | 跨分片脱敏及审计录制失败关闭 | 已完成 | `c517a3b` | [流式脱敏测试](../internal/recording/stream_redactor_test.go)、[数据库录制失败测试](../internal/server/dbproxy/audit_replay_path_test.go) |
 | 超级管理员独立文件权威路径与无管理员锁死 | 已完成 | `15e9c28`、`1c1b141` | 启动不再读取或重命名 `.super_admin_ids`；有用户但无有效超级管理员时失败关闭；显式配置只允许在无有效管理员时写库恢复；[启动回归测试](../cmd/bastion-core/bootstrap_test.go)、[存储事务测试](../internal/storage/super_admin_test.go) |
+| SSH 对聚合 Store 的直接依赖 | 已完成（首个拆分切片） | `a3e145a` | SSH 使用方定义认证、目标、用户会话、审计会话和审计事件 5 组窄接口，共 9 个方法；[最小依赖回归测试](../internal/server/sshserver/repository_test.go) |
 
 ### 可以延期
 
@@ -131,7 +132,7 @@
 |---|---|---|---|---|---|---|
 | `DEF-20260719-001` | P2 | 已延期 | 启动烟测仍使用无验证码登录，导致认证 API 和前端代理检查被跳过 | 烟测通过正式挑战流程获得会话；登录失败时明确失败而非静默跳过关键检查 | 下次修改登录/启动流程时，最迟首个发布候选前 | `start.ps1:179-222` |
 | `TECH-20260719-001` | P2 | 已延期 | `internal/server/admin` 的 Handler、业务判断和持久层访问尚未完全分层 | 选定资源切片迁入 `handler -> service -> store`；Handler 不直接执行 SQL；目标包测试通过 | 修改对应资源行为或文件接近行数上限时 | [后端审计](./backend-audit-2026-07-18.md) |
-| `TECH-20260719-002` | P2 | 已延期 | `store.Store` 仍是 76 方法的聚合接口，部分方法缺少 `context.Context` | 按使用方拆小接口；迁移方法以 `context.Context` 为首参数；架构测试锁定边界 | 新增 Store 方法或出现取消/超时传播缺陷时 | [Phase 2 计划](./superpowers/plans/2026-07-18-core-stabilization-phase2-plan.md) |
+| `TECH-20260719-002` | P2 | 已延期 | `store.Store` 仍是 76 方法的聚合接口；SSH 已迁移到 5 组、共 9 个方法的使用方接口，剩余直接生产依赖集中在 Admin，且部分方法仍缺少 `context.Context` | 按使用方继续拆小接口；迁移方法以 `context.Context` 为首参数；架构测试锁定边界；最终删除聚合接口 | 新增 Store 方法、修改 Admin 资源域或出现取消/超时传播缺陷时 | [Phase 2 计划](./superpowers/plans/2026-07-18-core-stabilization-phase2-plan.md) |
 | `TECH-20260719-003` | P2 | 已延期 | 资源授权列表仍缺少批量查询能力，数据量增长后可能形成 N+1 | 提供批量授权查询；列表查询次数不随资源数线性增长；保留资源级拒绝语义 | 性能测试出现线性查询增长，最迟容量测试前 | [后端审计](./backend-audit-2026-07-18.md) |
 | `DEF-20260719-002` | P2 | 已延期 | 进程异常退出或结束状态写入失败后，审计会话可能长期保持 `started`，为避免误删活动会话，当前保留/配额任务不会清理它 | 增加带租约或心跳的会话恢复规则；仅回收可证明已失活的会话；覆盖重启和结束写入失败 | 首个发布候选前，或发现长期 `started` 会话时 | 审计治理切片复核 |
 | `TECH-20260719-005` | P3 | 已延期 | DTO、GORM Model 和 Store View 类型仍未彻底分离 | Model 不承载 API JSON 结构；Store 不堆放表现层 View；迁移不改变 API 行为 | 修改关联 API 或类型再次造成跨层依赖时 | [后端审计](./backend-audit-2026-07-18.md) |

@@ -21,11 +21,10 @@ func (s *Server) roleManagementService() (*service.RoleService, error) {
 	if s.db == nil {
 		return nil, errors.New(rbacMetadataUnavailable)
 	}
-	repository, ok := s.store.(service.RoleManagementRepository)
-	if !ok {
+	if s.roleRepository == nil {
 		return nil, errors.New("role management service is unavailable")
 	}
-	return newRoleManagementService(repository)
+	return newRoleManagementService(s.roleRepository)
 }
 
 func newRoleManagementService(repository service.RoleManagementRepository) (*service.RoleService, error) {

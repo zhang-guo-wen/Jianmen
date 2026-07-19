@@ -200,11 +200,10 @@ func (s *Server) temporaryAccessService() (*service.TemporaryAccessService, erro
 	if s.temporaryAccess != nil {
 		return s.temporaryAccess, nil
 	}
-	repository, ok := s.store.(service.TemporaryAccessRepository)
-	if !ok {
+	if s.temporaryRepository == nil {
 		return nil, errors.New("temporary access repository is unavailable")
 	}
-	temporaryAccess, err := service.NewTemporaryAccessService(repository)
+	temporaryAccess, err := service.NewTemporaryAccessService(s.temporaryRepository)
 	if err != nil {
 		return nil, err
 	}

@@ -19,7 +19,8 @@ func (s *DBStore) BeginRDPAuditSession(
 	if session == nil {
 		return errors.New("RDP audit session is required")
 	}
-	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	s.prepareAuditSessionLease(session)
+	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Create(session).Error; err != nil {
 			return fmt.Errorf("create RDP audit session: %w", err)
 		}
@@ -31,6 +32,11 @@ func (s *DBStore) BeginRDPAuditSession(
 		}
 		return nil
 	})
+	if err != nil {
+		return err
+	}
+	s.trackAuditSessionLease(session)
+	return nil
 }
 
 func (s *DBStore) ActivateRDPAuditSession(ctx context.Context, id string) error {

@@ -21,7 +21,7 @@ func (s *Server) handleAuditOperations(w http.ResponseWriter, r *http.Request) {
 		Page:         positiveIntRequestQuery(r, "page", 1),
 		Size:         positiveIntRequestQuery(r, "page_size", 50),
 	}
-	items, total, err := s.store.ListAuditEvents(params)
+	items, total, err := s.audit.ListAuditEvents(params)
 	if err != nil {
 		s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
 		return
@@ -43,7 +43,7 @@ func (s *Server) handleAuditLogins(w http.ResponseWriter, r *http.Request) {
 		Page:    positiveIntRequestQuery(r, "page", 1),
 		Size:    positiveIntRequestQuery(r, "page_size", 50),
 	}
-	items, total, err := s.store.ListLoginAuditLogs(params)
+	items, total, err := s.audit.ListLoginAuditLogs(params)
 	if err != nil {
 		s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
 		return

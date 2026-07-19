@@ -52,7 +52,11 @@ func TestEffectiveGlobalActionsExcludesResourcePermissionsAndHonorsDeny(t *testi
 		}
 	}
 
-	actions, err := (&Server{db: db, store: store.NewDBStore(db)}).effectiveGlobalActions(context.Background(), "u1")
+	roles, err := newRoleManagementService(store.NewDBStore(db))
+	if err != nil {
+		t.Fatalf("new role service: %v", err)
+	}
+	actions, err := (&Server{db: db, roleManagement: roles}).effectiveGlobalActions(context.Background(), "u1")
 	if err != nil {
 		t.Fatalf("effectiveGlobalActions: %v", err)
 	}

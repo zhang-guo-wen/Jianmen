@@ -85,7 +85,7 @@ func (s *Server) handleContainerEndpoints(w http.ResponseWriter, r *http.Request
 		if !s.requireContainerHostAccount(w, r, payload.HostID, payload.HostAccountID) {
 			return
 		}
-		view, err := s.store.AddContainerEndpoint(containerEndpointInput(payload))
+		view, err := s.containers.AddContainerEndpoint(containerEndpointInput(payload))
 		if err != nil {
 			writeContainerStoreError(w, r, err)
 			return
@@ -118,7 +118,7 @@ func (s *Server) handleContainerEndpoint(w http.ResponseWriter, r *http.Request)
 			s.forbidden(w, r)
 			return
 		}
-		view, err := s.store.ContainerEndpoint(id)
+		view, err := s.containers.ContainerEndpoint(id)
 		if err != nil {
 			writeContainerStoreError(w, r, err)
 			return
@@ -138,7 +138,7 @@ func (s *Server) handleContainerEndpoint(w http.ResponseWriter, r *http.Request)
 		if !s.requireContainerHostAccount(w, r, payload.HostID, payload.HostAccountID) {
 			return
 		}
-		view, err := s.store.UpdateContainerEndpoint(id, containerEndpointInput(payload))
+		view, err := s.containers.UpdateContainerEndpoint(id, containerEndpointInput(payload))
 		if err != nil {
 			writeContainerStoreError(w, r, err)
 			return
@@ -150,7 +150,7 @@ func (s *Server) handleContainerEndpoint(w http.ResponseWriter, r *http.Request)
 			s.forbidden(w, r)
 			return
 		}
-		if err := s.store.DeleteContainerEndpoint(id); err != nil {
+		if err := s.containers.DeleteContainerEndpoint(id); err != nil {
 			writeContainerStoreError(w, r, err)
 			return
 		}
@@ -194,7 +194,7 @@ func (s *Server) handleContainerRuntime(w http.ResponseWriter, r *http.Request, 
 		s.forbidden(w, r)
 		return
 	}
-	view, err := s.store.ContainerEndpoint(endpointID)
+	view, err := s.containers.ContainerEndpoint(endpointID)
 	if err != nil {
 		writeContainerStoreError(w, r, err)
 		return
@@ -247,7 +247,7 @@ func (s *Server) listContainerEndpoints(r *http.Request) ([]store.ContainerEndpo
 	}
 	items := make([]store.ContainerEndpointView, 0)
 	for {
-		pageItems, total, err := s.store.ListContainerEndpoints(r.Context(), params)
+		pageItems, total, err := s.containers.ListContainerEndpoints(r.Context(), params)
 		if err != nil {
 			return nil, err
 		}
@@ -296,7 +296,7 @@ func (s *Server) containerServiceConfig(input store.ContainerEndpointInput) (ser
 		Runtime: input.Runtime, ConnectionMode: input.ConnectionMode, Address: input.Address, Port: input.Port,
 	}
 	if input.ConnectionMode == model.ContainerConnectionSSH || input.ConnectionMode == model.ContainerConnectionContainerd {
-		target, err := s.store.TargetConfig(input.HostAccountID)
+		target, err := s.hostTargets.TargetConfig(input.HostAccountID)
 		if err != nil {
 			return service.ContainerEndpointConfig{}, err
 		}
@@ -329,11 +329,11 @@ func (s *Server) requireContainerHostAccount(w http.ResponseWriter, r *http.Requ
 		s.writeErrorText(w, r, http.StatusBadRequest, "host_id and host_account_id must be provided together")
 		return false
 	}
-	if _, err := s.store.Host(hostID); err != nil {
+	if _, err := s.hostTargets.Host(hostID); err != nil {
 		writeContainerStoreError(w, r, err)
 		return false
 	}
-	target, err := s.store.TargetConfig(hostAccountID)
+	target, err := s.hostTargets.TargetConfig(hostAccountID)
 	if err != nil {
 		writeContainerStoreError(w, r, err)
 		return false

@@ -274,7 +274,7 @@ func TestAIAccessTokenReissueRotatesExistingTokenInPlace(t *testing.T) {
 		reissued.AccessToken == original.AccessToken || reissued.RefreshToken == original.RefreshToken {
 		t.Fatalf("unexpected reissued credentials: %#v", reissued)
 	}
-	if _, err := server.store.AuthenticateAIAccessToken(
+	if _, err := server.aiTokens.AuthenticateAIAccessToken(
 		reissueRequest.Context(),
 		service.HashAIAccessToken(original.AccessToken),
 		time.Now().UTC(),

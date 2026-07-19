@@ -113,7 +113,7 @@
 
 ### 本阶段必须完成
 
-数据库网关、审计治理及当前 Store 消费方拆分范围内的 P0/P1/P2 已清零；组合阶段门禁、完整打包、容器构建、合并及主目录运行烟测均已通过，本阶段交付完成。以下已验证修复不得因历史计划未勾选而重新列为开放问题：
+数据库网关前一阶段已经完成；本次并行小切片进一步完成 Admin 聚合 Store 拆分和审计会话租约恢复，计划内 P0/P1/P2 已清零。全仓编译测试、真实数据库矩阵、Linux Race、完整打包和离线容器镜像门禁均已通过；主目录合并与运行烟测在本次提交合回 `dev` 后执行。以下已验证修复不得因历史计划未勾选而重新列为开放问题：
 
 | 事项 | 结果 | 提交 | 验证证据 |
 |---|---|---|---|
@@ -129,6 +129,8 @@
 | `TEST-20260719-002` Redis Relay 并发边界 | 已完成，阶段门禁通过 | `5dd41e0` | Relay 入口幂等强制串行化 Observer；原始 Redis Drain 竞态用例、全 `dbproxy` 包及组合 Linux/CGO Race 测试通过；无 P0/P1/P2 |
 | `DEF-20260719-001` 启动烟测绕过正式登录 | 已完成，主目录运行烟测通过 | `7c80f1a`、`8402830` | `start.ps1` 使用正式 ALTCHA challenge、统一响应封装和浏览器会话；失败硬退出；不再跳过 Admin/前端代理检查或输出 Token；主目录启动返回 0，正式登录成功，Admin/Web/SSH/数据库端口、前端与 API 代理验证通过 |
 | Admin 非 Server 聚合 Store 依赖 | 已完成，阶段门禁通过 | `1f8acb9` | Web Terminal 审计改为 3 方法使用方接口；角色服务 helper 直接依赖 `service.RoleManagementRepository`；目标包及全仓测试通过 |
+| `TECH-20260719-002` 拆分并删除 76 方法 `store.Store` | 已完成，阶段门禁通过 | `133ff7a`、`61f1480` | Admin 按资源域持有使用方窄接口，构造参数恢复编译期约束并拒绝 typed-nil；全仓已删除聚合接口；[边界与生产构造测试](../internal/server/admin/repository_test.go)、全仓测试及 Linux Race 通过 |
+| `DEF-20260719-002` 长期 `started` 审计会话 | 已完成，阶段门禁通过 | `540d282`、`db5dbab` | SSH、Web Terminal、数据库和 Web RDP 会话统一获得进程租约；活动会话分批心跳，行数不一致失败关闭；仅完整且过期的租约可恢复；结束和 RDP 完成按 owner fencing，晚到进程不能覆盖租约过期证据；[租约并发测试](../internal/store/dbstore_audit_lease_test.go)、[版本化迁移测试](../internal/storage/migration_audit_session_lease_test.go)、[MySQL/PostgreSQL 实库迁移](../internal/integration/database_storage_migration_integration_test.go)通过 |
 | `OPS-20260719-001` Linux Node 24 锁文件不完整 | 已完成，容器门禁通过 | `9070af0` | `node:24-bookworm-slim` 曾因缺少 `@emnapi/core/runtime@1.11.2` 锁记录拒绝 `npm ci`；按同一镜像 npm 仅重建锁元数据，Linux 容器完整构建、Windows `npm ci` 与类型检查通过；独立复审无 P0/P1/P2 |
 | `DEF-20260719-003` Web RDP 审计对象索引超过 MySQL 限制 | 已完成，实库矩阵通过 | `fa9f688` | `audit_artifacts.object_key` 从超出 `utf8mb4` 3072 字节索引上限的 1024 字符收敛为 255 字符，保留完整唯一约束；MySQL 8 目标迁移、Docker 实库全矩阵、全仓测试、Linux Race、完整打包及容器构建通过；独立复审无 P0/P1/P2 |
 
@@ -137,13 +139,12 @@
 | ID | 优先级 | 状态 | 工作项 | 验收摘要 | 复评时间/触发条件 | 来源 |
 |---|---|---|---|---|---|---|
 | `TECH-20260719-001` | P2 | 已延期 | `internal/server/admin` 的 Handler、业务判断和持久层访问尚未完全分层 | 选定资源切片迁入 `handler -> service -> store`；Handler 不直接执行 SQL；目标包测试通过 | 修改对应资源行为或文件接近行数上限时 | [后端审计](./backend-audit-2026-07-18.md) |
-| `TECH-20260719-002` | P2 | 已延期 | `store.Store` 仍是 76 方法的聚合接口；SSH 与 Admin 的 Web Terminal/角色 helper 已迁移到使用方接口，直接生产依赖仅剩 Admin Server 字段和构造参数，且部分方法仍缺少 `context.Context` | 按 Admin 资源域继续拆小接口；迁移方法以 `context.Context` 为首参数；架构测试锁定边界；最终删除聚合接口 | 新增 Store 方法、修改 Admin 资源域或出现取消/超时传播缺陷时 | [Phase 2 计划](./superpowers/plans/2026-07-18-core-stabilization-phase2-plan.md) |
-| `TECH-20260719-003` | P2 | 已延期 | 资源授权列表仍缺少批量查询能力，数据量增长后可能形成 N+1 | 提供批量授权查询；列表查询次数不随资源数线性增长；保留资源级拒绝语义 | 性能测试出现线性查询增长，最迟容量测试前 | [后端审计](./backend-audit-2026-07-18.md) |
-| `DEF-20260719-002` | P2 | 已延期 | 进程异常退出或结束状态写入失败后，审计会话可能长期保持 `started`，为避免误删活动会话，当前保留/配额任务不会清理它 | 增加带租约或心跳的会话恢复规则；仅回收可证明已失活的会话；覆盖重启和结束写入失败 | 首个发布候选前，或发现长期 `started` 会话时 | 审计治理切片复核 |
+| `TECH-20260719-003` | P2 | 已延期 | 主机/账号、数据库实例/账号、应用、平台账号和容器端点列表仍逐资源调用授权检查；仅在 Service 层循环或去重不消除底层 N+1 | 批量能力必须下沉到 Repository/SQL，一次读取用户对资源集合的有效授权；禁止以循环包装冒充批量；查询计数测试证明查询次数不随资源数线性增长，并保留资源级拒绝语义 | 性能测试出现线性查询增长，最迟容量测试前 | [后端审计](./backend-audit-2026-07-18.md) |
+| `TECH-20260719-004` | P2 | 已延期 | 聚合 `store.Store` 已删除，但部分 Admin 资源域历史方法仍未以 `context.Context` 为首参数，请求取消和超时尚不能贯穿到数据库 | 按单一资源域逐片迁移 Handler、Service 和 Repository；数据库调用使用请求 context；取消/超时测试证明无后台遗留查询 | 修改对应资源域，或出现取消/超时传播缺陷时 | `TECH-20260719-002` 关闭决策 |
 | `TECH-20260719-005` | P3 | 已延期 | DTO、GORM Model 和 Store View 类型仍未彻底分离 | Model 不承载 API JSON 结构；Store 不堆放表现层 View；迁移不改变 API 行为 | 修改关联 API 或类型再次造成跨层依赖时 | [后端审计](./backend-audit-2026-07-18.md) |
 | `TECH-20260719-006` | P3 | 已延期 | 前端生产构建仍有第三方 PURE 注释告警和主分包体积告警 | 先确认无功能风险；按页面拆分主包并记录体积基线；不为消除第三方告警修改依赖源码 | 主包继续增长或进入发布性能优化阶段时 | 最近一次阶段构建输出 |
 | `TECH-20260719-007` | P3 | 已延期 | 回放配额统计当前每小时遍历回放根目录，超大规模下耗时随文件数线性增长 | 记录会话关闭时的回放字节数并增量维护总量；以容量基准证明清理周期稳定 | 回放文件超过 100 万或扫描超过清理周期的 10% 时 | 审计治理切片复核 |
-| `TEST-20260719-003` | P3 | 已延期 | Admin 窄接口回归测试尚未显式覆盖“不支持角色仓库”的 Server 构造失败，以及 Web Terminal 审计底层报错传播 | 在不扩大生产代码的前提下补失败路径断言；保持原错误语义和失败关闭行为 | 下次修改 Admin 构造或 Web Terminal 审计适配器时 | `1f8acb9` 独立复审 |
+| `TEST-20260719-003` | P3 | 已延期 | Admin 生产构造、静态接口组合和 typed-nil 已覆盖；Web Terminal 审计底层报错传播仍缺少显式回归断言 | 在不扩大生产代码的前提下补 Web Terminal 失败路径断言；保持原错误语义和失败关闭行为 | 下次修改 Web Terminal 审计适配器时 | `1f8acb9` 独立复审、`61f1480` 修复证据 |
 
 ### 建议取消或关闭
 

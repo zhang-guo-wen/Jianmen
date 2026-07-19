@@ -94,7 +94,7 @@ func TestHandleUpdateTargetRejectsInvalidRDPSecurity(t *testing.T) {
 		t.Fatalf("update response does not explain valid RDP security modes: %s", updateResponse.Body.String())
 	}
 
-	stored, err := server.store.Target("rdp-security-account")
+	stored, err := server.hostTargets.Target("rdp-security-account")
 	if err != nil {
 		t.Fatalf("load stored target: %v", err)
 	}

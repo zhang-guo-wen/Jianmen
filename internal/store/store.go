@@ -1,14 +1,8 @@
 package store
 
 import (
-	"context"
 	"strings"
 	"time"
-
-	"golang.org/x/crypto/ssh"
-
-	"jianmen/internal/config"
-	"jianmen/internal/model"
 )
 
 type LoginName struct {
@@ -380,113 +374,4 @@ type PlatformAccountListParams struct {
 	Page     int
 	PageSize int
 	Unpaged  bool
-}
-
-// Store abstracts runtime data access. Implementations may back with
-// JSON files (StaticAdapter) or a relational database (DBStore).
-type Store interface {
-	Authenticate(ctx context.Context, username, password string) (model.User, error)
-	AuthenticatePublicKey(ctx context.Context, username string, key ssh.PublicKey) (model.User, error)
-	Users() []UserView
-	UserPreference(ctx context.Context, userID string) (model.UserPreference, error)
-	SaveUserPreference(ctx context.Context, preference model.UserPreference) (model.UserPreference, error)
-	CreateConnectionPassword(ctx context.Context, credential model.ConnectionPassword) error
-	AuthenticateConnectionPassword(ctx context.Context, userID, resourceType, resourceID, password string) error
-	AuthenticateMySQLConnectionPassword(ctx context.Context, userID, resourceID string, salt, response []byte) error
-	CreateAIAccessToken(ctx context.Context, token model.AIAccessToken) error
-	ListAIAccessTokens(ctx context.Context, userID string) ([]model.AIAccessToken, error)
-	AIAccessToken(ctx context.Context, userID, tokenID string) (model.AIAccessToken, error)
-	AuthenticateAIAccessToken(ctx context.Context, accessHash string, now time.Time) (model.AIAccessToken, error)
-	RotateAIAccessToken(ctx context.Context, refreshHash string, replacement model.AIAccessToken, now time.Time) (model.AIAccessToken, error)
-	RevokeAIAccessToken(ctx context.Context, userID, tokenID string, now time.Time) error
-
-	Hosts() []HostView
-	Host(id string) (HostView, error)
-	AddHost(host HostRecord) (HostView, error)
-	UpdateHost(id string, host HostRecord) (HostView, error)
-	DeleteHost(id string) error
-
-	Targets() []TargetView
-	Target(id string) (TargetView, error)
-	TargetConfig(id string) (TargetConfig, error)
-	AddTarget(target config.Target) (TargetView, error)
-	UpdateTarget(id string, target config.Target) (TargetView, error)
-	DeleteTarget(id string) error
-
-	DatabaseInstances() []DatabaseInstanceView
-	DatabaseInstance(id string) (DatabaseInstanceView, error)
-	AddDatabaseInstance(input DatabaseInstanceInput) (DatabaseInstanceView, error)
-	UpdateDatabaseInstance(id string, input DatabaseInstanceInput) (DatabaseInstanceView, error)
-	DeleteDatabaseInstance(id string) error
-
-	DatabaseAccounts() ([]DatabaseAccountView, error)
-	DatabaseAccount(id string) (DatabaseAccountView, error)
-	AddDatabaseAccount(instanceID, username, password, group, remark string, expiresAt *time.Time) (DatabaseAccountView, error)
-	UpdateDatabaseAccount(id, username, password, group, remark string, expiresAt *time.Time, status string) (DatabaseAccountView, error)
-	DeleteDatabaseAccount(id string) error
-
-	// Application CRUD
-	Applications() []ApplicationView
-	Application(id string) (ApplicationView, error)
-	AddApplication(input ApplicationInput) (ApplicationView, error)
-	UpdateApplication(id string, input ApplicationInput) (ApplicationView, error)
-	DeleteApplication(id string) error
-
-	// Container management
-	ListContainerEndpoints(ctx context.Context, params ContainerEndpointListParams) ([]ContainerEndpointView, int64, error)
-	ContainerEndpoint(id string) (ContainerEndpointView, error)
-	AddContainerEndpoint(input ContainerEndpointInput) (ContainerEndpointView, error)
-	UpdateContainerEndpoint(id string, input ContainerEndpointInput) (ContainerEndpointView, error)
-	DeleteContainerEndpoint(id string) error
-
-	// PlatformAccount CRUD
-	PlatformAccounts(params PlatformAccountListParams) ([]PlatformAccountView, int64, error)
-	PlatformAccount(id string) (PlatformAccountView, error)
-	AddPlatformAccount(acc model.PlatformAccount) (PlatformAccountView, error)
-	UpdatePlatformAccount(id string, acc model.PlatformAccount) (PlatformAccountView, error)
-	DeletePlatformAccount(id string) error
-	GetPlatformAccountPassword(id string) (string, error)
-
-	DatabaseAccountByUniqueName(uniqueName string) (*model.DatabaseAccount, error)
-	AuthenticateDirect(ctx context.Context, username, password string) (model.User, error)
-
-	DefaultTarget(ctx context.Context, user model.User) (TargetConfig, error)
-
-	UserSessions(userID string) ([]SessionView, error)
-	CreateUserSession(session model.UserSession) (*model.UserSession, error)
-	DisableUserSession(id string) error
-	EnableUserSession(id string) error
-	UserSessionByID(sessionID string, userID string) (*model.UserSession, error)
-
-	// -- audit --
-
-	CreateAuditSession(session *model.AuditSession) error
-	BeginRDPAuditSession(ctx context.Context, session *model.AuditSession, artifact *model.AuditArtifact) error
-	ActivateRDPAuditSession(ctx context.Context, id string) error
-	EndAuditSession(id string) error
-	GetAuditSession(id string) (*model.AuditSession, error)
-	ListAuditSessions(params AuditListParams) ([]AuditSessionView, int64, error)
-	UpdateAuditProtocol(id string, protocol string) error
-	FinishAuditSession(ctx context.Context, id, outcome, failureCode, failureMessage, recordingStatus string, endedAt time.Time) error
-	CreateAuditArtifact(ctx context.Context, artifact *model.AuditArtifact) error
-	UpdateAuditArtifact(ctx context.Context, artifact *model.AuditArtifact) error
-	AuditArtifactBySession(ctx context.Context, sessionID, kind string) (model.AuditArtifact, error)
-	CreateAuditRDPChannelEvent(ctx context.Context, event *model.AuditRDPChannelEvent) error
-
-	CreateAuditSSHCommand(cmd *model.AuditSSHCommand) error
-	ListAuditSSHCommands(sessionID string, opts PageOpts) ([]model.AuditSSHCommand, int64, error)
-
-	CreateAuditSFTPEvent(event *model.AuditSFTPEvent) error
-	ListAuditSFTPEvents(sessionID string, opts PageOpts) ([]model.AuditSFTPEvent, int64, error)
-
-	CreateAuditDBQuery(query *model.AuditDBQuery) error
-	ListAuditDBQueries(sessionID string, opts PageOpts) ([]model.AuditDBQuery, int64, error)
-	ListAuditDBQueryEvents(sessionID string) ([]model.AuditDBQuery, error)
-
-	CreateAuditEvent(event *model.AuditEvent) error
-	ListAuditEvents(params AuditEventListParams) ([]model.AuditEvent, int64, error)
-	CreateLoginAuditLog(log *model.LoginAuditLog) error
-	ListLoginAuditLogs(params LoginAuditListParams) ([]model.LoginAuditLog, int64, error)
-
-	FindUserSessionByCompactUsername(username string) (*model.UserSession, error)
 }

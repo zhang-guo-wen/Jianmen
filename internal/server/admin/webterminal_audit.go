@@ -40,7 +40,7 @@ func (s *Server) startWebTerminalAudit(session model.Session, target store.Targe
 		State:           "started",
 		ReplayDir:       filepath.Join(s.cfg.ReplayDir, "ssh", session.ID),
 	}
-	if err := s.store.CreateAuditSession(auditSession); err != nil {
+	if err := s.audit.CreateAuditSession(auditSession); err != nil {
 		s.logger.Warn("failed to create web terminal audit session", "session", session.ID, "error", err)
 		return nil
 	}
@@ -66,7 +66,7 @@ func (s *Server) newWebTerminalRecorder(
 		service.NewAuditPolicy(s.cfg.Recording.RetentionDays, s.cfg.Recording.RecordInput),
 		onFatal,
 		s.logger,
-		&webTerminalAuditSink{store: s.store, sessionID: auditSession.ID, onlineSessions: s.onlineSessions},
+		&webTerminalAuditSink{store: s.audit, sessionID: auditSession.ID, onlineSessions: s.onlineSessions},
 	)
 	if err != nil {
 		return nil, err

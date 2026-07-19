@@ -383,13 +383,19 @@ func newRBACServer(t *testing.T) (*Server, *gorm.DB) {
 		t.Fatalf("new RBAC authorization service: %v", err)
 	}
 	seedTestSuperAdmin(t, db, "u-admin")
-	return &Server{
+	server := &Server{
 		db:            db,
-		store:         storeInst,
 		identity:      identityService,
 		authorization: authorizationService,
 		logger:        slog.New(slog.NewTextHandler(io.Discard, nil)),
-	}, db
+	}
+	applyTestAdminDependencies(t, server, storeInst)
+	roleManagement, err := newRoleManagementService(storeInst)
+	if err != nil {
+		t.Fatalf("new RBAC role service: %v", err)
+	}
+	server.roleManagement = roleManagement
+	return server, db
 }
 
 func createRBACRole(t *testing.T, server *Server, body string) model.Role {

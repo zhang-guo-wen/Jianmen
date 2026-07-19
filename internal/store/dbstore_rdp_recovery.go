@@ -40,9 +40,7 @@ func (s *DBStore) ClaimRecoverableRDPRecordings(
 				)`,
 				auditCleanupReady,
 			)
-		if !includeInterrupted {
-			query = query.Where("audit_sessions.state = ?", "ended")
-		}
+		query = scopeRecoverableRDPSessions(query, includeInterrupted, claimedAt)
 
 		var candidates []model.AuditArtifact
 		if err := query.
@@ -53,10 +51,16 @@ func (s *DBStore) ClaimRecoverableRDPRecordings(
 		}
 		artifacts := make([]model.AuditArtifact, 0, len(candidates))
 		for _, artifact := range candidates {
-			update := recoverableRDPArtifactQuery(
+			updateQuery := recoverableRDPArtifactQuery(
 				tx.Model(&model.AuditArtifact{}).Where("id = ?", artifact.ID),
 				staleBefore,
-			).
+			)
+			sessionScope, sessionArgs := recoverableRDPSessionExists(
+				includeInterrupted,
+				claimedAt,
+			)
+			existsArgs := append([]any{auditCleanupReady}, sessionArgs...)
+			update := updateQuery.
 				Where(
 					`EXISTS (
 						SELECT 1 FROM audit_sessions
@@ -66,8 +70,8 @@ func (s *DBStore) ClaimRecoverableRDPRecordings(
 							OR audit_sessions.cleanup_status = ''
 							OR audit_sessions.cleanup_status = ?
 						)
-					)`,
-					auditCleanupReady,
+					`+sessionScope+`)`,
+					existsArgs...,
 				).
 				Updates(map[string]any{
 					"status":     model.RecordingStatusUploading,
@@ -122,6 +126,55 @@ func (s *DBStore) ClaimRecoverableRDPRecordings(
 		return nil, err
 	}
 	return items, nil
+}
+
+func scopeRecoverableRDPSessions(
+	query *gorm.DB,
+	includeInterrupted bool,
+	now time.Time,
+) *gorm.DB {
+	if !includeInterrupted {
+		return query.Where("audit_sessions.state = ?", "ended")
+	}
+	return query.Where(
+		`(
+			audit_sessions.state = ?
+			OR (
+				audit_sessions.state = ?
+				AND audit_sessions.lease_owner IS NOT NULL
+				AND audit_sessions.lease_owner <> ''
+				AND audit_sessions.heartbeat_at IS NOT NULL
+				AND audit_sessions.lease_expires_at IS NOT NULL
+				AND audit_sessions.heartbeat_at <= audit_sessions.lease_expires_at
+				AND audit_sessions.lease_expires_at <= ?
+			)
+		)`,
+		"ended",
+		"started",
+		now,
+	)
+}
+
+func recoverableRDPSessionExists(
+	includeInterrupted bool,
+	now time.Time,
+) (string, []any) {
+	if !includeInterrupted {
+		return "\nAND audit_sessions.state = ?", []any{"ended"}
+	}
+	return `
+	AND (
+		audit_sessions.state = ?
+		OR (
+			audit_sessions.state = ?
+			AND audit_sessions.lease_owner IS NOT NULL
+			AND audit_sessions.lease_owner <> ''
+			AND audit_sessions.heartbeat_at IS NOT NULL
+			AND audit_sessions.lease_expires_at IS NOT NULL
+			AND audit_sessions.heartbeat_at <= audit_sessions.lease_expires_at
+			AND audit_sessions.lease_expires_at <= ?
+		)
+	)`, []any{"ended", "started", now}
 }
 
 func recoverableRDPArtifactQuery(

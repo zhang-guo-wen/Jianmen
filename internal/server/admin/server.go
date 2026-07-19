@@ -12,14 +12,26 @@ import (
 	"jianmen/internal/online"
 	"jianmen/internal/server/appproxy"
 	"jianmen/internal/service"
-	"jianmen/internal/store"
 
 	"gorm.io/gorm"
 )
 
 type Server struct {
 	cfg                  *config.Config
-	store                store.Store
+	aiTokens             adminAIAccessTokenRepository
+	hostTargets          adminHostTargetRepository
+	databases            adminDatabaseRepository
+	applications         adminApplicationRepository
+	containers           adminContainerRepository
+	platformAccounts     adminPlatformAccountRepository
+	userSessions         adminUserSessionRepository
+	audit                adminAuditRepository
+	connectionPassword   adminConnectionPasswordRepository
+	preferences          adminUserPreferenceRepository
+	temporaryRepository  service.TemporaryAccessRepository
+	userRepository       service.UserRepository
+	userGroupRepository  service.UserGroupRepository
+	roleRepository       service.RoleManagementRepository
 	db                   *gorm.DB
 	logger               *slog.Logger
 	dataDir              string
@@ -47,7 +59,7 @@ type Server struct {
 
 func New(
 	cfg *config.Config,
-	repository store.Store,
+	repository adminRepository,
 	db *gorm.DB,
 	identity *service.IdentityService,
 	browserSessions *service.BrowserSessionService,
@@ -65,8 +77,6 @@ func New(
 	switch {
 	case cfg == nil:
 		return nil, errors.New("admin config is required")
-	case repository == nil:
-		return nil, errors.New("admin store is required")
 	case db == nil:
 		return nil, errors.New("admin metadata database is required")
 	case identity == nil:
@@ -88,52 +98,41 @@ func New(
 	case webRDP == nil || accessRequests == nil:
 		return nil, errors.New("admin Web RDP audit and approval handlers are required")
 	}
-	resourceAccess, ok := repository.(resourceAccessRepository)
-	if !ok {
-		return nil, errors.New("admin store does not support resource access")
+	dependencies, err := resolveAdminDependencies(repository)
+	if err != nil {
+		return nil, err
 	}
 	loginCaptcha, err := service.NewLoginCaptcha()
 	if err != nil {
 		return nil, fmt.Errorf("initialize login captcha: %w", err)
 	}
-	temporaryRepository, ok := repository.(service.TemporaryAccessRepository)
-	if !ok {
-		return nil, errors.New("admin store does not support temporary access")
-	}
-	temporaryAccess, err := service.NewTemporaryAccessService(temporaryRepository)
+	temporaryAccess, err := service.NewTemporaryAccessService(dependencies.temporaryAccess)
 	if err != nil {
 		return nil, fmt.Errorf("initialize temporary access service: %w", err)
 	}
-	userRepository, ok := repository.(service.UserRepository)
-	if !ok {
-		return nil, errors.New("admin store does not support user management")
-	}
-	userManagement, err := service.NewUserService(userRepository)
+	userManagement, err := service.NewUserService(dependencies.users)
 	if err != nil {
 		return nil, fmt.Errorf("initialize user service: %w", err)
 	}
-	userGroupRepository, ok := repository.(service.UserGroupRepository)
-	if !ok {
-		return nil, errors.New("admin store does not support user group management")
-	}
-	userGroups, err := service.NewUserGroupService(userGroupRepository)
+	userGroups, err := service.NewUserGroupService(dependencies.userGroups)
 	if err != nil {
 		return nil, fmt.Errorf("initialize user group service: %w", err)
 	}
-	roleManagementRepository, ok := repository.(service.RoleManagementRepository)
-	if !ok {
-		return nil, errors.New("admin store does not support role management")
-	}
-	roleManagement, err := newRoleManagementService(roleManagementRepository)
+	roleManagement, err := newRoleManagementService(dependencies.roles)
 	if err != nil {
 		return nil, err
 	}
 	return &Server{
-		cfg: cfg, store: repository, db: db, logger: logger,
+		cfg: cfg, db: db, logger: logger,
+		aiTokens: dependencies.aiTokens, hostTargets: dependencies.hostTargets, databases: dependencies.databases,
+		applications: dependencies.applications, containers: dependencies.containers, platformAccounts: dependencies.platformAccounts,
+		userSessions: dependencies.userSessions, audit: dependencies.audit, connectionPassword: dependencies.connectionPassword,
+		preferences: dependencies.preferences, temporaryRepository: dependencies.temporaryAccess,
+		userRepository: dependencies.users, userGroupRepository: dependencies.userGroups, roleRepository: dependencies.roles,
 		dataDir:      dataDir,
 		loginLimiter: newDefaultLoginLimiter(), loginCaptcha: loginCaptcha, appProxy: appProxy,
 		onlineSessions: onlineSessions, containerService: service.NewContainerService(),
-		identity: identity, authorization: authorization, resourceAccess: resourceAccess,
+		identity: identity, authorization: authorization, resourceAccess: dependencies.resourceAccess,
 		resourceGrants: resourceGrants, resourceGroups: resourceGroups, userManagement: userManagement, userGroups: userGroups, roleManagement: roleManagement, databaseProvisioning: databaseProvisioning, temporaryAccess: temporaryAccess,
 		browserSessions: browserSessions,
 		webRDP:          webRDP, accessRequests: accessRequests,

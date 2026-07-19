@@ -259,6 +259,7 @@ func TestLoginSessionCreationFailureAppendsFailureResult(t *testing.T) {
 		t.Fatal(err)
 	}
 	server.browserSessions = failingSessions
+	replaceTestAdminAuth(t, server, db, failingSessions)
 	audit := &loginAuditTestRepository{adminAuditRepository: server.audit}
 	server.audit = audit
 

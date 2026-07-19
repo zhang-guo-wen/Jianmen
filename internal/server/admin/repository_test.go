@@ -180,6 +180,7 @@ func TestAdminRepositoryBoundaryStaysStaticallyComposedAndDomainSplit(t *testing
 		t.Fatalf("parse repository boundary: %v", err)
 	}
 	wantEmbedded := map[string]bool{
+		"service.AdminAuthRepository":        true,
 		"adminAIAccessTokenRepository":       true,
 		"adminHostTargetRepository":          true,
 		"adminDatabaseRepository":            true,

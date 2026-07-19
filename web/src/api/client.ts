@@ -1540,7 +1540,10 @@ export const apiClient = {
       method: 'POST',
       body: JSON.stringify(payload)
     }),
-	getEncryptionKey: () => request<{ key: string }>('/api/init/encryption-key', { method: 'POST' }),
+	getEncryptionKey: (password: string) => request<{ key: string }>('/api/init/encryption-key', {
+		method: 'POST',
+		body: JSON.stringify({ password }),
+	}),
 	logout: () => request<void>('/api/logout', { method: 'POST' }),
 	createWebTerminalTicket: (targetId: string) => request<{ ticket: string; target_id: string }>('/api/web-terminal/tickets', { method: 'POST', body: JSON.stringify({ target_id: targetId }) }),
   createWebRDPTicket: (payload: WebRDPTicketPayload) =>

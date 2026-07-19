@@ -650,13 +650,19 @@ func TestDevAdminTokenIsRejected(t *testing.T) {
 
 func TestEncryptionKeyRequiresSuperAdminToken(t *testing.T) {
 	server, db := newAdminDBTestServer(t)
+	const password = "encryption-key-password"
+	passwordHash, err := hashPassword(password)
+	if err != nil {
+		t.Fatal(err)
+	}
 	users := []model.User{
-		{ID: "regular", Username: "regular", Status: "active", TokenHash: hashToken("regular-token")},
-		{ID: "admin", Username: "admin", Status: "active", TokenHash: hashToken("admin-token"), IsSuperAdmin: true},
+		{ID: "regular", Username: "regular", PasswordHash: passwordHash, Status: "active", TokenHash: hashToken("regular-token")},
+		{ID: "admin", Username: "admin", PasswordHash: passwordHash, Status: "active", TokenHash: hashToken("admin-token"), IsSuperAdmin: true},
 	}
 	if err := db.Create(&users).Error; err != nil {
 		t.Fatalf("create users: %v", err)
 	}
+	seedAdminSetupGuard(t, db)
 	handler := server.withAuthAndUser(server.handleInitEncryptionKey)
 
 	missingAuthReq := httptest.NewRequest(http.MethodPost, "/api/init/encryption-key", nil)
@@ -666,7 +672,11 @@ func TestEncryptionKeyRequiresSuperAdminToken(t *testing.T) {
 		t.Fatalf("missing auth status = %d, want %d", missingAuthRec.Code, http.StatusUnauthorized)
 	}
 
-	regularReq := httptest.NewRequest(http.MethodPost, "/api/init/encryption-key", nil)
+	regularReq := httptest.NewRequest(
+		http.MethodPost,
+		"/api/init/encryption-key",
+		strings.NewReader(`{"password":"`+password+`"}`),
+	)
 	regularSession, err := server.browserSessions.Create(regularReq.Context(), "regular")
 	if err != nil {
 		t.Fatal(err)
@@ -679,11 +689,28 @@ func TestEncryptionKeyRequiresSuperAdminToken(t *testing.T) {
 		t.Fatalf("regular status = %d, want %d; body=%s", regularRec.Code, http.StatusForbidden, regularRec.Body.String())
 	}
 
-	adminReq := httptest.NewRequest(http.MethodPost, "/api/init/encryption-key", nil)
+	adminReq := httptest.NewRequest(
+		http.MethodPost,
+		"/api/init/encryption-key",
+		strings.NewReader(`{"password":"`+password+`"}`),
+	)
 	adminSession, err := server.browserSessions.Create(adminReq.Context(), "admin")
 	if err != nil {
 		t.Fatal(err)
 	}
+	missingPasswordReq := httptest.NewRequest(
+		http.MethodPost,
+		"/api/init/encryption-key",
+		strings.NewReader(`{}`),
+	)
+	missingPasswordReq.AddCookie(&http.Cookie{Name: "jianmen_session", Value: adminSession.Secret})
+	missingPasswordReq.Header.Set("X-CSRF-Token", adminSession.CSRFToken)
+	missingPasswordRec := httptest.NewRecorder()
+	handler(missingPasswordRec, missingPasswordReq)
+	if missingPasswordRec.Code != http.StatusForbidden {
+		t.Fatalf("missing password status = %d, want %d; body=%s", missingPasswordRec.Code, http.StatusForbidden, missingPasswordRec.Body.String())
+	}
+
 	adminReq.AddCookie(&http.Cookie{Name: "jianmen_session", Value: adminSession.Secret})
 	adminReq.Header.Set("X-CSRF-Token", adminSession.CSRFToken)
 	adminRec := httptest.NewRecorder()
@@ -699,13 +726,26 @@ func TestEncryptionKeyRequiresSuperAdminToken(t *testing.T) {
 		t.Fatalf("key length = %d, want 64 hex chars", len(keyResp.Key))
 	}
 
-	secondAdminReq := httptest.NewRequest(http.MethodPost, "/api/init/encryption-key", nil)
+	secondAdminReq := httptest.NewRequest(
+		http.MethodPost,
+		"/api/init/encryption-key",
+		strings.NewReader(`{"password":"`+password+`"}`),
+	)
 	secondAdminReq.AddCookie(&http.Cookie{Name: "jianmen_session", Value: adminSession.Secret})
 	secondAdminReq.Header.Set("X-CSRF-Token", adminSession.CSRFToken)
 	secondAdminRec := httptest.NewRecorder()
 	handler(secondAdminRec, secondAdminReq)
 	if secondAdminRec.Code != http.StatusForbidden {
 		t.Fatalf("second admin status = %d, want %d; body=%s", secondAdminRec.Code, http.StatusForbidden, secondAdminRec.Body.String())
+	}
+	var auditEvents []model.AuditEvent
+	if err := db.Find(&auditEvents).Error; err != nil {
+		t.Fatal(err)
+	}
+	for _, event := range auditEvents {
+		if strings.Contains(event.Detail, password) {
+			t.Fatalf("encryption key audit exposed password: %#v", event)
+		}
 	}
 }
 
@@ -873,8 +913,17 @@ func newAdminDBTestServer(t *testing.T) (*Server, *gorm.DB) {
 	if err != nil {
 		t.Fatalf("new browser session service: %v", err)
 	}
+	keyReader, err := store.NewFileAdminEncryptionKeyReader(dataDir)
+	if err != nil {
+		t.Fatalf("new admin encryption key reader: %v", err)
+	}
+	adminAuth, err := service.NewAdminAuthService(storeInst, browserSessions, keyReader)
+	if err != nil {
+		t.Fatalf("new admin auth service: %v", err)
+	}
 	server := &Server{
 		cfg:             cfg,
+		adminAuth:       adminAuth,
 		db:              db,
 		logger:          slog.New(slog.NewTextHandler(io.Discard, nil)),
 		dataDir:         dataDir,
@@ -898,6 +947,24 @@ func newAdminDBTestServer(t *testing.T) (*Server, *gorm.DB) {
 	applyTestAdminDependencies(t, server, storeInst)
 	applyTestAdminServices(t, server, storeInst)
 	return server, db
+}
+
+func replaceTestAdminAuth(
+	t *testing.T,
+	server *Server,
+	db *gorm.DB,
+	browserSessions *service.BrowserSessionService,
+) {
+	t.Helper()
+	keyReader, err := store.NewFileAdminEncryptionKeyReader(server.dataDir)
+	if err != nil {
+		t.Fatalf("replace admin encryption key reader: %v", err)
+	}
+	adminAuth, err := service.NewAdminAuthService(store.NewDBStore(db), browserSessions, keyReader)
+	if err != nil {
+		t.Fatalf("replace admin auth service: %v", err)
+	}
+	server.adminAuth = adminAuth
 }
 
 func asTestSuperAdmin(req *http.Request) *http.Request {

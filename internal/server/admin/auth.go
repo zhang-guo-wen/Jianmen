@@ -7,21 +7,17 @@ import (
 	"fmt"
 	"io"
 
-	"golang.org/x/crypto/bcrypt"
+	"jianmen/internal/service"
 )
 
 const apiTokenBytes = 32
 
 func hashPassword(password string) (string, error) {
-	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
-	if err != nil {
-		return "", fmt.Errorf("hash password: %w", err)
-	}
-	return string(hash), nil
+	return service.HashAdminPassword(password)
 }
 
 func verifyPassword(hash, password string) bool {
-	return bcrypt.CompareHashAndPassword([]byte(hash), []byte(password)) == nil
+	return service.VerifyAdminPassword(hash, password)
 }
 
 func newAPIToken() (token, tokenHash string, err error) {

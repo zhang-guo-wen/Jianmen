@@ -16,7 +16,7 @@ import (
 
 	"jianmen/internal/model"
 	"jianmen/internal/online"
-	"jianmen/internal/rbac"
+	"jianmen/internal/service"
 	"jianmen/internal/store"
 )
 
@@ -116,34 +116,17 @@ func (s *Server) handleWebTerminal(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	user := model.User{ID: subject.ID, Username: subject.Username, IsSuperAdmin: subject.SuperAdmin, Status: subject.Status, ExpiresAt: subject.ExpiresAt}
-	target, err := s.resolveWebTerminalTarget(r.Context(), user, opts.TargetID)
+	target, err := s.hostManagement.ResolveWebTerminalTarget(r.Context(), service.HostManagementActor{ID: subject.ID, SuperAdmin: subject.SuperAdmin}, opts.TargetID)
 	if err != nil {
+		if errors.Is(err, service.ErrHostAccessDenied) || errors.Is(err, service.ErrHostTargetUnavailable) {
+			s.writeErrorText(w, r, http.StatusForbidden, "connection is not authorized")
+			return
+		}
 		s.writeErrorText(w, r, http.StatusNotFound, err.Error())
 		return
 	}
-	if target.Disabled {
-		s.writeErrorText(w, r, http.StatusForbidden, "target is disabled or unavailable")
-		return
-	}
-	if target.Expired(time.Now().UTC()) {
-		s.writeErrorText(w, r, http.StatusForbidden, "target account has expired")
-		return
-	}
-	if !strings.EqualFold(target.Protocol, "ssh") {
-		s.writeErrorText(w, r, http.StatusBadRequest, "target is not an SSH account")
-		return
-	}
-	allowed, err := s.authorizeConnection(r.Context(), user.ID, rbac.ActionSessionConnect, model.ResourceTypeHostAccount, target.ID)
-	if err != nil {
-		s.logger.Warn("web terminal authorization failed", "user", user.Username, "target", target.ID, "error", err)
-		s.writeErrorText(w, r, http.StatusForbidden, "connection is not authorized")
-		return
-	}
-	if !allowed {
-		s.writeErrorText(w, r, http.StatusForbidden, "connection is not authorized")
-		return
-	}
-	targetClient, err := dialWebTerminalTarget(target)
+	storedTarget := storeTargetConfig(target)
+	targetClient, err := dialWebTerminalTarget(storedTarget)
 	if err != nil {
 		s.writeErrorText(w, r, http.StatusBadGateway, err.Error())
 		return
@@ -157,8 +140,8 @@ func (s *Server) handleWebTerminal(w http.ResponseWriter, r *http.Request) {
 	}
 	defer conn.Close()
 
-	session := newWebTerminalSession(r, user, target)
-	auditSession := s.startWebTerminalAudit(r.Context(), session, target)
+	session := newWebTerminalSession(r, user, storedTarget)
+	auditSession := s.startWebTerminalAudit(r.Context(), session, storedTarget)
 	if auditSession == nil {
 		_ = targetClient.Close()
 		writeWebTerminalClose(conn, errors.New("audit service unavailable"))
@@ -175,7 +158,7 @@ func (s *Server) handleWebTerminal(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		_ = targetClient.Close()
 		writeWebTerminalClose(conn, errors.New("audit recorder unavailable"))
-		s.logger.Warn("failed to initialize web terminal recorder", "target", target.ID, "error", err)
+		s.logger.Warn("failed to initialize web terminal recorder", "target", storedTarget.ID, "error", err)
 		return
 	}
 	if recorder != nil {
@@ -183,17 +166,17 @@ func (s *Server) handleWebTerminal(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if auditSession != nil {
-		accountName := target.Name
+		accountName := storedTarget.Name
 		if accountName == "" {
-			accountName = target.Username
+			accountName = storedTarget.Username
 		}
 		unregisterOnline := s.onlineSessions.Register(online.Session{
 			ID:              auditSession.ID,
 			AuditSessionID:  auditSession.ID,
 			ResourceType:    model.ResourceTypeHost,
-			ResourceID:      target.HostID,
-			AccountID:       target.ID,
-			Instance:        target.HostName,
+			ResourceID:      storedTarget.HostID,
+			AccountID:       storedTarget.ID,
+			Instance:        storedTarget.HostName,
 			Protocol:        "ssh",
 			ProtocolSubtype: session.ProtocolSubtype,
 			Account:         accountName,
@@ -209,17 +192,16 @@ func (s *Server) handleWebTerminal(w http.ResponseWriter, r *http.Request) {
 
 	if err := serveWebTerminalSSHSession(r.Context(), conn, targetClient, opts, recorder, s.logger); err != nil && r.Context().Err() == nil {
 		writeWebTerminalClose(conn, err)
-		s.logger.Warn("web terminal session ended with error", "target", target.ID, "error", err)
+		s.logger.Warn("web terminal session ended with error", "target", storedTarget.ID, "error", err)
 	}
 }
 
 func (s *Server) resolveWebTerminalTarget(ctx context.Context, user model.User, targetID string) (store.TargetConfig, error) {
-	user.RequestedTargetID = targetID
-	target, err := s.hostTargets.DefaultTarget(ctx, user)
+	target, err := s.hostManagement.ResolveWebTerminalTarget(ctx, service.HostManagementActor{ID: user.ID, SuperAdmin: user.IsSuperAdmin}, targetID)
 	if err != nil {
 		return store.TargetConfig{}, err
 	}
-	return target, nil
+	return storeTargetConfig(target), nil
 }
 
 func webTerminalOptionsFromRequest(r *http.Request) (webTerminalOptions, error) {

@@ -24,16 +24,16 @@ type adminRepository interface {
 	adminDatabaseRepository
 	adminApplicationRepository
 	adminContainerRepository
-	adminPlatformAccountRepository
+	service.PlatformAccountRepository
 	adminUserSessionCreationRepository
 	adminAuditRepository
 	adminConnectionPasswordRepository
-	adminUserPreferenceRepository
 	resourceAccessRepository
 	service.TemporaryAccessRepository
 	service.UserRepository
 	service.UserGroupRepository
 	service.RoleManagementRepository
+	service.UserPreferenceRepository
 }
 
 // adminDependencies keeps the server coupled to resource-scoped repositories
@@ -45,16 +45,16 @@ type adminDependencies struct {
 	databases           adminDatabaseRepository
 	applications        adminApplicationRepository
 	containers          adminContainerRepository
-	platformAccounts    adminPlatformAccountRepository
+	platformAccounts    service.PlatformAccountRepository
 	userSessionCreation adminUserSessionCreationRepository
 	audit               adminAuditRepository
 	connectionPassword  adminConnectionPasswordRepository
-	preferences         adminUserPreferenceRepository
 	resourceAccess      resourceAccessRepository
 	temporaryAccess     service.TemporaryAccessRepository
 	users               service.UserRepository
 	userGroups          service.UserGroupRepository
 	roles               service.RoleManagementRepository
+	userPreferences     service.UserPreferenceRepository
 }
 
 type adminAIAccessTokenRepository interface {
@@ -65,15 +65,115 @@ type adminHostTargetRepository interface {
 	Hosts(context.Context) ([]store.HostView, error)
 	Host(context.Context, string) (store.HostView, error)
 	AddHost(context.Context, store.HostRecord) (store.HostView, error)
+	CreateManagedHost(context.Context, store.HostRecord, string) (store.HostView, error)
 	UpdateHost(context.Context, string, store.HostRecord) (store.HostView, error)
 	DeleteHost(context.Context, string) error
 	Targets(context.Context) ([]store.TargetView, error)
+	ListHostAccounts(context.Context, string) ([]store.TargetView, error)
 	Target(context.Context, string) (store.TargetView, error)
 	TargetConfig(context.Context, string) (store.TargetConfig, error)
 	AddTarget(context.Context, config.Target) (store.TargetView, error)
 	UpdateTarget(context.Context, string, config.Target) (store.TargetView, error)
 	DeleteTarget(context.Context, string) error
 	DefaultTarget(context.Context, model.User) (store.TargetConfig, error)
+}
+
+type hostManagementRepositoryAdapter struct{ repository adminHostTargetRepository }
+
+func (a hostManagementRepositoryAdapter) Hosts(ctx context.Context) ([]service.HostManagementHostView, error) {
+	views, err := a.repository.Hosts(ctx)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]service.HostManagementHostView, len(views))
+	for index := range views {
+		result[index] = hostManagementHostView(views[index])
+	}
+	return result, nil
+}
+
+func (a hostManagementRepositoryAdapter) Host(ctx context.Context, id string) (service.HostManagementHostView, error) {
+	view, err := a.repository.Host(ctx, id)
+	return hostManagementHostView(view), err
+}
+
+func (a hostManagementRepositoryAdapter) AddHost(ctx context.Context, record service.HostManagementHostRecord) (service.HostManagementHostView, error) {
+	view, err := a.repository.AddHost(ctx, store.HostRecord{ID: record.ID, Name: record.Name, Group: record.Group, Address: record.Address, Port: record.Port, Protocol: record.Protocol, Remark: record.Remark, Status: record.Status})
+	return hostManagementHostView(view), err
+}
+
+func (a hostManagementRepositoryAdapter) CreateManagedHost(ctx context.Context, record service.HostManagementHostRecord, creatorID string) (service.HostManagementHostView, error) {
+	view, err := a.repository.CreateManagedHost(ctx, store.HostRecord{ID: record.ID, Name: record.Name, Group: record.Group, Address: record.Address, Port: record.Port, Protocol: record.Protocol, Remark: record.Remark, Status: record.Status}, creatorID)
+	return hostManagementHostView(view), err
+}
+
+func (a hostManagementRepositoryAdapter) UpdateHost(ctx context.Context, id string, record service.HostManagementHostRecord) (service.HostManagementHostView, error) {
+	view, err := a.repository.UpdateHost(ctx, id, store.HostRecord{ID: record.ID, Name: record.Name, Group: record.Group, Address: record.Address, Port: record.Port, Protocol: record.Protocol, Remark: record.Remark, Status: record.Status})
+	return hostManagementHostView(view), err
+}
+
+func (a hostManagementRepositoryAdapter) DeleteHost(ctx context.Context, id string) error {
+	return a.repository.DeleteHost(ctx, id)
+}
+
+func (a hostManagementRepositoryAdapter) Targets(ctx context.Context) ([]service.HostManagementTargetView, error) {
+	views, err := a.repository.Targets(ctx)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]service.HostManagementTargetView, len(views))
+	for index := range views {
+		result[index] = hostManagementTargetView(views[index])
+	}
+	return result, nil
+}
+
+func (a hostManagementRepositoryAdapter) ListHostAccounts(ctx context.Context, hostID string) ([]service.HostManagementTargetView, error) {
+	views, err := a.repository.ListHostAccounts(ctx, hostID)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]service.HostManagementTargetView, len(views))
+	for index := range views {
+		result[index] = hostManagementTargetView(views[index])
+	}
+	return result, nil
+}
+
+func (a hostManagementRepositoryAdapter) Target(ctx context.Context, id string) (service.HostManagementTargetView, error) {
+	view, err := a.repository.Target(ctx, id)
+	return hostManagementTargetView(view), err
+}
+
+func (a hostManagementRepositoryAdapter) TargetConfig(ctx context.Context, id string) (service.HostManagementTargetConfig, error) {
+	config, err := a.repository.TargetConfig(ctx, id)
+	return hostManagementTargetConfig(config), err
+}
+
+func (a hostManagementRepositoryAdapter) AddTarget(ctx context.Context, target config.Target) (service.HostManagementTargetView, error) {
+	view, err := a.repository.AddTarget(ctx, target)
+	return hostManagementTargetView(view), err
+}
+
+func (a hostManagementRepositoryAdapter) UpdateTarget(ctx context.Context, id string, target config.Target) (service.HostManagementTargetView, error) {
+	view, err := a.repository.UpdateTarget(ctx, id, target)
+	return hostManagementTargetView(view), err
+}
+
+func (a hostManagementRepositoryAdapter) DeleteTarget(ctx context.Context, id string) error {
+	return a.repository.DeleteTarget(ctx, id)
+}
+
+func hostManagementHostView(view store.HostView) service.HostManagementHostView {
+	return service.HostManagementHostView{ID: view.ID, Name: view.Name, Group: view.Group, Address: view.Address, Port: view.Port, Protocol: view.Protocol, Remark: view.Remark, Status: view.Status, AccountCount: view.AccountCount, CreatedAt: view.CreatedAt, UpdatedAt: view.UpdatedAt, CanManage: view.CanManage}
+}
+
+func hostManagementTargetView(view store.TargetView) service.HostManagementTargetView {
+	return service.HostManagementTargetView{ID: view.ID, HostID: view.HostID, ResourceType: view.ResourceType, ResourceID: view.ResourceID, ResourceSeq: view.ResourceSeq, HostResourceID: view.HostResourceID, Name: view.Name, Group: view.Group, Remark: view.Remark, ExpiresAt: view.ExpiresAt, Status: view.Status, HostStatus: view.HostStatus, Host: view.Host, Port: view.Port, Protocol: view.Protocol, Username: view.Username, Domain: view.Domain, AuthMethods: view.AuthMethods, InsecureIgnoreHostKey: view.InsecureIgnoreHostKey, HostKeyFingerprint: view.HostKeyFingerprint, KnownHostsPath: view.KnownHostsPath, RDPSecurity: view.RDPSecurity, RDPIgnoreCertificate: view.RDPIgnoreCertificate, RDPCertFingerprints: view.RDPCertFingerprints, RDPApprovalRequired: view.RDPApprovalRequired, RDPClipboardRead: view.RDPClipboardRead, RDPClipboardWrite: view.RDPClipboardWrite, RDPFileUpload: view.RDPFileUpload, RDPFileDownload: view.RDPFileDownload, RDPDriveMapping: view.RDPDriveMapping, CanManage: view.CanManage}
+}
+
+func hostManagementTargetConfig(config store.TargetConfig) service.HostManagementTargetConfig {
+	return service.HostManagementTargetConfig{ID: config.ID, Name: config.Name, HostName: config.HostName, Host: config.Host, Port: config.Port, Protocol: config.Protocol, Username: config.Username, Domain: config.Domain, Password: config.Password, PrivateKeyPath: config.PrivateKeyPath, PrivateKeyPEM: config.PrivateKeyPEM, Passphrase: config.Passphrase, InsecureIgnoreHostKey: config.InsecureIgnoreHostKey, HostKeyFingerprint: config.HostKeyFingerprint, KnownHostsPath: config.KnownHostsPath, RDPSecurity: config.RDPSecurity, RDPIgnoreCertificate: config.RDPIgnoreCertificate, RDPCertFingerprints: config.RDPCertFingerprints, RDPApprovalRequired: config.RDPApprovalRequired, RDPClipboardRead: config.RDPClipboardRead, RDPClipboardWrite: config.RDPClipboardWrite, RDPFileUpload: config.RDPFileUpload, RDPFileDownload: config.RDPFileDownload, RDPDriveMapping: config.RDPDriveMapping, Disabled: config.Disabled, ExpiresAt: config.ExpiresAt, HostID: config.HostID}
 }
 
 type adminDatabaseRepository interface {
@@ -100,20 +200,7 @@ type adminApplicationRepository interface {
 }
 
 type adminContainerRepository interface {
-	ListContainerEndpoints(context.Context, store.ContainerEndpointListParams) ([]store.ContainerEndpointView, int64, error)
-	ContainerEndpoint(context.Context, string) (store.ContainerEndpointView, error)
-	AddContainerEndpoint(context.Context, store.ContainerEndpointInput) (store.ContainerEndpointView, error)
-	UpdateContainerEndpoint(context.Context, string, store.ContainerEndpointInput) (store.ContainerEndpointView, error)
-	DeleteContainerEndpoint(context.Context, string) error
-}
-
-type adminPlatformAccountRepository interface {
-	PlatformAccounts(context.Context, store.PlatformAccountListParams) ([]store.PlatformAccountView, int64, error)
-	PlatformAccount(context.Context, string) (store.PlatformAccountView, error)
-	AddPlatformAccount(context.Context, model.PlatformAccount) (store.PlatformAccountView, error)
-	UpdatePlatformAccount(context.Context, string, model.PlatformAccount) (store.PlatformAccountView, error)
-	DeletePlatformAccount(context.Context, string) error
-	GetPlatformAccountPassword(context.Context, string) (string, error)
+	service.ContainerManagementRepository
 }
 
 type adminUserSessionCreationRepository interface {
@@ -141,11 +228,6 @@ type adminConnectionPasswordRepository interface {
 	service.ConnectionPasswordRepository
 }
 
-type adminUserPreferenceRepository interface {
-	UserPreference(context.Context, string) (model.UserPreference, error)
-	SaveUserPreference(context.Context, model.UserPreference) (model.UserPreference, error)
-}
-
 func resolveAdminDependencies(repository adminRepository) (adminDependencies, error) {
 	if isNilAdminRepository(repository) {
 		return adminDependencies{}, errAdminStoreRequired
@@ -161,12 +243,12 @@ func resolveAdminDependencies(repository adminRepository) (adminDependencies, er
 		userSessionCreation: repository,
 		audit:               repository,
 		connectionPassword:  repository,
-		preferences:         repository,
 		resourceAccess:      repository,
 		temporaryAccess:     repository,
 		users:               repository,
 		userGroups:          repository,
 		roles:               repository,
+		userPreferences:     repository,
 	}, nil
 }
 

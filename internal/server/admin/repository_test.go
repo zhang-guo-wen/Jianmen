@@ -160,7 +160,7 @@ func TestAdminRepositoryBoundaryStaysStaticallyComposedAndDomainSplit(t *testing
 		"platformAccounts":    reflect.TypeOf((*adminPlatformAccountRepository)(nil)).Elem(),
 		"userSessionCreation": reflect.TypeOf((*service.UserSessionCreationService)(nil)),
 		"audit":               reflect.TypeOf((*adminAuditRepository)(nil)).Elem(),
-		"connectionPassword":  reflect.TypeOf((*adminConnectionPasswordRepository)(nil)).Elem(),
+		"connectionPassword":  reflect.TypeOf((*service.ConnectionPasswordService)(nil)),
 		"preferences":         reflect.TypeOf((*adminUserPreferenceRepository)(nil)).Elem(),
 	}
 	for name, want := range expectedFields {
@@ -260,7 +260,19 @@ func applyTestAdminDependencies(t *testing.T, server *Server, repository adminRe
 		}
 	}
 	server.audit = dependencies.audit
-	server.connectionPassword = dependencies.connectionPassword
+	if server.connectionPassword == nil {
+		authorization := server.authorization
+		if isNilAdminAuthorization(authorization) {
+			authorization = repositoryTestAuthorization{}
+		}
+		server.connectionPassword, err = service.NewConnectionPasswordService(
+			dependencies.connectionPassword,
+			authorization,
+		)
+		if err != nil {
+			t.Fatalf("new connection password service: %v", err)
+		}
+	}
 	server.preferences = dependencies.preferences
 	if server.resourceAccess == nil {
 		server.resourceAccess = dependencies.resourceAccess

@@ -7,14 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"gorm.io/gorm"
-
-	"jianmen/internal/model"
-	"jianmen/internal/rbac"
 	"jianmen/internal/service"
 )
-
-const connectionPasswordTTL = 30 * time.Minute
 
 type connectionPasswordRequest struct {
 	TargetID string `json:"target_id"`
@@ -42,64 +36,49 @@ func (s *Server) handleConnectionPasswords(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	resourceType, actions, err := s.connectionPasswordTarget(request.TargetID)
+	if s.connectionPassword == nil {
+		s.writeErrorText(w, r, http.StatusServiceUnavailable, "connection password service unavailable")
+		return
+	}
+	issued, err := s.connectionPassword.Issue(
+		r.Context(),
+		service.ConnectionPasswordIssueRequest{
+			UserID:   userID,
+			TargetID: request.TargetID,
+		},
+	)
 	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			s.writeErrorText(w, r, http.StatusNotFound, "target account not found or disabled")
-			return
-		}
-		s.writeErrorText(w, r, http.StatusInternalServerError, "failed to look up target")
-		return
-	}
-	allowed, err := s.authorizeAnyConnection(r.Context(), userID, actions, resourceType, request.TargetID)
-	if err != nil || !allowed {
-		s.forbidden(w, r)
-		return
-	}
-
-	now := time.Now().UTC()
-	issued, err := service.IssueConnectionPassword(now, connectionPasswordTTL)
-	if err != nil {
-		s.writeErrorText(w, r, http.StatusInternalServerError, "failed to generate connection password")
-		return
-	}
-	credential := model.ConnectionPassword{
-		UserID:          userID,
-		ResourceType:    resourceType,
-		ResourceID:      request.TargetID,
-		SecretHash:      issued.Hash,
-		MySQLNativeHash: issued.MySQLNativeHash,
-		ExpiresAt:       issued.ExpiresAt,
-	}
-	if err := s.connectionPassword.CreateConnectionPassword(r.Context(), credential); err != nil {
-		s.writeErrorText(w, r, http.StatusInternalServerError, "failed to save connection password")
+		s.writeConnectionPasswordServiceError(w, r, err)
 		return
 	}
 	s.writeJSON(w, r, http.StatusCreated, map[string]any{
-		"password":           issued.Plaintext,
+		"password":           issued.Password,
 		"expires_at":         issued.ExpiresAt.Format(time.RFC3339),
-		"expires_in_seconds": int(connectionPasswordTTL.Seconds()),
-		"reusable":           true,
+		"expires_in_seconds": issued.ExpiresInSeconds,
+		"reusable":           issued.Reusable,
 	})
 }
 
-func (s *Server) connectionPasswordTarget(targetID string) (string, []string, error) {
-	var hostAccount model.HostAccount
-	if err := s.db.Preload("Host").Where("id = ? AND status = ?", targetID, "active").First(&hostAccount).Error; err == nil {
-		if hostAccount.Host.Status == "disabled" {
-			return "", nil, gorm.ErrRecordNotFound
-		}
-		return model.ResourceTypeHostAccount, []string{rbac.ActionSessionConnect, rbac.ActionSFTPConnect}, nil
-	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
-		return "", nil, err
+func (s *Server) writeConnectionPasswordServiceError(
+	w http.ResponseWriter,
+	r *http.Request,
+	err error,
+) {
+	switch {
+	case errors.Is(err, service.ErrInvalidConnectionPasswordRequest):
+		s.writeErrorText(w, r, http.StatusBadRequest, "invalid connection password request")
+	case errors.Is(err, service.ErrConnectionPasswordTargetNotFound):
+		s.writeErrorText(w, r, http.StatusNotFound, "target account not found or disabled")
+	case errors.Is(err, service.ErrConnectionPasswordForbidden),
+		errors.Is(err, service.ErrConnectionPasswordAuthorization):
+		s.forbidden(w, r)
+	case errors.Is(err, service.ErrConnectionPasswordTargetLookup):
+		s.writeErrorText(w, r, http.StatusInternalServerError, "failed to look up target")
+	case errors.Is(err, service.ErrConnectionPasswordGeneration):
+		s.writeErrorText(w, r, http.StatusInternalServerError, "failed to generate connection password")
+	case errors.Is(err, service.ErrConnectionPasswordPersistence):
+		s.writeErrorText(w, r, http.StatusInternalServerError, "failed to save connection password")
+	default:
+		s.writeErrorText(w, r, http.StatusInternalServerError, "failed to issue connection password")
 	}
-
-	var databaseAccount model.DatabaseAccount
-	if err := s.db.Preload("Instance").Where("id = ? AND status = ?", targetID, "active").First(&databaseAccount).Error; err != nil {
-		return "", nil, err
-	}
-	if databaseAccount.Instance.Status == "disabled" {
-		return "", nil, gorm.ErrRecordNotFound
-	}
-	return model.ResourceTypeDatabaseAccount, []string{rbac.ActionDBConnect}, nil
 }

@@ -137,7 +137,7 @@ type adminAuditRepository interface {
 }
 
 type adminConnectionPasswordRepository interface {
-	CreateConnectionPassword(context.Context, model.ConnectionPassword) error
+	service.ConnectionPasswordRepository
 }
 
 type adminUserPreferenceRepository interface {

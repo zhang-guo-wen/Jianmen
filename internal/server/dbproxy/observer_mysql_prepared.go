@@ -11,15 +11,15 @@ const (
 )
 
 type mysqlPreparedStatement struct {
-	sql       string
+	audit     databaseSQLAudit
 	queryKind string
 }
 
-func newMySQLPreparedStatement(sql string) mysqlPreparedStatement {
-	redacted := redactDatabaseSQL(sql)
+func newMySQLPreparedStatement(sql string, limit int) mysqlPreparedStatement {
+	audit := prepareDatabaseSQLAudit(sql, limit)
 	return mysqlPreparedStatement{
-		sql:       redacted,
-		queryKind: classifyQueryKind(redacted),
+		audit:     audit,
+		queryKind: classifyQueryKind(audit.text),
 	}
 }
 
@@ -61,6 +61,20 @@ func (o *mysqlObserver) registerCompletedMySQLPrepare(
 	statement mysqlPreparedStatement,
 ) bool {
 	if _, exists := o.prepared[statementID]; exists {
+		return false
+	}
+	if len(o.prepared) >= maxObserverPreparedObjects {
+		return false
+	}
+	limit := normalizeMaxClientMessageBytes(o.maxClientMessageBytes)
+	used := 0
+	for _, prepared := range o.prepared {
+		if len(prepared.audit.text) > limit-used {
+			return false
+		}
+		used += len(prepared.audit.text)
+	}
+	if len(statement.audit.text) > limit-used {
 		return false
 	}
 	if o.prepared == nil {

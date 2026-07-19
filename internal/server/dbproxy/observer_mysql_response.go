@@ -190,11 +190,6 @@ func (o *mysqlObserver) finishMySQLPrepareWithOmittedTerminator() {
 func (o *mysqlObserver) finishMySQLPending(finish queryFinish) {
 	record := o.pending[0]
 	recorded := o.mysqlPendingIsRecorded(0)
-	if recorded && o.sink != nil && !finishObservedQuery(o.sink, record, finish) {
-		o.markMySQLPendingFinishFailed(0)
-		o.failDecision(auditSinkFailureDecision())
-		return
-	}
 	if len(o.pendingCommands) > 0 &&
 		o.pendingCommands[0] == mysqlCommandStmtPrepare &&
 		finish.Status == queryStatusSuccess {
@@ -203,6 +198,11 @@ func (o *mysqlObserver) finishMySQLPending(finish queryFinish) {
 			o.fail(observerErrorProtocol, "invalid MySQL prepared statement lifecycle")
 			return
 		}
+	}
+	if recorded && o.sink != nil && !finishObservedQuery(o.sink, record, finish) {
+		o.markMySQLPendingFinishFailed(0)
+		o.failDecision(auditSinkFailureDecision())
+		return
 	}
 	o.pending = o.pending[1:]
 	if len(o.pendingRecorded) > 0 {

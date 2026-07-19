@@ -1300,9 +1300,9 @@ export const apiClient = {
     request<DBConnectionMetaRecord>(
       `/api/audit/db/${encodeURIComponent(String(id))}`
     ),
-  getDBConnectionQueries: (id: string | number) =>
-    request<DBQueryEventRecord[]>(
-      `/api/audit/db/${encodeURIComponent(String(id))}/queries`
+  getDBConnectionQueries: (id: string | number, params?: { page?: number; page_size?: number; q?: string }) =>
+    request<PageResponse<DBQueryEventRecord>>(
+      `/api/audit/db/${encodeURIComponent(String(id))}/queries${buildQS(params as Record<string, string | number | undefined>)}`
     ),
 
   // applications (web app proxy)

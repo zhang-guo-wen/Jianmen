@@ -27,14 +27,19 @@ type querySink interface {
 }
 
 func newQueryObserver(protocol string, sink querySink) queryObserver {
+	return newQueryObserverWithLimit(protocol, sink, defaultMaxClientMessageBytes)
+}
+
+func newQueryObserverWithLimit(protocol string, sink querySink, maxClientMessageBytes int) queryObserver {
+	maxClientMessageBytes = normalizeMaxClientMessageBytes(maxClientMessageBytes)
 	var observer queryObserver
 	switch protocol {
 	case "mysql":
-		observer = &mysqlObserver{sink: sink}
+		observer = &mysqlObserver{sink: sink, maxClientMessageBytes: maxClientMessageBytes}
 	case "postgres":
-		observer = &postgresObserver{sink: sink, startupDone: true}
+		observer = &postgresObserver{sink: sink, startupDone: true, maxClientMessageBytes: maxClientMessageBytes}
 	case "redis":
-		observer = &redisObserver{sink: sink}
+		observer = &redisObserver{sink: sink, maxClientMessageBytes: maxClientMessageBytes}
 	default:
 		return noopObserver{}
 	}

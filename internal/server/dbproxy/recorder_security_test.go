@@ -39,12 +39,13 @@ func TestRecorderPersistsOnlyRedactedSQLAndPairsTerminalEvents(t *testing.T) {
 			}
 			audit := &queryCaptureAudit{}
 			recorder := &connectionRecorder{
-				id:             "connection-1",
-				protocol:       "mysql",
-				file:           file,
-				startedAt:      time.Now(),
-				audit:          audit,
-				auditSessionID: "session-1",
+				id:                    "connection-1",
+				protocol:              "mysql",
+				maxClientMessageBytes: defaultMaxClientMessageBytes,
+				file:                  file,
+				startedAt:             time.Now(),
+				audit:                 audit,
+				auditSessionID:        "session-1",
 			}
 			observer := newQueryObserver("mysql", recorder)
 			const secret = "persisted-secret-123456"
@@ -63,6 +64,9 @@ func TestRecorderPersistsOnlyRedactedSQLAndPairsTerminalEvents(t *testing.T) {
 			if strings.Contains(text, secret) || strings.Contains(text, "778899") {
 				t.Fatalf("queries.jsonl exposed a literal: %s", text)
 			}
+			if strings.Contains(text, "sql_sha256") {
+				t.Fatalf("queries.jsonl exposed a reversible SQL fingerprint: %s", text)
+			}
 			if strings.Count(text, `"type":"query_started"`) != 1 ||
 				strings.Count(text, `"type":"query_finished"`) != 1 {
 				t.Fatalf("query events are not paired: %s", text)
@@ -76,6 +80,10 @@ func TestRecorderPersistsOnlyRedactedSQLAndPairsTerminalEvents(t *testing.T) {
 			}
 			if !strings.Contains(text, queries[0].SQLText) {
 				t.Fatalf("file and database redaction differ: file=%s database=%q", text, queries[0].SQLText)
+			}
+			if queries[0].OriginalSQLBytes != int64(len(sql)) ||
+				queries[0].SQLTruncated {
+				t.Fatalf("database audit SQL metadata = %#v, want original length without truncation", queries[0])
 			}
 		})
 	}

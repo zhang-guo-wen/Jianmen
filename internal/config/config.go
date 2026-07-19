@@ -10,6 +10,12 @@ import (
 	"strings"
 )
 
+const (
+	DefaultDatabaseGatewayMaxClientMessageBytes = 10 * 1024 * 1024
+	MinDatabaseGatewayMaxClientMessageBytes     = 64 * 1024
+	MaxDatabaseGatewayMaxClientMessageBytes     = 16 * 1024 * 1024
+)
+
 type Config struct {
 	ListenAddr         string                   `json:"listen_addr"`
 	HostKeyPath        string                   `json:"host_key_path"`
@@ -53,11 +59,12 @@ type DatabaseConfig struct {
 }
 
 type DatabaseGatewayConfig struct {
-	Enabled    bool                     `json:"enabled"`
-	MySQL      DatabaseProtocolListener `json:"mysql"`
-	PostgreSQL DatabaseProtocolListener `json:"postgresql"`
-	Redis      DatabaseProtocolListener `json:"redis"`
-	enabledSet bool
+	Enabled               bool                     `json:"enabled"`
+	MaxClientMessageBytes int                      `json:"max_client_message_bytes"`
+	MySQL                 DatabaseProtocolListener `json:"mysql"`
+	PostgreSQL            DatabaseProtocolListener `json:"postgresql"`
+	Redis                 DatabaseProtocolListener `json:"redis"`
+	enabledSet            bool
 }
 
 func (c *DatabaseGatewayConfig) UnmarshalJSON(data []byte) error {
@@ -277,6 +284,10 @@ func (c *Config) applyDefaults() {
 		c.DatabaseGateway.Enabled = true
 		c.DatabaseGateway.MySQL = DatabaseProtocolListener{Enabled: true, Address: "127.0.0.1:33060"}
 	}
+	if c.DatabaseGateway.MaxClientMessageBytes == 0 {
+		c.DatabaseGateway.MaxClientMessageBytes =
+			DefaultDatabaseGatewayMaxClientMessageBytes
+	}
 	if !c.ApplicationGateway.Enabled && c.ApplicationGateway.PortStart == 0 && c.ApplicationGateway.PortEnd == 0 {
 		c.ApplicationGateway.Enabled = true
 		c.ApplicationGateway.PortStart = 47110
@@ -359,6 +370,18 @@ func (c *Config) Validate() error {
 }
 
 func validateDatabaseGateway(gateway DatabaseGatewayConfig) error {
+	maxClientMessageBytes := gateway.MaxClientMessageBytes
+	if maxClientMessageBytes == 0 {
+		maxClientMessageBytes = DefaultDatabaseGatewayMaxClientMessageBytes
+	}
+	if maxClientMessageBytes < MinDatabaseGatewayMaxClientMessageBytes ||
+		maxClientMessageBytes > MaxDatabaseGatewayMaxClientMessageBytes {
+		return fmt.Errorf(
+			"database_gateway.max_client_message_bytes must be between %d and %d",
+			MinDatabaseGatewayMaxClientMessageBytes,
+			MaxDatabaseGatewayMaxClientMessageBytes,
+		)
+	}
 	if !gateway.Enabled {
 		return nil
 	}

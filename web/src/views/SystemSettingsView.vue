@@ -95,7 +95,7 @@
         </div>
 
         <el-tabs v-model="activeTab" class="settings-tabs">
-          <el-tab-pane label="Web RDP 与审计" name="policy">
+          <el-tab-pane label="代理与审计" name="policy">
             <div class="policy-grid">
               <section class="settings-section">
                 <div class="section-heading">
@@ -225,6 +225,39 @@
                       controls-position="right"
                     />
                     <span>条</span>
+                  </div>
+                </div>
+              </section>
+
+              <section class="settings-section settings-section--wide">
+                <div class="section-heading">
+                  <div>
+                    <h2>数据库与 Redis 代理</h2>
+                    <p>控制代理接受的客户端请求大小；保存后需重启 Jianmen 才会生效。</p>
+                  </div>
+                </div>
+
+                <div class="setting-row">
+                  <div class="setting-copy">
+                    <strong>最大客户端 SQL / 命令报文</strong>
+                    <span>
+                      同时作用于 MySQL、PostgreSQL 和 Redis 客户端发送的单个 SQL、参数或命令报文；
+                      超过上限的请求将被拒绝，调整时需二次确认。
+                    </span>
+                  </div>
+                  <div class="number-control">
+                    <el-input-number
+                      v-model="maxClientMessageMiB"
+                      :min="MIN_CLIENT_MESSAGE_MIB"
+                      :max="MAX_CLIENT_MESSAGE_MIB"
+                      :precision="4"
+                      :step="1"
+                      controls-position="right"
+                    />
+                    <span>MiB</span>
+                    <span class="number-control__exact">
+                      {{ form.database_max_client_message_bytes }} 字节
+                    </span>
                   </div>
                 </div>
               </section>
@@ -411,6 +444,13 @@ import { ElMessage, ElMessageBox } from 'element-plus';
 
 import { ApiError, apiClient } from '@/api/client';
 import {
+  BYTES_PER_MIB,
+  DATABASE_MAX_CLIENT_MESSAGE_BYTES_DEFAULT,
+  DATABASE_MAX_CLIENT_MESSAGE_BYTES_MAX,
+  DATABASE_MAX_CLIENT_MESSAGE_BYTES_MIN,
+  clientMessageBytesToMiB,
+  clientMessageMiBToBytes,
+  formatClientMessageBytes,
   replayBytesToGiB,
   replayGiBToBytes,
   weakerProtectionReasons,
@@ -428,6 +468,7 @@ const SETTING_FIELDS: Array<keyof SystemSettingsValues> = [
   'web_rdp_enabled',
   'web_rdp_connect_timeout_seconds',
   'web_rdp_allow_unrecorded',
+  'database_max_client_message_bytes',
   'recording_enabled',
   'recording_record_input',
   'recording_record_commands',
@@ -440,6 +481,7 @@ const FIELD_LABELS: Record<keyof SystemSettingsValues, string> = {
   web_rdp_enabled: 'Web RDP',
   web_rdp_connect_timeout_seconds: '连接超时',
   web_rdp_allow_unrecorded: '未录制会话策略',
+  database_max_client_message_bytes: '最大客户端 SQL / 命令报文',
   recording_enabled: '会话录制',
   recording_record_input: '原始输入记录',
   recording_record_commands: '命令记录',
@@ -462,6 +504,8 @@ const diagnostics = reactive<{
   objectStorage?: SystemSettingsDiagnosticResult;
 }>({});
 const form = reactive<SystemSettingsValues>(emptySettings());
+const MIN_CLIENT_MESSAGE_MIB = DATABASE_MAX_CLIENT_MESSAGE_BYTES_MIN / BYTES_PER_MIB;
+const MAX_CLIENT_MESSAGE_MIB = DATABASE_MAX_CLIENT_MESSAGE_BYTES_MAX / BYTES_PER_MIB;
 
 const infrastructure = computed<SystemSettingsInfrastructure>(
   () => state.value?.infrastructure ?? emptyInfrastructure(),
@@ -473,6 +517,12 @@ const maxReplayGiB = computed<number>({
   get: () => replayBytesToGiB(form.recording_max_replay_bytes),
   set: value => {
     form.recording_max_replay_bytes = replayGiBToBytes(Number(value));
+  },
+});
+const maxClientMessageMiB = computed<number>({
+  get: () => clientMessageBytesToMiB(form.database_max_client_message_bytes),
+  set: value => {
+    form.database_max_client_message_bytes = clientMessageMiBToBytes(Number(value));
   },
 });
 const hasUnsavedChanges = computed(() => {
@@ -503,6 +553,7 @@ function emptySettings(): SystemSettingsValues {
     web_rdp_enabled: false,
     web_rdp_connect_timeout_seconds: 15,
     web_rdp_allow_unrecorded: false,
+    database_max_client_message_bytes: DATABASE_MAX_CLIENT_MESSAGE_BYTES_DEFAULT,
     recording_enabled: true,
     recording_record_input: false,
     recording_record_commands: true,
@@ -594,6 +645,14 @@ function validateSettings(): SystemSettingsValues | null {
     return null;
   }
   if (
+    !Number.isSafeInteger(next.database_max_client_message_bytes)
+    || next.database_max_client_message_bytes < DATABASE_MAX_CLIENT_MESSAGE_BYTES_MIN
+    || next.database_max_client_message_bytes > DATABASE_MAX_CLIENT_MESSAGE_BYTES_MAX
+  ) {
+    ElMessage.warning('最大客户端 SQL / 命令报文必须在 0.0625-16 MiB 之间');
+    return null;
+  }
+  if (
     !Number.isSafeInteger(next.recording_max_replay_bytes)
     || next.recording_max_replay_bytes < 0
   ) {
@@ -617,7 +676,7 @@ async function saveSettings() {
   if (riskReasons.length) {
     try {
       await ElMessageBox.confirm(
-        `以下变更会降低审计可用性或增加敏感信息采集：${riskReasons.join('；')}。保存后仍需重启才会生效，确定继续吗？`,
+        `以下变更会影响审计完整性、安全边界或连接行为：${riskReasons.join('；')}。保存后仍需重启才会生效，确定继续吗？`,
         '确认高风险配置变更',
         {
           type: 'warning',
@@ -717,6 +776,9 @@ function formatSettingValue(
   if (field === 'web_rdp_connect_timeout_seconds') return `${value} 秒`;
   if (field === 'recording_retention_days') return `${value} 天`;
   if (field === 'recording_cleanup_batch_size') return `${value} 条`;
+  if (field === 'database_max_client_message_bytes') {
+    return formatClientMessageBytes(Number(value));
+  }
   if (field === 'recording_max_replay_bytes') {
     return Number(value) === 0 ? '不限制' : `${replayBytesToGiB(Number(value))} GiB`;
   }
@@ -912,6 +974,10 @@ function errorMessage(error: unknown, fallback: string): string {
   background: var(--color-card);
 }
 
+.settings-section--wide {
+  grid-column: 1 / -1;
+}
+
 .section-heading {
   margin-bottom: 18px;
 }
@@ -982,6 +1048,11 @@ function errorMessage(error: unknown, fallback: string): string {
   min-width: 24px;
   color: var(--color-text-secondary);
   font-size: 12px;
+}
+
+.number-control > .number-control__exact {
+  min-width: max-content;
+  font-family: "Cascadia Mono", Consolas, monospace;
 }
 
 .diagnostic-result,

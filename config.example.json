@@ -28,6 +28,7 @@
   },
   "database_gateway": {
     "enabled": true,
+    "max_client_message_bytes": 10485760,
     "mysql": {
       "enabled": true,
       "listen_addr": "127.0.0.1:33060",

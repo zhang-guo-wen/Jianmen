@@ -71,7 +71,11 @@ func (o *redisObserver) promoteRedisResponseStream() ([]byte, *queryDecision) {
 	o.serverStream = newRedisResponseStream(primaryType)
 	o.serverStream.unsolicited = unsolicited
 	if potentialPubSubAck && !unsolicited {
-		o.serverStream.pubSubCapture = newRedisStreamPubSubCapture(primaryType)
+		o.serverStream.pubSubCapture = newRedisStreamPubSubCapture(
+			primaryType,
+			o.maxClientMessageBytes,
+			&o.slots[0],
+		)
 	}
 	forward, consumed, complete, decision := o.consumeRedisResponseStream(buffered)
 	if consumed < len(buffered) {
@@ -127,7 +131,9 @@ func (o *redisObserver) consumeRedisResponseStream(data []byte) (
 			if lineDecision != nil {
 				return forward, consumed, false, lineDecision
 			}
-			stream.pubSubCapture.consumeHeader(line)
+			if captureDecision := stream.pubSubCapture.consumeHeader(line); captureDecision != nil {
+				return forward, consumed, false, captureDecision
+			}
 			forward = append(forward, line...)
 			if lineComplete {
 				return forward, consumed, true, nil
@@ -145,7 +151,9 @@ func (o *redisObserver) consumeRedisResponseStream(data []byte) (
 					copied++
 				}
 			}
-			stream.pubSubCapture.consumeBulk(data[consumed:end])
+			if captureDecision := stream.pubSubCapture.consumeBulk(data[consumed:end]); captureDecision != nil {
+				return forward, consumed, false, captureDecision
+			}
 			forward = append(forward, data[consumed:end]...)
 			consumed = end
 			stream.bulkRemaining -= length

@@ -89,7 +89,7 @@ func (s *UserSessionCreationService) Create(ctx context.Context, request CreateU
 		return CreateUserSessionResult{}, ErrUserSessionForbidden
 	}
 
-	session, err := s.repository.GetOrCreateActivePermanentUserSession(ctx, userID)
+	session, err := s.GetOrCreateActivePermanentUserSession(ctx, userID)
 	if err != nil {
 		return CreateUserSessionResult{}, err
 	}
@@ -99,6 +99,23 @@ func (s *UserSessionCreationService) Create(ctx context.Context, request CreateU
 		ResourceType:    resourceType,
 		CompactUsername: prefix + resourceID + session.SessionID,
 	}, nil
+}
+
+// GetOrCreateActivePermanentUserSession is the shared allocation boundary for
+// every connection-configuration entry point, including the AI resource API.
+func (s *UserSessionCreationService) GetOrCreateActivePermanentUserSession(ctx context.Context, userID string) (model.UserSession, error) {
+	if err := ctx.Err(); err != nil {
+		return model.UserSession{}, fmt.Errorf("get or create permanent user session context: %w", err)
+	}
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return model.UserSession{}, fmt.Errorf("user_id is required")
+	}
+	session, err := s.repository.GetOrCreateActivePermanentUserSession(ctx, userID)
+	if err != nil {
+		return model.UserSession{}, fmt.Errorf("get or create permanent user session: %w", err)
+	}
+	return session, nil
 }
 
 func isNilUserSessionCreationDependency(dependency any) bool {

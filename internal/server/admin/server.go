@@ -26,7 +26,6 @@ type Server struct {
 	applications         adminApplicationRepository
 	containers           adminContainerRepository
 	platformAccounts     adminPlatformAccountRepository
-	userSessions         adminUserSessionRepository
 	userSessionCreation  *service.UserSessionCreationService
 	audit                adminAuditRepository
 	connectionPassword   adminConnectionPasswordRepository
@@ -137,7 +136,7 @@ func New(
 		cfg: cfg, db: db, logger: logger,
 		aiTokens: dependencies.aiTokens, hostTargets: dependencies.hostTargets, databases: dependencies.databases,
 		applications: dependencies.applications, containers: dependencies.containers, platformAccounts: dependencies.platformAccounts,
-		userSessions: dependencies.userSessions, userSessionCreation: userSessionCreation, audit: dependencies.audit, connectionPassword: dependencies.connectionPassword,
+		userSessionCreation: userSessionCreation, audit: dependencies.audit, connectionPassword: dependencies.connectionPassword,
 		preferences: dependencies.preferences, temporaryRepository: dependencies.temporaryAccess,
 		userRepository: dependencies.users, userGroupRepository: dependencies.userGroups, roleRepository: dependencies.roles,
 		dataDir:      dataDir,

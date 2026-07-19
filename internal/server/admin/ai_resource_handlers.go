@@ -175,25 +175,10 @@ func (s *Server) issueAIResourceSession(w http.ResponseWriter, r *http.Request, 
 		s.forbidden(w, r)
 		return
 	}
-	sessions, err := s.userSessions.UserSessions(userIDFromRequest(r))
+	session, err := s.userSessionCreation.GetOrCreateActivePermanentUserSession(r.Context(), userIDFromRequest(r))
 	if err != nil {
 		s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
 		return
-	}
-	var session *store.SessionView
-	for i := range sessions {
-		if sessions[i].Type == "permanent" && sessions[i].Status == "active" {
-			session = &sessions[i]
-			break
-		}
-	}
-	if session == nil {
-		created, createErr := s.userSessions.CreateUserSession(model.UserSession{UserID: userIDFromRequest(r), Type: "permanent", Status: "active"})
-		if createErr != nil {
-			s.writeErrorText(w, r, http.StatusInternalServerError, createErr.Error())
-			return
-		}
-		session = &store.SessionView{SessionID: created.SessionID, SessionSeq: created.SessionSeq, Type: created.Type, Status: created.Status}
 	}
 	prefix := util.PrefixHost
 	if resourceType == model.ResourceTypeDatabaseAccount {

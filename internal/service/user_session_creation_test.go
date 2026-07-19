@@ -19,6 +19,7 @@ type userSessionCreationRepositoryStub struct {
 	databaseFound    bool
 	session          model.UserSession
 	createdUserID    string
+	allocationCalls  int
 	contexts         []context.Context
 	err              error
 }
@@ -41,6 +42,7 @@ func (s *userSessionCreationRepositoryStub) FindActiveDatabaseAccount(ctx contex
 func (s *userSessionCreationRepositoryStub) GetOrCreateActivePermanentUserSession(ctx context.Context, userID string) (model.UserSession, error) {
 	s.remember(ctx)
 	s.createdUserID = userID
+	s.allocationCalls++
 	if s.session.ID == "" {
 		s.session = model.UserSession{ID: "session-1", UserID: userID, SessionID: "00001", SessionSeq: 1, Type: "permanent", Status: "active"}
 	}
@@ -59,6 +61,42 @@ type userSessionCreationAuthorizerStub struct {
 func (s *userSessionCreationAuthorizerStub) AuthorizeConnection(ctx context.Context, _ string, actions []string, resourceType, resourceID string) (bool, error) {
 	s.ctx, s.actions, s.resourceType, s.resourceID = ctx, actions, resourceType, resourceID
 	return s.allowed, s.err
+}
+
+func TestUserSessionCreationServiceExposesSharedAtomicAllocationPath(t *testing.T) {
+	repository := &userSessionCreationRepositoryStub{
+		session: model.UserSession{
+			ID: "shared-session", UserID: "user-1", SessionID: "00009",
+			SessionSeq: 9, Type: "permanent", Status: "active",
+		},
+	}
+	creation, err := NewUserSessionCreationService(repository, &userSessionCreationAuthorizerStub{})
+	if err != nil {
+		t.Fatalf("new service: %v", err)
+	}
+	ctx := context.WithValue(context.Background(), userSessionCreationContextKey{}, "ai-request")
+	session, err := creation.GetOrCreateActivePermanentUserSession(ctx, " user-1 ")
+	if err != nil {
+		t.Fatalf("get or create permanent session: %v", err)
+	}
+	if session.ID != "shared-session" || session.Type != "permanent" || session.Status != "active" {
+		t.Fatalf("session = %#v", session)
+	}
+	if repository.createdUserID != "user-1" || repository.allocationCalls != 1 {
+		t.Fatalf("atomic allocation user=%q calls=%d", repository.createdUserID, repository.allocationCalls)
+	}
+	if len(repository.contexts) != 1 || repository.contexts[0] != ctx {
+		t.Fatal("shared allocation path did not preserve request context")
+	}
+
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := creation.GetOrCreateActivePermanentUserSession(canceled, "user-1"); !errors.Is(err, context.Canceled) {
+		t.Fatalf("canceled allocation error = %v, want context canceled", err)
+	}
+	if repository.allocationCalls != 1 {
+		t.Fatal("canceled allocation reached repository")
+	}
 }
 
 func TestUserSessionCreationServiceCreatesHostSessionAndPropagatesContext(t *testing.T) {

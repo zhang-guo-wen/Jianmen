@@ -5,12 +5,14 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"jianmen/internal/model"
 	"jianmen/internal/rbac"
 	"jianmen/internal/service"
+	"jianmen/internal/store"
 )
 
 func TestAIAccessTokenIssueRotateAndRevoke(t *testing.T) {
@@ -224,6 +226,179 @@ func TestAIResourcesRequireCurrentRBACGrantAndIssueSessionCredential(t *testing.
 	server.withAIToken(server.handleAIResources)(sessionResponse, sessionRequest)
 	if sessionResponse.Code != http.StatusCreated || !strings.Contains(sessionResponse.Body.String(), "compact_username") {
 		t.Fatalf("session response = %d; body=%s", sessionResponse.Code, sessionResponse.Body.String())
+	}
+}
+
+func TestAIResourceSessionPreservesHostDatabaseAndRedisUsernameSemantics(t *testing.T) {
+	server, db := newAdminDBTestServer(t)
+	const userID = "ai-resource-prefix-user"
+	if err := db.Create(&model.User{
+		ID: userID, Username: userID, Status: "active", IsSuperAdmin: true,
+	}).Error; err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	host := model.Host{ID: "prefix-host", Name: "prefix-host", Address: "10.0.0.20", Port: 22, Status: "active"}
+	hostAccount := model.HostAccount{
+		ID: "prefix-host-account", HostID: host.ID, Name: "root", Username: "root",
+		AuthType: "password", Password: model.NewEncryptedField("host-secret"),
+		Status: "active", ResourceSeq: 1, ResourceID: "H001",
+	}
+	mysqlInstance := model.DatabaseInstance{
+		ID: "prefix-mysql", Name: "prefix-mysql", Protocol: "mysql",
+		Address: "10.0.0.21", Port: 3306, TLSMode: "disable", Status: "active",
+	}
+	redisInstance := model.DatabaseInstance{
+		ID: "prefix-redis", Name: "prefix-redis", Protocol: "redis",
+		Address: "10.0.0.22", Port: 6379, TLSMode: "disable", Status: "active",
+	}
+	mysqlAccount := model.DatabaseAccount{
+		ID: "prefix-mysql-account", InstanceID: mysqlInstance.ID, UniqueName: "prefix-mysql-account",
+		Username: "mysql-user", Password: model.NewEncryptedField("mysql-secret"),
+		Status: "active", ResourceSeq: 1, ResourceID: "D001",
+	}
+	redisAccount := model.DatabaseAccount{
+		ID: "prefix-redis-account", InstanceID: redisInstance.ID, UniqueName: "prefix-redis-account",
+		Username: "redis-user", Password: model.NewEncryptedField("redis-secret"),
+		Status: "active", ResourceSeq: 2, ResourceID: "D002",
+	}
+	for _, value := range []any{&host, &hostAccount, &mysqlInstance, &redisInstance, &mysqlAccount, &redisAccount} {
+		if err := db.Create(value).Error; err != nil {
+			t.Fatalf("create resource %T: %v", value, err)
+		}
+	}
+
+	tests := []struct {
+		name         string
+		resourceType string
+		resourceID   string
+		wantPrefix   string
+	}{
+		{name: "host", resourceType: model.ResourceTypeHostAccount, resourceID: hostAccount.ID, wantPrefix: "HH001"},
+		{name: "database", resourceType: model.ResourceTypeDatabaseAccount, resourceID: mysqlAccount.ID, wantPrefix: "DD001"},
+		{name: "redis", resourceType: model.ResourceTypeDatabaseAccount, resourceID: redisAccount.ID, wantPrefix: "RD002"},
+	}
+	var sharedSessionID string
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			request := withTestUser(
+				httptest.NewRequest(http.MethodPost, "/api/ai/resources/"+test.resourceType+"/"+test.resourceID+"/session", nil),
+				userID,
+				userID,
+			)
+			response := httptest.NewRecorder()
+			server.issueAIResourceSession(response, request, test.resourceType, test.resourceID)
+			if response.Code != http.StatusCreated {
+				t.Fatalf("status = %d; body=%s", response.Code, response.Body.String())
+			}
+			var body struct {
+				CompactUsername string `json:"compact_username"`
+				SessionID       string `json:"session_id"`
+			}
+			if err := decodeTestData(t, response.Body.Bytes(), &body); err != nil {
+				t.Fatalf("decode response: %v", err)
+			}
+			if !strings.HasPrefix(body.CompactUsername, test.wantPrefix) {
+				t.Fatalf("compact username = %q, want prefix %q", body.CompactUsername, test.wantPrefix)
+			}
+			if sharedSessionID == "" {
+				sharedSessionID = body.SessionID
+			}
+			if body.SessionID != sharedSessionID ||
+				body.CompactUsername != test.wantPrefix+sharedSessionID {
+				t.Fatalf("session response = %#v, shared session = %q", body, sharedSessionID)
+			}
+		})
+	}
+}
+
+func TestAIAndUserSessionEntrypointsShareAtomicPermanentSession(t *testing.T) {
+	server, db := newAdminDBTestServer(t)
+	const userID = "shared-session-user"
+	if err := db.Create(&model.User{
+		ID: userID, Username: userID, Status: "active", IsSuperAdmin: true,
+	}).Error; err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	host := model.Host{ID: "shared-host", Name: "shared-host", Address: "10.0.0.30", Port: 22, Status: "active"}
+	account := model.HostAccount{
+		ID: "shared-host-account", HostID: host.ID, Name: "root", Username: "root",
+		AuthType: "password", Password: model.NewEncryptedField("host-secret"),
+		Status: "active", ResourceSeq: 3, ResourceID: "H003",
+	}
+	if err := db.Create(&host).Error; err != nil {
+		t.Fatalf("create host: %v", err)
+	}
+	if err := db.Create(&account).Error; err != nil {
+		t.Fatalf("create host account: %v", err)
+	}
+	creation, err := service.NewUserSessionCreationService(store.NewDBStore(db), server.authorization)
+	if err != nil {
+		t.Fatalf("new shared user session creation service: %v", err)
+	}
+	server.userSessionCreation = creation
+
+	const callers = 16
+	type responseResult struct {
+		status int
+		body   string
+	}
+	results := make([]responseResult, callers)
+	start := make(chan struct{})
+	var group sync.WaitGroup
+	for index := 0; index < callers; index++ {
+		index := index
+		group.Add(1)
+		go func() {
+			defer group.Done()
+			<-start
+			recorder := httptest.NewRecorder()
+			if index%2 == 0 {
+				request := withTestUser(
+					httptest.NewRequest(http.MethodPost, "/api/ai/resources/host_account/"+account.ID+"/session", nil),
+					userID,
+					userID,
+				)
+				server.issueAIResourceSession(recorder, request, model.ResourceTypeHostAccount, account.ID)
+			} else {
+				request := withTestUser(
+					httptest.NewRequest(http.MethodPost, "/api/user-sessions", bytes.NewBufferString(`{"target_id":"`+account.ID+`"}`)),
+					userID,
+					userID,
+				)
+				server.handleUserSessions(recorder, request)
+			}
+			results[index] = responseResult{status: recorder.Code, body: recorder.Body.String()}
+		}()
+	}
+	close(start)
+	group.Wait()
+
+	var sharedSessionID string
+	for index, result := range results {
+		if result.status != http.StatusCreated {
+			t.Fatalf("request %d status = %d; body=%s", index, result.status, result.body)
+		}
+		var body struct {
+			SessionID string `json:"session_id"`
+		}
+		if err := decodeTestData(t, []byte(result.body), &body); err != nil {
+			t.Fatalf("decode request %d response: %v", index, err)
+		}
+		if sharedSessionID == "" {
+			sharedSessionID = body.SessionID
+		}
+		if body.SessionID == "" || body.SessionID != sharedSessionID {
+			t.Fatalf("request %d session ID = %q, want %q", index, body.SessionID, sharedSessionID)
+		}
+	}
+	var count int64
+	if err := db.Model(&model.UserSession{}).
+		Where("user_id = ? AND type = ? AND status = ?", userID, "permanent", "active").
+		Count(&count).Error; err != nil {
+		t.Fatalf("count active permanent sessions: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("active permanent session count = %d, want 1", count)
 	}
 }
 

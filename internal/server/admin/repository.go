@@ -24,7 +24,6 @@ type adminRepository interface {
 	adminApplicationRepository
 	adminContainerRepository
 	adminPlatformAccountRepository
-	adminUserSessionRepository
 	adminUserSessionCreationRepository
 	adminAuditRepository
 	adminConnectionPasswordRepository
@@ -45,7 +44,6 @@ type adminDependencies struct {
 	applications        adminApplicationRepository
 	containers          adminContainerRepository
 	platformAccounts    adminPlatformAccountRepository
-	userSessions        adminUserSessionRepository
 	userSessionCreation adminUserSessionCreationRepository
 	audit               adminAuditRepository
 	connectionPassword  adminConnectionPasswordRepository
@@ -117,11 +115,6 @@ type adminPlatformAccountRepository interface {
 	GetPlatformAccountPassword(string) (string, error)
 }
 
-type adminUserSessionRepository interface {
-	UserSessions(string) ([]store.SessionView, error)
-	CreateUserSession(model.UserSession) (*model.UserSession, error)
-}
-
 type adminUserSessionCreationRepository interface {
 	service.UserSessionCreationRepository
 }
@@ -163,7 +156,6 @@ func resolveAdminDependencies(repository adminRepository) (adminDependencies, er
 		applications:        repository,
 		containers:          repository,
 		platformAccounts:    repository,
-		userSessions:        repository,
 		userSessionCreation: repository,
 		audit:               repository,
 		connectionPassword:  repository,

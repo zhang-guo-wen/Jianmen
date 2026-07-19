@@ -53,15 +53,15 @@ function Stop-ProcessOnPort($Port, $Name) {
     }
 }
 
-function Wait-HttpOk($Name, $Url, $TimeoutSeconds, $Headers) {
+function Wait-HttpOk($Name, $Url, $TimeoutSeconds, $Headers, $WebSession) {
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
     $lastError = $null
     while ((Get-Date) -lt $deadline) {
         try {
             if ($Headers) {
-                $response = Invoke-WebRequest $Url -UseBasicParsing -TimeoutSec 2 -Headers $Headers
+                $response = Invoke-WebRequest $Url -UseBasicParsing -TimeoutSec 2 -Headers $Headers -WebSession $WebSession
             } else {
-                $response = Invoke-WebRequest $Url -UseBasicParsing -TimeoutSec 2
+                $response = Invoke-WebRequest $Url -UseBasicParsing -TimeoutSec 2 -WebSession $WebSession
             }
             if ($response.StatusCode -ge 200 -and $response.StatusCode -lt 300) {
                 Write-Ok "$Name ready: $Url ($($response.StatusCode))"
@@ -80,6 +80,43 @@ function Wait-HttpOk($Name, $Url, $TimeoutSeconds, $Headers) {
         Start-Sleep -Milliseconds 500
     }
     throw "$Name not ready after ${TimeoutSeconds}s: $Url; last error: $lastError"
+}
+
+function New-LoginCaptchaPayload($Challenge) {
+    foreach ($property in @('algorithm', 'challenge', 'maxNumber', 'salt', 'signature')) {
+        if ($null -eq $Challenge.$property -or [string]::IsNullOrWhiteSpace([string]$Challenge.$property)) {
+            throw "Login challenge is missing $property"
+        }
+    }
+
+    $sha256 = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $solutionNumber = -1
+        for ($number = 0; $number -le [int64]$Challenge.maxNumber; $number++) {
+            $bytes = [System.Text.Encoding]::UTF8.GetBytes("$($Challenge.salt)$number")
+            $hash = $sha256.ComputeHash($bytes)
+            $hex = ([System.BitConverter]::ToString($hash)).Replace('-', '').ToLowerInvariant()
+            if ($hex -eq [string]$Challenge.challenge) {
+                $solutionNumber = $number
+                break
+            }
+        }
+    } finally {
+        $sha256.Dispose()
+    }
+
+    if ($solutionNumber -lt 0) {
+        throw "Unable to solve login challenge"
+    }
+
+    $payload = [ordered]@{
+        algorithm = [string]$Challenge.algorithm
+        challenge = [string]$Challenge.challenge
+        number    = [int64]$solutionNumber
+        salt      = [string]$Challenge.salt
+        signature = [string]$Challenge.signature
+    } | ConvertTo-Json -Compress
+    return [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($payload))
 }
 
 function Wait-TcpPort($Name, $HostName, $Port, $TimeoutSeconds) {
@@ -173,26 +210,27 @@ try {
     Wait-TcpPort "Database gateway" "127.0.0.1" 33060 10
     Wait-TcpPort "SSH gateway" "127.0.0.1" 47102 10
 
-    # Login to get a real token for health checks
-    $realToken = $null
-    try {
-        $loginResp = Invoke-RestMethod -Uri "http://127.0.0.1:47100/api/login" -Method Post -Body '{"username":"admin","password":"admin"}' -ContentType "application/json" -TimeoutSec 5 -ErrorAction Stop
-        $realToken = $loginResp.data.token
-        if (-not $realToken) {
-            throw "Login response did not include data.token"
-        }
-        Write-Ok "Admin login OK, token: $($realToken.Substring(0,16))..."
-    } catch {
-        $realToken = $null
-        Write-Info "Admin auto-login failed, login manually"
+    # Login through the production challenge flow and retain the HttpOnly session cookie.
+    $webSession = New-Object Microsoft.PowerShell.Commands.WebRequestSession
+    $challenge = Invoke-RestMethod -Uri "http://127.0.0.1:47100/api/login/challenge" -Method Get -WebSession $webSession -TimeoutSec 5 -ErrorAction Stop
+    $captchaPayload = New-LoginCaptchaPayload $challenge
+    $loginBody = [ordered]@{
+        username       = "admin"
+        password       = "admin"
+        captcha_payload = $captchaPayload
+    } | ConvertTo-Json -Compress
+    $loginResp = Invoke-RestMethod -Uri "http://127.0.0.1:47100/api/login" -Method Post -Body $loginBody -ContentType "application/json" -WebSession $webSession -TimeoutSec 5 -ErrorAction Stop
+    if ([string]::IsNullOrWhiteSpace([string]$loginResp.csrf_token)) {
+        throw "Login response did not include csrf_token"
     }
+    $sessionCookie = $webSession.Cookies.GetCookies("http://127.0.0.1:47100/") | Where-Object { $_.Name -eq "jianmen_session" }
+    if (-not $sessionCookie) {
+        throw "Login response did not establish a browser session"
+    }
+    Write-Ok "Admin login OK (browser session established)"
 
     # Health check with real token
-    if ($realToken) {
-        Wait-HttpOk "Admin API" "http://127.0.0.1:47100/api/health" 5 @{Authorization="Bearer $realToken"}
-    } else {
-        Write-Info "Admin API health check skipped (no token)"
-    }
+    Wait-HttpOk "Admin API" "http://127.0.0.1:47100/api/health" 5 $null $webSession
 
     Write-Step "[5/5] Starting frontend..."
     Push-Location "web"
@@ -215,12 +253,8 @@ try {
 
     Wait-HttpOk "Web UI" "http://127.0.0.1:47101/" 30 $null
 
-    # Verify API proxy with real token
-    if ($realToken) {
-        Wait-HttpOk "Frontend API proxy" "http://127.0.0.1:47101/api/hosts" 15 @{Authorization="Bearer $realToken"}
-    } else {
-        Write-Info "Frontend API proxy check skipped (no token)"
-    }
+    # Verify API proxy with the authenticated browser session.
+    Wait-HttpOk "Frontend API proxy" "http://127.0.0.1:47101/api/hosts" 15 $null $webSession
 
     Write-Host ""
     Write-Host "=== All services started and verified ===" -ForegroundColor Cyan
@@ -229,11 +263,7 @@ try {
     Write-Host "  Web UI    : http://127.0.0.1:47101/" -ForegroundColor White
     Write-Host "  SSH GW    : 127.0.0.1:47102" -ForegroundColor White
     Write-Host "  DB GW     : 127.0.0.1:33060" -ForegroundColor White
-    if ($realToken) {
-        Write-Host "  Token     : $realToken" -ForegroundColor Gray
-    } else {
-        Write-Host "  Token     : (login with admin/admin)" -ForegroundColor Gray
-    }
+    Write-Host "  Auth      : browser session established" -ForegroundColor Gray
     Write-Host ""
     Write-Host "Logs:" -ForegroundColor Gray
     Write-Host "  logs\backend.log" -ForegroundColor Gray

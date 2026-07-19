@@ -26,7 +26,11 @@ import (
 
 type Server struct {
 	cfg            *config.Config
-	store          store.Store
+	authenticator  credentialAuthenticator
+	targetResolver targetResolver
+	userSessions   userSessionFinder
+	auditSessions  auditSessionWriter
+	auditEvents    auditEventWriter
 	authorizer     connectionAuthorizer
 	logger         *slog.Logger
 	onlineSessions *online.Registry
@@ -38,9 +42,9 @@ type connectionAuthorizer interface {
 	AuthorizeConnection(ctx context.Context, userID string, actions []string, resourceType, resourceID string) (bool, error)
 }
 
-// auditStore adapts store.Store to recording.AuditSink.
+// auditStore adapts the SSH audit event boundary to recording.AuditSink.
 type auditStore struct {
-	store          store.Store
+	store          auditEventWriter
 	sessionID      string
 	onlineSessions *online.Registry
 }
@@ -69,14 +73,14 @@ func (a *auditStore) UpdateProtocol(sessionID string, protocol string) error {
 	return a.store.UpdateAuditProtocol(a.sessionID, protocol)
 }
 
-func New(cfg *config.Config, s store.Store, authorizer connectionAuthorizer, logger *slog.Logger, onlineSessions *online.Registry) (*Server, error) {
+func New(cfg *config.Config, repository runtimeRepository, authorizer connectionAuthorizer, logger *slog.Logger, onlineSessions *online.Registry) (*Server, error) {
 	switch {
 	case cfg == nil:
 		return nil, errors.New("ssh server config is required")
 	case authorizer == nil:
 		return nil, errors.New("ssh server authorization service is required")
-	case s == nil:
-		return nil, errors.New("ssh server store is required")
+	case repository == nil:
+		return nil, errors.New("ssh server repository is required")
 	case logger == nil:
 		return nil, errors.New("ssh server logger is required")
 	case onlineSessions == nil:
@@ -84,7 +88,11 @@ func New(cfg *config.Config, s store.Store, authorizer connectionAuthorizer, log
 	}
 	return &Server{
 		cfg:            cfg,
-		store:          s,
+		authenticator:  repository,
+		targetResolver: repository,
+		userSessions:   repository,
+		auditSessions:  repository,
+		auditEvents:    repository,
 		authorizer:     authorizer,
 		logger:         logger,
 		onlineSessions: onlineSessions,
@@ -99,14 +107,14 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 
 	serverConfig := &ssh.ServerConfig{
 		PasswordCallback: func(conn ssh.ConnMetadata, password []byte) (*ssh.Permissions, error) {
-			user, err := s.store.Authenticate(ctx, conn.User(), string(password))
+			user, err := s.authenticator.Authenticate(ctx, conn.User(), string(password))
 			if err != nil {
 				return nil, err
 			}
 			return permissionsForUser(user), nil
 		},
 		PublicKeyCallback: func(conn ssh.ConnMetadata, key ssh.PublicKey) (*ssh.Permissions, error) {
-			user, err := s.store.AuthenticatePublicKey(ctx, conn.User(), key)
+			user, err := s.authenticator.AuthenticatePublicKey(ctx, conn.User(), key)
 			if err != nil {
 				return nil, err
 			}
@@ -120,7 +128,7 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 			if len(answers) != 1 {
 				return nil, errors.New("keyboard-interactive password answer is required")
 			}
-			user, err := s.store.Authenticate(ctx, conn.User(), answers[0])
+			user, err := s.authenticator.Authenticate(ctx, conn.User(), answers[0])
 			if err != nil {
 				return nil, err
 			}
@@ -175,7 +183,7 @@ func (s *Server) handleConn(ctx context.Context, rawConn net.Conn, serverConfig 
 	go ssh.DiscardRequests(reqs)
 
 	user := userFromPermissions(serverConn)
-	target, err := s.store.DefaultTarget(ctx, user)
+	target, err := s.targetResolver.DefaultTarget(ctx, user)
 	if err != nil {
 		s.logger.Warn("failed to resolve target", "user", user.Username, "error", err)
 		return
@@ -208,20 +216,20 @@ func (s *Server) handleConn(ctx context.Context, rawConn net.Conn, serverConfig 
 	session.AccountUsername = target.Username
 
 	// Look up UserSession from compact username to link the audit record.
-	userSession, _ := s.store.FindUserSessionByCompactUsername(serverConn.User())
+	userSession, _ := s.userSessions.FindUserSessionByCompactUsername(serverConn.User())
 
 	auditSession := newSSHAuditSession(user, target, session, s.cfg.ReplayDir)
 	if userSession != nil {
 		auditSession.UserSessionID = userSession.ID
 	}
 	auditSession.BeforeCreate(nil)
-	if err := s.store.CreateAuditSession(&auditSession); err != nil {
+	if err := s.auditSessions.CreateAuditSession(&auditSession); err != nil {
 		s.logger.Warn("failed to create SSH audit session", "session", session.ID, "error", err)
 		return
 	}
 
 	defer func() {
-		s.store.EndAuditSession(auditSession.ID)
+		s.auditSessions.EndAuditSession(auditSession.ID)
 	}()
 
 	var recorder *recording.SessionRecorder
@@ -238,7 +246,7 @@ func (s *Server) handleConn(ctx context.Context, rawConn net.Conn, serverConfig 
 				_ = rawConn.Close()
 			},
 			s.logger,
-			&auditStore{store: s.store, sessionID: auditSession.ID, onlineSessions: s.onlineSessions},
+			&auditStore{store: s.auditEvents, sessionID: auditSession.ID, onlineSessions: s.onlineSessions},
 		)
 		if err != nil {
 			s.logger.Warn("failed to initialize recorder", "session", session.ID, "error", err)

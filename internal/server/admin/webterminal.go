@@ -20,6 +20,12 @@ import (
 	"jianmen/internal/store"
 )
 
+type webTerminalAuditSinkStore interface {
+	CreateAuditSSHCommand(event *model.AuditSSHCommand) error
+	CreateAuditSFTPEvent(event *model.AuditSFTPEvent) error
+	UpdateAuditProtocol(id, protocol string) error
+}
+
 const (
 	webTerminalPath        = "/api/web-terminal"
 	defaultTerminalTerm    = "xterm-256color"
@@ -40,7 +46,7 @@ type webTerminalOptions struct {
 }
 
 type webTerminalAuditSink struct {
-	store          store.Store
+	store          webTerminalAuditSinkStore
 	sessionID      string
 	onlineSessions *online.Registry
 }

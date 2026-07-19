@@ -120,7 +120,11 @@ func New(
 	if err != nil {
 		return nil, fmt.Errorf("initialize user group service: %w", err)
 	}
-	roleManagement, err := newRoleManagementService(repository)
+	roleManagementRepository, ok := repository.(service.RoleManagementRepository)
+	if !ok {
+		return nil, errors.New("admin store does not support role management")
+	}
+	roleManagement, err := newRoleManagementService(roleManagementRepository)
 	if err != nil {
 		return nil, err
 	}

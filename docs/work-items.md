@@ -130,6 +130,7 @@
 | `DEF-20260719-001` 启动烟测绕过正式登录 | 已完成，主目录运行烟测通过 | `7c80f1a`、`8402830` | `start.ps1` 使用正式 ALTCHA challenge、统一响应封装和浏览器会话；失败硬退出；不再跳过 Admin/前端代理检查或输出 Token；主目录启动返回 0，正式登录成功，Admin/Web/SSH/数据库端口、前端与 API 代理验证通过 |
 | Admin 非 Server 聚合 Store 依赖 | 已完成，阶段门禁通过 | `1f8acb9` | Web Terminal 审计改为 3 方法使用方接口；角色服务 helper 直接依赖 `service.RoleManagementRepository`；目标包及全仓测试通过 |
 | `OPS-20260719-001` Linux Node 24 锁文件不完整 | 已完成，容器门禁通过 | `9070af0` | `node:24-bookworm-slim` 曾因缺少 `@emnapi/core/runtime@1.11.2` 锁记录拒绝 `npm ci`；按同一镜像 npm 仅重建锁元数据，Linux 容器完整构建、Windows `npm ci` 与类型检查通过；独立复审无 P0/P1/P2 |
+| `DEF-20260719-003` Web RDP 审计对象索引超过 MySQL 限制 | 已完成，实库矩阵通过 | `fa9f688` | `audit_artifacts.object_key` 从超出 `utf8mb4` 3072 字节索引上限的 1024 字符收敛为 255 字符，保留完整唯一约束；MySQL 8 目标迁移、Docker 实库全矩阵、全仓测试、Linux Race、完整打包及容器构建通过；独立复审无 P0/P1/P2 |
 
 ### 可以延期
 

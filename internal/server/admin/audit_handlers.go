@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"jianmen/internal/rbac"
 	"jianmen/internal/server/dbproxy"
@@ -146,7 +147,19 @@ func (s *Server) handleAuditArtifact(w http.ResponseWriter, r *http.Request) {
 		}
 		s.writeTextFile(w, r, filepath.Join(replayPath, "terminal.cast"), "application/x-asciicast; charset=utf-8")
 	case artifact == "queries" && (protocol == "db" || protocol == "mysql" || protocol == "postgres" || protocol == "redis"):
-		items, err := s.audit.ListAuditDBQueryEvents(sessionID)
+		page, pageSize, offset := auditDBQueryPageFromQuery(r)
+		items, total, err := s.audit.ListAuditDBQueryPreviews(
+			r.Context(),
+			sessionID,
+			store.AuditDBQueryPreviewParams{
+				Search: strings.ToLower(firstNonEmpty(
+					r.URL.Query().Get("q"),
+					r.URL.Query().Get("search"),
+				)),
+				Limit:  pageSize,
+				Offset: offset,
+			},
+		)
 		if err != nil {
 			s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
 			return
@@ -157,22 +170,111 @@ func (s *Server) handleAuditArtifact(w http.ResponseWriter, r *http.Request) {
 		}
 		events := make([]dbproxy.DBQueryEvent, 0, len(items)*2)
 		for i, q := range items {
-			seq := int64(i)
+			seq := int64(offset + i)
 			ts := q.Timestamp.UnixMilli()
+			sqlPreview, previewDetail := auditDBQuerySQLPreview(q)
 			events = append(events, dbproxy.DBQueryEvent{
 				Type: "query_started", ConnectionID: sessionID, Seq: seq,
-				Protocol: queryProtocol, SQL: q.SQLText, QueryKind: q.QueryKind,
-				StartedAt: ts,
+				Protocol: queryProtocol, SQL: sqlPreview, QueryKind: q.QueryKind,
+				Detail: previewDetail, StartedAt: ts,
 			}, dbproxy.DBQueryEvent{
 				Type: "query_finished", ConnectionID: sessionID, Seq: seq,
-				Protocol: queryProtocol, SQL: q.SQLText, QueryKind: q.QueryKind,
+				Protocol: queryProtocol, QueryKind: q.QueryKind,
 				StartedAt: ts, CompletedAt: ts, DurationMs: q.DurationMs, Status: "success",
 			})
 		}
-		s.writeJSON(w, r, http.StatusOK, events)
+		s.writeJSON(w, r, http.StatusOK, map[string]any{
+			"items": events, "total": total,
+			"page": page, "page_size": pageSize,
+		})
 	default:
 		s.writeErrorText(w, r, http.StatusNotFound, "not found")
 	}
+}
+
+const (
+	auditDBQueryDefaultPageSize     = 50
+	auditDBQueryMaxPageSize         = 100
+	auditDBQuerySQLPreviewByteLimit = 64 * 1024
+	auditDBQuerySQLTruncatedMarker  = "\n/* [TRUNCATED SQL PREVIEW] */"
+)
+
+func auditDBQueryPageFromQuery(r *http.Request) (int, int, int) {
+	page, _ := strconv.Atoi(r.URL.Query().Get("page"))
+	pageSize, _ := strconv.Atoi(firstNonEmpty(
+		r.URL.Query().Get("page_size"),
+		r.URL.Query().Get("size"),
+	))
+	if page <= 0 {
+		page = 1
+	}
+	if pageSize <= 0 {
+		pageSize = auditDBQueryDefaultPageSize
+	}
+	if pageSize > auditDBQueryMaxPageSize {
+		pageSize = auditDBQueryMaxPageSize
+	}
+	maxInt := int(^uint(0) >> 1)
+	if page > maxInt/pageSize {
+		page = maxInt / pageSize
+	}
+	return page, pageSize, (page - 1) * pageSize
+}
+
+func auditDBQuerySQLPreview(query store.AuditDBQueryPreview) (string, map[string]any) {
+	storedBytes := query.SQLStoredBytes
+	if storedBytes <= 0 {
+		storedBytes = int64(len(query.SQLText))
+	}
+	originalBytes := query.OriginalSQLBytes
+	if originalBytes <= 0 {
+		originalBytes = storedBytes
+	}
+
+	markerRequired := query.SQLTruncated || storedBytes > auditDBQuerySQLPreviewByteLimit
+	contentLimit := auditDBQuerySQLPreviewByteLimit
+	if markerRequired {
+		contentLimit -= len(auditDBQuerySQLTruncatedMarker)
+	}
+	invalidUTF8 := !utf8.ValidString(query.SQLText)
+	if invalidUTF8 {
+		markerRequired = true
+		contentLimit = auditDBQuerySQLPreviewByteLimit - len(auditDBQuerySQLTruncatedMarker)
+	}
+	preview, previewChanged := auditDBQueryUTF8Prefix(query.SQLText, contentLimit)
+	previewTruncated := previewChanged || int64(len(preview)) < storedBytes
+	if markerRequired {
+		preview += auditDBQuerySQLTruncatedMarker
+	}
+
+	detail := map[string]any{
+		"sql_truncated":         query.SQLTruncated || previewTruncated,
+		"sql_audit_truncated":   query.SQLTruncated,
+		"sql_preview_truncated": previewTruncated,
+		"sql_original_bytes":    originalBytes,
+		"sql_stored_bytes":      storedBytes,
+		"sql_preview_bytes":     len(preview),
+	}
+	return preview, detail
+}
+
+func auditDBQueryUTF8Prefix(value string, byteLimit int) (string, bool) {
+	if byteLimit <= 0 {
+		return "", value != ""
+	}
+	changed := false
+	if !utf8.ValidString(value) {
+		value = strings.ToValidUTF8(value, "\uFFFD")
+		changed = true
+	}
+	if len(value) <= byteLimit {
+		return value, changed
+	}
+	end := byteLimit
+	for end > 0 && !utf8.RuneStart(value[end]) {
+		end--
+	}
+	return value[:end], true
 }
 
 func pageFromQuery(r *http.Request) (int, int) {

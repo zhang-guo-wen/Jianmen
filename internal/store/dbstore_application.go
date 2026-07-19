@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net"
@@ -12,9 +13,9 @@ import (
 	"jianmen/internal/model"
 )
 
-func (s *DBStore) Applications() []ApplicationView {
+func (s *DBStore) Applications(ctx context.Context) []ApplicationView {
 	var apps []model.Application
-	if err := s.db.Order("name ASC").Find(&apps).Error; err != nil {
+	if err := s.db.WithContext(ctx).Order("name ASC").Find(&apps).Error; err != nil {
 		return nil
 	}
 	views := make([]ApplicationView, 0, len(apps))
@@ -24,10 +25,10 @@ func (s *DBStore) Applications() []ApplicationView {
 	return views
 }
 
-func (s *DBStore) Application(id string) (ApplicationView, error) {
+func (s *DBStore) Application(ctx context.Context, id string) (ApplicationView, error) {
 	id = strings.TrimSpace(id)
 	var app model.Application
-	if err := s.db.First(&app, "id = ?", id).Error; err != nil {
+	if err := s.db.WithContext(ctx).First(&app, "id = ?", id).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return ApplicationView{}, fmt.Errorf("%w: %q", ErrApplicationNotFound, id)
 		}
@@ -59,7 +60,7 @@ func applicationView(app model.Application) ApplicationView {
 	}
 }
 
-func (s *DBStore) AddApplication(input ApplicationInput) (ApplicationView, error) {
+func (s *DBStore) AddApplication(ctx context.Context, input ApplicationInput) (ApplicationView, error) {
 	if err := validateApplicationInput(input); err != nil {
 		return ApplicationView{}, err
 	}
@@ -77,7 +78,7 @@ func (s *DBStore) AddApplication(input ApplicationInput) (ApplicationView, error
 	if app.Name == "" {
 		app.Name = app.Address
 	}
-	if err := s.db.Transaction(func(tx *gorm.DB) error {
+	if err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Create(&app).Error; err != nil {
 			return err
 		}
@@ -91,10 +92,10 @@ func (s *DBStore) AddApplication(input ApplicationInput) (ApplicationView, error
 	return applicationView(app), nil
 }
 
-func (s *DBStore) UpdateApplication(id string, input ApplicationInput) (ApplicationView, error) {
+func (s *DBStore) UpdateApplication(ctx context.Context, id string, input ApplicationInput) (ApplicationView, error) {
 	id = strings.TrimSpace(id)
 	var app model.Application
-	if err := s.db.First(&app, "id = ?", id).Error; err != nil {
+	if err := s.db.WithContext(ctx).First(&app, "id = ?", id).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return ApplicationView{}, fmt.Errorf("%w: %q", ErrApplicationNotFound, id)
 		}
@@ -122,7 +123,7 @@ func (s *DBStore) UpdateApplication(id string, input ApplicationInput) (Applicat
 	if app.Name == "" {
 		app.Name = app.Address
 	}
-	if err := s.db.Transaction(func(tx *gorm.DB) error {
+	if err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Save(&app).Error; err != nil {
 			return err
 		}
@@ -166,9 +167,9 @@ func normalizeApplicationEntryPath(value string) string {
 	return value
 }
 
-func (s *DBStore) DeleteApplication(id string) error {
+func (s *DBStore) DeleteApplication(ctx context.Context, id string) error {
 	id = strings.TrimSpace(id)
-	return s.db.Transaction(func(tx *gorm.DB) error {
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var app model.Application
 		if err := tx.First(&app, "id = ?", id).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {

@@ -91,19 +91,19 @@ type adminDatabaseRepository interface {
 }
 
 type adminApplicationRepository interface {
-	Applications() []store.ApplicationView
-	Application(string) (store.ApplicationView, error)
-	AddApplication(store.ApplicationInput) (store.ApplicationView, error)
-	UpdateApplication(string, store.ApplicationInput) (store.ApplicationView, error)
-	DeleteApplication(string) error
+	Applications(context.Context) []store.ApplicationView
+	Application(context.Context, string) (store.ApplicationView, error)
+	AddApplication(context.Context, store.ApplicationInput) (store.ApplicationView, error)
+	UpdateApplication(context.Context, string, store.ApplicationInput) (store.ApplicationView, error)
+	DeleteApplication(context.Context, string) error
 }
 
 type adminContainerRepository interface {
 	ListContainerEndpoints(context.Context, store.ContainerEndpointListParams) ([]store.ContainerEndpointView, int64, error)
-	ContainerEndpoint(string) (store.ContainerEndpointView, error)
-	AddContainerEndpoint(store.ContainerEndpointInput) (store.ContainerEndpointView, error)
-	UpdateContainerEndpoint(string, store.ContainerEndpointInput) (store.ContainerEndpointView, error)
-	DeleteContainerEndpoint(string) error
+	ContainerEndpoint(context.Context, string) (store.ContainerEndpointView, error)
+	AddContainerEndpoint(context.Context, store.ContainerEndpointInput) (store.ContainerEndpointView, error)
+	UpdateContainerEndpoint(context.Context, string, store.ContainerEndpointInput) (store.ContainerEndpointView, error)
+	DeleteContainerEndpoint(context.Context, string) error
 }
 
 type adminPlatformAccountRepository interface {
@@ -129,7 +129,7 @@ type adminAuditRepository interface {
 	ListAuditSSHCommands(string, store.PageOpts) ([]model.AuditSSHCommand, int64, error)
 	CreateAuditSFTPEvent(*model.AuditSFTPEvent) error
 	ListAuditSFTPEvents(string, store.PageOpts) ([]model.AuditSFTPEvent, int64, error)
-	ListAuditDBQueryEvents(string) ([]model.AuditDBQuery, error)
+	ListAuditDBQueryPreviews(context.Context, string, store.AuditDBQueryPreviewParams) ([]store.AuditDBQueryPreview, int64, error)
 	CreateAuditEvent(*model.AuditEvent) error
 	ListAuditEvents(store.AuditEventListParams) ([]model.AuditEvent, int64, error)
 	CreateLoginAuditLog(*model.LoginAuditLog) error

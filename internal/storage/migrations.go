@@ -205,6 +205,11 @@ var migrations = []Migration{
 		Name:    "system configuration management",
 		Run:     migrateSystemSettings,
 	},
+	{
+		Version: auditDBQueryLargePayloadMigrationVersion,
+		Name:    "large database proxy client message support",
+		Run:     migrateAuditDBQueryLargePayload,
+	},
 }
 
 func rejectDuplicateDatabaseAccounts(tx *gorm.DB) error {

@@ -16,10 +16,12 @@ import (
 	mysqlDriver "github.com/go-sql-driver/mysql"
 	"github.com/jackc/pgx/v5/pgconn"
 	"gorm.io/gorm"
+	gormLogger "gorm.io/gorm/logger"
 
 	"jianmen/internal/crypto"
 	"jianmen/internal/model"
 	"jianmen/internal/storage"
+	"jianmen/internal/store"
 )
 
 const (
@@ -30,6 +32,7 @@ const (
 	webRDPAuditMigrationVersion               = "202607190003"
 	auditSessionLeaseMigrationVersion         = "202607190004"
 	systemSettingMigrationVersion             = "202607190005"
+	auditDBQueryLargePayloadMigrationVersion  = "202607190006"
 )
 
 var currentStorageMigrationVersions = []string{
@@ -57,6 +60,7 @@ var currentStorageMigrationVersions = []string{
 	"202607190003",
 	"202607190004",
 	systemSettingMigrationVersion,
+	auditDBQueryLargePayloadMigrationVersion,
 }
 
 type metadataDatabaseCase struct {
@@ -391,6 +395,332 @@ func TestStorageMigrationAddsSystemSettings(t *testing.T) {
 	}
 }
 
+func TestStorageMigrationExpandsDatabaseAuditQueryPayload(t *testing.T) {
+	for _, tt := range metadataDatabaseCases() {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			db := openMetadataDatabase(t, tt)
+
+			// Build the legacy schema by executing every historical migration
+			// through 202607190005. Pre-recording 006 makes Migrate skip only
+			// that migration without creating the latest schema and manually
+			// downgrading it.
+			seedAppliedMigrations(t, db, auditDBQueryLargePayloadMigrationVersion)
+			if err := storage.Migrate(db); err != nil {
+				t.Fatalf("build schema from historical migrations through 005: %v", err)
+			}
+			if err := db.Delete(
+				&storage.SchemaMigration{},
+				"version = ?",
+				auditDBQueryLargePayloadMigrationVersion,
+			).Error; err != nil {
+				t.Fatalf("make database audit query payload migration pending: %v", err)
+			}
+			assertOtherDatabaseMigrationsApplied(
+				t,
+				db,
+				auditDBQueryLargePayloadMigrationVersion,
+			)
+			legacyMigrations := loadMigrationVersionSet(t, db)
+			if _, ok := legacyMigrations[auditDBQueryLargePayloadMigrationVersion]; ok {
+				t.Fatal("database audit query payload migration is already recorded in legacy fixture")
+			}
+			for _, version := range currentStorageMigrationVersions {
+				if version == auditDBQueryLargePayloadMigrationVersion {
+					continue
+				}
+				if _, ok := legacyMigrations[version]; !ok {
+					t.Fatalf("historical migration %s was not executed for legacy fixture", version)
+				}
+			}
+			if db.Migrator().HasColumn(
+				&model.SystemSetting{},
+				"DatabaseMaxClientMessageBytes",
+			) {
+				t.Fatal("historical system settings schema unexpectedly contains database client message limit")
+			}
+			for _, field := range []string{"OriginalSQLBytes", "SQLTruncated"} {
+				if db.Migrator().HasColumn(&model.AuditDBQuery{}, field) {
+					t.Fatalf("historical database audit schema unexpectedly contains %s", field)
+				}
+			}
+
+			legacy := model.AuditDBQuery{
+				ID:             "legacy-database-audit-query",
+				AuditSessionID: "legacy-database-audit-session",
+				Timestamp:      time.Now().UTC(),
+				SQLText:        "SELECT 'preserve me'",
+				QueryKind:      "query",
+				DurationMs:     17,
+			}
+			if err := db.
+				Omit("OriginalSQLBytes", "SQLTruncated").
+				Create(&legacy).Error; err != nil {
+				t.Fatalf("seed legacy database audit query: %v", err)
+			}
+			legacySettings := model.SystemSetting{
+				ID:                          model.SystemSettingSingletonID,
+				WebRDPConnectTimeoutSeconds: 15,
+				RecordingEnabled:            true,
+				RecordingRecordCommands:     true,
+				RecordingRetentionDays:      30,
+				RecordingMaxReplayBytes:     1024,
+				RecordingCleanupBatchSize:   100,
+				Revision:                    2,
+				AppliedRevision:             1,
+			}
+			if err := db.Omit("DatabaseMaxClientMessageBytes").
+				Create(&legacySettings).Error; err != nil {
+				t.Fatalf("seed legacy system settings: %v", err)
+			}
+			if tt.driver == storage.DriverMySQL {
+				if got := databaseAuditSQLTextType(t, db); got != "text" {
+					t.Fatalf("legacy MySQL audit query type = %q, want text", got)
+				}
+			}
+
+			beforeMigrations := loadMigrationVersionSet(t, db)
+			if err := storage.Migrate(db); err != nil {
+				t.Fatalf("migrate database audit query payload storage: %v", err)
+			}
+			assertOnlyMigrationVersionsAdded(
+				t,
+				beforeMigrations,
+				loadMigrationVersionSet(t, db),
+				auditDBQueryLargePayloadMigrationVersion,
+			)
+
+			wantType := "text"
+			if tt.driver == storage.DriverMySQL {
+				wantType = "longtext"
+			}
+			if got := databaseAuditSQLTextType(t, db); got != wantType {
+				t.Fatalf("migrated database audit query type = %q, want %q", got, wantType)
+			}
+			if !db.Migrator().HasIndex(
+				&model.AuditDBQuery{},
+				"idx_audit_db_queries_session_timestamp_id",
+			) {
+				t.Fatal("database audit query pagination index was not created")
+			}
+
+			var preserved model.AuditDBQuery
+			if err := db.First(&preserved, "id = ?", legacy.ID).Error; err != nil {
+				t.Fatalf("load preserved database audit query: %v", err)
+			}
+			if preserved.SQLText != legacy.SQLText ||
+				preserved.QueryKind != legacy.QueryKind ||
+				preserved.DurationMs != legacy.DurationMs {
+				t.Fatalf("legacy database audit query changed during migration: %#v", preserved)
+			}
+			var migratedSettings model.SystemSetting
+			if err := db.First(
+				&migratedSettings,
+				"id = ?",
+				model.SystemSettingSingletonID,
+			).Error; err != nil {
+				t.Fatalf("load migrated system settings: %v", err)
+			}
+			if migratedSettings.DatabaseMaxClientMessageBytes != 10*1024*1024 {
+				t.Fatalf(
+					"database client message limit = %d, want %d",
+					migratedSettings.DatabaseMaxClientMessageBytes,
+					10*1024*1024,
+				)
+			}
+
+			payload := strings.Repeat("x", 10*1024*1024)
+			large := model.AuditDBQuery{
+				ID:               "large-database-audit-query",
+				AuditSessionID:   "large-database-audit-session",
+				Timestamp:        legacy.Timestamp.Add(time.Second),
+				SQLText:          payload,
+				OriginalSQLBytes: int64(len(payload)),
+				SQLTruncated:     true,
+				QueryKind:        "query",
+			}
+			quietDB := db.Session(&gorm.Session{Logger: gormLogger.Discard})
+			if err := quietDB.Create(&large).Error; err != nil {
+				t.Fatalf("store 10 MiB database audit query: %v", err)
+			}
+			var storedBytes int64
+			if err := db.Table("audit_db_queries").
+				Select("OCTET_LENGTH(sql_text)").
+				Where("id = ?", large.ID).
+				Scan(&storedBytes).Error; err != nil {
+				t.Fatalf("measure stored database audit query: %v", err)
+			}
+			if storedBytes != int64(len(payload)) {
+				t.Fatalf("stored database audit query = %d bytes, want %d", storedBytes, len(payload))
+			}
+			var storedMetadata model.AuditDBQuery
+			if err := db.Select(
+				"id",
+				"original_sql_bytes",
+				"sql_truncated",
+			).First(&storedMetadata, "id = ?", large.ID).Error; err != nil {
+				t.Fatalf("load stored database audit SQL metadata: %v", err)
+			}
+			if storedMetadata.OriginalSQLBytes != int64(len(payload)) || !storedMetadata.SQLTruncated {
+				t.Fatalf("stored database audit SQL metadata = %#v, want %#v", storedMetadata, large)
+			}
+			previews, previewTotal, err := store.NewDBStore(db).
+				ListAuditDBQueryPreviews(
+					context.Background(),
+					large.AuditSessionID,
+					store.AuditDBQueryPreviewParams{
+						Search: "xxx",
+						Limit:  1,
+					},
+				)
+			if err != nil {
+				t.Fatalf("load bounded database audit query preview: %v", err)
+			}
+			if previewTotal != 1 ||
+				len(previews) != 1 ||
+				len(previews[0].SQLText) != 64*1024 ||
+				previews[0].SQLStoredBytes != int64(len(payload)) ||
+				previews[0].OriginalSQLBytes != int64(len(payload)) ||
+				!previews[0].SQLTruncated {
+				t.Fatalf(
+					"bounded database audit query preview = %#v, total = %d",
+					previews,
+					previewTotal,
+				)
+			}
+
+			literalSessionID := "literal-search-database-audit-session"
+			literalQueries := []model.AuditDBQuery{
+				{
+					ID: "literal-percent-query", AuditSessionID: literalSessionID,
+					Timestamp: legacy.Timestamp.Add(2 * time.Second),
+					SQLText:   "SELECT 'discount 10%!'",
+				},
+				{
+					ID: "literal-underscore-query", AuditSessionID: literalSessionID,
+					Timestamp: legacy.Timestamp.Add(3 * time.Second),
+					SQLText:   "SELECT customer_id",
+				},
+				{
+					ID: "literal-wildcard-decoy-query", AuditSessionID: literalSessionID,
+					Timestamp: legacy.Timestamp.Add(4 * time.Second),
+					SQLText:   "SELECT customerXid, 'discount 100'",
+				},
+			}
+			if err := db.Create(&literalQueries).Error; err != nil {
+				t.Fatalf("store literal search database audit queries: %v", err)
+			}
+			for _, searchCase := range []struct {
+				search string
+				wantID string
+			}{
+				{search: "10%!", wantID: "literal-percent-query"},
+				{search: "customer_id", wantID: "literal-underscore-query"},
+				{search: "%!", wantID: "literal-percent-query"},
+			} {
+				items, total, err := store.NewDBStore(db).ListAuditDBQueryPreviews(
+					context.Background(),
+					literalSessionID,
+					store.AuditDBQueryPreviewParams{
+						Search: searchCase.search,
+						Limit:  10,
+					},
+				)
+				if err != nil {
+					t.Fatalf("literal database audit query search %q: %v", searchCase.search, err)
+				}
+				if total != 1 || len(items) != 1 || items[0].ID != searchCase.wantID {
+					t.Fatalf(
+						"literal database audit query search %q = %#v, total = %d, want %s",
+						searchCase.search,
+						items,
+						total,
+						searchCase.wantID,
+					)
+				}
+			}
+
+			assertMigrationRecord(
+				t,
+				db,
+				auditDBQueryLargePayloadMigrationVersion,
+				"large database proxy client message support",
+			)
+
+			// MySQL DDL is not transactionally rolled back. Simulate the
+			// process stopping after AutoMigrate changed the schema but before
+			// schema_migrations was recorded, then verify a retry is safe.
+			if tt.driver == storage.DriverMySQL {
+				if err := db.Delete(
+					&storage.SchemaMigration{},
+					"version = ?",
+					auditDBQueryLargePayloadMigrationVersion,
+				).Error; err != nil {
+					t.Fatalf("remove migration record after applied MySQL DDL: %v", err)
+				}
+				beforeRetry := loadMigrationVersionSet(t, db)
+				if err := storage.Migrate(db); err != nil {
+					t.Fatalf("retry database audit query payload migration after applied MySQL DDL: %v", err)
+				}
+				assertOnlyMigrationVersionsAdded(
+					t,
+					beforeRetry,
+					loadMigrationVersionSet(t, db),
+					auditDBQueryLargePayloadMigrationVersion,
+				)
+				if got := databaseAuditSQLTextType(t, db); got != "longtext" {
+					t.Fatalf("retried MySQL audit query type = %q, want longtext", got)
+				}
+				var retriedBytes int64
+				if err := db.Table("audit_db_queries").
+					Select("OCTET_LENGTH(sql_text)").
+					Where("id = ?", large.ID).
+					Scan(&retriedBytes).Error; err != nil {
+					t.Fatalf("measure database audit query after MySQL retry: %v", err)
+				}
+				if retriedBytes != int64(len(payload)) {
+					t.Fatalf(
+						"database audit query after MySQL retry = %d bytes, want %d",
+						retriedBytes,
+						len(payload),
+					)
+				}
+				assertMigrationRecord(
+					t,
+					db,
+					auditDBQueryLargePayloadMigrationVersion,
+					"large database proxy client message support",
+				)
+			}
+
+			beforeSecondMigration := loadMigrationVersionSet(t, db)
+			if err := storage.Migrate(db); err != nil {
+				t.Fatalf("second database audit query payload migration: %v", err)
+			}
+			assertOnlyMigrationVersionsAdded(
+				t,
+				beforeSecondMigration,
+				loadMigrationVersionSet(t, db),
+			)
+		})
+	}
+}
+
+func databaseAuditSQLTextType(t *testing.T, db *gorm.DB) string {
+	t.Helper()
+	columns, err := db.Migrator().ColumnTypes(&model.AuditDBQuery{})
+	if err != nil {
+		t.Fatalf("load database audit query column types: %v", err)
+	}
+	for _, column := range columns {
+		if strings.EqualFold(column.Name(), "sql_text") {
+			return strings.ToLower(column.DatabaseTypeName())
+		}
+	}
+	t.Fatal("database audit query sql_text column is missing")
+	return ""
+}
+
 func TestStorageMigrationRejectsLegacyDatabaseAccountDuplicatesAndRetries(t *testing.T) {
 	for _, tt := range metadataDatabaseCases() {
 		tt := tt
@@ -635,30 +965,31 @@ func assertOtherDatabaseMigrationsApplied(t *testing.T, db *gorm.DB, pendingVers
 func seedAppliedMigrations(t *testing.T, db *gorm.DB, versions ...string) {
 	t.Helper()
 	names := map[string]string{
-		"202606290001":                "prepare metadata sequences",
-		"202606290002":                "core metadata schema",
-		"202606290003":                "reconcile metadata resources",
-		"202606290004":                "global compact session identity",
-		"202606290005":                "metadata query indexes",
-		"202607130001":                "user groups and resource grants",
-		"202607160001":                "AI access tokens",
-		"202607160002":                "encrypted AI token values",
-		"202607170001":                "container management endpoints",
-		"202607170002":                "user expiry and temporary authorization metadata",
-		"202607180001":                "database backed super administrator identity",
-		"202607180002":                "temporary access connection password lifecycle",
-		"202607180003":                "atomic system initialization guard",
-		"202607180004":                "browser sessions and websocket tickets",
-		"202607180005":                "remove reversible AI token secrets",
-		"202607180006":                "database instance upstream TLS policy",
-		"202607180007":                "permission logical uniqueness",
-		"202607180008":                "database account instance username uniqueness",
-		"202607180009":                "database provisioning saga recovery state",
-		"202607190001":                "resource grant logical uniqueness",
-		"202607190002":                "audit retention cleanup state",
-		"202607190003":                "web RDP access control and audit schema",
-		"202607190004":                "audit session lease recovery",
-		systemSettingMigrationVersion: "system configuration management",
+		"202606290001":                           "prepare metadata sequences",
+		"202606290002":                           "core metadata schema",
+		"202606290003":                           "reconcile metadata resources",
+		"202606290004":                           "global compact session identity",
+		"202606290005":                           "metadata query indexes",
+		"202607130001":                           "user groups and resource grants",
+		"202607160001":                           "AI access tokens",
+		"202607160002":                           "encrypted AI token values",
+		"202607170001":                           "container management endpoints",
+		"202607170002":                           "user expiry and temporary authorization metadata",
+		"202607180001":                           "database backed super administrator identity",
+		"202607180002":                           "temporary access connection password lifecycle",
+		"202607180003":                           "atomic system initialization guard",
+		"202607180004":                           "browser sessions and websocket tickets",
+		"202607180005":                           "remove reversible AI token secrets",
+		"202607180006":                           "database instance upstream TLS policy",
+		"202607180007":                           "permission logical uniqueness",
+		"202607180008":                           "database account instance username uniqueness",
+		"202607180009":                           "database provisioning saga recovery state",
+		"202607190001":                           "resource grant logical uniqueness",
+		"202607190002":                           "audit retention cleanup state",
+		"202607190003":                           "web RDP access control and audit schema",
+		"202607190004":                           "audit session lease recovery",
+		systemSettingMigrationVersion:            "system configuration management",
+		auditDBQueryLargePayloadMigrationVersion: "large database proxy client message support",
 	}
 	for _, version := range versions {
 		name, ok := names[version]

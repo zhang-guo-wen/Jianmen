@@ -13,7 +13,8 @@ import (
 	"jianmen/internal/config"
 	"jianmen/internal/model"
 	"jianmen/internal/service"
-	"jianmen/internal/store"
+
+	"gorm.io/gorm"
 )
 
 type failCreateBrowserSessionRepository struct {
@@ -116,18 +117,16 @@ func TestBrowserSessionMiddlewareEnforcesCSRFAndLogoutRevokesSession(t *testing.
 	}
 }
 
-func TestSetupSessionFailureLeavesLoginRecoveryPath(t *testing.T) {
-	server, _ := newAdminDBTestServer(t)
-	workingSessions := server.browserSessions
-	repository := store.NewDBStore(server.db)
-	failingSessions, err := service.NewBrowserSessionService(failCreateBrowserSessionRepository{
-		BrowserSessionRepository: repository,
-	})
-	if err != nil {
+func TestSetupSessionInsertFailureRollsBackAndAllowsRetry(t *testing.T) {
+	server, db := newAdminDBTestServer(t)
+	callbackName := "test:fail_initial_admin_session_create"
+	if err := db.Callback().Create().Before("gorm:create").Register(callbackName, func(tx *gorm.DB) {
+		if tx.Statement.Schema != nil && tx.Statement.Schema.Name == "AdminSession" {
+			tx.AddError(errors.New("injected setup session persistence failure"))
+		}
+	}); err != nil {
 		t.Fatal(err)
 	}
-	server.browserSessions = failingSessions
-	replaceTestAdminAuth(t, server, server.db, failingSessions)
 
 	setupRequest := httptest.NewRequest(http.MethodPost, "/api/init/setup", strings.NewReader(
 		`{"username":"recovery-admin","password":"Recovery-Password-123!","email":"admin@example.com"}`,
@@ -138,25 +137,57 @@ func TestSetupSessionFailureLeavesLoginRecoveryPath(t *testing.T) {
 		t.Fatalf("setup status = %d, want %d; body=%s", setupResponse.Code, http.StatusInternalServerError, setupResponse.Body.String())
 	}
 
-	var users int64
-	if err := server.db.Model(&model.User{}).Where("username = ? AND is_super_admin = ?", "recovery-admin", true).Count(&users).Error; err != nil {
-		t.Fatal(err)
-	}
-	if users != 1 {
-		t.Fatalf("persisted recovery administrators = %d, want 1", users)
+	for _, check := range []struct {
+		name       string
+		modelValue any
+	}{
+		{name: "users", modelValue: &model.User{}},
+		{name: "setup guards", modelValue: &model.SystemInitialization{}},
+		{name: "sessions", modelValue: &model.AdminSession{}},
+	} {
+		var count int64
+		if err := db.Model(check.modelValue).Count(&count).Error; err != nil {
+			t.Fatal(err)
+		}
+		if count != 0 {
+			t.Fatalf("%s after failed setup = %d, want 0", check.name, count)
+		}
 	}
 
-	server.browserSessions = workingSessions
-	replaceTestAdminAuth(t, server, server.db, workingSessions)
-	loginRequest := httptest.NewRequest(http.MethodPost, "/api/login", strings.NewReader(
-		`{"username":"recovery-admin","password":"Recovery-Password-123!","captcha_payload":"verified"}`,
-	))
-	loginResponse := httptest.NewRecorder()
-	server.handleLogin(loginResponse, loginRequest)
-	if loginResponse.Code != http.StatusOK {
-		t.Fatalf("recovery login status = %d, want %d; body=%s", loginResponse.Code, http.StatusOK, loginResponse.Body.String())
+	if err := db.Callback().Create().Remove(callbackName); err != nil {
+		t.Fatal(err)
 	}
-	if len(loginResponse.Result().Cookies()) != 1 || loginResponse.Result().Cookies()[0].Name != "jianmen_session" {
-		t.Fatalf("recovery login cookies = %#v", loginResponse.Result().Cookies())
+	retryRequest := httptest.NewRequest(http.MethodPost, "/api/init/setup", strings.NewReader(
+		`{"username":"recovery-admin","password":"Recovery-Password-123!","email":"admin@example.com"}`,
+	))
+	retryResponse := httptest.NewRecorder()
+	server.handleInitSetup(retryResponse, retryRequest)
+	if retryResponse.Code != http.StatusCreated {
+		t.Fatalf("retry setup status = %d, want %d; body=%s", retryResponse.Code, http.StatusCreated, retryResponse.Body.String())
+	}
+	if len(retryResponse.Result().Cookies()) != 1 || retryResponse.Result().Cookies()[0].Name != "jianmen_session" {
+		t.Fatalf("retry setup cookies = %#v", retryResponse.Result().Cookies())
+	}
+	if _, found, err := server.browserSessions.Authenticate(
+		context.Background(),
+		retryResponse.Result().Cookies()[0].Value,
+	); err != nil || !found {
+		t.Fatalf("atomic setup session authenticate = found=%v err=%v", found, err)
+	}
+	for _, check := range []struct {
+		name       string
+		modelValue any
+	}{
+		{name: "users", modelValue: &model.User{}},
+		{name: "setup guards", modelValue: &model.SystemInitialization{}},
+		{name: "sessions", modelValue: &model.AdminSession{}},
+	} {
+		var count int64
+		if err := db.Model(check.modelValue).Count(&count).Error; err != nil {
+			t.Fatal(err)
+		}
+		if count != 1 {
+			t.Fatalf("%s after retry = %d, want 1", check.name, count)
+		}
 	}
 }

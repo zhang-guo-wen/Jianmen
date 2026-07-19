@@ -33,6 +33,7 @@ type AdminLoginCredential struct {
 	PasswordHash    string
 	MySQLNativeHash string
 	Status          string
+	SuperAdmin      bool
 	ExpiresAt       *time.Time
 }
 
@@ -48,13 +49,30 @@ type AdminSetupRecord struct {
 	CreatedAt       time.Time
 }
 
+type AdminSetupSessionRecord struct {
+	SessionID  string
+	UserID     string
+	SecretHash string
+	CSRFHash   string
+	ExpiresAt  time.Time
+	CreatedAt  time.Time
+}
+
 type AdminAuthRepository interface {
 	AdminInitialized(ctx context.Context) (bool, error)
 	FindAdminLoginCredential(ctx context.Context, username string) (AdminLoginCredential, bool, error)
-	PersistAdminLoginState(ctx context.Context, userID, mysqlNativeHash string, loggedInAt time.Time) error
-	SetupInitialAdmin(ctx context.Context, record AdminSetupRecord) error
-	ValidateAdminEncryptionKeyClaimer(ctx context.Context, userID string) error
-	ClaimAdminEncryptionKey(ctx context.Context, userID string, claimedAt time.Time) error
+	FindAdminEncryptionKeyCredential(ctx context.Context, userID string) (AdminLoginCredential, bool, error)
+	PersistAdminLoginState(
+		ctx context.Context,
+		userID, expectedPasswordHash, mysqlNativeHash string,
+		loggedInAt time.Time,
+	) error
+	SetupInitialAdmin(ctx context.Context, record AdminSetupRecord, session AdminSetupSessionRecord) error
+	ClaimAdminEncryptionKey(
+		ctx context.Context,
+		userID, expectedPasswordHash string,
+		claimedAt time.Time,
+	) error
 }
 
 type AdminEncryptionKeyReader interface {
@@ -68,12 +86,13 @@ type AdminSetupInput struct {
 	DisplayName string
 }
 
-// VerifiedAdminLogin deliberately omits password and password hashes. The
-// unexported verifier is carried only until CompleteLogin persists state.
+// VerifiedAdminLogin does not export password material. The verified hash
+// version and protocol verifier remain private until CompleteLogin persists state.
 type VerifiedAdminLogin struct {
-	UserID   string
-	Username string
-	verifier string
+	UserID       string
+	Username     string
+	passwordHash string
+	verifier     string
 }
 
 type AdminAuthService struct {
@@ -146,9 +165,10 @@ func (s *AdminAuthService) VerifyLogin(
 		verifier = util.MySQLNativePasswordHash(password)
 	}
 	return VerifiedAdminLogin{
-		UserID:   credential.UserID,
-		Username: credential.Username,
-		verifier: verifier,
+		UserID:       credential.UserID,
+		Username:     credential.Username,
+		passwordHash: credential.PasswordHash,
+		verifier:     verifier,
 	}, nil
 }
 
@@ -160,7 +180,13 @@ func (s *AdminAuthService) CompleteLogin(
 		return CreatedBrowserSession{}, err
 	}
 	now := s.now().UTC()
-	if err := s.repository.PersistAdminLoginState(ctx, login.UserID, login.verifier, now); err != nil {
+	if err := s.repository.PersistAdminLoginState(
+		ctx,
+		login.UserID,
+		login.passwordHash,
+		login.verifier,
+		now,
+	); err != nil {
 		return CreatedBrowserSession{}, fmt.Errorf("%w: %w", ErrAdminLoginStatePersist, err)
 	}
 	session, err := s.browserSessions.Create(ctx, login.UserID)
@@ -201,32 +227,81 @@ func (s *AdminAuthService) Setup(
 		SuperAdmin:      true,
 		CreatedAt:       now,
 	}
-	if err := s.repository.SetupInitialAdmin(ctx, record); err != nil {
-		return CreatedBrowserSession{}, fmt.Errorf("setup initial admin: %w", err)
-	}
-	session, err := s.browserSessions.Create(ctx, record.UserID)
+	sessionRecord, session, err := prepareInitialAdminSession(record.UserID, now)
 	if err != nil {
-		return CreatedBrowserSession{}, fmt.Errorf("%w: %v", ErrAdminSessionCreate, err)
+		return CreatedBrowserSession{}, fmt.Errorf("%w: %w", ErrAdminSessionCreate, err)
+	}
+	if err := s.repository.SetupInitialAdmin(ctx, record, sessionRecord); err != nil {
+		return CreatedBrowserSession{}, fmt.Errorf("setup initial admin: %w", err)
 	}
 	return session, nil
 }
 
-func (s *AdminAuthService) ClaimEncryptionKey(ctx context.Context, userID string) (string, error) {
+func prepareInitialAdminSession(
+	userID string,
+	now time.Time,
+) (AdminSetupSessionRecord, CreatedBrowserSession, error) {
+	secret, err := newBrowserSecret()
+	if err != nil {
+		return AdminSetupSessionRecord{}, CreatedBrowserSession{}, err
+	}
+	csrf, err := newBrowserSecret()
+	if err != nil {
+		return AdminSetupSessionRecord{}, CreatedBrowserSession{}, err
+	}
+	sessionID := model.NewID()
+	expiresAt := now.Add(browserSessionTTL)
+	record := AdminSetupSessionRecord{
+		SessionID:  sessionID,
+		UserID:     userID,
+		SecretHash: browserSecretHash(secret),
+		CSRFHash:   browserSecretHash(csrf),
+		ExpiresAt:  expiresAt,
+		CreatedAt:  now,
+	}
+	created := CreatedBrowserSession{
+		SessionID: sessionID,
+		Secret:    secret,
+		CSRFToken: csrf,
+		ExpiresAt: expiresAt,
+	}
+	return record, created, nil
+}
+
+func (s *AdminAuthService) ClaimEncryptionKey(
+	ctx context.Context,
+	userID string,
+	password string,
+) (string, error) {
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
 	userID = strings.TrimSpace(userID)
-	if err := s.repository.ValidateAdminEncryptionKeyClaimer(ctx, userID); err != nil {
-		return "", fmt.Errorf("validate admin encryption key claim: %w", err)
+	credential, found, err := s.repository.FindAdminEncryptionKeyCredential(ctx, userID)
+	if err != nil {
+		return "", fmt.Errorf("find admin encryption key credential: %w", err)
+	}
+	hash := invalidAdminPasswordHash
+	if found && strings.TrimSpace(credential.PasswordHash) != "" {
+		hash = credential.PasswordHash
+	}
+	passwordMatches := VerifyAdminPassword(hash, password)
+	now := s.now().UTC()
+	if !found || !passwordMatches || credential.Status != "active" || !credential.SuperAdmin ||
+		(credential.ExpiresAt != nil && !credential.ExpiresAt.After(now)) {
+		return "", ErrAdminEncryptionKeyDenied
 	}
 	key, err := s.keyReader.ReadAdminEncryptionKey(ctx)
 	if err != nil {
 		return "", fmt.Errorf("read admin encryption key: %w", err)
 	}
+	if len(key) != 32 {
+		return "", fmt.Errorf("read admin encryption key: invalid AES-256 key length %d", len(key))
+	}
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
-	if err := s.repository.ClaimAdminEncryptionKey(ctx, userID, s.now().UTC()); err != nil {
+	if err := s.repository.ClaimAdminEncryptionKey(ctx, userID, credential.PasswordHash, now); err != nil {
 		return "", fmt.Errorf("claim admin encryption key: %w", err)
 	}
 	return hex.EncodeToString(key), nil

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -29,6 +30,10 @@ type SetupResponse struct {
 
 type EncryptionKeyResponse struct {
 	Key string `json:"key"`
+}
+
+type EncryptionKeyRequest struct {
+	Password string `json:"password"`
 }
 
 func (s *Server) handleInitStatus(w http.ResponseWriter, r *http.Request) {
@@ -270,7 +275,16 @@ func (s *Server) handleInitEncryptionKey(w http.ResponseWriter, r *http.Request)
 		s.writeErrorText(w, r, http.StatusServiceUnavailable, "metadata database unavailable")
 		return
 	}
-	key, err := s.adminAuth.ClaimEncryptionKey(r.Context(), userIDFromRequest(r))
+	defer r.Body.Close()
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<16)
+	var req EncryptionKeyRequest
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&req); err != nil && !errors.Is(err, io.EOF) {
+		s.writeErrorText(w, r, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	key, err := s.adminAuth.ClaimEncryptionKey(r.Context(), userIDFromRequest(r), req.Password)
 	if err != nil {
 		switch {
 		case errors.Is(err, service.ErrAdminSetupNotCompleted):

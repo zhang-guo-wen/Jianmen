@@ -24,7 +24,7 @@ func TestRecordOperationPersistsMutationMetadata(t *testing.T) {
 	s := &Server{
 		cfg:    &config.Config{},
 		db:     db,
-		store:  store.NewDBStore(db),
+		audit:  store.NewDBStore(db),
 		logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
 	}
 	r := httptest.NewRequest("PUT", "/api/db/instances/instance-1", nil)

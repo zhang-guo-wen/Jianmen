@@ -46,7 +46,7 @@ func TestVisibleResourcesUseContainerAndAccountGrants(t *testing.T) {
 	}
 	request := asTestUser(httptest.NewRequest(http.MethodGet, "/api/hosts", nil), "u1", "alice")
 
-	hosts, err := server.visibleHosts(request, server.store.Hosts())
+	hosts, err := server.visibleHosts(request, server.hostTargets.Hosts())
 	if err != nil {
 		t.Fatalf("visibleHosts: %v", err)
 	}
@@ -66,7 +66,7 @@ func TestVisibleResourcesUseContainerAndAccountGrants(t *testing.T) {
 		}
 	}
 
-	targets, err := server.visibleTargets(request, server.store.Targets())
+	targets, err := server.visibleTargets(request, server.hostTargets.Targets())
 	if err != nil {
 		t.Fatalf("visibleTargets: %v", err)
 	}
@@ -79,7 +79,7 @@ func TestVisibleResourcesUseContainerAndAccountGrants(t *testing.T) {
 		}
 	}
 
-	instances, err := server.visibleDatabaseInstances(request, server.store.DatabaseInstances())
+	instances, err := server.visibleDatabaseInstances(request, server.databases.DatabaseInstances())
 	if err != nil {
 		t.Fatalf("visibleDatabaseInstances: %v", err)
 	}
@@ -186,7 +186,7 @@ func TestAccountGrantAllowsViewingButNotContainerManagement(t *testing.T) {
 	seedGlobalAction(t, db, "u1", rbac.ActionDBProxyView)
 	request := asTestUser(httptest.NewRequest(http.MethodPut, "/api/targets/ha-account", nil), "u1", "alice")
 
-	targets, err := server.visibleTargets(request, server.store.Targets())
+	targets, err := server.visibleTargets(request, server.hostTargets.Targets())
 	if err != nil {
 		t.Fatalf("visibleTargets: %v", err)
 	}

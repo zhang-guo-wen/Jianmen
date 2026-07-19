@@ -48,7 +48,7 @@ func isAuditableMutation(r *http.Request) bool {
 }
 
 func (s *Server) recordOperation(r *http.Request, status int) {
-	if s.store == nil {
+	if s.audit == nil {
 		return
 	}
 	event := &model.AuditEvent{
@@ -71,7 +71,7 @@ func (s *Server) recordOperation(r *http.Request, status int) {
 	if err == nil {
 		event.Detail = string(detail)
 	}
-	if err := s.store.CreateAuditEvent(event); err != nil {
+	if err := s.audit.CreateAuditEvent(event); err != nil {
 		logger := s.logger
 		if logger == nil {
 			logger = slog.Default()

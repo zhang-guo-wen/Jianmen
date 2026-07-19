@@ -12,6 +12,7 @@ import (
 
 	"jianmen/internal/model"
 	"jianmen/internal/rbac"
+	"jianmen/internal/store"
 )
 
 func TestTemporaryAccessHandlerHasNoDirectDatabaseOrBackgroundContext(t *testing.T) {
@@ -65,7 +66,7 @@ func TestTemporaryAuthorizationCreatesBoundedGrant(t *testing.T) {
 	if result.Connection.Address != "bastion.example.test:47102" || result.Connection.Username != "HA001"+result.SessionID || result.Connection.Password == "" {
 		t.Fatalf("unexpected connection info: %#v", result.Connection)
 	}
-	if err := server.store.AuthenticateConnectionPassword(req.Context(), "u-admin", model.ResourceTypeHostAccount, "account-1", result.Connection.Password); err != nil {
+	if err := store.NewDBStore(db).AuthenticateConnectionPassword(req.Context(), "u-admin", model.ResourceTypeHostAccount, "account-1", result.Connection.Password); err != nil {
 		t.Fatalf("issued temporary password does not authenticate: %v", err)
 	}
 	allowed, err := rbac.NewResourceGrantChecker(db).HasGrant("u-admin", model.ResourceTypeHostAccount, "account-1")

@@ -63,6 +63,22 @@ func main() {
 	defer cancel()
 	errCh := make(chan error, 5)
 	onlineSessions := online.NewRegistry()
+	auditLeases, err := service.NewAuditSessionLeaseService(appStore)
+	if err != nil {
+		logger.Error("failed to initialize audit session leases", "error", err)
+		os.Exit(1)
+	}
+	if err := recoverExpiredAuditSessionsAtStartup(ctx, auditLeases, logger); err != nil {
+		logger.Error("failed to recover audit session leases", "error", err)
+		os.Exit(1)
+	}
+	startAuditSessionLeaseRuntime(
+		ctx,
+		errCh,
+		auditLeases,
+		logger,
+		auditSessionLeaseHeartbeatInterval,
+	)
 	rdpObjects, err := newRDPObjectStore(ctx, cfg)
 	if err != nil {
 		logger.Error("failed to initialize RDP object storage", "error", err)

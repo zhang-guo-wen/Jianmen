@@ -38,12 +38,15 @@ type AuditSession struct {
 	ClientIP        string     `gorm:"size:128" json:"client_ip"`
 	StartedAt       time.Time  `gorm:"index:idx_audit_sessions_protocol_started,priority:2;index:idx_audit_sessions_user_started,priority:2;index:idx_audit_sessions_session_started,priority:2;index:idx_audit_sessions_resource_started,priority:3" json:"started_at"`
 	EndedAt         *time.Time `gorm:"index:idx_audit_sessions_cleanup,priority:2" json:"ended_at,omitempty"`
-	State           string     `gorm:"index;size:32" json:"state"`
+	State           string     `gorm:"index;index:idx_audit_sessions_lease_owner_state,priority:2;index:idx_audit_sessions_lease_expiry,priority:1;size:32" json:"state"`
 	Outcome         string     `gorm:"index;size:32" json:"outcome"`
 	FailureCode     string     `gorm:"index;size:64" json:"failure_code,omitempty"`
 	FailureMessage  string     `gorm:"type:text" json:"failure_message,omitempty"`
 	PolicySnapshot  string     `gorm:"type:text" json:"policy_snapshot,omitempty"`
 	RecordingStatus string     `gorm:"index;size:32" json:"recording_status"`
+	LeaseOwner      string     `gorm:"index:idx_audit_sessions_lease_owner_state,priority:1;size:64" json:"-"`
+	HeartbeatAt     *time.Time `json:"-"`
+	LeaseExpiresAt  *time.Time `gorm:"index:idx_audit_sessions_lease_expiry,priority:2" json:"-"`
 	ReplayDir       string     `gorm:"size:512" json:"-"` // Legacy SSH spool path; never expose through APIs.
 	CleanupStatus   string     `gorm:"index:idx_audit_sessions_cleanup,priority:1;size:16;not null;default:ready" json:"-"`
 	CleanupAt       *time.Time `gorm:"index" json:"-"`

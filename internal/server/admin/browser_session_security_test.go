@@ -13,6 +13,7 @@ import (
 	"jianmen/internal/config"
 	"jianmen/internal/model"
 	"jianmen/internal/service"
+	"jianmen/internal/store"
 )
 
 type failCreateBrowserSessionRepository struct {
@@ -118,10 +119,7 @@ func TestBrowserSessionMiddlewareEnforcesCSRFAndLogoutRevokesSession(t *testing.
 func TestSetupSessionFailureLeavesLoginRecoveryPath(t *testing.T) {
 	server, _ := newAdminDBTestServer(t)
 	workingSessions := server.browserSessions
-	repository, ok := server.store.(service.BrowserSessionRepository)
-	if !ok {
-		t.Fatal("admin store does not implement browser session repository")
-	}
+	repository := store.NewDBStore(server.db)
 	failingSessions, err := service.NewBrowserSessionService(failCreateBrowserSessionRepository{
 		BrowserSessionRepository: repository,
 	})

@@ -107,7 +107,7 @@ func (s *Server) handleUserSessions(w http.ResponseWriter, r *http.Request) {
 				Type:   "permanent",
 				Status: "active",
 			}
-			created, createErr := s.store.CreateUserSession(newSess)
+			created, createErr := s.userSessions.CreateUserSession(newSess)
 			if createErr != nil {
 				s.writeErrorText(w, r, http.StatusInternalServerError, createErr.Error())
 				return

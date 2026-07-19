@@ -287,11 +287,11 @@ func TestWebTerminalRecorderUsesAuthenticatedIdentity(t *testing.T) {
 	}
 
 	commandAt := session.StartedAt.Add(time.Second)
-	sink := &webTerminalAuditSink{store: server.store, sessionID: auditSession.ID}
+	sink := &webTerminalAuditSink{store: server.audit, sessionID: auditSession.ID}
 	if err := sink.WriteCommand(session.ID, commandAt, "whoami"); err != nil {
 		t.Fatalf("write web terminal audit command: %v", err)
 	}
-	if err := server.store.EndAuditSession(auditSession.ID); err != nil {
+	if err := server.audit.EndAuditSession(auditSession.ID); err != nil {
 		t.Fatalf("end web terminal audit session: %v", err)
 	}
 

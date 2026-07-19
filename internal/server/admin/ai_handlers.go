@@ -149,7 +149,7 @@ func (s *Server) handleAITokens(w http.ResponseWriter, r *http.Request) {
 	}
 	switch r.Method {
 	case http.MethodGet:
-		tokens, err := s.store.ListAIAccessTokens(r.Context(), userID)
+		tokens, err := s.aiTokens.ListAIAccessTokens(r.Context(), userID)
 		if err != nil {
 			s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
 			return
@@ -244,7 +244,7 @@ func (s *Server) handleAIToken(w http.ResponseWriter, r *http.Request) {
 	id := parts[0]
 	switch r.Method {
 	case http.MethodGet:
-		token, err := s.store.AIAccessToken(r.Context(), userIDFromRequest(r), id)
+		token, err := s.aiTokens.AIAccessToken(r.Context(), userIDFromRequest(r), id)
 		if err != nil {
 			if errors.Is(err, store.ErrAIAccessTokenNotFound) {
 				s.writeErrorText(w, r, http.StatusNotFound, "token not found")
@@ -255,7 +255,7 @@ func (s *Server) handleAIToken(w http.ResponseWriter, r *http.Request) {
 		}
 		s.writeJSON(w, r, http.StatusOK, aiTokenResponse(token))
 	case http.MethodDelete:
-		if err := s.store.RevokeAIAccessToken(r.Context(), userIDFromRequest(r), id, time.Now().UTC()); err != nil {
+		if err := s.aiTokens.RevokeAIAccessToken(r.Context(), userIDFromRequest(r), id, time.Now().UTC()); err != nil {
 			if errors.Is(err, store.ErrAIAccessTokenNotFound) {
 				s.writeErrorText(w, r, http.StatusNotFound, "token not found")
 				return
@@ -313,11 +313,7 @@ func (s *Server) handleAIReissue(w http.ResponseWriter, r *http.Request, tokenID
 }
 
 func (s *Server) aiAccessTokenService() (*service.AIAccessTokenService, error) {
-	repository, ok := s.store.(service.AIAccessTokenRepository)
-	if !ok {
-		return nil, errors.New("ai access token repository is unavailable")
-	}
-	return service.NewAIAccessTokenService(repository)
+	return service.NewAIAccessTokenService(s.aiTokens)
 }
 
 func (s *Server) handleAIRefresh(w http.ResponseWriter, r *http.Request) {
@@ -338,7 +334,7 @@ func (s *Server) handleAIRefresh(w http.ResponseWriter, r *http.Request) {
 		s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
 		return
 	}
-	rotated, err := s.store.RotateAIAccessToken(r.Context(), service.HashAIAccessToken(request.RefreshToken), model.AIAccessToken{
+	rotated, err := s.aiTokens.RotateAIAccessToken(r.Context(), service.HashAIAccessToken(request.RefreshToken), model.AIAccessToken{
 		AccessTokenHash: issued.AccessTokenHash, RefreshTokenHash: issued.RefreshTokenHash,
 		AccessExpiresAt: issued.AccessExpiresAt, RefreshExpiresAt: issued.RefreshExpiresAt,
 	}, time.Now().UTC())
@@ -377,7 +373,7 @@ func (s *Server) withAIToken(next http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 		now := time.Now().UTC()
-		stored, err := s.store.AuthenticateAIAccessToken(r.Context(), service.HashAIAccessToken(token), now)
+		stored, err := s.aiTokens.AuthenticateAIAccessToken(r.Context(), service.HashAIAccessToken(token), now)
 		if err != nil {
 			s.writeErrorText(w, r, http.StatusUnauthorized, "invalid or expired AI token")
 			return

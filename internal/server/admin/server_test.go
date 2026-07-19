@@ -314,7 +314,7 @@ func TestHandleTestConnectionResolvesHostContainerForNewAccount(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse ssh port: %v", err)
 	}
-	if _, err := server.store.AddHost(store.HostRecord{
+	if _, err := server.hostTargets.AddHost(store.HostRecord{
 		ID:      "new-account-host",
 		Name:    "new-account-host",
 		Address: host,
@@ -802,9 +802,8 @@ func newTargetTestServer(t *testing.T) *Server {
 	}).Error; err != nil {
 		t.Fatalf("create target test super administrator: %v", err)
 	}
-	return &Server{
+	server := &Server{
 		cfg:            cfg,
-		store:          storeInst,
 		db:             db,
 		logger:         slog.New(slog.NewTextHandler(io.Discard, nil)),
 		identity:       identityService,
@@ -812,6 +811,8 @@ func newTargetTestServer(t *testing.T) *Server {
 		resourceAccess: storeInst,
 		resourceGrants: resourceGrants,
 	}
+	applyTestAdminDependencies(t, server, storeInst)
+	return server
 }
 
 type testLoginCaptcha struct{}
@@ -872,9 +873,8 @@ func newAdminDBTestServer(t *testing.T) (*Server, *gorm.DB) {
 	if err != nil {
 		t.Fatalf("new browser session service: %v", err)
 	}
-	return &Server{
+	server := &Server{
 		cfg:             cfg,
-		store:           storeInst,
 		db:              db,
 		logger:          slog.New(slog.NewTextHandler(io.Discard, nil)),
 		dataDir:         dataDir,
@@ -885,7 +885,10 @@ func newAdminDBTestServer(t *testing.T) (*Server, *gorm.DB) {
 		resourceGrants:  resourceGrants,
 		resourceGroups:  resourceGroups,
 		browserSessions: browserSessions,
-	}, db
+	}
+	applyTestAdminDependencies(t, server, storeInst)
+	applyTestAdminServices(t, server, storeInst)
+	return server, db
 }
 
 func asTestSuperAdmin(req *http.Request) *http.Request {

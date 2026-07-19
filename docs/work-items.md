@@ -113,7 +113,7 @@
 
 ### 本阶段必须完成
 
-数据库网关、审计治理及当前 Store 消费方拆分范围内的 P0/P1/P2 已清零；组合阶段门禁、完整打包和容器构建已经通过，当前仅剩合并和主目录运行烟测。以下已验证修复不得因历史计划未勾选而重新列为开放问题：
+数据库网关、审计治理及当前 Store 消费方拆分范围内的 P0/P1/P2 已清零；组合阶段门禁、完整打包、容器构建、合并及主目录运行烟测均已通过，本阶段交付完成。以下已验证修复不得因历史计划未勾选而重新列为开放问题：
 
 | 事项 | 结果 | 提交 | 验证证据 |
 |---|---|---|---|
@@ -127,7 +127,7 @@
 | SSH 对聚合 Store 的直接依赖 | 已完成，阶段门禁通过 | `a3e145a` | SSH 使用方定义认证、目标、用户会话、审计会话和审计事件 5 组窄接口，共 9 个方法；[最小依赖回归测试](../internal/server/sshserver/repository_test.go) |
 | `TEST-20260719-001` 数据库真实协议兼容矩阵与模糊测试 | 已完成 | 本次提交 | [兼容矩阵](./database-protocol-compatibility.md)、[MySQL 实库](../internal/integration/mysql_proxy_integration_test.go)、[PostgreSQL 实库](../internal/integration/postgres_proxy_integration_test.go)、[Redis 实库](../internal/integration/redis_proxy_integration_test.go)、[监听生命周期](../internal/server/dbproxy/listeners_test.go) |
 | `TEST-20260719-002` Redis Relay 并发边界 | 已完成，阶段门禁通过 | `5dd41e0` | Relay 入口幂等强制串行化 Observer；原始 Redis Drain 竞态用例、全 `dbproxy` 包及组合 Linux/CGO Race 测试通过；无 P0/P1/P2 |
-| `DEF-20260719-001` 启动烟测绕过正式登录 | 实现及复审完成，待运行烟测 | `7c80f1a` | `start.ps1` 使用正式 ALTCHA challenge 和浏览器会话；失败硬退出；不再跳过 Admin/前端代理检查或输出 Token；脚本解析与求解器烟测通过 |
+| `DEF-20260719-001` 启动烟测绕过正式登录 | 已完成，主目录运行烟测通过 | `7c80f1a`、`8402830` | `start.ps1` 使用正式 ALTCHA challenge、统一响应封装和浏览器会话；失败硬退出；不再跳过 Admin/前端代理检查或输出 Token；主目录启动返回 0，正式登录成功，Admin/Web/SSH/数据库端口、前端与 API 代理验证通过 |
 | Admin 非 Server 聚合 Store 依赖 | 已完成，阶段门禁通过 | `1f8acb9` | Web Terminal 审计改为 3 方法使用方接口；角色服务 helper 直接依赖 `service.RoleManagementRepository`；目标包及全仓测试通过 |
 | `OPS-20260719-001` Linux Node 24 锁文件不完整 | 已完成，容器门禁通过 | `9070af0` | `node:24-bookworm-slim` 曾因缺少 `@emnapi/core/runtime@1.11.2` 锁记录拒绝 `npm ci`；按同一镜像 npm 仅重建锁元数据，Linux 容器完整构建、Windows `npm ci` 与类型检查通过；独立复审无 P0/P1/P2 |
 

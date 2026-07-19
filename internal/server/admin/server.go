@@ -23,7 +23,7 @@ type Server struct {
 	aiAccessTokens       *service.AIAccessTokenService
 	hostTargets          adminHostTargetRepository
 	databases            adminDatabaseRepository
-	applications         adminApplicationRepository
+	applicationService   *service.ApplicationService
 	containers           adminContainerRepository
 	platformAccounts     adminPlatformAccountRepository
 	userSessionCreation  *service.UserSessionCreationService
@@ -39,7 +39,6 @@ type Server struct {
 	dataDir              string
 	loginLimiter         *loginLimiter
 	loginCaptcha         loginCaptchaVerifier
-	appProxy             *appproxy.Server
 	onlineSessions       *online.Registry
 	containerService     *service.ContainerService
 	identity             *service.IdentityService
@@ -143,15 +142,29 @@ func New(
 	if err != nil {
 		return nil, fmt.Errorf("initialize connection password service: %w", err)
 	}
+	var applicationProxy service.ApplicationProxy
+	if appProxy != nil {
+		applicationProxy = appProxy
+	}
+	applicationService, err := service.NewApplicationService(
+		dependencies.applications,
+		authorization,
+		applicationProxy,
+		cfg.ApplicationGateway.PortStart,
+		cfg.ApplicationGateway.PortEnd,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("initialize application service: %w", err)
+	}
 	return &Server{
 		cfg: cfg, db: db, logger: logger,
 		aiAccessTokens: aiAccessTokens, hostTargets: dependencies.hostTargets, databases: dependencies.databases,
-		applications: dependencies.applications, containers: dependencies.containers, platformAccounts: dependencies.platformAccounts,
+		applicationService: applicationService, containers: dependencies.containers, platformAccounts: dependencies.platformAccounts,
 		userSessionCreation: userSessionCreation, audit: dependencies.audit, connectionPassword: connectionPassword,
 		preferences: dependencies.preferences, temporaryRepository: dependencies.temporaryAccess,
 		userRepository: dependencies.users, userGroupRepository: dependencies.userGroups, roleRepository: dependencies.roles,
 		dataDir:      dataDir,
-		loginLimiter: newDefaultLoginLimiter(), loginCaptcha: loginCaptcha, appProxy: appProxy,
+		loginLimiter: newDefaultLoginLimiter(), loginCaptcha: loginCaptcha,
 		onlineSessions: onlineSessions, containerService: service.NewContainerService(),
 		identity: identity, authorization: authorization, resourceAccess: dependencies.resourceAccess,
 		resourceGrants: resourceGrants, resourceGroups: resourceGroups, userManagement: userManagement, userGroups: userGroups, roleManagement: roleManagement, databaseProvisioning: databaseProvisioning, temporaryAccess: temporaryAccess,

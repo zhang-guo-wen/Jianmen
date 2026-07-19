@@ -88,11 +88,7 @@ type adminDatabaseRepository interface {
 }
 
 type adminApplicationRepository interface {
-	Applications(context.Context) []store.ApplicationView
-	Application(context.Context, string) (store.ApplicationView, error)
-	AddApplication(context.Context, store.ApplicationInput) (store.ApplicationView, error)
-	UpdateApplication(context.Context, string, store.ApplicationInput) (store.ApplicationView, error)
-	DeleteApplication(context.Context, string) error
+	service.ApplicationRepository
 }
 
 type adminContainerRepository interface {

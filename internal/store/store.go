@@ -331,6 +331,15 @@ type AuditListParams struct {
 	Size            int
 }
 
+// AuditSessionAccessMetadata contains only the fields needed to authorize an
+// audit session read. Sensitive replay and session detail fields are excluded.
+type AuditSessionAccessMetadata struct {
+	ID              string
+	Protocol        string
+	ProtocolSubtype string
+	State           string
+}
+
 // AuditSessionView 审计列表视图。
 type AuditSessionView struct {
 	ID              string `json:"id"`

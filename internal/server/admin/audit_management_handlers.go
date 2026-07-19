@@ -4,16 +4,11 @@ import (
 	"net/http"
 	"strings"
 
-	"jianmen/internal/rbac"
-	"jianmen/internal/store"
+	"jianmen/internal/service"
 )
 
 func (s *Server) handleAuditOperations(w http.ResponseWriter, r *http.Request) {
-	if !s.requirePermission(r, rbac.ActionAuditView) {
-		s.forbidden(w, r)
-		return
-	}
-	params := store.AuditEventListParams{
+	params := service.AuditEventListParams{
 		Search:       strings.TrimSpace(firstNonEmpty(r.URL.Query().Get("q"), r.URL.Query().Get("search"))),
 		Action:       strings.TrimSpace(r.URL.Query().Get("action")),
 		ResourceType: strings.TrimSpace(r.URL.Query().Get("resource_type")),
@@ -21,9 +16,9 @@ func (s *Server) handleAuditOperations(w http.ResponseWriter, r *http.Request) {
 		Page:         positiveIntRequestQuery(r, "page", 1),
 		Size:         positiveIntRequestQuery(r, "page_size", 50),
 	}
-	items, total, err := s.audit.ListAuditEvents(r.Context(), params)
+	items, total, err := s.auditQuery.ListOperations(r.Context(), userIDFromRequest(r), params)
 	if err != nil {
-		s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
+		s.writeAuditQueryError(w, r, err)
 		return
 	}
 	s.writeJSON(w, r, http.StatusOK, map[string]any{
@@ -32,20 +27,16 @@ func (s *Server) handleAuditOperations(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAuditLogins(w http.ResponseWriter, r *http.Request) {
-	if !s.requirePermission(r, rbac.ActionAuditView) {
-		s.forbidden(w, r)
-		return
-	}
-	params := store.LoginAuditListParams{
+	params := service.LoginAuditListParams{
 		Search:  strings.TrimSpace(firstNonEmpty(r.URL.Query().Get("q"), r.URL.Query().Get("search"))),
 		Outcome: strings.TrimSpace(r.URL.Query().Get("outcome")),
 		Date:    strings.TrimSpace(r.URL.Query().Get("date")),
 		Page:    positiveIntRequestQuery(r, "page", 1),
 		Size:    positiveIntRequestQuery(r, "page_size", 50),
 	}
-	items, total, err := s.audit.ListLoginAuditLogs(r.Context(), params)
+	items, total, err := s.auditQuery.ListLogins(r.Context(), userIDFromRequest(r), params)
 	if err != nil {
-		s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
+		s.writeAuditQueryError(w, r, err)
 		return
 	}
 	s.writeJSON(w, r, http.StatusOK, map[string]any{

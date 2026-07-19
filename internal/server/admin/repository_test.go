@@ -366,6 +366,19 @@ func applyTestAdminDependencies(t *testing.T, server *Server, repository adminRe
 		}
 	}
 	server.audit = dependencies.audit
+	if server.auditQuery == nil {
+		authorization := server.authorization
+		if isNilAdminAuthorization(authorization) {
+			authorization = repositoryTestAuthorization{}
+		}
+		server.auditQuery, err = service.NewAuditQueryService(
+			adminAuditQueryRepository{repository: dependencies.audit},
+			adminAuditQueryAuthorizer{authorization: authorization},
+		)
+		if err != nil {
+			t.Fatalf("new audit query service: %v", err)
+		}
+	}
 	if server.connectionPassword == nil {
 		authorization := server.authorization
 		if isNilAdminAuthorization(authorization) {

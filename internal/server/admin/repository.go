@@ -211,6 +211,7 @@ type adminUserSessionCreationRepository interface {
 type adminAuditRepository interface {
 	CreateAuditSession(context.Context, *model.AuditSession) error
 	EndAuditSession(context.Context, string) error
+	GetAuditSessionAccessMetadata(context.Context, string) (store.AuditSessionAccessMetadata, error)
 	GetAuditSession(context.Context, string) (*model.AuditSession, error)
 	ListAuditSessions(context.Context, store.AuditListParams) ([]store.AuditSessionView, int64, error)
 	UpdateAuditProtocol(context.Context, string, string) error

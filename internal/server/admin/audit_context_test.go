@@ -50,6 +50,10 @@ func (*auditContextRepository) GetAuditSession(context.Context, string) (*model.
 	return nil, nil
 }
 
+func (*auditContextRepository) GetAuditSessionAccessMetadata(context.Context, string) (store.AuditSessionAccessMetadata, error) {
+	return store.AuditSessionAccessMetadata{}, nil
+}
+
 func (*auditContextRepository) ListAuditSessions(context.Context, store.AuditListParams) ([]store.AuditSessionView, int64, error) {
 	return nil, 0, nil
 }

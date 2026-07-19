@@ -81,6 +81,24 @@ func (s *DBStore) GetAuditSession(ctx context.Context, id string) (*model.AuditS
 	return &session, nil
 }
 
+func (s *DBStore) GetAuditSessionAccessMetadata(ctx context.Context, id string) (AuditSessionAccessMetadata, error) {
+	if ctx == nil {
+		return AuditSessionAccessMetadata{}, errors.New("get audit session access metadata: nil context")
+	}
+	var metadata AuditSessionAccessMetadata
+	if err := s.db.WithContext(ctx).
+		Model(&model.AuditSession{}).
+		Select("id", "protocol", "protocol_subtype", "state").
+		Where("id = ?", strings.TrimSpace(id)).
+		First(&metadata).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return AuditSessionAccessMetadata{}, fmt.Errorf("audit session access metadata %q: %w", id, err)
+		}
+		return AuditSessionAccessMetadata{}, fmt.Errorf("get audit session access metadata %q: %w", id, err)
+	}
+	return metadata, nil
+}
+
 func (s *DBStore) ListAuditSessions(
 	ctx context.Context,
 	params AuditListParams,

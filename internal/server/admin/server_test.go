@@ -887,6 +887,15 @@ func newAdminDBTestServer(t *testing.T) (*Server, *gorm.DB) {
 		resourceGroups:  resourceGroups,
 		browserSessions: browserSessions,
 	}
+	databaseManagement, err := service.NewDatabaseManagementService(
+		databaseManagementRepositoryAdapter{repository: storeInst},
+		authorizationService,
+		&fakeDatabaseProvisioningService{},
+	)
+	if err != nil {
+		t.Fatalf("new database management service: %v", err)
+	}
+	server.databaseManagement = databaseManagement
 	applyTestAdminDependencies(t, server, storeInst)
 	applyTestAdminServices(t, server, storeInst)
 	return server, db

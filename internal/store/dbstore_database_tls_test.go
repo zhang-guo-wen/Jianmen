@@ -79,6 +79,32 @@ func TestDatabaseInstanceUpdateWithoutTLSModePreservesPolicyAndCA(t *testing.T) 
 	}
 }
 
+func TestDatabaseInstanceUpdateWithoutStatusPreservesDisabledState(t *testing.T) {
+	repository, db := newDatabaseTLSTestStore(t)
+	created, err := repository.AddDatabaseInstance(context.Background(), DatabaseInstanceInput{
+		Name: "disabled", Protocol: "mysql", Address: "db.internal", Port: 3306, Status: "disabled",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	updated, err := repository.UpdateDatabaseInstance(context.Background(), created.ID, DatabaseInstanceInput{
+		Name: "renamed", Protocol: "mysql", Address: "db.internal", Port: 3306,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Status != "disabled" {
+		t.Fatalf("updated status = %q, want disabled", updated.Status)
+	}
+	var stored model.DatabaseInstance
+	if err := db.First(&stored, "id = ?", created.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if stored.Status != "disabled" {
+		t.Fatalf("stored status = %q, want disabled", stored.Status)
+	}
+}
+
 func newDatabaseTLSTestStore(t *testing.T) (*DBStore, *gorm.DB) {
 	t.Helper()
 	db, err := storage.Open(storage.Config{Driver: storage.DriverSQLite, DSN: ":memory:"})

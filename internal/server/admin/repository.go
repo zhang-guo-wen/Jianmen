@@ -76,15 +76,21 @@ type adminHostTargetRepository interface {
 
 type adminDatabaseRepository interface {
 	DatabaseInstances(context.Context) []store.DatabaseInstanceView
+	ListDatabaseInstances(context.Context) ([]store.DatabaseInstanceView, error)
 	DatabaseInstance(context.Context, string) (store.DatabaseInstanceView, error)
 	AddDatabaseInstance(context.Context, store.DatabaseInstanceInput) (store.DatabaseInstanceView, error)
 	UpdateDatabaseInstance(context.Context, string, store.DatabaseInstanceInput) (store.DatabaseInstanceView, error)
 	DeleteDatabaseInstance(context.Context, string) error
 	DatabaseAccounts(context.Context) ([]store.DatabaseAccountView, error)
+	ListDatabaseAccountsByInstance(context.Context, string) ([]store.DatabaseAccountView, error)
 	DatabaseAccount(context.Context, string) (store.DatabaseAccountView, error)
 	AddDatabaseAccount(context.Context, string, string, string, string, string, *time.Time) (store.DatabaseAccountView, error)
 	UpdateDatabaseAccount(context.Context, string, string, string, string, string, *time.Time, string) (store.DatabaseAccountView, error)
 	DeleteDatabaseAccount(context.Context, string) error
+	CreateDatabaseInstanceWithCreatorGrant(context.Context, store.DatabaseInstanceInput, string) (store.DatabaseInstanceView, error)
+	DatabaseAccountProbeMetadata(context.Context, string) (store.DatabaseAccountProbeMetadata, error)
+	DatabaseAccountProbePassword(context.Context, string) (string, error)
+	DatabaseInstanceForProbe(context.Context, string) (model.DatabaseInstance, error)
 }
 
 type adminApplicationRepository interface {

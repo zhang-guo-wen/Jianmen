@@ -91,11 +91,11 @@ type adminDatabaseRepository interface {
 }
 
 type adminApplicationRepository interface {
-	Applications() []store.ApplicationView
-	Application(string) (store.ApplicationView, error)
-	AddApplication(store.ApplicationInput) (store.ApplicationView, error)
-	UpdateApplication(string, store.ApplicationInput) (store.ApplicationView, error)
-	DeleteApplication(string) error
+	Applications(context.Context) []store.ApplicationView
+	Application(context.Context, string) (store.ApplicationView, error)
+	AddApplication(context.Context, store.ApplicationInput) (store.ApplicationView, error)
+	UpdateApplication(context.Context, string, store.ApplicationInput) (store.ApplicationView, error)
+	DeleteApplication(context.Context, string) error
 }
 
 type adminContainerRepository interface {

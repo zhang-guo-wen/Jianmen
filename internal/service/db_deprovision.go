@@ -10,7 +10,7 @@ func (s *DatabaseProvisioningService) Deprovision(ctx context.Context, accountID
 	if ctx == nil || ctx.Err() != nil {
 		return ErrDatabaseDeprovisionFailed
 	}
-	token, err := randomProvisioningString(s.random, 20, provisioningOperationAlphabet)
+	token, err := s.randomString(20, provisioningOperationAlphabet)
 	if err != nil {
 		return ErrDatabaseDeprovisionFailed
 	}

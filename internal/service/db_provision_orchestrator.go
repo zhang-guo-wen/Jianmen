@@ -66,15 +66,15 @@ func (s *DatabaseProvisioningService) Provision(
 		return ProvisionDatabaseAccountResult{}, ErrDatabaseProvisioningFailed
 	}
 
-	token, err := randomProvisioningString(s.random, 20, provisioningOperationAlphabet)
+	token, err := s.randomString(20, provisioningOperationAlphabet)
 	if err != nil {
 		return ProvisionDatabaseAccountResult{}, fmt.Errorf("generate database operation identity: %w", err)
 	}
-	password, err := randomProvisioningString(s.random, 32, provisioningPasswordAlphabet)
+	password, err := s.randomString(32, provisioningPasswordAlphabet)
 	if err != nil {
 		return ProvisionDatabaseAccountResult{}, fmt.Errorf("generate database password: %w", err)
 	}
-	leaseToken, err := randomProvisioningString(s.random, 20, provisioningOperationAlphabet)
+	leaseToken, err := s.randomString(20, provisioningOperationAlphabet)
 	if err != nil {
 		return ProvisionDatabaseAccountResult{}, fmt.Errorf("generate database operation lease: %w", err)
 	}

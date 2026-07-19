@@ -48,21 +48,10 @@ func (s *Server) handleContainerEndpoints(w http.ResponseWriter, r *http.Request
 			s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
 			return
 		}
-		authorized := make([]store.ContainerEndpointView, 0, len(items))
-		authorizationCache := make(map[string]bool)
-		for _, item := range items {
-			key := item.ID + "\x00view-connect"
-			allowed, ok := authorizationCache[key]
-			if !ok {
-				allowed = s.authorizeContainerEndpoint(r, []string{rbac.ActionContainerView, rbac.ActionContainerConnect}, item.ID)
-				authorizationCache[key] = allowed
-			}
-			if !allowed {
-				continue
-			}
-			item.CanManage = s.authorizeContainerEndpoint(r, []string{rbac.ActionContainerUpdate}, item.ID) ||
-				s.authorizeContainerEndpoint(r, []string{rbac.ActionContainerDelete}, item.ID)
-			authorized = append(authorized, item)
+		authorized, err := s.visibleContainerEndpoints(r, items)
+		if err != nil {
+			s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
+			return
 		}
 		start := (pageNumber - 1) * pageSize
 		if start > len(authorized) {

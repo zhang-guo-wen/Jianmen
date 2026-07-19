@@ -16,6 +16,10 @@ func (denyTicketAuthorization) AuthorizeConnection(context.Context, string, []st
 	return false, nil
 }
 
+func (denyTicketAuthorization) AuthorizeBatch(context.Context, string, []service.AuthorizationRequest) ([]service.AuthorizationDecision, error) {
+	return nil, nil
+}
+
 func TestWebTerminalTicketDenialDoesNotRevealTargetExistence(t *testing.T) {
 	server, _ := newAdminDBTestServer(t)
 	server.authorization = denyTicketAuthorization{}

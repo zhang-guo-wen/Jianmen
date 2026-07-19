@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"math/big"
 	"strings"
+	"sync"
 	"time"
 
 	"jianmen/internal/model"
@@ -302,6 +303,7 @@ type DatabaseProvisioningService struct {
 	repository          DatabaseProvisioningRepository
 	provisioner         DatabaseAccountProvisioner
 	random              io.Reader
+	randomMu            sync.Mutex
 	cleanupTimeout      time.Duration
 	leaseDuration       time.Duration
 	reconcileStaleAfter time.Duration
@@ -369,6 +371,12 @@ func randomProvisioningString(reader io.Reader, length int, alphabet string) (st
 		result[index] = alphabet[value.Int64()]
 	}
 	return string(result), nil
+}
+
+func (s *DatabaseProvisioningService) randomString(length int, alphabet string) (string, error) {
+	s.randomMu.Lock()
+	defer s.randomMu.Unlock()
+	return randomProvisioningString(s.random, length, alphabet)
 }
 
 func validateProvisioningAdministratorForNewUse(

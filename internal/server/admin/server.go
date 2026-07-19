@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"reflect"
 	"sync"
 
 	"jianmen/internal/config"
@@ -25,9 +26,9 @@ type Server struct {
 	applications         adminApplicationRepository
 	containers           adminContainerRepository
 	platformAccounts     adminPlatformAccountRepository
-	userSessions         adminUserSessionRepository
+	userSessionCreation  *service.UserSessionCreationService
 	audit                adminAuditRepository
-	connectionPassword   adminConnectionPasswordRepository
+	connectionPassword   *service.ConnectionPasswordService
 	preferences          adminUserPreferenceRepository
 	temporaryRepository  service.TemporaryAccessRepository
 	userRepository       service.UserRepository
@@ -86,7 +87,7 @@ func New(
 		return nil, errors.New("admin identity service is required")
 	case browserSessions == nil:
 		return nil, errors.New("admin browser session service is required")
-	case authorization == nil:
+	case isNilAdminAuthorization(authorization):
 		return nil, errors.New("admin authorization service is required")
 	case resourceGrants == nil:
 		return nil, errors.New("admin resource grant service is required")
@@ -127,11 +128,22 @@ func New(
 	if err != nil {
 		return nil, err
 	}
+	userSessionCreation, err := service.NewUserSessionCreationService(dependencies.userSessionCreation, authorization)
+	if err != nil {
+		return nil, fmt.Errorf("initialize user session creation service: %w", err)
+	}
+	connectionPassword, err := service.NewConnectionPasswordService(
+		dependencies.connectionPassword,
+		authorization,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("initialize connection password service: %w", err)
+	}
 	return &Server{
 		cfg: cfg, db: db, logger: logger,
 		aiTokens: dependencies.aiTokens, hostTargets: dependencies.hostTargets, databases: dependencies.databases,
 		applications: dependencies.applications, containers: dependencies.containers, platformAccounts: dependencies.platformAccounts,
-		userSessions: dependencies.userSessions, audit: dependencies.audit, connectionPassword: dependencies.connectionPassword,
+		userSessionCreation: userSessionCreation, audit: dependencies.audit, connectionPassword: connectionPassword,
 		preferences: dependencies.preferences, temporaryRepository: dependencies.temporaryAccess,
 		userRepository: dependencies.users, userGroupRepository: dependencies.userGroups, roleRepository: dependencies.roles,
 		dataDir:      dataDir,
@@ -143,4 +155,17 @@ func New(
 		webRDP:          webRDP, accessRequests: accessRequests,
 		systemSettings: systemSettings,
 	}, nil
+}
+
+func isNilAdminAuthorization(authorization authorizationService) bool {
+	if authorization == nil {
+		return true
+	}
+	value := reflect.ValueOf(authorization)
+	switch value.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
+		return value.IsNil()
+	default:
+		return false
+	}
 }

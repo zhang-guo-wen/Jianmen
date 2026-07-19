@@ -137,30 +137,25 @@ func (s *Server) issueAIResourceCredential(w http.ResponseWriter, r *http.Reques
 		s.writeErrorText(w, r, http.StatusNotFound, "unsupported resource type")
 		return
 	}
-	if _, err := s.loadAIResource(resourceType, resourceID); err != nil {
-		s.writeAIResourceError(w, r, err)
+	if s.connectionPassword == nil {
+		s.writeErrorText(w, r, http.StatusServiceUnavailable, "connection password service unavailable")
 		return
 	}
-	allowed, err := s.authorizeAnyConnection(r.Context(), userIDFromRequest(r), aiResourceActions(resourceType), resourceType, resourceID)
-	if err != nil || !allowed {
-		s.forbidden(w, r)
-		return
-	}
-	issued, err := service.IssueConnectionPassword(time.Now().UTC(), 30*time.Minute)
+	issued, err := s.connectionPassword.Issue(
+		r.Context(),
+		service.ConnectionPasswordIssueRequest{
+			UserID:               userIDFromRequest(r),
+			TargetID:             resourceID,
+			ExpectedResourceType: resourceType,
+		},
+	)
 	if err != nil {
-		s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
-		return
-	}
-	if err := s.connectionPassword.CreateConnectionPassword(r.Context(), model.ConnectionPassword{
-		UserID: userIDFromRequest(r), ResourceType: resourceType, ResourceID: resourceID,
-		SecretHash: issued.Hash, MySQLNativeHash: issued.MySQLNativeHash, ExpiresAt: issued.ExpiresAt,
-	}); err != nil {
-		s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
+		s.writeConnectionPasswordServiceError(w, r, err)
 		return
 	}
 	s.writeJSON(w, r, http.StatusCreated, map[string]any{
-		"resource_id": resourceID, "password": issued.Plaintext,
-		"expires_at": issued.ExpiresAt, "expires_in_seconds": int((30 * time.Minute).Seconds()),
+		"resource_id": resourceID, "password": issued.Password,
+		"expires_at": issued.ExpiresAt, "expires_in_seconds": issued.ExpiresInSeconds,
 	})
 }
 
@@ -175,25 +170,10 @@ func (s *Server) issueAIResourceSession(w http.ResponseWriter, r *http.Request, 
 		s.forbidden(w, r)
 		return
 	}
-	sessions, err := s.userSessions.UserSessions(userIDFromRequest(r))
+	session, err := s.userSessionCreation.GetOrCreateActivePermanentUserSession(r.Context(), userIDFromRequest(r))
 	if err != nil {
 		s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
 		return
-	}
-	var session *store.SessionView
-	for i := range sessions {
-		if sessions[i].Type == "permanent" && sessions[i].Status == "active" {
-			session = &sessions[i]
-			break
-		}
-	}
-	if session == nil {
-		created, createErr := s.userSessions.CreateUserSession(model.UserSession{UserID: userIDFromRequest(r), Type: "permanent", Status: "active"})
-		if createErr != nil {
-			s.writeErrorText(w, r, http.StatusInternalServerError, createErr.Error())
-			return
-		}
-		session = &store.SessionView{SessionID: created.SessionID, SessionSeq: created.SessionSeq, Type: created.Type, Status: created.Status}
 	}
 	prefix := util.PrefixHost
 	if resourceType == model.ResourceTypeDatabaseAccount {

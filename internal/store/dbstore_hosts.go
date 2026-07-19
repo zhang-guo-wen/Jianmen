@@ -1,6 +1,7 @@
 package store
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -27,7 +28,7 @@ func (s *DBStore) hostView(m model.Host, accountCount ...int) HostView {
 	}
 	return HostView{
 		ID: m.ID, Name: m.Name, Group: m.GroupName, Address: m.Address,
-		Port: m.Port, Remark: m.Remark, Status: status,
+		Port: m.Port, Protocol: normalizedHostProtocol(m.Protocol), Remark: m.Remark, Status: status,
 		AccountCount: count,
 		CreatedAt:    m.CreatedAt.Format(time.RFC3339),
 		UpdatedAt:    m.UpdatedAt.Format(time.RFC3339),
@@ -91,12 +92,16 @@ func hostIDs(hosts []model.Host) []string {
 }
 
 func (s *DBStore) AddHost(host HostRecord) (HostView, error) {
+	if err := validateHostProtocol(host.Protocol); err != nil {
+		return HostView{}, err
+	}
 	normalized := normalizeHostRecord(host)
 	m := model.Host{
 		ID:        normalized.ID,
 		Name:      normalized.Name,
 		Address:   normalized.Address,
 		Port:      normalized.Port,
+		Protocol:  normalized.Protocol,
 		GroupName: normalized.Group,
 		Remark:    normalized.Remark,
 	}
@@ -122,10 +127,23 @@ func (s *DBStore) UpdateHost(id string, host HostRecord) (HostView, error) {
 	if err := s.db.First(&m, "id = ?", id).Error; err != nil {
 		return HostView{}, fmt.Errorf("%w: %q", ErrHostNotFound, id)
 	}
+	if err := validateHostProtocol(host.Protocol); err != nil {
+		return HostView{}, err
+	}
 	normalized := normalizeHostRecord(host)
+	if normalizedHostProtocol(m.Protocol) != normalized.Protocol {
+		var accountCount int64
+		if err := s.db.Model(&model.HostAccount{}).Where("host_id = ?", m.ID).Count(&accountCount).Error; err != nil {
+			return HostView{}, fmt.Errorf("count host accounts: %w", err)
+		}
+		if accountCount != 0 {
+			return HostView{}, errors.New("host protocol cannot change while accounts exist")
+		}
+	}
 	m.Name = normalized.Name
 	m.Address = normalized.Address
 	m.Port = normalized.Port
+	m.Protocol = normalized.Protocol
 	m.GroupName = normalized.Group
 	m.Remark = normalized.Remark
 	m.Status = "active"
@@ -176,9 +194,10 @@ func normalizeHostRecord(h HostRecord) HostRecord {
 	h.Name = strings.TrimSpace(h.Name)
 	h.Group = strings.TrimSpace(h.Group)
 	h.Address = strings.TrimSpace(h.Address)
+	h.Protocol = normalizedHostProtocol(h.Protocol)
 	h.Remark = strings.TrimSpace(h.Remark)
 	if h.Port == 0 {
-		h.Port = 22
+		h.Port = defaultHostPort(h.Protocol)
 	}
 	if h.ID == "" {
 		h.ID = fmt.Sprintf("%s-%d", strings.ToLower(h.Address), h.Port)
@@ -187,4 +206,29 @@ func normalizeHostRecord(h HostRecord) HostRecord {
 		h.Name = formatHostAddress(h.Address, h.Port)
 	}
 	return h
+}
+
+func normalizedHostProtocol(protocol string) string {
+	switch strings.ToLower(strings.TrimSpace(protocol)) {
+	case "rdp":
+		return "rdp"
+	default:
+		return "ssh"
+	}
+}
+
+func validateHostProtocol(protocol string) error {
+	switch strings.ToLower(strings.TrimSpace(protocol)) {
+	case "", "ssh", "rdp":
+		return nil
+	default:
+		return fmt.Errorf("host protocol %q is not supported", protocol)
+	}
+}
+
+func defaultHostPort(protocol string) int {
+	if normalizedHostProtocol(protocol) == "rdp" {
+		return 3389
+	}
+	return 22
 }

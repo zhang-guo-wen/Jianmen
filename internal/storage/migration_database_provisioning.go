@@ -35,7 +35,7 @@ func (databaseAccountBeforeProvisioning) TableName() string {
 }
 
 func metadataModelsBeforeDatabaseProvisioning() []any {
-	current := model.AllModels()
+	current := metadataModelsBeforeWebRDP()
 	beforeProvisioning := make([]any, 0, len(current))
 	for _, item := range current {
 		if _, isDatabaseAccount := item.(*model.DatabaseAccount); isDatabaseAccount {

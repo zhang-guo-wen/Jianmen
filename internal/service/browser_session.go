@@ -18,6 +18,9 @@ const (
 	browserSessionTTL   = 12 * time.Hour
 	webSocketTicketTTL  = 30 * time.Second
 	browserSecretLength = 32
+
+	WebSocketPurposeTerminal = "web-terminal"
+	WebSocketPurposeRDP      = "web-rdp"
 )
 
 var ErrBrowserSessionInvalid = errors.New("browser session is invalid")
@@ -36,7 +39,16 @@ type BrowserSessionRepository interface {
 	FindActiveAdminSessionBySecretHash(ctx context.Context, secretHash string, now time.Time) (BrowserSessionSubject, bool, error)
 	RevokeAdminSession(ctx context.Context, sessionID string, now time.Time) error
 	CreateWebSocketTicket(ctx context.Context, ticket model.WebSocketTicket) error
-	ConsumeWebSocketTicket(ctx context.Context, secretHash, targetID string, now time.Time) (BrowserSessionSubject, bool, error)
+	ConsumeWebSocketTicket(ctx context.Context, secretHash, purpose, targetID string, now time.Time) (WebSocketTicketSubject, bool, error)
+}
+
+// WebSocketTicketSubject is returned only after a purpose-bound, target-bound
+// ticket has been atomically consumed.
+type WebSocketTicketSubject struct {
+	BrowserSessionSubject
+	Purpose      string
+	TargetID     string
+	ConnectionID string
 }
 
 type BrowserSessionService struct {
@@ -120,6 +132,16 @@ func (s *BrowserSessionService) Revoke(ctx context.Context, sessionID string) er
 }
 
 func (s *BrowserSessionService) CreateWebSocketTicket(ctx context.Context, subject BrowserSessionSubject, targetID string) (string, error) {
+	return s.CreateScopedWebSocketTicket(ctx, subject, WebSocketPurposeTerminal, targetID, "")
+}
+
+func (s *BrowserSessionService) CreateScopedWebSocketTicket(
+	ctx context.Context,
+	subject BrowserSessionSubject,
+	purpose string,
+	targetID string,
+	connectionID string,
+) (string, error) {
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
@@ -130,12 +152,24 @@ func (s *BrowserSessionService) CreateWebSocketTicket(ctx context.Context, subje
 	if targetID == "" {
 		return "", errors.New("websocket ticket target id is required")
 	}
+	purpose = strings.TrimSpace(purpose)
+	if purpose == "" {
+		return "", errors.New("websocket ticket purpose is required")
+	}
 	secret, err := newBrowserSecret()
 	if err != nil {
 		return "", err
 	}
 	now := s.now().UTC()
-	ticket := model.WebSocketTicket{ID: model.NewID(), SessionID: subject.SessionID, TargetID: targetID, SecretHash: browserSecretHash(secret), ExpiresAt: now.Add(webSocketTicketTTL)}
+	ticket := model.WebSocketTicket{
+		ID:           model.NewID(),
+		SessionID:    subject.SessionID,
+		Purpose:      purpose,
+		TargetID:     targetID,
+		ConnectionID: strings.TrimSpace(connectionID),
+		SecretHash:   browserSecretHash(secret),
+		ExpiresAt:    now.Add(webSocketTicketTTL),
+	}
 	if err := s.repository.CreateWebSocketTicket(ctx, ticket); err != nil {
 		return "", fmt.Errorf("create websocket ticket: %w", err)
 	}
@@ -143,15 +177,31 @@ func (s *BrowserSessionService) CreateWebSocketTicket(ctx context.Context, subje
 }
 
 func (s *BrowserSessionService) ConsumeWebSocketTicket(ctx context.Context, secret, targetID string) (BrowserSessionSubject, bool, error) {
+	ticket, found, err := s.ConsumeScopedWebSocketTicket(ctx, secret, WebSocketPurposeTerminal, targetID)
+	return ticket.BrowserSessionSubject, found, err
+}
+
+func (s *BrowserSessionService) ConsumeScopedWebSocketTicket(
+	ctx context.Context,
+	secret string,
+	purpose string,
+	targetID string,
+) (WebSocketTicketSubject, bool, error) {
 	if err := ctx.Err(); err != nil {
-		return BrowserSessionSubject{}, false, err
+		return WebSocketTicketSubject{}, false, err
 	}
-	if strings.TrimSpace(secret) == "" || strings.TrimSpace(targetID) == "" {
-		return BrowserSessionSubject{}, false, nil
+	if strings.TrimSpace(secret) == "" || strings.TrimSpace(purpose) == "" || strings.TrimSpace(targetID) == "" {
+		return WebSocketTicketSubject{}, false, nil
 	}
-	subject, found, err := s.repository.ConsumeWebSocketTicket(ctx, browserSecretHash(secret), strings.TrimSpace(targetID), s.now().UTC())
+	subject, found, err := s.repository.ConsumeWebSocketTicket(
+		ctx,
+		browserSecretHash(secret),
+		strings.TrimSpace(purpose),
+		strings.TrimSpace(targetID),
+		s.now().UTC(),
+	)
 	if err != nil {
-		return BrowserSessionSubject{}, false, fmt.Errorf("consume websocket ticket: %w", err)
+		return WebSocketTicketSubject{}, false, fmt.Errorf("consume websocket ticket: %w", err)
 	}
 	return subject, found, nil
 }

@@ -73,20 +73,25 @@ func (s *Server) handleHost(w http.ResponseWriter, r *http.Request) {
 		if !s.requireAuthenticatedUser(w, r) {
 			return
 		}
-		actions := []string{rbac.ActionTargetView}
+		var actions []string
 		if connectableOnly(r) {
-			if !s.requireAnyPermission(r, rbac.ActionSessionConnect, rbac.ActionSFTPConnect) {
+			if !s.requireAnyPermission(r, rbac.ActionSessionConnect, rbac.ActionSFTPConnect, rbac.ActionRDPConnect) {
 				s.forbidden(w, r)
 				return
 			}
-			actions = []string{rbac.ActionSessionConnect, rbac.ActionSFTPConnect}
+		} else {
+			actions = []string{rbac.ActionTargetView}
 		}
 		accounts, err := s.resourceAccess.ListHostAccounts(r.Context(), id)
 		if err != nil {
 			writeHostStoreError(w, r, err)
 			return
 		}
-		accounts, err = s.visibleTargetsForActions(r, accounts, actions)
+		if connectableOnly(r) {
+			accounts, err = s.visibleConnectableTargets(r, accounts)
+		} else {
+			accounts, err = s.visibleTargetsForActions(r, accounts, actions)
+		}
 		if err != nil {
 			s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
 			return
@@ -164,15 +169,22 @@ func (s *Server) handleTargets(w http.ResponseWriter, r *http.Request) {
 		if !s.requireAuthenticatedUser(w, r) {
 			return
 		}
-		actions := []string{rbac.ActionTargetView}
+		var actions []string
 		if connectableOnly(r) {
-			if !s.requireAnyPermission(r, rbac.ActionSessionConnect, rbac.ActionSFTPConnect) {
+			if !s.requireAnyPermission(r, rbac.ActionSessionConnect, rbac.ActionSFTPConnect, rbac.ActionRDPConnect) {
 				s.forbidden(w, r)
 				return
 			}
-			actions = []string{rbac.ActionSessionConnect, rbac.ActionSFTPConnect}
+		} else {
+			actions = []string{rbac.ActionTargetView}
 		}
-		targets, err := s.visibleTargetsForActions(r, s.store.Targets(), actions)
+		targets := s.store.Targets()
+		var err error
+		if connectableOnly(r) {
+			targets, err = s.visibleConnectableTargets(r, targets)
+		} else {
+			targets, err = s.visibleTargetsForActions(r, targets, actions)
+		}
 		if err != nil {
 			s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
 			return
@@ -261,7 +273,9 @@ func (s *Server) handleTestConnection(w http.ResponseWriter, r *http.Request) {
 		Name:                  target.Name,
 		Host:                  target.Host,
 		Port:                  target.Port,
+		Protocol:              target.Protocol,
 		Username:              target.Username,
+		Domain:                target.Domain,
 		Password:              target.Password,
 		PrivateKeyPath:        target.PrivateKeyPath,
 		PrivateKeyPEM:         target.PrivateKeyPEM,
@@ -269,6 +283,9 @@ func (s *Server) handleTestConnection(w http.ResponseWriter, r *http.Request) {
 		InsecureIgnoreHostKey: target.InsecureIgnoreHostKey,
 		HostKeyFingerprint:    target.HostKeyFingerprint,
 		KnownHostsPath:        target.KnownHostsPath,
+		RDPSecurity:           target.RDPSecurity,
+		RDPIgnoreCertificate:  target.RDPIgnoreCertificate,
+		RDPCertFingerprints:   target.RDPCertFingerprints,
 		Disabled:              target.Disabled,
 		ExpiresAt:             target.ExpiresAt,
 		HostID:                target.HostID,
@@ -286,6 +303,13 @@ func (s *Server) handleTestConnection(w http.ResponseWriter, r *http.Request) {
 		storedTarget.Username = firstNonEmpty(targetCfg.Username, storedTarget.Username)
 		storedTarget.Name = firstNonEmpty(targetCfg.Name, storedTarget.Name)
 		storedTarget.HostID = firstNonEmpty(targetCfg.HostID, storedTarget.HostID)
+		storedTarget.Protocol = firstNonEmpty(targetCfg.Protocol, storedTarget.Protocol)
+		storedTarget.Domain = firstNonEmpty(targetCfg.Domain, storedTarget.Domain)
+		storedTarget.RDPSecurity = firstNonEmpty(targetCfg.RDPSecurity, storedTarget.RDPSecurity)
+		storedTarget.RDPIgnoreCertificate = targetCfg.RDPIgnoreCertificate
+		storedTarget.RDPCertFingerprints = firstNonEmpty(
+			targetCfg.RDPCertFingerprints, storedTarget.RDPCertFingerprints,
+		)
 		if hostKeyConfigProvided {
 			storedTarget.InsecureIgnoreHostKey = targetCfg.InsecureIgnoreHostKey
 			storedTarget.HostKeyFingerprint = targetCfg.HostKeyFingerprint
@@ -303,6 +327,7 @@ func (s *Server) handleTestConnection(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		targetCfg.Host = firstNonEmpty(targetCfg.Host, host.Address)
+		targetCfg.Protocol = firstNonEmpty(targetCfg.Protocol, host.Protocol)
 		if targetCfg.Port == 0 {
 			targetCfg.Port = host.Port
 		}
@@ -311,6 +336,31 @@ func (s *Server) handleTestConnection(w http.ResponseWriter, r *http.Request) {
 	addr := targetCfg.Addr()
 	if addr == "" || targetCfg.Username == "" {
 		s.writeErrorText(w, r, http.StatusBadRequest, "host, port, and username are required")
+		return
+	}
+	if strings.EqualFold(targetCfg.Protocol, "rdp") {
+		if s.webRDP == nil {
+			s.writeJSON(w, r, http.StatusOK, map[string]any{
+				"ok": false, "error": "Web RDP 未启用，无法测试 RDP 账号",
+			})
+			return
+		}
+		start := time.Now()
+		err := s.webRDP.TestConnection(r.Context(), targetCfg)
+		latencyMs := time.Since(start).Milliseconds()
+		if err != nil {
+			s.logger.Warn("RDP connection test failed", "target", targetCfg.ID, "address", addr, "error", err)
+			s.writeJSON(w, r, http.StatusOK, map[string]any{
+				"ok": false, "latency_ms": latencyMs, "verification_scope": "guacd_handshake",
+				"authentication_verified": false, "error": "RDP 代理握手失败",
+			})
+			return
+		}
+		s.writeJSON(w, r, http.StatusOK, map[string]any{
+			"ok": true, "latency_ms": latencyMs, "verification_scope": "guacd_handshake",
+			"authentication_verified": false,
+			"message":                 "RDP 代理握手成功；目标 Windows 账号将在实际 Web RDP 会话中认证 (" + addr + ")",
+		})
 		return
 	}
 

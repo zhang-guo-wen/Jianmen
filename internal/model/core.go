@@ -125,9 +125,12 @@ func AllModels() []any {
 		&AuditEvent{},
 		&LoginAuditLog{},
 		&AuditSession{},
+		&AuditArtifact{},
+		&AuditRDPChannelEvent{},
 		&AuditSSHCommand{},
 		&AuditDBQuery{},
 		&AuditSFTPEvent{},
+		&AccessRequest{},
 	}
 }
 
@@ -150,6 +153,11 @@ func (m *PlatformAccount) BeforeCreate(_ *gorm.DB) error   { return ensureID(&m.
 func (m *AuditEvent) BeforeCreate(_ *gorm.DB) error        { return ensureID(&m.ID) }
 func (m *LoginAuditLog) BeforeCreate(_ *gorm.DB) error     { return ensureID(&m.ID) }
 func (m *AuditSession) BeforeCreate(_ *gorm.DB) error      { return ensureID(&m.ID) }
-func (m *AuditSSHCommand) BeforeCreate(_ *gorm.DB) error   { return ensureID(&m.ID) }
-func (m *AuditDBQuery) BeforeCreate(_ *gorm.DB) error      { return ensureID(&m.ID) }
-func (m *AuditSFTPEvent) BeforeCreate(_ *gorm.DB) error    { return ensureID(&m.ID) }
+func (m *AuditArtifact) BeforeCreate(_ *gorm.DB) error     { return ensureID(&m.ID) }
+func (m *AuditRDPChannelEvent) BeforeCreate(_ *gorm.DB) error {
+	return ensureID(&m.ID)
+}
+func (m *AuditSSHCommand) BeforeCreate(_ *gorm.DB) error { return ensureID(&m.ID) }
+func (m *AuditDBQuery) BeforeCreate(_ *gorm.DB) error    { return ensureID(&m.ID) }
+func (m *AuditSFTPEvent) BeforeCreate(_ *gorm.DB) error  { return ensureID(&m.ID) }
+func (m *AccessRequest) BeforeCreate(_ *gorm.DB) error   { return ensureID(&m.ID) }

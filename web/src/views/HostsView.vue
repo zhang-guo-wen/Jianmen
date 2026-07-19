@@ -21,6 +21,13 @@
         <el-table-column label="地址" min-width="180" show-overflow-tooltip>
           <template #default="{ row }">{{ hostEndpoint(row) }}</template>
         </el-table-column>
+        <el-table-column label="协议" width="78" align="center">
+          <template #default="{ row }">
+            <el-tag :type="hostProtocol(row) === 'rdp' ? 'primary' : 'success'" size="small" effect="plain">
+              {{ hostProtocol(row).toUpperCase() }}
+            </el-tag>
+          </template>
+        </el-table-column>
         <el-table-column label="账号管理" min-width="110" align="center">
           <template #default="{ row }">
             <el-button v-if="permission.canDo('target:view')" link type="primary" size="small" class="account-mgmt-btn" @click="openAccountsDialog(row)">
@@ -47,7 +54,7 @@
         <el-table-column label="操作" width="210" align="right">
           <template #default="{ row }">
             <div class="table-actions">
-              <el-button v-if="permission.canDo('session:connect')"
+              <el-button v-if="canConnectHost(row)"
                 link
                 type="success"
                 size="small"
@@ -61,13 +68,13 @@
                 @click="openEditHostDialog(row)"
                 >编辑</el-button
               >
-              <el-dropdown v-if="permission.canDo('audit:view') || permission.canDo('session:view') || (row.can_manage && permission.canDo('host:delete'))" trigger="click" teleported>
+              <el-dropdown v-if="canViewHostAudit(row) || permission.canDo('session:view') || (row.can_manage && permission.canDo('host:delete'))" trigger="click" teleported>
                 <el-button link type="primary" size="small"
                   >更多<el-icon class="el-icon--right"><ArrowDown /></el-icon></el-button
                 >
                 <template #dropdown>
                   <el-dropdown-menu>
-                    <el-dropdown-item v-if="permission.canDo('audit:view')" @click="handleHostAuditLog(row)">审计日志</el-dropdown-item>
+                    <el-dropdown-item v-if="canViewHostAudit(row)" @click="handleHostAuditLog(row)">审计日志</el-dropdown-item>
                     <el-dropdown-item v-if="permission.canDo('session:view')" @click="handleHostSessions(row)">在线会话</el-dropdown-item>
                     <el-dropdown-item v-if="row.can_manage && permission.canDo('host:delete')"
                       class="danger-dropdown-item"
@@ -96,6 +103,12 @@
           :rules="hostRules"
           label-width="96px"
         >
+          <el-form-item label="协议" prop="protocol" required>
+            <el-radio-group v-model="hostForm.protocol" @change="handleHostProtocolChange">
+              <el-radio-button label="ssh">SSH</el-radio-button>
+              <el-radio-button label="rdp">RDP</el-radio-button>
+            </el-radio-group>
+          </el-form-item>
           <el-form-item label="主机地址" prop="address" required>
             <el-input
               v-model="hostForm.address"
@@ -248,7 +261,7 @@
           </el-table-column>
           <el-table-column label="操作" width="200" fixed="right">
             <template #default="{ row }">
-              <el-button v-if="permission.canDo('session:connect')"
+               <el-button v-if="canConnectTarget(row)"
                 link
                 type="success"
                 size="small"
@@ -293,7 +306,7 @@
         >
           <div class="form-section">
             <div class="form-section-title">登录与认证</div>
-            <el-form-item label="认证方式" prop="auth_method">
+            <el-form-item v-if="selectedHostProtocol === 'ssh'" label="认证方式" prop="auth_method">
               <el-radio-group
                 v-model="accountForm.auth_method"
                 class="auth-method-group"
@@ -306,7 +319,7 @@
             <el-form-item label="登录账号" prop="username">
               <el-input
                 v-model="accountForm.username"
-                placeholder="SSH 登录用户名"
+                :placeholder="selectedHostProtocol === 'rdp' ? 'Windows 登录用户名' : 'SSH 登录用户名'"
               />
             </el-form-item>
             <el-form-item
@@ -322,7 +335,7 @@
               />
             </el-form-item>
             <el-form-item
-              v-if="isKeyAuthMethod(accountForm.auth_method)"
+              v-if="selectedHostProtocol === 'ssh' && isKeyAuthMethod(accountForm.auth_method)"
               label="解锁口令"
             >
               <el-input
@@ -333,7 +346,7 @@
               />
             </el-form-item>
             <el-form-item
-              v-if="accountForm.auth_method === 'private_key'"
+              v-if="selectedHostProtocol === 'ssh' && accountForm.auth_method === 'private_key'"
               label="私钥"
               prop="private_key_pem"
             >
@@ -363,6 +376,34 @@
                 />
               </div>
             </el-form-item>
+            <template v-if="selectedHostProtocol === 'rdp'">
+              <el-form-item label="Windows 域">
+                <el-input
+                  v-model="accountForm.domain"
+                  clearable
+                  placeholder="可选，例如 CORP"
+                />
+              </el-form-item>
+              <el-form-item label="安全模式">
+                <el-select v-model="accountForm.rdp_security" style="width: 100%">
+                  <el-option label="自动协商（推荐）" value="any" />
+                  <el-option label="NLA" value="nla" />
+                  <el-option label="TLS" value="tls" />
+                  <el-option label="RDP 原生加密" value="rdp" />
+                </el-select>
+              </el-form-item>
+              <el-form-item label="忽略证书">
+                <el-switch v-model="accountForm.rdp_ignore_certificate" />
+                <span class="inline-help">仅建议在受控测试环境中开启</span>
+              </el-form-item>
+              <el-form-item v-if="!accountForm.rdp_ignore_certificate" label="证书指纹">
+                <el-input
+                  v-model="accountForm.rdp_cert_fingerprints"
+                  clearable
+                  placeholder="可选；多个 SHA-256 指纹用逗号分隔"
+                />
+              </el-form-item>
+            </template>
           </div>
 
           <div class="form-section">
@@ -385,9 +426,49 @@
                 <span class="expiry-text">{{ accountExpiryText }}</span>
               </div>
             </el-form-item>
+            <template v-if="selectedHostProtocol === 'rdp'">
+              <el-form-item label="连接审批">
+                <el-switch v-model="accountForm.rdp_approval_required" />
+                <span class="inline-help">开启后，每次连接必须先取得有效审批</span>
+              </el-form-item>
+              <el-form-item label="通道权限">
+                <div class="rdp-policy-grid">
+                  <label>
+                    <span>读取远端剪贴板</span>
+                    <el-switch v-model="accountForm.rdp_clipboard_read" />
+                  </label>
+                  <label>
+                    <span>写入远端剪贴板</span>
+                    <el-switch v-model="accountForm.rdp_clipboard_write" />
+                  </label>
+                  <label>
+                    <span>上传文件</span>
+                    <el-switch
+                      v-model="accountForm.rdp_file_upload"
+                      @change="handleRDPFilePolicyChange"
+                    />
+                  </label>
+                  <label>
+                    <span>下载文件</span>
+                    <el-switch
+                      v-model="accountForm.rdp_file_download"
+                      @change="handleRDPFilePolicyChange"
+                    />
+                  </label>
+                  <label>
+                    <span>映射堡垒机磁盘</span>
+                    <el-switch
+                      v-model="accountForm.rdp_drive_mapping"
+                      @change="handleRDPDrivePolicyChange"
+                    />
+                  </label>
+                </div>
+                <span class="inline-help">文件上传和下载依赖磁盘映射，但仍分别校验权限</span>
+              </el-form-item>
+            </template>
           </div>
 
-          <el-form-item label="连接测试">
+          <el-form-item v-if="selectedHostProtocol === 'ssh'" label="连接测试">
             <div class="test-connection-row">
               <el-button :loading="testingConnection" @click="testConnection">测试连接</el-button>
               <template v-if="accountTestResult">
@@ -430,7 +511,7 @@
                   />
                 </el-select>
               </el-form-item>
-              <el-form-item label="主机密钥" prop="host_key_mode">
+              <el-form-item v-if="selectedHostProtocol === 'ssh'" label="主机密钥" prop="host_key_mode">
                 <div class="host-key-field">
                   <el-radio-group
                     v-model="accountForm.host_key_mode"
@@ -453,7 +534,7 @@
                 </div>
               </el-form-item>
               <el-form-item
-                v-if="accountForm.host_key_mode === 'fingerprint'"
+                v-if="selectedHostProtocol === 'ssh' && accountForm.host_key_mode === 'fingerprint'"
                 label="主机指纹"
                 prop="host_key_fingerprint"
               >
@@ -464,7 +545,7 @@
                 />
               </el-form-item>
               <el-form-item
-                v-if="accountForm.host_key_mode === 'known_hosts'"
+                v-if="selectedHostProtocol === 'ssh' && accountForm.host_key_mode === 'known_hosts'"
                 label="known_hosts"
                 prop="known_hosts_path"
               >
@@ -527,6 +608,8 @@ import { usePermissionStore } from "@/stores/permission";
 
 type AuthMethod = "password" | "private_key";
 type HostKeyMode = "ignore" | "fingerprint" | "known_hosts";
+type HostProtocol = "ssh" | "rdp";
+type RDPSecurity = "any" | "nla" | "tls" | "rdp";
 
 interface HostForm {
   id: string;
@@ -534,6 +617,7 @@ interface HostForm {
   group: string;
   address: string;
   port: number;
+  protocol: HostProtocol;
   remark: string;
 }
 
@@ -545,6 +629,7 @@ interface AccountForm {
   disabled: boolean;
   expires_at: string;
   username: string;
+  domain: string;
   auth_method: AuthMethod;
   password: string;
   private_key_pem: string;
@@ -553,6 +638,15 @@ interface AccountForm {
   insecure_ignore_host_key: boolean;
   host_key_fingerprint: string;
   known_hosts_path: string;
+  rdp_security: RDPSecurity;
+  rdp_ignore_certificate: boolean;
+  rdp_cert_fingerprints: string;
+  rdp_approval_required: boolean;
+  rdp_clipboard_read: boolean;
+  rdp_clipboard_write: boolean;
+  rdp_file_upload: boolean;
+  rdp_file_download: boolean;
+  rdp_drive_mapping: boolean;
 }
 
 const { t } = useI18n();
@@ -660,7 +754,11 @@ const accountExpiryText = computed(() => {
   if (!accountForm.expires_at) return "永久有效";
   return formatDateTime(accountForm.expires_at);
 });
+const selectedHostProtocol = computed<HostProtocol>(() =>
+  selectedHost.value ? hostProtocol(selectedHost.value) : hostForm.protocol
+);
 const hostRules: FormRules<HostForm> = {
+  protocol: [{ required: true, message: "请选择连接协议", trigger: "change" }],
   address: [{ required: true, message: "请输入主机地址", trigger: "blur" }],
   port: [
     { required: true, message: "请输入端口", trigger: "change" },
@@ -722,8 +820,41 @@ function hostId(host: HostView): string {
 
 function hostEndpoint(host: HostView): string {
   const address = stringFrom(host.address);
-  const port = numberFrom(host.port, 22);
+  const port = numberFrom(host.port, defaultPort(hostProtocol(host)));
   return address ? `${address}:${port}` : "-";
+}
+
+function hostProtocol(host: HostView): HostProtocol {
+  return String(host.protocol || "ssh").toLowerCase() === "rdp" ? "rdp" : "ssh";
+}
+
+function targetProtocol(target: TargetRecord): HostProtocol {
+  const protocol = stringFrom(target.protocol).toLowerCase();
+  if (protocol === "rdp") return "rdp";
+  if (protocol === "ssh") return "ssh";
+  return selectedHost.value ? hostProtocol(selectedHost.value) : "ssh";
+}
+
+function defaultPort(protocol: HostProtocol): number {
+  return protocol === "rdp" ? 3389 : 22;
+}
+
+function canConnectHost(host: HostView): boolean {
+  return hostProtocol(host) === "rdp"
+    ? permission.canDo("rdp:connect")
+    : permission.canDo("session:connect");
+}
+
+function canConnectTarget(target: TargetRecord): boolean {
+  return targetProtocol(target) === "rdp"
+    ? permission.canDo("rdp:connect")
+    : permission.canDo("session:connect");
+}
+
+function canViewHostAudit(host: HostView): boolean {
+  return hostProtocol(host) === "rdp"
+    ? permission.canDo("rdp:recording:view")
+    : permission.canDo("audit:view");
 }
 
 function hostName(host: HostView): string {
@@ -789,7 +920,7 @@ function targetHostString(target: TargetRecord): string {
   const host = stringFrom(target.host).trim();
   if (host) return host;
   const addr2 = stringFrom(target.address).trim();
-  const port = numberFrom(target.port, 22);
+  const port = numberFrom(target.port, defaultPort(targetProtocol(target)));
   const portSuffix = `:${port}`;
   return addr2.endsWith(portSuffix)
     ? addr2.slice(0, -portSuffix.length)
@@ -887,7 +1018,7 @@ function formatAddressPort(addr: string, port: number): string {
     address.includes(":") && !address.startsWith("[")
       ? `[${address}]`
       : address;
-  return `${displayHost}:${numberFrom(port, 22)}`;
+  return `${displayHost}:${numberFrom(port, defaultPort(hostForm.protocol))}`;
 }
 
 function defaultHostName(): string {
@@ -909,12 +1040,28 @@ function normalizeHostAddressInput() {
   syncDefaultHostName();
 }
 
+function handleHostProtocolChange(protocol: HostProtocol) {
+  const previousDefault = protocol === "rdp" ? 22 : 3389;
+  if (!hostForm.port || hostForm.port === previousDefault) {
+    hostForm.port = defaultPort(protocol);
+  }
+  syncDefaultHostName();
+}
+
 // ════════════════════════════════════════════════════════════════
 // Form factories
 // ════════════════════════════════════════════════════════════════
 
 function emptyHostForm(): HostForm {
-  return { id: "", name: "", group: "", address: "", port: 22, remark: "" };
+  return {
+    id: "",
+    name: "",
+    group: "",
+    address: "",
+    port: 22,
+    protocol: "ssh",
+    remark: "",
+  };
 }
 
 function emptyAccountForm(): AccountForm {
@@ -926,6 +1073,7 @@ function emptyAccountForm(): AccountForm {
     disabled: false,
     expires_at: "",
     username: "",
+    domain: "",
     auth_method: "password",
     password: "",
     private_key_pem: "",
@@ -934,6 +1082,15 @@ function emptyAccountForm(): AccountForm {
     insecure_ignore_host_key: false,
     host_key_fingerprint: "",
     known_hosts_path: "",
+    rdp_security: "any",
+    rdp_ignore_certificate: false,
+    rdp_cert_fingerprints: "",
+    rdp_approval_required: false,
+    rdp_clipboard_read: false,
+    rdp_clipboard_write: false,
+    rdp_file_upload: false,
+    rdp_file_download: false,
+    rdp_drive_mapping: false,
   };
 }
 
@@ -956,12 +1113,14 @@ function syncDefaultAccountName() {
 }
 
 function recordToHostForm(host: HostView): HostForm {
+  const protocol = hostProtocol(host);
   return {
     id: hostId(host),
     name: stringFrom(host.name),
     group: stringFrom(host.group),
     address: stringFrom(host.address),
-    port: numberFrom(host.port, 22),
+    port: numberFrom(host.port, defaultPort(protocol)),
+    protocol,
     remark: stringFrom(host.remark),
   };
 }
@@ -976,7 +1135,8 @@ function recordToAccountForm(target: TargetRecord): AccountForm {
     disabled: target.disabled === true,
     expires_at: stringFrom(target.expires_at),
     username: stringFrom(target.username),
-    auth_method: inferAuthMethod(target),
+    domain: stringFrom(target.domain),
+    auth_method: targetProtocol(target) === "rdp" ? "password" : inferAuthMethod(target),
     password: "",
     private_key_pem: "",
     passphrase: "",
@@ -984,7 +1144,23 @@ function recordToAccountForm(target: TargetRecord): AccountForm {
     insecure_ignore_host_key: target.insecure_ignore_host_key === true,
     host_key_fingerprint: stringFrom(target.host_key_fingerprint),
     known_hosts_path: stringFrom(target.known_hosts_path),
+    rdp_security: normalizeRDPSecurity(target.rdp_security),
+    rdp_ignore_certificate: target.rdp_ignore_certificate === true,
+    rdp_cert_fingerprints: stringFrom(target.rdp_cert_fingerprints),
+    rdp_approval_required: target.rdp_approval_required === true,
+    rdp_clipboard_read: target.rdp_clipboard_read === true,
+    rdp_clipboard_write: target.rdp_clipboard_write === true,
+    rdp_file_upload: target.rdp_file_upload === true,
+    rdp_file_download: target.rdp_file_download === true,
+    rdp_drive_mapping: target.rdp_drive_mapping === true,
   };
+}
+
+function normalizeRDPSecurity(value: unknown): RDPSecurity {
+  const security = String(value || "").toLowerCase();
+  return security === "nla" || security === "tls" || security === "rdp"
+    ? security
+    : "any";
 }
 
 function hostKeyModeForTarget(target: TargetRecord): HostKeyMode {
@@ -1007,17 +1183,20 @@ function buildHostPayload(): HostPayload {
     group: hostForm.group.trim() || undefined,
     address: hostForm.address.trim(),
     port: Number(hostForm.port),
+    protocol: hostForm.protocol,
     remark: hostForm.remark.trim() || undefined,
   };
 }
 
 function hostPayloadFromRecord(host: HostView): HostPayload {
+  const protocol = hostProtocol(host);
   return {
     id: hostId(host) || undefined,
     name: hostName(host),
     group: stringFrom(host.group).trim() || undefined,
     address: stringFrom(host.address).trim(),
-    port: numberFrom(host.port, 22),
+    port: numberFrom(host.port, defaultPort(protocol)),
+    protocol,
     remark: stringFrom(host.remark).trim() || undefined,
   };
 }
@@ -1026,6 +1205,7 @@ function buildAccountPayload(): TargetPayload {
   const host = selectedHost.value;
   const username = accountForm.username.trim();
   const hostKey = accountHostKeyPayload();
+  const protocol = selectedHostProtocol.value;
   const payload: TargetPayload = {
     id:
       accountForm.id.trim() ||
@@ -1037,8 +1217,10 @@ function buildAccountPayload(): TargetPayload {
     disabled: accountForm.disabled,
     expires_at: accountForm.expires_at || undefined,
     host: stringFrom(host?.address).trim(),
-    port: numberFrom(host?.port, 22),
+    port: numberFrom(host?.port, defaultPort(protocol)),
+    protocol,
     username,
+    domain: protocol === "rdp" ? accountForm.domain.trim() : "",
     password: "",
     private_key_path: "",
     private_key_pem: "",
@@ -1046,8 +1228,22 @@ function buildAccountPayload(): TargetPayload {
     insecure_ignore_host_key: hostKey.insecure_ignore_host_key,
     host_key_fingerprint: hostKey.host_key_fingerprint,
     known_hosts_path: hostKey.known_hosts_path,
+    rdp_security: protocol === "rdp" ? accountForm.rdp_security : "any",
+    rdp_ignore_certificate:
+      protocol === "rdp" && accountForm.rdp_ignore_certificate,
+    rdp_cert_fingerprints:
+      protocol === "rdp" && !accountForm.rdp_ignore_certificate
+        ? accountForm.rdp_cert_fingerprints.trim()
+        : "",
+    rdp_approval_required:
+      protocol === "rdp" && accountForm.rdp_approval_required,
+    rdp_clipboard_read: protocol === "rdp" && accountForm.rdp_clipboard_read,
+    rdp_clipboard_write: protocol === "rdp" && accountForm.rdp_clipboard_write,
+    rdp_file_upload: protocol === "rdp" && accountForm.rdp_file_upload,
+    rdp_file_download: protocol === "rdp" && accountForm.rdp_file_download,
+    rdp_drive_mapping: protocol === "rdp" && accountForm.rdp_drive_mapping,
   };
-  if (accountForm.auth_method === "password") {
+  if (protocol === "rdp" || accountForm.auth_method === "password") {
     payload.password = accountForm.password;
   } else {
     if (hasValue(accountForm.private_key_pem)) {
@@ -1063,6 +1259,7 @@ function targetStatusPayload(
   disabled: boolean,
 ): TargetPayload {
   const mode = hostKeyModeForTarget(target);
+  const protocol = targetProtocol(target);
   return {
     id: targetId(target),
     host_id: stringFrom(target.host_id).trim() || undefined,
@@ -1075,8 +1272,10 @@ function targetStatusPayload(
     disabled,
     expires_at: stringFrom(target.expires_at).trim() || undefined,
     host: targetHostString(target),
-    port: numberFrom(target.port, 22),
+    port: numberFrom(target.port, defaultPort(protocol)),
+    protocol,
     username: stringFrom(target.username).trim(),
+    domain: stringFrom(target.domain).trim(),
     password: "",
     private_key_path: "",
     private_key_pem: "",
@@ -1088,10 +1287,26 @@ function targetStatusPayload(
         : "",
     known_hosts_path:
       mode === "known_hosts" ? stringFrom(target.known_hosts_path).trim() : "",
+    rdp_security: normalizeRDPSecurity(target.rdp_security),
+    rdp_ignore_certificate: target.rdp_ignore_certificate === true,
+    rdp_cert_fingerprints: stringFrom(target.rdp_cert_fingerprints).trim(),
+    rdp_approval_required: target.rdp_approval_required === true,
+    rdp_clipboard_read: target.rdp_clipboard_read === true,
+    rdp_clipboard_write: target.rdp_clipboard_write === true,
+    rdp_file_upload: target.rdp_file_upload === true,
+    rdp_file_download: target.rdp_file_download === true,
+    rdp_drive_mapping: target.rdp_drive_mapping === true,
   };
 }
 
 function accountHostKeyPayload() {
+  if (selectedHostProtocol.value === "rdp") {
+    return {
+      insecure_ignore_host_key: false,
+      host_key_fingerprint: "",
+      known_hosts_path: "",
+    };
+  }
   const mode = accountForm.host_key_mode;
   return {
     insecure_ignore_host_key: mode === "ignore",
@@ -1103,7 +1318,10 @@ function accountHostKeyPayload() {
 }
 
 function selectedCredentialValue(): string {
-  if (accountForm.auth_method === "password") return accountForm.password;
+  if (
+    selectedHostProtocol.value === "rdp"
+    || accountForm.auth_method === "password"
+  ) return accountForm.password;
   return accountForm.private_key_pem;
 }
 
@@ -1118,7 +1336,7 @@ function validatePassword(
 ) {
   if (
     !editingAccountId.value &&
-    accountForm.auth_method === "password" &&
+    (selectedHostProtocol.value === "rdp" || accountForm.auth_method === "password") &&
     !hasValue(value)
   ) {
     callback(new Error(t("hosts.required.password")));
@@ -1134,6 +1352,7 @@ function validatePrivateKeyPEM(
 ) {
   if (
     !editingAccountId.value &&
+    selectedHostProtocol.value === "ssh" &&
     accountForm.auth_method === "private_key" &&
     !hasValue(value)
   ) {
@@ -1148,7 +1367,11 @@ function validateHostKeyFingerprint(
   value: unknown,
   callback: (error?: Error) => void,
 ) {
-  if (accountForm.host_key_mode === "fingerprint" && !hasValue(value)) {
+  if (
+    selectedHostProtocol.value === "ssh"
+    && accountForm.host_key_mode === "fingerprint"
+    && !hasValue(value)
+  ) {
     callback(new Error("请输入 SSH 主机密钥指纹"));
     return;
   }
@@ -1160,7 +1383,11 @@ function validateKnownHostsPath(
   value: unknown,
   callback: (error?: Error) => void,
 ) {
-  if (accountForm.host_key_mode === "known_hosts" && !hasValue(value)) {
+  if (
+    selectedHostProtocol.value === "ssh"
+    && accountForm.host_key_mode === "known_hosts"
+    && !hasValue(value)
+  ) {
     callback(new Error("请输入 known_hosts 文件路径"));
     return;
   }
@@ -1173,6 +1400,19 @@ function handleAuthMethodChange() {
     "private_key_pem",
     "passphrase",
   ]);
+}
+
+function handleRDPFilePolicyChange(enabled: boolean | string | number) {
+  if (enabled === true) {
+    accountForm.rdp_drive_mapping = true;
+  }
+}
+
+function handleRDPDrivePolicyChange(enabled: boolean | string | number) {
+  if (enabled !== true) {
+    accountForm.rdp_file_upload = false;
+    accountForm.rdp_file_download = false;
+  }
 }
 
 function handleHostKeyModeChange() {
@@ -1556,6 +1796,15 @@ async function confirmDeleteAccount(target: TargetRecord) {
 // ════════════════════════════════════════════════════════════════
 
 function openConnectionDialog(target: TargetRecord) {
+  if (targetProtocol(target) === "rdp") {
+    const id = targetId(target);
+    if (!id) {
+      ElMessage.error(t("hosts.error.missingId"));
+      return;
+    }
+    void router.push({ path: "/web-rdp", query: { target_id: id } });
+    return;
+  }
   selectedConnectionTarget.value = target;
   connectionDialogVisible.value = true;
 }
@@ -1580,7 +1829,10 @@ async function handleHostConnect(host: HostView) {
 function handleHostAuditLog(host: HostView) {
   void router.push({
     name: "audit",
-    query: { scope: "ssh", q: hostName(host) },
+    query: {
+      scope: hostProtocol(host) === "rdp" ? "rdp" : "ssh",
+      q: hostName(host),
+    },
   });
 }
 
@@ -1697,6 +1949,33 @@ onMounted(() => {
   font-size: 12px;
 }
 
+.inline-help {
+  margin-left: 10px;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+}
+
+.rdp-policy-grid {
+  display: grid;
+  width: 100%;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 14px;
+}
+
+.rdp-policy-grid label {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-surface-muted);
+  color: var(--color-text-secondary);
+  font-size: 12px;
+}
+
 /* Auth method radio */
 .auth-method-group {
   display: flex;
@@ -1800,5 +2079,11 @@ onMounted(() => {
 /* FormDialog body min-height for account edit */
 :deep(.form-dialog-body) {
   min-height: 280px;
+}
+
+@media (max-width: 720px) {
+  .rdp-policy-grid {
+    grid-template-columns: 1fr;
+  }
 }
 </style>

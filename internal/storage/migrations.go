@@ -136,7 +136,7 @@ var migrations = []Migration{
 		Version: "202607180004",
 		Name:    "browser sessions and websocket tickets",
 		Run: func(tx *gorm.DB) error {
-			return tx.AutoMigrate(&model.AdminSession{}, &model.WebSocketTicket{})
+			return tx.AutoMigrate(&model.AdminSession{}, &webSocketTicketBeforeWebRDP{})
 		},
 	},
 	{
@@ -184,6 +184,11 @@ var migrations = []Migration{
 		Version: "202607190001",
 		Name:    "resource grant logical uniqueness",
 		Run:     migrateResourceGrantLogicalUniqueness,
+	},
+	{
+		Version: webRDPAuditMigrationVersion,
+		Name:    "web RDP access control and audit schema",
+		Run:     migrateWebRDPAuditSchema,
 	},
 }
 

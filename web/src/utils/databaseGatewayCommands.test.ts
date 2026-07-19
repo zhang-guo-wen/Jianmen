@@ -267,6 +267,30 @@ test('database and quick-connect loaders keep request snapshots isolated', () =>
   assert.match(quickConnectSource, /sshLoading\.value = sshRequests\.isLoading\(\)/);
 });
 
+test('RDP quick connect is click-initiated and never hydrates SSH credentials', () => {
+  const source = readFileSync(new URL('../views/QuickConnectView.vue', import.meta.url), 'utf8');
+  assert.match(source, /path: isRDPTarget\(target\) \? '\/web-rdp' : '\/web-terminal'/);
+  assert.match(source, /const queue = items\.filter\(target => !isRDPTarget\(target\)\)/);
+
+  const ensureStart = source.indexOf('function ensureConnectionInfo');
+  const ensureEnd = source.indexOf('async function retryConnectionInfo', ensureStart);
+  const ensureSource = source.slice(ensureStart, ensureEnd);
+  assert.match(
+    ensureSource,
+    /if \(isRDPTarget\(target\)\) \{[\s\S]*return Promise\.resolve\(initializeConnectionState\(target\)\);[\s\S]*createUserSession/,
+  );
+});
+
+test('RDP audit playback uses object recording endpoint without replay directory exposure', () => {
+  const source = readFileSync(new URL('../views/AuditView.vue', import.meta.url), 'utf8');
+  assert.match(source, /new GuacamoleReplay\.SessionRecording\(tunnel\)/);
+  assert.match(source, /apiClient\.getRDPRecordingURL\(session\.id\)/);
+
+  const rdpReplayStart = source.indexOf('async function openRDPReplay');
+  const rdpReplayEnd = source.indexOf('function toggleRDPReplay', rdpReplayStart);
+  assert.doesNotMatch(source.slice(rdpReplayStart, rdpReplayEnd), /replay_dir/);
+});
+
 test('temporary password copy button exposes its in-flight state', () => {
   const dialogSource = readFileSync(new URL('../components/ConnectionConfigDialog.vue', import.meta.url), 'utf8');
   assert.match(dialogSource, /InfoValue label="临时密码"[\s\S]*:loading="isCopyInFlight\(temporaryPassword\)"/);

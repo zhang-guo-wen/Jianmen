@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
@@ -32,7 +33,13 @@ func (s *DBStore) EndAuditSession(id string) error {
 	now := time.Now().UTC()
 	return s.db.Model(&model.AuditSession{}).
 		Where("id = ?", id).
-		Updates(map[string]any{"state": "ended", "ended_at": now}).Error
+		Updates(map[string]any{
+			"state": "ended", "ended_at": now,
+			"outcome": gorm.Expr(
+				"CASE WHEN outcome IS NULL OR outcome = '' OR outcome IN (?, ?) THEN ? ELSE outcome END",
+				model.AuditOutcomeConnecting, model.AuditOutcomeActive, model.AuditOutcomeSucceeded,
+			),
+		}).Error
 }
 
 func (s *DBStore) UpdateAuditProtocol(id string, protocol string) error {
@@ -86,6 +93,24 @@ func (s *DBStore) ListAuditSessions(params AuditListParams) ([]AuditSessionView,
 			q = q.Where("started_at >= ? AND started_at < ?", date, nextDate)
 		}
 	}
+	if userID := strings.TrimSpace(params.UserID); userID != "" {
+		q = q.Where("user_id = ?", userID)
+	}
+	if accountID := strings.TrimSpace(params.AccountID); accountID != "" {
+		q = q.Where("account_id = ?", accountID)
+	}
+	if outcome := strings.TrimSpace(params.Outcome); outcome != "" {
+		q = q.Where("outcome = ?", outcome)
+	}
+	if status := strings.TrimSpace(params.RecordingStatus); status != "" {
+		q = q.Where("recording_status = ?", status)
+	}
+	if params.StartedFrom != nil {
+		q = q.Where("started_at >= ?", params.StartedFrom.UTC())
+	}
+	if params.StartedTo != nil {
+		q = q.Where("started_at < ?", params.StartedTo.UTC())
+	}
 	var total int64
 	if err := q.Count(&total).Error; err != nil {
 		return nil, 0, err
@@ -108,9 +133,14 @@ func (s *DBStore) ListAuditSessions(params AuditListParams) ([]AuditSessionView,
 	for i, sess := range sessions {
 		views[i] = AuditSessionView{
 			ID:              sess.ID,
+			UserID:          sess.UserID,
 			Username:        sess.Username,
 			Protocol:        sess.Protocol,
 			ProtocolSubtype: sess.ProtocolSubtype,
+			ResourceType:    sess.ResourceType,
+			ResourceID:      sess.ResourceID,
+			HostID:          sess.HostID,
+			AccountID:       sess.AccountID,
 			TargetName:      sess.TargetName,
 			TargetAddress:   sess.TargetAddress,
 			AccountName:     sess.AccountName,
@@ -118,7 +148,11 @@ func (s *DBStore) ListAuditSessions(params AuditListParams) ([]AuditSessionView,
 			ClientIP:        sess.ClientIP,
 			StartedAt:       sess.StartedAt.Format(time.RFC3339Nano),
 			State:           sess.State,
-			ReplayDir:       sess.ReplayDir,
+			Outcome:         sess.Outcome,
+			FailureCode:     sess.FailureCode,
+			FailureMessage:  sess.FailureMessage,
+			RecordingStatus: sess.RecordingStatus,
+			HasReplay:       sess.ReplayDir != "" || sess.RecordingStatus == model.RecordingStatusReady,
 			LogCount:        logCounts[sess.ID],
 		}
 		if sess.EndedAt != nil {
@@ -126,6 +160,76 @@ func (s *DBStore) ListAuditSessions(params AuditListParams) ([]AuditSessionView,
 		}
 	}
 	return views, total, nil
+}
+
+func (s *DBStore) FinishAuditSession(
+	ctx context.Context,
+	id string,
+	outcome string,
+	failureCode string,
+	failureMessage string,
+	recordingStatus string,
+	endedAt time.Time,
+) error {
+	result := s.db.WithContext(ctx).Model(&model.AuditSession{}).
+		Where("id = ?", strings.TrimSpace(id)).
+		Updates(map[string]any{
+			"state": "ended", "ended_at": endedAt.UTC(), "outcome": strings.TrimSpace(outcome),
+			"failure_code": strings.TrimSpace(failureCode), "failure_message": strings.TrimSpace(failureMessage),
+			"recording_status": strings.TrimSpace(recordingStatus),
+		})
+	if result.Error != nil {
+		return fmt.Errorf("finish audit session: %w", result.Error)
+	}
+	if result.RowsAffected != 1 {
+		return fmt.Errorf("finish audit session %q: %w", id, gorm.ErrRecordNotFound)
+	}
+	return nil
+}
+
+func (s *DBStore) CreateAuditArtifact(ctx context.Context, artifact *model.AuditArtifact) error {
+	if artifact == nil {
+		return errors.New("audit artifact is required")
+	}
+	if err := s.db.WithContext(ctx).Create(artifact).Error; err != nil {
+		return fmt.Errorf("create audit artifact: %w", err)
+	}
+	return nil
+}
+
+func (s *DBStore) UpdateAuditArtifact(ctx context.Context, artifact *model.AuditArtifact) error {
+	if artifact == nil || strings.TrimSpace(artifact.ID) == "" {
+		return errors.New("audit artifact id is required")
+	}
+	if err := s.db.WithContext(ctx).Save(artifact).Error; err != nil {
+		return fmt.Errorf("update audit artifact: %w", err)
+	}
+	return nil
+}
+
+func (s *DBStore) AuditArtifactBySession(
+	ctx context.Context,
+	sessionID string,
+	kind string,
+) (model.AuditArtifact, error) {
+	var artifact model.AuditArtifact
+	err := s.db.WithContext(ctx).
+		Where("audit_session_id = ? AND kind = ?", strings.TrimSpace(sessionID), strings.TrimSpace(kind)).
+		First(&artifact).Error
+	if err != nil {
+		return model.AuditArtifact{}, fmt.Errorf("get audit artifact: %w", err)
+	}
+	return artifact, nil
+}
+
+func (s *DBStore) CreateAuditRDPChannelEvent(ctx context.Context, event *model.AuditRDPChannelEvent) error {
+	if event == nil {
+		return errors.New("RDP channel event is required")
+	}
+	if err := s.db.WithContext(ctx).Create(event).Error; err != nil {
+		return fmt.Errorf("create RDP channel event: %w", err)
+	}
+	return nil
 }
 
 type auditLogCountRow struct {

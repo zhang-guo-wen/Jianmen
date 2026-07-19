@@ -32,17 +32,31 @@ func (s *DBStore) targetView(a model.HostAccount) TargetView {
 		name = a.ID
 	}
 	host, port := s.hostAddressPort(a.Host, a.HostID)
+	protocol := normalizedHostProtocol(a.Host.Protocol)
+	expiresAt := ""
+	if a.ExpiresAt != nil {
+		expiresAt = a.ExpiresAt.UTC().Format(time.RFC3339Nano)
+	}
 	return TargetView{
 		ID: a.ID, HostID: a.HostID,
 		ResourceType: model.ResourceTypeHostAccount, ResourceID: a.ResourceID,
 		ResourceSeq: a.ResourceSeq,
-		Name:        name, Group: a.GroupName, Remark: a.Remark,
-		Host: host, Port: port,
-		Username: a.Username, Status: status,
+		Name:        name, Group: a.GroupName, Remark: a.Remark, ExpiresAt: expiresAt,
+		Host: host, Port: port, Protocol: protocol,
+		Username: a.Username, Domain: a.Domain, Status: status,
 		AuthMethods:           authMethods,
 		InsecureIgnoreHostKey: a.InsecureIgnoreHostKey,
 		HostKeyFingerprint:    a.HostKeyFingerprint,
 		KnownHostsPath:        a.KnownHostsPath,
+		RDPSecurity:           normalizedRDPSecurity(a.RDPSecurity),
+		RDPIgnoreCertificate:  a.RDPIgnoreCertificate,
+		RDPCertFingerprints:   a.RDPCertFingerprints,
+		RDPApprovalRequired:   a.RDPApprovalRequired,
+		RDPClipboardRead:      a.RDPClipboardRead,
+		RDPClipboardWrite:     a.RDPClipboardWrite,
+		RDPFileUpload:         a.RDPFileUpload,
+		RDPFileDownload:       a.RDPFileDownload,
+		RDPDriveMapping:       a.RDPDriveMapping,
 	}
 }
 
@@ -59,7 +73,7 @@ func (s *DBStore) hostAddressPort(h model.Host, hostID string) (host string, por
 	return
 }
 
-func (s *DBStore) ensureHost(hostID, address string, port int) error {
+func (s *DBStore) ensureHost(hostID, address string, protocol string, port int) error {
 	var existing model.Host
 	if err := s.db.First(&existing, "id = ?", hostID).Error; err == nil {
 		return s.syncResource(model.ResourceTypeHost, existing.ID, hostResourceName(existing), "")
@@ -72,10 +86,11 @@ func (s *DBStore) ensureHost(hostID, address string, port int) error {
 		name = hostID
 	}
 	host := model.Host{
-		ID:      hostID,
-		Name:    name,
-		Address: address,
-		Port:    port,
+		ID:       hostID,
+		Name:     name,
+		Address:  address,
+		Port:     port,
+		Protocol: normalizedHostProtocol(protocol),
 	}
 	return s.db.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Create(&host).Error; err != nil {
@@ -108,12 +123,23 @@ func (s *DBStore) targetConfig(a model.HostAccount) TargetConfig {
 		HostName:              strings.TrimSpace(a.Host.Name),
 		Host:                  host,
 		Port:                  port,
+		Protocol:              normalizedHostProtocol(a.Host.Protocol),
+		Domain:                a.Domain,
 		Password:              a.Password.GetPlaintext(),
 		PrivateKeyPEM:         a.PrivateKeyPEM.GetPlaintext(),
 		Passphrase:            a.Passphrase.GetPlaintext(),
 		InsecureIgnoreHostKey: a.InsecureIgnoreHostKey,
 		HostKeyFingerprint:    a.HostKeyFingerprint,
 		KnownHostsPath:        a.KnownHostsPath,
+		RDPSecurity:           normalizedRDPSecurity(a.RDPSecurity),
+		RDPIgnoreCertificate:  a.RDPIgnoreCertificate,
+		RDPCertFingerprints:   a.RDPCertFingerprints,
+		RDPApprovalRequired:   a.RDPApprovalRequired,
+		RDPClipboardRead:      a.RDPClipboardRead,
+		RDPClipboardWrite:     a.RDPClipboardWrite,
+		RDPFileUpload:         a.RDPFileUpload,
+		RDPFileDownload:       a.RDPFileDownload,
+		RDPDriveMapping:       a.RDPDriveMapping,
 		HostID:                a.HostID,
 		Disabled:              disabled,
 		ExpiresAt:             expiresAt,
@@ -162,14 +188,32 @@ func (s *DBStore) TargetConfig(id string) (TargetConfig, error) {
 
 func (s *DBStore) AddTarget(target config.Target) (TargetView, error) {
 	target = normalizeConfigTarget(target)
+	if err := validateRDPSecurity(target.RDPSecurity); err != nil {
+		return TargetView{}, err
+	}
+	if target.Protocol == "rdp" {
+		if err := validateNewRDPAccount(target); err != nil {
+			return TargetView{}, err
+		}
+	}
 	if target.HostID == "" {
 		target.HostID = fmt.Sprintf("%s-%d", target.Host, target.Port)
 	}
 	if target.Username == "" {
 		return TargetView{}, errors.New("username is required")
 	}
-	if err := s.ensureHost(target.HostID, target.Host, target.Port); err != nil {
+	if err := s.ensureHost(target.HostID, target.Host, target.Protocol, target.Port); err != nil {
 		return TargetView{}, fmt.Errorf("ensure host: %w", err)
+	}
+	var targetHost model.Host
+	if err := s.db.First(&targetHost, "id = ?", target.HostID).Error; err != nil {
+		return TargetView{}, fmt.Errorf("load target host: %w", err)
+	}
+	target.Protocol = normalizedHostProtocol(targetHost.Protocol)
+	if target.Protocol == "rdp" {
+		if err := validateNewRDPAccount(target); err != nil {
+			return TargetView{}, err
+		}
 	}
 	if err := s.ensureHostAccountUsernameAvailable(target.HostID, target.Username, ""); err != nil {
 		return TargetView{}, err
@@ -184,6 +228,7 @@ func (s *DBStore) AddTarget(target config.Target) (TargetView, error) {
 		HostID:                target.HostID,
 		Name:                  target.Name,
 		Username:              target.Username,
+		Domain:                target.Domain,
 		AuthType:              "password",
 		Password:              model.NewEncryptedField(target.Password),
 		PrivateKeyPEM:         model.NewEncryptedField(target.PrivateKeyPEM),
@@ -191,11 +236,25 @@ func (s *DBStore) AddTarget(target config.Target) (TargetView, error) {
 		InsecureIgnoreHostKey: target.InsecureIgnoreHostKey,
 		HostKeyFingerprint:    target.HostKeyFingerprint,
 		KnownHostsPath:        target.KnownHostsPath,
+		RDPSecurity:           normalizedRDPSecurity(target.RDPSecurity),
+		RDPIgnoreCertificate:  target.RDPIgnoreCertificate,
+		RDPCertFingerprints:   target.RDPCertFingerprints,
+		RDPApprovalRequired:   target.RDPApprovalRequired,
+		RDPClipboardRead:      target.RDPClipboardRead,
+		RDPClipboardWrite:     target.RDPClipboardWrite,
+		RDPFileUpload:         target.RDPFileUpload,
+		RDPFileDownload:       target.RDPFileDownload,
+		RDPDriveMapping:       target.RDPDriveMapping,
 		GroupName:             target.Group,
 		Remark:                target.Remark,
 		ResourceSeq:           seq,
 		ResourceID:            util.ResourceIDFromSeq(util.PrefixHost, seq),
 	}
+	expiresAt, err := parseTargetExpiry(target.ExpiresAt)
+	if err != nil {
+		return TargetView{}, err
+	}
+	a.ExpiresAt = expiresAt
 	if target.PrivateKeyPEM != "" || target.PrivateKeyPath != "" {
 		a.AuthType = "private_key"
 		if target.PrivateKeyPath != "" && target.PrivateKeyPEM == "" {
@@ -224,9 +283,31 @@ func (s *DBStore) AddTarget(target config.Target) (TargetView, error) {
 
 func (s *DBStore) UpdateTarget(id string, target config.Target) (TargetView, error) {
 	target = normalizeConfigTargetUpdate(target)
+	if err := validateRDPSecurity(target.RDPSecurity); err != nil {
+		return TargetView{}, err
+	}
 	var a model.HostAccount
 	if err := s.db.First(&a, "id = ?", id).Error; err != nil {
 		return TargetView{}, fmt.Errorf("%w: %q", ErrTargetNotFound, id)
+	}
+	var targetHost model.Host
+	if err := s.db.First(&targetHost, "id = ?", a.HostID).Error; err != nil {
+		return TargetView{}, fmt.Errorf("load target host: %w", err)
+	}
+	protocol := normalizedHostProtocol(targetHost.Protocol)
+	if protocol == "rdp" {
+		if target.PrivateKeyPEM != "" || target.PrivateKeyPath != "" || target.Passphrase != "" {
+			return TargetView{}, errors.New("RDP accounts only support password authentication")
+		}
+		if target.Password == "" && a.Password.GetPlaintext() == "" {
+			return TargetView{}, errors.New("RDP account password is required")
+		}
+		if err := validateRDPFilePolicy(target); err != nil {
+			return TargetView{}, err
+		}
+		a.AuthType = "password"
+		a.PrivateKeyPEM = model.EncryptedField{}
+		a.Passphrase = model.EncryptedField{}
 	}
 	if target.Username == "" {
 		return TargetView{}, errors.New("username is required")
@@ -235,6 +316,7 @@ func (s *DBStore) UpdateTarget(id string, target config.Target) (TargetView, err
 		return TargetView{}, err
 	}
 	a.Username = target.Username
+	a.Domain = target.Domain
 	a.Name = target.Name
 	if a.Name == "" {
 		a.Name = a.Username
@@ -244,6 +326,20 @@ func (s *DBStore) UpdateTarget(id string, target config.Target) (TargetView, err
 	a.InsecureIgnoreHostKey = target.InsecureIgnoreHostKey
 	a.HostKeyFingerprint = target.HostKeyFingerprint
 	a.KnownHostsPath = target.KnownHostsPath
+	a.RDPSecurity = normalizedRDPSecurity(target.RDPSecurity)
+	a.RDPIgnoreCertificate = target.RDPIgnoreCertificate
+	a.RDPCertFingerprints = target.RDPCertFingerprints
+	a.RDPApprovalRequired = target.RDPApprovalRequired
+	a.RDPClipboardRead = target.RDPClipboardRead
+	a.RDPClipboardWrite = target.RDPClipboardWrite
+	a.RDPFileUpload = target.RDPFileUpload
+	a.RDPFileDownload = target.RDPFileDownload
+	a.RDPDriveMapping = target.RDPDriveMapping
+	expiresAt, err := parseTargetExpiry(target.ExpiresAt)
+	if err != nil {
+		return TargetView{}, err
+	}
+	a.ExpiresAt = expiresAt
 	if target.Password != "" {
 		a.AuthType = "password"
 		a.Password = model.NewEncryptedField(target.Password)
@@ -342,6 +438,9 @@ func (s *DBStore) DefaultTarget(_ context.Context, user model.User) (TargetConfi
 		if a.Host.Status == "disabled" {
 			return TargetConfig{}, fmt.Errorf("%w: host %q is disabled", ErrTargetUnavailable, a.HostID)
 		}
+		if normalizedHostProtocol(a.Host.Protocol) != "ssh" {
+			return TargetConfig{}, fmt.Errorf("%w: target %q is not an SSH account", ErrTargetUnavailable, user.RequestedTargetID)
+		}
 		return s.targetConfig(a), nil
 	}
 
@@ -351,6 +450,7 @@ func (s *DBStore) DefaultTarget(_ context.Context, user model.User) (TargetConfi
 		Where("host_accounts.status = ?", "active").
 		Where("host_accounts.expires_at IS NULL OR host_accounts.expires_at > ?", now).
 		Where("hosts.status IS NULL OR hosts.status <> ?", "disabled").
+		Where("LOWER(COALESCE(hosts.protocol, 'ssh')) = ?", "ssh").
 		Order("host_accounts.created_at ASC").
 		First(&account).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -375,42 +475,4 @@ func (s *DBStore) ensureHostAccountUsernameAvailable(hostID, username, exceptID 
 		return fmt.Errorf("host account %q already exists on host %q", username, hostID)
 	}
 	return nil
-}
-
-func normalizeConfigTarget(t config.Target) config.Target {
-	t.ID = strings.TrimSpace(t.ID)
-	t.Name = strings.TrimSpace(t.Name)
-	t.HostID = strings.TrimSpace(t.HostID)
-	t.Group = strings.TrimSpace(t.Group)
-	t.Remark = strings.TrimSpace(t.Remark)
-	t.Host = strings.TrimSpace(t.Host)
-	t.Username = strings.TrimSpace(t.Username)
-	t.Password = strings.TrimSpace(t.Password)
-	t.PrivateKeyPEM = strings.TrimSpace(t.PrivateKeyPEM)
-	t.PrivateKeyPath = strings.TrimSpace(t.PrivateKeyPath)
-	t.HostKeyFingerprint = strings.TrimSpace(t.HostKeyFingerprint)
-	t.KnownHostsPath = strings.TrimSpace(t.KnownHostsPath)
-	if t.Port == 0 {
-		t.Port = 22
-	}
-	if t.Name == "" {
-		t.Name = t.Username
-	}
-	return t
-}
-
-func normalizeConfigTargetUpdate(t config.Target) config.Target {
-	t.ID = strings.TrimSpace(t.ID)
-	t.Name = strings.TrimSpace(t.Name)
-	t.HostID = strings.TrimSpace(t.HostID)
-	t.Group = strings.TrimSpace(t.Group)
-	t.Remark = strings.TrimSpace(t.Remark)
-	t.Host = strings.TrimSpace(t.Host)
-	t.Username = strings.TrimSpace(t.Username)
-	t.Password = strings.TrimSpace(t.Password)
-	t.PrivateKeyPEM = strings.TrimSpace(t.PrivateKeyPEM)
-	t.PrivateKeyPath = strings.TrimSpace(t.PrivateKeyPath)
-	t.HostKeyFingerprint = strings.TrimSpace(t.HostKeyFingerprint)
-	t.KnownHostsPath = strings.TrimSpace(t.KnownHostsPath)
-	return t
 }

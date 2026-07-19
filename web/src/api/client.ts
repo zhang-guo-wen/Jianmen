@@ -159,11 +159,22 @@ export interface TargetRecord {
   expires_at?: string;
   host?: string;
   port?: number;
+  protocol?: 'ssh' | 'rdp' | string;
   username?: string;
+  domain?: string;
   auth_methods?: string[];
   insecure_ignore_host_key?: boolean;
   host_key_fingerprint?: string;
   known_hosts_path?: string;
+  rdp_security?: string;
+  rdp_ignore_certificate?: boolean;
+  rdp_cert_fingerprints?: string;
+  rdp_approval_required?: boolean;
+  rdp_clipboard_read?: boolean;
+  rdp_clipboard_write?: boolean;
+  rdp_file_upload?: boolean;
+  rdp_file_download?: boolean;
+  rdp_drive_mapping?: boolean;
   status?: string;
   [key: string]: unknown;
   can_manage?: boolean;
@@ -172,6 +183,7 @@ export interface TargetRecord {
 export interface TargetPayload {
   id: string;
   host_id?: string;
+  protocol?: 'ssh' | 'rdp' | string;
   name: string;
   group?: string;
   remark?: string;
@@ -180,6 +192,7 @@ export interface TargetPayload {
   host: string;
   port: number;
   username: string;
+  domain?: string;
   password: string;
   private_key_path: string;
   private_key_pem: string;
@@ -187,6 +200,38 @@ export interface TargetPayload {
   insecure_ignore_host_key: boolean;
   host_key_fingerprint: string;
   known_hosts_path: string;
+  rdp_security?: string;
+  rdp_ignore_certificate?: boolean;
+  rdp_cert_fingerprints?: string;
+  rdp_approval_required?: boolean;
+  rdp_clipboard_read?: boolean;
+  rdp_clipboard_write?: boolean;
+  rdp_file_upload?: boolean;
+  rdp_file_download?: boolean;
+  rdp_drive_mapping?: boolean;
+}
+
+export interface WebRDPEffectivePolicy {
+  clipboard_read: boolean;
+  clipboard_write: boolean;
+  file_upload: boolean;
+  file_download: boolean;
+  drive_mapping: boolean;
+}
+
+export interface WebRDPTicketPayload {
+  target_id: string;
+  width: number;
+  height: number;
+  dpi: number;
+}
+
+export interface WebRDPTicketResponse {
+  ticket: string;
+  target_id: string;
+  effective_policy: WebRDPEffectivePolicy;
+  approval_id?: string;
+  access_expires_at?: string;
 }
 
 // ── Host ───────────────────────────────────────────────────────────────
@@ -197,6 +242,7 @@ export interface HostView {
   group?: string;
   address: string;
   port: number;
+  protocol?: 'ssh' | 'rdp' | string;
   remark?: string;
   status?: string;
   account_count?: number;
@@ -211,6 +257,7 @@ export interface HostPayload {
   group?: string;
   address: string;
   port: number;
+  protocol?: 'ssh' | 'rdp' | string;
   remark?: string;
   status?: string;
   account_count?: number;
@@ -239,14 +286,73 @@ export interface SessionRecord {
   protocol?: string;
   protocol_subtype?: string;
   replay_dir?: string;
+  has_replay?: boolean;
+  outcome?: string;
+  failure_code?: string;
+  failure_message?: string;
+  recording_status?: string;
   log_count?: number;
   [key: string]: unknown;
+}
+
+export interface RDPAuditSessionRecord {
+  id: string;
+  user_id?: string;
+  username?: string;
+  protocol: string;
+  protocol_subtype?: string;
+  resource_type?: string;
+  resource_id?: string;
+  host_id?: string;
+  account_id?: string;
+  target_name?: string;
+  target_address?: string;
+  account_name?: string;
+  account_username?: string;
+  client_ip?: string;
+  started_at?: string;
+  ended_at?: string;
+  state?: string;
+  outcome?: string;
+  failure_code?: string;
+  failure_message?: string;
+  recording_status?: string;
+  has_replay: boolean;
+  log_count?: number;
+}
+
+export interface AccessRequestRecord {
+  id: string;
+  requester_id: string;
+  resource_type: string;
+  resource_id: string;
+  protocol: string;
+  actions: string[];
+  reason: string;
+  status: 'pending' | 'approved' | 'rejected' | 'cancelled' | string;
+  requested_at: string;
+  access_starts_at?: string;
+  access_expires_at?: string;
+  decided_by?: string;
+  decided_at?: string;
+  decision_remark?: string;
+  cancelled_at?: string;
+}
+
+export interface AccessRequestPayload {
+  resource_type: 'host_account';
+  resource_id: string;
+  protocol: 'rdp';
+  actions: string[];
+  reason: string;
+  access_starts_at?: string;
+  access_expires_at?: string;
 }
 
 export interface OnlineSessionRecord {
   id: string;
   audit_session_id: string;
-  resource_type: 'host' | 'database_instance';
+  resource_type: 'host' | 'host_account' | 'database_instance';
   resource_id: string;
   account_id?: string;
   instance: string;
@@ -793,6 +899,8 @@ export interface TestConnectionResult {
   message?: string;
   latency_ms?: number;
   error?: string;
+  verification_scope?: 'guacd_handshake';
+  authentication_verified?: boolean;
 }
 
 // ── helpers ────────────────────────────────────────────────────────────
@@ -1035,6 +1143,47 @@ export const apiClient = {
     ),
   getSessionReplay: (id: string | number) =>
     request<string>(`/api/audit/ssh/${encodeURIComponent(String(id))}/replay`),
+  getRDPSessions: (params?: {
+    user_id?: string;
+    account_id?: string;
+    from?: string;
+    to?: string;
+    outcome?: string;
+    page?: number;
+    page_size?: number;
+  }) =>
+    request<PageResponse<RDPAuditSessionRecord>>(
+      `/api/audit/rdp${buildQS(params as Record<string, string | number | undefined>)}`
+    ),
+  getRDPRecordingURL: (id: string | number) =>
+    `${API_BASE_URL}/api/audit/rdp/${encodeURIComponent(String(id))}/recording`,
+
+  // RDP access approvals
+  getAccessRequests: (params?: {
+    requester_id?: string;
+    resource_type?: string;
+    resource_id?: string;
+    protocol?: string;
+    status?: string;
+    page?: number;
+    page_size?: number;
+  }) =>
+    request<PageResponse<AccessRequestRecord>>(
+      `/api/access-requests${buildQS(params as Record<string, string | number | undefined>)}`
+    ),
+  createAccessRequest: (payload: AccessRequestPayload) =>
+    request<AccessRequestRecord>('/api/access-requests', {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    }),
+  decideAccessRequest: (id: string, decision: 'approve' | 'reject' | 'cancel', remark = '') =>
+    request<AccessRequestRecord>(
+      `/api/access-requests/${encodeURIComponent(id)}/${decision}`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ remark })
+      }
+    ),
 
   // database gateway & instances
   getDBGateway: (protocol = 'mysql') =>
@@ -1355,5 +1504,10 @@ export const apiClient = {
     }),
 	getEncryptionKey: () => request<{ key: string }>('/api/init/encryption-key', { method: 'POST' }),
 	logout: () => request<void>('/api/logout', { method: 'POST' }),
-	createWebTerminalTicket: (targetId: string) => request<{ ticket: string; target_id: string }>('/api/web-terminal/tickets', { method: 'POST', body: JSON.stringify({ target_id: targetId }) })
+	createWebTerminalTicket: (targetId: string) => request<{ ticket: string; target_id: string }>('/api/web-terminal/tickets', { method: 'POST', body: JSON.stringify({ target_id: targetId }) }),
+  createWebRDPTicket: (payload: WebRDPTicketPayload) =>
+    request<WebRDPTicketResponse>('/api/web-rdp/tickets', {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    })
 };

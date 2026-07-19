@@ -11,6 +11,7 @@ type Host struct {
 	Name      string    `gorm:"size:255;not null" json:"name"`
 	Address   string    `gorm:"index;index:idx_hosts_address_port,priority:1;size:255;not null" json:"address"`
 	Port      int       `gorm:"index:idx_hosts_address_port,priority:2;not null;default:22" json:"port"`
+	Protocol  string    `gorm:"index;size:16;not null;default:ssh" json:"protocol"`
 	GroupName string    `gorm:"size:128" json:"group"`
 	Remark    string    `gorm:"type:text" json:"remark,omitempty"`
 	Status    string    `gorm:"index;size:32;not null;default:active" json:"status"`
@@ -23,6 +24,7 @@ type HostAccount struct {
 	HostID                string         `gorm:"index;index:idx_host_accounts_host_username,priority:1;index:idx_host_accounts_host_status,priority:1;size:64;not null" json:"host_id"`
 	Name                  string         `gorm:"size:128;not null;default:''" json:"name"`
 	Username              string         `gorm:"index:idx_host_accounts_host_username,priority:2;size:128;not null" json:"username"`
+	Domain                string         `gorm:"size:255" json:"domain,omitempty"`
 	AuthType              string         `gorm:"size:32" json:"auth_type,omitempty"`
 	Password              EncryptedField `gorm:"type:text" json:"-"`
 	PrivateKeyPEM         EncryptedField `gorm:"type:text" json:"-"`
@@ -30,6 +32,15 @@ type HostAccount struct {
 	InsecureIgnoreHostKey bool           `gorm:"not null;default:false" json:"insecure_ignore_host_key"`
 	HostKeyFingerprint    string         `gorm:"size:128" json:"host_key_fingerprint,omitempty"`
 	KnownHostsPath        string         `gorm:"size:255" json:"known_hosts_path,omitempty"`
+	RDPSecurity           string         `gorm:"size:32;not null;default:any" json:"rdp_security,omitempty"`
+	RDPIgnoreCertificate  bool           `gorm:"not null;default:false" json:"rdp_ignore_certificate"`
+	RDPCertFingerprints   string         `gorm:"type:text" json:"rdp_cert_fingerprints,omitempty"`
+	RDPApprovalRequired   bool           `gorm:"not null;default:false" json:"rdp_approval_required"`
+	RDPClipboardRead      bool           `gorm:"not null;default:false" json:"rdp_clipboard_read"`
+	RDPClipboardWrite     bool           `gorm:"not null;default:false" json:"rdp_clipboard_write"`
+	RDPFileUpload         bool           `gorm:"not null;default:false" json:"rdp_file_upload"`
+	RDPFileDownload       bool           `gorm:"not null;default:false" json:"rdp_file_download"`
+	RDPDriveMapping       bool           `gorm:"not null;default:false" json:"rdp_drive_mapping"`
 	Status                string         `gorm:"index;index:idx_host_accounts_host_status,priority:2;index:idx_host_accounts_status_expires,priority:1;size:32;not null;default:active" json:"status"`
 	ResourceSeq           int            `gorm:"index;not null;default:0" json:"resource_seq"`
 	ResourceID            string         `gorm:"uniqueIndex;size:4" json:"resource_id"`

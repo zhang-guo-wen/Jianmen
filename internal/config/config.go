@@ -19,6 +19,8 @@ type Config struct {
 	Database           DatabaseConfig           `json:"database"`
 	DatabaseGateway    DatabaseGatewayConfig    `json:"database_gateway"`
 	ApplicationGateway ApplicationGatewayConfig `json:"application_gateway"`
+	WebRDP             WebRDPConfig             `json:"web_rdp"`
+	ObjectStorage      ObjectStorageConfig      `json:"object_storage"`
 	Recording          RecordingConfig          `json:"recording"`
 	Users              []User                   `json:"users"`
 	Targets            []Target                 `json:"targets"`
@@ -115,6 +117,7 @@ type User struct {
 type Target struct {
 	ID                    string `json:"id"`
 	HostID                string `json:"host_id"`
+	Protocol              string `json:"protocol"`
 	Name                  string `json:"name"`
 	Group                 string `json:"group"`
 	Remark                string `json:"remark"`
@@ -123,6 +126,7 @@ type Target struct {
 	Host                  string `json:"host"`
 	Port                  int    `json:"port"`
 	Username              string `json:"username"`
+	Domain                string `json:"domain"`
 	Password              string `json:"password"`
 	PrivateKeyPath        string `json:"private_key_path"`
 	PrivateKeyPEM         string `json:"private_key_pem"`
@@ -130,6 +134,15 @@ type Target struct {
 	InsecureIgnoreHostKey bool   `json:"insecure_ignore_host_key"`
 	HostKeyFingerprint    string `json:"host_key_fingerprint"`
 	KnownHostsPath        string `json:"known_hosts_path"`
+	RDPSecurity           string `json:"rdp_security"`
+	RDPIgnoreCertificate  bool   `json:"rdp_ignore_certificate"`
+	RDPCertFingerprints   string `json:"rdp_cert_fingerprints"`
+	RDPApprovalRequired   bool   `json:"rdp_approval_required"`
+	RDPClipboardRead      bool   `json:"rdp_clipboard_read"`
+	RDPClipboardWrite     bool   `json:"rdp_clipboard_write"`
+	RDPFileUpload         bool   `json:"rdp_file_upload"`
+	RDPFileDownload       bool   `json:"rdp_file_download"`
+	RDPDriveMapping       bool   `json:"rdp_drive_mapping"`
 }
 
 func Load(path string) (*Config, error) {
@@ -211,6 +224,7 @@ func (c *Config) applyDefaults() {
 		c.ApplicationGateway.PortStart = 47110
 		c.ApplicationGateway.PortEnd = 47199
 	}
+	c.applyWebRDPDefaults()
 	if c.Database.Enabled && c.Database.Driver == "" {
 		c.Database.Driver = "sqlite"
 	}
@@ -219,7 +233,11 @@ func (c *Config) applyDefaults() {
 	}
 	for i := range c.Targets {
 		if c.Targets[i].Port == 0 {
-			c.Targets[i].Port = 22
+			if strings.EqualFold(strings.TrimSpace(c.Targets[i].Protocol), "rdp") {
+				c.Targets[i].Port = 3389
+			} else {
+				c.Targets[i].Port = 22
+			}
 		}
 	}
 }
@@ -262,6 +280,9 @@ func (c *Config) Validate() error {
 		if c.ApplicationGateway.PortStart > c.ApplicationGateway.PortEnd {
 			return fmt.Errorf("application_gateway.port_start (%d) > port_end (%d)", c.ApplicationGateway.PortStart, c.ApplicationGateway.PortEnd)
 		}
+	}
+	if err := c.validateWebRDP(); err != nil {
+		return err
 	}
 	// Users may be empty — the setup wizard creates the first admin user.
 	if len(c.Users) == 0 {

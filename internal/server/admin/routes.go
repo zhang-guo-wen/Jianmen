@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"jianmen/internal/frontend"
+	"jianmen/internal/handler/webrdp"
 	"jianmen/internal/rbac"
 )
 
@@ -43,6 +44,8 @@ func (s *Server) routes() http.Handler {
 	s.muxHandle(mux, "/api/targets/", s.withAuthAndUser(s.handleTarget))
 	s.muxHandle(mux, "/api/web-terminal/tickets", s.withAuthAndUser(s.handleWebTerminalTicket))
 	s.muxHandle(mux, webTerminalPath, s.handleWebTerminal)
+	s.muxHandle(mux, webrdp.TicketPath, s.withAuthAndUser(s.handleWebRDPTicket))
+	s.muxHandle(mux, webrdp.Path, s.handleWebRDP)
 	s.muxHandle(mux, "/api/sessions", s.withAuthAndUser(s.withPermission(rbac.ActionSessionView, s.handleSessions)))
 	s.muxHandle(mux, "/api/sessions/", s.withAuthAndUser(s.withAnyPermission([]string{rbac.ActionAuditView, rbac.ActionSessionView}, s.handleSessionArtifact)))
 	s.muxHandle(mux, "/api/online-sessions", s.withAuthAndUser(s.handleOnlineSessions))
@@ -73,6 +76,8 @@ func (s *Server) routes() http.Handler {
 
 	s.muxHandle(mux, "/api/audit/ssh", s.withAuthAndUser(s.handleAuditSSH))
 	s.muxHandle(mux, "/api/audit/db", s.withAuthAndUser(s.handleAuditDB))
+	s.muxHandle(mux, "/api/audit/rdp", s.withAuthAndUser(s.handleRDPAudit))
+	s.muxHandle(mux, "/api/audit/rdp/", s.withAuthAndUser(s.handleRDPAuditItem))
 	s.muxHandle(mux, "/api/audit/operations", s.withAuthAndUser(s.handleAuditOperations))
 	s.muxHandle(mux, "/api/audit/logins", s.withAuthAndUser(s.handleAuditLogins))
 	s.muxHandle(mux, "/api/audit/", s.withAuthAndUser(s.handleAuditArtifact))
@@ -97,6 +102,8 @@ func (s *Server) routes() http.Handler {
 	s.muxHandle(mux, "/api/resource-grants", s.withAuthAndUser(s.handleResourceGrants))
 	s.muxHandle(mux, "/api/resource-grants/check", s.withAuthAndUser(s.handleResourceGrantCheck))
 	s.muxHandle(mux, "/api/resource-grants/", s.withAuthAndUser(s.handleResourceGrant))
+	s.muxHandle(mux, "/api/access-requests", s.withAuthAndUser(s.handleAccessRequests))
+	s.muxHandle(mux, "/api/access-requests/", s.withAuthAndUser(s.handleAccessRequest))
 
 	return logRequests(s.logger, withCORS(s.cfg.Admin.CORSAllowedOrigins, mux))
 }

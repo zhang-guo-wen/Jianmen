@@ -1,5 +1,7 @@
 package dbproxy
 
+import "strings"
+
 var allowedRedisPostAuthCommands = map[string]struct{}{
 	"APPEND": {}, "ASKING": {}, "BITCOUNT": {}, "BITFIELD": {}, "BITFIELD_RO": {},
 	"BITOP": {}, "BITPOS": {}, "BLMOVE": {}, "BLMPOP": {}, "BLPOP": {},
@@ -42,12 +44,67 @@ var allowedRedisPostAuthCommands = map[string]struct{}{
 	"ZRANGESTORE": {}, "ZRANK": {}, "ZREM": {}, "ZREMRANGEBYLEX": {},
 	"ZREMRANGEBYRANK": {}, "ZREMRANGEBYSCORE": {}, "ZREVRANGE": {}, "ZREVRANK": {},
 	"ZSCAN": {}, "ZSCORE": {}, "ZUNION": {}, "ZUNIONSTORE": {},
-	"COMMAND": {}, "SELECT": {},
+	"COMMAND": {}, "SELECT": {}, "HELLO": {}, "CLIENT": {},
+	"SUBSCRIBE": {}, "PSUBSCRIBE": {}, "SSUBSCRIBE": {},
+	"UNSUBSCRIBE": {}, "PUNSUBSCRIBE": {}, "SUNSUBSCRIBE": {},
 }
 
 func isAllowedRedisPostAuthCommand(command string) bool {
 	_, allowed := allowedRedisPostAuthCommands[command]
 	return allowed && redisCommandHasAuditSpec(command)
+}
+
+func isAllowedRedisPostAuthCommandArgs(args []string) bool {
+	if len(args) == 0 {
+		return false
+	}
+	command := upperRedisCommand(args[0])
+	if !isAllowedRedisPostAuthCommand(command) {
+		return false
+	}
+	switch command {
+	case "HELLO":
+		if len(args) != 2 && len(args) != 4 {
+			return false
+		}
+		if args[1] != "2" && args[1] != "3" {
+			return false
+		}
+		return len(args) == 2 || (upperRedisCommand(args[2]) == "SETNAME" && args[3] != "")
+	case "CLIENT":
+		return isAllowedRedisClientCommand(args)
+	case "SUBSCRIBE", "PSUBSCRIBE", "SSUBSCRIBE":
+		return len(args) >= 2
+	default:
+		return true
+	}
+}
+
+func isAllowedRedisClientCommand(args []string) bool {
+	if len(args) < 2 {
+		return false
+	}
+	switch upperRedisCommand(args[1]) {
+	case "ID", "GETNAME", "INFO":
+		return len(args) == 2
+	case "SETNAME":
+		return len(args) == 3 && args[2] != ""
+	case "SETINFO":
+		if len(args) != 4 {
+			return false
+		}
+		option := strings.ToUpper(args[2])
+		return option == "LIB-NAME" || option == "LIB-VER"
+	default:
+		return false
+	}
+}
+
+func upperRedisCommand(value string) string {
+	if !validRedisCommandName(value) {
+		return ""
+	}
+	return strings.ToUpper(value)
 }
 
 func redisCommandHasAuditSpec(command string) bool {

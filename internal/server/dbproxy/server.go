@@ -16,15 +16,16 @@ import (
 )
 
 type Gateway struct {
-	cfg            config.DatabaseGatewayConfig
-	store          databaseAccountResolver
-	db             *gorm.DB
-	replayDir      string
-	logger         *slog.Logger
-	authorizer     connectionAuthorizer
-	audit          auditWriter
-	auditRequired  bool
-	onlineSessions *online.Registry
+	cfg             config.DatabaseGatewayConfig
+	store           databaseAccountResolver
+	db              *gorm.DB
+	replayDir       string
+	logger          *slog.Logger
+	authorizer      connectionAuthorizer
+	audit           auditWriter
+	auditRequired   bool
+	onlineSessions  *online.Registry
+	postgresCancels postgresCancelRegistry
 }
 
 type databaseAccountResolver interface {
@@ -61,17 +62,18 @@ func (g *Gateway) ListenAndServe(ctx context.Context) error {
 }
 
 type gatewayConn struct {
-	client        net.Conn
-	protocol      string
-	accountID     string
-	instanceID    string
-	accountName   string
-	upstream      net.Conn
-	upstreamAddr  string
-	userID        string
-	accountUser   string // 上游数据库登录名
-	instanceName  string // 数据库实例名称
-	userSessionID string
+	client                net.Conn
+	protocol              string
+	accountID             string
+	instanceID            string
+	accountName           string
+	upstream              net.Conn
+	upstreamAddr          string
+	userID                string
+	accountUser           string // 上游数据库登录名
+	instanceName          string // 数据库实例名称
+	userSessionID         string
+	postgresCancelCleanup func()
 }
 
 func upstreamAddress(inst model.DatabaseInstance) string {
@@ -93,6 +95,7 @@ func (g *Gateway) handleGatewayConn(client net.Conn, conn *gatewayConn) {
 	if conn.client != nil {
 		client = conn.client
 	}
+	defer conn.releasePostgresCancel()
 	defer client.Close()
 	defer conn.upstream.Close()
 
@@ -167,6 +170,15 @@ func (g *Gateway) handleGatewayConn(client net.Conn, conn *gatewayConn) {
 	relayGatewayConnection(client, conn.upstream, observer)
 }
 
+func (connection *gatewayConn) releasePostgresCancel() {
+	if connection == nil || connection.postgresCancelCleanup == nil {
+		return
+	}
+	cleanup := connection.postgresCancelCleanup
+	connection.postgresCancelCleanup = nil
+	cleanup()
+}
+
 func (g *Gateway) writeAuditUnavailableResponse(client net.Conn, protocol string) {
 	decision := newObserverFatalDecision(observerErrorAuditFailure, "database gateway audit unavailable")
 	response := newQueryObserver(protocol, nil).ErrorResponse(*decision)
@@ -174,105 +186,5 @@ func (g *Gateway) writeAuditUnavailableResponse(client net.Conn, protocol string
 		if _, err := client.Write(response); err != nil {
 			g.logger.Warn("db gateway failed to write audit unavailable response", "error", err)
 		}
-	}
-}
-
-// handlePG implements two-layer PostgreSQL authentication:
-// 1. Extract compact username from PG StartupMessage
-// 2. Request cleartext password from client (bastion user auth)
-// 3. Validate via user session password
-// 4. RBAC check
-// 5. Check account disabled/expiry
-// 6. Connect to upstream and relay auth with Password
-func (g *Gateway) handlePG(ctx context.Context, client net.Conn, firstByte byte) *gatewayConn {
-	startupMessage, err := readPostgresStartupMessage(client, firstByte)
-	if err != nil {
-		g.logger.Warn("db gateway invalid PostgreSQL StartupMessage")
-		return nil
-	}
-	username, database, err := parsePostgresStartupMessage(startupMessage)
-	if err != nil {
-		g.logger.Warn("db gateway failed to parse PostgreSQL StartupMessage")
-		_ = writePostgresAuthenticationError(client)
-		return nil
-	}
-
-	resolved, err := g.resolveAccount(ctx, username)
-	if err != nil {
-		g.logger.Warn("db gateway account resolution failed")
-		_ = writePostgresAuthenticationError(client)
-		return nil
-	}
-	acct := resolved.account
-	if err := validateResolvedAccountProtocol(resolved, databaseProtocolPostgreSQL); err != nil {
-		g.logger.Warn("PostgreSQL gateway rejected cross-protocol account")
-		if writeErr := writePostgresAccountProtocolError(client); writeErr != nil {
-			g.logger.Warn("PostgreSQL gateway failed to send protocol rejection")
-		}
-		return nil
-	}
-
-	if err := writePostgresMessage(client, 'R', []byte{0, 0, 0, 3}); err != nil {
-		return nil
-	}
-	password, err := readPostgresPasswordMessage(client)
-	if err != nil {
-		g.logger.Warn("db gateway invalid PostgreSQL PasswordMessage")
-		_ = writePostgresAuthenticationError(client)
-		return nil
-	}
-
-	if err := g.authenticatePostgresConnection(ctx, resolved, password); err != nil {
-		g.logger.Warn("db gateway authentication or authorization failed")
-		_ = writePostgresAuthenticationError(client)
-		return nil
-	}
-	userID := resolved.user.ID
-
-	// Check account disabled and expiry
-	if acct.Status == "disabled" {
-		g.logger.Warn("db gateway account disabled")
-		_ = writePostgresAuthenticationError(client)
-		return nil
-	}
-	if acct.ExpiresAt != nil && time.Now().UTC().After(*acct.ExpiresAt) {
-		g.logger.Warn("db gateway account expired")
-		_ = writePostgresAuthenticationError(client)
-		return nil
-	}
-	if acct.Instance.Status == "disabled" {
-		g.logger.Warn("db gateway instance disabled")
-		_ = writePostgresAuthenticationError(client)
-		return nil
-	}
-
-	// Connect to upstream and negotiate its configured TLS policy before authentication.
-	upstream, err := dialPostgresUpstream(ctx, acct.Instance)
-	if err != nil {
-		g.logger.Warn("db gateway upstream connect failed")
-		_ = writePostgresAuthenticationError(client)
-		return nil
-	}
-
-	// Forward a new StartupMessage to upstream with the upstream username and target database.
-	startupMsg := BuildPostgresUpstreamStartupMessage(acct.Username, database)
-
-	if _, err := upstream.Write(startupMsg); err != nil {
-		upstream.Close()
-		return nil
-	}
-
-	if err := authenticatePostgresUpstream(upstream, client, acct.Username, acct.Password.GetPlaintext()); err != nil {
-		g.logger.Warn("db gateway PostgreSQL upstream authentication failed")
-		_ = writePostgresAuthenticationError(client)
-		upstream.Close()
-		return nil
-	}
-
-	return &gatewayConn{
-		protocol: "postgres", accountID: acct.ID, instanceID: acct.InstanceID, accountName: resolved.rawName,
-		upstream: upstream, upstreamAddr: upstreamAddress(acct.Instance), userID: userID,
-		accountUser: acct.Username, instanceName: acct.Instance.Name,
-		userSessionID: resolved.userSessionID,
 	}
 }

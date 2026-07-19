@@ -55,7 +55,12 @@ func sendFakeMySQLHandshakeWithTLS(conn net.Conn, tlsEnabled bool) ([]byte, erro
 	if err != nil {
 		return nil, err
 	}
-	capFlags := uint32(mysqlClientProtocol41 | mysqlClientSecureConnection | mysqlClientPluginAuth)
+	capFlags := uint32(
+		mysqlClientConnectWithDB |
+			mysqlClientProtocol41 |
+			mysqlClientSecureConnection |
+			mysqlClientPluginAuth,
+	)
 	if tlsEnabled {
 		capFlags |= mysqlClientSSL
 	}
@@ -228,7 +233,7 @@ func (g *Gateway) handleMySQLWithListener(ctx context.Context, client net.Conn, 
 	}
 
 	// Connect to upstream and negotiate its configured TLS policy before sending credentials.
-	upstream, hs, err := dialMySQLUpstream(ctx, acct.Instance)
+	upstream, hs, err := dialMySQLUpstream(ctx, acct.Instance, obs.Database)
 	if err != nil {
 		g.logger.Warn("mysql gateway upstream connect failed")
 		_ = writeMySQLClientAuthError(client, clientAuthSeq)
@@ -240,7 +245,14 @@ func (g *Gateway) handleMySQLWithListener(ctx context.Context, client net.Conn, 
 	if dbtls.IsVerified(upstream) {
 		upstreamLoginSequence = 2
 	}
-	upstreamLogin, err := BuildMySQLUpstreamLogin(hs, acct.Username, acct.Password.GetPlaintext(), hs.AuthPluginName, upstreamLoginSequence)
+	upstreamLogin, err := buildMySQLUpstreamLogin(
+		hs,
+		acct.Username,
+		acct.Password.GetPlaintext(),
+		obs.Database,
+		hs.AuthPluginName,
+		upstreamLoginSequence,
+	)
 	if err != nil {
 		g.logger.Warn("mysql gateway failed to build upstream login")
 		_ = writeMySQLClientAuthError(client, clientAuthSeq)

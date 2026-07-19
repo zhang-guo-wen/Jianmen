@@ -10,7 +10,14 @@ $required = @(
   'npm run build',
   'go build ./...',
   'go test ./... -count=1',
-  'go vet ./...'
+  'go vet ./...',
+  'FuzzMySQLPacketFrames',
+  'FuzzReadPostgresStartupMessage',
+  'FuzzReadPostgresTypedMessage',
+  'FuzzRedisRESPFrameLength',
+  'FuzzRedisObserverClientFrames',
+  'FuzzRedisAuthenticationCommandParser',
+  'JIANMEN_REQUIRE_DOCKER: "1"'
 )
 $content = Get-Content -LiteralPath $ciWorkflowPath -Raw
 foreach ($command in $required) {

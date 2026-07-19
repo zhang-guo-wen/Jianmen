@@ -11,6 +11,8 @@ import (
 	"net"
 	"strconv"
 	"strings"
+
+	"github.com/xdg-go/stringprep"
 )
 
 const (
@@ -87,7 +89,7 @@ func runPostgresSCRAMWithNonce(conn net.Conn, username, password string, offered
 
 	clientFinalWithoutProof := "c=biws,r=" + combinedNonce
 	authMessage := clientFirstBare + "," + serverFirst + "," + clientFinalWithoutProof
-	saltedPassword := PBKDF2Key([]byte(password), salt, iterations, sha256.Size)
+	saltedPassword := PBKDF2Key(normalizePostgresSCRAMPassword(password), salt, iterations, sha256.Size)
 	clientKey := HMACSHA256(saltedPassword, []byte("Client Key"))
 	storedKey := SHA256Hash(clientKey)
 	clientSignature := HMACSHA256(storedKey, []byte(authMessage))
@@ -124,6 +126,14 @@ func runPostgresSCRAMWithNonce(conn net.Conn, username, password string, offered
 		return errors.New("PostgreSQL SCRAM server signature mismatch")
 	}
 	return nil
+}
+
+func normalizePostgresSCRAMPassword(password string) []byte {
+	normalized, err := stringprep.SASLprep.Prepare(password)
+	if err != nil {
+		return []byte(password)
+	}
+	return []byte(normalized)
 }
 
 func postgresSCRAMMechanismOffered(payload []byte, wanted string) bool {

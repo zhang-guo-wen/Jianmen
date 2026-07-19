@@ -51,7 +51,7 @@ func (err *databaseProbeError) Error() string { return err.message }
 func (err *databaseProbeError) Unwrap() error { return err.cause }
 
 func probeMySQLAuthentication(ctx context.Context, instance model.DatabaseInstance, username, password string) error {
-	conn, handshake, err := dialMySQLUpstream(ctx, instance)
+	conn, handshake, err := dialMySQLUpstream(ctx, instance, "")
 	if err != nil {
 		return fmt.Errorf("connect MySQL upstream: %w", err)
 	}

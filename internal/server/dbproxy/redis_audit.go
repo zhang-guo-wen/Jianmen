@@ -267,7 +267,8 @@ func redisAuditNoKey(command string) bool {
 	switch command {
 	case "ASKING", "COMMAND", "DBSIZE", "DISCARD", "ECHO", "EXEC", "INFO",
 		"KEYS", "LASTSAVE", "MULTI", "PING", "QUIT", "RANDOMKEY", "READONLY",
-		"READWRITE", "SCAN", "SELECT", "TIME", "UNWATCH", "WAIT":
+		"READWRITE", "SCAN", "SELECT", "TIME", "UNWATCH", "WAIT", "HELLO", "CLIENT",
+		"SUBSCRIBE", "PSUBSCRIBE", "SSUBSCRIBE", "UNSUBSCRIBE", "PUNSUBSCRIBE", "SUNSUBSCRIBE":
 		return true
 	default:
 		return false

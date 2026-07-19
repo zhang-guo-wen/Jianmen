@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"strings"
 )
 
 const (
@@ -20,6 +21,19 @@ const (
 type postgresWireMessage struct {
 	kind    byte
 	payload []byte
+}
+
+type postgresStartupParameter struct {
+	name  string
+	value string
+}
+
+type postgresStartup struct {
+	protocolMinor      uint32
+	parameters         []postgresStartupParameter
+	unsupportedOptions []string
+	username           string
+	database           string
 }
 
 func (message postgresWireMessage) raw() []byte {
@@ -49,62 +63,93 @@ func readPostgresStartupMessage(conn net.Conn, firstByte byte) ([]byte, error) {
 }
 
 func parsePostgresStartupMessage(message []byte) (string, string, error) {
+	startup, err := parsePostgresStartup(message)
+	if err != nil {
+		return "", "", err
+	}
+	return startup.username, startup.database, nil
+}
+
+func parsePostgresStartup(message []byte) (postgresStartup, error) {
 	if len(message) < minPostgresStartupMessageBytes || len(message) > maxPostgresStartupMessageBytes {
-		return "", "", fmt.Errorf("invalid PostgreSQL StartupMessage size %d", len(message))
+		return postgresStartup{}, fmt.Errorf("invalid PostgreSQL StartupMessage size %d", len(message))
 	}
 	if declared := int(binary.BigEndian.Uint32(message[:4])); declared != len(message) {
-		return "", "", fmt.Errorf("PostgreSQL StartupMessage length mismatch: declared %d, read %d", declared, len(message))
+		return postgresStartup{}, fmt.Errorf(
+			"PostgreSQL StartupMessage length mismatch: declared %d, read %d",
+			declared,
+			len(message),
+		)
 	}
-	if protocol := binary.BigEndian.Uint32(message[4:8]); protocol != postgresProtocolVersion30 {
-		return "", "", fmt.Errorf("unsupported PostgreSQL protocol version %d", protocol)
+	protocol := binary.BigEndian.Uint32(message[4:8])
+	if protocol>>16 != postgresProtocolVersion30>>16 {
+		return postgresStartup{}, fmt.Errorf("unsupported PostgreSQL protocol version %d", protocol)
 	}
+	startup := postgresStartup{protocolMinor: protocol & 0xffff}
 	parameters := message[8:]
 	if len(parameters) == 0 || parameters[len(parameters)-1] != 0 {
-		return "", "", errors.New("PostgreSQL StartupMessage is missing its final terminator")
+		return postgresStartup{}, errors.New("PostgreSQL StartupMessage is missing its final terminator")
 	}
 
-	var username, database string
 	sawFinalTerminator := false
+	sawUser := false
+	sawDatabase := false
 	for position := 0; position < len(parameters); {
 		if parameters[position] == 0 {
 			if position != len(parameters)-1 {
-				return "", "", errors.New("PostgreSQL StartupMessage contains data after its final terminator")
+				return postgresStartup{}, errors.New(
+					"PostgreSQL StartupMessage contains data after its final terminator",
+				)
 			}
 			sawFinalTerminator = true
 			break
 		}
 		keyEnd := indexPostgresNUL(parameters, position)
 		if keyEnd < 0 {
-			return "", "", errors.New("PostgreSQL StartupMessage key is not terminated")
+			return postgresStartup{}, errors.New("PostgreSQL StartupMessage key is not terminated")
 		}
 		valueStart := keyEnd + 1
 		valueEnd := indexPostgresNUL(parameters, valueStart)
 		if valueEnd < 0 {
-			return "", "", errors.New("PostgreSQL StartupMessage value is not terminated")
+			return postgresStartup{}, errors.New("PostgreSQL StartupMessage value is not terminated")
 		}
 		key := string(parameters[position:keyEnd])
 		value := string(parameters[valueStart:valueEnd])
+		if key == "" {
+			return postgresStartup{}, errors.New("PostgreSQL StartupMessage parameter name is empty")
+		}
+		startup.parameters = append(startup.parameters, postgresStartupParameter{name: key, value: value})
 		switch key {
 		case "user":
-			if username != "" {
-				return "", "", errors.New("PostgreSQL StartupMessage contains duplicate user parameters")
+			if sawUser {
+				return postgresStartup{}, errors.New(
+					"PostgreSQL StartupMessage contains duplicate user parameters",
+				)
 			}
-			username = value
+			sawUser = true
+			startup.username = value
 		case "database":
-			if database != "" {
-				return "", "", errors.New("PostgreSQL StartupMessage contains duplicate database parameters")
+			if sawDatabase {
+				return postgresStartup{}, errors.New(
+					"PostgreSQL StartupMessage contains duplicate database parameters",
+				)
 			}
-			database = value
+			sawDatabase = true
+			startup.database = value
+		default:
+			if strings.HasPrefix(key, "_pq_.") {
+				startup.unsupportedOptions = append(startup.unsupportedOptions, key)
+			}
 		}
 		position = valueEnd + 1
 	}
 	if !sawFinalTerminator {
-		return "", "", errors.New("PostgreSQL StartupMessage is missing its final terminator")
+		return postgresStartup{}, errors.New("PostgreSQL StartupMessage is missing its final terminator")
 	}
-	if username == "" {
-		return "", "", errors.New("PostgreSQL StartupMessage user is required")
+	if startup.username == "" {
+		return postgresStartup{}, errors.New("PostgreSQL StartupMessage user is required")
 	}
-	return username, database, nil
+	return startup, nil
 }
 
 func readPostgresPasswordMessage(conn net.Conn) (string, error) {
@@ -148,8 +193,24 @@ func writePostgresMessage(conn net.Conn, kind byte, payload []byte) error {
 		return fmt.Errorf("PostgreSQL message payload is too large: %d", len(payload))
 	}
 	message := postgresWireMessage{kind: kind, payload: payload}
-	if _, err := conn.Write(message.raw()); err != nil {
+	if err := writePostgresBytes(conn, message.raw()); err != nil {
 		return fmt.Errorf("write PostgreSQL message: %w", err)
+	}
+	return nil
+}
+
+func writePostgresBytes(writer interface {
+	Write([]byte) (int, error)
+}, data []byte) error {
+	for len(data) > 0 {
+		written, err := writer.Write(data)
+		if err != nil {
+			return err
+		}
+		if written <= 0 || written > len(data) {
+			return io.ErrShortWrite
+		}
+		data = data[written:]
 	}
 	return nil
 }

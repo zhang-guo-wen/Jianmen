@@ -44,6 +44,17 @@ func readMySQLPacketLimited(conn net.Conn, maxPayloadBytes int) (*mysqlPacket, e
 // BuildMySQLUpstreamLogin builds a MySQL login packet for the upstream server.
 // Exported for use by test connection in admin package.
 func BuildMySQLUpstreamLogin(hs *MySQLHandshake, username, password, authPlugin string, seq byte) ([]byte, error) {
+	return buildMySQLUpstreamLogin(hs, username, password, "", authPlugin, seq)
+}
+
+func buildMySQLUpstreamLogin(
+	hs *MySQLHandshake,
+	username string,
+	password string,
+	database string,
+	authPlugin string,
+	seq byte,
+) ([]byte, error) {
 	if hs == nil {
 		return nil, fmt.Errorf("build MySQL upstream login: nil handshake")
 	}
@@ -59,8 +70,8 @@ func BuildMySQLUpstreamLogin(hs *MySQLHandshake, username, password, authPlugin 
 			AuthPluginName:  hs.AuthPluginName,
 		},
 		mysqlwire.LoginOptions{
-			Username: username, Password: password, AuthPlugin: authPlugin,
-			Sequence: seq, TLS: seq == 2,
+			Username: username, Password: password, Database: database,
+			AuthPlugin: authPlugin, Sequence: seq, TLS: seq == 2,
 		},
 	)
 	if err != nil {

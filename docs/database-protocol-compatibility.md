@@ -1,0 +1,76 @@
+# 数据库真实协议兼容矩阵
+
+更新时间：2026-07-19
+
+本矩阵描述 Jianmen 数据库网关已经纳入自动化验证的协议与版本边界。“实库”表示测试会启动官方 Docker 镜像，并使用真实客户端通过网关完成认证和数据交互；“协议测试”表示使用有界解析、畸形帧和模糊测试验证协议适配器，但不等同于对应产品版本的实库认证。
+
+## 默认实库矩阵
+
+| 协议 | 官方镜像 | 客户端/认证路径 | 每个版本的必测场景 |
+|---|---|---|---|
+| MySQL | `mysql:5.7`、`mysql:8.0`、`mysql:8.4` | `go-sql-driver/mysql`；堡垒机 `mysql_native_password`；上游 5.7 `mysql_native_password`、8.x `caching_sha2_password` | 初始数据库、普通查询、预处理语句、提交/回滚、审计脱敏、超过 `0xFFFFFF` 的多物理包响应及恶意边界字节 |
+| PostgreSQL | `postgres:14-alpine` 至 `postgres:18-alpine` | `pgx/v5`、`database/sql` 和原始协议客户端；网关 TLS；上游 SCRAM-SHA-256（RFC 4013 SASLprep） | Startup 参数、简单/扩展查询、预处理语句、提交/回滚、ErrorResponse 后恢复、COPY、大 DataRow、CancelRequest |
+| Redis | `redis:6.2-alpine`、`redis:7.4-alpine`、`redis:8.8-alpine` | 原始 RESP 客户端；双参数 `AUTH`、`HELLO 2 AUTH`、`HELLO 3 AUTH` | RESP2/RESP3、流水线、MULTI/EXEC、SELECT、Map/Set/Boolean/Double、Pub/Sub 与 Push、多主题批量退订、临界大主题 ACK、大 Bulk String、审计脱敏 |
+
+默认矩阵由以下测试实现：
+
+- [MySQL 实库矩阵](../internal/integration/mysql_proxy_integration_test.go)
+- [PostgreSQL 实库矩阵](../internal/integration/postgres_proxy_integration_test.go)
+- [Redis 实库矩阵](../internal/integration/redis_proxy_integration_test.go)
+
+监听器的启动、关闭、部分绑定失败回收、握手超时和活动连接关闭另由 [监听器测试](../internal/server/dbproxy/listeners_test.go) 覆盖。
+
+## 协议能力边界
+
+| 能力 | MySQL | PostgreSQL | Redis |
+|---|---|---|---|
+| 基础协议 | Protocol 4.1 | Protocol 3.0 | RESP2、RESP3 |
+| 新版本协商 | 8.x `caching_sha2_password`，完整认证仅在已验证 TLS 上发送明文口令 | 3.2 客户端通过 `NegotiateProtocolVersion` 降级到 3.0；保留普通 Startup 参数并报告 `_pq_.*` 不支持项 | `HELLO 2/3`，网关凭据不会转发给上游 |
+| 客户端加密 | MySQL SSLRequest/TLS | SSLRequest/TLS；Direct TLS 要求 ALPN `postgresql` | 配置证书时使用 TLS；无证书仅允许回环来源 |
+| 上游加密 | 8.0/8.4 实库矩阵使用 `verify-ca`；5.7 仅作为回环旧版明文基线 | 支持配置化 TLS；本矩阵的官方镜像使用回环明文上游 | 支持配置化 TLS；明文上游仅允许回环地址 |
+| 查询形态 | COM_QUERY、COM_STMT_PREPARE/EXECUTE、事务 | 简单/扩展查询、COPY、事务、异步 CancelRequest | 普通命令、流水线、事务、Pub/Sub |
+| 大响应 | 验证跨 `0xFFFFFF` 物理包边界、零长终止片及续片首字节 `0xff`/`0xfe` | 验证 300 KB DataRow 和 COPY | 验证 300 KB Bulk String、超大 Pub/Sub 消息及超过审计缓冲区的订阅 ACK |
+| 畸形输入 | 包头、长度、截断帧模糊测试 | StartupMessage/类型消息模糊测试；取消密钥长度边界测试 | RESP2/3 类型、嵌套、长度、命令和认证模糊测试 |
+
+PostgreSQL 18 的协议 3.2 使用可变长度取消密钥。网关能够安全解析和路由 4–256 字节密钥，但当前会把 3.2 会话协商到 3.0，因此官方 PostgreSQL 18 实库路径实际使用 3.0 的 4 字节密钥。Direct TLS、3.2 协商和可变密钥分别有原始协议实测或协议测试，不能把“可协商连接”解读为“网关原生运行 3.2”。
+
+## 明确不在支持矩阵内
+
+- MySQL：pre-4.1、压缩协议、`LOCAL INFILE`、`sha256_password`、MariaDB 专有扩展。
+- PostgreSQL：Protocol 2.0、GSSAPI/SSPI、OAuth、逻辑/物理复制模式；GSSENC 请求会被明确拒绝并允许客户端回退到 TLS。
+- Redis：单参数 `AUTH <password>`、Inline Command、Cluster/Sentinel 路由、RESP3 streamed string/streamed aggregate、模块私有协议扩展。网关需要双参数 `AUTH <compact-user> <bastion-password>` 才能唯一定位账号资源。
+
+未列入默认矩阵的版本或扩展不代表一定无法工作，只表示不承诺回归兼容。新增版本进入支持范围前，必须先加入默认实库镜像并通过同一组场景。
+
+## 协议依据
+
+- [MySQL 8.4 Reference Manual：发布模型](https://dev.mysql.com/doc/refman/8.4/en/mysql-releases.html)
+- [PostgreSQL 18：协议概览](https://www.postgresql.org/docs/18/protocol-overview.html)、[消息格式](https://www.postgresql.org/docs/18/protocol-message-formats.html) 与 [SASL 认证](https://www.postgresql.org/docs/18/sasl-authentication.html)
+- [Redis：RESP 协议规范](https://redis.io/docs/latest/develop/reference/protocol-spec/)
+
+## 本地与 CI 执行
+
+需要 Docker 的完整实库测试：
+
+```powershell
+$env:JIANMEN_REQUIRE_DOCKER = '1'
+go test -tags=integration ./internal/integration -count=1 -timeout=35m
+```
+
+如果本机没有 Docker，集成测试会显式跳过并给出原因；设置 `JIANMEN_REQUIRE_DOCKER=1` 后，缺少 Docker 会直接失败，CI 使用这一严格模式。
+
+可用逗号分隔的镜像变量缩小诊断范围：
+
+```powershell
+$env:JIANMEN_MYSQL_IMAGES = 'mysql:8.4'
+$env:JIANMEN_POSTGRES_IMAGES = 'postgres:18-alpine'
+$env:JIANMEN_REDIS_IMAGES = 'redis:8.8-alpine'
+```
+
+协议模糊入口：
+
+- MySQL：`FuzzMySQLPacketFrames`
+- PostgreSQL：`FuzzReadPostgresStartupMessage`、`FuzzReadPostgresTypedMessage`
+- Redis：`FuzzRedisRESPFrameLength`、`FuzzRedisObserverClientFrames`、`FuzzRedisAuthenticationCommandParser`
+
+CI 会对每个入口执行短时模糊冒烟；常规 `go test ./...` 还会执行所有种子语料。发现的新崩溃样本必须固化为种子或确定性回归测试。

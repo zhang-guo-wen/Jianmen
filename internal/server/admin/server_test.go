@@ -790,6 +790,10 @@ func newTargetTestServer(t *testing.T) *Server {
 	if err != nil {
 		t.Fatalf("new target test authorization service: %v", err)
 	}
+	resourceGrants, err := service.NewResourceGrantService(storeInst, rbac.NewResourceGrantChecker(db))
+	if err != nil {
+		t.Fatalf("new target test resource grant service: %v", err)
+	}
 	if err := db.Create(&model.User{
 		ID:           "u-admin",
 		Username:     "admin",
@@ -799,12 +803,14 @@ func newTargetTestServer(t *testing.T) *Server {
 		t.Fatalf("create target test super administrator: %v", err)
 	}
 	return &Server{
-		cfg:           cfg,
-		store:         storeInst,
-		db:            db,
-		logger:        slog.New(slog.NewTextHandler(io.Discard, nil)),
-		identity:      identityService,
-		authorization: authorizationService,
+		cfg:            cfg,
+		store:          storeInst,
+		db:             db,
+		logger:         slog.New(slog.NewTextHandler(io.Discard, nil)),
+		identity:       identityService,
+		authorization:  authorizationService,
+		resourceAccess: storeInst,
+		resourceGrants: resourceGrants,
 	}
 }
 
@@ -875,6 +881,7 @@ func newAdminDBTestServer(t *testing.T) (*Server, *gorm.DB) {
 		loginCaptcha:    testLoginCaptcha{},
 		identity:        identityService,
 		authorization:   authorizationService,
+		resourceAccess:  storeInst,
 		resourceGrants:  resourceGrants,
 		resourceGroups:  resourceGroups,
 		browserSessions: browserSessions,

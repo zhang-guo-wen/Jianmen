@@ -69,6 +69,20 @@ func (s *DBStore) CreateResourceGrant(ctx context.Context, grant model.ResourceG
 	return grant, nil
 }
 
+func (s *DBStore) EnsureResourceGrant(ctx context.Context, grant model.ResourceGrant) error {
+	match := model.ResourceGrant{
+		PrincipalType: grant.PrincipalType,
+		PrincipalID:   grant.PrincipalID,
+		ResourceType:  grant.ResourceType,
+		ResourceID:    grant.ResourceID,
+		Effect:        grant.Effect,
+	}
+	if err := s.db.WithContext(ctx).Where(match).FirstOrCreate(&grant).Error; err != nil {
+		return fmt.Errorf("ensure resource grant: %w", err)
+	}
+	return nil
+}
+
 func (s *DBStore) DeleteResourceGrant(ctx context.Context, id string) error {
 	result := s.db.WithContext(ctx).Delete(&model.ResourceGrant{}, "id = ?", strings.TrimSpace(id))
 	if result.Error != nil {

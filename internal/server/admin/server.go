@@ -29,6 +29,7 @@ type Server struct {
 	containerService     *service.ContainerService
 	identity             *service.IdentityService
 	authorization        authorizationService
+	resourceAccess       resourceAccessRepository
 	resourceGrants       *service.ResourceGrantService
 	resourceGroups       *service.ResourceGroupService
 	userManagement       *service.UserService
@@ -95,6 +96,10 @@ func New(
 	case onlineSessions == nil:
 		return nil, errors.New("admin online session registry is required")
 	}
+	resourceAccess, ok := repository.(resourceAccessRepository)
+	if !ok {
+		return nil, errors.New("admin store does not support resource access")
+	}
 	loginCaptcha, err := service.NewLoginCaptcha()
 	if err != nil {
 		return nil, fmt.Errorf("initialize login captcha: %w", err)
@@ -132,7 +137,7 @@ func New(
 		dataDir:      dataDir,
 		loginLimiter: newDefaultLoginLimiter(), loginCaptcha: loginCaptcha, appProxy: appProxy,
 		onlineSessions: onlineSessions, containerService: service.NewContainerService(),
-		identity: identity, authorization: authorization,
+		identity: identity, authorization: authorization, resourceAccess: resourceAccess,
 		resourceGrants: resourceGrants, resourceGroups: resourceGroups, userManagement: userManagement, userGroups: userGroups, roleManagement: roleManagement, databaseProvisioning: databaseProvisioning, temporaryAccess: temporaryAccess,
 		browserSessions: browserSessions,
 	}, nil

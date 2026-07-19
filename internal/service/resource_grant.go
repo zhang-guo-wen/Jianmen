@@ -19,6 +19,7 @@ type ResourceGrantRepository interface {
 	SearchResourceGrants(ctx context.Context, query string) ([]model.ResourceGrant, error)
 	FindResourceGrant(ctx context.Context, id string) (model.ResourceGrant, bool, error)
 	CreateResourceGrant(ctx context.Context, grant model.ResourceGrant) (model.ResourceGrant, error)
+	EnsureResourceGrant(ctx context.Context, grant model.ResourceGrant) error
 	DeleteResourceGrant(ctx context.Context, id string) error
 	ResourceGrantPrincipalExists(ctx context.Context, principalType, principalID string) (bool, error)
 	ResourceGrantResourceExists(ctx context.Context, resourceType, resourceID string) (bool, error)
@@ -138,6 +139,50 @@ func (s *ResourceGrantService) Create(ctx context.Context, actorID string, bypas
 		return model.ResourceGrant{}, fmt.Errorf("create resource grant: %w", err)
 	}
 	return created, nil
+}
+
+// GrantCreatedResource ensures that a non-super-administrator can manage a
+// resource they have just created. It is separate from Create because the
+// creator cannot already hold a grant on a resource that did not previously
+// exist.
+func (s *ResourceGrantService) GrantCreatedResource(
+	ctx context.Context,
+	actorID string,
+	bypass bool,
+	resourceType string,
+	resourceID string,
+) error {
+	if bypass {
+		return nil
+	}
+	grant := normalizeResourceGrant(model.ResourceGrant{
+		PrincipalType: "user",
+		PrincipalID:   actorID,
+		ResourceType:  resourceType,
+		ResourceID:    resourceID,
+		Effect:        model.PermissionEffectAllow,
+	})
+	if err := validateResourceGrant(grant); err != nil {
+		return err
+	}
+	principalExists, err := s.repository.ResourceGrantPrincipalExists(ctx, grant.PrincipalType, grant.PrincipalID)
+	if err != nil {
+		return fmt.Errorf("check created resource principal: %w", err)
+	}
+	if !principalExists {
+		return fmt.Errorf("%w: creator not found", ErrInvalidResourceGrant)
+	}
+	resourceExists, err := s.repository.ResourceGrantResourceExists(ctx, grant.ResourceType, grant.ResourceID)
+	if err != nil {
+		return fmt.Errorf("check created resource: %w", err)
+	}
+	if !resourceExists {
+		return fmt.Errorf("%w: created resource not found or resource_type mismatch", ErrInvalidResourceGrant)
+	}
+	if err := s.repository.EnsureResourceGrant(ctx, grant); err != nil {
+		return fmt.Errorf("ensure creator resource grant: %w", err)
+	}
+	return nil
 }
 
 func (s *ResourceGrantService) Delete(ctx context.Context, actorID string, bypass bool, id string) error {

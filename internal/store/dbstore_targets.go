@@ -120,9 +120,9 @@ func (s *DBStore) targetConfig(a model.HostAccount) TargetConfig {
 	}
 }
 
-func (s *DBStore) HostAccounts(hostID string) ([]TargetView, error) {
+func (s *DBStore) ListHostAccounts(ctx context.Context, hostID string) ([]TargetView, error) {
 	var accounts []model.HostAccount
-	if err := s.db.Preload("Host").Where("host_id = ?", hostID).Order("username ASC").Find(&accounts).Error; err != nil {
+	if err := s.db.WithContext(ctx).Preload("Host").Where("host_id = ?", hostID).Order("username ASC").Find(&accounts).Error; err != nil {
 		return nil, fmt.Errorf("list accounts: %w", err)
 	}
 	out := make([]TargetView, len(accounts))

@@ -5,6 +5,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 
@@ -14,6 +15,28 @@ import (
 	"jianmen/internal/rbac"
 	"jianmen/internal/store"
 )
+
+func TestResourceAccessHasNoDirectDatabaseOrAggregateStoreQueries(t *testing.T) {
+	source, err := os.ReadFile("resource_access.go")
+	if err != nil {
+		t.Fatalf("read resource access source: %v", err)
+	}
+	for _, forbidden := range []string{"s.db", "s.store.HostAccounts", "s.store.InstanceAccounts"} {
+		if strings.Contains(string(source), forbidden) {
+			t.Fatalf("resource access still contains forbidden dependency %q", forbidden)
+		}
+	}
+
+	aggregateStore, err := os.ReadFile("../../store/store.go")
+	if err != nil {
+		t.Fatalf("read aggregate store source: %v", err)
+	}
+	for _, forbidden := range []string{"\tHostAccounts(", "\tInstanceAccounts("} {
+		if strings.Contains(string(aggregateStore), forbidden) {
+			t.Fatalf("aggregate store still contains resource access method %q", forbidden)
+		}
+	}
+}
 
 func TestVisibleResourcesUseContainerAndAccountGrants(t *testing.T) {
 	server, db := newAdminDBTestServer(t)
@@ -188,7 +211,7 @@ func TestAccountGrantAllowsViewingButNotContainerManagement(t *testing.T) {
 	}
 
 	dbRequest := asTestUser(httptest.NewRequest(http.MethodPut, "/api/db/accounts/dba-account-only", nil), "u1", "alice")
-	allDBAccounts, err := server.store.InstanceAccounts("db-account-only")
+	allDBAccounts, err := server.resourceAccess.ListDatabaseAccountsByInstance(request.Context(), "db-account-only")
 	if err != nil {
 		t.Fatalf("InstanceAccounts: %v", err)
 	}

@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net"
@@ -84,9 +85,9 @@ func (s *DBStore) AddDatabaseInstance(input DatabaseInstanceInput) (DatabaseInst
 	return s.databaseInstanceView(inst, 0), nil
 }
 
-func (s *DBStore) InstanceAccounts(instanceID string) ([]DatabaseAccountView, error) {
+func (s *DBStore) ListDatabaseAccountsByInstance(ctx context.Context, instanceID string) ([]DatabaseAccountView, error) {
 	var accounts []model.DatabaseAccount
-	if err := s.db.Where("instance_id = ?", instanceID).Order("username ASC").Find(&accounts).Error; err != nil {
+	if err := s.db.WithContext(ctx).Where("instance_id = ?", instanceID).Order("username ASC").Find(&accounts).Error; err != nil {
 		return nil, err
 	}
 	views := make([]DatabaseAccountView, 0, len(accounts))

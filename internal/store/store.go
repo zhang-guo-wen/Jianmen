@@ -366,7 +366,6 @@ type Store interface {
 	UpdateHost(id string, host HostRecord) (HostView, error)
 	DeleteHost(id string) error
 
-	HostAccounts(hostID string) ([]TargetView, error)
 	Targets() []TargetView
 	Target(id string) (TargetView, error)
 	TargetConfig(id string) (TargetConfig, error)
@@ -380,7 +379,6 @@ type Store interface {
 	UpdateDatabaseInstance(id string, input DatabaseInstanceInput) (DatabaseInstanceView, error)
 	DeleteDatabaseInstance(id string) error
 
-	InstanceAccounts(instanceID string) ([]DatabaseAccountView, error)
 	DatabaseAccounts() ([]DatabaseAccountView, error)
 	DatabaseAccount(id string) (DatabaseAccountView, error)
 	AddDatabaseAccount(instanceID, username, password, group, remark string, expiresAt *time.Time) (DatabaseAccountView, error)

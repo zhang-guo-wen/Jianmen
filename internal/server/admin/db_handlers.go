@@ -185,7 +185,7 @@ func (s *Server) handleDBInstance(w http.ResponseWriter, r *http.Request) {
 				}
 				actions = []string{rbac.ActionDBConnect}
 			}
-			accounts, err := s.store.InstanceAccounts(id)
+			accounts, err := s.resourceAccess.ListDatabaseAccountsByInstance(r.Context(), id)
 			if err != nil {
 				writeDBStoreError(w, r, err)
 				return

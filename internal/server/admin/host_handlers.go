@@ -81,7 +81,7 @@ func (s *Server) handleHost(w http.ResponseWriter, r *http.Request) {
 			}
 			actions = []string{rbac.ActionSessionConnect, rbac.ActionSFTPConnect}
 		}
-		accounts, err := s.store.HostAccounts(id)
+		accounts, err := s.resourceAccess.ListHostAccounts(r.Context(), id)
 		if err != nil {
 			writeHostStoreError(w, r, err)
 			return

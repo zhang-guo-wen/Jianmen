@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -9,6 +10,11 @@ import (
 	"jianmen/internal/rbac"
 	"jianmen/internal/store"
 )
+
+type resourceAccessRepository interface {
+	ListHostAccounts(ctx context.Context, hostID string) ([]store.TargetView, error)
+	ListDatabaseAccountsByInstance(ctx context.Context, instanceID string) ([]store.DatabaseAccountView, error)
+}
 
 func (s *Server) requireAuthenticatedUser(w http.ResponseWriter, r *http.Request) bool {
 	if userIDFromRequest(r) != "" {
@@ -54,17 +60,19 @@ func (s *Server) authorizeResourceActions(r *http.Request, actions []string, res
 }
 
 func (s *Server) grantCreatedResource(r *http.Request, resourceType, resourceID string) error {
-	if s.db == nil || isSuperAdminRequest(r) {
-		return nil
+	if s.resourceGrants == nil {
+		return errors.New("resource grant service unavailable")
 	}
-	grant := model.ResourceGrant{
-		PrincipalType: "user",
-		PrincipalID:   userIDFromRequest(r),
-		ResourceType:  resourceType,
-		ResourceID:    resourceID,
-		Effect:        model.PermissionEffectAllow,
+	if err := s.resourceGrants.GrantCreatedResource(
+		r.Context(),
+		userIDFromRequest(r),
+		isSuperAdminRequest(r),
+		resourceType,
+		resourceID,
+	); err != nil {
+		return fmt.Errorf("grant created resource: %w", err)
 	}
-	return s.db.Where(grant).FirstOrCreate(&grant).Error
+	return nil
 }
 
 func (s *Server) visibleHosts(r *http.Request, hosts []store.HostView) ([]store.HostView, error) {
@@ -84,7 +92,7 @@ func (s *Server) visibleHosts(r *http.Request, hosts []store.HostView) ([]store.
 			continue
 		}
 
-		accounts, err := s.store.HostAccounts(host.ID)
+		accounts, err := s.resourceAccess.ListHostAccounts(r.Context(), host.ID)
 		if err != nil {
 			return nil, err
 		}
@@ -107,7 +115,7 @@ func (s *Server) hostVisible(r *http.Request, hostID string) (bool, error) {
 	if err != nil || allowed {
 		return allowed, err
 	}
-	accounts, err := s.store.HostAccounts(hostID)
+	accounts, err := s.resourceAccess.ListHostAccounts(r.Context(), hostID)
 	if err != nil {
 		return false, err
 	}
@@ -168,7 +176,7 @@ func (s *Server) visibleDatabaseInstancesForActions(
 			continue
 		}
 
-		accounts, err := s.store.InstanceAccounts(instance.ID)
+		accounts, err := s.resourceAccess.ListDatabaseAccountsByInstance(r.Context(), instance.ID)
 		if err != nil {
 			return nil, err
 		}
@@ -191,7 +199,7 @@ func (s *Server) databaseInstanceVisible(r *http.Request, instanceID string) (bo
 	if err != nil || allowed {
 		return allowed, err
 	}
-	accounts, err := s.store.InstanceAccounts(instanceID)
+	accounts, err := s.resourceAccess.ListDatabaseAccountsByInstance(r.Context(), instanceID)
 	if err != nil {
 		return false, err
 	}

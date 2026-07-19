@@ -14,10 +14,12 @@ type fakeResourceGrantRepository struct {
 	principals   map[string]bool
 	resources    map[string]bool
 	created      model.ResourceGrant
+	ensured      model.ResourceGrant
 	deletedID    string
 	searchErr    error
 	findErr      error
 	createErr    error
+	ensureErr    error
 	deleteErr    error
 	principalErr error
 	resourceErr  error
@@ -48,6 +50,14 @@ func (f *fakeResourceGrantRepository) CreateResourceGrant(_ context.Context, gra
 	}
 	f.created = grant
 	return grant, nil
+}
+
+func (f *fakeResourceGrantRepository) EnsureResourceGrant(_ context.Context, grant model.ResourceGrant) error {
+	if f.ensureErr != nil {
+		return f.ensureErr
+	}
+	f.ensured = grant
+	return nil
 }
 
 func (f *fakeResourceGrantRepository) DeleteResourceGrant(_ context.Context, id string) error {
@@ -119,6 +129,59 @@ func TestResourceGrantServiceCreateRejectsMissingReferencesBeforePersistence(t *
 	}
 	if repository.created.ID != "" {
 		t.Fatalf("unexpected persisted grant: %#v", repository.created)
+	}
+}
+
+func TestResourceGrantServiceGrantCreatedResourceEnsuresCreatorGrant(t *testing.T) {
+	repository := &fakeResourceGrantRepository{
+		principals: map[string]bool{"user:u1": true},
+		resources:  map[string]bool{model.ResourceTypeHost + ":host-1": true},
+	}
+	service, err := NewResourceGrantService(repository, &fakeResourceGrantChecker{})
+	if err != nil {
+		t.Fatalf("new service: %v", err)
+	}
+
+	if err := service.GrantCreatedResource(context.Background(), " u1 ", false, " HOST ", " host-1 "); err != nil {
+		t.Fatalf("grant created resource: %v", err)
+	}
+	want := model.ResourceGrant{
+		PrincipalType: "user",
+		PrincipalID:   "u1",
+		ResourceType:  model.ResourceTypeHost,
+		ResourceID:    "host-1",
+		Effect:        model.PermissionEffectAllow,
+	}
+	if !reflect.DeepEqual(repository.ensured, want) {
+		t.Fatalf("ensured grant = %#v, want %#v", repository.ensured, want)
+	}
+}
+
+func TestResourceGrantServiceGrantCreatedResourceRejectsMissingActor(t *testing.T) {
+	repository := &fakeResourceGrantRepository{}
+	service, err := NewResourceGrantService(repository, &fakeResourceGrantChecker{})
+	if err != nil {
+		t.Fatalf("new service: %v", err)
+	}
+
+	err = service.GrantCreatedResource(context.Background(), "", false, model.ResourceTypeHost, "host-1")
+	if !errors.Is(err, ErrInvalidResourceGrant) {
+		t.Fatalf("grant error = %v, want invalid grant", err)
+	}
+	if repository.ensured.ResourceID != "" {
+		t.Fatalf("unexpected persisted grant: %#v", repository.ensured)
+	}
+}
+
+func TestResourceGrantServiceGrantCreatedResourceBypassesSuperAdministrator(t *testing.T) {
+	repository := &fakeResourceGrantRepository{ensureErr: errors.New("must not be called")}
+	service, err := NewResourceGrantService(repository, &fakeResourceGrantChecker{})
+	if err != nil {
+		t.Fatalf("new service: %v", err)
+	}
+
+	if err := service.GrantCreatedResource(context.Background(), "", true, "", ""); err != nil {
+		t.Fatalf("super administrator bypass: %v", err)
 	}
 }
 

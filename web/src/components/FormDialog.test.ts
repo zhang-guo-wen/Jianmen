@@ -98,3 +98,24 @@ test('direct mutation dialogs opt into the shared form-dialog shell', () => {
     }
   }
 });
+
+test('host and database account creation forms keep expiry controls concise', () => {
+  const hostsSource = source('views/HostsView.vue');
+  const databaseSource = source('views/DatabaseView.vue');
+
+  assert.doesNotMatch(
+    hostsSource,
+    /SSH 主机密钥会在新增和重新启用时自动获取并校验/,
+  );
+  assert.doesNotMatch(hostsSource, /class="expiry-text"/);
+  assert.doesNotMatch(hostsSource, /\.expiry-text\s*\{/);
+
+  assert.match(
+    databaseSource,
+    /<div v-if="editingAccount" class="expiry-control">[\s\S]*?<div v-else class="expiry-presets">[\s\S]*?永久/,
+  );
+  assert.match(
+    databaseSource,
+    /createDBAccount\([\s\S]*?expires_at:\s*undefined/,
+  );
+});

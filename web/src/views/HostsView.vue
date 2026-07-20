@@ -141,14 +141,6 @@
               style="width: 100%"
             />
           </el-form-item>
-          <el-alert
-            v-if="hostForm.protocol === 'ssh'"
-            class="host-key-note"
-            type="info"
-            :closable="false"
-            show-icon
-            title="SSH 主机密钥会在新增和重新启用时自动获取并校验，无需填写指纹或服务器文件路径。"
-          />
           <el-collapse v-model="hostMorePanels" class="more-collapse">
             <el-collapse-item title="更多设置" name="more">
               <el-form-item label="名称">
@@ -481,7 +473,6 @@
                   />
                   <el-button @click="setPermanentExpiry">永久</el-button>
                 </div>
-                <span class="expiry-text">{{ accountExpiryText }}</span>
               </div>
             </el-form-item>
             <template v-if="selectedHostProtocol === 'rdp'">
@@ -782,10 +773,6 @@ async function loadGroupOptions() {
       .filter(Boolean);
   }
 }
-const accountExpiryText = computed(() => {
-  if (!accountForm.expires_at) return "永久有效";
-  return formatDateTime(accountForm.expires_at);
-});
 const selectedHostProtocol = computed<HostProtocol>(() =>
   selectedHost.value ? hostProtocol(selectedHost.value) : hostForm.protocol
 );
@@ -2139,12 +2126,6 @@ onMounted(() => {
 .expiry-picker-row :deep(.el-date-editor.el-input) {
   width: 100%;
 }
-.expiry-text {
-  color: var(--color-text-secondary);
-  font-size: 12px;
-  line-height: 1.4;
-}
-
 /* Connection */
 /* 弹窗底部按钮间距 */
 :deep(.el-dialog__footer .el-button + .el-button) {

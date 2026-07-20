@@ -280,7 +280,7 @@
           </div>
         </el-form-item>
         <el-form-item label="有效期">
-          <div class="expiry-control">
+          <div v-if="editingAccount" class="expiry-control">
             <el-date-picker
               v-model="accountForm.expiresAt"
               type="datetime"
@@ -301,6 +301,11 @@
                 {{ opt.label }}
               </el-button>
             </div>
+          </div>
+          <div v-else class="expiry-presets">
+            <el-button size="small" type="primary" @click="setPermanentAccountExpiry">
+              永久
+            </el-button>
           </div>
         </el-form-item>
         <el-collapse v-model="accountMorePanels">
@@ -979,6 +984,11 @@ function setExpiry(opt: { label: string; hours: number }) {
   }
 }
 
+function setPermanentAccountExpiry() {
+  expiryPreset.value = '永久'
+  accountForm.expiresAt = null
+}
+
 async function testSavedAccountConnection(row: api.DBAccountRecord) {
   const key = String(row.id || row.resource_id || '')
   if (!key) return
@@ -1056,7 +1066,7 @@ async function submitAccount() {
         password: accountForm.password,
         group: accountForm.group,
         remark: accountForm.remark,
-        expires_at: accountForm.expiresAt?.toISOString(),
+        expires_at: undefined,
       })
       ElMessage.success('账号已创建')
     }

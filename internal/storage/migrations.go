@@ -230,6 +230,11 @@ var migrations = []Migration{
 		Name:    "database gateway client TLS mode",
 		Run:     migrateDatabaseGatewayClientTLSMode,
 	},
+	{
+		Version: userPreferenceClientsMigrationVersion,
+		Name:    "user preference local client fields",
+		Run:     migrateUserPreferenceClients,
+	},
 }
 
 func rejectDuplicateDatabaseAccounts(tx *gorm.DB) error {

@@ -64,11 +64,9 @@
       <el-dialog
         v-model="grantDialogVisible"
         :title="t('resourceGrant.addGrant')"
-        width="800px"
-        top="4vh"
-        class="resource-grant-dialog"
+        class="resource-grant-dialog crud-form-dialog"
       >
-        <el-form :model="grantForm" label-width="120px">
+        <el-form :model="grantForm" label-position="top">
           <el-form-item :label="t('resourceGrant.principalType')" required>
             <el-radio-group v-model="grantForm.principal_type">
               <el-radio value="user">{{ t('resourceGrant.user') }}</el-radio>
@@ -872,10 +870,6 @@ onMounted(async () => {
   display: flex;
   flex-direction: column;
   gap: 8px;
-}
-
-:deep(.resource-grant-dialog) {
-  margin-bottom: 4vh;
 }
 
 :deep(.resource-grant-dialog .el-dialog__body) {

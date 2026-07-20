@@ -387,7 +387,6 @@
     <FormDialog
       v-model:visible="roleDialogVisible"
       :title="t('rbac.action.newRole')"
-      width="min(440px, calc(100vw - 32px))"
       :loading="submitting.role"
       @submit="submitRole"
     >
@@ -412,7 +411,6 @@
     <FormDialog
       v-model:visible="permissionDialogVisible"
       :title="t('rbac.action.newPermission')"
-      width="min(580px, calc(100vw - 32px))"
       :loading="submitting.permission"
       @submit="submitPermission"
     >
@@ -1432,7 +1430,7 @@ onMounted(async () => {
 
 .form-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1fr);
   gap: 0 16px;
 }
 
@@ -1498,8 +1496,7 @@ onMounted(async () => {
 }
 
 @media (max-width: 720px) {
-  .inline-form,
-  .form-grid {
+  .inline-form {
     grid-template-columns: 1fr;
   }
 }

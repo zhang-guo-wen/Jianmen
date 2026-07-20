@@ -3,9 +3,8 @@
     :model-value="visible"
     @update:model-value="emit('update:visible', $event)"
     :title="title"
-    :width="dialogWidth"
     :close-on-click-modal="false"
-    class="form-dialog"
+    class="form-dialog crud-form-dialog"
     destroy-on-close
   >
     <div class="form-dialog-body">
@@ -21,25 +20,17 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
-
-const props = withDefaults(
+withDefaults(
   defineProps<{
     visible: boolean
     title: string
-    width?: string
     loading?: boolean
     submitText?: string
   }>(),
   {
-    width: '480px',
     loading: false,
     submitText: '保存',
   },
-)
-
-const dialogWidth = computed(() =>
-  props.width.startsWith('min(') ? props.width : `min(${props.width}, calc(100vw - 24px))`,
 )
 
 const emit = defineEmits<{
@@ -50,20 +41,10 @@ const emit = defineEmits<{
 
 <style scoped>
 .form-dialog-body {
-  max-height: min(64dvh, 680px);
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  scrollbar-gutter: stable;
-}
-
-:deep(.form-dialog) {
-  display: flex;
-  max-height: calc(100dvh - 24px);
-  flex-direction: column;
+  min-width: 0;
 }
 
 :deep(.form-dialog .el-dialog__body) {
-  min-height: 0;
   padding-right: 16px;
 }
 

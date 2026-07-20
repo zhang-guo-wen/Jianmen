@@ -93,7 +93,6 @@
       <FormDialog
         v-model:visible="hostDialogVisible"
         :title="editingHostId ? '编辑主机' : '新增主机'"
-        width="680px"
         :loading="submittingHost"
         @submit="submitHost"
       >
@@ -101,7 +100,7 @@
           ref="hostFormRef"
           :model="hostForm"
           :rules="hostRules"
-          label-width="96px"
+          label-position="top"
         >
           <el-form-item label="协议" prop="protocol" required>
             <el-radio-group v-model="hostForm.protocol" @change="handleHostProtocolChange">
@@ -293,7 +292,6 @@
       <FormDialog
         v-model:visible="accountFormVisible"
         :title="editingAccountId ? '编辑账号' : '新增账号'"
-        width="680px"
         :loading="submittingAccount"
         @submit="submitAccount"
       >
@@ -302,7 +300,7 @@
           v-loading="accountDetailLoading"
           :model="accountForm"
           :rules="accountRules"
-          label-width="96px"
+          label-position="top"
         >
           <div class="form-section">
             <div class="form-section-title">登录与认证</div>
@@ -2074,11 +2072,6 @@ onMounted(() => {
 }
 :deep(.el-dialog__footer .el-button:first-child) {
   margin-left: 0;
-}
-
-/* FormDialog body min-height for account edit */
-:deep(.form-dialog-body) {
-  min-height: 280px;
 }
 
 @media (max-width: 720px) {

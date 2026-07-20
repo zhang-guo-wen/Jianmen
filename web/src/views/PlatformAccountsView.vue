@@ -64,11 +64,10 @@
       <FormDialog
         v-model:visible="dialogVisible"
         :title="editingId ? t('platformAccounts.dialog.editTitle') : t('platformAccounts.createTitle')"
-        width="520px"
         :loading="submitting"
         @submit="submitForm"
       >
-        <el-form ref="formRef" :model="form" :rules="rules" label-width="100px">
+        <el-form ref="formRef" :model="form" :rules="rules" label-position="top">
           <el-form-item :label="t('platformAccounts.field.url')">
             <el-input v-model="form.url" placeholder="https://jenkins.example.com" @input="handleUrlInput">
               <template #prefix v-if="form.url"><el-link :href="form.url" target="_blank" :underline="false">↗</el-link></template>

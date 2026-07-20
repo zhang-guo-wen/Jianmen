@@ -1,0 +1,100 @@
+import assert from 'node:assert/strict';
+import { readdirSync, readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import test from 'node:test';
+import { fileURLToPath } from 'node:url';
+
+const sourceRoot = dirname(dirname(fileURLToPath(import.meta.url)));
+
+function collectVueFiles(directory: string): string[] {
+  return readdirSync(directory, { withFileTypes: true }).flatMap(entry => {
+    const path = join(directory, entry.name);
+    if (entry.isDirectory()) return collectVueFiles(path);
+    return entry.isFile() && entry.name.endsWith('.vue') ? [path] : [];
+  });
+}
+
+function source(relativePath: string): string {
+  return readFileSync(join(sourceRoot, relativePath), 'utf8');
+}
+
+function dialogOpeningTag(componentSource: string, marker: string): string {
+  const modelIndex = componentSource.indexOf(marker);
+  assert.notEqual(modelIndex, -1, `missing dialog marker ${marker}`);
+
+  const start = componentSource.lastIndexOf('<el-dialog', modelIndex);
+  const end = componentSource.indexOf('>', modelIndex);
+  assert.notEqual(start, -1, `missing opening dialog for ${marker}`);
+  assert.notEqual(end, -1, `missing closing bracket for ${marker}`);
+  return componentSource.slice(start, end + 1);
+}
+
+test('shared form dialog owns width and uses the dialog body as the only scroller', () => {
+  const componentSource = source('components/FormDialog.vue');
+  const globalStyles = source('styles/main.css');
+
+  assert.match(componentSource, /class="form-dialog crud-form-dialog"/);
+  assert.doesNotMatch(componentSource, /width\?:\s*string/);
+  assert.doesNotMatch(componentSource, /dialogWidth/);
+  assert.doesNotMatch(componentSource, /overflow-y:\s*auto/);
+  assert.doesNotMatch(componentSource, /max-height:/);
+
+  assert.match(globalStyles, /--form-dialog-width:\s*640px/);
+  assert.match(globalStyles, /\.el-overlay-dialog\s*\{[\s\S]*?box-sizing:\s*border-box;[\s\S]*?overflow:\s*hidden;/);
+  assert.match(globalStyles, /\.el-dialog__body\s*\{[\s\S]*?flex:\s*1 1 auto;[\s\S]*?overflow-x:\s*hidden;[\s\S]*?overflow-y:\s*auto;/);
+  assert.match(globalStyles, /\.crud-form-dialog\s*\{[\s\S]*?width:\s*min\(var\(--form-dialog-width\), 100%\)\s*!important;/);
+  assert.match(globalStyles, /\.crud-form-dialog \.form-grid\s*\{[\s\S]*?grid-template-columns:\s*minmax\(0, 1fr\)\s*!important;/);
+});
+
+test('FormDialog callers cannot override width and form fields stay vertical', () => {
+  for (const file of collectVueFiles(sourceRoot)) {
+    const componentSource = readFileSync(file, 'utf8');
+    const blocks = componentSource.match(/<FormDialog\b[\s\S]*?<\/FormDialog>/g) ?? [];
+
+    for (const block of blocks) {
+      const openingTag = block.slice(0, block.indexOf('>') + 1);
+      assert.doesNotMatch(openingTag, /\bwidth=/, `${file} overrides the shared dialog width`);
+      if (block.includes('<el-form')) {
+        assert.match(
+          block,
+          /<el-form\b[^>]*\blabel-position="top"/,
+          `${file} contains a non-vertical FormDialog form`,
+        );
+      }
+    }
+  }
+});
+
+test('direct mutation dialogs opt into the shared form-dialog shell', () => {
+  const dialogs = [
+    { file: 'components/AccountGroupsContent.vue', model: 'dialogVisible', topForm: true },
+    { file: 'components/BatchCreateUsersDialog.vue', model: 'visible', marker: ':model-value="visible"', topForm: false },
+    { file: 'components/ResourceGroupsContent.vue', model: 'dialogVisible', topForm: true },
+    { file: 'views/ContainersView.vue', model: 'quickAccountVisible', topForm: true },
+    { file: 'views/DatabaseView.vue', model: 'autoProvisionVisible', topForm: true },
+    { file: 'views/ResourceGrantView.vue', model: 'grantDialogVisible', topForm: true },
+    { file: 'views/TemporaryAccountsView.vue', model: 'temporaryDialogVisible', topForm: true },
+    { file: 'views/TemporaryAccountsView.vue', model: 'aiDialogVisible', topForm: true },
+    { file: 'views/TemporaryAccountsView.vue', model: 'extendDialogVisible', topForm: false },
+    { file: 'views/UserGroupsView.vue', model: 'groupDialogVisible', topForm: true },
+    { file: 'views/UserGroupsView.vue', model: 'membersDialogVisible', topForm: false },
+    { file: 'views/UsersView.vue', model: 'roleDialogVisible', topForm: false },
+  ];
+
+  for (const dialog of dialogs) {
+    const componentSource = source(dialog.file);
+    const openingTag = dialogOpeningTag(componentSource, dialog.marker ?? `v-model="${dialog.model}"`);
+    assert.match(openingTag, /\bclass="[^"]*\bcrud-form-dialog\b[^"]*"/, `${dialog.file}:${dialog.model} is not standardized`);
+    assert.doesNotMatch(openingTag, /\bwidth=/, `${dialog.file}:${dialog.model} overrides the shared width`);
+
+    if (dialog.topForm) {
+      const dialogEnd = componentSource.indexOf('</el-dialog>', componentSource.indexOf(openingTag));
+      const dialogBlock = componentSource.slice(componentSource.indexOf(openingTag), dialogEnd);
+      assert.match(
+        dialogBlock,
+        /<el-form\b[^>]*\blabel-position="top"/,
+        `${dialog.file}:${dialog.model} is not a vertical form`,
+      );
+    }
+  }
+});

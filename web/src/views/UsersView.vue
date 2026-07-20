@@ -83,9 +83,8 @@
       v-model="roleDialogVisible"
       :close-on-click-modal="!assigningRole"
       :title="roleDialogTitle"
-      class="form-dialog"
+      class="crud-form-dialog"
       destroy-on-close
-      width="min(420px, calc(100vw - 32px))"
     >
       <div v-if="roleDialogUser" class="role-assign-body">
         <div class="role-assign-current">
@@ -486,7 +485,6 @@ onMounted(async () => {
 .more-collapse { border-top: 1px solid #eef2f7; border-bottom: 0; }
 .more-collapse :deep(.el-collapse-item__header) { color: #374151; font-size: 13px; font-weight: 700; }
 .more-collapse :deep(.el-collapse-item__wrap) { border-bottom: 0; }
-:global(.form-dialog .el-dialog__body) { max-height: min(66vh, 620px); overflow-y: auto; padding-right: 22px; }
 </style>
 
 <style scoped>

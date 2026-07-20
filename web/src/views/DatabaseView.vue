@@ -70,7 +70,7 @@
     </DataTableCard>
 
     <!-- 创建/编辑实例弹窗 -->
-    <FormDialog v-model:visible="showInstanceDialog" :title="editingInstance ? '编辑实例' : '新增实例'" width="640px" :loading="submitting" @submit="submitInstance">
+    <FormDialog v-model:visible="showInstanceDialog" :title="editingInstance ? '编辑实例' : '新增实例'" :loading="submitting" @submit="submitInstance">
       <el-form :model="instanceForm" class="database-resource-form" label-position="top">
         <el-form-item label="名称" required>
           <el-input v-model="instanceForm.name" />
@@ -237,7 +237,6 @@
     <FormDialog
       v-model:visible="accountDialogVisible"
       :title="editingAccount ? '编辑账号' : '新增账号'"
-      width="620px"
       :loading="accountSubmitting"
       @submit="submitAccount"
     >
@@ -323,7 +322,7 @@
     <el-dialog
       v-model="autoProvisionVisible"
       title="自动创建 MySQL 账号"
-      width="min(720px, calc(100vw - 32px))"
+      class="crud-form-dialog"
       destroy-on-close
       @closed="resetAutoProvision"
     >

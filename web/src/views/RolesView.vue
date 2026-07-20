@@ -88,7 +88,6 @@
   <FormDialog
     v-model:visible="permDialogVisible"
     :title="permDialogTitle"
-    width="min(680px, calc(100vw - 32px))"
     :loading="savingPerms"
     submit-text="保存"
     @submit="savePermissions"

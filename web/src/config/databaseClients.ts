@@ -41,6 +41,14 @@ export const DATABASE_CLIENT_PLATFORM_OPTIONS = [
 ] as const;
 
 export const DATABASE_CLIENT_CA_FILE_NAME = 'jianmen-database-gateway-ca.pem';
+export const DATABASE_CLIENT_PROTOCOL_REGISTRATION_VERSION = 2;
+
+export function isCurrentDatabaseClientProtocolRegistration(
+  registered: unknown,
+  version: unknown,
+): boolean {
+  return registered === true && version === DATABASE_CLIENT_PROTOCOL_REGISTRATION_VERSION;
+}
 
 export function detectDatabaseClientPlatform(userAgent = navigator.userAgent): DatabaseClientPlatform {
   const normalized = userAgent.toLowerCase();
@@ -161,7 +169,7 @@ try {
     "user=$($data.user)",
     "password=$($data.password)",
     "name=$($data.name)",
-    'savePassword=false',
+    'savePassword=true',
     'create=true',
     'save=false',
     'connect=true',

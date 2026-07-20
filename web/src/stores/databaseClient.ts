@@ -2,7 +2,9 @@ import { computed, ref } from 'vue';
 import { defineStore } from 'pinia';
 
 import {
+  DATABASE_CLIENT_PROTOCOL_REGISTRATION_VERSION,
   detectDatabaseClientPlatform,
+  isCurrentDatabaseClientProtocolRegistration,
   isValidDatabaseClientCAFilePath,
   isValidDatabaseClientExecutablePath,
   type DatabaseClientSettings,
@@ -23,7 +25,9 @@ function defaults(): DatabaseClientSettings {
 function readSettings(): DatabaseClientSettings {
   const fallback = defaults();
   try {
-    const stored = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}') as Partial<DatabaseClientSettings>;
+    const stored = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}') as Partial<DatabaseClientSettings> & {
+      protocolRegistrationVersion?: unknown;
+    };
     const platform = stored.platform === 'windows' || stored.platform === 'macos' || stored.platform === 'linux'
       ? stored.platform
       : fallback.platform;
@@ -32,7 +36,10 @@ function readSettings(): DatabaseClientSettings {
       platform,
       executablePath: typeof stored.executablePath === 'string' ? stored.executablePath : '',
       caFilePath: typeof stored.caFilePath === 'string' ? stored.caFilePath : '',
-      protocolRegistered: stored.protocolRegistered === true,
+      protocolRegistered: isCurrentDatabaseClientProtocolRegistration(
+        stored.protocolRegistered,
+        stored.protocolRegistrationVersion,
+      ),
     };
   } catch {
     return fallback;
@@ -62,7 +69,12 @@ export const useDatabaseClientStore = defineStore('database-client', () => {
         && settings.platform === 'windows'
         && settings.protocolRegistered,
     };
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(nextValue));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({
+      ...nextValue,
+      protocolRegistrationVersion: nextValue.protocolRegistered
+        ? DATABASE_CLIENT_PROTOCOL_REGISTRATION_VERSION
+        : 0,
+    }));
     value.value = nextValue;
   }
 

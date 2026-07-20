@@ -12,7 +12,7 @@ import (
 
 const maxServerIdentityPEMSize = 1 << 20
 
-func verifiedChainWithConfiguredIntermediates(
+func verifiedChainMatchingConfiguredCertificates(
 	verifiedChains [][]*x509.Certificate,
 	configured []*x509.Certificate,
 ) []*x509.Certificate {
@@ -20,25 +20,29 @@ func verifiedChainWithConfiguredIntermediates(
 		if len(verifiedChain) == 0 {
 			continue
 		}
-		complete := true
+		requiredIntermediates := []*x509.Certificate(nil)
 		if len(verifiedChain) > 2 {
-			for _, required := range verifiedChain[1 : len(verifiedChain)-1] {
-				found := false
-				for _, candidate := range configured {
-					if required.Equal(candidate) {
-						found = true
-						break
-					}
-				}
-				if !found {
-					complete = false
-					break
-				}
+			requiredIntermediates = verifiedChain[1 : len(verifiedChain)-1]
+		}
+		if len(configured) != len(requiredIntermediates) &&
+			len(configured) != len(requiredIntermediates)+1 {
+			continue
+		}
+		matches := true
+		for index, required := range requiredIntermediates {
+			if !required.Equal(configured[index]) {
+				matches = false
+				break
 			}
 		}
-		if complete {
-			return verifiedChain
+		if !matches {
+			continue
 		}
+		if len(configured) == len(requiredIntermediates)+1 &&
+			!verifiedChain[len(verifiedChain)-1].Equal(configured[len(configured)-1]) {
+			continue
+		}
+		return verifiedChain
 	}
 	return nil
 }

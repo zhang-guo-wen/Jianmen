@@ -103,9 +103,9 @@ func loadServerIdentity(
 		return ServerIdentityMaterial{}, fmt.Errorf("verify server certificate identity: %w", err)
 	}
 	if trustMode == ServerIdentityTrustModeSystem {
-		verifiedChain := verifiedChainWithConfiguredIntermediates(verifiedChains, chain[1:])
+		verifiedChain := verifiedChainMatchingConfiguredCertificates(verifiedChains, chain[1:])
 		if len(verifiedChain) == 0 {
-			return ServerIdentityMaterial{}, errors.New("cert_file must include every intermediate certificate required by the system-trusted chain")
+			return ServerIdentityMaterial{}, errors.New("cert_file must contain the leaf followed by every required intermediate certificate in verification order")
 		}
 		trustAnchor := verifiedChain[len(verifiedChain)-1]
 		trustAnchorPEM = string(pem.EncodeToMemory(&pem.Block{

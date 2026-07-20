@@ -253,17 +253,42 @@ func TestLoadServerIdentitySystemTrustRequiresCompleteIntermediateChain(t *testi
 		t.Fatalf("read configured root: %v", err)
 	}
 	verifiedChain := []*x509.Certificate{configuredChain[0], configuredChain[1], rootChain[0]}
-	if got := verifiedChainWithConfiguredIntermediates(
+	if got := verifiedChainMatchingConfiguredCertificates(
 		[][]*x509.Certificate{verifiedChain},
 		nil,
 	); got != nil {
-		t.Fatal("verifiedChainWithConfiguredIntermediates() accepted a missing intermediate")
+		t.Fatal("verifiedChainMatchingConfiguredCertificates() accepted a missing intermediate")
 	}
-	if got := verifiedChainWithConfiguredIntermediates(
+	if got := verifiedChainMatchingConfiguredCertificates(
 		[][]*x509.Certificate{verifiedChain},
 		configuredChain[1:],
 	); len(got) != len(verifiedChain) {
-		t.Fatal("verifiedChainWithConfiguredIntermediates() rejected the configured intermediate")
+		t.Fatal("verifiedChainMatchingConfiguredCertificates() rejected the configured intermediate")
+	}
+	if got := verifiedChainMatchingConfiguredCertificates(
+		[][]*x509.Certificate{verifiedChain},
+		[]*x509.Certificate{rootChain[0], configuredChain[1]},
+	); got != nil {
+		t.Fatal("verifiedChainMatchingConfiguredCertificates() accepted certificates in the wrong order")
+	}
+
+	misorderedFile := filepath.Join(t.TempDir(), "gateway-misordered-chain.crt")
+	misorderedPEM := append(
+		pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: configuredChain[0].Raw}),
+		pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: rootChain[0].Raw})...,
+	)
+	misorderedPEM = append(
+		misorderedPEM,
+		pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: configuredChain[1].Raw})...,
+	)
+	writeIdentityTestFile(t, misorderedFile, misorderedPEM)
+	if _, err := loadServerIdentity(
+		misorderedFile,
+		"",
+		"gateway.example.test",
+		loadRoots,
+	); err == nil {
+		t.Fatal("loadServerIdentity() accepted a system-trusted certificate chain in the wrong order")
 	}
 
 	if _, err := loadServerIdentity(

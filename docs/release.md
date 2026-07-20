@@ -91,17 +91,18 @@ Client-facing TLS has two policies: `optional` (the default) accepts both plaint
 MySQL, PostgreSQL, and Redis, while `required` rejects plaintext authentication and database
 traffic. PostgreSQL plaintext `CancelRequest` control packets remain compatible because they
 carry no login credentials or database data and must match the per-session cancellation secret.
-The default Docker configuration requires `/app/certs/database.crt` and
-`/app/certs/database.key` so either policy can offer TLS. For client identity verification, also
-mount the public CA at
-`/app/certs/database-ca.crt` and configure each listener's `ca_file` plus a `server_name` that
-matches a certificate SAN. The gateway API distributes only validated certificate PEM, the TLS
-server name, and the leaf-certificate SHA-256 fingerprint; it never exposes `key_file` or private
-key contents. Without complete TLS identity material, the web UI does not offer a downgraded
-database connection command. The local certificate command above creates `database-ca.crt` and a
-separate ServerAuth leaf certificate whose `localhost` SAN matches the Docker examples'
-`server_name`. A CA-issued leaf without `ca_file` is rejected; the fallback is reserved for a
-single valid self-signed leaf used with explicit certificate-pin semantics.
+The default Docker configuration uses `database.crt`, `database.key`, and `database-ca.crt` as a
+local custom-CA example. For a publicly trusted certificate, configure a leaf-first full-chain
+`cert_file`, its matching `key_file`, and a `server_name` covered by the certificate SAN, and omit
+`ca_file`. Jianmen validates that chain against the runtime system certificate pool during startup
+and fails closed if the chain, validity period, key usage, or hostname is invalid. The certificate
+file must contain every required intermediate certificate.
+
+The gateway API reports whether the validated identity uses `custom` or `system` trust and never
+exposes private-key material. DBeaver uses its Java default trust store for system-trusted
+certificates. `psql` system trust requires libpq 16 or newer; older clients and the native MySQL CLI
+still require an explicit CA file. No client path silently falls back to encryption without
+identity verification.
 
 ## GitHub releases
 

@@ -167,7 +167,15 @@ docker run -d \
 
 ### 数据库网关 TLS 身份校验
 
-统一入口以及各协议独立入口应配置服务端证书、私钥、公共 CA 文件与客户端验证名称。`server_name` 必须是证书 SAN 中的 DNS 名称或 IP；客户端连接命令使用该名称，而不是监听地址。`ca_file` 仅保存可公开分发的 CA PEM。只有单张、当前有效且可验证的自签名叶证书才允许省略 `ca_file`，此时按证书固定（pin）语义分发；普通 CA 签发的叶证书不能被当作根证书。`key_file` 永不会通过 API 返回。
+统一入口以及各协议独立入口必须配置 `cert_file`、`key_file` 和与证书 SAN 匹配的 `server_name`。`cert_file` 的第一张证书必须是服务端叶证书，后面依次包含建立验证链所需的全部中间证书。
+
+- 配置 `ca_file`：使用自定义 CA 信任，适用于私有 CA；客户端需要下载并使用该 CA。
+- 未配置 `ca_file` 且证书是单张自签名叶证书：按证书固定（pin）方式信任。
+- 未配置 `ca_file` 且证书由 CA 签发：Jianmen 启动时使用运行环境的系统根证书库校验证书链、有效期、ServerAuth 用途和 `server_name`；只有全部通过才启用监听。公网 CA 证书通常使用此模式。
+
+系统信任模式不会把普通叶证书当作根证书。网关 API 仅返回信任模式、可公开分发的证书材料、服务端名称和叶证书指纹，永不返回 `key_file` 或私钥内容。
+
+下面是本地私有 CA 的配置示例：
 
 ```json
 "mode": "unified",
@@ -183,7 +191,27 @@ docker run -d \
 }
 ```
 
-`client_tls_mode` 支持两种模式：`optional`（默认）同时接受明文和 TLS，`required` 只接受 TLS。快速连接在 `optional` 下默认生成明文连接，可在连接弹窗中手动开启 TLS；切换为 `required` 后会强制生成强校验命令：PostgreSQL 使用 `sslmode=verify-full sslrootcert=...`，MySQL 使用 `--ssl-mode=VERIFY_IDENTITY --ssl-ca=...`。TLS 身份材料不完整时不会降级为 `require` 或 `REQUIRED` 命令。
+公网证书应使用叶证书在前的完整链文件，并故意省略 `ca_file`：
+
+```json
+"unified": {
+  "enabled": true,
+  "listen_addr": "0.0.0.0:33060",
+  "cert_file": "/app/certs/db.example.com.fullchain.pem",
+  "key_file": "/app/certs/db.example.com.key",
+  "server_name": "db.example.com",
+  "detection_timeout_ms": 200
+}
+```
+
+`client_tls_mode` 支持两种模式：`optional`（默认）同时接受明文和 TLS，`required` 只接受 TLS。快速连接在 `optional` 下默认生成明文连接，可在连接弹窗中手动开启 TLS；`required` 始终使用严格证书链和主机名校验，不会降级为只加密但不验证身份：
+
+- DBeaver + 公网证书：MySQL 使用 Connector/J 默认信任库和 `VERIFY_IDENTITY`；PostgreSQL 使用 Java 默认信任库、`DefaultJavaSSLFactory` 和 `verify-full`，无需配置本地 CA 路径。
+- `psql` 16 及以上使用 `sslmode=verify-full sslrootcert=system`；`psql` 15 及以下需下载 CA，并把命令改为显式 CA 文件。
+- MySQL 原生命令行即使使用公网证书，`VERIFY_IDENTITY` 仍需 `--ssl-ca` 或 `--ssl-capath`，因此快速命令继续使用下载的 CA 文件。
+- `redis-cli` 缺少 Jianmen 所需的严格主机名验证能力，暂不生成可能误导为安全的 TLS 快速命令。
+
+Jianmen 服务端的系统根库与 DBeaver/Java 默认信任库并非同一个库；任一端缺少对应根证书都会失败关闭，不会降级为明文或仅加密模式。
 
 上面的本机评估流程生成的数据库叶证书 SAN 包含 `localhost` 和 `127.0.0.1`，与默认配置的 `server_name: "localhost"` 一致。生产环境使用其他网关域名时，必须同时替换 `server_name`，并重新签发包含该 DNS 名称 SAN 的数据库叶证书。
 
@@ -236,7 +264,7 @@ stream {
 部署时必须注意：
 
 - 不要添加 `listen 33060 ssl`、`ssl_certificate`、`proxy_ssl on` 或 `ssl_preread on`。MySQL 由服务端先发送 Greeting，PostgreSQL 通常先发送明文 `SSLRequest`，Nginx 的通用 TLS 监听无法在同一个端口终结三种原生协议；Redis 虽然可以直接发送 TLS ClientHello，也不能解决 MySQL 和 PostgreSQL。Web 管理端是标准 HTTPS，可以单独由 Nginx 正常终结 TLS。
-- 数据库网关证书、私钥和 CA 仍配置在 Jianmen。证书 SAN 必须包含客户端实际连接的域名或 IP。Nginx 不会终结或改变 `客户端 → Jianmen` 的原生 TLS，也不能把 `Jianmen → 实际数据库` 的 `disable` 链路变成加密链路。
+- 数据库网关证书、私钥和 `server_name` 仍配置在 Jianmen；私有 CA 还必须配置 `ca_file`，公网系统受信任证书应提供完整链并省略 `ca_file`。证书 SAN 必须包含客户端实际连接的域名或 IP。Nginx 不会终结或改变 `客户端 → Jianmen` 的原生 TLS，也不能把 `Jianmen → 实际数据库` 的 `disable` 链路变成加密链路。
 - Jianmen 当前不解析 PROXY Protocol，必须保持 `proxy_protocol off`。开启后，Nginx 会在数据库协议前插入 `PROXY ...`，导致统一入口和独立入口握手失败。Jianmen 看到的 TCP 对端会是 Nginx，真实客户端地址应从 Nginx Stream 访问日志查询。
 - 不要依赖“回环地址允许本机明文开发”作为代理部署的安全边界。Nginx 转发到 `127.0.0.1` 时，外部连接在 Jianmen 看来同样来自回环地址；只要数据库入口会被外部访问，就必须给 Jianmen 配置网关证书，并将 `client_tls_mode` 设为 `required`。仅配置证书但保留默认 `optional` 仍会接受明文连接。
 - Docker 部署时只让 Nginx 发布宿主机 `33060`，Jianmen 的 `33060` 只保留在隔离容器网络，不要再使用 `-p 33060:33060` 直接发布 Jianmen。若两者共享主机网络，不能同时监听 `0.0.0.0:33060`；可以让 Jianmen 监听 `127.0.0.1:33060`，让 Nginx 仅监听服务器的具体对外 IP。

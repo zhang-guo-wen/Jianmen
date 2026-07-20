@@ -6,6 +6,7 @@ export const DATABASE_MAX_CLIENT_MESSAGE_BYTES_DEFAULT = 10 * BYTES_PER_MIB;
 
 export type DatabaseGatewayMode = 'unified' | 'independent';
 export type DatabaseGatewayClientTLSMode = 'required' | 'optional';
+export type DatabaseGatewayTLSTrustMode = 'custom' | 'system';
 
 export interface SystemSettingsValues {
   database_gateway_mode: DatabaseGatewayMode;

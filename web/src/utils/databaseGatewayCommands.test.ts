@@ -9,6 +9,8 @@ import {
   buildDatabaseGatewayConnection,
   databaseGatewayCAFileName,
   databaseGatewayFallbackPort,
+  databaseGatewayRequiresCustomCA,
+  databaseGatewayTLSTrustMode,
   hasDatabaseGatewayTLSIdentity,
   isSafeDatabaseCommandValue,
   resolveDatabaseGatewayClientHost,
@@ -34,9 +36,15 @@ const secureGateway: DatabaseGatewayTLSIdentity = {
   host: 'gateway.db.example',
   client_tls_mode: 'optional',
   tls_enabled: true,
+  tls_trust_mode: 'custom',
   tls_server_name: 'gateway.db.example',
   tls_ca_pem: '-----BEGIN CERTIFICATE-----\nCA\n-----END CERTIFICATE-----',
   tls_cert_sha256: 'aa:bb',
+};
+
+const systemTrustGateway: DatabaseGatewayTLSIdentity = {
+  ...secureGateway,
+  tls_trust_mode: 'system',
 };
 
 test('database gateway client host replaces wildcard and remote-loopback listener addresses', () => {
@@ -169,6 +177,21 @@ test('PostgreSQL defaults dbname to postgres and disables TLS by default', () =>
   assert.equal(connection.usesTLS, false);
 });
 
+test('PostgreSQL system trust uses libpq system roots with verify-full', () => {
+  const connection = buildDatabaseGatewayConnection({
+    protocol: 'postgresql',
+    gateway: systemTrustGateway,
+    port: 54330,
+    username: 'ops',
+    useTLS: true,
+  });
+
+  assert.ok(connection?.command);
+  assert.match(connection.command, /sslmode=verify-full/);
+  assert.match(connection.command, /sslrootcert=system/);
+  assert.doesNotMatch(connection.command, /jianmen-database-gateway-ca\.pem/);
+});
+
 test('MySQL command has a bounded POSIX argv and VERIFY_IDENTITY', (context) => {
   const connection = buildDatabaseGatewayConnection({
     protocol: 'mysql',
@@ -198,6 +221,27 @@ test('MySQL command has a bounded POSIX argv and VERIFY_IDENTITY', (context) => 
     'ops+account@jianmen',
     '-p',
   ]);
+});
+
+test('MySQL native CLI keeps the explicit CA fallback in system trust mode', () => {
+  const connection = buildDatabaseGatewayConnection({
+    protocol: 'mysql',
+    gateway: systemTrustGateway,
+    port: 33060,
+    username: 'ops',
+    useTLS: true,
+  });
+  assert.ok(connection?.command);
+  assert.match(connection.command, /--ssl-mode=VERIFY_IDENTITY/);
+  assert.match(connection.command, /--ssl-ca=/);
+
+  assert.equal(buildDatabaseGatewayConnection({
+    protocol: 'mysql',
+    gateway: { ...systemTrustGateway, tls_ca_pem: '' },
+    port: 33060,
+    username: 'ops',
+    useTLS: true,
+  }), null);
 });
 
 test('Redis emits a plaintext ACL command by default without putting the password in argv', () => {
@@ -291,6 +335,31 @@ test('TLS connections fail closed for incomplete identity and all modes reject i
     assert.equal(buildDatabaseGatewayConnection({ protocol, gateway: secureGateway, port: 0, username: 'ops' }), null);
     assert.equal(buildDatabaseGatewayConnection({ protocol, gateway: secureGateway, port: 65536, username: 'ops' }), null);
   }
+});
+
+test('TLS identity distinguishes system trust from custom CA and rejects missing modes', () => {
+  const systemWithoutCA = {
+    ...systemTrustGateway,
+    tls_ca_pem: '',
+  };
+  const customWithoutCA = {
+    ...secureGateway,
+    tls_ca_pem: '',
+  };
+  const missingMode = {
+    ...secureGateway,
+    tls_trust_mode: undefined,
+  };
+
+  assert.equal(hasDatabaseGatewayTLSIdentity(systemWithoutCA), true);
+  assert.equal(hasDatabaseGatewayTLSIdentity(customWithoutCA), false);
+  assert.equal(hasDatabaseGatewayTLSIdentity(missingMode), false);
+  assert.equal(databaseGatewayTLSTrustMode(systemWithoutCA), 'system');
+  assert.equal(databaseGatewayTLSTrustMode(customWithoutCA), 'custom');
+  assert.equal(databaseGatewayTLSTrustMode(missingMode), null);
+  assert.equal(databaseGatewayRequiresCustomCA(systemWithoutCA), false);
+  assert.equal(databaseGatewayRequiresCustomCA(customWithoutCA), true);
+  assert.equal(databaseGatewayRequiresCustomCA(missingMode), true);
 });
 
 test('request generations reject stale target results and invalidation', () => {

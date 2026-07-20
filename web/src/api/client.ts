@@ -4,6 +4,7 @@ import { withIdempotencyKey, type ProvisionRequest } from '@/utils/provisioningR
 import type {
   DatabaseGatewayClientTLSMode,
   DatabaseGatewayMode,
+  DatabaseGatewayTLSTrustMode,
   SystemSettingsDiagnosticResult,
   SystemSettingsRevisionResponse,
   SystemSettingsState,
@@ -13,6 +14,7 @@ import type {
 export type {
   DatabaseGatewayClientTLSMode,
   DatabaseGatewayMode,
+  DatabaseGatewayTLSTrustMode,
   SystemSettingsDiagnosticResult,
   SystemSettingsInfrastructure,
   SystemSettingsRevision,
@@ -499,6 +501,7 @@ export interface DBGatewayConfig {
   port: number;
   mysql_detection_delay_ms: number;
   tls_enabled: boolean;
+  tls_trust_mode?: DatabaseGatewayTLSTrustMode;
   tls_server_name?: string;
   tls_ca_pem?: string;
   tls_cert_sha256?: string;

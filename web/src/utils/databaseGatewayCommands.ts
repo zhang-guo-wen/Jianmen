@@ -1,6 +1,7 @@
 import type {
   DatabaseGatewayClientTLSMode,
   DatabaseGatewayMode,
+  DatabaseGatewayTLSTrustMode,
 } from '../api/systemSettings';
 import { DATABASE_CLIENT_CA_FILE_NAME } from '../config/databaseClients';
 
@@ -9,6 +10,7 @@ export interface DatabaseGatewayTLSIdentity {
   host?: string;
   client_tls_mode?: DatabaseGatewayClientTLSMode;
   tls_enabled: boolean;
+  tls_trust_mode?: DatabaseGatewayTLSTrustMode;
   tls_server_name?: string;
   tls_ca_pem?: string;
   tls_cert_sha256?: string;
@@ -40,13 +42,31 @@ export interface DatabaseGatewayConnection {
   usesTLS: boolean;
 }
 
-export function hasDatabaseGatewayTLSIdentity(gateway: DatabaseGatewayTLSIdentity | null | undefined): gateway is DatabaseGatewayTLSIdentity & Required<Pick<DatabaseGatewayTLSIdentity, 'tls_server_name' | 'tls_ca_pem' | 'tls_cert_sha256'>> {
+export function databaseGatewayTLSTrustMode(
+  gateway: DatabaseGatewayTLSIdentity | null | undefined,
+): DatabaseGatewayTLSTrustMode | null {
+  return gateway?.tls_trust_mode === 'system' || gateway?.tls_trust_mode === 'custom'
+    ? gateway.tls_trust_mode
+    : null;
+}
+
+export function databaseGatewayRequiresCustomCA(
+  gateway: DatabaseGatewayTLSIdentity | null | undefined,
+): boolean {
+  return databaseGatewayTLSTrustMode(gateway) !== 'system';
+}
+
+export function hasDatabaseGatewayTLSIdentity(gateway: DatabaseGatewayTLSIdentity | null | undefined): gateway is DatabaseGatewayTLSIdentity & Required<Pick<DatabaseGatewayTLSIdentity, 'tls_server_name' | 'tls_cert_sha256'>> {
   return Boolean(
     gateway?.enabled &&
     gateway.tls_enabled &&
     gateway.tls_server_name?.trim() &&
-    gateway.tls_ca_pem?.trim() &&
-    gateway.tls_cert_sha256?.trim(),
+    gateway.tls_cert_sha256?.trim() &&
+    databaseGatewayTLSTrustMode(gateway) !== null &&
+    (
+      databaseGatewayTLSTrustMode(gateway) === 'system'
+      || gateway.tls_ca_pem?.trim()
+    ),
   );
 }
 
@@ -136,13 +156,16 @@ export function buildDatabaseGatewayConnection(input: DatabaseGatewayConnectionI
   ) return null;
 
   if (protocol === 'postgres') {
+    const rootCertificateArgument = databaseGatewayTLSTrustMode(gateway) === 'system'
+      ? 'sslrootcert=system'
+      : `sslrootcert=${libpqQuote(caFilePath)}`;
     const conninfo = [
       `host=${libpqQuote(host)}`,
       `port=${input.port}`,
       `user=${libpqQuote(input.username)}`,
       `dbname=${libpqQuote(databaseName)}`,
       useTLS ? 'sslmode=verify-full' : 'sslmode=disable',
-      ...(useTLS ? [`sslrootcert=${libpqQuote(caFilePath)}`] : []),
+      ...(useTLS ? [rootCertificateArgument] : []),
       'gssencmode=disable',
     ].join(' ');
     return {
@@ -156,6 +179,7 @@ export function buildDatabaseGatewayConnection(input: DatabaseGatewayConnectionI
   }
 
   if (protocol === 'mysql') {
+    if (useTLS && !gateway.tls_ca_pem?.trim()) return null;
     return {
       command: useTLS
         ? `mysql --protocol=tcp --ssl-mode=VERIFY_IDENTITY --ssl-ca=${shellQuote(caFilePath)} -h ${shellQuote(host)} -P ${input.port} -u ${shellQuote(input.username)} -p`

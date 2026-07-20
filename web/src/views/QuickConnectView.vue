@@ -283,6 +283,7 @@ import { useRoute, useRouter } from 'vue-router';
 
 import {
   apiClient,
+  type DatabaseGatewayTLSTrustMode,
   type DBAccountRecord,
   type DBGatewayConfig,
   type HostView,
@@ -303,6 +304,7 @@ import {
 } from '@/utils/databaseGatewayAvailability';
 import { loadDatabaseConnectionResources } from '@/utils/databaseConnectionOrchestration';
 import {
+  databaseGatewayRequiresCustomCA,
   hasDatabaseGatewayTLSIdentity,
   resolveDatabaseGatewayClientHost,
   resolveDatabaseGatewayPort,
@@ -344,6 +346,7 @@ interface DatabaseConnectionState {
   expiresAt: string;
   tlsIdentityReady: boolean;
   clientTLSMode: 'required' | 'optional';
+  tlsTrustMode: DatabaseGatewayTLSTrustMode | undefined;
 }
 
 class DatabaseGatewayConfigurationRedirect extends Error {}
@@ -928,6 +931,7 @@ function ensureDatabaseConnectionInfo(account: QuickDBTarget): Promise<DatabaseC
     expiresAt: '',
     tlsIdentityReady: false,
     clientTLSMode: 'optional',
+    tlsTrustMode: undefined,
   };
   dbConnectionStates[key] = state;
 
@@ -951,6 +955,10 @@ function ensureDatabaseConnectionInfo(account: QuickDBTarget): Promise<DatabaseC
       state.clientTLSMode = connectableGateway.client_tls_mode === 'required'
         ? 'required'
         : 'optional';
+      state.tlsTrustMode = connectableGateway.tls_trust_mode === 'system'
+        || connectableGateway.tls_trust_mode === 'custom'
+        ? connectableGateway.tls_trust_mode
+        : undefined;
       state.host = resolveDatabaseGatewayClientHost(
         connectableGateway.host,
         window.location.hostname || '127.0.0.1',
@@ -986,7 +994,11 @@ async function copyDatabaseConnectionInfo(account: QuickDBTarget) {
       `连接地址：${connectionHost}:${state.port}`,
       `连接账户：${state.compactUser}`,
       `连接临时密码：${state.password}`,
-      `客户端 TLS：${state.clientTLSMode === 'required' ? '强制 TLS' : '未启用（网关支持可选 TLS）'}`,
+      `客户端 TLS：${
+        state.clientTLSMode === 'required'
+          ? `强制 TLS（${state.tlsTrustMode === 'system' ? '客户端默认信任库' : '自定义 CA'}）`
+          : '未启用（网关支持可选 TLS）'
+      }`,
     ].join('\n');
     await writeClipboardText(content);
     ElMessage.success('数据库临时连接信息已全部复制');
@@ -1032,7 +1044,15 @@ async function openDatabaseClient(account: QuickDBTarget) {
     if (state.clientTLSMode === 'required' && !state.tlsIdentityReady) {
       throw new Error('数据库网关 TLS 身份材料不完整，已阻止本地客户端打开');
     }
-    if (state.clientTLSMode === 'required' && !databaseClient.value.caFilePath.trim()) {
+    if (
+      state.clientTLSMode === 'required'
+      && databaseGatewayRequiresCustomCA({
+        enabled: true,
+        tls_enabled: true,
+        tls_trust_mode: state.tlsTrustMode,
+      })
+      && !databaseClient.value.caFilePath.trim()
+    ) {
       ElMessage.warning('数据库网关强制 TLS，请先在个人设置中配置网关 CA 文件');
       openClientSettings('database');
       return;
@@ -1046,6 +1066,9 @@ async function openDatabaseClient(account: QuickDBTarget) {
       databaseName: ['postgres', 'postgresql'].includes(protocol.toLowerCase()) ? 'postgres' : '',
       connectionName: `${account._instance_name || 'Jianmen'} / ${account.username || '数据库账号'}`,
       tls: state.clientTLSMode === 'required' ? 'verify-full' : 'disable',
+      ...(state.clientTLSMode === 'required' && state.tlsTrustMode
+        ? { tlsTrust: state.tlsTrustMode }
+        : {}),
     });
     if (!launchURL) throw new Error('连接参数不符合本地客户端安全规则');
     ElMessage.success('正在打开 DBeaver 并使用临时密码建立连接');

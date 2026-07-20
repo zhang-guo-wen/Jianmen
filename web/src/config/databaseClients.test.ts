@@ -146,7 +146,7 @@ test('database client deep link defaults to a plaintext connection and carries o
 
   const payload = decodeLaunchPayload(url);
   assert.deepEqual(payload, {
-    v: 3,
+    v: 4,
     driver: 'postgresql',
     host: 'gateway.db.example',
     port: 33060,
@@ -155,6 +155,7 @@ test('database client deep link defaults to a plaintext connection and carries o
     password: 'temporary_password_1234567890',
     name: '生产库 / reporting',
     tls: 'disable',
+    tls_trust_mode: 'system',
   });
 });
 
@@ -167,10 +168,28 @@ test('database client deep link can explicitly request a verified TLS connection
     password: 'temporary_password_1234567890',
     connectionName: 'Jianmen TLS',
     tls: 'verify-full',
+    tlsTrust: 'custom',
   }));
 
-  assert.equal(payload.v, 3);
+  assert.equal(payload.v, 4);
   assert.equal(payload.tls, 'verify-full');
+  assert.equal(payload.tls_trust_mode, 'custom');
+});
+
+test('database client deep link carries system trust explicitly', () => {
+  const payload = decodeLaunchPayload(buildDatabaseProtocolURL({
+    protocol: 'postgres',
+    host: 'gateway.db.example',
+    port: 33060,
+    username: 'D000100001',
+    password: 'temporary_password_1234567890',
+    tls: 'verify-full',
+    tlsTrust: 'system',
+  }));
+
+  assert.equal(payload.v, 4);
+  assert.equal(payload.tls, 'verify-full');
+  assert.equal(payload.tls_trust_mode, 'system');
 });
 
 test('database client deep link rejects connection-field injection and cleans display names', () => {
@@ -212,6 +231,7 @@ test('Windows registration command validates every payload field and fixes safe 
   assert.match(script, /\$args\.Count -ne 0/);
   assert.match(script, /\$uri\.Scheme -cne 'jianmen-db'/);
   assert.match(script, /\$properties\.Count -ne \$allowed\.Count/);
+  assert.match(script, /\$data\.tls_trust_mode -cnotin @\('custom', 'system'\)/);
   assert.match(script, /\[string\]\$data\.host -notmatch/);
   assert.match(script, /\[string\]\$data\.user -notmatch/);
   assert.match(script, /\[string\]\$data\.password -notmatch/);
@@ -226,7 +246,9 @@ test('Windows registration command validates every payload field and fixes safe 
   assert.match(script, /'connect=true'/);
   assert.match(script, /"password=\$\(\$data\.password\)"/);
   assert.match(script, /prop\.sslMode=VERIFY_IDENTITY/);
+  assert.match(script, /prop\.fallbackToSystemTrustStore=true/);
   assert.match(script, /prop\.sslmode=verify-full/);
+  assert.match(script, /prop\.sslfactory=org\.postgresql\.ssl\.DefaultJavaSSLFactory/);
   assert.match(script, /netHandler\.ssl\.ca\.cert=\$caFile/);
   assert.match(script, /netHandler\.ssl\.sslMode=verify-full/);
   assert.match(script, /netHandler\.ssl\.verify\.server=true/);
@@ -252,6 +274,7 @@ test('Windows registration allows plaintext quick connect without a CA file', ()
   const script = decodeBrokerPowerShell(command);
   assert.match(script, /\$caFile = ''/);
   assert.match(script, /\$data\.tls -ceq 'verify-full'/);
+  assert.match(script, /\$data\.tls_trust_mode -ceq 'custom'/);
   assert.match(script, /prop\.sslMode=DISABLED/);
   assert.match(script, /prop\.sslmode=disable/);
 });
@@ -351,6 +374,72 @@ func main() {
     assert.ok(connectionFields.includes('connect=true'));
     assert.ok(connectionFields.includes('save=true'));
     assert.ok(connectionFields.includes('savePassword=true'));
+
+    rmSync(capturedArgumentsPath, { force: true });
+    const systemTrustURL = buildDatabaseProtocolURL({
+      protocol: 'postgres',
+      host: 'gateway.db.example',
+      port: 54320,
+      username: 'D000100001',
+      password: 'temporary_password_1234567890',
+      databaseName: 'postgres',
+      tls: 'verify-full',
+      tlsTrust: 'system',
+      connectionName: '系统信任测试',
+    });
+    const systemTrustResult = spawnSync(
+      'powershell.exe',
+      ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', scriptPath, systemTrustURL],
+      {
+        encoding: 'utf8',
+        timeout: 10_000,
+        env: { ...process.env, JIANMEN_TEST_ARGV_FILE: capturedArgumentsPath },
+      },
+    );
+    assert.equal(systemTrustResult.status, 0, systemTrustResult.stderr || systemTrustResult.stdout);
+    const systemTrustDeadline = Date.now() + 5_000;
+    while (!existsSync(capturedArgumentsPath) && Date.now() < systemTrustDeadline) {
+      await delay(25);
+    }
+    assert.equal(existsSync(capturedArgumentsPath), true, 'DBeaver system-trust helper did not receive arguments');
+    const systemTrustArguments = JSON.parse(readFileSync(capturedArgumentsPath, 'utf8')) as string[];
+    const systemTrustFields = systemTrustArguments[1]?.split('|') ?? [];
+    assert.ok(systemTrustFields.includes('prop.sslmode=verify-full'));
+    assert.ok(systemTrustFields.includes('prop.sslfactory=org.postgresql.ssl.DefaultJavaSSLFactory'));
+    assert.equal(systemTrustFields.some(field => field.startsWith('netHandler.ssl.ca.cert=')), false);
+    assert.equal(systemTrustFields.some(field => field.startsWith('prop.sslrootcert=')), false);
+
+    rmSync(capturedArgumentsPath, { force: true });
+    const mysqlSystemTrustURL = buildDatabaseProtocolURL({
+      protocol: 'mysql',
+      host: 'gateway.db.example',
+      port: 33060,
+      username: 'D000100001',
+      password: 'temporary_password_1234567890',
+      tls: 'verify-full',
+      tlsTrust: 'system',
+      connectionName: 'MySQL 系统信任测试',
+    });
+    const mysqlSystemTrustResult = spawnSync(
+      'powershell.exe',
+      ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', scriptPath, mysqlSystemTrustURL],
+      {
+        encoding: 'utf8',
+        timeout: 10_000,
+        env: { ...process.env, JIANMEN_TEST_ARGV_FILE: capturedArgumentsPath },
+      },
+    );
+    assert.equal(mysqlSystemTrustResult.status, 0, mysqlSystemTrustResult.stderr || mysqlSystemTrustResult.stdout);
+    const mysqlSystemTrustDeadline = Date.now() + 5_000;
+    while (!existsSync(capturedArgumentsPath) && Date.now() < mysqlSystemTrustDeadline) {
+      await delay(25);
+    }
+    assert.equal(existsSync(capturedArgumentsPath), true, 'DBeaver MySQL system-trust helper did not receive arguments');
+    const mysqlSystemTrustArguments = JSON.parse(readFileSync(capturedArgumentsPath, 'utf8')) as string[];
+    const mysqlSystemTrustFields = mysqlSystemTrustArguments[1]?.split('|') ?? [];
+    assert.ok(mysqlSystemTrustFields.includes('prop.sslMode=VERIFY_IDENTITY'));
+    assert.ok(mysqlSystemTrustFields.includes('prop.fallbackToSystemTrustStore=true'));
+    assert.equal(mysqlSystemTrustFields.some(field => field.startsWith('netHandler.ssl.ca.cert=')), false);
 
     const extraArgument = spawnSync(
       'powershell.exe',

@@ -170,6 +170,7 @@ beforeEach(() => {
     port: 33060,
     client_tls_mode: 'optional',
     tls_enabled: true,
+    tls_trust_mode: 'custom',
     tls_server_name: 'database.example',
     tls_ca_pem: '-----BEGIN CERTIFICATE-----\ntest\n-----END CERTIFICATE-----',
     tls_cert_sha256: 'AA:BB',
@@ -344,9 +345,51 @@ describe('ConnectionConfigDialog database local client', () => {
     const launchInput = mocks.buildDatabaseProtocolURL.mock.calls.at(-1)?.[0] as {
       host?: string;
       tls?: string;
+      tlsTrust?: string;
     } | undefined;
     assert.equal(launchInput?.host, 'database.example');
     assert.equal(launchInput?.tls, 'verify-full');
+    assert.equal(launchInput?.tlsTrust, 'custom');
+    wrapper.unmount();
+  });
+
+  it('allows optional TLS with client default trust and no CA path', async () => {
+    mocks.databaseClient.configured = true;
+    mocks.databaseClient.directLaunchReady = true;
+    Object.assign(mocks.databaseClient.value, {
+      client: 'dbeaver',
+      platform: 'windows',
+      executablePath: 'C:\\DBeaver\\dbeaverc.exe',
+      caFilePath: '',
+      protocolRegistered: true,
+    });
+    mocks.apiClient.getDBGateway.mockResolvedValue({
+      enabled: true,
+      connectable: true,
+      mode: 'unified',
+      protocol: 'postgresql',
+      host: 'gateway.internal',
+      port: 33060,
+      client_tls_mode: 'optional',
+      tls_enabled: true,
+      tls_trust_mode: 'system',
+      tls_server_name: 'database.example',
+      tls_cert_sha256: 'AA:BB',
+    });
+    const wrapper = await mountDatabaseDialog();
+
+    await wrapper.get('[data-testid="database-tls-switch"]').trigger('click');
+    await wrapper.get('[data-testid="database-local-client"]').trigger('click');
+
+    const launchInput = mocks.buildDatabaseProtocolURL.mock.calls.at(-1)?.[0] as {
+      host?: string;
+      tls?: string;
+      tlsTrust?: string;
+    } | undefined;
+    assert.equal(launchInput?.host, 'database.example');
+    assert.equal(launchInput?.tls, 'verify-full');
+    assert.equal(launchInput?.tlsTrust, 'system');
+    assert.equal(mocks.routerPush.mock.calls.length, 0);
     wrapper.unmount();
   });
 
@@ -369,6 +412,7 @@ describe('ConnectionConfigDialog database local client', () => {
       port: 33060,
       client_tls_mode: 'required',
       tls_enabled: true,
+      tls_trust_mode: 'custom',
       tls_server_name: 'database.example',
       tls_ca_pem: '-----BEGIN CERTIFICATE-----\ntest\n-----END CERTIFICATE-----',
       tls_cert_sha256: 'AA:BB',
@@ -381,9 +425,11 @@ describe('ConnectionConfigDialog database local client', () => {
     const launchInput = mocks.buildDatabaseProtocolURL.mock.calls.at(-1)?.[0] as {
       host?: string;
       tls?: string;
+      tlsTrust?: string;
     } | undefined;
     assert.equal(launchInput?.host, 'database.example');
     assert.equal(launchInput?.tls, 'verify-full');
+    assert.equal(launchInput?.tlsTrust, 'custom');
     wrapper.unmount();
   });
 
@@ -399,6 +445,7 @@ describe('ConnectionConfigDialog database local client', () => {
       port: 33060,
       client_tls_mode: 'required',
       tls_enabled: true,
+      tls_trust_mode: 'custom',
       tls_server_name: 'database.example',
       tls_ca_pem: '-----BEGIN CERTIFICATE-----\ntest\n-----END CERTIFICATE-----',
       tls_cert_sha256: 'AA:BB',
@@ -412,6 +459,45 @@ describe('ConnectionConfigDialog database local client', () => {
       path: '/settings',
       query: { tab: 'database', return_to: '/databases' },
     });
+    wrapper.unmount();
+  });
+
+  it('launches required TLS with client default trust when no CA path is configured', async () => {
+    mocks.databaseClient.configured = true;
+    mocks.databaseClient.directLaunchReady = true;
+    Object.assign(mocks.databaseClient.value, {
+      client: 'dbeaver',
+      platform: 'windows',
+      executablePath: 'C:\\DBeaver\\dbeaverc.exe',
+      caFilePath: '',
+      protocolRegistered: true,
+    });
+    mocks.apiClient.getDBGateway.mockResolvedValue({
+      enabled: true,
+      connectable: true,
+      mode: 'unified',
+      protocol: 'postgresql',
+      host: 'gateway.internal',
+      port: 33060,
+      client_tls_mode: 'required',
+      tls_enabled: true,
+      tls_trust_mode: 'system',
+      tls_server_name: 'database.example',
+      tls_cert_sha256: 'AA:BB',
+    });
+    const wrapper = await mountDatabaseDialog();
+
+    await wrapper.get('[data-testid="database-local-client"]').trigger('click');
+
+    const launchInput = mocks.buildDatabaseProtocolURL.mock.calls.at(-1)?.[0] as {
+      host?: string;
+      tls?: string;
+      tlsTrust?: string;
+    } | undefined;
+    assert.equal(launchInput?.host, 'database.example');
+    assert.equal(launchInput?.tls, 'verify-full');
+    assert.equal(launchInput?.tlsTrust, 'system');
+    assert.equal(mocks.routerPush.mock.calls.length, 0);
     wrapper.unmount();
   });
 

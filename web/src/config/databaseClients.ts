@@ -1,5 +1,6 @@
 export type DatabaseClientPlatform = 'windows' | 'macos' | 'linux';
 export type DatabaseClientTLSMode = 'disable' | 'verify-full';
+export type DatabaseClientTLSTrustMode = 'custom' | 'system';
 
 export interface DatabaseClientSettings {
   client: '' | 'dbeaver';
@@ -29,10 +30,11 @@ export interface DatabaseClientLaunchInput {
   databaseName?: string;
   connectionName?: string;
   tls?: DatabaseClientTLSMode;
+  tlsTrust?: DatabaseClientTLSTrustMode;
 }
 
 interface DatabaseClientLaunchPayload {
-  v: 3;
+  v: 4;
   driver: 'mysql' | 'postgresql';
   host: string;
   port: number;
@@ -41,6 +43,7 @@ interface DatabaseClientLaunchPayload {
   password: string;
   name: string;
   tls: DatabaseClientTLSMode;
+  tls_trust_mode: DatabaseClientTLSTrustMode;
 }
 
 export const DATABASE_CLIENT_OPTIONS = [
@@ -54,7 +57,7 @@ export const DATABASE_CLIENT_PLATFORM_OPTIONS = [
 ] as const;
 
 export const DATABASE_CLIENT_CA_FILE_NAME = 'jianmen-database-gateway-ca.pem';
-export const DATABASE_CLIENT_PROTOCOL_REGISTRATION_VERSION = 4;
+export const DATABASE_CLIENT_PROTOCOL_REGISTRATION_VERSION = 5;
 
 export function isCurrentDatabaseClientProtocolRegistration(
   registered: unknown,
@@ -156,10 +159,10 @@ try {
   $bytes = [Convert]::FromBase64String($encoded)
   if ($bytes.Length -gt 3072) { exit 4 }
   $data = [Text.Encoding]::UTF8.GetString($bytes) | ConvertFrom-Json
-  $allowed = @('v', 'driver', 'host', 'port', 'database', 'user', 'password', 'name', 'tls')
+  $allowed = @('v', 'driver', 'host', 'port', 'database', 'user', 'password', 'name', 'tls', 'tls_trust_mode')
   $properties = @($data.PSObject.Properties.Name)
   if ($properties.Count -ne $allowed.Count -or @($properties | Where-Object { $_ -notin $allowed }).Count -ne 0) { exit 5 }
-  if ([string]$data.v -cne '3' -or [string]$data.tls -cnotin @('disable', 'verify-full')) { exit 6 }
+  if ([string]$data.v -cne '4' -or [string]$data.tls -cnotin @('disable', 'verify-full') -or [string]$data.tls_trust_mode -cnotin @('custom', 'system')) { exit 6 }
   if ([string]$data.driver -cnotin @('mysql', 'postgresql')) { exit 7 }
   if ([string]$data.host -notmatch '^[A-Za-z0-9._:\[\]-]{1,255}$') { exit 8 }
   if ([string]$data.user -notmatch '^[\p{L}\p{N}._@+-]{1,256}$') { exit 9 }
@@ -169,7 +172,7 @@ try {
   $port = 0
   if (-not [int]::TryParse([string]$data.port, [ref]$port) -or $port -lt 1 -or $port -gt 65535) { exit 13 }
   $caFile = '${caFile}'
-  if ([string]$data.tls -ceq 'verify-full' -and ([string]::IsNullOrWhiteSpace($caFile) -or -not (Test-Path -LiteralPath $caFile -PathType Leaf))) {
+  if ([string]$data.tls -ceq 'verify-full' -and [string]$data.tls_trust_mode -ceq 'custom' -and ([string]::IsNullOrWhiteSpace($caFile) -or -not (Test-Path -LiteralPath $caFile -PathType Leaf))) {
     try {
       $message = '配置的网关 CA 文件不存在：' + [Environment]::NewLine + $caFile +
         [Environment]::NewLine + '请在 Jianmen 个人设置中重新下载或修正路径。'
@@ -191,23 +194,32 @@ try {
     'connect=true'
   )
   if ([string]$data.tls -ceq 'verify-full') {
-    $parts += @(
-      'netHandler.ssl.method=CERTIFICATES',
-      "netHandler.ssl.ca.cert=$caFile"
-    )
+    if ([string]$data.tls_trust_mode -ceq 'custom') {
+      $parts += @(
+        'netHandler.ssl.method=CERTIFICATES',
+        "netHandler.ssl.ca.cert=$caFile"
+      )
+    }
     if ([string]$data.driver -ceq 'mysql') {
       $parts += @(
         'prop.sslMode=VERIFY_IDENTITY',
         'netHandler.ssl.require=true',
         'netHandler.ssl.verify.server=true'
       )
+      if ([string]$data.tls_trust_mode -ceq 'system') {
+        $parts += 'prop.fallbackToSystemTrustStore=true'
+      }
     } else {
       $parts += @(
         'prop.ssl=true',
         'prop.sslmode=verify-full',
-        "prop.sslrootcert=$caFile",
         'netHandler.ssl.sslMode=verify-full'
       )
+      if ([string]$data.tls_trust_mode -ceq 'custom') {
+        $parts += "prop.sslrootcert=$caFile"
+      } else {
+        $parts += 'prop.sslfactory=org.postgresql.ssl.DefaultJavaSSLFactory'
+      }
     }
   } elseif ([string]$data.driver -ceq 'mysql') {
     $parts += @(
@@ -278,6 +290,7 @@ function normalizeLaunchPayload(input: DatabaseClientLaunchInput): DatabaseClien
   const database = (input.databaseName ?? defaultDatabaseName(input.protocol)).trim();
   const name = sanitizeConnectionName(input.connectionName || 'Jianmen 临时连接');
   const tls = input.tls ?? 'disable';
+  const trust = tls === 'verify-full' ? input.tlsTrust ?? 'custom' : 'system';
   if (
     !driver
     || !Number.isInteger(input.port)
@@ -289,11 +302,12 @@ function normalizeLaunchPayload(input: DatabaseClientLaunchInput): DatabaseClien
     || !/^[\p{L}\p{N} ._\-]{0,128}$/u.test(database)
     || !name
     || (tls !== 'disable' && tls !== 'verify-full')
+    || (trust !== 'custom' && trust !== 'system')
   ) {
     return null;
   }
   return {
-    v: 3,
+    v: 4,
     driver,
     host,
     port: input.port,
@@ -302,6 +316,7 @@ function normalizeLaunchPayload(input: DatabaseClientLaunchInput): DatabaseClien
     password,
     name,
     tls,
+    tls_trust_mode: trust,
   };
 }
 

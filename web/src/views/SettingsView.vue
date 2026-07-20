@@ -106,13 +106,13 @@
                     <el-input v-model="form.db_client_path" name="db_client_path" autocomplete="off" :placeholder="`例如 ${dbClientPathExample}`" />
                     <div class="field-help">Windows 推荐选择 dbeaverc.exe；本机路径只用于生成协议注册命令，不会上传。</div>
                   </el-form-item>
-                  <el-form-item label="本地 CA 文件路径（可选）" :error="dbCAFilePathError">
+                  <el-form-item label="本地 CA 文件路径（私有/自签证书）" :error="dbCAFilePathError">
                     <el-input v-model="form.db_client_ca_file_path" name="db_client_ca_path" autocomplete="off" :placeholder="`例如 ${dbCAFilePathExample}`">
                       <template #append>
                         <el-button :loading="dbCALoading" @click="downloadDatabaseGatewayCA">下载网关 CA</el-button>
                       </template>
                     </el-input>
-                    <div class="field-help">默认非 TLS 快速连接无需填写；需要 TLS 时，请下载 CA 并填写保存后的绝对路径。</div>
+                    <div class="field-help">公网 CA 证书通过 DBeaver/Java 默认信任库校验，无需填写；私有 CA、自签证书或原生命令行兼容回退可下载 CA。</div>
                   </el-form-item>
                   <el-alert v-if="form.db_client_platform !== 'windows'" type="warning" :closable="false" show-icon title="当前仅 Windows 支持从浏览器直接唤起 DBeaver。" />
                   <ClientRegistrationAlert
@@ -377,7 +377,11 @@ async function downloadDatabaseGatewayCA() {
       apiClient.getDBGateway('redis'),
     ]);
     const certificates = results
-      .flatMap(result => result.status === 'fulfilled' && hasDatabaseGatewayTLSIdentity(result.value) ? [result.value.tls_ca_pem.trim()] : [])
+      .flatMap(result => {
+        if (result.status !== 'fulfilled' || !hasDatabaseGatewayTLSIdentity(result.value)) return [];
+        const certificate = result.value.tls_ca_pem?.trim();
+        return certificate ? [certificate] : [];
+      })
       .filter((cert, i, arr) => arr.indexOf(cert) === i);
     if (!certificates.length) {
       const rejected = results.find((r): r is PromiseRejectedResult => r.status === 'rejected');

@@ -59,24 +59,25 @@ func (s *Server) handleDBGateway(w http.ResponseWriter, r *http.Request) {
 		"mysql_detection_delay_ms": databaseGatewayMySQLDetectionDelay(cfg),
 	}
 	if tlsEnabled {
-		caPEM, fingerprint, err := databaseGatewayTLSIdentityMaterial(listener)
+		identity, err := databaseGatewayTLSIdentityMaterial(listener)
 		if err != nil {
 			s.writeErrorText(w, r, http.StatusServiceUnavailable, databaseGatewayTLSMaterialUnavailable)
 			return
 		}
 		response["tls_server_name"] = strings.TrimSpace(listener.ServerName)
-		response["tls_ca_pem"] = caPEM
-		response["tls_cert_sha256"] = fingerprint
+		response["tls_ca_pem"] = identity.CAPEM
+		response["tls_cert_sha256"] = identity.LeafSHA256
+		response["tls_trust_mode"] = identity.TrustMode
 	}
 	s.writeJSON(w, r, http.StatusOK, response)
 }
 
-func databaseGatewayTLSIdentityMaterial(listener config.DatabaseProtocolListener) (string, string, error) {
+func databaseGatewayTLSIdentityMaterial(listener config.DatabaseProtocolListener) (dbtls.ServerIdentityMaterial, error) {
 	identity, err := dbtls.LoadServerIdentity(listener.CertFile, listener.CAFile, listener.ServerName)
 	if err != nil {
-		return "", "", err
+		return dbtls.ServerIdentityMaterial{}, err
 	}
-	return identity.CAPEM, identity.LeafSHA256, nil
+	return identity, nil
 }
 
 func databaseProtocolListener(gateway config.DatabaseGatewayConfig, requested string) (string, config.DatabaseProtocolListener, bool) {

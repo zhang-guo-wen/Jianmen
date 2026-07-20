@@ -101,6 +101,7 @@ func TestHandleDBGatewayReturnsProtocolListenerToConnectOnlyUser(t *testing.T) {
 		TLSServerName     string `json:"tls_server_name"`
 		TLSCAPEM          string `json:"tls_ca_pem"`
 		TLSCertSHA256     string `json:"tls_cert_sha256"`
+		TLSTrustMode      string `json:"tls_trust_mode"`
 		MySQLDelayMS      int    `json:"mysql_detection_delay_ms"`
 	}
 	if err := decodeTestData(t, recorder.Body.Bytes(), &response); err != nil {
@@ -112,7 +113,7 @@ func TestHandleDBGatewayReturnsProtocolListenerToConnectOnlyUser(t *testing.T) {
 		response.Protocol != "postgresql" || response.ListenAddr != "0.0.0.0:54330" ||
 		response.Host != "" || response.Port != 54330 || !response.TLSEnabled ||
 		response.TLSServerName != "pg-gateway.example.test" || response.TLSCAPEM == "" ||
-		response.TLSCertSHA256 != leafFingerprint {
+		response.TLSCertSHA256 != leafFingerprint || response.TLSTrustMode != "custom" {
 		t.Fatalf("unexpected PostgreSQL gateway response: %#v", response)
 	}
 	if strings.Contains(recorder.Body.String(), "private-key-content") || strings.Contains(recorder.Body.String(), "database-password") || strings.Contains(recorder.Body.String(), "key_file") {
@@ -349,11 +350,15 @@ func TestHandleDBGatewayFallsBackToLeafCertificateAsTrustAnchor(t *testing.T) {
 		TLSCAPEM      string `json:"tls_ca_pem"`
 		TLSCertSHA256 string `json:"tls_cert_sha256"`
 		TLSServerName string `json:"tls_server_name"`
+		TLSTrustMode  string `json:"tls_trust_mode"`
 	}
 	if err := decodeTestData(t, recorder.Body.Bytes(), &response); err != nil {
 		t.Fatalf("decode gateway response: %v", err)
 	}
-	if response.TLSCAPEM != string(readGatewayTestFile(t, certFile)) || response.TLSCertSHA256 != fingerprint || response.TLSServerName != "mysql-gateway.example.test" {
+	if response.TLSCAPEM != string(readGatewayTestFile(t, certFile)) ||
+		response.TLSCertSHA256 != fingerprint ||
+		response.TLSServerName != "mysql-gateway.example.test" ||
+		response.TLSTrustMode != "custom" {
 		t.Fatalf("unexpected fallback TLS material: %#v", response)
 	}
 }
@@ -484,11 +489,17 @@ func TestHandleDBGatewayDisabledStateDoesNotReadOrReturnTLSMaterial(t *testing.T
 				TLSServerName *string `json:"tls_server_name"`
 				TLSCAPEM      *string `json:"tls_ca_pem"`
 				TLSCertSHA256 *string `json:"tls_cert_sha256"`
+				TLSTrustMode  *string `json:"tls_trust_mode"`
 			}
 			if err := decodeTestData(t, recorder.Body.Bytes(), &response); err != nil {
 				t.Fatalf("decode disabled gateway response: %v", err)
 			}
-			if response.Enabled || response.TLSEnabled || response.TLSServerName != nil || response.TLSCAPEM != nil || response.TLSCertSHA256 != nil {
+			if response.Enabled ||
+				response.TLSEnabled ||
+				response.TLSServerName != nil ||
+				response.TLSCAPEM != nil ||
+				response.TLSCertSHA256 != nil ||
+				response.TLSTrustMode != nil {
 				t.Fatalf("disabled gateway exposed TLS identity material: %#v", response)
 			}
 		})

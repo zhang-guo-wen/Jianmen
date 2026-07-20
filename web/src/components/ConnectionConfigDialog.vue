@@ -40,7 +40,7 @@
         <div v-if="resourceType === 'database'" class="database-tls-row">
           <div>
             <strong>客户端 TLS</strong>
-            <span>{{ databaseTLSRequired ? '系统已强制使用 TLS' : '默认不使用 TLS，可手动开启' }}</span>
+            <span>{{ databaseTLSDescription }}</span>
           </div>
           <el-switch
             v-model="databaseUseTLS"
@@ -60,7 +60,7 @@
           v-if="resourceType === 'database' && databaseUseTLS && !secureGatewayTLS"
           type="error"
           :closable="false"
-          title="TLS 身份材料不完整，无法生成安全连接命令。请联系管理员配置证书、ca_file 和 server_name。"
+          title="TLS 身份材料不完整，无法生成安全连接命令。请联系管理员检查证书链和 server_name。"
         />
         <CommandRows :commands="commands" :loading-for="isCopyInFlight" @copy="copyValue" />
       </section>
@@ -156,7 +156,13 @@ import { useRouter } from 'vue-router';
 import { Loading } from '@element-plus/icons-vue';
 import { ElButton, ElInput, ElMessage, ElMessageBox, ElSwitch } from 'element-plus';
 
-import { apiClient, type DBAccountRecord, type DBGatewayConfig, type TargetRecord } from '@/api/client';
+import {
+  apiClient,
+  type DatabaseGatewayTLSTrustMode,
+  type DBAccountRecord,
+  type DBGatewayConfig,
+  type TargetRecord,
+} from '@/api/client';
 import { buildDatabaseProtocolURL } from '@/config/databaseClients';
 import { buildSSHProtocolRegistrationCommand, isAbsoluteExecutablePath, SSH_CLIENT_OPTIONS } from '@/config/sshClients';
 import { useDatabaseClientStore } from '@/stores/databaseClient';
@@ -168,6 +174,7 @@ import {
 } from '@/utils/databaseConnectionOrchestration';
 import {
   buildDatabaseGatewayConnection,
+  databaseGatewayRequiresCustomCA,
   hasDatabaseGatewayTLSIdentity,
   resolveDatabaseGatewayClientHost,
   resolveDatabaseGatewayPort,
@@ -294,6 +301,7 @@ const connectionInfo = ref<{
   compactUser: string;
   tlsEnabled: boolean;
   clientTLSMode: 'required' | 'optional';
+  tlsTrustMode: DatabaseGatewayTLSTrustMode | undefined;
   tlsServerName: string;
   tlsCAPEM: string;
   tlsCertSHA256: string;
@@ -322,9 +330,20 @@ const isRedis = computed(() => (
 const databaseTLSRequired = computed(() => (
   connectionInfo.value?.clientTLSMode === 'required'
 ));
+const databaseTLSDescription = computed(() => {
+  if (!databaseUseTLS.value) return '默认不使用 TLS，可手动开启';
+  return connectionInfo.value?.tlsTrustMode === 'system'
+    ? databaseTLSRequired.value
+      ? '系统已强制使用 TLS；使用 DBeaver/Java 默认信任库，无需本地 CA 文件'
+      : '已开启 TLS；使用 DBeaver/Java 默认信任库，无需本地 CA 文件'
+    : databaseTLSRequired.value
+      ? '系统已强制使用 TLS，使用自定义 CA'
+      : '已开启 TLS，使用自定义 CA';
+});
 const secureGatewayTLS = computed(() => hasDatabaseGatewayTLSIdentity({
   enabled: true,
   tls_enabled: connectionInfo.value?.tlsEnabled ?? false,
+  tls_trust_mode: connectionInfo.value?.tlsTrustMode,
   tls_server_name: connectionInfo.value?.tlsServerName,
   tls_ca_pem: connectionInfo.value?.tlsCAPEM,
   tls_cert_sha256: connectionInfo.value?.tlsCertSHA256,
@@ -335,6 +354,7 @@ const databaseConnectionPlan = computed(() => {
     port,
     compactUser,
     tlsEnabled,
+    tlsTrustMode,
     tlsServerName,
     tlsCAPEM,
     tlsCertSHA256,
@@ -344,6 +364,7 @@ const databaseConnectionPlan = computed(() => {
     host: databaseConnectionHost.value,
     client_tls_mode: connectionInfo.value.clientTLSMode,
     tls_enabled: tlsEnabled,
+    tls_trust_mode: tlsTrustMode,
     tls_server_name: tlsServerName,
     tls_ca_pem: tlsCAPEM,
     tls_cert_sha256: tlsCertSHA256,
@@ -512,6 +533,9 @@ async function initializeConnection(snapshot: ConnectionTargetSnapshot) {
       compactUser: session?.compact_username || '',
       tlsEnabled: gateway?.tls_enabled ?? false,
       clientTLSMode,
+      tlsTrustMode: gateway?.tls_trust_mode === 'system' || gateway?.tls_trust_mode === 'custom'
+        ? gateway.tls_trust_mode
+        : undefined,
       tlsServerName: gateway?.tls_server_name || '',
       tlsCAPEM: gateway?.tls_ca_pem || '',
       tlsCertSHA256: gateway?.tls_cert_sha256 || '',
@@ -626,7 +650,15 @@ function openDatabaseClient() {
     openDatabaseClientSettings();
     return;
   }
-  if (databaseUseTLS.value && !databaseClient.value.caFilePath.trim()) {
+  if (
+    databaseUseTLS.value
+    && databaseGatewayRequiresCustomCA({
+      enabled: true,
+      tls_enabled: connectionInfo.value?.tlsEnabled ?? false,
+      tls_trust_mode: connectionInfo.value?.tlsTrustMode,
+    })
+    && !databaseClient.value.caFilePath.trim()
+  ) {
     ElMessage.warning('使用 TLS 打开 DBeaver 前，请先在个人设置中配置网关 CA 文件');
     openDatabaseClientSettings();
     return;
@@ -648,6 +680,9 @@ function openDatabaseClient() {
     databaseName: ['postgres', 'postgresql'].includes(props.protocol.toLowerCase()) ? 'postgres' : '',
     connectionName: props.resourceName || 'Jianmen 临时连接',
     tls: databaseUseTLS.value ? 'verify-full' : 'disable',
+    ...(databaseUseTLS.value && connectionInfo.value.tlsTrustMode
+      ? { tlsTrust: connectionInfo.value.tlsTrustMode }
+      : {}),
   });
   if (!launchURL) {
     ElMessage.error('连接参数不符合本地客户端安全规则');

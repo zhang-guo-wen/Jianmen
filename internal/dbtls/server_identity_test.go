@@ -6,6 +6,7 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
+	"errors"
 	"math/big"
 	"os"
 	"path/filepath"
@@ -90,6 +91,259 @@ func TestLoadServerIdentityFallbackRequiresSelfSignedLeaf(t *testing.T) {
 	}
 	if identity.CAPEM != string(readIdentityTestFile(t, selfSignedCertFile)) || identity.LeafSHA256 == "" {
 		t.Fatalf("unexpected self-signed identity material: %#v", identity)
+	}
+	if identity.TrustMode != ServerIdentityTrustModeCustom {
+		t.Fatalf("self-signed trust mode = %q, want %q", identity.TrustMode, ServerIdentityTrustModeCustom)
+	}
+
+	_, unrelatedCAFile := writeCAIssuedIdentity(
+		t,
+		"unrelated.example.test",
+		now.Add(-time.Hour),
+		now.Add(time.Hour),
+		[]x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+	)
+	selfSignedBundle := filepath.Join(t.TempDir(), "self-signed-with-extra.crt")
+	bundlePEM := append(
+		append([]byte(nil), readIdentityTestFile(t, selfSignedCertFile)...),
+		readIdentityTestFile(t, unrelatedCAFile)...,
+	)
+	writeIdentityTestFile(t, selfSignedBundle, bundlePEM)
+	if _, err := loadServerIdentity(
+		selfSignedBundle,
+		"",
+		"gateway.example.test",
+		func() (*x509.CertPool, error) {
+			t.Fatal("self-signed identity with extra certificates loaded system roots")
+			return nil, nil
+		},
+	); err == nil {
+		t.Fatal("loadServerIdentity() accepted a self-signed leaf with extra certificates")
+	}
+}
+
+func TestLoadServerIdentityUsesSystemTrustForCAIssuedIdentity(t *testing.T) {
+	now := time.Now()
+	certFile, caFile := writeCAIssuedIdentity(
+		t,
+		"gateway.example.test",
+		now.Add(-time.Hour),
+		now.Add(time.Hour),
+		[]x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+	)
+	_, anchors, err := readCertificateFile(caFile)
+	if err != nil {
+		t.Fatalf("read test CA: %v", err)
+	}
+	systemRoots := x509.NewCertPool()
+	systemRoots.AddCert(anchors[0])
+
+	identity, err := loadServerIdentity(
+		certFile,
+		"",
+		"gateway.example.test",
+		func() (*x509.CertPool, error) {
+			return systemRoots, nil
+		},
+	)
+	if err != nil {
+		t.Fatalf("load system-trusted identity: %v", err)
+	}
+	if identity.TrustMode != ServerIdentityTrustModeSystem {
+		t.Fatalf("system-trusted mode = %q, want %q", identity.TrustMode, ServerIdentityTrustModeSystem)
+	}
+	if identity.CAPEM != string(readIdentityTestFile(t, caFile)) || identity.LeafSHA256 == "" {
+		t.Fatalf("unexpected system-trusted identity material: %#v", identity)
+	}
+}
+
+func TestLoadServerIdentitySystemTrustRejectsInvalidLeafIdentity(t *testing.T) {
+	now := time.Now()
+	tests := []struct {
+		name       string
+		serverName string
+		notBefore  time.Time
+		notAfter   time.Time
+		usages     []x509.ExtKeyUsage
+	}{
+		{
+			name:       "wrong SAN",
+			serverName: "other.example.test",
+			notBefore:  now.Add(-time.Hour),
+			notAfter:   now.Add(time.Hour),
+			usages:     []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		},
+		{
+			name:       "expired",
+			serverName: "gateway.example.test",
+			notBefore:  now.Add(-2 * time.Hour),
+			notAfter:   now.Add(-time.Hour),
+			usages:     []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		},
+		{
+			name:       "client auth only",
+			serverName: "gateway.example.test",
+			notBefore:  now.Add(-time.Hour),
+			notAfter:   now.Add(time.Hour),
+			usages:     []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			certFile, caFile := writeCAIssuedIdentity(
+				t,
+				"gateway.example.test",
+				tt.notBefore,
+				tt.notAfter,
+				tt.usages,
+			)
+			_, anchors, err := readCertificateFile(caFile)
+			if err != nil {
+				t.Fatalf("read test CA: %v", err)
+			}
+			systemRoots := x509.NewCertPool()
+			systemRoots.AddCert(anchors[0])
+			if _, err := loadServerIdentity(
+				certFile,
+				"",
+				tt.serverName,
+				func() (*x509.CertPool, error) {
+					return systemRoots, nil
+				},
+			); err == nil {
+				t.Fatalf("loadServerIdentity() accepted system-trusted leaf with %s", tt.name)
+			}
+		})
+	}
+}
+
+func TestLoadServerIdentitySystemTrustRequiresCompleteIntermediateChain(t *testing.T) {
+	fullChainFile, leafOnlyFile, caFile := writeIntermediateCAIssuedIdentity(t, "gateway.example.test")
+	_, anchors, err := readCertificateFile(caFile)
+	if err != nil {
+		t.Fatalf("read test root CA: %v", err)
+	}
+	systemRoots := x509.NewCertPool()
+	systemRoots.AddCert(anchors[0])
+	loadRoots := func() (*x509.CertPool, error) {
+		return systemRoots, nil
+	}
+
+	identity, err := loadServerIdentity(
+		fullChainFile,
+		"",
+		"gateway.example.test",
+		loadRoots,
+	)
+	if err != nil {
+		t.Fatalf("load full system-trusted chain: %v", err)
+	}
+	if identity.TrustMode != ServerIdentityTrustModeSystem ||
+		identity.CAPEM != string(readIdentityTestFile(t, caFile)) {
+		t.Fatalf("unexpected full-chain identity: %#v", identity)
+	}
+
+	_, configuredChain, err := readCertificateFile(fullChainFile)
+	if err != nil {
+		t.Fatalf("read configured full chain: %v", err)
+	}
+	_, rootChain, err := readCertificateFile(caFile)
+	if err != nil {
+		t.Fatalf("read configured root: %v", err)
+	}
+	verifiedChain := []*x509.Certificate{configuredChain[0], configuredChain[1], rootChain[0]}
+	if got := verifiedChainWithConfiguredIntermediates(
+		[][]*x509.Certificate{verifiedChain},
+		nil,
+	); got != nil {
+		t.Fatal("verifiedChainWithConfiguredIntermediates() accepted a missing intermediate")
+	}
+	if got := verifiedChainWithConfiguredIntermediates(
+		[][]*x509.Certificate{verifiedChain},
+		configuredChain[1:],
+	); len(got) != len(verifiedChain) {
+		t.Fatal("verifiedChainWithConfiguredIntermediates() rejected the configured intermediate")
+	}
+
+	if _, err := loadServerIdentity(
+		leafOnlyFile,
+		"",
+		"gateway.example.test",
+		loadRoots,
+	); err == nil {
+		t.Fatal("loadServerIdentity() accepted a system-trusted leaf without its intermediate certificate")
+	}
+}
+
+func TestLoadServerIdentityRejectsUnavailableSystemTrust(t *testing.T) {
+	now := time.Now()
+	certFile, _ := writeCAIssuedIdentity(
+		t,
+		"gateway.example.test",
+		now.Add(-time.Hour),
+		now.Add(time.Hour),
+		[]x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+	)
+	if _, err := loadServerIdentity(
+		certFile,
+		"",
+		"gateway.example.test",
+		func() (*x509.CertPool, error) {
+			return nil, nil
+		},
+	); err == nil {
+		t.Fatal("loadServerIdentity() accepted an unavailable system certificate pool")
+	}
+	if _, err := loadServerIdentity(
+		certFile,
+		"",
+		"gateway.example.test",
+		func() (*x509.CertPool, error) {
+			return nil, errors.New("system roots unavailable")
+		},
+	); err == nil {
+		t.Fatal("loadServerIdentity() ignored a system certificate pool error")
+	}
+}
+
+func TestLoadServerIdentityExplicitCADoesNotFallBackToSystemTrust(t *testing.T) {
+	now := time.Now()
+	certFile, correctCAFile := writeCAIssuedIdentity(
+		t,
+		"gateway.example.test",
+		now.Add(-time.Hour),
+		now.Add(time.Hour),
+		[]x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+	)
+	_, wrongCAFile := writeCAIssuedIdentity(
+		t,
+		"unrelated.example.test",
+		now.Add(-time.Hour),
+		now.Add(time.Hour),
+		[]x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+	)
+	_, correctAnchors, err := readCertificateFile(correctCAFile)
+	if err != nil {
+		t.Fatalf("read correct test CA: %v", err)
+	}
+	systemRoots := x509.NewCertPool()
+	systemRoots.AddCert(correctAnchors[0])
+	systemRootsCalled := false
+
+	if _, err := loadServerIdentity(
+		certFile,
+		wrongCAFile,
+		"gateway.example.test",
+		func() (*x509.CertPool, error) {
+			systemRootsCalled = true
+			return systemRoots, nil
+		},
+	); err == nil {
+		t.Fatal("loadServerIdentity() bypassed an explicit wrong CA with system trust")
+	}
+	if systemRootsCalled {
+		t.Fatal("loadServerIdentity() loaded system roots despite an explicit ca_file")
 	}
 }
 
@@ -181,6 +435,91 @@ func writeSelfSignedIdentity(t *testing.T, serverName string, notBefore, notAfte
 	path := filepath.Join(t.TempDir(), "self-signed.crt")
 	writeIdentityTestFile(t, path, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}))
 	return path
+}
+
+func writeIntermediateCAIssuedIdentity(t *testing.T, serverName string) (fullChainFile, leafOnlyFile, caFile string) {
+	t.Helper()
+	now := time.Now()
+	rootKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rootTemplate := &x509.Certificate{
+		SerialNumber:          big.NewInt(10),
+		Subject:               pkix.Name{CommonName: "identity test root CA"},
+		NotBefore:             now.Add(-24 * time.Hour),
+		NotAfter:              now.Add(24 * time.Hour),
+		IsCA:                  true,
+		BasicConstraintsValid: true,
+		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageDigitalSignature,
+	}
+	rootDER, err := x509.CreateCertificate(
+		rand.Reader,
+		rootTemplate,
+		rootTemplate,
+		&rootKey.PublicKey,
+		rootKey,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	intermediateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	intermediateTemplate := &x509.Certificate{
+		SerialNumber:          big.NewInt(11),
+		Subject:               pkix.Name{CommonName: "identity test intermediate CA"},
+		NotBefore:             now.Add(-12 * time.Hour),
+		NotAfter:              now.Add(12 * time.Hour),
+		IsCA:                  true,
+		BasicConstraintsValid: true,
+		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageDigitalSignature,
+	}
+	intermediateDER, err := x509.CreateCertificate(
+		rand.Reader,
+		intermediateTemplate,
+		rootTemplate,
+		&intermediateKey.PublicKey,
+		rootKey,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	leafKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	leafTemplate := &x509.Certificate{
+		SerialNumber: big.NewInt(12),
+		Subject:      pkix.Name{CommonName: serverName},
+		DNSNames:     []string{serverName},
+		NotBefore:    now.Add(-time.Hour),
+		NotAfter:     now.Add(time.Hour),
+		KeyUsage:     x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+	}
+	leafDER, err := x509.CreateCertificate(
+		rand.Reader,
+		leafTemplate,
+		intermediateTemplate,
+		&leafKey.PublicKey,
+		intermediateKey,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	dir := t.TempDir()
+	fullChainFile = filepath.Join(dir, "gateway-fullchain.crt")
+	leafOnlyFile = filepath.Join(dir, "gateway-leaf.crt")
+	caFile = filepath.Join(dir, "gateway-root-ca.crt")
+	leafPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: leafDER})
+	intermediatePEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: intermediateDER})
+	writeIdentityTestFile(t, fullChainFile, append(append([]byte(nil), leafPEM...), intermediatePEM...))
+	writeIdentityTestFile(t, leafOnlyFile, leafPEM)
+	writeIdentityTestFile(t, caFile, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: rootDER}))
+	return fullChainFile, leafOnlyFile, caFile
 }
 
 func writeIdentityTestFile(t *testing.T, path string, contents []byte) {

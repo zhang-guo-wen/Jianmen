@@ -14,6 +14,7 @@ import (
 
 	"jianmen/internal/config"
 	"jianmen/internal/handler/accessrequest"
+	"jianmen/internal/handler/sqlconsole"
 	"jianmen/internal/handler/systemsettings"
 	"jianmen/internal/handler/webrdp"
 	"jianmen/internal/online"
@@ -97,8 +98,20 @@ func TestNewAcceptsCompleteDBStoreRepository(t *testing.T) {
 		t.Fatalf("new resource group service: %v", err)
 	}
 	var nilAuthorization *typedNilAuthorization
-	if _, err := New(&config.Config{}, repository, db, identity, browserSessions, nilAuthorization, resourceGrants, resourceGroups, repositoryTestProvisioning{}, slog.New(slog.NewTextHandler(io.Discard, nil)), t.TempDir(), nil, online.NewRegistry(), &webrdp.Handler{}, &accessrequest.Handler{}, nil); err == nil {
+	if _, err := New(&config.Config{}, repository, db, identity, browserSessions, nilAuthorization, resourceGrants, resourceGroups, repositoryTestProvisioning{}, slog.New(slog.NewTextHandler(io.Discard, nil)), t.TempDir(), nil, online.NewRegistry(), &webrdp.Handler{}, &accessrequest.Handler{}, nil, nil); err == nil {
 		t.Fatal("New accepted typed-nil authorization service")
+	}
+	sqlConsoleService, err := service.NewSQLConsoleService(
+		repository,
+		repositoryTestAuthorization{},
+		service.NewDatabaseSQLConsoleExecutor(),
+	)
+	if err != nil {
+		t.Fatalf("new SQL console service: %v", err)
+	}
+	sqlConsoleHandler, err := sqlconsole.New(sqlConsoleService)
+	if err != nil {
+		t.Fatalf("new SQL console handler: %v", err)
 	}
 
 	server, err := New(
@@ -118,6 +131,7 @@ func TestNewAcceptsCompleteDBStoreRepository(t *testing.T) {
 		&webrdp.Handler{},
 		&accessrequest.Handler{},
 		&systemsettings.Handler{},
+		sqlConsoleHandler,
 	)
 	if err != nil {
 		t.Fatalf("new admin server: %v", err)

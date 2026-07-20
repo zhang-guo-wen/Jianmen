@@ -47,6 +47,10 @@ var permissionPages = []PermissionPageDefinition{
 		action(ActionAppConnect, "访问应用", "通过应用代理访问指定应用", model.ResourceTypeApplication),
 		action(ActionContainerConnect, "读取容器", "读取容器列表和日志", model.ResourceTypeContainerEndpoint),
 	),
+	page("sqlConsole", "在线 SQL", "/sql-console", 15,
+		action(ActionDBQuery, "执行只读 SQL", "在受控数据库账号上执行只读查询", model.ResourceTypeDatabaseAccount),
+		action(ActionDBExecute, "执行写入 SQL", "在确认后执行数据库变更语句", model.ResourceTypeDatabaseAccount),
+	),
 	page("hosts", "主机管理", "/hosts", 20,
 		action(ActionHostView, "查看主机", "浏览主机列表与详情"),
 		action(ActionHostCreate, "新增主机", "创建主机资源"),
@@ -97,6 +101,8 @@ var permissionPages = []PermissionPageDefinition{
 }
 
 var actionDependencies = map[string][]string{
+	ActionDBQuery:               {ActionDBConnect},
+	ActionDBExecute:             {ActionDBQuery},
 	ActionHostCreate:            {ActionHostView},
 	ActionHostUpdate:            {ActionHostView},
 	ActionHostDelete:            {ActionHostView},
@@ -127,6 +133,7 @@ var actionDependencies = map[string][]string{
 
 var pageVisibilityActions = map[string][]string{
 	"quickConnect":     {ActionSessionConnect, ActionSFTPConnect, ActionRDPConnect, ActionDBConnect, ActionAppConnect, ActionContainerConnect},
+	"sqlConsole":       {ActionDBQuery, ActionDBExecute},
 	"hosts":            {ActionHostView},
 	"databases":        {ActionDBProxyView},
 	"platformAccounts": {ActionPlatformAccountView},

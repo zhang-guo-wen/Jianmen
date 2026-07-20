@@ -8,6 +8,7 @@ import (
 
 	"jianmen/internal/config"
 	"jianmen/internal/handler/accessrequest"
+	"jianmen/internal/handler/sqlconsole"
 	"jianmen/internal/handler/systemsettings"
 	"jianmen/internal/handler/webrdp"
 	"jianmen/internal/online"
@@ -60,6 +61,7 @@ type Server struct {
 	webRDP                 *webrdp.Handler
 	accessRequests         *accessrequest.Handler
 	systemSettings         *systemsettings.Handler
+	sqlConsole             *sqlconsole.Handler
 }
 
 func New(
@@ -79,6 +81,7 @@ func New(
 	webRDP *webrdp.Handler,
 	accessRequests *accessrequest.Handler,
 	systemSettings *systemsettings.Handler,
+	sqlConsole *sqlconsole.Handler,
 ) (*Server, error) {
 	switch {
 	case cfg == nil:
@@ -105,6 +108,8 @@ func New(
 		return nil, errors.New("admin Web RDP audit and approval handlers are required")
 	case systemSettings == nil:
 		return nil, errors.New("admin system settings handler is required")
+	case sqlConsole == nil:
+		return nil, errors.New("admin SQL console handler is required")
 	}
 	dependencies, err := resolveAdminDependencies(repository)
 	if err != nil {
@@ -227,6 +232,7 @@ func New(
 		browserSessions: browserSessions,
 		webRDP:          webRDP, accessRequests: accessRequests,
 		systemSettings: systemSettings,
+		sqlConsole:     sqlConsole,
 	}, nil
 }
 

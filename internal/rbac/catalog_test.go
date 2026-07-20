@@ -7,7 +7,7 @@ import (
 
 func TestPermissionCatalogContainsEveryAction(t *testing.T) {
 	expected := []string{
-		ActionDBConnect, ActionSessionConnect, ActionSFTPConnect,
+		ActionDBConnect, ActionDBQuery, ActionDBExecute, ActionSessionConnect, ActionSFTPConnect,
 		ActionRDPConnect, ActionRDPClipboardRead, ActionRDPClipboardWrite,
 		ActionRDPFileUpload, ActionRDPFileDownload, ActionRDPDriveMap,
 		ActionRDPRecordingView, ActionRDPApprovalManage,
@@ -190,6 +190,24 @@ func TestAccessiblePagesUsesAnyChildAction(t *testing.T) {
 	}
 	if all := AccessiblePages([]string{"*"}); len(all) != len(PermissionPages()) {
 		t.Fatalf("wildcard pages = %d, want %d", len(all), len(PermissionPages()))
+	}
+}
+
+func TestDatabaseExecuteIncludesQueryAndConnectionAccess(t *testing.T) {
+	actions, err := ValidateAssignableActions([]string{ActionDBExecute})
+	if err != nil {
+		t.Fatalf("ValidateAssignableActions() error = %v", err)
+	}
+	wantActions := []string{ActionDBConnect, ActionDBExecute, ActionDBQuery}
+	if !reflect.DeepEqual(actions, wantActions) {
+		t.Fatalf("actions = %#v, want %#v", actions, wantActions)
+	}
+	wantPages := []PageAccess{
+		{Key: "quickConnect", Path: "/quick-connect", Order: 10},
+		{Key: "sqlConsole", Path: "/sql-console", Order: 15},
+	}
+	if pages := AccessiblePages(actions); !reflect.DeepEqual(pages, wantPages) {
+		t.Fatalf("pages = %#v, want %#v", pages, wantPages)
 	}
 }
 

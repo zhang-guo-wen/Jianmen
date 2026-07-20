@@ -543,8 +543,28 @@ export interface DBAccountRecord {
   updated_at?: string;
   instance_name?: string;
   instance_address?: string;
+  instance_protocol?: string;
   [key: string]: unknown;
   can_manage?: boolean;
+}
+
+export interface SQLConsoleExecutePayload {
+  account_id: string;
+  database?: string;
+  sql: string;
+  confirm_write?: boolean;
+}
+
+export interface SQLConsoleResult {
+  audit_session_id: string;
+  query_kind: string;
+  read_only: boolean;
+  columns: string[];
+  rows: unknown[][];
+  row_count: number;
+  rows_affected: number;
+  truncated: boolean;
+  duration_ms: number;
 }
 
 export interface DBInstancePayload {
@@ -1277,7 +1297,7 @@ export const apiClient = {
     }),
 
   // database accounts
-  getAllDBAccounts: (params?: { page?: number; page_size?: number; q?: string }) =>
+  getAllDBAccounts: (params?: { page?: number; page_size?: number; q?: string; connectable?: boolean }) =>
     request<PageResponse<DBAccountRecord>>(`/api/db/accounts${buildQS(params as Record<string, string | number | undefined>)}`),
   getDBAccounts: (instanceID: string, params?: { page?: number; page_size?: number; q?: string; connectable?: boolean }) =>
     request<PageResponse<DBAccountRecord>>(`/api/db/instances/${encodeURIComponent(instanceID)}/accounts${buildQS(params)}`),
@@ -1309,6 +1329,12 @@ export const apiClient = {
     request<{ ok: boolean; error?: string; latency_ms: number }>('/api/db/accounts/test', {
       method: 'POST',
       body: JSON.stringify(payload)
+    }),
+  executeSQL: (payload: SQLConsoleExecutePayload, signal?: AbortSignal) =>
+    request<SQLConsoleResult>('/api/sql-console/execute', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+      signal,
     }),
 
   // auto-provision

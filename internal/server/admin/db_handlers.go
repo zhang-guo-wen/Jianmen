@@ -17,8 +17,9 @@ import (
 
 type databaseAccountResourceView struct {
 	store.DatabaseAccountView
-	InstanceName    string `json:"instance_name"`
-	InstanceAddress string `json:"instance_address"`
+	InstanceName     string `json:"instance_name"`
+	InstanceAddress  string `json:"instance_address"`
+	InstanceProtocol string `json:"instance_protocol"`
 }
 
 type databaseInstancePayload struct {
@@ -57,7 +58,11 @@ func (s *Server) handleDBAccounts(w http.ResponseWriter, r *http.Request) {
 		s.writeDatabaseManagementError(w, r, err)
 		return
 	}
-	instances, err := s.databaseManagement.ListInstances(r.Context(), userIDFromRequest(r), false)
+	instances, err := s.databaseManagement.ListInstances(
+		r.Context(),
+		userIDFromRequest(r),
+		connectableOnly(r),
+	)
 	if err != nil {
 		s.writeDatabaseManagementError(w, r, err)
 		return
@@ -69,7 +74,12 @@ func (s *Server) handleDBAccounts(w http.ResponseWriter, r *http.Request) {
 	resources := make([]databaseAccountResourceView, 0, len(accounts))
 	for _, account := range accounts {
 		instance := byID[account.InstanceID]
-		resources = append(resources, databaseAccountResourceView{DatabaseAccountView: databaseAccountToStore(account), InstanceName: instance.Name, InstanceAddress: net.JoinHostPort(instance.Address, strconv.Itoa(instance.Port))})
+		resources = append(resources, databaseAccountResourceView{
+			DatabaseAccountView: databaseAccountToStore(account),
+			InstanceName:        instance.Name,
+			InstanceAddress:     net.JoinHostPort(instance.Address, strconv.Itoa(instance.Port)),
+			InstanceProtocol:    instance.Protocol,
+		})
 	}
 	s.writeJSON(w, r, http.StatusOK, paginateSlice(resources, r, func(v databaseAccountResourceView, q string) bool {
 		return strings.Contains(strings.ToLower(v.UniqueName), q) || strings.Contains(strings.ToLower(v.Username), q) || strings.Contains(strings.ToLower(v.Group), q) || strings.Contains(strings.ToLower(v.InstanceName), q) || strings.Contains(strings.ToLower(v.InstanceAddress), q)

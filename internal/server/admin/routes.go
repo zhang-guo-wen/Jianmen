@@ -62,6 +62,7 @@ func (s *Server) routes() http.Handler {
 	s.muxHandle(mux, "/api/db/accounts/", s.withAuthAndUser(s.handleDBAccount))
 	s.muxHandle(mux, "/api/db/connections", s.withAuthAndUser(s.withPermission(rbac.ActionDBAuditView, s.handleDBConnections)))
 	s.muxHandle(mux, "/api/db/connections/", s.withAuthAndUser(s.withPermission(rbac.ActionDBAuditView, s.handleDBConnectionArtifact)))
+	s.muxHandle(mux, "/api/sql-console/execute", s.withAuthAndUser(s.handleSQLConsoleExecute))
 
 	s.muxHandle(mux, "/api/rbac/roles", s.withAuthAndUser(s.withPermission(rbac.ActionRBACManage, s.handleRBACRoles)))
 	s.muxHandle(mux, "/api/rbac/roles/", s.withAuthAndUser(s.withPermission(rbac.ActionRBACManage, s.handleRBACRole)))

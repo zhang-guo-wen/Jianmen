@@ -8,6 +8,8 @@ import (
 
 const (
 	ActionDBConnect         = "db:connect"
+	ActionDBQuery           = "db:query"
+	ActionDBExecute         = "db:execute"
 	ActionSessionConnect    = "session:connect"
 	ActionSFTPConnect       = "sftp:connect"
 	ActionRDPConnect        = "rdp:connect"

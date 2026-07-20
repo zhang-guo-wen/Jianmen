@@ -2,11 +2,14 @@ package store
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 
 	"jianmen/internal/model"
+
+	"gorm.io/gorm"
 )
 
 const auditDBQueryPreviewMaxCharacters = 64 * 1024
@@ -39,6 +42,25 @@ func (s *DBStore) CreateAuditDBQuery(ctx context.Context, query *model.AuditDBQu
 		return fmt.Errorf("create database audit query: nil context")
 	}
 	return s.db.WithContext(ctx).Create(query).Error
+}
+
+func (s *DBStore) UpdateAuditDBQueryDuration(ctx context.Context, id string, durationMs int64) error {
+	if ctx == nil {
+		return errors.New("update database query audit: nil context")
+	}
+	if durationMs < 0 {
+		durationMs = 0
+	}
+	result := s.db.WithContext(ctx).Model(&model.AuditDBQuery{}).
+		Where("id = ?", strings.TrimSpace(id)).
+		Update("duration_ms", durationMs)
+	if result.Error != nil {
+		return fmt.Errorf("update database query audit: %w", result.Error)
+	}
+	if result.RowsAffected != 1 {
+		return fmt.Errorf("update database query audit %q: %w", id, gorm.ErrRecordNotFound)
+	}
+	return nil
 }
 
 func (s *DBStore) ListAuditDBQueryPreviews(

@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"sort"
 	"testing"
 	"time"
 
@@ -26,6 +27,9 @@ func (r *platformAccountServiceRepository) ListPlatformAccountMetadata(_ context
 	for _, record := range r.records {
 		result = append(result, record)
 	}
+	sort.Slice(result, func(left, right int) bool {
+		return result[left].ID > result[right].ID
+	})
 	return result, nil
 }
 

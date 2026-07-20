@@ -1,5 +1,6 @@
 ﻿import {
   DataAnalysis,
+  DataLine,
   DocumentChecked,
   Key,
   Link,
@@ -35,6 +36,16 @@ export const APP_NAV_ITEMS: AppNavigationItem[] = [
     titleKey: 'route.quickConnect.title',
     descriptionKey: 'route.quickConnect.description',
     component: () => import('@/views/QuickConnectView.vue'),
+  },
+  {
+    key: 'sqlConsole',
+    path: '/sql-console',
+    name: 'sql-console',
+    icon: DataLine,
+    labelKey: 'nav.sqlConsole',
+    titleKey: 'route.sqlConsole.title',
+    descriptionKey: 'route.sqlConsole.description',
+    component: () => import('@/views/SQLConsoleView.vue'),
   },
   {
     key: 'hosts',

@@ -118,6 +118,7 @@ const pageDescription = computed(() =>
   metaText(route.meta.descriptionKey, "route.quickConnect.description"),
 );
 const experimentalRouteNames = new Set([
+  "sql-console",
   "platform-accounts",
   "applications",
   "containers",

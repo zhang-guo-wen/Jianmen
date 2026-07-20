@@ -7,6 +7,7 @@ import (
 	"gorm.io/gorm"
 
 	"jianmen/internal/config"
+	"jianmen/internal/handler/sqlconsole"
 	"jianmen/internal/handler/systemsettings"
 	"jianmen/internal/objectstore"
 	"jianmen/internal/online"
@@ -55,6 +56,18 @@ func startAdminRuntime(
 	if err != nil {
 		return err
 	}
+	sqlConsoleService, err := service.NewSQLConsoleService(
+		appStore,
+		authorization,
+		service.NewDatabaseSQLConsoleExecutor(),
+	)
+	if err != nil {
+		return err
+	}
+	sqlConsoleHandler, err := sqlconsole.New(sqlConsoleService)
+	if err != nil {
+		return err
+	}
 	webRuntime, err := newWebRDPRuntime(
 		ctx, cfg, objects, appStore, identity, browserSessions, authorization,
 		onlineSessions, logger,
@@ -67,6 +80,7 @@ func startAdminRuntime(
 		resourceGrants, resourceGroups, databaseProvisioning, logger, dataDir,
 		appProxy, onlineSessions, webRuntime.webRDP, webRuntime.accessRequests,
 		settingsHandler,
+		sqlConsoleHandler,
 	)
 	if err != nil {
 		return err

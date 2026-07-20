@@ -170,7 +170,11 @@
     </header>
 
     <main class="rdp-workspace">
-      <div ref="displayRef" class="rdp-display"></div>
+      <div
+        ref="displayRef"
+        class="rdp-display"
+        :class="{ 'is-auto-fit': autoFit }"
+      ></div>
 
       <div
         v-if="status === 'requesting-ticket' || status === 'connecting'"
@@ -408,7 +412,10 @@ function formatBytes(bytes: number) {
 async function startConnection() {
   if (!displayRef.value) return;
   try {
-    await connect(displayRef.value);
+    await connect(
+      displayRef.value,
+      displayRef.value.parentElement ?? displayRef.value,
+    );
   } catch {
     // The composable exposes the user-facing error and error state.
   }
@@ -681,10 +688,16 @@ onUnmounted(() => {
 .rdp-display {
   display: flex;
   align-items: flex-start;
-  justify-content: center;
+  justify-content: flex-start;
   width: 100%;
   height: 100%;
   overflow: auto;
+}
+
+.rdp-display.is-auto-fit {
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
 }
 
 :deep(.rdp-display > div) {

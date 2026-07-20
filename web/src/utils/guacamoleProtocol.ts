@@ -3,6 +3,8 @@ export type GuacamoleInstructionHandler = (
   parameters: string[],
 ) => void;
 
+export type GuacamoleInstructionElement = string | number | boolean;
+
 const MAX_ELEMENT_CODEPOINTS = 1 << 20;
 const MAX_INSTRUCTION_BUFFER = 8 << 20;
 const MAX_ELEMENTS = 256;
@@ -34,14 +36,20 @@ export function guacamoleCodePointCount(value: string): number {
 }
 
 export function encodeGuacamoleInstruction(
-  elements: Array<string | number>,
+  elements: GuacamoleInstructionElement[],
 ): string {
   if (!elements.length || elements.length > MAX_ELEMENTS) {
     throw new Error('Guacamole instruction element count is invalid');
   }
   let encoded = '';
   elements.forEach((element, index) => {
-    const value = String(element);
+    // Guacamole represents booleans as integers on the wire. In particular,
+    // the key instruction requires pressed=1 and released=0. Stringifying a
+    // JavaScript boolean would produce "true"/"false", which guacd does not
+    // accept as a pressed-state integer.
+    const value = typeof element === 'boolean'
+      ? (element ? '1' : '0')
+      : String(element);
     const length = guacamoleCodePointCount(value);
     if (length > MAX_ELEMENT_CODEPOINTS) {
       throw new Error('Guacamole instruction element is too large');

@@ -25,7 +25,7 @@ declare module 'guacamole-common-js' {
     connect(data?: string): void;
     disconnect(): void;
     isConnected(): boolean;
-    sendMessage(...elements: Array<string | number>): void;
+    sendMessage(...elements: Array<string | number | boolean>): void;
     setState(state: number): void;
     setUUID(uuid: string): void;
     onerror: ((status: GuacamoleStatus) => void) | null;

@@ -14,6 +14,7 @@ import {
 } from '@/api/client';
 import {
   encodeGuacamoleInstruction,
+  type GuacamoleInstructionElement,
   UnicodeGuacamoleParser,
 } from '@/utils/guacamoleProtocol';
 
@@ -165,7 +166,7 @@ export class RawWebSocketTunnel extends Guacamole.Tunnel {
     this.setState(Guacamole.Tunnel.State.CLOSED);
   }
 
-  private sendInstruction(elements: Array<string | number>) {
+  private sendInstruction(elements: GuacamoleInstructionElement[]) {
     const socket = this.socket;
     if (!socket || socket.readyState !== WebSocket.OPEN) return;
     socket.send(encodeGuacamoleInstruction(elements));

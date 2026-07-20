@@ -17,6 +17,7 @@ type DatabaseGatewayConfig struct {
 	Enabled               bool                     `json:"enabled"`
 	MaxClientMessageBytes int                      `json:"max_client_message_bytes"`
 	Mode                  string                   `json:"mode"`
+	ClientTLSMode         string                   `json:"client_tls_mode"`
 	Unified               DatabaseUnifiedListener  `json:"unified"`
 	MySQL                 DatabaseProtocolListener `json:"mysql"`
 	PostgreSQL            DatabaseProtocolListener `json:"postgresql"`
@@ -86,6 +87,7 @@ func (c *DatabaseGatewayConfig) applyDefaults() {
 	empty := !c.Enabled &&
 		!c.enabledSet &&
 		strings.TrimSpace(c.Mode) == "" &&
+		strings.TrimSpace(c.ClientTLSMode) == "" &&
 		c.Unified == (DatabaseUnifiedListener{}) &&
 		c.MySQL == (DatabaseProtocolListener{}) &&
 		c.PostgreSQL == (DatabaseProtocolListener{}) &&
@@ -97,6 +99,9 @@ func (c *DatabaseGatewayConfig) applyDefaults() {
 	}
 	if strings.TrimSpace(c.Mode) == "" {
 		c.Mode = DatabaseGatewayModeUnified
+	}
+	if strings.TrimSpace(c.ClientTLSMode) == "" {
+		c.ClientTLSMode = DatabaseGatewayClientTLSModeOptional
 	}
 	if strings.TrimSpace(c.Unified.Address) == "" {
 		c.Unified.Address = "127.0.0.1:33060"

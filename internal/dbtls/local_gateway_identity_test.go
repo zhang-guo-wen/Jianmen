@@ -101,6 +101,75 @@ func TestEnsureLocalUnifiedGatewayIdentityReusesValidIdentity(t *testing.T) {
 	}
 }
 
+func TestEnsureLocalGatewayIdentitiesCoversIndependentLoopbackListeners(t *testing.T) {
+	dataDir := t.TempDir()
+	gateway := config.DatabaseGatewayConfig{
+		Enabled: true,
+		Mode:    config.DatabaseGatewayModeIndependent,
+		MySQL: config.DatabaseProtocolListener{
+			Enabled: true, Address: "127.0.0.1:33061",
+		},
+		PostgreSQL: config.DatabaseProtocolListener{
+			Enabled: true, Address: "localhost:33062",
+		},
+		Redis: config.DatabaseProtocolListener{
+			Enabled: true, Address: "[::1]:33063",
+		},
+	}
+
+	generated, err := EnsureLocalGatewayIdentities(&gateway, dataDir)
+	if err != nil {
+		t.Fatalf("EnsureLocalGatewayIdentities() error = %v", err)
+	}
+	if !generated {
+		t.Fatal("EnsureLocalGatewayIdentities() did not generate identities")
+	}
+	listeners := []struct {
+		name     string
+		listener config.DatabaseProtocolListener
+	}{
+		{name: "mysql", listener: gateway.MySQL},
+		{name: "postgresql", listener: gateway.PostgreSQL},
+		{name: "redis", listener: gateway.Redis},
+	}
+	seenCertificates := make(map[string]struct{}, len(listeners))
+	for _, item := range listeners {
+		if item.listener.CertFile == "" ||
+			item.listener.KeyFile == "" ||
+			item.listener.ServerName != localGatewayDefaultServerName {
+			t.Fatalf("%s managed identity = %#v", item.name, item.listener)
+		}
+		if _, exists := seenCertificates[item.listener.CertFile]; exists {
+			t.Fatalf("%s unexpectedly shares a managed certificate", item.name)
+		}
+		seenCertificates[item.listener.CertFile] = struct{}{}
+		if _, err := LoadServerIdentity(
+			item.listener.CertFile,
+			item.listener.CAFile,
+			item.listener.ServerName,
+		); err != nil {
+			t.Fatalf("load %s managed identity: %v", item.name, err)
+		}
+	}
+
+	restarted := gateway
+	restarted.MySQL.CertFile, restarted.MySQL.KeyFile = "", ""
+	restarted.PostgreSQL.CertFile, restarted.PostgreSQL.KeyFile = "", ""
+	restarted.Redis.CertFile, restarted.Redis.KeyFile = "", ""
+	generated, err = EnsureLocalGatewayIdentities(&restarted, dataDir)
+	if err != nil {
+		t.Fatalf("reuse independent identities: %v", err)
+	}
+	if generated {
+		t.Fatal("valid independent identities were replaced")
+	}
+	if restarted.MySQL.CertFile != gateway.MySQL.CertFile ||
+		restarted.PostgreSQL.CertFile != gateway.PostgreSQL.CertFile ||
+		restarted.Redis.CertFile != gateway.Redis.CertFile {
+		t.Fatalf("independent managed identity paths changed: %#v", restarted)
+	}
+}
+
 func TestEnsureLocalUnifiedGatewayIdentityOnlyHandlesEligibleListener(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -115,11 +184,6 @@ func TestEnsureLocalUnifiedGatewayIdentityOnlyHandlesEligibleListener(t *testing
 		}},
 		{name: "non-loopback listener", mutate: func(g *config.DatabaseGatewayConfig) {
 			g.Unified.Address = "0.0.0.0:33060"
-		}},
-		{name: "explicit identity", mutate: func(g *config.DatabaseGatewayConfig) {
-			g.Unified.CertFile = "explicit.crt"
-			g.Unified.KeyFile = "explicit.key"
-			g.Unified.ServerName = "db.example.test"
 		}},
 	}
 
@@ -143,6 +207,30 @@ func TestEnsureLocalUnifiedGatewayIdentityOnlyHandlesEligibleListener(t *testing
 				t.Fatalf("managed identity directory exists for ineligible listener: %v", err)
 			}
 		})
+	}
+}
+
+func TestEnsureLocalGatewayIdentitiesPreservesValidExplicitIdentity(t *testing.T) {
+	dataDir := t.TempDir()
+	managed := newLocalUnifiedGatewayConfig()
+	if _, err := EnsureLocalUnifiedGatewayIdentity(&managed, dataDir); err != nil {
+		t.Fatalf("generate source identity: %v", err)
+	}
+	explicit := newLocalUnifiedGatewayConfig()
+	explicit.Unified.CertFile = managed.Unified.CertFile
+	explicit.Unified.KeyFile = managed.Unified.KeyFile
+	explicit.Unified.ServerName = managed.Unified.ServerName
+	before := explicit
+
+	generated, err := EnsureLocalGatewayIdentities(&explicit, t.TempDir())
+	if err != nil {
+		t.Fatalf("validate explicit identity: %v", err)
+	}
+	if generated {
+		t.Fatal("valid explicit identity was replaced")
+	}
+	if !reflect.DeepEqual(explicit, before) {
+		t.Fatalf("explicit identity changed from %#v to %#v", before, explicit)
 	}
 }
 

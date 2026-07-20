@@ -9,6 +9,7 @@ import (
 	"crypto/x509/pkix"
 	"encoding/binary"
 	"encoding/pem"
+	"io"
 	"log/slog"
 	"math/big"
 	"net"
@@ -152,6 +153,7 @@ func TestProtocolListenersFailStartupForUnreadableTLSConfiguration(t *testing.T)
 }
 
 func TestProtocolListenersReleaseEarlierBindingsWhenLaterBindFails(t *testing.T) {
+	certFile, keyFile := writeListenerCertificate(t)
 	firstReservation, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -171,12 +173,18 @@ func TestProtocolListenersReleaseEarlierBindingsWhenLaterBindFails(t *testing.T)
 		cfg: config.DatabaseGatewayConfig{
 			Enabled: true,
 			MySQL: config.DatabaseProtocolListener{
-				Enabled: true,
-				Address: firstAddress,
+				Enabled:    true,
+				Address:    firstAddress,
+				CertFile:   certFile,
+				KeyFile:    keyFile,
+				ServerName: "localhost",
 			},
 			Redis: config.DatabaseProtocolListener{
-				Enabled: true,
-				Address: blocked.Addr().String(),
+				Enabled:    true,
+				Address:    blocked.Addr().String(),
+				CertFile:   certFile,
+				KeyFile:    keyFile,
+				ServerName: "localhost",
 			},
 		},
 		logger: slog.Default(),
@@ -219,7 +227,9 @@ func TestPostgresRequiresTLSBeforeCleartextPassword(t *testing.T) {
 	defer server.Close()
 	defer client.Close()
 
-	gateway := &Gateway{}
+	gateway := &Gateway{cfg: config.DatabaseGatewayConfig{
+		ClientTLSMode: config.DatabaseGatewayClientTLSModeRequired,
+	}}
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
@@ -387,7 +397,12 @@ func TestMySQLTLSListenerRejectsPlaintextLogin(t *testing.T) {
 	server, client := net.Pipe()
 	defer server.Close()
 	defer client.Close()
-	gateway := &Gateway{logger: slog.Default()}
+	gateway := &Gateway{
+		cfg: config.DatabaseGatewayConfig{
+			ClientTLSMode: config.DatabaseGatewayClientTLSModeRequired,
+		},
+		logger: slog.Default(),
+	}
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
@@ -420,15 +435,158 @@ func TestMySQLTLSListenerRejectsPlaintextLogin(t *testing.T) {
 	}
 }
 
+func TestOptionalTLSListenersStillAuthenticatePlaintextClients(t *testing.T) {
+	certFile, keyFile := writeListenerCertificate(t)
+	listener := config.DatabaseProtocolListener{
+		CertFile: certFile,
+		KeyFile:  keyFile,
+	}
+
+	t.Run("MySQL", func(t *testing.T) {
+		gateway, resolver := newCrossProtocolGateway(t, "mysql")
+		gateway.cfg.ClientTLSMode = config.DatabaseGatewayClientTLSModeOptional
+		server, client := net.Pipe()
+		defer server.Close()
+		defer client.Close()
+
+		done := make(chan *gatewayConn, 1)
+		go func() {
+			done <- gateway.handleMySQLWithListener(
+				context.Background(),
+				server,
+				listener,
+			)
+		}()
+		if _, err := readMySQLPacket(client); err != nil {
+			t.Fatalf("read MySQL handshake: %v", err)
+		}
+		if _, err := client.Write(
+			protocolValidationMySQLLogin(databaseCompactUsername()),
+		); err != nil {
+			t.Fatalf("write plaintext MySQL login: %v", err)
+		}
+		go drainProtocolRejection(client)
+
+		select {
+		case connection := <-done:
+			if connection != nil {
+				t.Fatal("test authentication unexpectedly established a MySQL connection")
+			}
+		case <-time.After(time.Second):
+			t.Fatal("optional MySQL plaintext handler did not return")
+		}
+		if len(resolver.mysqlContexts) != 1 {
+			t.Fatalf(
+				"MySQL plaintext authentication calls = %d, want 1",
+				len(resolver.mysqlContexts),
+			)
+		}
+	})
+
+	t.Run("PostgreSQL", func(t *testing.T) {
+		gateway, resolver := newCrossProtocolGateway(t, "postgres")
+		gateway.cfg.ClientTLSMode = config.DatabaseGatewayClientTLSModeOptional
+		server, client := net.Pipe()
+		defer server.Close()
+		defer client.Close()
+
+		done := make(chan *gatewayConn, 1)
+		go func() {
+			done <- gateway.handlePostgresConnection(
+				context.Background(),
+				server,
+				listener,
+			)
+		}()
+		startup := postgresStartupPacket(databaseCompactUsername(), "postgres")
+		if _, err := client.Write(startup); err != nil {
+			t.Fatalf("write plaintext PostgreSQL startup: %v", err)
+		}
+		response := make([]byte, 9)
+		if _, err := io.ReadFull(client, response); err != nil {
+			t.Fatalf("read PostgreSQL password request: %v", err)
+		}
+		if response[0] != 'R' {
+			t.Fatalf("PostgreSQL response kind = %q, want R", response[0])
+		}
+		if err := writePostgresMessage(
+			client,
+			'p',
+			append([]byte("bastion-password"), 0),
+		); err != nil {
+			t.Fatalf("write PostgreSQL password: %v", err)
+		}
+		go drainProtocolRejection(client)
+
+		select {
+		case connection := <-done:
+			if connection != nil {
+				t.Fatal("test authentication unexpectedly established a PostgreSQL connection")
+			}
+		case <-time.After(time.Second):
+			t.Fatal("optional PostgreSQL plaintext handler did not return")
+		}
+		if len(resolver.passwordContexts) != 1 {
+			t.Fatalf(
+				"PostgreSQL plaintext authentication calls = %d, want 1",
+				len(resolver.passwordContexts),
+			)
+		}
+	})
+
+	t.Run("Redis", func(t *testing.T) {
+		gateway, resolver := newCrossProtocolGateway(t, "redis")
+		gateway.cfg.ClientTLSMode = config.DatabaseGatewayClientTLSModeOptional
+		server, client := net.Pipe()
+		defer server.Close()
+		defer client.Close()
+
+		done := make(chan *gatewayConn, 1)
+		go func() {
+			done <- gateway.handleRedisConnection(
+				context.Background(),
+				server,
+				listener,
+			)
+		}()
+		if _, err := client.Write(
+			redisAuthCommand(databaseCompactUsername(), "bastion-password"),
+		); err != nil {
+			t.Fatalf("write plaintext Redis AUTH: %v", err)
+		}
+		go drainProtocolRejection(client)
+
+		select {
+		case connection := <-done:
+			if connection != nil {
+				t.Fatal("test authentication unexpectedly established a Redis connection")
+			}
+		case <-time.After(time.Second):
+			t.Fatal("optional Redis plaintext handler did not return")
+		}
+		if len(resolver.passwordContexts) != 1 {
+			t.Fatalf(
+				"Redis plaintext authentication calls = %d, want 1",
+				len(resolver.passwordContexts),
+			)
+		}
+	})
+}
+
 func TestRedisRejectsRemotePlaintextAuth(t *testing.T) {
 	server, client := net.Pipe()
 	defer client.Close()
-	gateway := &Gateway{}
+	gateway := &Gateway{cfg: config.DatabaseGatewayConfig{
+		ClientTLSMode: config.DatabaseGatewayClientTLSModeRequired,
+	}}
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
 		gateway.handleRedisConnection(context.Background(), &remoteAddrConn{Conn: server, remote: "192.0.2.10:12345"}, config.DatabaseProtocolListener{})
 	}()
+	if _, err := client.Write([]byte{'*'}); err != nil {
+		t.Fatal(err)
+	}
 	buf := make([]byte, 128)
 	if err := client.SetReadDeadline(time.Now().Add(time.Second)); err != nil {
 		t.Fatal(err)

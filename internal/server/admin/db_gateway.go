@@ -42,7 +42,6 @@ func (s *Server) handleDBGateway(w http.ResponseWriter, r *http.Request) {
 	connectable, unavailableReason := databaseGatewayAvailability(
 		cfg.Enabled,
 		listener.Enabled,
-		protocol,
 		tlsConfigured,
 	)
 	tlsEnabled := enabled && tlsConfigured
@@ -51,6 +50,7 @@ func (s *Server) handleDBGateway(w http.ResponseWriter, r *http.Request) {
 		"connectable":              connectable,
 		"unavailable_reason":       unavailableReason,
 		"mode":                     cfg.EffectiveMode(),
+		"client_tls_mode":          cfg.EffectiveClientTLSMode(),
 		"protocol":                 protocol,
 		"listen_addr":              listener.Address,
 		"host":                     host,
@@ -115,7 +115,6 @@ func databaseProtocolListener(gateway config.DatabaseGatewayConfig, requested st
 func databaseGatewayAvailability(
 	gatewayEnabled bool,
 	listenerEnabled bool,
-	protocol string,
 	tlsConfigured bool,
 ) (bool, string) {
 	if !gatewayEnabled {
@@ -124,7 +123,7 @@ func databaseGatewayAvailability(
 	if !listenerEnabled {
 		return false, databaseGatewayUnavailableListenerDisabled
 	}
-	if protocol == "postgresql" && !tlsConfigured {
+	if !tlsConfigured {
 		return false, databaseGatewayUnavailableTLSIdentityMissing
 	}
 	return true, ""

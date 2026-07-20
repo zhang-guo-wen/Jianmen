@@ -304,6 +304,7 @@ import {
 import { loadDatabaseConnectionResources } from '@/utils/databaseConnectionOrchestration';
 import {
   hasDatabaseGatewayTLSIdentity,
+  resolveDatabaseGatewayClientHost,
   resolveDatabaseGatewayPort,
 } from '@/utils/databaseGatewayCommands';
 import {
@@ -336,11 +337,13 @@ interface SSHConnectionState {
 interface DatabaseConnectionState {
   loading: boolean;
   host: string;
+  tlsServerName: string;
   port: number;
   compactUser: string;
   password: string;
   expiresAt: string;
   tlsIdentityReady: boolean;
+  clientTLSMode: 'required' | 'optional';
 }
 
 class DatabaseGatewayConfigurationRedirect extends Error {}
@@ -865,9 +868,8 @@ function databaseCredentialLoading(account: QuickDBTarget): boolean {
 }
 
 function databaseCredentialUnavailableReason(protocol?: string): string {
-  return String(protocol || '').toLowerCase() === 'redis'
-    ? 'Redis 暂不支持复制临时连接凭据'
-    : '';
+  void protocol;
+  return '';
 }
 
 function databaseClientUnavailableReason(protocol?: string): string {
@@ -919,11 +921,13 @@ function ensureDatabaseConnectionInfo(account: QuickDBTarget): Promise<DatabaseC
   const state: DatabaseConnectionState = {
     loading: true,
     host: '',
+    tlsServerName: '',
     port: 0,
     compactUser: '',
     password: '',
     expiresAt: '',
     tlsIdentityReady: false,
+    clientTLSMode: 'optional',
   };
   dbConnectionStates[key] = state;
 
@@ -944,7 +948,14 @@ function ensureDatabaseConnectionInfo(account: QuickDBTarget): Promise<DatabaseC
       });
       const connectableGateway = gateway;
       state.tlsIdentityReady = hasDatabaseGatewayTLSIdentity(connectableGateway);
-      state.host = String(connectableGateway.tls_server_name || connectableGateway.host || window.location.hostname || '127.0.0.1');
+      state.clientTLSMode = connectableGateway.client_tls_mode === 'required'
+        ? 'required'
+        : 'optional';
+      state.host = resolveDatabaseGatewayClientHost(
+        connectableGateway.host,
+        window.location.hostname || '127.0.0.1',
+      );
+      state.tlsServerName = String(connectableGateway.tls_server_name || '');
       state.port = resolveDatabaseGatewayPort(protocol, connectableGateway);
       state.compactUser = String(session?.compact_username || '');
       state.password = String(credential?.password || '');
@@ -966,14 +977,16 @@ function ensureDatabaseConnectionInfo(account: QuickDBTarget): Promise<DatabaseC
 async function copyDatabaseConnectionInfo(account: QuickDBTarget) {
   try {
     const state = await ensureDatabaseConnectionInfo(account);
+    const connectionHost = databaseConnectionHost(state);
     const content = [
       `数据库实例：${account._instance_name || '-'}`,
       `数据库分组：${databaseGroup(account)}`,
       `数据库备注：${databaseRemark(account)}`,
       `账号名称：${account.username || '-'}`,
-      `连接地址：${state.host}:${state.port}`,
+      `连接地址：${connectionHost}:${state.port}`,
       `连接账户：${state.compactUser}`,
       `连接临时密码：${state.password}`,
+      `客户端 TLS：${state.clientTLSMode === 'required' ? '强制 TLS' : '未启用（网关支持可选 TLS）'}`,
     ].join('\n');
     await writeClipboardText(content);
     ElMessage.success('数据库临时连接信息已全部复制');
@@ -1016,17 +1029,23 @@ async function openDatabaseClient(account: QuickDBTarget) {
   dbClientLaunching[key] = true;
   try {
     const state = await ensureDatabaseConnectionInfo(account);
-    if (!state.tlsIdentityReady) {
+    if (state.clientTLSMode === 'required' && !state.tlsIdentityReady) {
       throw new Error('数据库网关 TLS 身份材料不完整，已阻止本地客户端打开');
+    }
+    if (state.clientTLSMode === 'required' && !databaseClient.value.caFilePath.trim()) {
+      ElMessage.warning('数据库网关强制 TLS，请先在个人设置中配置网关 CA 文件');
+      openClientSettings('database');
+      return;
     }
     const launchURL = buildDatabaseProtocolURL({
       protocol,
-      host: state.host,
+      host: databaseConnectionHost(state),
       port: state.port,
       username: state.compactUser,
       password: state.password,
       databaseName: ['postgres', 'postgresql'].includes(protocol.toLowerCase()) ? 'postgres' : '',
       connectionName: `${account._instance_name || 'Jianmen'} / ${account.username || '数据库账号'}`,
+      tls: state.clientTLSMode === 'required' ? 'verify-full' : 'disable',
     });
     if (!launchURL) throw new Error('连接参数不符合本地客户端安全规则');
     ElMessage.success('正在打开 DBeaver 并使用临时密码建立连接');
@@ -1037,6 +1056,13 @@ async function openDatabaseClient(account: QuickDBTarget) {
   } finally {
     delete dbClientLaunching[key];
   }
+}
+
+function databaseConnectionHost(state: DatabaseConnectionState): string {
+  if (state.clientTLSMode === 'required' && state.tlsServerName) {
+    return state.tlsServerName;
+  }
+  return state.host;
 }
 
 function openClientSettings(tab: 'ssh' | 'database') {

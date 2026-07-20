@@ -84,7 +84,12 @@ func TestPostgresGSSENCRejectsPlaintextStartupAndClosesConnection(t *testing.T) 
 	defer cancel()
 	done := make(chan error, 1)
 	go func() {
-		done <- (&Gateway{logger: slog.Default()}).serveProtocolListener(
+		done <- (&Gateway{
+			cfg: config.DatabaseGatewayConfig{
+				ClientTLSMode: config.DatabaseGatewayClientTLSModeRequired,
+			},
+			logger: slog.Default(),
+		}).serveProtocolListener(
 			ctx,
 			listener,
 			databaseProtocolPostgreSQL,

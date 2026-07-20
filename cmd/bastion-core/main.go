@@ -33,13 +33,16 @@ func main() {
 	defer cleanupMetadata()
 	appStore := store.NewDBStore(metadataDB)
 	logger.Info("using database-backed store")
-	systemSettings, err := bootstrapSystemSettings(context.Background(), cfg, appStore)
+	systemSettings, err := bootstrapSystemSettings(
+		context.Background(),
+		cfg,
+		appStore,
+		func(effective *config.Config) error {
+			return prepareDatabaseGatewayTLS(effective, dataDir, logger)
+		},
+	)
 	if err != nil {
 		logger.Error("failed to initialize system settings", "error", err)
-		os.Exit(1)
-	}
-	if err := prepareDatabaseGatewayTLS(cfg, dataDir, logger); err != nil {
-		logger.Error("failed to initialize database gateway TLS", "error", err)
 		os.Exit(1)
 	}
 	identityService, err := service.NewIdentityService(appStore)

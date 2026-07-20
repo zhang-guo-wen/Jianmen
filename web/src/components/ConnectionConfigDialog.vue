@@ -35,7 +35,20 @@
       <section v-if="connectionInfo && gatewayAddress" class="shared-connection-panel">
         <div class="detail-grid">
           <InfoValue label="连接地址" :value="gatewayAddress" :loading="isCopyInFlight(gatewayAddress, '连接地址')" @copy="copyValue" />
-          <InfoValue v-if="!isRedis" label="连接账户" :value="connectionInfo.compactUser" :loading="isCopyInFlight(connectionInfo.compactUser, '连接账户')" @copy="copyValue" />
+          <InfoValue label="连接账户" :value="connectionInfo.compactUser" :loading="isCopyInFlight(connectionInfo.compactUser, '连接账户')" @copy="copyValue" />
+        </div>
+        <div v-if="resourceType === 'database'" class="database-tls-row">
+          <div>
+            <strong>客户端 TLS</strong>
+            <span>{{ databaseTLSRequired ? '系统已强制使用 TLS' : '默认不使用 TLS，可手动开启' }}</span>
+          </div>
+          <el-switch
+            v-model="databaseUseTLS"
+            :disabled="databaseTLSRequired"
+            inline-prompt
+            active-text="TLS"
+            inactive-text="无 TLS"
+          />
         </div>
         <el-alert
           v-if="resourceType === 'database' && databaseCommandUnavailableReason"
@@ -44,7 +57,7 @@
           :title="databaseCommandUnavailableReason"
         />
         <el-alert
-          v-if="resourceType === 'database' && requiresGatewayTLSIdentity && !secureGatewayTLS"
+          v-if="resourceType === 'database' && databaseUseTLS && !secureGatewayTLS"
           type="error"
           :closable="false"
           title="TLS 身份材料不完整，无法生成安全连接命令。请联系管理员配置证书、ca_file 和 server_name。"
@@ -57,7 +70,7 @@
         <p>正在生成连接配置…</p>
       </div>
 
-      <template v-else-if="!connectionError && connectionInfo && !isRedis">
+      <template v-else-if="!connectionError && connectionInfo">
         <section class="connection-panel permanent-panel">
           <header>
             <strong>长期连接</strong>
@@ -141,7 +154,7 @@
 import { computed, defineComponent, h, reactive, ref, watch, type PropType } from 'vue';
 import { useRouter } from 'vue-router';
 import { Loading } from '@element-plus/icons-vue';
-import { ElButton, ElInput, ElMessage, ElMessageBox } from 'element-plus';
+import { ElButton, ElInput, ElMessage, ElMessageBox, ElSwitch } from 'element-plus';
 
 import { apiClient, type DBAccountRecord, type DBGatewayConfig, type TargetRecord } from '@/api/client';
 import { buildDatabaseProtocolURL } from '@/config/databaseClients';
@@ -151,13 +164,12 @@ import { usePreferencesStore } from '@/stores/preferences';
 import { writeClipboardText } from '@/utils/clipboard';
 import { databaseGatewayConnectionError } from '@/utils/databaseGatewayAvailability';
 import {
-  isGatewayOnlyDatabaseProtocol,
   loadDatabaseConnectionResources,
 } from '@/utils/databaseConnectionOrchestration';
 import {
-  REDIS_COMMAND_UNAVAILABLE_REASON,
   buildDatabaseGatewayConnection,
   hasDatabaseGatewayTLSIdentity,
+  resolveDatabaseGatewayClientHost,
   resolveDatabaseGatewayPort,
 } from '@/utils/databaseGatewayCommands';
 import {
@@ -281,21 +293,34 @@ const connectionInfo = ref<{
   port: number;
   compactUser: string;
   tlsEnabled: boolean;
+  clientTLSMode: 'required' | 'optional';
   tlsServerName: string;
   tlsCAPEM: string;
   tlsCertSHA256: string;
 } | null>(null);
 const temporaryPassword = ref('');
 const temporaryPasswordExpiresAt = ref('');
+const databaseUseTLS = ref(false);
 const initializeRequest = createLatestKeyedRequest<ConnectionResourceBundle>();
 const testRequest = createLatestKeyedRequest<{ ok: boolean; error?: string; latency_ms?: number }>();
 const operationCounters = reactive<InFlightCounters>({});
 
-const gatewayAddress = computed(() => connectionInfo.value ? `${connectionInfo.value.host}:${connectionInfo.value.port}` : '');
-const requiresGatewayTLSIdentity = computed(() => ['mysql', 'postgres', 'postgresql', 'redis'].includes(props.protocol.toLowerCase()));
+const databaseConnectionHost = computed(() => {
+  const info = connectionInfo.value;
+  if (!info) return '';
+  return databaseUseTLS.value && info.tlsServerName ? info.tlsServerName : info.host;
+});
+const gatewayAddress = computed(() => (
+  connectionInfo.value
+    ? `${props.resourceType === 'database' ? databaseConnectionHost.value : connectionInfo.value.host}:${connectionInfo.value.port}`
+    : ''
+));
 const isRedis = computed(() => (
   props.resourceType === 'database' &&
-  isGatewayOnlyDatabaseProtocol(props.protocol)
+  props.protocol.trim().toLowerCase() === 'redis'
+));
+const databaseTLSRequired = computed(() => (
+  connectionInfo.value?.clientTLSMode === 'required'
 ));
 const secureGatewayTLS = computed(() => hasDatabaseGatewayTLSIdentity({
   enabled: true,
@@ -316,6 +341,8 @@ const databaseConnectionPlan = computed(() => {
   } = connectionInfo.value;
   const gateway = {
     enabled: true,
+    host: databaseConnectionHost.value,
+    client_tls_mode: connectionInfo.value.clientTLSMode,
     tls_enabled: tlsEnabled,
     tls_server_name: tlsServerName,
     tls_ca_pem: tlsCAPEM,
@@ -326,13 +353,16 @@ const databaseConnectionPlan = computed(() => {
     gateway,
     port,
     username: compactUser,
+    useTLS: databaseUseTLS.value,
   });
 });
 const databaseCommandUnavailableReason = computed(() => {
-  if (isRedis.value) return REDIS_COMMAND_UNAVAILABLE_REASON;
-  if (!secureGatewayTLS.value) return '';
   if (databaseConnectionPlan.value?.unavailableReason) return databaseConnectionPlan.value.unavailableReason;
-  if (!databaseConnectionPlan.value) return '连接参数包含不安全字符，无法生成安全命令。';
+  if (!databaseConnectionPlan.value) {
+    return databaseUseTLS.value && !secureGatewayTLS.value
+      ? 'TLS 身份材料不完整，无法生成安全连接命令。'
+      : '连接参数包含不安全字符，无法生成连接命令。';
+  }
   return '';
 });
 const commands = computed<CommandItem[]>(() => {
@@ -354,13 +384,17 @@ const sshClientUrl = computed(() => {
   return buildSSHDeepLink({
     username: connectionInfo.value.compactUser,
     password: temporaryPassword.value,
-    host: connectionInfo.value.host,
+    host: databaseConnectionHost.value,
     port: connectionInfo.value.port,
   });
 });
 const databaseClientLaunchBlocked = computed(() => (
   databaseClient.directLaunchReady
-  && (!connectionInfo.value || !secureGatewayTLS.value || !temporaryPassword.value)
+  && (
+    !connectionInfo.value
+    || (databaseUseTLS.value && !secureGatewayTLS.value)
+    || !temporaryPassword.value
+  )
 ));
 const initClientVisible = ref(false);
 const initClientType = ref('xshell');
@@ -426,6 +460,7 @@ function clearConnectionState() {
   connectionInfo.value = null;
   temporaryPassword.value = '';
   temporaryPasswordExpiresAt.value = '';
+  databaseUseTLS.value = false;
   for (const key of Object.keys(operationCounters)) delete operationCounters[key];
 }
 
@@ -455,7 +490,7 @@ async function initializeConnection(snapshot: ConnectionTargetSnapshot) {
   const token = request.token;
   clearConnectionState();
   creatingSession.value = true;
-  if (snapshot.resourceType === 'database' && isGatewayOnlyDatabaseProtocol(snapshot.protocol)) {
+  if (snapshot.resourceType === 'database' && snapshot.protocol.trim().toLowerCase() === 'redis') {
     testRequest.invalidate();
     connectionTesting.value = false;
   } else {
@@ -464,13 +499,19 @@ async function initializeConnection(snapshot: ConnectionTargetSnapshot) {
   try {
     const { session, credential, gateway } = await request.promise;
     if (!initializeRequest.isCurrent(token, currentTargetSnapshotKey())) return;
+    const clientTLSMode = gateway?.client_tls_mode === 'required' ? 'required' : 'optional';
+    databaseUseTLS.value = clientTLSMode === 'required';
     connectionInfo.value = {
-      host: gateway?.tls_server_name || gateway?.host || window.location.hostname,
+      host: resolveDatabaseGatewayClientHost(
+        gateway?.host,
+        window.location.hostname,
+      ),
       port: snapshot.resourceType === 'host'
         ? 47102
         : resolveDatabaseGatewayPort(snapshot.protocol, gateway),
       compactUser: session?.compact_username || '',
       tlsEnabled: gateway?.tls_enabled ?? false,
+      clientTLSMode,
       tlsServerName: gateway?.tls_server_name || '',
       tlsCAPEM: gateway?.tls_ca_pem || '',
       tlsCertSHA256: gateway?.tls_cert_sha256 || '',
@@ -571,7 +612,7 @@ function openDatabaseClientSettings() {
 
 function openDatabaseClient() {
   if (!databaseClient.configured) {
-    ElMessage.warning('请先配置本地 DBeaver 客户端和 CA 文件路径');
+    ElMessage.warning('请先配置本地 DBeaver 客户端');
     openDatabaseClientSettings();
     return;
   }
@@ -585,18 +626,28 @@ function openDatabaseClient() {
     openDatabaseClientSettings();
     return;
   }
-  if (!connectionInfo.value || !temporaryPassword.value || !secureGatewayTLS.value) {
-    ElMessage.warning('数据库安全连接信息尚未就绪');
+  if (databaseUseTLS.value && !databaseClient.value.caFilePath.trim()) {
+    ElMessage.warning('使用 TLS 打开 DBeaver 前，请先在个人设置中配置网关 CA 文件');
+    openDatabaseClientSettings();
+    return;
+  }
+  if (
+    !connectionInfo.value
+    || !temporaryPassword.value
+    || (databaseUseTLS.value && !secureGatewayTLS.value)
+  ) {
+    ElMessage.warning('数据库连接信息尚未就绪');
     return;
   }
   const launchURL = buildDatabaseProtocolURL({
     protocol: props.protocol,
-    host: connectionInfo.value.host,
+    host: databaseConnectionHost.value,
     port: connectionInfo.value.port,
     username: connectionInfo.value.compactUser,
     password: temporaryPassword.value,
     databaseName: ['postgres', 'postgresql'].includes(props.protocol.toLowerCase()) ? 'postgres' : '',
     connectionName: props.resourceName || 'Jianmen 临时连接',
+    tls: databaseUseTLS.value ? 'verify-full' : 'disable',
   });
   if (!launchURL) {
     ElMessage.error('连接参数不符合本地客户端安全规则');
@@ -654,6 +705,10 @@ function formatExpiresAt(value: string): string {
 .connectivity-row { display: flex; align-items: center; gap: 8px; color: var(--el-text-color-secondary); font-size: 13px; }
 .shared-connection-panel { overflow: hidden; border: 1px solid var(--el-border-color-light); border-radius: 10px; }
 .shared-connection-panel .detail-grid { border-top: 0; }
+.database-tls-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 9px 14px; border-top: 1px solid var(--el-border-color-lighter); background: var(--el-fill-color-extra-light); }
+.database-tls-row > div { display: grid; gap: 3px; }
+.database-tls-row strong { font-size: 13px; }
+.database-tls-row span { color: var(--el-text-color-secondary); font-size: 12px; }
 :deep(.copy-action) { justify-self: end; }
 .connect-error { color: var(--el-color-danger); }
 .loading-state { padding: 30px 0; text-align: center; }

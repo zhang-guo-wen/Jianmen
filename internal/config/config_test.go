@@ -319,11 +319,12 @@ func TestDatabaseProtocolListenerValidation(t *testing.T) {
 			wantErr: "cert_file and key_file",
 		},
 		{
-			name: "PostgreSQL listener requires TLS",
-			gateway: DatabaseGatewayConfig{Enabled: true,
-				PostgreSQL: DatabaseProtocolListener{Enabled: true, Address: "127.0.0.1:54330"},
+			name: "required mode allows a managed PostgreSQL TLS identity on loopback",
+			gateway: DatabaseGatewayConfig{
+				Enabled:       true,
+				ClientTLSMode: DatabaseGatewayClientTLSModeRequired,
+				PostgreSQL:    DatabaseProtocolListener{Enabled: true, Address: "127.0.0.1:54330"},
 			},
-			wantErr: "postgresql requires TLS",
 		},
 		{
 			name: "non-loopback MySQL listener requires TLS",
@@ -435,6 +436,9 @@ func TestDefaultDatabaseGatewayUsesUnifiedLoopbackEntry(t *testing.T) {
 			cfg.DatabaseGateway.MaxClientMessageBytes,
 			DefaultDatabaseGatewayMaxClientMessageBytes,
 		)
+	}
+	if got := cfg.DatabaseGateway.EffectiveClientTLSMode(); got != DatabaseGatewayClientTLSModeOptional {
+		t.Fatalf("default database gateway client TLS mode = %q, want optional", got)
 	}
 	if !cfg.DatabaseGateway.MySQL.Enabled {
 		t.Fatal("default database gateway must keep the certificate-optional MySQL listener enabled")

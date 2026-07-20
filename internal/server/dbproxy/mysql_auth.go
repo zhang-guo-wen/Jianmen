@@ -147,7 +147,7 @@ func (g *Gateway) handleMySQLWithListener(ctx context.Context, client net.Conn, 
 		g.logger.Warn("mysql gateway failed to read initial packet")
 		return nil
 	}
-	if tlsConfig != nil && !isMySQLTLSRequest(clientLoginPkt) {
+	if g.cfg.ClientTLSRequired() && !isMySQLTLSRequest(clientLoginPkt) {
 		g.logger.Warn("mysql gateway rejected plaintext login on TLS listener")
 		_ = writeMySQLClientAuthError(client, mysqlClientAuthResponseSequence(clientLoginPkt.seq))
 		return nil

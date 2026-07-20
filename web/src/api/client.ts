@@ -2,6 +2,7 @@
 
 import { withIdempotencyKey, type ProvisionRequest } from '@/utils/provisioningRequest';
 import type {
+  DatabaseGatewayClientTLSMode,
   DatabaseGatewayMode,
   SystemSettingsDiagnosticResult,
   SystemSettingsRevisionResponse,
@@ -10,6 +11,7 @@ import type {
 } from './systemSettings';
 
 export type {
+  DatabaseGatewayClientTLSMode,
   DatabaseGatewayMode,
   SystemSettingsDiagnosticResult,
   SystemSettingsInfrastructure,
@@ -490,6 +492,7 @@ export interface DBGatewayConfig {
   connectable: boolean;
   unavailable_reason: '' | 'gateway_disabled' | 'listener_disabled' | 'tls_identity_missing';
   mode: DatabaseGatewayMode;
+  client_tls_mode: DatabaseGatewayClientTLSMode;
   protocol: string;
   listen_addr: string;
   host: string;

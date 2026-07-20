@@ -13,18 +13,15 @@ func prepareDatabaseGatewayTLS(
 	dataDir string,
 	logger *slog.Logger,
 ) error {
-	generated, err := dbtls.EnsureLocalUnifiedGatewayIdentity(
+	generated, err := dbtls.EnsureLocalGatewayIdentities(
 		&cfg.DatabaseGateway,
 		dataDir,
 	)
 	if err != nil {
-		return fmt.Errorf("prepare local unified gateway identity: %w", err)
+		return fmt.Errorf("prepare local database gateway identity: %w", err)
 	}
 	if generated {
-		logger.Info(
-			"generated local unified database gateway TLS identity",
-			"certificate", cfg.DatabaseGateway.Unified.CertFile,
-		)
+		logger.Info("generated local database gateway TLS identity")
 	}
 	return nil
 }

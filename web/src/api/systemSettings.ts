@@ -5,9 +5,11 @@ export const DATABASE_MAX_CLIENT_MESSAGE_BYTES_MAX = 16 * BYTES_PER_MIB;
 export const DATABASE_MAX_CLIENT_MESSAGE_BYTES_DEFAULT = 10 * BYTES_PER_MIB;
 
 export type DatabaseGatewayMode = 'unified' | 'independent';
+export type DatabaseGatewayClientTLSMode = 'required' | 'optional';
 
 export interface SystemSettingsValues {
   database_gateway_mode: DatabaseGatewayMode;
+  database_gateway_client_tls_mode: DatabaseGatewayClientTLSMode;
   web_rdp_enabled: boolean;
   web_rdp_connect_timeout_seconds: number;
   web_rdp_allow_unrecorded: boolean;
@@ -22,6 +24,7 @@ export interface SystemSettingsValues {
 
 export const SYSTEM_SETTINGS_FIELDS = [
   'database_gateway_mode',
+  'database_gateway_client_tls_mode',
   'web_rdp_enabled',
   'web_rdp_connect_timeout_seconds',
   'web_rdp_allow_unrecorded',
@@ -151,6 +154,12 @@ export function weakerProtectionReasons(
 ): string[] {
   const reasons: string[] = [];
 
+  if (
+    current.database_gateway_client_tls_mode === 'required'
+    && next.database_gateway_client_tls_mode === 'optional'
+  ) {
+    reasons.push('允许数据库客户端不使用 TLS 连接 Jianmen');
+  }
   if (!current.web_rdp_allow_unrecorded && next.web_rdp_allow_unrecorded) {
     reasons.push('允许录制失败时继续建立 Web RDP 会话');
   }

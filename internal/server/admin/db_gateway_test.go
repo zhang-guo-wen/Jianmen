@@ -188,12 +188,13 @@ func TestHandleDBGatewayUsesUnifiedEntryForEveryProtocol(t *testing.T) {
 	}
 }
 
-func TestHandleDBGatewaySeparatesEnabledUnifiedEntryFromPostgreSQLTLSReadiness(t *testing.T) {
+func TestHandleDBGatewayReportsRequiredTLSIdentityReadiness(t *testing.T) {
 	server, db := newAdminDBTestServer(t)
 	seedTestSuperAdmin(t, db, "u-admin")
 	server.cfg.DatabaseGateway = config.DatabaseGatewayConfig{
-		Enabled: true,
-		Mode:    config.DatabaseGatewayModeUnified,
+		Enabled:       true,
+		Mode:          config.DatabaseGatewayModeUnified,
+		ClientTLSMode: config.DatabaseGatewayClientTLSModeRequired,
 		Unified: config.DatabaseUnifiedListener{
 			Enabled: true, Address: "127.0.0.1:33060", DetectionTimeoutMS: 200,
 		},
@@ -202,9 +203,9 @@ func TestHandleDBGatewaySeparatesEnabledUnifiedEntryFromPostgreSQLTLSReadiness(t
 		connectable bool
 		reason      string
 	}{
-		"mysql":      {connectable: true},
+		"mysql":      {reason: databaseGatewayUnavailableTLSIdentityMissing},
 		"postgresql": {reason: databaseGatewayUnavailableTLSIdentityMissing},
-		"redis":      {connectable: true},
+		"redis":      {reason: databaseGatewayUnavailableTLSIdentityMissing},
 	} {
 		t.Run(protocol, func(t *testing.T) {
 			recorder := httptest.NewRecorder()
@@ -263,7 +264,11 @@ func TestDatabaseGatewayAvailabilityDistinguishesDisabledStates(t *testing.T) {
 			wantReason: databaseGatewayUnavailableListenerDisabled,
 		},
 		{
-			name: "postgresql TLS missing", gatewayEnabled: true, listenerEnabled: true, protocol: "postgresql",
+			name: "required TLS missing", gatewayEnabled: true, listenerEnabled: true, protocol: "postgresql",
+			wantReason: databaseGatewayUnavailableTLSIdentityMissing,
+		},
+		{
+			name: "optional TLS missing", gatewayEnabled: true, listenerEnabled: true, protocol: "postgresql",
 			wantReason: databaseGatewayUnavailableTLSIdentityMissing,
 		},
 		{
@@ -276,7 +281,6 @@ func TestDatabaseGatewayAvailabilityDistinguishesDisabledStates(t *testing.T) {
 			connectable, reason := databaseGatewayAvailability(
 				tt.gatewayEnabled,
 				tt.listenerEnabled,
-				tt.protocol,
 				tt.tlsConfigured,
 			)
 			if connectable != tt.wantConnectable || reason != tt.wantReason {

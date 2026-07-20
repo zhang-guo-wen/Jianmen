@@ -220,7 +220,28 @@ func TestUnifiedListenerAllowsLoopbackPlaintextRedisWithoutCertificate(t *testin
 	waitUnifiedHandler(t, done)
 }
 
-func TestUnifiedListenerRejectsPlaintextRedisWhenTLSConfigured(t *testing.T) {
+func TestUnifiedOptionalTLSListenerAllowsPlaintextRedisWithCertificate(t *testing.T) {
+	certFile, keyFile := writeListenerCertificate(t)
+	server, client := net.Pipe()
+	defer client.Close()
+	done := runUnifiedPipeHandler(
+		server,
+		config.DatabaseUnifiedListener{CertFile: certFile, KeyFile: keyFile},
+		500*time.Millisecond,
+		100*time.Millisecond,
+		config.DatabaseGatewayClientTLSModeOptional,
+	)
+	if _, err := client.Write([]byte("*1\r\n$4\r\nPING\r\n")); err != nil {
+		t.Fatal(err)
+	}
+	response := readUnifiedResponse(t, client)
+	if response != "-NOAUTH Authentication required.\r\n" {
+		t.Fatalf("Redis response = %q", response)
+	}
+	waitUnifiedHandler(t, done)
+}
+
+func TestUnifiedRequiredTLSListenerRejectsPlaintextRedis(t *testing.T) {
 	certFile, keyFile := writeListenerCertificate(t)
 	server, client := net.Pipe()
 	defer client.Close()
@@ -230,8 +251,9 @@ func TestUnifiedListenerRejectsPlaintextRedisWhenTLSConfigured(t *testing.T) {
 		config.DatabaseUnifiedListener{CertFile: certFile, KeyFile: keyFile},
 		500*time.Millisecond,
 		100*time.Millisecond,
+		config.DatabaseGatewayClientTLSModeRequired,
 	)
-	// A configured TLS policy rejects as soon as the RESP marker is visible.
+	// Required TLS rejects as soon as the RESP marker is visible.
 	if _, err := client.Write([]byte{'*'}); err != nil {
 		t.Fatal(err)
 	}
@@ -452,6 +474,7 @@ func TestUnifiedTCPListenerRoutesThreeProtocolsConcurrently(t *testing.T) {
 }
 
 func TestUnifiedModeIgnoresIndependentListenerBindings(t *testing.T) {
+	certFile, keyFile := writeListenerCertificate(t)
 	blocked, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -466,6 +489,9 @@ func TestUnifiedModeIgnoresIndependentListenerBindings(t *testing.T) {
 			Unified: config.DatabaseUnifiedListener{
 				Enabled:            true,
 				Address:            unifiedAddress,
+				CertFile:           certFile,
+				KeyFile:            keyFile,
+				ServerName:         "localhost",
 				DetectionTimeoutMS: 20,
 			},
 			MySQL: config.DatabaseProtocolListener{
@@ -510,12 +536,20 @@ func runUnifiedPipeHandler(
 	listenerConfig config.DatabaseUnifiedListener,
 	handshakeTimeout time.Duration,
 	detectionTimeout time.Duration,
+	clientTLSModes ...string,
 ) <-chan struct{} {
+	clientTLSMode := config.DatabaseGatewayClientTLSModeOptional
+	if len(clientTLSModes) > 0 {
+		clientTLSMode = clientTLSModes[0]
+	}
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
 		defer server.Close()
-		(&Gateway{logger: slog.Default()}).handleUnifiedConnectionWithTimeout(
+		(&Gateway{
+			cfg:    config.DatabaseGatewayConfig{ClientTLSMode: clientTLSMode},
+			logger: slog.Default(),
+		}).handleUnifiedConnectionWithTimeout(
 			context.Background(),
 			server,
 			listenerConfig,

@@ -141,7 +141,7 @@ func (g *Gateway) handleUnifiedConnectionWithTimeout(
 		connection = g.handleMySQLWithListener(ctx, client, protocolConfig)
 	case unifiedPrefacePostgreSQL:
 		protocol = databaseProtocolPostgreSQL
-		prefixed := &postgresPrefixedConn{Conn: client, prefix: []byte{preface.firstByte}}
+		prefixed := &prefixedConn{Conn: client, prefix: []byte{preface.firstByte}}
 		connection = g.handlePostgresConnection(ctx, prefixed, protocolConfig)
 	case unifiedPrefaceRedis:
 		protocol = databaseProtocolRedis
@@ -200,7 +200,7 @@ func (g *Gateway) handleUnifiedPlaintextRedis(
 	listenerConfig config.DatabaseUnifiedListener,
 	firstByte byte,
 ) *gatewayConn {
-	if unifiedTLSConfigured(listenerConfig) || !isLoopbackPeer(client.RemoteAddr()) {
+	if g.cfg.ClientTLSRequired() {
 		_, _ = client.Write([]byte("-NOAUTH TLS is required for remote AUTH\r\n"))
 		return nil
 	}
@@ -221,7 +221,7 @@ func (g *Gateway) handleUnifiedTLS(
 		g.logger.Error("load unified database listener certificate", "error", err)
 		return "", nil
 	}
-	prefixed := &postgresPrefixedConn{Conn: client, prefix: []byte{firstByte}}
+	prefixed := &prefixedConn{Conn: client, prefix: []byte{firstByte}}
 	secured := tls.Server(prefixed, tlsConfig)
 	if err := secured.HandshakeContext(ctx); err != nil {
 		return "", nil
@@ -255,7 +255,7 @@ func validateUnifiedListenerTLS(listener config.DatabaseUnifiedListener) error {
 		return errors.New("unified database listener certificate and key must be configured together")
 	}
 	if !certConfigured {
-		return nil
+		return errors.New("unified database listener requires TLS certificate and key")
 	}
 	if _, err := dbtls.LoadServerIdentity(listener.CertFile, listener.CAFile, listener.ServerName); err != nil {
 		return fmt.Errorf("load unified database listener TLS: validate listener identity: %w", err)

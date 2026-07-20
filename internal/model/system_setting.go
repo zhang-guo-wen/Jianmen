@@ -8,6 +8,7 @@ const SystemSettingSingletonID = "system"
 type SystemSetting struct {
 	ID                            string `gorm:"primaryKey;size:32"`
 	DatabaseGatewayMode           string `gorm:"size:16;not null;default:unified;check:chk_system_settings_database_gateway_mode,database_gateway_mode IN ('unified','independent')"`
+	DatabaseGatewayClientTLSMode  string `gorm:"size:16;not null;default:optional;check:chk_system_settings_database_gateway_client_tls_mode,database_gateway_client_tls_mode IN ('required','optional')"`
 	WebRDPEnabled                 bool   `gorm:"not null"`
 	WebRDPConnectTimeoutSeconds   int    `gorm:"not null"`
 	WebRDPAllowUnrecorded         bool   `gorm:"not null"`

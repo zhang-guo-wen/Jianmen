@@ -68,8 +68,8 @@ The default container endpoints are:
 - SSH gateway: `HOST:47102`
 - Unified database gateway (default, MySQL/PostgreSQL/Redis): `HOST:33060`
 - Independent MySQL gateway: `HOST:33061`
-- Independent PostgreSQL gateway (client TLS required): `HOST:33062`
-- Independent Redis gateway (remote client AUTH requires TLS): `HOST:33063`
+- Independent PostgreSQL gateway: `HOST:33062`
+- Independent Redis gateway: `HOST:33063`
 - Application gateways: `HOST:47110-47199`
 
 Mount a custom configuration file at `/app/config.json` when the defaults in
@@ -87,10 +87,13 @@ Only the selected mode binds its listeners. The default container command publis
 when selecting `independent`, also publish `33061:33061`, `33062:33062`, and `33063:33063`
 (or add those mappings to Compose) before restarting the container.
 
-PostgreSQL must negotiate TLS before its cleartext password exchange, while Redis only permits
-plaintext AUTH from a loopback client for local development. The default Docker configuration
-therefore requires `/app/certs/database.crt` and `/app/certs/database.key`. For client identity
-verification, also mount the public CA at
+Client-facing TLS has two policies: `optional` (the default) accepts both plaintext and TLS for
+MySQL, PostgreSQL, and Redis, while `required` rejects plaintext authentication and database
+traffic. PostgreSQL plaintext `CancelRequest` control packets remain compatible because they
+carry no login credentials or database data and must match the per-session cancellation secret.
+The default Docker configuration requires `/app/certs/database.crt` and
+`/app/certs/database.key` so either policy can offer TLS. For client identity verification, also
+mount the public CA at
 `/app/certs/database-ca.crt` and configure each listener's `ca_file` plus a `server_name` that
 matches a certificate SAN. The gateway API distributes only validated certificate PEM, the TLS
 server name, and the leaf-certificate SHA-256 fingerprint; it never exposes `key_file` or private

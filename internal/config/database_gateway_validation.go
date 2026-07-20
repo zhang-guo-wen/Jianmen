@@ -7,6 +7,9 @@ import (
 )
 
 func validateDatabaseGateway(gateway DatabaseGatewayConfig) error {
+	if err := validateDatabaseGatewayClientTLSMode(gateway.EffectiveClientTLSMode()); err != nil {
+		return err
+	}
 	maxClientMessageBytes := gateway.MaxClientMessageBytes
 	if maxClientMessageBytes == 0 {
 		maxClientMessageBytes = DefaultDatabaseGatewayMaxClientMessageBytes
@@ -75,7 +78,6 @@ func validateUnifiedDatabaseListener(listener DatabaseUnifiedListener) error {
 		listener.KeyFile,
 		listener.CAFile,
 		listener.ServerName,
-		false,
 	)
 }
 
@@ -100,7 +102,6 @@ func validateIndependentDatabaseListeners(gateway DatabaseGatewayConfig) error {
 			item.listener.KeyFile,
 			item.listener.CAFile,
 			item.listener.ServerName,
-			item.name == "postgresql",
 		); err != nil {
 			return err
 		}
@@ -122,7 +123,6 @@ func validateIndependentDatabaseListeners(gateway DatabaseGatewayConfig) error {
 
 func validateDatabaseListener(
 	name, address, certFile, keyFile, caFile, serverName string,
-	requireTLS bool,
 ) error {
 	if _, _, err := net.SplitHostPort(address); err != nil {
 		return fmt.Errorf("invalid database_gateway.%s.listen_addr %q: %w", name, address, err)
@@ -142,9 +142,6 @@ func validateDatabaseListener(
 		if err := validateDatabaseGatewayServerName(serverName); err != nil {
 			return fmt.Errorf("database_gateway.%s server_name is invalid: %w", name, err)
 		}
-	}
-	if requireTLS && !certConfigured {
-		return fmt.Errorf("database_gateway.%s requires TLS cert_file and key_file", name)
 	}
 	if !certConfigured && !isLoopbackListenAddr(address) {
 		return fmt.Errorf("database_gateway.%s requires TLS cert_file and key_file on a non-loopback listener", name)

@@ -66,13 +66,16 @@ export const usePreferencesStore = defineStore('preferences', () => {
 
   const hasSSHClient = computed(() => value.value.ssh_client === 'default' || Boolean(value.value.ssh_client && isAbsoluteExecutablePath(value.value.ssh_client_path)));
 
-  /** 数据库客户端是否已完整配置（路径有效 + CA 文件有效 + Windows 平台） */
+  /** 数据库客户端是否已完整配置（非 TLS 快速连接仅要求有效程序路径） */
   const hasDBClient = computed(() => {
     const v = value.value;
     return v.db_client === 'dbeaver'
       && v.db_client_platform === 'windows'
       && isValidDatabaseClientExecutablePath(v.db_client_path, 'windows')
-      && isValidDatabaseClientCAFilePath(v.db_client_ca_file_path, 'windows');
+      && (
+        !v.db_client_ca_file_path.trim()
+        || isValidDatabaseClientCAFilePath(v.db_client_ca_file_path, 'windows')
+      );
   });
 
   function resolveDark(theme = value.value.theme): boolean {

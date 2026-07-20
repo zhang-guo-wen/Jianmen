@@ -100,7 +100,6 @@ test('ConnectionConfigDialog call sites keep kebab-case attrs', () => {
   const callers = [
     { file: new URL('../views/DatabaseView.vue', import.meta.url), expected: [':allow-ssh='] },
     { file: new URL('../views/HostsView.vue', import.meta.url), expected: [':allow-ssh=', ':allow-sftp='] },
-    { file: new URL('../views/QuickConnectView.vue', import.meta.url), expected: [':allow-ssh=', ':allow-sftp='] },
   ];
 
   for (const caller of callers) {

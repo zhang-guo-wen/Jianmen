@@ -337,6 +337,14 @@ test('quick database cards copy temporary connection credentials with an in-flig
   );
 });
 
+test('quick-connect client buttons redirect to settings only when local configuration is missing', () => {
+  const source = readFileSync(new URL('../views/QuickConnectView.vue', import.meta.url), 'utf8');
+  assert.doesNotMatch(source, /<el-button @click="openDatabaseClientSettings">/);
+  assert.match(source, /if \(!preferences\.hasSSHClient\)[\s\S]*openClientSettings\('ssh'\)/);
+  assert.match(source, /if \(!databaseClient\.configured\)[\s\S]*openClientSettings\('database'\)/);
+  assert.match(source, /query:\s*\{\s*tab,\s*return_to:\s*router\.currentRoute\.value\.fullPath\s*\}/);
+});
+
 test('database and quick-connect loaders keep request snapshots isolated', () => {
   const databaseViewSource = readFileSync(new URL('../views/DatabaseView.vue', import.meta.url), 'utf8');
   const quickConnectSource = readFileSync(new URL('../views/QuickConnectView.vue', import.meta.url), 'utf8');

@@ -71,11 +71,17 @@ test('quick-connect web and local client actions preflight SSH host identity', (
   const webStart = source.indexOf('async function openWebConnection')
   const clientStart = source.indexOf('async function openClientConnection')
   const preflightStart = source.indexOf('async function preflightSSHConnection')
-  const preflightEnd = source.indexOf('function handleQuickHostIdentityChanged', preflightStart)
+  const preflightEnd = source.indexOf('watch([targetPage', preflightStart)
+  const clientSource = source.slice(clientStart, preflightStart)
 
   assert.ok(webStart >= 0 && clientStart > webStart && preflightStart > clientStart)
   assert.match(source.slice(webStart, clientStart), /await preflightSSHConnection\(target\)/)
-  assert.match(source.slice(clientStart, preflightStart), /await preflightSSHConnection\(target\)/)
+  assert.match(clientSource, /await preflightSSHConnection\(target\)/)
+  assert.ok(
+    clientSource.indexOf('!preferences.hasSSHClient') < clientSource.indexOf('preflightSSHConnection(target)'),
+    'SSH client settings should be checked before connection preflight',
+  )
+  assert.match(clientSource, /openClientSettings\('ssh'\)/)
   assert.match(source.slice(preflightStart, preflightEnd), /apiClient\.testTargetConnection\(\{ id: targetID \}\)/)
   assert.match(source.slice(preflightStart, preflightEnd), /ElMessageBox\.alert/)
   assert.match(source.slice(preflightStart, preflightEnd), /await loadTargets\(\)/)

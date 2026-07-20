@@ -152,9 +152,6 @@
               @update:model-value="setDBFilter"
             />
             <div class="page-card__actions">
-              <el-button @click="openDatabaseClientSettings">
-                本地客户端设置
-              </el-button>
               <el-button :loading="dbLoading" :icon="Refresh" @click="loadDBAccounts">
                 {{ t('common.refresh') }}
               </el-button>
@@ -276,19 +273,6 @@
         <QuickContainerConnectPanel :active="activeTab === 'container'" />
       </el-tab-pane>
     </el-tabs>
-
-    <ConnectionConfigDialog
-      v-model="hostConfigVisible"
-      resource-type="host"
-      :target="selectedSSHTarget"
-      :resource-name="selectedSSHTarget ? quickHostName(selectedSSHTarget) : ''"
-      :source-address="selectedSSHTarget ? `${targetHost(selectedSSHTarget)}:${targetPort(selectedSSHTarget)}` : ''"
-      :source-account="String(selectedSSHTarget?.username || '')"
-      :allow-ssh="permission.canDo('session:connect')"
-      :allow-sftp="permission.canDo('sftp:connect')"
-      @host-identity-changed="handleQuickHostIdentityChanged"
-    />
-
   </div>
 </template>
 
@@ -299,7 +283,6 @@ import { ElMessage, ElMessageBox } from 'element-plus';
 import { useRoute, useRouter } from 'vue-router';
 
 import { apiClient, type DBAccountRecord, type HostView, type PageResponse, type TargetRecord } from '@/api/client';
-import ConnectionConfigDialog from '@/components/ConnectionConfigDialog.vue';
 import QuickContainerConnectPanel from '@/components/QuickContainerConnectPanel.vue';
 import ResourceFilterBar from '@/components/ResourceFilterBar.vue';
 import { buildDatabaseProtocolURL } from '@/config/databaseClients';
@@ -420,20 +403,12 @@ const dbFilter = ref('all');
 const dbPage = ref(1);
 const dbPageSize = ref(50);
 
-// Dialog state
-const hostConfigVisible = ref(false);
-const selectedSSHTarget = ref<TargetRecord | null>(null);
-
 function targetKey(target: TargetRecord): string {
   return String(target.id || target.resource_id || `${target.host_id || target.host}-${target.username || ''}`);
 }
 
 function targetHost(target: TargetRecord): string {
   return String(target.host || target.address || '');
-}
-
-function targetPort(target: TargetRecord): number {
-  return Number(target.port) || (isRDPTarget(target) ? 3389 : 22);
 }
 
 function targetProtocol(target: TargetRecord): 'ssh' | 'rdp' {
@@ -733,25 +708,25 @@ async function openClientConnection(target: TargetRecord) {
     await openWebConnection(target);
     return;
   }
+  if (!preferences.loaded) {
+    try {
+      await preferences.fetch();
+    } catch (error) {
+      ElMessage.error(error instanceof Error ? error.message : '无法加载本地 SSH 客户端配置');
+      return;
+    }
+  }
+  if (!preferences.hasSSHClient) {
+    ElMessage.warning('请先配置本地 SSH 客户端');
+    openClientSettings('ssh');
+    return;
+  }
   if (!(await preflightSSHConnection(target))) {
     return;
   }
   const state = await ensureConnectionInfo(target);
   if (state.error || !state.compactUser || !state.password) {
     ElMessage.error(state.error || '连接信息尚未生成');
-    return;
-  }
-  if (!preferences.loaded) {
-    try {
-      await preferences.fetch();
-    } catch {
-      // The connection dialog provides the client initialization flow.
-    }
-  }
-  if (!preferences.hasSSHClient) {
-    selectedSSHTarget.value = target;
-    hostConfigVisible.value = true;
-    ElMessage.warning('请先完成本地 SSH 客户端初始化');
     return;
   }
   window.location.href = buildSSHDeepLink({
@@ -994,17 +969,17 @@ async function openDatabaseClient(account: QuickDBTarget) {
   }
   if (!databaseClient.configured) {
     ElMessage.warning('请先配置本地 DBeaver 客户端');
-    openDatabaseClientSettings();
+    openClientSettings('database');
     return;
   }
   if (databaseClient.value.platform !== 'windows') {
     ElMessage.warning('当前仅 Windows 支持从浏览器直接打开 DBeaver');
-    openDatabaseClientSettings();
+    openClientSettings('database');
     return;
   }
   if (!databaseClient.directLaunchReady) {
     ElMessage.warning('请先执行本地协议注册命令，并在设置中确认已完成');
-    openDatabaseClientSettings();
+    openClientSettings('database');
     return;
   }
 
@@ -1058,10 +1033,10 @@ function downloadDatabaseGatewayCA(protocol: string, pem: string) {
   URL.revokeObjectURL(url);
 }
 
-function openDatabaseClientSettings() {
+function openClientSettings(tab: 'ssh' | 'database') {
   void router.push({
     path: '/settings',
-    query: { tab: 'database', return_to: router.currentRoute.value.fullPath },
+    query: { tab, return_to: router.currentRoute.value.fullPath },
   });
 }
 
@@ -1090,10 +1065,6 @@ async function preflightSSHConnection(target: TargetRecord): Promise<boolean> {
     await loadTargets();
     return false;
   }
-}
-
-function handleQuickHostIdentityChanged() {
-  void loadTargets();
 }
 
 watch([targetPage, targetPageSize, sshFilter], () => {

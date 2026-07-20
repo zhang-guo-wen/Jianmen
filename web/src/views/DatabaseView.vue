@@ -66,9 +66,6 @@
     <!-- 创建/编辑实例弹窗 -->
     <FormDialog v-model:visible="showInstanceDialog" :title="editingInstance ? '编辑实例' : '新增实例'" :loading="submitting" @submit="submitInstance">
       <el-form :model="instanceForm" class="database-resource-form" label-position="top">
-        <el-form-item label="名称" required>
-          <el-input v-model="instanceForm.name" />
-        </el-form-item>
         <el-form-item label="协议" required>
           <el-select v-model="instanceForm.protocol" @change="onProtocolChange">
             <el-option label="MySQL" value="mysql" />
@@ -88,6 +85,13 @@
         </el-form-item>
         <el-collapse v-model="instanceMorePanels">
           <el-collapse-item name="more" title="更多设置">
+            <el-form-item label="名称">
+              <el-input
+                v-model="instanceForm.name"
+                placeholder="默认 = 上游地址"
+                @input="instanceNameTouched = true"
+              />
+            </el-form-item>
             <el-form-item label="分组">
               <el-select
                 v-model="instanceForm.group"
@@ -491,6 +495,7 @@ const tlsCAFileInput = ref<HTMLInputElement | null>(null)
 const previousTLSMode = ref<api.DatabaseTLSMode>(DEFAULT_DATABASE_UPSTREAM_TLS_MODE)
 const originalHasTLSCA = ref(false)
 const lastAutoTLSHostName = ref('')
+const instanceNameTouched = ref(false)
 const instanceForm = reactive<InstanceForm>({
   name: '',
   protocol: 'mysql',
@@ -686,6 +691,7 @@ function onInstanceSearch(keyword: string) {
 
 function openCreateInstance() {
   editingInstance.value = null
+  instanceNameTouched.value = false
   instanceMorePanels.value = ['more']
   originalHasTLSCA.value = false
   previousTLSMode.value = DEFAULT_DATABASE_UPSTREAM_TLS_MODE
@@ -730,10 +736,12 @@ function onInstanceAddressInput(address: string) {
     instanceForm.tlsServerName = inferred
   }
   lastAutoTLSHostName.value = inferred
+  syncDefaultInstanceName()
 }
 
 function editInstance(inst: api.DatabaseInstanceView) {
   editingInstance.value = inst
+  instanceNameTouched.value = true
   instanceMorePanels.value = []
   const tlsMode = normalizeTLSMode(inst.tls_mode)
   originalHasTLSCA.value = Boolean(inst.has_tls_ca)
@@ -762,6 +770,16 @@ function onProtocolChange(protocol: string) {
       case 'postgres': instanceForm.port = 5432; break
       default: instanceForm.port = 3306; break
     }
+  }
+}
+
+function defaultInstanceName(): string {
+  return instanceForm.address.trim()
+}
+
+function syncDefaultInstanceName() {
+  if (!instanceNameTouched.value) {
+    instanceForm.name = defaultInstanceName()
   }
 }
 
@@ -824,8 +842,8 @@ function clearTLSCA() {
 }
 
 async function submitInstance() {
-  if (!instanceForm.name.trim() || !instanceForm.address.trim()) {
-    ElMessage.warning('请填写必填字段')
+  if (!instanceForm.address.trim()) {
+    ElMessage.warning('请填写上游地址')
     return
   }
   submitting.value = true
@@ -836,7 +854,7 @@ async function submitInstance() {
         instanceForm.tlsServerName,
         instanceForm.tlsCaPem,
       ),
-      name: instanceForm.name.trim(),
+      name: instanceForm.name.trim() || defaultInstanceName(),
       protocol: instanceForm.protocol,
       address: instanceForm.address.trim(),
       port: instanceForm.port,

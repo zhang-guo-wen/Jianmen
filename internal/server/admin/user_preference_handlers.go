@@ -13,6 +13,11 @@ type userPreferenceResponse struct {
 	Theme              string `json:"theme"`
 	SSHClient          string `json:"ssh_client"`
 	SSHClientPath      string `json:"ssh_client_path"`
+	SSHClientPlatform  string `json:"ssh_client_platform"`
+	DBClient           string `json:"db_client"`
+	DBClientPlatform   string `json:"db_client_platform"`
+	DBClientPath       string `json:"db_client_path"`
+	DBClientCAFilePath string `json:"db_client_ca_file_path"`
 	TerminalFontFamily string `json:"terminal_font_family"`
 	TerminalFontSize   int    `json:"terminal_font_size"`
 }
@@ -21,6 +26,11 @@ type userPreferenceRequest struct {
 	Theme              *string `json:"theme"`
 	SSHClient          *string `json:"ssh_client"`
 	SSHClientPath      *string `json:"ssh_client_path"`
+	SSHClientPlatform  *string `json:"ssh_client_platform"`
+	DBClient           *string `json:"db_client"`
+	DBClientPlatform   *string `json:"db_client_platform"`
+	DBClientPath       *string `json:"db_client_path"`
+	DBClientCAFilePath *string `json:"db_client_ca_file_path"`
 	TerminalFontFamily *string `json:"terminal_font_family"`
 	TerminalFontSize   *int    `json:"terminal_font_size"`
 }
@@ -74,6 +84,11 @@ func toUserPreferencePatch(request userPreferenceRequest) service.UserPreference
 		Theme:              request.Theme,
 		SSHClient:          request.SSHClient,
 		SSHClientPath:      request.SSHClientPath,
+		SSHClientPlatform:  request.SSHClientPlatform,
+		DBClient:           request.DBClient,
+		DBClientPlatform:   request.DBClientPlatform,
+		DBClientPath:       request.DBClientPath,
+		DBClientCAFilePath: request.DBClientCAFilePath,
 		TerminalFontFamily: request.TerminalFontFamily,
 		TerminalFontSize:   request.TerminalFontSize,
 	}
@@ -84,6 +99,11 @@ func userPreferenceView(preference model.UserPreference) userPreferenceResponse 
 		Theme:              preference.Theme,
 		SSHClient:          preference.SSHClient,
 		SSHClientPath:      preference.SSHClientPath,
+		SSHClientPlatform:  preference.SSHClientPlatform,
+		DBClient:           preference.DBClient,
+		DBClientPlatform:   preference.DBClientPlatform,
+		DBClientPath:       preference.DBClientPath,
+		DBClientCAFilePath: preference.DBClientCAFilePath,
 		TerminalFontFamily: preference.TerminalFontFamily,
 		TerminalFontSize:   preference.TerminalFontSize,
 	}

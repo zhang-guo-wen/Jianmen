@@ -305,7 +305,7 @@ test('settings exposes local-only database client configuration without restorin
   assert.match(localStoreSource, /localStorage/);
   assert.doesNotMatch(localStoreSource, /apiClient/);
   const preferencesSource = readFileSync(new URL('../stores/preferences.ts', import.meta.url), 'utf8');
-  assert.doesNotMatch(preferencesSource, /dbeaver/i);
+  assert.match(preferencesSource, /dbeaver/i);
 });
 
 test('database and quick-connect loaders keep request snapshots isolated', () => {

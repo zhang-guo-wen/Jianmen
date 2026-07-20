@@ -2,56 +2,70 @@ import { computed, ref } from 'vue';
 import { defineStore } from 'pinia';
 
 import {
-  detectDatabaseClientPlatform,
-  isValidDatabaseClientExecutablePath,
-  type DatabaseClientSettings,
+  DATABASE_CLIENT_PROTOCOL_REGISTRATION_VERSION,
+  isCurrentDatabaseClientProtocolRegistration,
+  type DatabaseClientPlatform,
 } from '@/config/databaseClients';
+import { usePreferencesStore } from '@/stores/preferences';
 
-const STORAGE_KEY = 'jianmen_local_database_client';
+/** 协议注册状态只存浏览器本地（机器相关，不存入后端） */
+const REG_STORAGE_KEY = 'jianmen_db_protocol_registered';
 
-function defaults(): DatabaseClientSettings {
-  return {
-    client: '',
-    platform: detectDatabaseClientPlatform(),
-    executablePath: '',
-  };
+function readProtocolRegistered(): boolean {
+  try {
+    const stored = JSON.parse(localStorage.getItem(REG_STORAGE_KEY) || '{}') as Record<string, unknown>;
+    return isCurrentDatabaseClientProtocolRegistration(
+      stored.registered,
+      stored.version,
+    );
+  } catch {
+    return false;
+  }
 }
 
-function readSettings(): DatabaseClientSettings {
-  const fallback = defaults();
-  try {
-    const stored = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}') as Partial<DatabaseClientSettings>;
-    const platform = stored.platform === 'windows' || stored.platform === 'macos' || stored.platform === 'linux'
-      ? stored.platform
-      : fallback.platform;
-    return {
-      client: stored.client === 'dbeaver' ? 'dbeaver' : '',
-      platform,
-      executablePath: typeof stored.executablePath === 'string' ? stored.executablePath : '',
-    };
-  } catch {
-    return fallback;
-  }
+function writeProtocolRegistered(registered: boolean) {
+  localStorage.setItem(REG_STORAGE_KEY, JSON.stringify({
+    registered,
+    version: registered ? DATABASE_CLIENT_PROTOCOL_REGISTRATION_VERSION : 0,
+  }));
 }
 
 export const useDatabaseClientStore = defineStore('database-client', () => {
-  const value = ref<DatabaseClientSettings>(readSettings());
+  const protocolRegistered = ref(readProtocolRegistered());
+  const preferences = usePreferencesStore();
 
-  const configured = computed(() =>
-    value.value.client === 'dbeaver'
-    && isValidDatabaseClientExecutablePath(value.value.executablePath, value.value.platform),
+  const configured = computed(() => preferences.hasDBClient);
+
+  const directLaunchReady = computed(() =>
+    configured.value
+    && preferences.value.db_client_platform === 'windows'
+    && protocolRegistered.value,
   );
 
-  function update(settings: DatabaseClientSettings) {
-    const nextValue = { ...settings, executablePath: settings.executablePath.trim() };
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(nextValue));
-    value.value = nextValue;
+  const value = computed(() => ({
+    client: preferences.value.db_client as '' | 'dbeaver',
+    platform: preferences.value.db_client_platform as DatabaseClientPlatform,
+    executablePath: preferences.value.db_client_path,
+    caFilePath: preferences.value.db_client_ca_file_path,
+    protocolRegistered: protocolRegistered.value,
+  }));
+
+  function markRegistered() {
+    protocolRegistered.value = true;
+    writeProtocolRegistered(true);
   }
 
-  function reset() {
-    localStorage.removeItem(STORAGE_KEY);
-    value.value = defaults();
+  function markUnregistered() {
+    protocolRegistered.value = false;
+    writeProtocolRegistered(false);
   }
 
-  return { value, configured, update, reset };
+  return {
+    value,
+    configured,
+    directLaunchReady,
+    protocolRegistered,
+    markRegistered,
+    markUnregistered,
+  };
 });

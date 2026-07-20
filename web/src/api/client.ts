@@ -151,6 +151,11 @@ export interface UserPreferences {
   theme: 'system' | 'light' | 'dark';
   ssh_client: string;
   ssh_client_path: string;
+  ssh_client_platform: string;
+  db_client: string;
+  db_client_platform: string;
+  db_client_path: string;
+  db_client_ca_file_path: string;
   terminal_font_family: string;
   terminal_font_size: number;
 }

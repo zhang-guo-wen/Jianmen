@@ -20,6 +20,11 @@ type UserPreferencePatch struct {
 	Theme              *string `json:"theme"`
 	SSHClient          *string `json:"ssh_client"`
 	SSHClientPath      *string `json:"ssh_client_path"`
+	SSHClientPlatform  *string `json:"ssh_client_platform"`
+	DBClient           *string `json:"db_client"`
+	DBClientPlatform   *string `json:"db_client_platform"`
+	DBClientPath       *string `json:"db_client_path"`
+	DBClientCAFilePath *string `json:"db_client_ca_file_path"`
 	TerminalFontFamily *string `json:"terminal_font_family"`
 	TerminalFontSize   *int    `json:"terminal_font_size"`
 }
@@ -94,6 +99,21 @@ func applyUserPreferencePatch(preference *model.UserPreference, input UserPrefer
 	if input.SSHClientPath != nil {
 		preference.SSHClientPath = strings.TrimSpace(*input.SSHClientPath)
 	}
+	if input.SSHClientPlatform != nil {
+		preference.SSHClientPlatform = strings.ToLower(strings.TrimSpace(*input.SSHClientPlatform))
+	}
+	if input.DBClient != nil {
+		preference.DBClient = strings.ToLower(strings.TrimSpace(*input.DBClient))
+	}
+	if input.DBClientPlatform != nil {
+		preference.DBClientPlatform = strings.ToLower(strings.TrimSpace(*input.DBClientPlatform))
+	}
+	if input.DBClientPath != nil {
+		preference.DBClientPath = strings.TrimSpace(*input.DBClientPath)
+	}
+	if input.DBClientCAFilePath != nil {
+		preference.DBClientCAFilePath = strings.TrimSpace(*input.DBClientCAFilePath)
+	}
 	if input.TerminalFontFamily != nil {
 		preference.TerminalFontFamily = strings.TrimSpace(*input.TerminalFontFamily)
 	}
@@ -106,6 +126,11 @@ func normalizeStoredUserPreference(preference model.UserPreference) model.UserPr
 	preference.Theme = strings.TrimSpace(preference.Theme)
 	preference.SSHClient = strings.TrimSpace(preference.SSHClient)
 	preference.SSHClientPath = strings.TrimSpace(preference.SSHClientPath)
+	preference.SSHClientPlatform = strings.TrimSpace(preference.SSHClientPlatform)
+	preference.DBClient = strings.TrimSpace(preference.DBClient)
+	preference.DBClientPlatform = strings.TrimSpace(preference.DBClientPlatform)
+	preference.DBClientPath = strings.TrimSpace(preference.DBClientPath)
+	preference.DBClientCAFilePath = strings.TrimSpace(preference.DBClientCAFilePath)
 	preference.TerminalFontFamily = strings.TrimSpace(preference.TerminalFontFamily)
 
 	if preference.Theme == "" {
@@ -116,6 +141,12 @@ func normalizeStoredUserPreference(preference model.UserPreference) model.UserPr
 	}
 	if preference.TerminalFontSize == 0 {
 		preference.TerminalFontSize = 14
+	}
+	if preference.SSHClientPlatform == "" {
+		preference.SSHClientPlatform = "windows"
+	}
+	if preference.DBClientPlatform == "" {
+		preference.DBClientPlatform = "windows"
 	}
 	return preference
 }

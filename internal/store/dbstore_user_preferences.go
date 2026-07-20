@@ -36,7 +36,9 @@ func (s *DBStore) SaveUserPreference(ctx context.Context, preference model.UserP
 	err := s.db.WithContext(ctx).Clauses(clause.OnConflict{
 		Columns: []clause.Column{{Name: "user_id"}},
 		DoUpdates: clause.AssignmentColumns([]string{
-			"theme", "ssh_client", "ssh_client_path", "terminal_font_family", "terminal_font_size", "updated_at",
+			"theme", "ssh_client", "ssh_client_path", "ssh_client_platform",
+				"db_client", "db_client_platform", "db_client_path", "db_client_ca_file_path",
+				"terminal_font_family", "terminal_font_size", "updated_at",
 		}),
 	}).Create(&preference).Error
 	if err != nil {
@@ -59,6 +61,11 @@ func normalizeStoredUserPreference(preference model.UserPreference) model.UserPr
 	preference.Theme = strings.TrimSpace(preference.Theme)
 	preference.SSHClient = strings.TrimSpace(preference.SSHClient)
 	preference.SSHClientPath = strings.TrimSpace(preference.SSHClientPath)
+	preference.SSHClientPlatform = strings.TrimSpace(preference.SSHClientPlatform)
+	preference.DBClient = strings.TrimSpace(preference.DBClient)
+	preference.DBClientPlatform = strings.TrimSpace(preference.DBClientPlatform)
+	preference.DBClientPath = strings.TrimSpace(preference.DBClientPath)
+	preference.DBClientCAFilePath = strings.TrimSpace(preference.DBClientCAFilePath)
 	preference.TerminalFontFamily = strings.TrimSpace(preference.TerminalFontFamily)
 	if preference.Theme == "" {
 		preference.Theme = "light"
@@ -68,6 +75,12 @@ func normalizeStoredUserPreference(preference model.UserPreference) model.UserPr
 	}
 	if preference.TerminalFontSize == 0 {
 		preference.TerminalFontSize = 14
+	}
+	if preference.SSHClientPlatform == "" {
+		preference.SSHClientPlatform = "windows"
+	}
+	if preference.DBClientPlatform == "" {
+		preference.DBClientPlatform = "windows"
 	}
 	return preference
 }

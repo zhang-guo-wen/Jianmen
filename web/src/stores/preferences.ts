@@ -3,20 +3,27 @@ import { computed, ref } from 'vue';
 
 import { apiClient, type UserPreferences, type UserPreferencesUpdate } from '@/api/client';
 import { isAbsoluteExecutablePath } from '@/config/sshClients';
+import { isValidDatabaseClientCAFilePath, isValidDatabaseClientExecutablePath } from '@/config/databaseClients';
 
-const APPEARANCE_CACHE_KEY = 'jianmen_user_appearance';
+/** 浏览器本地缓存 key，统一存储外观和客户端配置 */
+const CLIENT_CACHE_KEY = 'jianmen_client_config';
 
 const defaults: UserPreferences = {
   theme: 'light',
   ssh_client: '',
   ssh_client_path: '',
+  ssh_client_platform: 'windows',
+  db_client: '',
+  db_client_platform: 'windows',
+  db_client_path: '',
+  db_client_ca_file_path: '',
   terminal_font_family: 'Cascadia Mono, Consolas, monospace',
   terminal_font_size: 14,
 };
 
 function cachedAppearance(): Partial<UserPreferences> {
   try {
-    const cached = JSON.parse(localStorage.getItem(APPEARANCE_CACHE_KEY) || '{}') as Partial<UserPreferences>;
+    const cached = JSON.parse(localStorage.getItem(CLIENT_CACHE_KEY) || '{}') as Partial<UserPreferences>;
     const theme = cached.theme;
     const fontSize = Number(cached.terminal_font_size);
     return {
@@ -31,8 +38,26 @@ function cachedAppearance(): Partial<UserPreferences> {
   }
 }
 
+function cachedClientConfig(): Partial<UserPreferences> {
+  try {
+    const cached = JSON.parse(localStorage.getItem(CLIENT_CACHE_KEY) || '{}') as Partial<UserPreferences>;
+    const validPlatforms = ['windows', 'macos', 'linux'];
+    return {
+      ...(typeof cached.ssh_client === 'string' ? { ssh_client: cached.ssh_client } : {}),
+      ...(typeof cached.ssh_client_path === 'string' ? { ssh_client_path: cached.ssh_client_path } : {}),
+      ...(typeof cached.ssh_client_platform === 'string' && validPlatforms.includes(cached.ssh_client_platform) ? { ssh_client_platform: cached.ssh_client_platform } : {}),
+      ...(typeof cached.db_client === 'string' ? { db_client: cached.db_client } : {}),
+      ...(typeof cached.db_client_platform === 'string' && validPlatforms.includes(cached.db_client_platform) ? { db_client_platform: cached.db_client_platform } : {}),
+      ...(typeof cached.db_client_path === 'string' ? { db_client_path: cached.db_client_path } : {}),
+      ...(typeof cached.db_client_ca_file_path === 'string' ? { db_client_ca_file_path: cached.db_client_ca_file_path } : {}),
+    };
+  } catch {
+    return {};
+  }
+}
+
 export const usePreferencesStore = defineStore('preferences', () => {
-  const value = ref<UserPreferences>({ ...defaults, ...cachedAppearance() });
+  const value = ref<UserPreferences>({ ...defaults, ...cachedAppearance(), ...cachedClientConfig() });
   const loaded = ref(false);
   const loading = ref(false);
   const saving = ref(false);
@@ -41,12 +66,27 @@ export const usePreferencesStore = defineStore('preferences', () => {
 
   const hasSSHClient = computed(() => value.value.ssh_client === 'default' || Boolean(value.value.ssh_client && isAbsoluteExecutablePath(value.value.ssh_client_path)));
 
+  /** 数据库客户端是否已完整配置（路径有效 + CA 文件有效 + Windows 平台） */
+  const hasDBClient = computed(() => {
+    const v = value.value;
+    return v.db_client === 'dbeaver'
+      && v.db_client_platform === 'windows'
+      && isValidDatabaseClientExecutablePath(v.db_client_path, 'windows')
+      && isValidDatabaseClientCAFilePath(v.db_client_ca_file_path, 'windows');
+  });
+
   function resolveDark(theme = value.value.theme): boolean {
     return theme === 'dark' || (theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
   }
 
+  /** 将全部配置写入浏览器缓存 */
+  function persistClientConfig() {
+    localStorage.setItem(CLIENT_CACHE_KEY, JSON.stringify(value.value));
+  }
+
   function persistAppearance() {
-    localStorage.setItem(APPEARANCE_CACHE_KEY, JSON.stringify({
+    localStorage.setItem(CLIENT_CACHE_KEY, JSON.stringify({
+      ...JSON.parse(localStorage.getItem(CLIENT_CACHE_KEY) || '{}'),
       theme: value.value.theme,
       terminal_font_family: value.value.terminal_font_family,
       terminal_font_size: value.value.terminal_font_size,
@@ -72,7 +112,9 @@ export const usePreferencesStore = defineStore('preferences', () => {
     loading.value = true;
     error.value = '';
     try {
-      value.value = { ...defaults, ...(await apiClient.getMyPreferences()) };
+      const server = { ...defaults, ...(await apiClient.getMyPreferences()) };
+      // 外观优先本地缓存，客户端配置以后端为准
+      value.value = { ...server, ...cachedAppearance() };
       loaded.value = true;
       persistAppearance();
       apply();
@@ -92,7 +134,7 @@ export const usePreferencesStore = defineStore('preferences', () => {
     try {
       value.value = { ...defaults, ...(await apiClient.updateMyPreferences(patch)) };
       loaded.value = true;
-      persistAppearance();
+      persistClientConfig();
       apply();
       return value.value;
     } catch (err) {
@@ -103,8 +145,27 @@ export const usePreferencesStore = defineStore('preferences', () => {
     }
   }
 
+  /** 从后端加载配置并写入浏览器缓存（换新浏览器时使用） */
+  async function loadToBrowser() {
+    loading.value = true;
+    error.value = '';
+    try {
+      const server = await apiClient.getMyPreferences();
+      value.value = { ...defaults, ...server, ...cachedAppearance() };
+      loaded.value = true;
+      persistClientConfig();
+      apply();
+      return value.value;
+    } catch (err) {
+      error.value = err instanceof Error ? err.message : '加载配置失败';
+      throw err;
+    } finally {
+      loading.value = false;
+    }
+  }
+
   function reset() {
-    localStorage.removeItem(APPEARANCE_CACHE_KEY);
+    localStorage.removeItem(CLIENT_CACHE_KEY);
     value.value = { ...defaults };
     loaded.value = false;
     loading.value = false;
@@ -113,5 +174,5 @@ export const usePreferencesStore = defineStore('preferences', () => {
     apply();
   }
 
-  return { value, loaded, loading, saving, error, hasSSHClient, fetch, update, apply, reset };
+  return { value, loaded, loading, saving, error, hasSSHClient, hasDBClient, fetch, update, loadToBrowser, apply, reset };
 });

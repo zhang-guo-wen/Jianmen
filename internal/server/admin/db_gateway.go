@@ -13,6 +13,12 @@ import (
 
 const databaseGatewayTLSMaterialUnavailable = "database gateway TLS identity material is unavailable"
 
+const (
+	databaseGatewayUnavailableGatewayDisabled    = "gateway_disabled"
+	databaseGatewayUnavailableListenerDisabled   = "listener_disabled"
+	databaseGatewayUnavailableTLSIdentityMissing = "tls_identity_missing"
+)
+
 func (s *Server) handleDBGateway(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		w.Header().Set("Allow", http.MethodGet)
@@ -31,11 +37,19 @@ func (s *Server) handleDBGateway(w http.ResponseWriter, r *http.Request) {
 	}
 	host, port := parseListenAddr(listener.Address)
 	enabled := cfg.Enabled && listener.Enabled
-	tlsEnabled := enabled &&
-		strings.TrimSpace(listener.CertFile) != "" &&
+	tlsConfigured := strings.TrimSpace(listener.CertFile) != "" &&
 		strings.TrimSpace(listener.KeyFile) != ""
+	connectable, unavailableReason := databaseGatewayAvailability(
+		cfg.Enabled,
+		listener.Enabled,
+		protocol,
+		tlsConfigured,
+	)
+	tlsEnabled := enabled && tlsConfigured
 	response := map[string]any{
 		"enabled":                  enabled,
+		"connectable":              connectable,
+		"unavailable_reason":       unavailableReason,
 		"mode":                     cfg.EffectiveMode(),
 		"protocol":                 protocol,
 		"listen_addr":              listener.Address,
@@ -79,14 +93,8 @@ func databaseProtocolListener(gateway config.DatabaseGatewayConfig, requested st
 	}
 	if gateway.EffectiveMode() == config.DatabaseGatewayModeUnified {
 		unified := gateway.Unified
-		enabled := unified.Enabled
-		if protocol == "postgresql" &&
-			(strings.TrimSpace(unified.CertFile) == "" ||
-				strings.TrimSpace(unified.KeyFile) == "") {
-			enabled = false
-		}
 		return protocol, config.DatabaseProtocolListener{
-			Enabled:    enabled,
+			Enabled:    unified.Enabled,
 			Address:    unified.Address,
 			CertFile:   unified.CertFile,
 			KeyFile:    unified.KeyFile,
@@ -102,6 +110,24 @@ func databaseProtocolListener(gateway config.DatabaseGatewayConfig, requested st
 	default:
 		return protocol, gateway.MySQL, true
 	}
+}
+
+func databaseGatewayAvailability(
+	gatewayEnabled bool,
+	listenerEnabled bool,
+	protocol string,
+	tlsConfigured bool,
+) (bool, string) {
+	if !gatewayEnabled {
+		return false, databaseGatewayUnavailableGatewayDisabled
+	}
+	if !listenerEnabled {
+		return false, databaseGatewayUnavailableListenerDisabled
+	}
+	if protocol == "postgresql" && !tlsConfigured {
+		return false, databaseGatewayUnavailableTLSIdentityMissing
+	}
+	return true, ""
 }
 
 func databaseGatewayMySQLDetectionDelay(gateway config.DatabaseGatewayConfig) int {

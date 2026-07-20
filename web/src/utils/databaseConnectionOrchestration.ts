@@ -2,6 +2,7 @@ export interface DatabaseConnectionResourceLoaders<Gateway, Session, Credential>
   protocol: string;
   targetID: string;
   getGateway(protocol: string): Promise<Gateway>;
+  validateGateway?(gateway: Gateway): void;
   createSession(targetID: string): Promise<Session>;
   createPassword(targetID: string): Promise<Credential>;
 }
@@ -20,18 +21,19 @@ export async function loadDatabaseConnectionResources<Gateway, Session, Credenti
   loaders: DatabaseConnectionResourceLoaders<Gateway, Session, Credential>,
 ): Promise<DatabaseConnectionResources<Gateway, Session, Credential>> {
   const protocol = loaders.protocol.trim().toLowerCase();
+  const gateway = await loaders.getGateway(protocol);
+  loaders.validateGateway?.(gateway);
   if (isGatewayOnlyDatabaseProtocol(protocol)) {
     return {
-      gateway: await loaders.getGateway(protocol),
+      gateway,
       session: null,
       credential: null,
     };
   }
 
-  const [session, credential, gateway] = await Promise.all([
+  const [session, credential] = await Promise.all([
     loaders.createSession(loaders.targetID),
     loaders.createPassword(loaders.targetID),
-    loaders.getGateway(protocol),
   ]);
   return { gateway, session, credential };
 }

@@ -5,7 +5,7 @@
         <div class="settings-toolbar">
           <div class="settings-toolbar__copy">
             <strong>个人设置</strong>
-            <span>界面偏好会随账号保存；本地客户端路径由当前浏览器单独保存。</span>
+            <span>界面偏好会随账号保存；本地客户端和 CA 路径由当前浏览器单独保存。</span>
           </div>
           <div class="settings-toolbar__actions">
             <span v-if="preferences.error" class="save-error">保存失败</span>
@@ -139,6 +139,23 @@
                       Windows 推荐选择 dbeaverc.exe；本机路径只用于生成协议注册命令，不会上传。
                     </div>
                   </el-form-item>
+                  <el-form-item label="本地 CA 文件路径" required :error="databaseCAFilePathError">
+                    <el-input
+                      v-model="databaseForm.caFilePath"
+                      name="database_client_ca_path"
+                      autocomplete="off"
+                      :placeholder="`例如 ${databaseCAFilePathExample}`"
+                    >
+                      <template #append>
+                        <el-button :loading="databaseCALoading" @click="downloadDatabaseGatewayCA">
+                          下载网关 CA
+                        </el-button>
+                      </template>
+                    </el-input>
+                    <div class="field-help">
+                      浏览器会把 CA 下载到默认下载目录；请将文件保存或移动到上方填写的绝对路径。该路径只在本机使用，不会上传。
+                    </div>
+                  </el-form-item>
 
                   <el-alert
                     v-if="databaseForm.platform !== 'windows'"
@@ -178,10 +195,10 @@
               <div class="database-client-flow">
                 <strong>数据库快速连接流程</strong>
                 <ol>
-                  <li>选择 DBeaver 并填写命令行程序路径。</li>
+                  <li>选择 DBeaver，填写命令行程序路径和本地 CA 文件路径。</li>
+                  <li>下载网关 CA，并将文件保存到配置的本地 CA 路径。</li>
                   <li>在 Windows CMD 中执行一次协议注册命令，勾选“我已执行”后保存。</li>
-                  <li>在“快速连接 → 数据库”点击“客户端”，Jianmen 会下载网关 CA 并打开一个未保存、未自动连接的 DBeaver 草稿。</li>
-                  <li>在 DBeaver 的 SSL 页选择下载的 CA，保持严格主机名校验，再输入堡垒机登录密码连接。</li>
+                  <li>在连接页面或“快速连接 → 数据库”点击“本地客户端”，Jianmen 会使用临时密码直接发起安全连接，无需再次选择 CA 或输入密码。</li>
                 </ol>
               </div>
             </section>
@@ -197,11 +214,15 @@ import { computed, onMounted, reactive, shallowRef, watch } from 'vue';
 import { ElMessage } from 'element-plus';
 import { useRoute, useRouter } from 'vue-router';
 
+import { apiClient } from '@/api/client';
 import {
+  DATABASE_CLIENT_CA_FILE_NAME,
   DATABASE_CLIENT_OPTIONS,
   DATABASE_CLIENT_PLATFORM_OPTIONS,
   buildDatabaseProtocolRegistrationCommand,
+  databaseClientCAFileExample,
   databaseClientExecutableExample,
+  isValidDatabaseClientCAFilePath,
   isValidDatabaseClientExecutablePath,
   type DatabaseClientSettings,
 } from '@/config/databaseClients';
@@ -209,6 +230,7 @@ import { buildSSHProtocolRegistrationCommand, isAbsoluteExecutablePath, SSH_CLIE
 import { useDatabaseClientStore } from '@/stores/databaseClient';
 import { usePreferencesStore } from '@/stores/preferences';
 import { writeClipboardText } from '@/utils/clipboard';
+import { hasDatabaseGatewayTLSIdentity } from '@/utils/databaseGatewayCommands';
 
 const route = useRoute();
 const router = useRouter();
@@ -216,6 +238,7 @@ const preferences = usePreferencesStore();
 const databaseClient = useDatabaseClientStore();
 const form = reactive({ ...preferences.value });
 const databaseForm = reactive<DatabaseClientSettings>({ ...databaseClient.value });
+const databaseCALoading = shallowRef(false);
 const settingsTabs = ['appearance', 'ssh', 'database'] as const;
 const requestedTab = typeof route.query.tab === 'string' && settingsTabs.includes(route.query.tab as typeof settingsTabs[number])
   ? route.query.tab
@@ -230,6 +253,7 @@ const themeOptions = [
 const sshClientPathError = computed(() => executablePathError(form.ssh_client, form.ssh_client_path, 'SSH', 'C:\\Program Files\\PuTTY\\putty.exe'));
 const sshRegistrationCommand = computed(() => buildSSHProtocolRegistrationCommand(form.ssh_client, form.ssh_client_path));
 const databaseClientPathExample = computed(() => databaseClientExecutableExample(databaseForm.platform));
+const databaseCAFilePathExample = computed(() => databaseClientCAFileExample(databaseForm.platform));
 const databaseRegistrationCommand = computed(() =>
   buildDatabaseProtocolRegistrationCommand({ ...databaseForm }),
 );
@@ -245,11 +269,19 @@ const databaseClientPathError = computed(() => {
   }
   return '';
 });
+const databaseCAFilePathError = computed(() => {
+  if (!databaseForm.client) return '';
+  if (!databaseForm.caFilePath.trim()) return '请输入网关 CA 在本机保存的绝对路径';
+  if (!isValidDatabaseClientCAFilePath(databaseForm.caFilePath, databaseForm.platform)) {
+    return `请输入 .pem、.crt 或 .cer 文件的完整路径，例如 ${databaseCAFilePathExample.value}`;
+  }
+  return '';
+});
 const databaseClientStatus = computed<{
   label: string;
   type: 'success' | 'warning' | 'info';
 }>(() => {
-  if (!databaseForm.client || databaseClientPathError.value) {
+  if (!databaseForm.client || databaseClientPathError.value || databaseCAFilePathError.value) {
     return { label: '未配置', type: 'info' };
   }
   if (databaseForm.platform !== 'windows') {
@@ -264,13 +296,17 @@ watch(() => form.ssh_client, (client) => {
   if (client === 'default' || !client) form.ssh_client_path = '';
 });
 watch(() => databaseForm.client, (client) => {
-  if (!client) databaseForm.executablePath = '';
+  if (!client) {
+    databaseForm.executablePath = '';
+    databaseForm.caFilePath = '';
+  }
 });
 watch(
   () => [
     databaseForm.client,
     databaseForm.platform,
     databaseForm.executablePath,
+    databaseForm.caFilePath,
   ] as const,
   (value, previous) => {
     if (value.some((item, index) => item !== previous[index])) {
@@ -299,7 +335,7 @@ function executablePathError(client: string, path: string, label: string, exampl
 }
 
 async function save() {
-  const error = sshClientPathError.value || databaseClientPathError.value;
+  const error = sshClientPathError.value || databaseClientPathError.value || databaseCAFilePathError.value;
   if (error) {
     ElMessage.warning(error);
     activeTab.value = sshClientPathError.value ? 'ssh' : 'database';
@@ -331,8 +367,9 @@ async function save() {
 }
 
 function saveDatabaseClient() {
-  if (databaseClientPathError.value) {
-    ElMessage.warning(databaseClientPathError.value);
+  const error = databaseClientPathError.value || databaseCAFilePathError.value;
+  if (error) {
+    ElMessage.warning(error);
     return;
   }
   try {
@@ -349,6 +386,45 @@ function saveDatabaseClient() {
     if (databaseReturnPath.value) void router.push(databaseReturnPath.value);
   } catch {
     ElMessage.error('当前浏览器无法保存本地客户端配置');
+  }
+}
+
+async function downloadDatabaseGatewayCA() {
+  if (databaseCALoading.value) return;
+  databaseCALoading.value = true;
+  try {
+    const results = await Promise.allSettled([
+      apiClient.getDBGateway('mysql'),
+      apiClient.getDBGateway('postgres'),
+    ]);
+    const certificates = results
+      .flatMap(result => (
+        result.status === 'fulfilled' && hasDatabaseGatewayTLSIdentity(result.value)
+          ? [result.value.tls_ca_pem.trim()]
+          : []
+      ))
+      .filter((certificate, index, values) => values.indexOf(certificate) === index);
+    if (!certificates.length) {
+      const rejected = results.find((result): result is PromiseRejectedResult => result.status === 'rejected');
+      throw rejected?.reason instanceof Error
+        ? rejected.reason
+        : new Error('数据库网关 TLS 身份材料尚未就绪');
+    }
+
+    const blob = new Blob([`${certificates.join('\n')}\n`], { type: 'application/x-pem-file' });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = DATABASE_CLIENT_CA_FILE_NAME;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(url);
+    ElMessage.success('网关 CA 已下载，请保存或移动到上方配置的本地路径');
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : '网关 CA 下载失败');
+  } finally {
+    databaseCALoading.value = false;
   }
 }
 

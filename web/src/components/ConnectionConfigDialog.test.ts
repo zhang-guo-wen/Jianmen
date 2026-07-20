@@ -96,7 +96,7 @@ test('ConnectionConfigDialog props use Vue-normalized casing', () => {
   assert.equal(/:\s*allowSFTP/.test(componentSource), false);
 });
 
-test('database connection dialog hides TLS metadata and local-client setup controls', () => {
+test('database connection dialog hides TLS metadata and setup controls while keeping direct client launch', () => {
   const componentPath = new URL('../components/ConnectionConfigDialog.vue', import.meta.url);
   const componentSource = readFileSync(componentPath, 'utf8');
 
@@ -116,9 +116,7 @@ test('database connection dialog hides TLS metadata and local-client setup contr
 
   for (const removedSymbol of [
     'buildDBeaverConfigurationCommand',
-    'useDatabaseClientStore',
     'dbeaverConfigurationCommand',
-    'openDatabaseClientSettings',
     'copyDBeaverConfigurationCommand',
     'downloadGatewayCA',
     'databaseGatewayCAFileName',
@@ -128,6 +126,10 @@ test('database connection dialog hides TLS metadata and local-client setup contr
   ]) {
     assert.equal(componentSource.includes(removedSymbol), false, `unexpected symbol: ${removedSymbol}`);
   }
+  assert.match(componentSource, /data-testid="database-local-client"/);
+  assert.match(componentSource, /useDatabaseClientStore/);
+  assert.match(componentSource, /buildDatabaseProtocolURL/);
+  assert.match(componentSource, /function openDatabaseClientSettings\(\)/);
 
   const planStart = componentSource.indexOf('const databaseConnectionPlan');
   const planEnd = componentSource.indexOf('const databaseCommandUnavailableReason', planStart);

@@ -86,6 +86,15 @@
     <template #footer>
       <el-button data-testid="ssh-local-client" v-if="resourceType === 'host' && allowSsh" type="primary" :disabled="!connectionTestResult?.ok || sshIdentityBlocked" :loading="preferences.loading" @click="openPreferredSSHClient">本地 SSH 客户端打开</el-button>
       <el-button data-testid="ssh-browser" v-if="resourceType === 'host' && allowSsh" type="primary" :disabled="!connectionTestResult?.ok || sshIdentityBlocked" @click="openInBrowser">在浏览器中打开</el-button>
+      <el-button
+        v-if="resourceType === 'database' && !isRedis"
+        data-testid="database-local-client"
+        type="primary"
+        :disabled="databaseClientLaunchBlocked"
+        @click="openDatabaseClient"
+      >
+        本地客户端打开
+      </el-button>
       <el-button @click="visible = false">关闭</el-button>
     </template>
   </el-dialog>
@@ -135,7 +144,9 @@ import { Loading } from '@element-plus/icons-vue';
 import { ElButton, ElInput, ElMessage, ElMessageBox } from 'element-plus';
 
 import { apiClient, type DBAccountRecord, type DBGatewayConfig, type TargetRecord } from '@/api/client';
+import { buildDatabaseProtocolURL } from '@/config/databaseClients';
 import { buildSSHProtocolRegistrationCommand, isAbsoluteExecutablePath, SSH_CLIENT_OPTIONS } from '@/config/sshClients';
+import { useDatabaseClientStore } from '@/stores/databaseClient';
 import { usePreferencesStore } from '@/stores/preferences';
 import { writeClipboardText } from '@/utils/clipboard';
 import { databaseGatewayConnectionError } from '@/utils/databaseGatewayAvailability';
@@ -255,6 +266,7 @@ const emit = defineEmits<{
 }>();
 const router = useRouter();
 const preferences = usePreferencesStore();
+const databaseClient = useDatabaseClientStore();
 const visible = computed({ get: () => props.modelValue, set: value => emit('update:modelValue', value) });
 const dialogTitle = computed(() => props.resourceType === 'host' ? '主机连接配置' : '数据库连接配置');
 const protocolLabel = computed(() => props.protocol.toUpperCase());
@@ -346,6 +358,10 @@ const sshClientUrl = computed(() => {
     port: connectionInfo.value.port,
   });
 });
+const databaseClientLaunchBlocked = computed(() => (
+  databaseClient.directLaunchReady
+  && (!connectionInfo.value || !secureGatewayTLS.value || !temporaryPassword.value)
+));
 const initClientVisible = ref(false);
 const initClientType = ref('xshell');
 const initClientPath = ref('');
@@ -545,6 +561,49 @@ function openInBrowser() {
   if (!targetID) return;
   visible.value = false;
   router.push({ path: '/web-terminal', query: { target_id: targetID } });
+}
+
+function openDatabaseClientSettings() {
+  const returnTo = router.currentRoute.value.fullPath;
+  visible.value = false;
+  void router.push({ path: '/settings', query: { tab: 'database', return_to: returnTo } });
+}
+
+function openDatabaseClient() {
+  if (!databaseClient.configured) {
+    ElMessage.warning('请先配置本地 DBeaver 客户端和 CA 文件路径');
+    openDatabaseClientSettings();
+    return;
+  }
+  if (databaseClient.value.platform !== 'windows') {
+    ElMessage.warning('当前仅 Windows 支持从浏览器直接打开 DBeaver');
+    openDatabaseClientSettings();
+    return;
+  }
+  if (!databaseClient.directLaunchReady) {
+    ElMessage.warning('请先执行本地协议注册命令，并在设置中确认已完成');
+    openDatabaseClientSettings();
+    return;
+  }
+  if (!connectionInfo.value || !temporaryPassword.value || !secureGatewayTLS.value) {
+    ElMessage.warning('数据库安全连接信息尚未就绪');
+    return;
+  }
+  const launchURL = buildDatabaseProtocolURL({
+    protocol: props.protocol,
+    host: connectionInfo.value.host,
+    port: connectionInfo.value.port,
+    username: connectionInfo.value.compactUser,
+    password: temporaryPassword.value,
+    databaseName: ['postgres', 'postgresql'].includes(props.protocol.toLowerCase()) ? 'postgres' : '',
+    connectionName: props.resourceName || 'Jianmen 临时连接',
+  });
+  if (!launchURL) {
+    ElMessage.error('连接参数不符合本地客户端安全规则');
+    return;
+  }
+  ElMessage.success('正在打开 DBeaver 并使用临时密码建立连接');
+  window.location.href = launchURL;
 }
 
 function pickClientFile() {

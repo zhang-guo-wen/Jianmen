@@ -3,6 +3,7 @@ import { defineStore } from 'pinia';
 
 import {
   detectDatabaseClientPlatform,
+  isValidDatabaseClientCAFilePath,
   isValidDatabaseClientExecutablePath,
   type DatabaseClientSettings,
 } from '@/config/databaseClients';
@@ -14,6 +15,7 @@ function defaults(): DatabaseClientSettings {
     client: '',
     platform: detectDatabaseClientPlatform(),
     executablePath: '',
+    caFilePath: '',
     protocolRegistered: false,
   };
 }
@@ -29,6 +31,7 @@ function readSettings(): DatabaseClientSettings {
       client: stored.client === 'dbeaver' ? 'dbeaver' : '',
       platform,
       executablePath: typeof stored.executablePath === 'string' ? stored.executablePath : '',
+      caFilePath: typeof stored.caFilePath === 'string' ? stored.caFilePath : '',
       protocolRegistered: stored.protocolRegistered === true,
     };
   } catch {
@@ -41,7 +44,8 @@ export const useDatabaseClientStore = defineStore('database-client', () => {
 
   const configured = computed(() =>
     value.value.client === 'dbeaver'
-    && isValidDatabaseClientExecutablePath(value.value.executablePath, value.value.platform),
+    && isValidDatabaseClientExecutablePath(value.value.executablePath, value.value.platform)
+    && isValidDatabaseClientCAFilePath(value.value.caFilePath, value.value.platform),
   );
   const directLaunchReady = computed(() =>
     configured.value
@@ -53,6 +57,7 @@ export const useDatabaseClientStore = defineStore('database-client', () => {
     const nextValue = {
       ...settings,
       executablePath: settings.executablePath.trim(),
+      caFilePath: settings.caFilePath.trim(),
       protocolRegistered: settings.client === 'dbeaver'
         && settings.platform === 'windows'
         && settings.protocolRegistered,

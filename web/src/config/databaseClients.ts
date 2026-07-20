@@ -4,18 +4,8 @@ export interface DatabaseClientSettings {
   client: '' | 'dbeaver';
   platform: DatabaseClientPlatform;
   executablePath: string;
+  caFilePath: string;
   protocolRegistered: boolean;
-}
-
-export interface DBeaverConfigurationInput {
-  platform: DatabaseClientPlatform;
-  executablePath: string;
-  protocol: string;
-  host: string;
-  port: number;
-  username: string;
-  databaseName?: string;
-  connectionName?: string;
 }
 
 export interface DatabaseClientLaunchInput {
@@ -23,17 +13,19 @@ export interface DatabaseClientLaunchInput {
   host: string;
   port: number;
   username: string;
+  password: string;
   databaseName?: string;
   connectionName?: string;
 }
 
 interface DatabaseClientLaunchPayload {
-  v: 1;
+  v: 2;
   driver: 'mysql' | 'postgresql';
   host: string;
   port: number;
   database: string;
   user: string;
+  password: string;
   name: string;
   tls: 'verify-full';
 }
@@ -48,6 +40,8 @@ export const DATABASE_CLIENT_PLATFORM_OPTIONS = [
   { label: 'Linux', value: 'linux' },
 ] as const;
 
+export const DATABASE_CLIENT_CA_FILE_NAME = 'jianmen-database-gateway-ca.pem';
+
 export function detectDatabaseClientPlatform(userAgent = navigator.userAgent): DatabaseClientPlatform {
   const normalized = userAgent.toLowerCase();
   if (normalized.includes('mac')) return 'macos';
@@ -59,6 +53,12 @@ export function databaseClientExecutableExample(platform: DatabaseClientPlatform
   if (platform === 'macos') return '/Applications/DBeaver.app/Contents/MacOS/dbeaver';
   if (platform === 'linux') return '/usr/bin/dbeaver-ce';
   return 'C:\\Program Files\\DBeaver\\dbeaverc.exe';
+}
+
+export function databaseClientCAFileExample(platform: DatabaseClientPlatform): string {
+  if (platform === 'macos') return `/Users/your-name/Downloads/${DATABASE_CLIENT_CA_FILE_NAME}`;
+  if (platform === 'linux') return `/home/your-name/Downloads/${DATABASE_CLIENT_CA_FILE_NAME}`;
+  return `C:\\Users\\your-name\\Downloads\\${DATABASE_CLIENT_CA_FILE_NAME}`;
 }
 
 export function isValidDatabaseClientExecutablePath(
@@ -76,42 +76,24 @@ export function isValidDatabaseClientExecutablePath(
     : /\/(?:dbeaver|dbeaver-ce)$/i.test(value);
 }
 
-export function buildDBeaverConfigurationCommand(
-  input: DBeaverConfigurationInput,
-): string {
-  const {
-    platform,
-    executablePath,
-    protocol,
-    host,
-    port,
-    username,
-    databaseName = defaultDatabaseName(protocol),
-    connectionName = 'Jianmen 临时连接',
-  } = input;
-
-  const payload = normalizeLaunchPayload({
-    protocol,
-    host,
-    port,
-    username,
-    databaseName,
-    connectionName,
-  });
-  if (!isValidDatabaseClientExecutablePath(executablePath, platform) || !payload) return '';
-
-  const connection = [
-    ...dbeaverConnectionFields(payload),
-    'savePassword=false',
-    'create=true',
-    'save=false',
-    'connect=false',
-  ].join('|');
-
-  if (platform === 'windows') {
-    return `& ${quotePowerShell(executablePath.trim())} -con ${quotePowerShell(connection)}`;
+export function isValidDatabaseClientCAFilePath(
+  path: string,
+  platform: DatabaseClientPlatform,
+): boolean {
+  const value = path.trim();
+  if (
+    !value
+    || value.length > 1024
+    || /[\r\n\0|]/.test(value)
+    || !/\.(?:pem|crt|cer)$/i.test(value)
+  ) {
+    return false;
   }
-  return `${quotePOSIX(executablePath.trim())} -con ${quotePOSIX(connection)}`;
+  if (platform === 'windows') {
+    if (!/^[A-Za-z]:[\\/]/.test(value)) return false;
+    return !/[<>:"?*]/.test(value.slice(3));
+  }
+  return value.startsWith('/');
 }
 
 export function buildDatabaseProtocolURL(input: DatabaseClientLaunchInput): string {
@@ -127,11 +109,13 @@ export function buildDatabaseProtocolRegistrationCommand(
     settings.client !== 'dbeaver'
     || settings.platform !== 'windows'
     || !isValidDatabaseClientExecutablePath(settings.executablePath, 'windows')
+    || !isValidDatabaseClientCAFilePath(settings.caFilePath, 'windows')
   ) {
     return '';
   }
 
   const executable = quotePowerShellLiteral(settings.executablePath.trim());
+  const caFile = quotePowerShellLiteral(settings.caFilePath.trim());
   const script = String.raw`param(
   [Parameter(Mandatory=$true, Position=0)]
   [string]$JianmenUrl
@@ -148,38 +132,68 @@ try {
   $bytes = [Convert]::FromBase64String($encoded)
   if ($bytes.Length -gt 3072) { exit 4 }
   $data = [Text.Encoding]::UTF8.GetString($bytes) | ConvertFrom-Json
-  $allowed = @('v', 'driver', 'host', 'port', 'database', 'user', 'name', 'tls')
+  $allowed = @('v', 'driver', 'host', 'port', 'database', 'user', 'password', 'name', 'tls')
   $properties = @($data.PSObject.Properties.Name)
   if ($properties.Count -ne $allowed.Count -or @($properties | Where-Object { $_ -notin $allowed }).Count -ne 0) { exit 5 }
-  if ([string]$data.v -cne '1' -or [string]$data.tls -cne 'verify-full') { exit 6 }
+  if ([string]$data.v -cne '2' -or [string]$data.tls -cne 'verify-full') { exit 6 }
   if ([string]$data.driver -cnotin @('mysql', 'postgresql')) { exit 7 }
   if ([string]$data.host -notmatch '^[A-Za-z0-9._:\[\]-]{1,255}$') { exit 8 }
   if ([string]$data.user -notmatch '^[\p{L}\p{N}._@+-]{1,256}$') { exit 9 }
-  if ([string]$data.database -notmatch '^[\p{L}\p{N} ._-]{0,128}$') { exit 10 }
-  if ([string]$data.name -notmatch "^[\p{L}\p{N} ._()'/-]{1,128}$") { exit 11 }
+  if ([string]$data.password -notmatch '^[A-Za-z0-9_-]{16,128}$') { exit 10 }
+  if ([string]$data.database -notmatch '^[\p{L}\p{N} ._-]{0,128}$') { exit 11 }
+  if ([string]$data.name -notmatch "^[\p{L}\p{N} ._()'/-]{1,128}$") { exit 12 }
   $port = 0
-  if (-not [int]::TryParse([string]$data.port, [ref]$port) -or $port -lt 1 -or $port -gt 65535) { exit 12 }
+  if (-not [int]::TryParse([string]$data.port, [ref]$port) -or $port -lt 1 -or $port -gt 65535) { exit 13 }
+  $caFile = '${caFile}'
+  if (-not (Test-Path -LiteralPath $caFile -PathType Leaf)) {
+    try {
+      $message = '配置的网关 CA 文件不存在：' + [Environment]::NewLine + $caFile +
+        [Environment]::NewLine + '请在 Jianmen 个人设置中重新下载或修正路径。'
+      [void](New-Object -ComObject WScript.Shell).Popup($message, 0, 'Jianmen 数据库连接', 16)
+    } catch {}
+    exit 14
+  }
   $parts = @(
     "driver=$($data.driver)",
     "host=$($data.host)",
     "port=$port",
     "database=$($data.database)",
     "user=$($data.user)",
+    "password=$($data.password)",
     "name=$($data.name)",
     'savePassword=false',
     'create=true',
     'save=false',
-    'connect=false'
+    'connect=true',
+    'netHandler.ssl.method=CERTIFICATES',
+    "netHandler.ssl.ca.cert=$caFile"
   )
   if ([string]$data.driver -ceq 'mysql') {
-    $parts += 'prop.sslMode=VERIFY_IDENTITY'
+    $parts += @(
+      'prop.sslMode=VERIFY_IDENTITY',
+      'netHandler.ssl.require=true',
+      'netHandler.ssl.verify.server=true'
+    )
   } else {
-    $parts += @('prop.ssl=true', 'prop.sslmode=verify-full')
+    $parts += @(
+      'prop.ssl=true',
+      'prop.sslmode=verify-full',
+      "prop.sslrootcert=$caFile",
+      'netHandler.ssl.sslMode=verify-full'
+    )
   }
   $connection = $parts -join '|'
   Start-Process -FilePath '${executable}' -ArgumentList ('-con "' + $connection + '"')
 } catch {
-  exit 13
+  try {
+    [void](New-Object -ComObject WScript.Shell).Popup(
+      '无法打开 DBeaver，请检查本地客户端路径和网关 CA 配置。',
+      0,
+      'Jianmen 数据库连接',
+      16
+    )
+  } catch {}
+  exit 15
 }`;
   const encodedBroker = encodeUTF8Base64(script);
   const powershellPath = '%SystemRoot%\\System32\\WindowsPowerShell\\v1.0\\powershell.exe';
@@ -220,6 +234,7 @@ function normalizeLaunchPayload(input: DatabaseClientLaunchInput): DatabaseClien
   const driver = databaseDriver(input.protocol);
   const host = input.host.trim();
   const username = input.username.trim();
+  const password = input.password.trim();
   const database = (input.databaseName ?? defaultDatabaseName(input.protocol)).trim();
   const name = sanitizeConnectionName(input.connectionName || 'Jianmen 临时连接');
   if (
@@ -229,32 +244,23 @@ function normalizeLaunchPayload(input: DatabaseClientLaunchInput): DatabaseClien
     || input.port > 65535
     || !/^[A-Za-z0-9._:[\]\-]{1,255}$/.test(host)
     || !/^[\p{L}\p{N}._@+\-]{1,256}$/u.test(username)
+    || !/^[A-Za-z0-9_-]{16,128}$/.test(password)
     || !/^[\p{L}\p{N} ._\-]{0,128}$/u.test(database)
     || !name
   ) {
     return null;
   }
   return {
-    v: 1,
+    v: 2,
     driver,
     host,
     port: input.port,
     database,
     user: username,
+    password,
     name,
     tls: 'verify-full',
   };
-}
-
-function dbeaverConnectionFields(payload: DatabaseClientLaunchPayload): string[] {
-  return [
-    `driver=${payload.driver}`,
-    `host=${payload.host}`,
-    `port=${payload.port}`,
-    `database=${payload.database}`,
-    `user=${payload.user}`,
-    `name=${payload.name}`,
-  ];
 }
 
 function sanitizeConnectionName(value: string): string {
@@ -280,12 +286,4 @@ function encodeUTF8Base64(value: string): string {
 
 function quotePowerShellLiteral(value: string): string {
   return value.replace(/'/g, "''");
-}
-
-function quotePowerShell(value: string): string {
-  return `'${value.replace(/'/g, "''")}'`;
-}
-
-function quotePOSIX(value: string): string {
-  return `'${value.replace(/'/g, "'\"'\"'")}'`;
 }

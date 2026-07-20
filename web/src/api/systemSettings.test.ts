@@ -43,14 +43,14 @@ test('database gateway mode participates in global settings differences', () => 
   assert.deepEqual(changedSystemSettingsFields(next, next), []);
 });
 
-test('system settings presents unified database entry as the default with the MySQL delay notice', () => {
+test('system settings presents unified database entry as the default and owns the MySQL delay notice', () => {
   const source = readFileSync(new URL('../views/SystemSettingsView.vue', import.meta.url), 'utf8');
 
   assert.match(source, /database_gateway_mode:\s*'unified'/);
   assert.match(source, /label="代理与审计"/);
   assert.match(source, /统一入口（默认）/);
   assert.match(source, /独立端口/);
-  assert.match(source, /统一入口的 MySQL 每次连接会增加约 200ms 建连时间/);
+  assert.match(source, /统一入口需要短暂等待以识别连接协议，MySQL 每次连接会增加约 200ms 建连时间。/);
 });
 
 test('GiB conversion preserves normal configuration values', () => {

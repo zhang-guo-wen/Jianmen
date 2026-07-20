@@ -37,14 +37,6 @@
           <InfoValue label="连接地址" :value="gatewayAddress" :loading="isCopyInFlight(gatewayAddress, '连接地址')" @copy="copyValue" />
           <InfoValue v-if="!isRedis" label="连接账户" :value="connectionInfo.compactUser" :loading="isCopyInFlight(connectionInfo.compactUser, '连接账户')" @copy="copyValue" />
         </div>
-        <el-alert
-          v-if="mysqlDetectionNotice"
-          class="mysql-detection-notice"
-          type="info"
-          :closable="false"
-          show-icon
-          :title="mysqlDetectionNotice"
-        />
         <section v-if="resourceType === 'database' && secureGatewayTLS" class="gateway-tls-panel">
           <InfoValue label="TLS 验证名称" :value="connectionInfo.tlsServerName" :loading="isCopyInFlight(connectionInfo.tlsServerName, 'TLS 验证名称')" @copy="copyValue" />
           <InfoValue label="证书 SHA-256 指纹" :value="connectionInfo.tlsCertSHA256" :loading="isCopyInFlight(connectionInfo.tlsCertSHA256, '证书 SHA-256 指纹')" @copy="copyValue" />
@@ -184,7 +176,6 @@ import {
   databaseGatewayCAFileName,
   hasDatabaseGatewayTLSIdentity,
   resolveDatabaseGatewayPort,
-  unifiedMySQLDetectionNotice,
 } from '@/utils/databaseGatewayCommands';
 import {
   beginInFlightIfIdle,
@@ -310,8 +301,6 @@ const connectionInfo = ref<{
   tlsServerName: string;
   tlsCAPEM: string;
   tlsCertSHA256: string;
-  gatewayMode: DBGatewayConfig['mode'];
-  mysqlDetectionDelayMs: number;
 } | null>(null);
 const temporaryPassword = ref('');
 const temporaryPasswordExpiresAt = ref('');
@@ -321,14 +310,6 @@ const testRequest = createLatestKeyedRequest<{ ok: boolean; error?: string; late
 const operationCounters = reactive<InFlightCounters>({});
 
 const gatewayAddress = computed(() => connectionInfo.value ? `${connectionInfo.value.host}:${connectionInfo.value.port}` : '');
-const mysqlDetectionNotice = computed(() => (
-  props.resourceType === 'database' && connectionInfo.value
-    ? unifiedMySQLDetectionNotice(props.protocol, {
-      mode: connectionInfo.value.gatewayMode,
-      mysql_detection_delay_ms: connectionInfo.value.mysqlDetectionDelayMs,
-    })
-    : ''
-));
 const requiresGatewayTLSIdentity = computed(() => ['mysql', 'postgres', 'postgresql', 'redis'].includes(props.protocol.toLowerCase()));
 const isPostgres = computed(() => ['postgres', 'postgresql'].includes(props.protocol.toLowerCase()));
 const isRedis = computed(() => (
@@ -345,24 +326,15 @@ const secureGatewayTLS = computed(() => hasDatabaseGatewayTLSIdentity({
 const databaseConnectionPlan = computed(() => {
   if (props.resourceType !== 'database' || !connectionInfo.value) return null;
   const {
-    host,
     port,
     compactUser,
     tlsEnabled,
     tlsServerName,
     tlsCAPEM,
     tlsCertSHA256,
-    gatewayMode,
-    mysqlDetectionDelayMs,
   } = connectionInfo.value;
-  const gateway: DBGatewayConfig = {
+  const gateway = {
     enabled: true,
-    mode: gatewayMode,
-    protocol: props.protocol,
-    listen_addr: '',
-    host,
-    port,
-    mysql_detection_delay_ms: mysqlDetectionDelayMs,
     tls_enabled: tlsEnabled,
     tls_server_name: tlsServerName,
     tls_ca_pem: tlsCAPEM,
@@ -540,10 +512,6 @@ async function initializeConnection(snapshot: ConnectionTargetSnapshot) {
       tlsServerName: gateway?.tls_server_name || '',
       tlsCAPEM: gateway?.tls_ca_pem || '',
       tlsCertSHA256: gateway?.tls_cert_sha256 || '',
-      gatewayMode: gateway?.mode === 'independent' ? 'independent' : 'unified',
-      mysqlDetectionDelayMs: Number.isInteger(gateway?.mysql_detection_delay_ms)
-        ? Number(gateway?.mysql_detection_delay_ms)
-        : 0,
     };
     temporaryPassword.value = credential?.password || '';
     temporaryPasswordExpiresAt.value = credential?.expires_at || '';
@@ -712,7 +680,6 @@ function formatExpiresAt(value: string): string {
 .connectivity-row { display: flex; align-items: center; gap: 8px; color: var(--el-text-color-secondary); font-size: 13px; }
 .shared-connection-panel { overflow: hidden; border: 1px solid var(--el-border-color-light); border-radius: 10px; }
 .shared-connection-panel .detail-grid { border-top: 0; }
-.mysql-detection-notice { margin: 10px 14px; }
 .gateway-tls-panel { display: grid; gap: 1px; background: var(--el-border-color-lighter); border-top: 1px solid var(--el-border-color-lighter); }
 .gateway-tls-panel > * { background: var(--el-bg-color); }
 .gateway-tls-panel :deep(.el-form-item) { margin: 0; padding: 9px 14px; }

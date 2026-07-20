@@ -302,7 +302,6 @@ import {
   databaseGatewayCAFileName,
   hasDatabaseGatewayTLSIdentity,
   resolveDatabaseGatewayPort,
-  unifiedMySQLDetectionNotice,
 } from '@/utils/databaseGatewayCommands';
 import {
   createSingleFlight,
@@ -1037,10 +1036,7 @@ async function openDatabaseClient(account: QuickDBTarget) {
     });
     if (!launchURL) throw new Error('连接参数不符合本地客户端安全规则');
     downloadDatabaseGatewayCA(protocol, enabledGateway.tls_ca_pem);
-    const detectionNotice = unifiedMySQLDetectionNotice(protocol, enabledGateway);
-    ElMessage.success(
-      `已下载网关 CA，正在打开 DBeaver 连接草稿；${detectionNotice || '请在 SSL 配置中选择该 CA 后连接'}`,
-    );
+    ElMessage.success('已下载网关 CA，正在打开 DBeaver 连接草稿；请在 SSL 配置中选择该 CA 后连接');
     window.location.href = launchURL;
   } catch (error) {
     if (error instanceof DatabaseGatewayConfigurationRedirect) return;

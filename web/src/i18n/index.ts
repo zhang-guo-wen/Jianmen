@@ -2,6 +2,7 @@
 import { inject, type App, type InjectionKey } from 'vue';
 
 const zhCN = {
+  'common.experimentalFeature': '实验性功能',
   'hosts.action.delete': '删除',
   'hosts.action.edit': '编辑',
   'hosts.action.new': '新增主机',

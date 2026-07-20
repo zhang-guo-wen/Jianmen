@@ -237,7 +237,6 @@
                       :aria-label="databaseClientUnavailableReason(account._protocol) || undefined"
                     >
                       <el-button
-                        type="primary"
                         size="small"
                         :disabled="Boolean(databaseClientUnavailableReason(account._protocol))"
                         :loading="databaseClientLoading(account)"
@@ -282,7 +281,14 @@ import { Refresh, Search } from '@element-plus/icons-vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { useRoute, useRouter } from 'vue-router';
 
-import { apiClient, type DBAccountRecord, type HostView, type PageResponse, type TargetRecord } from '@/api/client';
+import {
+  apiClient,
+  type DBAccountRecord,
+  type DBGatewayConfig,
+  type HostView,
+  type PageResponse,
+  type TargetRecord,
+} from '@/api/client';
 import QuickContainerConnectPanel from '@/components/QuickContainerConnectPanel.vue';
 import ResourceFilterBar from '@/components/ResourceFilterBar.vue';
 import { buildDatabaseProtocolURL } from '@/config/databaseClients';
@@ -333,6 +339,8 @@ interface DatabaseConnectionState {
   password: string;
   expiresAt: string;
 }
+
+class DatabaseGatewayConfigurationRedirect extends Error {}
 
 type QuickDBTarget = DBAccountRecord & {
   _instance_name?: string;
@@ -882,6 +890,25 @@ function onDBSearch(query: string) {
   dbPage.value = 1;
 }
 
+function requireEnabledDatabaseGateway(
+  gateway: DBGatewayConfig | null | undefined,
+  protocol: string,
+): DBGatewayConfig {
+  if (gateway?.enabled) return gateway;
+
+  const message = `${databaseProtocolLabel(protocol)} 数据库网关未启用`;
+  if (!permission.canAccessMenu('systemSettings')) {
+    throw new Error(`${message}，请联系超级管理员完成系统配置`);
+  }
+
+  ElMessage.warning(`${message}，正在前往系统设置`);
+  void router.push({
+    path: '/system-settings',
+    query: { return_to: router.currentRoute.value.fullPath },
+  });
+  throw new DatabaseGatewayConfigurationRedirect(message);
+}
+
 function ensureDatabaseConnectionInfo(account: QuickDBTarget): Promise<DatabaseConnectionState> {
   const key = databaseTargetKey(account);
   const currentState = dbConnectionStates[key];
@@ -916,9 +943,9 @@ function ensureDatabaseConnectionInfo(account: QuickDBTarget): Promise<DatabaseC
         createSession: accountID => apiClient.createUserSession(accountID),
         createPassword: accountID => apiClient.createConnectionPassword(accountID),
       });
-      if (!gateway?.enabled) throw new Error(`${databaseProtocolLabel(protocol)} 数据库网关未启用`);
-      state.host = String(gateway.tls_server_name || gateway.host || window.location.hostname || '127.0.0.1');
-      state.port = resolveDatabaseGatewayPort(protocol, gateway);
+      const enabledGateway = requireEnabledDatabaseGateway(gateway, protocol);
+      state.host = String(enabledGateway.tls_server_name || enabledGateway.host || window.location.hostname || '127.0.0.1');
+      state.port = resolveDatabaseGatewayPort(protocol, enabledGateway);
       state.compactUser = String(session?.compact_username || '');
       state.password = String(credential?.password || '');
       state.expiresAt = String(credential?.expires_at || '');
@@ -951,6 +978,7 @@ async function copyDatabaseConnectionInfo(account: QuickDBTarget) {
     await writeClipboardText(content);
     ElMessage.success('数据库临时连接信息已全部复制');
   } catch (error) {
+    if (error instanceof DatabaseGatewayConfigurationRedirect) return;
     ElMessage.error(error instanceof Error ? error.message : '复制失败，请稍后重试');
   }
 }
@@ -991,12 +1019,12 @@ async function openDatabaseClient(account: QuickDBTarget) {
       apiClient.createUserSession(targetID),
       apiClient.getDBGateway(protocol),
     ]);
-    if (!gateway?.enabled) throw new Error(`${databaseProtocolLabel(protocol)} 数据库网关未启用`);
-    if (!hasDatabaseGatewayTLSIdentity(gateway)) {
+    const enabledGateway = requireEnabledDatabaseGateway(gateway, protocol);
+    if (!hasDatabaseGatewayTLSIdentity(enabledGateway)) {
       throw new Error('数据库网关 TLS 身份材料不完整，已阻止本地客户端打开');
     }
-    const host = gateway.tls_server_name;
-    const port = resolveDatabaseGatewayPort(protocol, gateway);
+    const host = enabledGateway.tls_server_name;
+    const port = resolveDatabaseGatewayPort(protocol, enabledGateway);
     const compactUser = String(session.compact_username || '');
     if (!compactUser) throw new Error('连接账号生成失败');
     const launchURL = buildDatabaseProtocolURL({
@@ -1008,13 +1036,14 @@ async function openDatabaseClient(account: QuickDBTarget) {
       connectionName: `${account._instance_name || 'Jianmen'} / ${account.username || '数据库账号'}`,
     });
     if (!launchURL) throw new Error('连接参数不符合本地客户端安全规则');
-    downloadDatabaseGatewayCA(protocol, gateway.tls_ca_pem);
-    const detectionNotice = unifiedMySQLDetectionNotice(protocol, gateway);
+    downloadDatabaseGatewayCA(protocol, enabledGateway.tls_ca_pem);
+    const detectionNotice = unifiedMySQLDetectionNotice(protocol, enabledGateway);
     ElMessage.success(
       `已下载网关 CA，正在打开 DBeaver 连接草稿；${detectionNotice || '请在 SSL 配置中选择该 CA 后连接'}`,
     );
     window.location.href = launchURL;
   } catch (error) {
+    if (error instanceof DatabaseGatewayConfigurationRedirect) return;
     ElMessage.error(error instanceof Error ? error.message : '无法打开本地数据库客户端');
   } finally {
     delete dbClientLaunching[key];

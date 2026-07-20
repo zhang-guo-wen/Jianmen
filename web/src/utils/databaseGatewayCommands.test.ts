@@ -315,7 +315,7 @@ test('quick database client launch requires gateway TLS and never creates or emb
   const start = source.indexOf('async function openDatabaseClient');
   const end = source.indexOf('function downloadDatabaseGatewayCA', start);
   const launchSource = source.slice(start, end);
-  assert.match(launchSource, /hasDatabaseGatewayTLSIdentity\(gateway\)/);
+  assert.match(launchSource, /hasDatabaseGatewayTLSIdentity\(enabledGateway\)/);
   assert.match(launchSource, /buildDatabaseProtocolURL/);
   assert.match(launchSource, /databaseClient\.directLaunchReady/);
   assert.match(launchSource, /window\.location\.href = launchURL/);
@@ -343,6 +343,25 @@ test('quick-connect client buttons redirect to settings only when local configur
   assert.match(source, /if \(!preferences\.hasSSHClient\)[\s\S]*openClientSettings\('ssh'\)/);
   assert.match(source, /if \(!databaseClient\.configured\)[\s\S]*openClientSettings\('database'\)/);
   assert.match(source, /query:\s*\{\s*tab,\s*return_to:\s*router\.currentRoute\.value\.fullPath\s*\}/);
+  assert.match(
+    source,
+    /:loading="databaseClientLoading\(account\)"[\s\S]*?@click="openDatabaseClient\(account\)"/,
+  );
+  const databaseClientLoadingIndex = source.indexOf(':loading="databaseClientLoading(account)"');
+  const databaseClientButtonStart = source.lastIndexOf('<el-button', databaseClientLoadingIndex);
+  const databaseClientButtonEnd = source.indexOf('</el-button>', databaseClientLoadingIndex);
+  const databaseClientButton = source.slice(databaseClientButtonStart, databaseClientButtonEnd);
+  assert.doesNotMatch(databaseClientButton, /type="primary"/);
+});
+
+test('disabled database gateways redirect super admins to system settings', () => {
+  const source = readFileSync(new URL('../views/QuickConnectView.vue', import.meta.url), 'utf8');
+  assert.match(source, /function requireEnabledDatabaseGateway\(/);
+  assert.match(source, /permission\.canAccessMenu\('systemSettings'\)/);
+  assert.match(source, /path:\s*'\/system-settings'/);
+  assert.match(source, /请联系超级管理员完成系统配置/);
+  assert.match(source, /error instanceof DatabaseGatewayConfigurationRedirect/);
+  assert.doesNotMatch(source, /if \(!gateway\?\.enabled\) throw new Error/);
 });
 
 test('database and quick-connect loaders keep request snapshots isolated', () => {

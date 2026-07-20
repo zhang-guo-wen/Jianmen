@@ -12,7 +12,6 @@ import {
   hasDatabaseGatewayTLSIdentity,
   isSafeDatabaseCommandValue,
   resolveDatabaseGatewayPort,
-  unifiedMySQLDetectionNotice,
   type DatabaseGatewayTLSIdentity,
 } from './databaseGatewayCommands.ts';
 import {
@@ -52,26 +51,13 @@ test('database gateway API port wins over every mode fallback', () => {
   assert.equal(resolveDatabaseGatewayPort('postgres', { mode: 'unified', port: 70000 }), 33060);
 });
 
-test('unified MySQL connection notice uses the API delay with a 200ms fallback', () => {
-  assert.equal(
-    unifiedMySQLDetectionNotice('mysql', { mode: 'unified', mysql_detection_delay_ms: 180 }),
-    '统一入口需要短暂等待以识别连接协议，MySQL 每次连接会增加约 180ms 建连时间。',
-  );
-  assert.match(
-    unifiedMySQLDetectionNotice('mysql', { mode: 'unified' }),
-    /增加约 200ms 建连时间/,
-  );
-  assert.equal(unifiedMySQLDetectionNotice('mysql', { mode: 'independent' }), '');
-  assert.equal(unifiedMySQLDetectionNotice('postgres', { mode: 'unified' }), '');
-});
-
-test('quick connect and connection dialog share the API-aware gateway resolver and MySQL notice', () => {
+test('quick connect and connection dialog use the API-aware gateway resolver without the MySQL delay notice', () => {
   const quickConnect = readFileSync(new URL('../views/QuickConnectView.vue', import.meta.url), 'utf8');
   const dialog = readFileSync(new URL('../components/ConnectionConfigDialog.vue', import.meta.url), 'utf8');
 
   for (const source of [quickConnect, dialog]) {
     assert.match(source, /resolveDatabaseGatewayPort/);
-    assert.match(source, /unifiedMySQLDetectionNotice/);
+    assert.doesNotMatch(source, /统一入口需要短暂等待以识别连接协议/);
     assert.doesNotMatch(source, /function databaseGatewayDefaultPort/);
   }
 });

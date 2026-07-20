@@ -110,7 +110,7 @@
                   type="warning"
                   :closable="false"
                   show-icon
-                  title="统一入口的 MySQL 每次连接会增加约 200ms 建连时间。"
+                  title="统一入口需要短暂等待以识别连接协议，MySQL 每次连接会增加约 200ms 建连时间。"
                 />
 
                 <div class="setting-row">

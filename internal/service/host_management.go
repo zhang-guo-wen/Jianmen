@@ -47,13 +47,15 @@ type HostManagementActor struct {
 }
 
 type HostManagementService struct {
-	repository HostManagementRepository
-	authorizer HostManagementAuthorizer
+	repository        HostManagementRepository
+	authorizer        HostManagementAuthorizer
+	identityCollector HostIdentityCollector
 }
 
 func NewHostManagementService(
 	repository HostManagementRepository,
 	authorizer HostManagementAuthorizer,
+	identityCollector HostIdentityCollector,
 ) (*HostManagementService, error) {
 	if repository == nil {
 		return nil, errors.New("host management repository is required")
@@ -61,7 +63,10 @@ func NewHostManagementService(
 	if authorizer == nil {
 		return nil, errors.New("host management authorizer is required")
 	}
-	return &HostManagementService{repository: repository, authorizer: authorizer}, nil
+	if identityCollector == nil {
+		return nil, errors.New("ssh host identity collector is required")
+	}
+	return &HostManagementService{repository: repository, authorizer: authorizer, identityCollector: identityCollector}, nil
 }
 
 func (s *HostManagementService) ListHosts(ctx context.Context, actor HostManagementActor) ([]HostManagementHostView, error) {

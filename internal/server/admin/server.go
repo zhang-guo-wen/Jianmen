@@ -13,6 +13,7 @@ import (
 	"jianmen/internal/online"
 	"jianmen/internal/server/appproxy"
 	"jianmen/internal/service"
+	"jianmen/internal/sshhost"
 	"jianmen/internal/store"
 
 	"gorm.io/gorm"
@@ -160,7 +161,11 @@ func New(
 	if err != nil {
 		return nil, fmt.Errorf("initialize connection password service: %w", err)
 	}
-	hostManagement, err := service.NewHostManagementService(hostManagementRepositoryAdapter{repository: dependencies.hostTargets}, authorization)
+	hostManagement, err := service.NewHostManagementService(
+		hostManagementRepositoryAdapter{repository: dependencies.hostTargets},
+		authorization,
+		hostIdentityCollectorAdapter{collector: sshhost.NewCollector(sshhost.DefaultCollectTimeout)},
+	)
 	if err != nil {
 		return nil, fmt.Errorf("initialize host management service: %w", err)
 	}

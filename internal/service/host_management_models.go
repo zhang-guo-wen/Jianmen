@@ -7,15 +7,16 @@ import (
 )
 
 type HostManagementHostRecord struct {
-	ID, Name, Group, Address, Protocol, Remark, Status string
-	Port                                               int
+	ID, Name, Group, Address, Protocol, Remark, Status, HostKeyFingerprint, KnownHosts string
+	Port                                                                               int
 }
 
 type HostManagementHostView struct {
-	ID, Name, Group, Address, Protocol, Remark, Status string
-	Port, AccountCount                                 int
-	CreatedAt, UpdatedAt                               string
-	CanManage                                          bool
+	ID, Name, Group, Address, Protocol, Remark, Status, HostKeyFingerprint, KnownHosts, IdentityStatus string
+	Port, AccountCount                                                                                 int
+	CreatedAt, UpdatedAt                                                                               string
+	CanManage                                                                                          bool
+	HostKeyChangeHandler                                                                               func(hostID, oldFingerprint, newFingerprint string) (hostDisabled bool, err error)
 }
 
 type HostManagementTargetView struct {
@@ -31,7 +32,8 @@ type HostManagementTargetConfig struct {
 	ID, Name, HostName, Host, Protocol, Username, Domain, Password, PrivateKeyPath, PrivateKeyPEM, Passphrase                                                        string
 	Port                                                                                                                                                             int
 	InsecureIgnoreHostKey, RDPIgnoreCertificate, RDPApprovalRequired, RDPClipboardRead, RDPClipboardWrite, RDPFileUpload, RDPFileDownload, RDPDriveMapping, Disabled bool
-	HostKeyFingerprint, KnownHostsPath, RDPSecurity, RDPCertFingerprints, ExpiresAt, HostID                                                                          string
+	HostKeyFingerprint, KnownHosts, KnownHostsPath, RDPSecurity, RDPCertFingerprints, ExpiresAt, HostID                                                              string
+	HostKeyChangeHandler                                                                                                                                             func(hostID, oldFingerprint, newFingerprint string) (hostDisabled bool, err error)
 }
 
 func (t HostManagementTargetConfig) Addr() string {

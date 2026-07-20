@@ -27,10 +27,14 @@ func (s *DBStore) hostView(ctx context.Context, m model.Host, accountCount ...in
 	return HostView{
 		ID: m.ID, Name: m.Name, Group: m.GroupName, Address: m.Address,
 		Port: m.Port, Protocol: normalizedHostProtocol(m.Protocol), Remark: m.Remark, Status: status,
-		LifecycleStatus: strings.ToLower(strings.TrimSpace(m.Status)),
-		AccountCount:    count,
-		CreatedAt:       m.CreatedAt.Format(time.RFC3339),
-		UpdatedAt:       m.UpdatedAt.Format(time.RFC3339),
+		LifecycleStatus:      strings.ToLower(strings.TrimSpace(m.Status)),
+		HostKeyFingerprint:   strings.TrimSpace(m.HostKeyFingerprint),
+		KnownHosts:           strings.TrimSpace(m.KnownHosts),
+		IdentityStatus:       hostIdentityStatus(m),
+		HostKeyChangeHandler: s.hostKeyChangeHandler(newSSHHostIdentitySnapshot(m)),
+		AccountCount:         count,
+		CreatedAt:            m.CreatedAt.Format(time.RFC3339),
+		UpdatedAt:            m.UpdatedAt.Format(time.RFC3339),
 	}
 }
 
@@ -113,13 +117,15 @@ func (s *DBStore) createHost(ctx context.Context, host HostRecord, creatorID str
 	}
 	normalized := normalizeHostRecord(host)
 	m := model.Host{
-		ID:        normalized.ID,
-		Name:      normalized.Name,
-		Address:   normalized.Address,
-		Port:      normalized.Port,
-		Protocol:  normalized.Protocol,
-		GroupName: normalized.Group,
-		Remark:    normalized.Remark,
+		ID:                 normalized.ID,
+		Name:               normalized.Name,
+		Address:            normalized.Address,
+		Port:               normalized.Port,
+		Protocol:           normalized.Protocol,
+		GroupName:          normalized.Group,
+		Remark:             normalized.Remark,
+		HostKeyFingerprint: normalized.HostKeyFingerprint,
+		KnownHosts:         normalized.KnownHosts,
 	}
 	if normalized.Status == "disabled" {
 		m.Status = "disabled"
@@ -199,6 +205,8 @@ func (s *DBStore) UpdateHost(ctx context.Context, id string, host HostRecord) (H
 		m.Protocol = normalized.Protocol
 		m.GroupName = normalized.Group
 		m.Remark = normalized.Remark
+		m.HostKeyFingerprint = normalized.HostKeyFingerprint
+		m.KnownHosts = normalized.KnownHosts
 		m.Status = "active"
 		if normalized.Status == "disabled" {
 			m.Status = "disabled"
@@ -251,6 +259,8 @@ func normalizeHostRecord(h HostRecord) HostRecord {
 	h.Address = strings.TrimSpace(h.Address)
 	h.Protocol = normalizedHostProtocol(h.Protocol)
 	h.Remark = strings.TrimSpace(h.Remark)
+	h.HostKeyFingerprint = strings.TrimSpace(h.HostKeyFingerprint)
+	h.KnownHosts = strings.TrimSpace(h.KnownHosts)
 	if h.Port == 0 {
 		h.Port = defaultHostPort(h.Protocol)
 	}

@@ -90,8 +90,8 @@
                   <p>配置数据库快速连接使用的 DBeaver 程序。该配置只保存在当前浏览器。</p>
                 </div>
                 <div class="section-heading__actions">
-                  <el-tag :type="databaseClient.configured ? 'success' : 'info'" effect="light">
-                    {{ databaseClient.configured ? '已配置' : '未配置' }}
+                  <el-tag :type="databaseClientStatus.type" effect="light">
+                    {{ databaseClientStatus.label }}
                   </el-tag>
                   <el-button type="primary" @click="saveDatabaseClient">
                     {{ databaseReturnPath ? '保存并返回' : '保存本地配置' }}
@@ -136,19 +136,52 @@
                       :placeholder="`例如 ${databaseClientPathExample}`"
                     />
                     <div class="field-help">
-                      Windows 推荐选择 dbeaverc.exe；快速连接会生成不含密码的基础配置命令。
+                      Windows 推荐选择 dbeaverc.exe；本机路径只用于生成协议注册命令，不会上传。
                     </div>
                   </el-form-item>
+
+                  <el-alert
+                    v-if="databaseForm.platform !== 'windows'"
+                    type="warning"
+                    :closable="false"
+                    show-icon
+                    title="当前仅 Windows 支持从浏览器直接唤起 DBeaver。此平台可保存路径并复制基础配置命令，但“客户端”按钮不会伪装为可直开。"
+                  />
+                  <el-alert
+                    v-else-if="databaseRegistrationCommand"
+                    class="database-registration-alert"
+                    type="info"
+                    :closable="false"
+                    show-icon
+                  >
+                    <template #title>首次使用需注册 Jianmen 本地数据库协议</template>
+                    <p class="registration-help">
+                      在 Windows CMD 中执行下面命令一次。命令只为当前 Windows 用户注册协议，不需要管理员权限，也不会写入数据库密码。
+                    </p>
+                    <div class="command-box"><code>{{ databaseRegistrationCommand }}</code></div>
+                    <div class="registration-actions">
+                      <el-button
+                        type="primary"
+                        plain
+                        @click="copyDatabaseRegistrationCommand"
+                      >
+                        复制协议注册命令
+                      </el-button>
+                      <el-checkbox v-model="databaseForm.protocolRegistered">
+                        我已执行以上命令
+                      </el-checkbox>
+                    </div>
+                  </el-alert>
                 </template>
               </el-form>
 
               <div class="database-client-flow">
                 <strong>数据库快速连接流程</strong>
                 <ol>
-                  <li>在“快速连接 → 数据库”中打开“连接配置”。</li>
-                  <li>下载网关 CA，并复制 DBeaver 基础配置命令。</li>
-                  <li>执行命令创建未保存、不会自动连接的连接草稿。</li>
-                  <li>在 DBeaver 的 SSL 页选择 CA 并启用严格校验，再粘贴弹窗中的临时密码。</li>
+                  <li>选择 DBeaver 并填写命令行程序路径。</li>
+                  <li>在 Windows CMD 中执行一次协议注册命令，勾选“我已执行”后保存。</li>
+                  <li>在“快速连接 → 数据库”点击“客户端”，Jianmen 会下载网关 CA 并打开一个未保存、未自动连接的 DBeaver 草稿。</li>
+                  <li>在 DBeaver 的 SSL 页选择下载的 CA，保持严格主机名校验，再输入堡垒机登录密码连接。</li>
                 </ol>
               </div>
             </section>
@@ -167,6 +200,7 @@ import { useRoute, useRouter } from 'vue-router';
 import {
   DATABASE_CLIENT_OPTIONS,
   DATABASE_CLIENT_PLATFORM_OPTIONS,
+  buildDatabaseProtocolRegistrationCommand,
   databaseClientExecutableExample,
   isValidDatabaseClientExecutablePath,
   type DatabaseClientSettings,
@@ -196,6 +230,9 @@ const themeOptions = [
 const sshClientPathError = computed(() => executablePathError(form.ssh_client, form.ssh_client_path, 'SSH', 'C:\\Program Files\\PuTTY\\putty.exe'));
 const sshRegistrationCommand = computed(() => buildSSHProtocolRegistrationCommand(form.ssh_client, form.ssh_client_path));
 const databaseClientPathExample = computed(() => databaseClientExecutableExample(databaseForm.platform));
+const databaseRegistrationCommand = computed(() =>
+  buildDatabaseProtocolRegistrationCommand({ ...databaseForm }),
+);
 const databaseReturnPath = computed(() => {
   const value = typeof route.query.return_to === 'string' ? route.query.return_to : '';
   return value.startsWith('/') && !value.startsWith('//') ? value : '';
@@ -208,6 +245,20 @@ const databaseClientPathError = computed(() => {
   }
   return '';
 });
+const databaseClientStatus = computed<{
+  label: string;
+  type: 'success' | 'warning' | 'info';
+}>(() => {
+  if (!databaseForm.client || databaseClientPathError.value) {
+    return { label: '未配置', type: 'info' };
+  }
+  if (databaseForm.platform !== 'windows') {
+    return { label: '不支持直开', type: 'warning' };
+  }
+  return databaseForm.protocolRegistered
+    ? { label: '可直接打开', type: 'success' }
+    : { label: '待注册协议', type: 'warning' };
+});
 
 watch(() => form.ssh_client, (client) => {
   if (client === 'default' || !client) form.ssh_client_path = '';
@@ -215,6 +266,18 @@ watch(() => form.ssh_client, (client) => {
 watch(() => databaseForm.client, (client) => {
   if (!client) databaseForm.executablePath = '';
 });
+watch(
+  () => [
+    databaseForm.client,
+    databaseForm.platform,
+    databaseForm.executablePath,
+  ] as const,
+  (value, previous) => {
+    if (value.some((item, index) => item !== previous[index])) {
+      databaseForm.protocolRegistered = false;
+    }
+  },
+);
 watch(activeTab, (tab) => {
   if (route.name !== 'settings' || route.query.tab === tab) return;
   void router.replace({ query: { ...route.query, tab } });
@@ -274,10 +337,28 @@ function saveDatabaseClient() {
   }
   try {
     databaseClient.update({ ...databaseForm });
-    ElMessage.success('本地数据库客户端配置已保存');
+    if (databaseForm.platform !== 'windows') {
+      ElMessage.warning('本地配置已保存；当前平台暂不支持从浏览器直接打开 DBeaver');
+      return;
+    }
+    if (!databaseForm.protocolRegistered) {
+      ElMessage.warning('程序路径已保存；请执行协议注册命令并勾选“我已执行”');
+      return;
+    }
+    ElMessage.success('本地数据库客户端已配置，可从快速连接直接打开');
     if (databaseReturnPath.value) void router.push(databaseReturnPath.value);
   } catch {
     ElMessage.error('当前浏览器无法保存本地客户端配置');
+  }
+}
+
+async function copyDatabaseRegistrationCommand() {
+  if (!databaseRegistrationCommand.value) return;
+  try {
+    await writeClipboardText(databaseRegistrationCommand.value);
+    ElMessage.success('协议注册命令已复制；执行后请勾选“我已执行”');
+  } catch {
+    ElMessage.warning('复制失败，请手动复制协议注册命令');
   }
 }
 
@@ -473,6 +554,25 @@ async function copyRegistrationCommand(command: string) {
 
 .local-only-alert {
   margin-bottom: 20px;
+}
+
+.database-registration-alert {
+  margin-top: 6px;
+}
+
+.registration-help {
+  margin: 8px 0 0;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.registration-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 10px;
 }
 
 .database-client-flow {

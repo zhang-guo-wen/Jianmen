@@ -9,6 +9,7 @@ import (
 	"jianmen/internal/config"
 	"jianmen/internal/model"
 	"jianmen/internal/service"
+	"jianmen/internal/sshhost"
 	"jianmen/internal/store"
 )
 
@@ -81,6 +82,18 @@ type adminHostTargetRepository interface {
 
 type hostManagementRepositoryAdapter struct{ repository adminHostTargetRepository }
 
+type hostIdentityCollectorAdapter struct {
+	collector *sshhost.Collector
+}
+
+func (a hostIdentityCollectorAdapter) Collect(ctx context.Context, address string, port int) (service.HostIdentity, error) {
+	identity, err := a.collector.Collect(ctx, address, port)
+	if err != nil {
+		return service.HostIdentity{}, err
+	}
+	return service.HostIdentity{Fingerprint: identity.Fingerprint, KnownHosts: identity.KnownHosts}, nil
+}
+
 func (a hostManagementRepositoryAdapter) Hosts(ctx context.Context) ([]service.HostManagementHostView, error) {
 	views, err := a.repository.Hosts(ctx)
 	if err != nil {
@@ -99,17 +112,17 @@ func (a hostManagementRepositoryAdapter) Host(ctx context.Context, id string) (s
 }
 
 func (a hostManagementRepositoryAdapter) AddHost(ctx context.Context, record service.HostManagementHostRecord) (service.HostManagementHostView, error) {
-	view, err := a.repository.AddHost(ctx, store.HostRecord{ID: record.ID, Name: record.Name, Group: record.Group, Address: record.Address, Port: record.Port, Protocol: record.Protocol, Remark: record.Remark, Status: record.Status})
+	view, err := a.repository.AddHost(ctx, store.HostRecord{ID: record.ID, Name: record.Name, Group: record.Group, Address: record.Address, Port: record.Port, Protocol: record.Protocol, Remark: record.Remark, Status: record.Status, HostKeyFingerprint: record.HostKeyFingerprint, KnownHosts: record.KnownHosts})
 	return hostManagementHostView(view), err
 }
 
 func (a hostManagementRepositoryAdapter) CreateManagedHost(ctx context.Context, record service.HostManagementHostRecord, creatorID string) (service.HostManagementHostView, error) {
-	view, err := a.repository.CreateManagedHost(ctx, store.HostRecord{ID: record.ID, Name: record.Name, Group: record.Group, Address: record.Address, Port: record.Port, Protocol: record.Protocol, Remark: record.Remark, Status: record.Status}, creatorID)
+	view, err := a.repository.CreateManagedHost(ctx, store.HostRecord{ID: record.ID, Name: record.Name, Group: record.Group, Address: record.Address, Port: record.Port, Protocol: record.Protocol, Remark: record.Remark, Status: record.Status, HostKeyFingerprint: record.HostKeyFingerprint, KnownHosts: record.KnownHosts}, creatorID)
 	return hostManagementHostView(view), err
 }
 
 func (a hostManagementRepositoryAdapter) UpdateHost(ctx context.Context, id string, record service.HostManagementHostRecord) (service.HostManagementHostView, error) {
-	view, err := a.repository.UpdateHost(ctx, id, store.HostRecord{ID: record.ID, Name: record.Name, Group: record.Group, Address: record.Address, Port: record.Port, Protocol: record.Protocol, Remark: record.Remark, Status: record.Status})
+	view, err := a.repository.UpdateHost(ctx, id, store.HostRecord{ID: record.ID, Name: record.Name, Group: record.Group, Address: record.Address, Port: record.Port, Protocol: record.Protocol, Remark: record.Remark, Status: record.Status, HostKeyFingerprint: record.HostKeyFingerprint, KnownHosts: record.KnownHosts})
 	return hostManagementHostView(view), err
 }
 
@@ -166,7 +179,13 @@ func (a hostManagementRepositoryAdapter) DeleteTarget(ctx context.Context, id st
 }
 
 func hostManagementHostView(view store.HostView) service.HostManagementHostView {
-	return service.HostManagementHostView{ID: view.ID, Name: view.Name, Group: view.Group, Address: view.Address, Port: view.Port, Protocol: view.Protocol, Remark: view.Remark, Status: view.Status, AccountCount: view.AccountCount, CreatedAt: view.CreatedAt, UpdatedAt: view.UpdatedAt, CanManage: view.CanManage}
+	var changeHandler func(string, string, string) (bool, error)
+	if view.HostKeyChangeHandler != nil {
+		changeHandler = func(hostID, oldFingerprint, newFingerprint string) (bool, error) {
+			return view.HostKeyChangeHandler(sshhost.Change{HostID: hostID, OldFingerprint: oldFingerprint, NewFingerprint: newFingerprint})
+		}
+	}
+	return service.HostManagementHostView{ID: view.ID, Name: view.Name, Group: view.Group, Address: view.Address, Port: view.Port, Protocol: view.Protocol, Remark: view.Remark, Status: view.Status, HostKeyFingerprint: view.HostKeyFingerprint, KnownHosts: view.KnownHosts, IdentityStatus: view.IdentityStatus, HostKeyChangeHandler: changeHandler, AccountCount: view.AccountCount, CreatedAt: view.CreatedAt, UpdatedAt: view.UpdatedAt, CanManage: view.CanManage}
 }
 
 func hostManagementTargetView(view store.TargetView) service.HostManagementTargetView {
@@ -174,7 +193,22 @@ func hostManagementTargetView(view store.TargetView) service.HostManagementTarge
 }
 
 func hostManagementTargetConfig(config store.TargetConfig) service.HostManagementTargetConfig {
-	return service.HostManagementTargetConfig{ID: config.ID, Name: config.Name, HostName: config.HostName, Host: config.Host, Port: config.Port, Protocol: config.Protocol, Username: config.Username, Domain: config.Domain, Password: config.Password, PrivateKeyPath: config.PrivateKeyPath, PrivateKeyPEM: config.PrivateKeyPEM, Passphrase: config.Passphrase, InsecureIgnoreHostKey: config.InsecureIgnoreHostKey, HostKeyFingerprint: config.HostKeyFingerprint, KnownHostsPath: config.KnownHostsPath, RDPSecurity: config.RDPSecurity, RDPIgnoreCertificate: config.RDPIgnoreCertificate, RDPCertFingerprints: config.RDPCertFingerprints, RDPApprovalRequired: config.RDPApprovalRequired, RDPClipboardRead: config.RDPClipboardRead, RDPClipboardWrite: config.RDPClipboardWrite, RDPFileUpload: config.RDPFileUpload, RDPFileDownload: config.RDPFileDownload, RDPDriveMapping: config.RDPDriveMapping, Disabled: config.Disabled, ExpiresAt: config.ExpiresAt, HostID: config.HostID}
+	var changeHandler func(string, string, string) (bool, error)
+	if config.HostKeyChangeHandler != nil {
+		changeHandler = func(hostID, oldFingerprint, newFingerprint string) (bool, error) {
+			return config.HostKeyChangeHandler(sshhost.Change{HostID: hostID, OldFingerprint: oldFingerprint, NewFingerprint: newFingerprint})
+		}
+	}
+	return service.HostManagementTargetConfig{ID: config.ID, Name: config.Name, HostName: config.HostName, Host: config.Host, Port: config.Port, Protocol: config.Protocol, Username: config.Username, Domain: config.Domain, Password: config.Password, PrivateKeyPath: config.PrivateKeyPath, PrivateKeyPEM: config.PrivateKeyPEM, Passphrase: config.Passphrase, InsecureIgnoreHostKey: config.InsecureIgnoreHostKey, HostKeyFingerprint: config.HostKeyFingerprint, KnownHosts: config.KnownHosts, KnownHostsPath: config.KnownHostsPath, HostKeyChangeHandler: changeHandler, RDPSecurity: config.RDPSecurity, RDPIgnoreCertificate: config.RDPIgnoreCertificate, RDPCertFingerprints: config.RDPCertFingerprints, RDPApprovalRequired: config.RDPApprovalRequired, RDPClipboardRead: config.RDPClipboardRead, RDPClipboardWrite: config.RDPClipboardWrite, RDPFileUpload: config.RDPFileUpload, RDPFileDownload: config.RDPFileDownload, RDPDriveMapping: config.RDPDriveMapping, Disabled: config.Disabled, ExpiresAt: config.ExpiresAt, HostID: config.HostID}
+}
+
+func storeHostKeyChangeHandler(handler func(string, string, string) (bool, error)) sshhost.ChangeHandler {
+	if handler == nil {
+		return nil
+	}
+	return func(change sshhost.Change) (bool, error) {
+		return handler(change.HostID, change.OldFingerprint, change.NewFingerprint)
+	}
 }
 
 type adminDatabaseRepository interface {

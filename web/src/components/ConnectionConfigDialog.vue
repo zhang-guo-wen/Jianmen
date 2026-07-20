@@ -108,8 +108,8 @@
     </div>
 
     <template #footer>
-      <el-button data-testid="ssh-local-client" v-if="resourceType === 'host' && allowSsh" type="primary" :loading="preferences.loading" @click="openPreferredSSHClient">本地 SSH 客户端打开</el-button>
-      <el-button data-testid="ssh-browser" v-if="resourceType === 'host' && allowSsh" type="primary" @click="openInBrowser">在浏览器中打开</el-button>
+      <el-button data-testid="ssh-local-client" v-if="resourceType === 'host' && allowSsh" type="primary" :disabled="!connectionTestResult?.ok || sshIdentityBlocked" :loading="preferences.loading" @click="openPreferredSSHClient">本地 SSH 客户端打开</el-button>
+      <el-button data-testid="ssh-browser" v-if="resourceType === 'host' && allowSsh" type="primary" :disabled="!connectionTestResult?.ok || sshIdentityBlocked" @click="openInBrowser">在浏览器中打开</el-button>
       <el-button v-if="resourceType === 'database'" @click="openDatabaseClientSettings">本地客户端设置</el-button>
       <el-button
         v-if="resourceType === 'database' && !isRedis && databaseClient.configured"
@@ -166,7 +166,7 @@
 import { computed, defineComponent, h, reactive, ref, watch, type PropType } from 'vue';
 import { useRouter } from 'vue-router';
 import { Loading } from '@element-plus/icons-vue';
-import { ElButton, ElInput, ElMessage } from 'element-plus';
+import { ElButton, ElInput, ElMessage, ElMessageBox } from 'element-plus';
 
 import { apiClient, type DBAccountRecord, type DBGatewayConfig, type TargetRecord } from '@/api/client';
 import { buildDBeaverConfigurationCommand } from '@/config/databaseClients';
@@ -195,6 +195,10 @@ import {
 } from '@/utils/connectionRequestState';
 import { buildSSHDeepLink } from '@/utils/connectionLinks';
 import { buildConnectionCommands, type ConnectionCommandInput } from '@/utils/connectionConfigCommands';
+import {
+  parseSSHHostIdentityIssue,
+  sshHostIdentityNotice,
+} from '@/utils/sshHostIdentity';
 
 interface CommandItem {
   label: string;
@@ -282,7 +286,10 @@ const props = withDefaults(defineProps<{
   resourceName: '', sourceAddress: '', sourceAccount: '', protocol: 'mysql', allowSsh: true, allowSftp: false,
 });
 
-const emit = defineEmits<{ (event: 'update:modelValue', value: boolean): void }>();
+const emit = defineEmits<{
+  (event: 'update:modelValue', value: boolean): void
+  (event: 'hostIdentityChanged', hostId: string): void
+}>();
 const router = useRouter();
 const preferences = usePreferencesStore();
 const databaseClient = useDatabaseClientStore();
@@ -294,6 +301,7 @@ const creatingSession = ref(false);
 const connectionError = ref('');
 const connectionTesting = ref(false);
 const connectionTestResult = ref<{ ok: boolean; error?: string; latency_ms?: number } | null>(null);
+const sshIdentityBlocked = ref(false);
 const connectionInfo = ref<{
   host: string;
   port: number;
@@ -482,6 +490,7 @@ watch(
 function clearConnectionState() {
   connectionError.value = '';
   connectionTestResult.value = null;
+  sshIdentityBlocked.value = false;
   connectionInfo.value = null;
   temporaryPassword.value = '';
   temporaryPasswordExpiresAt.value = '';
@@ -556,14 +565,10 @@ async function testConnection(snapshot: ConnectionTargetSnapshot) {
       return { ok: result.ok, latency_ms: result.latency_ms, error: result.ok ? undefined : result.error || '连接失败' };
     }
     const target = snapshot.target as TargetRecord;
-    const username = String(target.username || 'unknown');
+    const targetID = String(target.id || target.resource_id || '');
+    if (!targetID) throw new Error('无法获取目标资源ID');
     const result = await apiClient.testTargetConnection({
-      id: String(target.id || target.resource_id || username), name: String(target.name || username), username,
-      password: '', private_key_path: '', private_key_pem: '', passphrase: '', host: String(target.host || target.address || ''),
-      port: Number(target.port) || 22,
-      insecure_ignore_host_key: target.insecure_ignore_host_key === true,
-      host_key_fingerprint: String(target.host_key_fingerprint || ''),
-      known_hosts_path: String(target.known_hosts_path || ''),
+      id: targetID,
     });
     return { ok: result.ok, latency_ms: result.latency_ms, error: result.ok ? undefined : result.error || result.message || '连接失败' };
   });
@@ -575,7 +580,19 @@ async function testConnection(snapshot: ConnectionTargetSnapshot) {
     connectionTestResult.value = result;
   } catch (error) {
     if (!testRequest.isCurrent(token, currentTargetSnapshotKey())) return;
-    connectionTestResult.value = { ok: false, error: error instanceof Error ? error.message : '连接失败' };
+    const identityIssue = parseSSHHostIdentityIssue(error);
+    if (identityIssue) {
+      sshIdentityBlocked.value = true;
+      connectionTestResult.value = { ok: false, error: 'SSH 主机身份校验未通过' };
+      emit('hostIdentityChanged', identityIssue.hostId);
+      const notice = sshHostIdentityNotice(identityIssue);
+      await ElMessageBox.alert(notice.message, notice.title, {
+        type: 'warning',
+        confirmButtonText: '知道了',
+      }).catch(() => undefined);
+    } else {
+      connectionTestResult.value = { ok: false, error: error instanceof Error ? error.message : '连接失败' };
+    }
   } finally {
     if (testRequest.isCurrent(token, currentTargetSnapshotKey())) {
       connectionTesting.value = false;

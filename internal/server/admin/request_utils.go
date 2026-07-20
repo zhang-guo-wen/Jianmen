@@ -11,6 +11,7 @@ import (
 )
 
 const defaultPageSize = 50
+const defaultHostPageSize = 20
 
 func (s *Server) forbidden(w http.ResponseWriter, r *http.Request) {
 	s.writeErrorText(w, r, http.StatusForbidden, "forbidden")
@@ -45,7 +46,10 @@ func userIDFromPath(path string) (string, bool) {
 }
 
 func paginateHosts(hosts []store.HostView, r *http.Request) pageResponse {
-	return paginateSlice(hosts, r, func(h store.HostView, q string) bool {
+	hosts = filterByGroup(hosts, r, func(host store.HostView) string {
+		return host.Group
+	})
+	return paginateSliceWithDefault(hosts, r, defaultHostPageSize, func(h store.HostView, q string) bool {
 		return strings.Contains(strings.ToLower(h.Name), q) ||
 			strings.Contains(strings.ToLower(h.Address), q) ||
 			strings.Contains(strings.ToLower(h.Group), q) ||
@@ -54,7 +58,31 @@ func paginateHosts(hosts []store.HostView, r *http.Request) pageResponse {
 	})
 }
 
+func filterByGroup[T any](items []T, r *http.Request, groupName func(T) string) []T {
+	group := strings.TrimSpace(r.URL.Query().Get("group"))
+	ungrouped, _ := strconv.ParseBool(strings.TrimSpace(r.URL.Query().Get("ungrouped")))
+	if group == "" && !ungrouped {
+		return items
+	}
+	filtered := make([]T, 0, len(items))
+	for _, item := range items {
+		itemGroup := strings.TrimSpace(groupName(item))
+		if ungrouped && itemGroup == "" {
+			filtered = append(filtered, item)
+			continue
+		}
+		if !ungrouped && strings.EqualFold(itemGroup, group) {
+			filtered = append(filtered, item)
+		}
+	}
+	return filtered
+}
+
 func paginateSlice[T any](items []T, r *http.Request, match func(T, string) bool) pageResponse {
+	return paginateSliceWithDefault(items, r, defaultPageSize, match)
+}
+
+func paginateSliceWithDefault[T any](items []T, r *http.Request, fallbackPageSize int, match func(T, string) bool) pageResponse {
 	q := strings.TrimSpace(strings.ToLower(r.URL.Query().Get("q")))
 	if q != "" {
 		filtered := make([]T, 0, len(items))
@@ -66,7 +94,7 @@ func paginateSlice[T any](items []T, r *http.Request, match func(T, string) bool
 		items = filtered
 	}
 	page := positiveIntRequestQuery(r, "page", 1)
-	pageSize := positiveIntRequestQuery(r, "page_size", defaultPageSize)
+	pageSize := positiveIntRequestQuery(r, "page_size", fallbackPageSize)
 	if pageSize > 200 {
 		pageSize = 200
 	}

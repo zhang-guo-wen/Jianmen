@@ -5,6 +5,7 @@ import { beforeEach, describe, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   routerPush: vi.fn(),
+  messageAlert: vi.fn(),
   preferences: {
     loading: false,
     loaded: true,
@@ -88,6 +89,7 @@ vi.mock('element-plus', async () => {
     ElButton,
     ElInput,
     ElMessage: { success: vi.fn(), warning: vi.fn(), error: vi.fn() },
+    ElMessageBox: { alert: mocks.messageAlert },
   };
 });
 
@@ -112,6 +114,7 @@ const target = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.messageAlert.mockResolvedValue(undefined);
   mocks.apiClient.createUserSession.mockResolvedValue({ compact_username: 'admin@host-1' });
   mocks.apiClient.createConnectionPassword.mockResolvedValue({ password: 'temporary-password', expires_at: '' });
   mocks.apiClient.testTargetConnection.mockResolvedValue({ ok: true, latency_ms: 1 });
@@ -166,6 +169,29 @@ describe('ConnectionConfigDialog permission controls', () => {
     assertVisibility(wrapper, 'connection-command-ssh', allowSsh);
     assertVisibility(wrapper, 'connection-command-sftp', allowSftp);
 
+    wrapper.unmount();
+  });
+
+  it('blocks SSH launch controls and emits refresh when the host key changes', async () => {
+    mocks.apiClient.testTargetConnection.mockRejectedValue(Object.assign(
+      new Error('host key changed'),
+      {
+        code: 'SSH_HOST_KEY_CHANGED',
+        details: {
+          host_id: 'host-1',
+          old_fingerprint: 'SHA256:old',
+          new_fingerprint: 'SHA256:new',
+          host_disabled: true,
+        },
+      },
+    ));
+
+    const wrapper = await mountDialog(true, true);
+
+    assert.equal(wrapper.get('[data-testid="ssh-local-client"]').attributes('disabled'), '');
+    assert.equal(wrapper.get('[data-testid="ssh-browser"]').attributes('disabled'), '');
+    assert.deepEqual(wrapper.emitted('hostIdentityChanged'), [['host-1']]);
+    assert.equal(mocks.messageAlert.mock.calls.length, 1);
     wrapper.unmount();
   });
 });

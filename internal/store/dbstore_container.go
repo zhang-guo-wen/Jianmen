@@ -154,7 +154,7 @@ func (s *DBStore) ContainerHostAccountConfig(ctx context.Context, id string) (se
 	if err != nil {
 		return service.ContainerEndpointConfig{}, err
 	}
-	return service.ContainerEndpointConfig{SSHAddress: target.Addr(), SSHConfig: sshConfig, SSHCacheKey: target.ID + "@" + target.Addr(), Unavailable: target.Disabled || target.Expired(time.Now().UTC())}, nil
+	return service.ContainerEndpointConfig{SSHAddress: target.Addr(), SSHConfig: sshConfig, SSHCacheKey: targetSSHCacheKey(target), Unavailable: target.Disabled || target.Expired(time.Now().UTC())}, nil
 }
 
 func (s *DBStore) createContainerCreatorGrant(tx *gorm.DB, creatorID, endpointID string) error {

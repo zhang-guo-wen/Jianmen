@@ -182,6 +182,9 @@ func containerEndpointPathParts(path string) (endpointID, child, containerID str
 }
 
 func (s *Server) writeContainerServiceError(w http.ResponseWriter, r *http.Request, err error) {
+	if s.writeSSHHostIdentityError(w, r, err) {
+		return
+	}
 	switch {
 	case errors.Is(err, service.ErrContainerForbidden):
 		s.forbidden(w, r)

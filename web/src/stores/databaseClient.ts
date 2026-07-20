@@ -14,6 +14,7 @@ function defaults(): DatabaseClientSettings {
     client: '',
     platform: detectDatabaseClientPlatform(),
     executablePath: '',
+    protocolRegistered: false,
   };
 }
 
@@ -28,6 +29,7 @@ function readSettings(): DatabaseClientSettings {
       client: stored.client === 'dbeaver' ? 'dbeaver' : '',
       platform,
       executablePath: typeof stored.executablePath === 'string' ? stored.executablePath : '',
+      protocolRegistered: stored.protocolRegistered === true,
     };
   } catch {
     return fallback;
@@ -41,9 +43,20 @@ export const useDatabaseClientStore = defineStore('database-client', () => {
     value.value.client === 'dbeaver'
     && isValidDatabaseClientExecutablePath(value.value.executablePath, value.value.platform),
   );
+  const directLaunchReady = computed(() =>
+    configured.value
+    && value.value.platform === 'windows'
+    && value.value.protocolRegistered,
+  );
 
   function update(settings: DatabaseClientSettings) {
-    const nextValue = { ...settings, executablePath: settings.executablePath.trim() };
+    const nextValue = {
+      ...settings,
+      executablePath: settings.executablePath.trim(),
+      protocolRegistered: settings.client === 'dbeaver'
+        && settings.platform === 'windows'
+        && settings.protocolRegistered,
+    };
     localStorage.setItem(STORAGE_KEY, JSON.stringify(nextValue));
     value.value = nextValue;
   }
@@ -53,5 +66,5 @@ export const useDatabaseClientStore = defineStore('database-client', () => {
     value.value = defaults();
   }
 
-  return { value, configured, update, reset };
+  return { value, configured, directLaunchReady, update, reset };
 });

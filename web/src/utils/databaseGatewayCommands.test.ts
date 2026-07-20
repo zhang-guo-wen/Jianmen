@@ -296,16 +296,30 @@ test('disabled database client symbols are absent from production frontend sourc
   assert.doesNotMatch(preferencesSource, /database_client|database_client_path/);
 });
 
-test('settings exposes local-only database client configuration without restoring the password link', () => {
+test('settings exposes local-only database client registration and never stores it as an account preference', () => {
   const settingsSource = readFileSync(new URL('../views/SettingsView.vue', import.meta.url), 'utf8');
   const localStoreSource = readFileSync(new URL('../stores/databaseClient.ts', import.meta.url), 'utf8');
   assert.match(settingsSource, /DBeaver/);
   assert.match(settingsSource, /useDatabaseClientStore/);
-  assert.doesNotMatch(settingsSource, /jianmen-db:\/\//i);
+  assert.match(settingsSource, /buildDatabaseProtocolRegistrationCommand/);
+  assert.match(settingsSource, /我已执行以上命令/);
   assert.match(localStoreSource, /localStorage/);
+  assert.match(localStoreSource, /directLaunchReady/);
   assert.doesNotMatch(localStoreSource, /apiClient/);
   const preferencesSource = readFileSync(new URL('../stores/preferences.ts', import.meta.url), 'utf8');
   assert.doesNotMatch(preferencesSource, /dbeaver/i);
+});
+
+test('quick database client launch requires gateway TLS and never creates or embeds a temporary password', () => {
+  const source = readFileSync(new URL('../views/QuickConnectView.vue', import.meta.url), 'utf8');
+  const start = source.indexOf('async function openDatabaseClient');
+  const end = source.indexOf('function downloadDatabaseGatewayCA', start);
+  const launchSource = source.slice(start, end);
+  assert.match(launchSource, /hasDatabaseGatewayTLSIdentity\(gateway\)/);
+  assert.match(launchSource, /buildDatabaseProtocolURL/);
+  assert.match(launchSource, /databaseClient\.directLaunchReady/);
+  assert.match(launchSource, /window\.location\.href = launchURL/);
+  assert.doesNotMatch(launchSource, /createConnectionPassword|temporaryPassword|password:/);
 });
 
 test('database and quick-connect loaders keep request snapshots isolated', () => {
@@ -313,9 +327,34 @@ test('database and quick-connect loaders keep request snapshots isolated', () =>
   const quickConnectSource = readFileSync(new URL('../views/QuickConnectView.vue', import.meta.url), 'utf8');
   assert.match(databaseViewSource, /const instanceID = selectedInstance\.value\.id[\s\S]*const page = accountPage\.value[\s\S]*const pageSize = accountPageSize\.value/);
   assert.match(databaseViewSource, /getDBAccounts\(instanceID, \{[\s\S]*page,[\s\S]*page_size: pageSize/);
+  assert.match(databaseViewSource, /const savedCredentialTestRequests = createLatestKeyedRequest/);
+  assert.match(databaseViewSource, /savedCredentialTestRequests\.begin\([\s\S]*savedCredentialTestRequests\.isCurrent\(request\.token, key\)/);
+  assert.match(databaseViewSource, /watch\(accountDialogVisible,[\s\S]*savedCredentialTestRequests\.invalidate\(\)/);
   assert.match(quickConnectSource, /const sshRequests = createLatestKeyedRequest/);
   assert.match(quickConnectSource, /sshRequests\.begin\(keyword/);
   assert.match(quickConnectSource, /sshLoading\.value = sshRequests\.isLoading\(\)/);
+});
+
+test('database TLS mode preserves hidden inputs and clears persisted CA only on submit', () => {
+  const source = readFileSync(new URL('../views/DatabaseView.vue', import.meta.url), 'utf8');
+  const changeStart = source.indexOf('async function onTLSModeChange');
+  const changeEnd = source.indexOf('function chooseTLSCAFile', changeStart);
+  const changeSource = source.slice(changeStart, changeEnd);
+  assert.match(changeSource, /上游数据库链路将不再使用 TLS/);
+  assert.doesNotMatch(changeSource, /客户端到 Jianmen 的 TLS 不受影响/);
+  assert.doesNotMatch(changeSource, /instanceForm\.(?:tlsCaPem|tlsServerName)\s*=\s*''/);
+  assert.doesNotMatch(changeSource, /instanceForm\.hasTlsCa\s*=\s*false/);
+
+  const submitStart = source.indexOf('async function submitInstance');
+  const submitEnd = source.indexOf('async function toggleInstance', submitStart);
+  const submitSource = source.slice(submitStart, submitEnd);
+  assert.match(submitSource, /instanceForm\.tlsMode === 'disable' && originalHasTLSCA\.value/);
+  assert.match(submitSource, /if \(clearStoredTLSCA\) payload\.clear_tls_ca = true/);
+});
+
+test('database account status switch has an account-specific accessible label', () => {
+  const source = readFileSync(new URL('../views/DatabaseView.vue', import.meta.url), 'utf8');
+  assert.match(source, /:aria-label="`\$\{row\.username \|\| '未命名账号'\}账号状态：\$\{row\.status === 'active' \? '启用' : '停用'\}`"/);
 });
 
 test('RDP quick connect is click-initiated and never hydrates SSH credentials', () => {

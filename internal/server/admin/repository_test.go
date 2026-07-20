@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"reflect"
 	"testing"
+	"time"
 
 	"jianmen/internal/config"
 	"jianmen/internal/handler/accessrequest"
@@ -18,6 +19,7 @@ import (
 	"jianmen/internal/online"
 	"jianmen/internal/rbac"
 	"jianmen/internal/service"
+	"jianmen/internal/sshhost"
 	"jianmen/internal/storage"
 	"jianmen/internal/store"
 )
@@ -299,6 +301,7 @@ func applyTestAdminDependencies(t *testing.T, server *Server, repository adminRe
 		server.hostManagement, err = service.NewHostManagementService(
 			hostManagementRepositoryAdapter{repository: dependencies.hostTargets},
 			authorization,
+			hostIdentityCollectorAdapter{collector: sshhost.NewCollector(500 * time.Millisecond)},
 		)
 		if err != nil {
 			t.Fatalf("new host management service: %v", err)

@@ -9,13 +9,15 @@
       search-placeholder="搜索实例名称、地址、协议…"
       @search="onInstanceSearch"
     >
-      <template #toolbar-extra>
+      <template #toolbar-filter>
         <ResourceFilterBar
           :model-value="instanceFilter"
           :options="instanceQuickGroupOptions"
           :preview-limit="filterPreviewLimit"
           @update:model-value="setInstanceFilter"
         />
+      </template>
+      <template #toolbar-extra>
         <el-button v-if="permission.canDo('dbproxy:create')" type="primary" @click="openCreateInstance">新增实例</el-button>
       </template>
       <el-table-column prop="name" label="名称" min-width="130" show-overflow-tooltip />
@@ -25,14 +27,6 @@
       <el-table-column label="协议" width="100" align="center">
         <template #default="{ row }">
           <el-tag class="protocol-tag" size="small" :type="row.protocol === 'mysql' ? 'success' : row.protocol === 'redis' ? 'danger' : 'primary'" effect="light">{{ row.protocol === 'mysql' ? 'MySQL' : row.protocol === 'redis' ? 'Redis' : 'PostgreSQL' }}</el-tag>
-        </template>
-      </el-table-column>
-      <el-table-column label="上游 TLS" min-width="145">
-        <template #default="{ row }">
-          <div class="tls-summary">
-            <el-tag size="small" :type="tlsModeTagType(row.tls_mode)">{{ tlsModeLabel(row.tls_mode) }}</el-tag>
-            <span v-if="row.has_tls_ca" class="tls-ca-status">CA 已配置</span>
-          </div>
         </template>
       </el-table-column>
       <el-table-column label="账号管理" min-width="110" align="center">
@@ -83,7 +77,11 @@
           </el-select>
         </el-form-item>
         <el-form-item label="上游地址" required>
-          <el-input v-model="instanceForm.address" placeholder="host:port 或 IP" />
+          <el-input
+            v-model="instanceForm.address"
+            placeholder="host:port 或 IP"
+            @input="onInstanceAddressInput"
+          />
         </el-form-item>
         <el-form-item label="端口">
           <el-input-number v-model="instanceForm.port" :min="1" :max="65535" />
@@ -110,63 +108,58 @@
             <el-form-item label="备注">
               <el-input v-model="instanceForm.remark" type="textarea" />
             </el-form-item>
-            <el-form-item label="上游 TLS">
+            <el-form-item label="启用 TLS">
               <el-select v-model="instanceForm.tlsMode" @change="onTLSModeChange">
-                <el-option label="不使用 TLS（默认）" value="disable" />
+                <el-option label="不启用（默认）" value="disable" />
                 <el-option label="验证证书和主机名（最安全）" value="verify-full" />
                 <el-option label="仅验证证书" value="verify-ca" />
               </el-select>
               <div class="tls-mode-help">{{ tlsModeDescription(instanceForm.tlsMode) }}</div>
-              <el-alert
-                v-if="instanceForm.tlsMode === 'disable'"
-                class="tls-risk-alert"
-                type="warning"
-                :closable="false"
-                show-icon
-              >
-                当前只关闭 Jianmen 到实际数据库的 TLS，客户端到 Jianmen 的 TLS 不受影响。请确保上游链路位于可信网络。
-              </el-alert>
             </el-form-item>
-            <el-form-item label="TLS 主机名">
-              <el-input
-                v-model="instanceForm.tlsServerName"
-                :disabled="instanceForm.tlsMode !== 'verify-full'"
-                placeholder="verify-full 时用于主机名校验，可留空使用地址"
-              />
-            </el-form-item>
-            <el-form-item label="TLS CA">
-              <div class="tls-ca-editor">
-                <div class="tls-ca-actions">
-                  <el-button size="small" :disabled="instanceForm.tlsMode === 'disable'" @click="chooseTLSCAFile">选择 PEM 文件</el-button>
-                  <input
-                    ref="tlsCAFileInput"
-                    class="tls-ca-file-input"
-                    type="file"
-                    accept=".pem,.crt,.cer,text/plain"
-                    @change="handleTLSCAFileChange"
-                  />
-                  <span v-if="instanceForm.tlsCaPem" class="tls-ca-status">已填写新的 CA</span>
-                  <span v-else-if="instanceForm.hasTlsCa" class="tls-ca-status">已配置（内容不回显）</span>
-                  <el-button
-                    v-if="instanceForm.hasTlsCa || instanceForm.tlsCaPem"
-                    link
-                    type="danger"
-                    size="small"
-                    @click="clearTLSCA"
-                  >
-                    清除 CA
-                  </el-button>
-                </div>
+            <template v-if="instanceForm.tlsMode !== 'disable'">
+              <el-form-item label="主机名">
                 <el-input
-                  v-model="instanceForm.tlsCaPem"
-                  type="textarea"
-                  :rows="4"
-                  :disabled="instanceForm.tlsMode === 'disable'"
-                  placeholder="也可以手动粘贴 PEM 内容；编辑时留空会保留已有 CA"
-                  @input="onTLSCAPEMInput"
+                  v-model="instanceForm.tlsServerName"
+                  :disabled="instanceForm.tlsMode !== 'verify-full'"
+                  placeholder="根据上游地址自动推导，也可手动修改"
                 />
-              </div>
-            </el-form-item>
+              </el-form-item>
+              <el-form-item label="自定义 CA">
+                <div class="tls-ca-editor">
+                  <div class="tls-ca-help">
+                    只有使用企业私有 CA、自签名证书时，才需要提供自定义 CA。
+                  </div>
+                  <div class="tls-ca-actions">
+                    <el-button size="small" @click="chooseTLSCAFile">选择 PEM 文件</el-button>
+                    <input
+                      ref="tlsCAFileInput"
+                      class="tls-ca-file-input"
+                      type="file"
+                      accept=".pem,.crt,.cer,text/plain"
+                      @change="handleTLSCAFileChange"
+                    />
+                    <span v-if="instanceForm.tlsCaPem" class="tls-ca-status">已填写新的 CA</span>
+                    <span v-else-if="instanceForm.hasTlsCa" class="tls-ca-status">已配置（内容不回显）</span>
+                    <el-button
+                      v-if="instanceForm.hasTlsCa || instanceForm.tlsCaPem"
+                      link
+                      type="danger"
+                      size="small"
+                      @click="clearTLSCA"
+                    >
+                      清除 CA
+                    </el-button>
+                  </div>
+                  <el-input
+                    v-model="instanceForm.tlsCaPem"
+                    type="textarea"
+                    :rows="4"
+                    placeholder="也可以手动粘贴 PEM 内容；编辑时留空会保留已有 CA"
+                    @input="onTLSCAPEMInput"
+                  />
+                </div>
+              </el-form-item>
+            </template>
           </el-collapse-item>
         </el-collapse>
       </el-form>
@@ -199,7 +192,7 @@
             自动创建
           </el-button>
         </template>
-        <el-table-column label="连接账号" min-width="130">
+        <el-table-column label="登录账号" min-width="130">
           <template #default="{ row }">{{ row.username || '-' }}</template>
         </el-table-column>
         <el-table-column label="分组" width="110">
@@ -211,8 +204,12 @@
               v-if="row.can_manage && permission.canDo('dbproxy:update')"
               :model-value="row.status === 'active'"
               :loading="statusUpdatingId === row.id"
+              :aria-label="`${row.username || '未命名账号'}账号状态：${row.status === 'active' ? '启用' : '停用'}`"
               @update:model-value="(val: boolean) => toggleAccountStatus(row, val)"
             />
+            <el-tag v-else size="small" :type="row.status === 'active' ? 'success' : 'info'">
+              {{ row.status === 'active' ? '启用' : '停用' }}
+            </el-tag>
           </template>
         </el-table-column>
         <el-table-column label="过期时间" min-width="140">
@@ -283,13 +280,28 @@
           </div>
         </el-form-item>
         <el-form-item label="有效期">
-          <div class="expiry-presets">
-            <el-button v-for="opt in expiryOptions" :key="opt.label" size="small"
-              :type="expiryPreset === opt.label ? 'primary' : ''"
-              @click="setExpiry(opt)">{{ opt.label }}</el-button>
+          <div class="expiry-control">
+            <el-date-picker
+              v-model="accountForm.expiresAt"
+              type="datetime"
+              class="expiry-picker"
+              clearable
+              format="YYYY-MM-DD HH:mm"
+              placeholder="选择过期时间"
+              @change="expiryPreset = ''"
+            />
+            <div class="expiry-presets">
+              <el-button
+                v-for="opt in expiryOptions"
+                :key="opt.label"
+                size="small"
+                :type="expiryPreset === opt.label ? 'primary' : ''"
+                @click="setExpiry(opt)"
+              >
+                {{ opt.label }}
+              </el-button>
+            </div>
           </div>
-          <el-date-picker v-model="accountForm.expiresAt" type="datetime"
-            class="expiry-picker" placeholder="自定义时间" />
         </el-form-item>
         <el-collapse v-model="accountMorePanels">
           <el-collapse-item name="more" title="更多设置">
@@ -473,6 +485,7 @@ const accountGroupOptions = ref<string[]>([])
 const tlsCAFileInput = ref<HTMLInputElement | null>(null)
 const previousTLSMode = ref<api.DatabaseTLSMode>(DEFAULT_DATABASE_UPSTREAM_TLS_MODE)
 const originalHasTLSCA = ref(false)
+const lastAutoTLSHostName = ref('')
 const instanceForm = reactive<InstanceForm>({
   name: '',
   protocol: 'mysql',
@@ -507,10 +520,11 @@ const statusUpdatingId = ref('')
 
 const expiryPreset = ref('')
 const expiryOptions = [
+  { label: '永久', hours: -1 },
   { label: '8小时', hours: 8 },
   { label: '7天', hours: 7 * 24 },
+  { label: '30天', hours: 30 * 24 },
   { label: '1年', hours: 365 * 24 },
-  { label: '永久', hours: -1 },
 ]
 
 const accountForm = reactive<AccountFormState>({
@@ -530,6 +544,7 @@ const accountFormTesting = ref(false)
 const accountFormTestResult = ref<{ ok: boolean; error?: string; latency_ms?: number } | null>(null)
 const savedCredentialTesting = ref(false)
 const savedCredentialTestResult = ref<{ ok: boolean; error?: string; latency_ms?: number } | null>(null)
+const savedCredentialTestRequests = createLatestKeyedRequest<{ ok: boolean; error?: string; latency_ms?: number }>()
 
 function instanceUsageCount(instance: api.DatabaseInstanceView): number {
   return instanceUsageCounts.value[String(instance.name || '').trim().toLowerCase()] || 0
@@ -609,22 +624,6 @@ function normalizeTLSMode(value: unknown): api.DatabaseTLSMode {
   return normalizeDatabaseUpstreamTLSMode(value)
 }
 
-function tlsModeLabel(value: unknown): string {
-  switch (normalizeTLSMode(value)) {
-    case 'disable': return '未加密'
-    case 'verify-ca': return '验证 CA'
-    default: return '验证 CA + 主机名'
-  }
-}
-
-function tlsModeTagType(value: unknown): 'success' | 'warning' | 'danger' {
-  switch (normalizeTLSMode(value)) {
-    case 'disable': return 'warning'
-    case 'verify-ca': return 'warning'
-    default: return 'success'
-  }
-}
-
 function tlsModeDescription(value: api.DatabaseTLSMode): string {
   switch (value) {
     case 'disable': return 'Jianmen 到实际数据库不加密；适用于未启用 TLS 的数据库或可信内网。'
@@ -685,6 +684,7 @@ function openCreateInstance() {
   instanceMorePanels.value = ['more']
   originalHasTLSCA.value = false
   previousTLSMode.value = DEFAULT_DATABASE_UPSTREAM_TLS_MODE
+  lastAutoTLSHostName.value = ''
   Object.assign(instanceForm, {
     name: '',
     protocol: 'mysql',
@@ -701,12 +701,39 @@ function openCreateInstance() {
   showInstanceDialog.value = true
 }
 
+function inferTLSHostName(address: string): string {
+  const value = address.trim()
+  if (!value) return ''
+  if (value.startsWith('[')) {
+    const bracketEnd = value.indexOf(']')
+    return bracketEnd > 1 ? value.slice(1, bracketEnd) : ''
+  }
+  if ((value.match(/:/g) || []).length > 1) return value
+  const separator = value.lastIndexOf(':')
+  if (separator > 0 && /^\d+$/.test(value.slice(separator + 1))) {
+    return value.slice(0, separator)
+  }
+  return value
+}
+
+function onInstanceAddressInput(address: string) {
+  const inferred = inferTLSHostName(address)
+  if (
+    !instanceForm.tlsServerName.trim()
+    || instanceForm.tlsServerName === lastAutoTLSHostName.value
+  ) {
+    instanceForm.tlsServerName = inferred
+  }
+  lastAutoTLSHostName.value = inferred
+}
+
 function editInstance(inst: api.DatabaseInstanceView) {
   editingInstance.value = inst
   instanceMorePanels.value = []
   const tlsMode = normalizeTLSMode(inst.tls_mode)
   originalHasTLSCA.value = Boolean(inst.has_tls_ca)
   previousTLSMode.value = tlsMode
+  lastAutoTLSHostName.value = inferTLSHostName(inst.address || '')
   Object.assign(instanceForm, {
     name: inst.name || '',
     protocol: inst.protocol || 'mysql',
@@ -735,19 +762,16 @@ function onProtocolChange(protocol: string) {
 
 async function onTLSModeChange(mode: api.DatabaseTLSMode) {
   if (mode !== 'disable') {
-    if (mode !== 'verify-full') {
-      instanceForm.tlsServerName = ''
-    }
-    if (previousTLSMode.value === 'disable') {
-      instanceForm.hasTlsCa = originalHasTLSCA.value
-      instanceForm.clearTlsCa = false
+    if (mode === 'verify-full' && !instanceForm.tlsServerName.trim()) {
+      instanceForm.tlsServerName = inferTLSHostName(instanceForm.address)
+      lastAutoTLSHostName.value = instanceForm.tlsServerName
     }
     previousTLSMode.value = mode
     return
   }
   try {
     await ElMessageBox.confirm(
-      '关闭后，Jianmen 到实际数据库的凭据和数据将通过明文链路传输；客户端到 Jianmen 的 TLS 不受影响。确定关闭吗？',
+      '关闭后，上游数据库链路将不再使用 TLS。确定关闭吗？',
       '关闭上游 TLS',
       { type: 'warning', confirmButtonText: '确认关闭', cancelButtonText: '取消' }
     )
@@ -755,10 +779,6 @@ async function onTLSModeChange(mode: api.DatabaseTLSMode) {
     instanceForm.tlsMode = previousTLSMode.value
     return
   }
-  instanceForm.tlsCaPem = ''
-  instanceForm.tlsServerName = ''
-  instanceForm.hasTlsCa = false
-  instanceForm.clearTlsCa = editingInstance.value ? originalHasTLSCA.value : false
   previousTLSMode.value = mode
 }
 
@@ -818,7 +838,14 @@ async function submitInstance() {
       group: instanceForm.group.trim() || undefined,
       remark: instanceForm.remark.trim() || undefined
     }
-    if (instanceForm.clearTlsCa) payload.clear_tls_ca = true
+    const clearStoredTLSCA = Boolean(
+      editingInstance.value
+      && (
+        instanceForm.clearTlsCa
+        || (instanceForm.tlsMode === 'disable' && originalHasTLSCA.value)
+      )
+    )
+    if (clearStoredTLSCA) payload.clear_tls_ca = true
     if (editingInstance.value?.id) {
       await api.apiClient.updateDBInstance(editingInstance.value.id, payload)
       ElMessage.success('数据库实例已更新')
@@ -913,6 +940,8 @@ async function loadSelectedInstanceAccounts() {
 }
 
 function openCreateAccount() {
+  savedCredentialTestRequests.invalidate()
+  savedCredentialTesting.value = false
   editingAccount.value = null
   accountMorePanels.value = ['more']
   accountForm.username = ''
@@ -951,17 +980,28 @@ function setExpiry(opt: { label: string; hours: number }) {
 }
 
 async function testSavedAccountConnection(row: api.DBAccountRecord) {
-  const id = row.id || row.resource_id || ''
-  if (!id) return
+  const key = String(row.id || row.resource_id || '')
+  if (!key) return
+  const request = savedCredentialTestRequests.begin(
+    key,
+    () => api.apiClient.testDBConnection(key),
+  )
   savedCredentialTesting.value = true
   savedCredentialTestResult.value = null
+  const isCurrentRequest = () => (
+    accountDialogVisible.value
+    && String(editingAccount.value?.id || editingAccount.value?.resource_id || '') === key
+    && savedCredentialTestRequests.isCurrent(request.token, key)
+  )
   try {
-    const result = await api.apiClient.testDBConnection(String(id))
+    const result = await request.promise
+    if (!isCurrentRequest()) return
     savedCredentialTestResult.value = { ok: result.ok, latency_ms: result.latency_ms, error: result.ok ? undefined : (result.error || '连接失败') }
   } catch (err) {
+    if (!isCurrentRequest()) return
     savedCredentialTestResult.value = { ok: false, error: err instanceof Error ? err.message : '连接失败' }
   } finally {
-    savedCredentialTesting.value = false
+    if (isCurrentRequest()) savedCredentialTesting.value = false
   }
 }
 
@@ -1108,20 +1148,30 @@ watch(showInstanceDialog, visible => {
   }
 })
 
+watch(accountDialogVisible, visible => {
+  if (!visible) {
+    savedCredentialTestRequests.invalidate()
+    savedCredentialTesting.value = false
+    savedCredentialTestResult.value = null
+  }
+})
+
 onMounted(() => {
   loadInstances()
   loadGroupOptions()
 })
 
 async function loadGroupOptions() {
-  try {
-    const resourceGroups = await api.apiClient.getResourceGroups({ group_type: 'resource' })
-    const accountGroups = await api.apiClient.getResourceGroups({ group_type: 'account' })
-    instanceGroupOptions.value = (resourceGroups.items ?? []).map(g => g.name).filter(Boolean)
-    accountGroupOptions.value = (accountGroups.items ?? []).map(g => g.name).filter(Boolean)
-  } catch {
-    // ignore
-  }
+  const [resourceGroups, accountGroups] = await Promise.allSettled([
+    api.apiClient.getResourceGroups({ group_type: 'resource', page_size: 200 }),
+    api.apiClient.getResourceGroups({ group_type: 'account', page_size: 200 }),
+  ])
+  instanceGroupOptions.value = resourceGroups.status === 'fulfilled'
+    ? (resourceGroups.value.items ?? []).map(group => group.name).filter(Boolean)
+    : []
+  accountGroupOptions.value = accountGroups.status === 'fulfilled'
+    ? (accountGroups.value.items ?? []).map(group => group.name).filter(Boolean)
+    : []
 }
 
 // ── 自动创建 ──
@@ -1246,12 +1296,24 @@ function closeProvisionAndRefresh() {
   width: 100%;
 }
 
-.expiry-presets,
 .grant-actions {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
   width: 100%;
+}
+
+.expiry-control {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) auto;
+  gap: 8px;
+  width: 100%;
+}
+
+.expiry-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 
 .expiry-presets :deep(.el-button),
@@ -1261,7 +1323,6 @@ function closeProvisionAndRefresh() {
 
 .expiry-picker {
   width: 100%;
-  margin-top: 8px;
 }
 
 .provision-loading {
@@ -1345,13 +1406,6 @@ function closeProvisionAndRefresh() {
   justify-content: center;
 }
 
-.tls-summary {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 4px;
-}
-
 .tls-ca-status {
   color: #667085;
   font-size: 12px;
@@ -1364,12 +1418,15 @@ function closeProvisionAndRefresh() {
   margin-top: 6px;
 }
 
-.tls-risk-alert {
-  margin-top: 8px;
-}
-
 .tls-ca-editor {
   width: 100%;
+}
+
+.tls-ca-help {
+  margin-bottom: 8px;
+  color: #667085;
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 .tls-ca-actions {
@@ -1412,6 +1469,10 @@ function closeProvisionAndRefresh() {
   }
 
   .config-row {
+    grid-template-columns: 1fr;
+  }
+
+  .expiry-control {
     grid-template-columns: 1fr;
   }
 }

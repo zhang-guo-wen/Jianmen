@@ -17,6 +17,7 @@ import (
 	"golang.org/x/sync/singleflight"
 
 	"jianmen/internal/model"
+	"jianmen/internal/sshhost"
 )
 
 type ContainerEndpointConfig struct {
@@ -98,6 +99,11 @@ func (s *ContainerService) Test(ctx context.Context, endpoint ContainerEndpointC
 	}
 	result := ContainerTestResult{OK: err == nil, LatencyMS: time.Since(started).Milliseconds()}
 	if err != nil {
+		var changed *sshhost.KeyChangedError
+		var unavailable *sshhost.IdentityUnavailableError
+		if errors.As(err, &changed) || errors.As(err, &unavailable) {
+			return ContainerTestResult{}, err
+		}
 		result.Message = err.Error()
 	}
 	return result, nil

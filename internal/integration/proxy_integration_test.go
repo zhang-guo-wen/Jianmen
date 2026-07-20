@@ -26,6 +26,7 @@ import (
 	"jianmen/internal/rbac"
 	"jianmen/internal/server/sshserver"
 	"jianmen/internal/service"
+	"jianmen/internal/sshhost"
 	"jianmen/internal/storage"
 	jmstore "jianmen/internal/store"
 	"jianmen/internal/util"
@@ -66,13 +67,23 @@ func TestSSHProxyAgainstDockerOpenSSH(t *testing.T) {
 
 	fixture := newMetadataFixture(t)
 	targetHost, targetPort := splitAddress(t, targetAddr)
+	identity, err := sshhost.NewCollector(10*time.Second).Collect(context.Background(), targetHost, targetPort)
+	if err != nil {
+		t.Fatalf("collect ssh target identity: %v", err)
+	}
+	if _, err := fixture.store.AddHost(context.Background(), jmstore.HostRecord{
+		ID: "docker-openssh", Name: "docker-openssh", Address: targetHost, Port: targetPort,
+		Protocol: "ssh", Status: "active",
+		HostKeyFingerprint: identity.Fingerprint, KnownHosts: identity.KnownHosts,
+	}); err != nil {
+		t.Fatalf("add ssh host: %v", err)
+	}
 	target, err := fixture.store.AddTarget(context.Background(), config.Target{
-		HostID:                "docker-openssh",
-		Host:                  targetHost,
-		Port:                  targetPort,
-		Username:              targetUser,
-		Password:              targetPassword,
-		InsecureIgnoreHostKey: true,
+		HostID:   "docker-openssh",
+		Host:     targetHost,
+		Port:     targetPort,
+		Username: targetUser,
+		Password: targetPassword,
 	})
 	if err != nil {
 		t.Fatalf("add ssh target: %v", err)

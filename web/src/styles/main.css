@@ -31,6 +31,7 @@
   --font-mono: "Cascadia Mono", Consolas, ui-monospace, monospace;
   --content-narrow: 920px;
   --dialog-gutter: 12px;
+  --form-dialog-width: 640px;
 
   color: var(--color-text);
   font-family: var(--font-sans);
@@ -196,6 +197,12 @@ body {
   min-width: 0;
 }
 
+.page-title-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
 .app-header h1 {
   margin: 0;
   font-size: clamp(22px, 2.6vw, 30px);
@@ -327,19 +334,91 @@ body {
   border-radius: 20px;
 }
 
+.el-overlay-dialog {
+  box-sizing: border-box;
+  display: flex;
+  overflow: hidden;
+  align-items: center;
+  justify-content: center;
+  padding:
+    max(var(--dialog-gutter), env(safe-area-inset-top))
+    max(var(--dialog-gutter), env(safe-area-inset-right))
+    max(var(--dialog-gutter), env(safe-area-inset-bottom))
+    max(var(--dialog-gutter), env(safe-area-inset-left));
+}
+
 .el-dialog {
   display: flex;
-  margin: var(--dialog-gutter) auto;
-  max-width: calc(100vw - (var(--dialog-gutter) * 2));
-  max-height: calc(100dvh - (var(--dialog-gutter) * 2));
+  margin: 0;
+  min-width: 0;
+  min-height: 0;
+  max-width: 100%;
+  max-height: 100%;
   flex-direction: column;
 }
 
+.el-dialog__header,
+.el-dialog__footer {
+  flex: 0 0 auto;
+}
+
 .el-dialog__body {
+  min-width: 0;
   min-height: 0;
+  flex: 1 1 auto;
+  overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior: contain;
   scrollbar-gutter: stable;
+}
+
+.crud-form-dialog {
+  width: min(var(--form-dialog-width), 100%) !important;
+}
+
+.crud-form-dialog .el-form-item,
+.crud-form-dialog .form-grid {
+  min-width: 0;
+}
+
+.crud-form-dialog .el-form-item {
+  display: block;
+}
+
+.crud-form-dialog .el-form-item__label-wrap {
+  width: 100%;
+  margin-left: 0 !important;
+}
+
+.crud-form-dialog .el-form-item__label {
+  display: flex;
+  width: 100% !important;
+  height: auto;
+  justify-content: flex-start;
+  margin-bottom: 8px;
+  line-height: 22px;
+  text-align: left;
+}
+
+.crud-form-dialog .el-form-item__content {
+  width: 100%;
+  min-width: 0;
+  margin-left: 0 !important;
+}
+
+.crud-form-dialog .form-grid {
+  grid-template-columns: minmax(0, 1fr) !important;
+}
+
+.crud-form-dialog :where(
+  .el-input,
+  .el-select,
+  .el-input-number,
+  .el-textarea,
+  .el-date-editor
+) {
+  width: 100%;
+  max-width: 100%;
 }
 
 .el-dialog__footer {

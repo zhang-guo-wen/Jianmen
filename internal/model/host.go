@@ -7,16 +7,18 @@ import (
 )
 
 type Host struct {
-	ID        string    `gorm:"primaryKey;size:64" json:"id"`
-	Name      string    `gorm:"size:255;not null" json:"name"`
-	Address   string    `gorm:"index;index:idx_hosts_address_port,priority:1;size:255;not null" json:"address"`
-	Port      int       `gorm:"index:idx_hosts_address_port,priority:2;not null;default:22" json:"port"`
-	Protocol  string    `gorm:"index;size:16;not null;default:ssh" json:"protocol"`
-	GroupName string    `gorm:"size:128" json:"group"`
-	Remark    string    `gorm:"type:text" json:"remark,omitempty"`
-	Status    string    `gorm:"index;size:32;not null;default:active" json:"status"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	ID                 string    `gorm:"primaryKey;size:64" json:"id"`
+	Name               string    `gorm:"size:255;not null" json:"name"`
+	Address            string    `gorm:"index;index:idx_hosts_address_port,priority:1;size:255;not null" json:"address"`
+	Port               int       `gorm:"index:idx_hosts_address_port,priority:2;not null;default:22" json:"port"`
+	Protocol           string    `gorm:"index;size:16;not null;default:ssh" json:"protocol"`
+	GroupName          string    `gorm:"size:128" json:"group"`
+	Remark             string    `gorm:"type:text" json:"remark,omitempty"`
+	Status             string    `gorm:"index;size:32;not null;default:active" json:"status"`
+	HostKeyFingerprint string    `gorm:"size:128"`
+	KnownHosts         string    `gorm:"type:text"`
+	CreatedAt          time.Time `json:"created_at"`
+	UpdatedAt          time.Time `json:"updated_at"`
 }
 
 type HostAccount struct {

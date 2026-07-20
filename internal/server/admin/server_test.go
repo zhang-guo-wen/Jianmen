@@ -78,8 +78,8 @@ func TestHandleTargetCRUD(t *testing.T) {
 	if err := decodeTestData(t, createRec.Body.Bytes(), &created); err != nil {
 		t.Fatalf("unmarshal create response: %v; body=%s", err, createRec.Body.String())
 	}
-	if !created.InsecureIgnoreHostKey {
-		t.Fatalf("created target did not preserve explicit insecure host key mode: %#v", created)
+	if created.InsecureIgnoreHostKey {
+		t.Fatalf("created target exposed legacy insecure host key mode: %#v", created)
 	}
 	assertTargetResponseHasNoSecrets(t, createRec.Body.Bytes())
 
@@ -258,6 +258,7 @@ func TestHandleTestConnectionUsesStoredCredentialsWhenPayloadOmitsSecrets(t *tes
 	if err != nil {
 		t.Fatalf("parse ssh port: %v", err)
 	}
+	createManagedTestSSHHost(t, server, "stored-secret-host", host, port)
 
 	createReq := httptest.NewRequest(http.MethodPost, "/api/targets", bytes.NewBufferString(fmt.Sprintf(`{
 		"id": "stored-secret-account",
@@ -314,20 +315,14 @@ func TestHandleTestConnectionResolvesHostContainerForNewAccount(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse ssh port: %v", err)
 	}
-	if _, err := server.hostTargets.AddHost(context.Background(), store.HostRecord{
-		ID:      "new-account-host",
-		Name:    "new-account-host",
-		Address: host,
-		Port:    port,
-	}); err != nil {
-		t.Fatalf("create host: %v", err)
-	}
+	createManagedTestSSHHost(t, server, "new-account-host", host, port)
 
 	testReq := httptest.NewRequest(http.MethodPost, "/api/targets/test-connection", bytes.NewBufferString(`{
 		"host_id": "new-account-host",
 		"username": "root",
 		"password": "secret",
-		"insecure_ignore_host_key": true
+		"insecure_ignore_host_key": true,
+		"host_key_fingerprint": "SHA256:must-not-override-host-identity"
 	}`))
 	testReq = asTestSuperAdmin(testReq)
 	testRec := httptest.NewRecorder()
@@ -358,6 +353,7 @@ func TestHandleTestConnectionUsesStoredTargetWhenOnlyIDProvided(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse ssh port: %v", err)
 	}
+	createManagedTestSSHHost(t, server, "stored-target-host", host, port)
 
 	createReq := httptest.NewRequest(http.MethodPost, "/api/targets", bytes.NewBufferString(fmt.Sprintf(`{
 		"id": "stored-target-only-id",
@@ -1035,6 +1031,31 @@ func startTestPasswordSSHServer(t *testing.T, username, password string) string 
 	}()
 
 	return listener.Addr().String()
+}
+
+func createManagedTestSSHHost(t *testing.T, server *Server, hostID, address string, port int) {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodPost, "/api/hosts", bytes.NewBufferString(fmt.Sprintf(`{
+		"id": %q,
+		"name": %q,
+		"address": %q,
+		"port": %d,
+		"protocol": "ssh"
+	}`, hostID, hostID, address, port)))
+	req = asTestSuperAdmin(req)
+	rec := httptest.NewRecorder()
+	server.handleHosts(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create managed SSH host status = %d, want %d; body=%s", rec.Code, http.StatusCreated, rec.Body.String())
+	}
+	var host store.HostView
+	if err := decodeTestData(t, rec.Body.Bytes(), &host); err != nil {
+		t.Fatalf("decode managed SSH host: %v", err)
+	}
+	if host.Status != "active" || host.IdentityStatus != "available" ||
+		host.HostKeyFingerprint == "" || host.KnownHosts == "" {
+		t.Fatalf("managed SSH host identity was not captured: %#v", host)
+	}
 }
 
 // decodeTestData unpacks the "data" field from the unified API response wrapper.

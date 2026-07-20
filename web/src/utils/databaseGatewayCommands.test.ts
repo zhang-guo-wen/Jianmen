@@ -12,9 +12,12 @@ import {
   hasDatabaseGatewayTLSIdentity,
   isSafeDatabaseCommandValue,
   resolveDatabaseGatewayPort,
-  unifiedMySQLDetectionNotice,
   type DatabaseGatewayTLSIdentity,
 } from './databaseGatewayCommands.ts';
+import {
+  databaseGatewayConnectionError,
+  databaseProtocolLabel,
+} from './databaseGatewayAvailability.ts';
 import {
   beginInFlight,
   beginInFlightIfIdle,
@@ -32,6 +35,40 @@ const secureGateway: DatabaseGatewayTLSIdentity = {
   tls_ca_pem: '-----BEGIN CERTIFICATE-----\nCA\n-----END CERTIFICATE-----',
   tls_cert_sha256: 'aa:bb',
 };
+
+test('database gateway availability distinguishes disabled entry from missing PostgreSQL TLS', () => {
+  assert.equal(databaseProtocolLabel('postgresql'), 'PG');
+  assert.equal(
+    databaseGatewayConnectionError({
+      enabled: false,
+      connectable: false,
+      unavailable_reason: 'listener_disabled',
+      mode: 'independent',
+      protocol: 'postgresql',
+      listen_addr: '127.0.0.1:33062',
+      host: '127.0.0.1',
+      port: 33062,
+      mysql_detection_delay_ms: 0,
+      tls_enabled: false,
+    }, 'postgres'),
+    'PG 数据库网关未启用',
+  );
+  assert.equal(
+    databaseGatewayConnectionError({
+      enabled: true,
+      connectable: false,
+      unavailable_reason: 'tls_identity_missing',
+      mode: 'unified',
+      protocol: 'postgresql',
+      listen_addr: '127.0.0.1:33060',
+      host: '127.0.0.1',
+      port: 33060,
+      mysql_detection_delay_ms: 200,
+      tls_enabled: false,
+    }, 'postgresql'),
+    '统一数据库入口已启用，但 PG 连接所需的 TLS 证书尚未就绪',
+  );
+});
 
 test('database gateway fallback ports follow unified and independent modes', () => {
   for (const protocol of ['mysql', 'postgres', 'postgresql', 'redis']) {
@@ -52,26 +89,13 @@ test('database gateway API port wins over every mode fallback', () => {
   assert.equal(resolveDatabaseGatewayPort('postgres', { mode: 'unified', port: 70000 }), 33060);
 });
 
-test('unified MySQL connection notice uses the API delay with a 200ms fallback', () => {
-  assert.equal(
-    unifiedMySQLDetectionNotice('mysql', { mode: 'unified', mysql_detection_delay_ms: 180 }),
-    '统一入口需要短暂等待以识别连接协议，MySQL 每次连接会增加约 180ms 建连时间。',
-  );
-  assert.match(
-    unifiedMySQLDetectionNotice('mysql', { mode: 'unified' }),
-    /增加约 200ms 建连时间/,
-  );
-  assert.equal(unifiedMySQLDetectionNotice('mysql', { mode: 'independent' }), '');
-  assert.equal(unifiedMySQLDetectionNotice('postgres', { mode: 'unified' }), '');
-});
-
-test('quick connect and connection dialog share the API-aware gateway resolver and MySQL notice', () => {
+test('quick connect and connection dialog use the API-aware gateway resolver without the MySQL delay notice', () => {
   const quickConnect = readFileSync(new URL('../views/QuickConnectView.vue', import.meta.url), 'utf8');
   const dialog = readFileSync(new URL('../components/ConnectionConfigDialog.vue', import.meta.url), 'utf8');
 
   for (const source of [quickConnect, dialog]) {
     assert.match(source, /resolveDatabaseGatewayPort/);
-    assert.match(source, /unifiedMySQLDetectionNotice/);
+    assert.doesNotMatch(source, /统一入口需要短暂等待以识别连接协议/);
     assert.doesNotMatch(source, /function databaseGatewayDefaultPort/);
   }
 });
@@ -296,16 +320,98 @@ test('disabled database client symbols are absent from production frontend sourc
   assert.doesNotMatch(preferencesSource, /database_client|database_client_path/);
 });
 
-test('settings exposes local-only database client configuration without restoring the password link', () => {
+test('settings exposes local-only database client registration and never stores it as an account preference', () => {
   const settingsSource = readFileSync(new URL('../views/SettingsView.vue', import.meta.url), 'utf8');
   const localStoreSource = readFileSync(new URL('../stores/databaseClient.ts', import.meta.url), 'utf8');
   assert.match(settingsSource, /DBeaver/);
   assert.match(settingsSource, /useDatabaseClientStore/);
-  assert.doesNotMatch(settingsSource, /jianmen-db:\/\//i);
+  assert.match(settingsSource, /buildDatabaseProtocolRegistrationCommand/);
+  assert.match(settingsSource, /db_client_ca_path/);
+  assert.match(settingsSource, /downloadDatabaseGatewayCA/);
+  assert.match(settingsSource, /下载网关 CA/);
+  assert.match(settingsSource, /注册 Jianmen 数据库协议/);
+  assert.match(settingsSource, /我已执行以上命令/);
   assert.match(localStoreSource, /localStorage/);
+  assert.match(localStoreSource, /caFilePath/);
+  assert.match(localStoreSource, /directLaunchReady/);
+  assert.match(localStoreSource, /DATABASE_CLIENT_PROTOCOL_REGISTRATION_VERSION/);
+  assert.match(localStoreSource, /REG_STORAGE_KEY/);
   assert.doesNotMatch(localStoreSource, /apiClient/);
   const preferencesSource = readFileSync(new URL('../stores/preferences.ts', import.meta.url), 'utf8');
   assert.match(preferencesSource, /dbeaver/i);
+});
+
+test('quick database client launch requires gateway TLS and embeds only the issued temporary password', () => {
+  const source = readFileSync(new URL('../views/QuickConnectView.vue', import.meta.url), 'utf8');
+  const start = source.indexOf('async function openDatabaseClient');
+  const end = source.indexOf('function openClientSettings', start);
+  const launchSource = source.slice(start, end);
+  assert.match(launchSource, /ensureDatabaseConnectionInfo\(account\)/);
+  assert.match(launchSource, /state\.tlsIdentityReady/);
+  assert.match(launchSource, /buildDatabaseProtocolURL/);
+  assert.match(launchSource, /password:\s*state\.password/);
+  assert.match(
+    launchSource,
+    /databaseName:\s*\['postgres', 'postgresql'\]\.includes\(protocol\.toLowerCase\(\)\) \? 'postgres' : ''/,
+  );
+  assert.match(launchSource, /databaseClient\.directLaunchReady/);
+  assert.match(launchSource, /window\.location\.href = launchURL/);
+  assert.doesNotMatch(launchSource, /downloadDatabaseGatewayCA|new Blob|已下载网关 CA/);
+  assert.match(source, /createPassword:\s*accountID => apiClient\.createConnectionPassword\(accountID\)/);
+});
+
+test('database connection dialog opens the configured local client instead of copying a command', () => {
+  const source = readFileSync(new URL('../components/ConnectionConfigDialog.vue', import.meta.url), 'utf8');
+  assert.match(source, /data-testid="database-local-client"/);
+  assert.match(source, /@click="openDatabaseClient"/);
+  assert.match(source, /buildDatabaseProtocolURL\(\{/);
+  assert.match(source, /password:\s*temporaryPassword\.value/);
+  assert.match(source, /window\.location\.href = launchURL/);
+  assert.match(source, /if \(!databaseClient\.configured\)[\s\S]*openDatabaseClientSettings\(\)/);
+  assert.doesNotMatch(source, /复制 DBeaver 配置命令|copyDBeaverConfigurationCommand/);
+});
+
+test('quick database cards copy temporary connection credentials with an in-flight state', () => {
+  const source = readFileSync(new URL('../views/QuickConnectView.vue', import.meta.url), 'utf8');
+  assert.match(source, /@click="copyDatabaseConnectionInfo\(account\)"/);
+  assert.match(source, /:loading="databaseCredentialLoading\(account\)"/);
+  assert.match(source, /loadDatabaseConnectionResources\(\{/);
+  assert.match(source, /`连接地址：\$\{state\.host\}:\$\{state\.port\}`/);
+  assert.match(source, /`连接账户：\$\{state\.compactUser\}`/);
+  assert.match(source, /`连接临时密码：\$\{state\.password\}`/);
+  assert.match(source, /Redis 暂不支持复制临时连接凭据/);
+  assert.match(
+    source,
+    /\.database-card__actions\s*\{[\s\S]*grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\)/,
+  );
+});
+
+test('quick-connect client buttons redirect to settings only when local configuration is missing', () => {
+  const source = readFileSync(new URL('../views/QuickConnectView.vue', import.meta.url), 'utf8');
+  assert.doesNotMatch(source, /<el-button @click="openDatabaseClientSettings">/);
+  assert.match(source, /if \(!preferences\.hasSSHClient\)[\s\S]*openClientSettings\('ssh'\)/);
+  assert.match(source, /if \(!databaseClient\.configured\)[\s\S]*openClientSettings\('database'\)/);
+  assert.match(source, /query:\s*\{\s*tab,\s*return_to:\s*router\.currentRoute\.value\.fullPath\s*\}/);
+  assert.match(
+    source,
+    /:loading="databaseClientLoading\(account\)"[\s\S]*?@click="openDatabaseClient\(account\)"/,
+  );
+  const databaseClientLoadingIndex = source.indexOf(':loading="databaseClientLoading(account)"');
+  const databaseClientButtonStart = source.lastIndexOf('<el-button', databaseClientLoadingIndex);
+  const databaseClientButtonEnd = source.indexOf('</el-button>', databaseClientLoadingIndex);
+  const databaseClientButton = source.slice(databaseClientButtonStart, databaseClientButtonEnd);
+  assert.doesNotMatch(databaseClientButton, /type="primary"/);
+});
+
+test('only disabled database gateways redirect super admins to system settings', () => {
+  const source = readFileSync(new URL('../views/QuickConnectView.vue', import.meta.url), 'utf8');
+  assert.match(source, /function requireConnectableDatabaseGateway\(/);
+  assert.match(source, /if \(gateway\?\.enabled\) throw new Error\(message\)/);
+  assert.match(source, /permission\.canAccessMenu\('systemSettings'\)/);
+  assert.match(source, /path:\s*'\/system-settings'/);
+  assert.match(source, /请联系超级管理员完成系统配置/);
+  assert.match(source, /error instanceof DatabaseGatewayConfigurationRedirect/);
+  assert.doesNotMatch(source, /if \(!gateway\?\.enabled\) throw new Error/);
 });
 
 test('database and quick-connect loaders keep request snapshots isolated', () => {
@@ -313,9 +419,33 @@ test('database and quick-connect loaders keep request snapshots isolated', () =>
   const quickConnectSource = readFileSync(new URL('../views/QuickConnectView.vue', import.meta.url), 'utf8');
   assert.match(databaseViewSource, /const instanceID = selectedInstance\.value\.id[\s\S]*const page = accountPage\.value[\s\S]*const pageSize = accountPageSize\.value/);
   assert.match(databaseViewSource, /getDBAccounts\(instanceID, \{[\s\S]*page,[\s\S]*page_size: pageSize/);
+  assert.doesNotMatch(databaseViewSource, /savedCredentialTestRequests|savedCredentialTesting|savedCredentialTestResult/);
+  assert.doesNotMatch(databaseViewSource, /testSavedAccountConnection|已保存凭据/);
   assert.match(quickConnectSource, /const sshRequests = createLatestKeyedRequest/);
   assert.match(quickConnectSource, /sshRequests\.begin\(keyword/);
   assert.match(quickConnectSource, /sshLoading\.value = sshRequests\.isLoading\(\)/);
+});
+
+test('database TLS mode preserves hidden inputs and clears persisted CA only on submit', () => {
+  const source = readFileSync(new URL('../views/DatabaseView.vue', import.meta.url), 'utf8');
+  const changeStart = source.indexOf('async function onTLSModeChange');
+  const changeEnd = source.indexOf('function chooseTLSCAFile', changeStart);
+  const changeSource = source.slice(changeStart, changeEnd);
+  assert.match(changeSource, /上游数据库链路将不再使用 TLS/);
+  assert.doesNotMatch(changeSource, /客户端到 Jianmen 的 TLS 不受影响/);
+  assert.doesNotMatch(changeSource, /instanceForm\.(?:tlsCaPem|tlsServerName)\s*=\s*''/);
+  assert.doesNotMatch(changeSource, /instanceForm\.hasTlsCa\s*=\s*false/);
+
+  const submitStart = source.indexOf('async function submitInstance');
+  const submitEnd = source.indexOf('async function toggleInstance', submitStart);
+  const submitSource = source.slice(submitStart, submitEnd);
+  assert.match(submitSource, /instanceForm\.tlsMode === 'disable' && originalHasTLSCA\.value/);
+  assert.match(submitSource, /if \(clearStoredTLSCA\) payload\.clear_tls_ca = true/);
+});
+
+test('database account status switch has an account-specific accessible label', () => {
+  const source = readFileSync(new URL('../views/DatabaseView.vue', import.meta.url), 'utf8');
+  assert.match(source, /:aria-label="`\$\{row\.username \|\| '未命名账号'\}账号状态：\$\{row\.status === 'active' \? '启用' : '停用'\}`"/);
 });
 
 test('RDP quick connect is click-initiated and never hydrates SSH credentials', () => {
@@ -350,11 +480,11 @@ test('temporary password copy button exposes its in-flight state', () => {
   );
 });
 
-test('DBeaver handoff fails closed and clears temporary credentials when the dialog closes', () => {
+test('connection dialog clears temporary credentials when it closes', () => {
   const dialogSource = readFileSync(new URL('../components/ConnectionConfigDialog.vue', import.meta.url), 'utf8');
   assert.match(
     dialogSource,
-    /const dbeaverConfigurationCommand[\s\S]*\|\| !secureGatewayTLS\.value/,
+    /function openDatabaseClient\(\)[\s\S]*!connectionInfo\.value \|\| !temporaryPassword\.value \|\| !secureGatewayTLS\.value/,
   );
   assert.match(
     dialogSource,
@@ -435,6 +565,34 @@ test('PostgreSQL and MySQL connection orchestration keep session and password lo
       credential: { password: `${protocol}-password` },
     });
   }
+});
+
+test('database connection orchestration validates the gateway before issuing credentials', async () => {
+  const calls: string[] = [];
+  await assert.rejects(
+    loadDatabaseConnectionResources({
+      protocol: 'postgres',
+      targetID: 'database-account-1',
+      getGateway: async () => {
+        calls.push('gateway');
+        return { connectable: false };
+      },
+      validateGateway: () => {
+        calls.push('validate');
+        throw new Error('gateway unavailable');
+      },
+      createSession: async () => {
+        calls.push('session');
+        return {};
+      },
+      createPassword: async () => {
+        calls.push('password');
+        return {};
+      },
+    }),
+    /gateway unavailable/,
+  );
+  assert.deepEqual(calls, ['gateway', 'validate']);
 });
 
 function findPOSIXShell(): string | null {

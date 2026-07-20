@@ -14,6 +14,21 @@ func (s *HostManagementService) CreateHost(ctx context.Context, actor HostManage
 	if err := s.require(ctx, actor, []string{rbac.ActionHostCreate}, "", ""); err != nil {
 		return HostManagementHostView{}, err
 	}
+	host = normalizedManagementHostRecord(host)
+	if host.Protocol == "ssh" {
+		identity, err := s.identityCollector.Collect(ctx, host.Address, host.Port)
+		if err == nil {
+			err = validateHostIdentity(identity)
+		}
+		if err != nil {
+			clearHostIdentity(&host)
+			host.Status = "disabled"
+		} else {
+			applyHostIdentity(&host, identity)
+		}
+	} else {
+		clearHostIdentity(&host)
+	}
 	creatorID := actor.ID
 	if actor.SuperAdmin {
 		creatorID = ""
@@ -28,6 +43,36 @@ func (s *HostManagementService) CreateHost(ctx context.Context, actor HostManage
 func (s *HostManagementService) UpdateHost(ctx context.Context, actor HostManagementActor, hostID string, host HostManagementHostRecord) (HostManagementHostView, error) {
 	if err := s.require(ctx, actor, []string{rbac.ActionHostUpdate}, model.ResourceTypeHost, hostID); err != nil {
 		return HostManagementHostView{}, err
+	}
+	current, err := s.repository.Host(ctx, hostID)
+	if err != nil {
+		return HostManagementHostView{}, fmt.Errorf("load host before update: %w", err)
+	}
+	if strings.TrimSpace(host.Status) == "" {
+		host.Status = current.Status
+	}
+	host = normalizedManagementHostRecord(host)
+	endpointChanged := hostEndpointChanged(current, host)
+	if host.Protocol != "ssh" {
+		clearHostIdentity(&host)
+	} else if host.Status == "active" &&
+		(strings.EqualFold(strings.TrimSpace(current.Status), "disabled") || endpointChanged) {
+		identity, collectErr := s.identityCollector.Collect(ctx, host.Address, host.Port)
+		if collectErr == nil {
+			collectErr = validateHostIdentity(identity)
+		}
+		if collectErr != nil {
+			return HostManagementHostView{}, &HostIdentityRefreshError{
+				HostID: hostID, HostStatus: current.Status,
+				IdentityStatus: current.IdentityStatus, Cause: collectErr,
+			}
+		}
+		applyHostIdentity(&host, identity)
+	} else if endpointChanged {
+		clearHostIdentity(&host)
+	} else {
+		host.HostKeyFingerprint = current.HostKeyFingerprint
+		host.KnownHosts = current.KnownHosts
 	}
 	view, err := s.repository.UpdateHost(ctx, hostID, host)
 	if err != nil {

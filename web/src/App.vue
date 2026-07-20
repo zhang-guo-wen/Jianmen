@@ -45,7 +45,12 @@
       <el-container class="app-content">
         <el-header class="app-header">
           <div class="page-heading">
-            <h1>{{ pageTitle }}</h1>
+            <div class="page-title-row">
+              <h1>{{ pageTitle }}</h1>
+              <el-tag v-if="isExperimentalFeature" type="warning" effect="light" round>
+                {{ t("common.experimentalFeature") }}
+              </el-tag>
+            </div>
             <p>{{ pageDescription }}</p>
           </div>
         </el-header>
@@ -111,6 +116,14 @@ const pageTitle = computed(() =>
 );
 const pageDescription = computed(() =>
   metaText(route.meta.descriptionKey, "route.quickConnect.description"),
+);
+const experimentalRouteNames = new Set([
+  "platform-accounts",
+  "applications",
+  "containers",
+]);
+const isExperimentalFeature = computed(
+  () => typeof route.name === "string" && experimentalRouteNames.has(route.name),
 );
 
 watchEffect(() => {

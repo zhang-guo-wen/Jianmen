@@ -220,6 +220,11 @@ var migrations = []Migration{
 		Name:    "database instance upstream TLS default",
 		Run:     migrateDatabaseTLSDefault,
 	},
+	{
+		Version: sshHostIdentityMigrationVersion,
+		Name:    "SSH host identity",
+		Run:     migrateSSHHostIdentity,
+	},
 }
 
 func rejectDuplicateDatabaseAccounts(tx *gorm.DB) error {

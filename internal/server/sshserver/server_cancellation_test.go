@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"golang.org/x/crypto/ssh"
+	"golang.org/x/crypto/ssh/knownhosts"
 
 	"jianmen/internal/config"
 	"jianmen/internal/model"
@@ -177,7 +178,13 @@ func startIdleSSHTestTarget(t *testing.T) store.TargetConfig {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
-	serverConfig := newSSHTestServerConfig(t)
+	signer := newSSHTestSigner(t)
+	serverConfig := &ssh.ServerConfig{
+		PasswordCallback: func(ssh.ConnMetadata, []byte) (*ssh.Permissions, error) {
+			return nil, nil
+		},
+	}
+	serverConfig.AddHostKey(signer)
 	go func() {
 		defer close(done)
 		rawConn, acceptErr := listener.Accept()
@@ -208,7 +215,9 @@ func startIdleSSHTestTarget(t *testing.T) store.TargetConfig {
 	return store.TargetConfig{
 		ID: "account-1", HostID: "host-1", HostName: "target-host",
 		Host: "127.0.0.1", Port: port, Protocol: "ssh", Username: "target-user",
-		Password: "target-password", InsecureIgnoreHostKey: true,
+		Password:           "target-password",
+		HostKeyFingerprint: ssh.FingerprintSHA256(signer.PublicKey()),
+		KnownHosts:         knownhosts.Line([]string{listener.Addr().String()}, signer.PublicKey()),
 	}
 }
 

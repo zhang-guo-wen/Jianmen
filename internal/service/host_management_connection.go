@@ -17,14 +17,25 @@ func (s *HostManagementService) ResolveConnectionTest(ctx context.Context, actor
 	if input.ID == "" && input.HostID == "" && !actor.SuperAdmin {
 		return HostManagementTargetConfig{}, ErrHostAccessDenied
 	}
-	if err := s.require(ctx, actor, []string{rbac.ActionTargetCreate}, "", ""); err != nil {
-		return HostManagementTargetConfig{}, err
-	}
 
 	var resolved HostManagementTargetConfig
 	switch {
 	case input.ID != "":
-		if err := s.require(ctx, actor, []string{rbac.ActionTargetCreate}, model.ResourceTypeHostAccount, input.ID); err != nil {
+		actions := []string{rbac.ActionTargetCreate}
+		if connectionTestUsesStoredAccountOnly(input) {
+			target, err := s.repository.Target(ctx, input.ID)
+			if err != nil {
+				return HostManagementTargetConfig{}, fmt.Errorf("load host account for connection test authorization: %w", err)
+			}
+			actions = []string{rbac.ActionSessionConnect, rbac.ActionSFTPConnect, rbac.ActionTargetCreate}
+			if strings.EqualFold(target.Protocol, "rdp") {
+				actions = []string{rbac.ActionRDPConnect, rbac.ActionTargetCreate}
+			}
+		}
+		if err := s.require(ctx, actor, actions, "", ""); err != nil {
+			return HostManagementTargetConfig{}, err
+		}
+		if err := s.require(ctx, actor, actions, model.ResourceTypeHostAccount, input.ID); err != nil {
 			return HostManagementTargetConfig{}, err
 		}
 		stored, err := s.repository.TargetConfig(ctx, input.ID)
@@ -41,6 +52,9 @@ func (s *HostManagementService) ResolveConnectionTest(ctx context.Context, actor
 		if err := validatePersistedEndpoint(input, host, stored.HostID); err != nil {
 			return HostManagementTargetConfig{}, err
 		}
+		if strings.EqualFold(host.Protocol, "ssh") && strings.EqualFold(host.IdentityStatus, "unavailable") {
+			return HostManagementTargetConfig{}, &HostIdentityUnavailableError{HostID: stored.HostID}
+		}
 		if stored.Disabled || stored.Expired(time.Now().UTC()) || strings.EqualFold(host.Status, "disabled") {
 			return HostManagementTargetConfig{}, ErrHostTargetUnavailable
 		}
@@ -48,6 +62,9 @@ func (s *HostManagementService) ResolveConnectionTest(ctx context.Context, actor
 		applyPersistedEndpoint(&resolved, host, stored.HostID)
 
 	case input.HostID != "":
+		if err := s.require(ctx, actor, []string{rbac.ActionTargetCreate}, "", ""); err != nil {
+			return HostManagementTargetConfig{}, err
+		}
 		if err := s.require(ctx, actor, []string{rbac.ActionTargetCreate}, model.ResourceTypeHost, input.HostID); err != nil {
 			return HostManagementTargetConfig{}, err
 		}
@@ -58,6 +75,9 @@ func (s *HostManagementService) ResolveConnectionTest(ctx context.Context, actor
 		if err := validatePersistedEndpoint(input, host, input.HostID); err != nil {
 			return HostManagementTargetConfig{}, err
 		}
+		if strings.EqualFold(host.Protocol, "ssh") && strings.EqualFold(host.IdentityStatus, "unavailable") {
+			return HostManagementTargetConfig{}, &HostIdentityUnavailableError{HostID: input.HostID}
+		}
 		if strings.EqualFold(host.Status, "disabled") {
 			return HostManagementTargetConfig{}, ErrHostTargetUnavailable
 		}
@@ -67,6 +87,9 @@ func (s *HostManagementService) ResolveConnectionTest(ctx context.Context, actor
 		applyPersistedEndpoint(&resolved, host, input.HostID)
 
 	default:
+		if err := s.require(ctx, actor, []string{rbac.ActionTargetCreate}, "", ""); err != nil {
+			return HostManagementTargetConfig{}, err
+		}
 		resolved = targetConfigFromInput(input)
 	}
 
@@ -74,6 +97,14 @@ func (s *HostManagementService) ResolveConnectionTest(ctx context.Context, actor
 		return HostManagementTargetConfig{}, fmt.Errorf("%w: host, port, and username are required", ErrHostTargetInvalidInput)
 	}
 	return resolved, nil
+}
+
+func connectionTestUsesStoredAccountOnly(input config.Target) bool {
+	if strings.TrimSpace(input.ID) == "" {
+		return false
+	}
+	input.ID = ""
+	return input == (config.Target{})
 }
 
 func validatePersistedEndpoint(input config.Target, host HostManagementHostView, expectedHostID string) error {
@@ -98,6 +129,11 @@ func applyPersistedEndpoint(target *HostManagementTargetConfig, host HostManagem
 	target.Host = host.Address
 	target.Port = host.Port
 	target.Protocol = host.Protocol
+	target.InsecureIgnoreHostKey = false
+	target.HostKeyFingerprint = host.HostKeyFingerprint
+	target.KnownHosts = host.KnownHosts
+	target.KnownHostsPath = ""
+	target.HostKeyChangeHandler = host.HostKeyChangeHandler
 }
 
 func mergeStoredConnectionCredentials(stored HostManagementTargetConfig, input config.Target) HostManagementTargetConfig {
@@ -123,11 +159,6 @@ func mergeStoredConnectionCredentials(stored HostManagementTargetConfig, input c
 		stored.Passphrase = input.Passphrase
 	case input.Passphrase != "":
 		stored.Passphrase = input.Passphrase
-	}
-	if inputHostKeyConfigProvided(input) {
-		stored.InsecureIgnoreHostKey = input.InsecureIgnoreHostKey
-		stored.HostKeyFingerprint = input.HostKeyFingerprint
-		stored.KnownHostsPath = input.KnownHostsPath
 	}
 	if strings.TrimSpace(input.RDPSecurity) != "" {
 		stored.RDPSecurity = input.RDPSecurity
@@ -179,8 +210,4 @@ func (s *HostManagementService) loadConnectableTarget(ctx context.Context, targe
 
 func targetConfigFromInput(target config.Target) HostManagementTargetConfig {
 	return HostManagementTargetConfig{ID: target.ID, Name: target.Name, Host: target.Host, Port: target.Port, Protocol: target.Protocol, Username: target.Username, Domain: target.Domain, Password: target.Password, PrivateKeyPath: target.PrivateKeyPath, PrivateKeyPEM: target.PrivateKeyPEM, Passphrase: target.Passphrase, InsecureIgnoreHostKey: target.InsecureIgnoreHostKey, HostKeyFingerprint: target.HostKeyFingerprint, KnownHostsPath: target.KnownHostsPath, RDPSecurity: target.RDPSecurity, RDPIgnoreCertificate: target.RDPIgnoreCertificate, RDPCertFingerprints: target.RDPCertFingerprints, Disabled: target.Disabled, ExpiresAt: target.ExpiresAt, HostID: target.HostID}
-}
-
-func inputHostKeyConfigProvided(target config.Target) bool {
-	return target.InsecureIgnoreHostKey || target.HostKeyFingerprint != "" || target.KnownHostsPath != ""
 }

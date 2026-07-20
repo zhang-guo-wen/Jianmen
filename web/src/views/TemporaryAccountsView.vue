@@ -66,9 +66,9 @@
       </DataTableCard>
     </div>
 
-    <el-dialog v-model="temporaryDialogVisible" title="&#x4E34;&#x65F6;&#x6388;&#x6743;" width="640px" destroy-on-close>
+    <el-dialog v-model="temporaryDialogVisible" title="&#x4E34;&#x65F6;&#x6388;&#x6743;" class="crud-form-dialog" destroy-on-close>
       <el-alert title="&#x4E34;&#x65F6;&#x6388;&#x6743;&#x6700;&#x591A; 7 &#x5929;&#xFF1B;&#x5230;&#x671F;&#x540E;&#x81EA;&#x52A8;&#x505C;&#x7528;&#xFF0C;&#x4E0D;&#x80FD;&#x767B;&#x5F55;&#x7BA1;&#x7406;&#x7CFB;&#x7EDF;&#x3002;" type="info" show-icon :closable="false" />
-      <el-form label-width="100px" class="dialog-form">
+      <el-form label-position="top" class="dialog-form">
 
         <el-form-item label="&#x8D44;&#x6E90;&#x7C7B;&#x578B;" required>
           <el-radio-group v-model="temporaryForm.resource_type">
@@ -112,10 +112,10 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="aiDialogVisible" title="AI &#x6388;&#x6743;" width="640px" class="ai-result-dialog" destroy-on-close @closed="clearAIResult">
+    <el-dialog v-model="aiDialogVisible" title="AI &#x6388;&#x6743;" class="ai-result-dialog crud-form-dialog" destroy-on-close @closed="clearAIResult">
       <template v-if="!aiResult">
         <el-alert title="&#x6388;&#x6743; AI &#x4F7F;&#x7528;&#x5F53;&#x524D;&#x7528;&#x6237;&#x7684;&#x8D44;&#x6E90;&#x7684;&#x6743;&#x9650;&#xFF0C;&#x8BBF;&#x95EE;&#x4EE4;&#x724C;&#x9ED8;&#x8BA4; 48 &#x5C0F;&#x65F6;&#xFF0C;&#x5237;&#x65B0;&#x4EE4;&#x724C;&#x9ED8;&#x8BA4; 30 &#x5929;&#x3002;" type="warning" show-icon :closable="false" />
-        <el-form label-width="100px" class="dialog-form">
+        <el-form label-position="top" class="dialog-form">
 
           <el-form-item label="&#x6709;&#x6548;&#x671F;" required>
             <div class="expiry-row">
@@ -177,7 +177,7 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="extendDialogVisible" title="&#x5EF6;&#x957F;&#x6709;&#x6548;&#x671F;" width="460px">
+    <el-dialog v-model="extendDialogVisible" title="&#x5EF6;&#x957F;&#x6709;&#x6548;&#x671F;" class="crud-form-dialog">
       <el-date-picker v-model="extendExpiresAt" type="datetime" placeholder="&#x65B0;&#x7684;&#x5230;&#x671F;&#x65F6;&#x95F4;&#xFF08;&#x6700;&#x591A; 7 &#x5929;&#xFF09;" style="width: 100%" :disabled-date="disablePastDate" @change="handleExtendExpiryChange" />
       <el-alert v-if="extendExpiryError" :title="extendExpiryError" type="warning" show-icon :closable="false" class="expiry-warning" />
       <template #footer>

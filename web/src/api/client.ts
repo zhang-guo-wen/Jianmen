@@ -1,4 +1,4 @@
-﻿const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? '').replace(/\/$/, '');
+﻿const API_BASE_URL = ((typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_BASE_URL) || '').replace(/\/$/, '');
 
 import { withIdempotencyKey, type ProvisionRequest } from '@/utils/provisioningRequest';
 import type {
@@ -194,6 +194,7 @@ export interface TargetRecord {
   rdp_file_download?: boolean;
   rdp_drive_mapping?: boolean;
   status?: string;
+  disabled?: boolean;
   [key: string]: unknown;
   can_manage?: boolean;
 }
@@ -229,6 +230,8 @@ export interface TargetPayload {
   rdp_drive_mapping?: boolean;
 }
 
+export type TargetConnectionTestPayload = Partial<TargetPayload>;
+
 export interface WebRDPEffectivePolicy {
   clipboard_read: boolean;
   clipboard_write: boolean;
@@ -263,6 +266,9 @@ export interface HostView {
   protocol?: 'ssh' | 'rdp' | string;
   remark?: string;
   status?: string;
+  host_key_fingerprint?: string;
+  known_hosts?: string;
+  identity_status?: 'available' | 'unavailable' | 'not_applicable';
   account_count?: number;
   created_at?: string;
   updated_at?: string;
@@ -481,6 +487,8 @@ export interface DBConnectionRecord {
 
 export interface DBGatewayConfig {
   enabled: boolean;
+  connectable: boolean;
+  unavailable_reason: '' | 'gateway_disabled' | 'listener_disabled' | 'tls_identity_missing';
   mode: DatabaseGatewayMode;
   protocol: string;
   listen_addr: string;
@@ -551,7 +559,7 @@ export interface DBAccountPayload {
   password: string;
   group?: string;
   remark?: string;
-  expires_at?: string;
+  expires_at?: string | null;
 }
 
 export interface DBAccountTestPayload {
@@ -565,7 +573,7 @@ export interface DBAccountUpdatePayload {
   password?: string;
   group?: string;
   remark?: string;
-  expires_at?: string;
+  expires_at?: string | null;
   status?: string;
 }
 
@@ -1101,8 +1109,14 @@ export const apiClient = {
     request<void>(`/api/ai/tokens/${encodeURIComponent(id)}`, { method: 'DELETE' }),
 
   // hosts
-  getHosts: (params?: { page?: number; page_size?: number; q?: string }) =>
-    request<PageResponse<HostView>>(`/api/hosts${buildQS(params as Record<string, string | number | undefined>)}`),
+  getHosts: (params?: {
+    page?: number;
+    page_size?: number;
+    q?: string;
+    group?: string;
+    ungrouped?: boolean;
+  }) =>
+    request<PageResponse<HostView>>(`/api/hosts${buildQS(params)}`),
   createHost: (payload: HostPayload) =>
     request<HostView>('/api/hosts', {
       method: 'POST',
@@ -1119,8 +1133,8 @@ export const apiClient = {
     }),
 
   // host accounts
-  getHostAccounts: (id: string | number, params?: { page?: number; page_size?: number; q?: string }) =>
-    request<PageResponse<TargetRecord>>(`/api/hosts/${encodeURIComponent(String(id))}/accounts${buildQS(params as Record<string, string | number | undefined>)}`),
+  getHostAccounts: (id: string | number, params?: { page?: number; page_size?: number; q?: string; connectable?: boolean }) =>
+    request<PageResponse<TargetRecord>>(`/api/hosts/${encodeURIComponent(String(id))}/accounts${buildQS(params)}`),
 
   // targets
   getTargets: (params?: { page?: number; page_size?: number; q?: string; connectable?: boolean }) =>
@@ -1141,7 +1155,7 @@ export const apiClient = {
     request<void>(`/api/targets/${encodeURIComponent(String(id))}`, {
       method: 'DELETE'
     }),
-  testTargetConnection: (payload: TargetPayload) =>
+  testTargetConnection: (payload: TargetConnectionTestPayload) =>
     request<TestConnectionResult>('/api/targets/test-connection', {
       method: 'POST',
       body: JSON.stringify(payload)
@@ -1232,7 +1246,14 @@ export const apiClient = {
   getDBGateway: (protocol = 'mysql') =>
     request<DBGatewayConfig>(`/api/db/gateway?protocol=${encodeURIComponent(protocol)}`),
 
-  getDBInstances: (params?: { page?: number; page_size?: number; q?: string; connectable?: boolean }) =>
+  getDBInstances: (params?: {
+    page?: number;
+    page_size?: number;
+    q?: string;
+    group?: string;
+    ungrouped?: boolean;
+    connectable?: boolean;
+  }) =>
     request<PageResponse<DatabaseInstanceView>>(`/api/db/instances${buildQS(params)}`),
   createDBInstance: (payload: DBInstancePayload) =>
     request<DatabaseInstanceView>('/api/db/instances', {

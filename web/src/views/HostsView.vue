@@ -10,7 +10,19 @@
         search-placeholder="搜索名称、地址、分组..."
         @search="onHostSearch"
       >
+        <template #toolbar-filter>
+          <ResourceFilterBar
+            :model-value="hostGroupFilter"
+            :options="hostQuickGroupOptions"
+            :preview-limit="6"
+            :show-popular="false"
+            @update:model-value="setHostGroupFilter"
+          />
+        </template>
         <template #toolbar-extra>
+          <el-button :loading="hostsLoading" :icon="Refresh" @click="fetchHosts">
+            刷新
+          </el-button>
           <el-button v-if="permission.canDo('host:create')" type="primary" @click="openCreateHostDialog"
             >新增主机</el-button
           >
@@ -42,10 +54,14 @@
           <template #default="{ row }">
             <StatusSwitch
               v-if="row.can_manage && permission.canDo('host:update')"
-              :model-value="row.status === 'active'"
+              :model-value="hostEnabled(row)"
               :loading="statusUpdatingId === hostStatusKey(row)"
+              :aria-label="`${hostName(row)}主机状态`"
               @update:model-value="(val: boolean) => toggleHostStatus(row, val)"
             />
+            <el-tag v-else size="small" :type="hostEnabled(row) ? 'success' : 'info'">
+              {{ hostEnabled(row) ? '启用' : '停用' }}
+            </el-tag>
           </template>
         </el-table-column>
         <el-table-column label="备注" min-width="120" show-overflow-tooltip>
@@ -93,7 +109,6 @@
       <FormDialog
         v-model:visible="hostDialogVisible"
         :title="editingHostId ? '编辑主机' : '新增主机'"
-        width="680px"
         :loading="submittingHost"
         @submit="submitHost"
       >
@@ -101,10 +116,14 @@
           ref="hostFormRef"
           :model="hostForm"
           :rules="hostRules"
-          label-width="96px"
+          label-position="top"
         >
           <el-form-item label="协议" prop="protocol" required>
-            <el-radio-group v-model="hostForm.protocol" @change="handleHostProtocolChange">
+            <el-radio-group
+              v-model="hostForm.protocol"
+              class="auth-method-group"
+              @change="handleHostProtocolChange"
+            >
               <el-radio-button label="ssh">SSH</el-radio-button>
               <el-radio-button label="rdp">RDP</el-radio-button>
             </el-radio-group>
@@ -159,6 +178,26 @@
                   placeholder="备注信息"
                 />
               </el-form-item>
+              <template v-if="editingHostIdentity && hostForm.protocol === 'ssh'">
+                <el-form-item label="主机密钥指纹">
+                  <el-input
+                    :model-value="editingHostIdentity.host_key_fingerprint || ''"
+                    class="host-identity-value"
+                    readonly
+                    placeholder="尚未采集"
+                  />
+                </el-form-item>
+                <el-form-item label="known_hosts">
+                  <el-input
+                    :model-value="editingHostIdentity.known_hosts || ''"
+                    class="host-identity-value"
+                    type="textarea"
+                    :autosize="{ minRows: 2, maxRows: 4 }"
+                    readonly
+                    placeholder="尚未采集"
+                  />
+                </el-form-item>
+              </template>
             </el-collapse-item>
           </el-collapse>
         </el-form>
@@ -168,10 +207,12 @@
       <el-dialog
         v-model="accountsDialogVisible"
         :title="accountsDialogTitle"
+        class="accounts-dialog"
         destroy-on-close
         width="min(960px, calc(100vw - 32px))"
       >
         <DataTableCard
+          class="accounts-table"
           :data="accounts"
           :loading="accountsLoading"
           :total="accountTotal"
@@ -219,16 +260,27 @@
               >
             </template>
           </el-table-column>
-          <el-table-column label="启用状态" width="80" align="center">
+          <el-table-column
+            label="分组"
+            min-width="110"
+            show-overflow-tooltip
+          >
+            <template #default="{ row }">{{ row.group || "-" }}</template>
+          </el-table-column>
+          <el-table-column label="状态" width="80" align="center">
             <template #default="{ row }">
               <StatusSwitch
                 v-if="row.can_manage && permission.canDo('target:update')"
-                :model-value="!row.disabled"
+                :model-value="targetEnabled(row)"
                 :loading="statusUpdatingId === accountStatusKey(row)"
+                :aria-label="`${accountDisplayName(row)}账号状态`"
                 @update:model-value="
                   (val: boolean) => toggleAccountStatus(row, val)
                 "
               />
+              <el-tag v-else size="small" :type="targetEnabled(row) ? 'success' : 'info'">
+                {{ targetEnabled(row) ? '启用' : '停用' }}
+              </el-tag>
             </template>
           </el-table-column>
           <el-table-column
@@ -243,47 +295,33 @@
               targetRemark(row) || "-"
             }}</template>
           </el-table-column>
-          <el-table-column
-            label="账号名称"
-            min-width="130"
-            show-overflow-tooltip
-          >
-            <template #default="{ row }">{{
-              accountDisplayName(row)
-            }}</template>
-          </el-table-column>
-          <el-table-column
-            label="账号分组"
-            min-width="110"
-            show-overflow-tooltip
-          >
-            <template #default="{ row }">{{ row.group || "-" }}</template>
-          </el-table-column>
-          <el-table-column label="操作" width="200" fixed="right">
+          <el-table-column label="操作" width="200" fixed="right" align="right">
             <template #default="{ row }">
-               <el-button v-if="canConnectTarget(row)"
-                link
-                type="success"
-                size="small"
-                @click="openConnectionDialog(row)"
-                >连接</el-button
-              >
-              <el-button v-if="row.can_manage && permission.canDo('target:update')"
-                link
-                type="primary"
-                size="small"
-                @click="openEditAccountDialog(row)"
-                >编辑</el-button
-              >
-              <el-button v-if="row.can_manage && permission.canDo('target:delete')"
-                link
-                type="danger"
-                size="small"
-                :loading="deletingId === targetId(row)"
-                @click="confirmDeleteAccount(row)"
-              >
-                删除
-              </el-button>
+              <div class="table-actions">
+                <el-button v-if="canConnectTarget(row)"
+                  link
+                  type="success"
+                  size="small"
+                  @click="openConnectionDialog(row)"
+                  >连接</el-button
+                >
+                <el-button v-if="row.can_manage && permission.canDo('target:update')"
+                  link
+                  type="primary"
+                  size="small"
+                  @click="openEditAccountDialog(row)"
+                  >编辑</el-button
+                >
+                <el-button v-if="row.can_manage && permission.canDo('target:delete')"
+                  link
+                  type="danger"
+                  size="small"
+                  :loading="deletingId === targetId(row)"
+                  @click="confirmDeleteAccount(row)"
+                >
+                  删除
+                </el-button>
+              </div>
             </template>
           </el-table-column>
         </DataTableCard>
@@ -293,7 +331,6 @@
       <FormDialog
         v-model:visible="accountFormVisible"
         :title="editingAccountId ? '编辑账号' : '新增账号'"
-        width="680px"
         :loading="submittingAccount"
         @submit="submitAccount"
       >
@@ -302,7 +339,7 @@
           v-loading="accountDetailLoading"
           :model="accountForm"
           :rules="accountRules"
-          label-width="96px"
+          label-position="top"
         >
           <div class="form-section">
             <div class="form-section-title">登录与认证</div>
@@ -376,6 +413,22 @@
                 />
               </div>
             </el-form-item>
+            <el-form-item v-if="selectedHostProtocol === 'ssh'" label="连接测试">
+              <div class="test-connection-row">
+                <el-button :loading="testingConnection" @click="testConnection">测试连接</el-button>
+                <div v-if="accountTestResult" class="test-connection-result" aria-live="polite">
+                  <el-tag :type="accountTestResult.ok ? 'success' : 'danger'" size="small">
+                    {{ accountTestResult.ok ? '可达' : '不可达' }}
+                  </el-tag>
+                  <span v-if="accountTestResult.latency_ms !== undefined" class="test-connection-meta">
+                    延迟 {{ accountTestResult.latency_ms }}ms
+                  </span>
+                  <span v-if="accountTestResult.error" class="test-connection-error">
+                    {{ accountTestResult.error }}
+                  </span>
+                </div>
+              </div>
+            </el-form-item>
             <template v-if="selectedHostProtocol === 'rdp'">
               <el-form-item label="Windows 域">
                 <el-input
@@ -423,7 +476,6 @@
                   />
                   <el-button @click="setPermanentExpiry">永久</el-button>
                 </div>
-                <span class="expiry-text">{{ accountExpiryText }}</span>
               </div>
             </el-form-item>
             <template v-if="selectedHostProtocol === 'rdp'">
@@ -468,32 +520,8 @@
             </template>
           </div>
 
-          <el-form-item v-if="selectedHostProtocol === 'ssh'" label="连接测试">
-            <div class="test-connection-row">
-              <el-button :loading="testingConnection" @click="testConnection">测试连接</el-button>
-              <template v-if="accountTestResult">
-                <el-tag :type="accountTestResult.ok ? 'success' : 'danger'" size="small">
-                  {{ accountTestResult.ok ? '可达' : '不可达' }}
-                </el-tag>
-                <span v-if="accountTestResult.latency_ms !== undefined" class="test-connection-meta">
-                  延迟 {{ accountTestResult.latency_ms }}ms
-                </span>
-                <span v-if="accountTestResult.error" class="test-connection-error">
-                  {{ accountTestResult.error }}
-                </span>
-              </template>
-            </div>
-          </el-form-item>
-
           <el-collapse v-model="accountMorePanels" class="more-collapse">
             <el-collapse-item title="更多设置" name="more">
-              <el-form-item label="账号名称">
-                <el-input
-                  v-model="accountForm.name"
-                  placeholder="默认等于登录账号"
-                  @input="accountNameTouched = true"
-                />
-              </el-form-item>
               <el-form-item label="账号分组">
                 <el-select
                   v-model="accountForm.group"
@@ -510,50 +538,6 @@
                     :value="g"
                   />
                 </el-select>
-              </el-form-item>
-              <el-form-item v-if="selectedHostProtocol === 'ssh'" label="主机密钥" prop="host_key_mode">
-                <div class="host-key-field">
-                  <el-radio-group
-                    v-model="accountForm.host_key_mode"
-                    @change="handleHostKeyModeChange"
-                  >
-                    <el-radio-button label="fingerprint">指纹</el-radio-button>
-                    <el-radio-button label="known_hosts"
-                      >known_hosts</el-radio-button
-                    >
-                    <el-radio-button label="ignore">忽略校验</el-radio-button>
-                  </el-radio-group>
-                  <el-alert
-                    v-if="accountForm.host_key_mode === 'ignore'"
-                    class="host-key-alert"
-                    show-icon
-                    type="warning"
-                    :closable="false"
-                    title="仅在受控测试环境中使用，忽略校验会降低 SSH 主机身份保护。"
-                  />
-                </div>
-              </el-form-item>
-              <el-form-item
-                v-if="selectedHostProtocol === 'ssh' && accountForm.host_key_mode === 'fingerprint'"
-                label="主机指纹"
-                prop="host_key_fingerprint"
-              >
-                <el-input
-                  v-model="accountForm.host_key_fingerprint"
-                  placeholder="SHA256:..."
-                  clearable
-                />
-              </el-form-item>
-              <el-form-item
-                v-if="selectedHostProtocol === 'ssh' && accountForm.host_key_mode === 'known_hosts'"
-                label="known_hosts"
-                prop="known_hosts_path"
-              >
-                <el-input
-                  v-model="accountForm.known_hosts_path"
-                  placeholder="/home/app/.ssh/known_hosts"
-                  clearable
-                />
               </el-form-item>
               <el-form-item label="备注">
                 <el-input
@@ -576,22 +560,32 @@
         :source-account="connectionSourceAccount"
         :allow-ssh="permission.canDo('session:connect')"
         :allow-sftp="permission.canDo('sftp:connect')"
+        @host-identity-changed="handleHostIdentityChanged"
       />
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onMounted, reactive, ref, watch } from "vue";
+import {
+  computed,
+  nextTick,
+  onMounted,
+  reactive,
+  ref,
+  shallowRef,
+  watch,
+} from "vue";
 import {
   ElMessage,
   ElMessageBox,
   type FormInstance,
   type FormRules,
 } from "element-plus";
-import { ArrowDown } from "@element-plus/icons-vue";
+import { ArrowDown, Refresh } from "@element-plus/icons-vue";
 import { useRouter } from "vue-router";
 import DataTableCard from "@/components/DataTableCard.vue";
+import ResourceFilterBar from "@/components/ResourceFilterBar.vue";
 import FormDialog from "@/components/FormDialog.vue";
 import ConnectionConfigDialog from "@/components/ConnectionConfigDialog.vue";
 import StatusSwitch from "@/components/StatusSwitch.vue";
@@ -605,11 +599,16 @@ import {
 } from "@/api/client";
 import { useI18n } from "@/i18n";
 import { usePermissionStore } from "@/stores/permission";
+import {
+  parseSSHHostIdentityIssue,
+  sshHostIdentityNotice,
+} from "@/utils/sshHostIdentity";
 
 type AuthMethod = "password" | "private_key";
-type HostKeyMode = "ignore" | "fingerprint" | "known_hosts";
 type HostProtocol = "ssh" | "rdp";
 type RDPSecurity = "any" | "nla" | "tls" | "rdp";
+
+const UNGROUPED_HOST_FILTER = "__ungrouped__";
 
 interface HostForm {
   id: string;
@@ -623,7 +622,6 @@ interface HostForm {
 
 interface AccountForm {
   id: string;
-  name: string;
   group: string;
   remark: string;
   disabled: boolean;
@@ -634,10 +632,6 @@ interface AccountForm {
   password: string;
   private_key_pem: string;
   passphrase: string;
-  host_key_mode: HostKeyMode;
-  insecure_ignore_host_key: boolean;
-  host_key_fingerprint: string;
-  known_hosts_path: string;
   rdp_security: RDPSecurity;
   rdp_ignore_certificate: boolean;
   rdp_cert_fingerprints: string;
@@ -657,10 +651,12 @@ const router = useRouter();
 const hosts = ref<HostView[]>([]);
 const hostTotal = ref(0);
 const hostPage = ref(1);
-const hostPageSize = ref(50);
+const hostPageSize = ref(20);
 const keyword = ref("");
+const hostGroupFilter = shallowRef("all");
 const hostsLoading = ref(false);
 const hostError = ref("");
+let hostRequestSequence = 0;
 
 // ── Account list state ──
 const selectedHost = ref<HostView | null>(null);
@@ -670,6 +666,8 @@ const accountPage = ref(1);
 const accountPageSize = ref(50);
 const accountsLoading = ref(false);
 const accountError = ref("");
+const accountsConnectableOnly = shallowRef(false);
+let accountRequestSequence = 0;
 
 // ── Dialog visibility ──
 const hostDialogVisible = ref(false);
@@ -691,10 +689,10 @@ const accountTestResult = ref<{
 const deletingId = ref("");
 const statusUpdatingId = ref("");
 const hostNameTouched = ref(false);
-const accountNameTouched = ref(false);
 const hostMorePanels = ref<string[]>([]);
 const accountMorePanels = ref<string[]>([]);
 const accountDetailLoading = ref(false);
+let accountDetailRequestSequence = 0;
 
 // ── Connection state ──
 const selectedConnectionTarget = ref<TargetRecord | null>(null);
@@ -740,20 +738,44 @@ const privateKeyPEMPlaceholder = computed(() =>
 const hostGroupOptions = ref<string[]>([]);
 const accountGroupOptions = ref<string[]>([]);
 
+const hostQuickGroupOptions = computed(() => {
+  const groups = new Set<string>();
+  for (const group of hostGroupOptions.value) {
+    const normalized = group.trim();
+    if (normalized) groups.add(normalized);
+  }
+  for (const host of hosts.value) {
+    const normalized = stringFrom(host.group).trim();
+    if (normalized) groups.add(normalized);
+  }
+  return [
+    { label: "未分组", value: UNGROUPED_HOST_FILTER },
+    ...Array.from(groups)
+      .sort((a, b) => a.localeCompare(b, "zh-CN"))
+      .map((group) => ({ label: group, value: group })),
+  ];
+});
+const editingHostIdentity = computed(() => {
+  if (!editingHostId.value) return null;
+  return hosts.value.find((host) => hostId(host) === editingHostId.value) ?? null;
+});
+
 async function loadGroupOptions() {
-  try {
-    const resourceGroups = await apiClient.getResourceGroups({ group_type: 'resource' });
-    const accountGroups = await apiClient.getResourceGroups({ group_type: 'account' });
-    hostGroupOptions.value = (resourceGroups.items ?? []).map(g => g.name).filter(Boolean);
-    accountGroupOptions.value = (accountGroups.items ?? []).map(g => g.name).filter(Boolean);
-  } catch {
-    // 加载失败时保持空列表
+  const [resourceGroups, accountGroups] = await Promise.allSettled([
+    apiClient.getResourceGroups({ group_type: "resource", page_size: 200 }),
+    apiClient.getResourceGroups({ group_type: "account", page_size: 200 }),
+  ]);
+  if (resourceGroups.status === "fulfilled") {
+    hostGroupOptions.value = (resourceGroups.value.items ?? [])
+      .map((group) => group.name)
+      .filter(Boolean);
+  }
+  if (accountGroups.status === "fulfilled") {
+    accountGroupOptions.value = (accountGroups.value.items ?? [])
+      .map((group) => group.name)
+      .filter(Boolean);
   }
 }
-const accountExpiryText = computed(() => {
-  if (!accountForm.expires_at) return "永久有效";
-  return formatDateTime(accountForm.expires_at);
-});
 const selectedHostProtocol = computed<HostProtocol>(() =>
   selectedHost.value ? hostProtocol(selectedHost.value) : hostForm.protocol
 );
@@ -782,15 +804,8 @@ const accountRules: FormRules<AccountForm> = {
       trigger: "change",
     },
   ],
-  host_key_mode: [
-    { required: true, message: "请选择主机密钥校验方式", trigger: "change" },
-  ],
   password: [{ validator: validatePassword, trigger: "blur" }],
   private_key_pem: [{ validator: validatePrivateKeyPEM, trigger: "blur" }],
-  host_key_fingerprint: [
-    { validator: validateHostKeyFingerprint, trigger: "blur" },
-  ],
-  known_hosts_path: [{ validator: validateKnownHostsPath, trigger: "blur" }],
 };
 
 // ════════════════════════════════════════════════════════════════
@@ -840,12 +855,19 @@ function defaultPort(protocol: HostProtocol): number {
 }
 
 function canConnectHost(host: HostView): boolean {
+  if (!hostEnabled(host)) return false;
   return hostProtocol(host) === "rdp"
     ? permission.canDo("rdp:connect")
     : permission.canDo("session:connect");
 }
 
 function canConnectTarget(target: TargetRecord): boolean {
+  if (!targetEnabled(target)) return false;
+  const expiresAt = stringFrom(target.expires_at).trim();
+  if (expiresAt) {
+    const expiry = Date.parse(expiresAt);
+    if (!Number.isNaN(expiry) && expiry <= Date.now()) return false;
+  }
   return targetProtocol(target) === "rdp"
     ? permission.canDo("rdp:connect")
     : permission.canDo("session:connect");
@@ -865,6 +887,10 @@ function hostStatusKey(host: HostView): string {
   return `host:${hostId(host)}`;
 }
 
+function hostEnabled(host: HostView): boolean {
+  return stringFrom(host.status).trim().toLowerCase() !== "disabled";
+}
+
 function targetId(target: TargetRecord): string {
   return String(target.id ?? "");
 }
@@ -873,14 +899,20 @@ function accountStatusKey(target: TargetRecord): string {
   return `account:${targetId(target)}`;
 }
 
+function targetEnabled(target: TargetRecord): boolean {
+  const status = stringFrom(target.status).trim().toLowerCase();
+  if (status) return status === "active" || status === "enabled";
+  return target.disabled !== true;
+}
+
 function targetRemark(target: TargetRecord): string {
   return stringFrom(target.remark).trim();
 }
 
 function accountDisplayName(target: TargetRecord): string {
   return (
-    stringFrom(target.name).trim() ||
     stringFrom(target.username).trim() ||
+    stringFrom(target.name).trim() ||
     targetId(target) ||
     "-"
   );
@@ -1067,7 +1099,6 @@ function emptyHostForm(): HostForm {
 function emptyAccountForm(): AccountForm {
   return {
     id: "",
-    name: "",
     group: "",
     remark: "",
     disabled: false,
@@ -1078,10 +1109,6 @@ function emptyAccountForm(): AccountForm {
     password: "",
     private_key_pem: "",
     passphrase: "",
-    host_key_mode: "fingerprint",
-    insecure_ignore_host_key: false,
-    host_key_fingerprint: "",
-    known_hosts_path: "",
     rdp_security: "any",
     rdp_ignore_certificate: false,
     rdp_cert_fingerprints: "",
@@ -1106,12 +1133,6 @@ function resetAccountForm(values: AccountForm = emptyAccountForm()) {
   }
 }
 
-function syncDefaultAccountName() {
-  if (!accountNameTouched.value) {
-    accountForm.name = accountForm.username.trim();
-  }
-}
-
 function recordToHostForm(host: HostView): HostForm {
   const protocol = hostProtocol(host);
   return {
@@ -1126,13 +1147,11 @@ function recordToHostForm(host: HostView): HostForm {
 }
 
 function recordToAccountForm(target: TargetRecord): AccountForm {
-  const hostKeyMode = hostKeyModeForTarget(target);
   return {
     id: targetId(target),
-    name: stringFrom(target.name),
     group: stringFrom(target.group),
     remark: stringFrom(target.remark),
-    disabled: target.disabled === true,
+    disabled: !targetEnabled(target),
     expires_at: stringFrom(target.expires_at),
     username: stringFrom(target.username),
     domain: stringFrom(target.domain),
@@ -1140,10 +1159,6 @@ function recordToAccountForm(target: TargetRecord): AccountForm {
     password: "",
     private_key_pem: "",
     passphrase: "",
-    host_key_mode: hostKeyMode,
-    insecure_ignore_host_key: target.insecure_ignore_host_key === true,
-    host_key_fingerprint: stringFrom(target.host_key_fingerprint),
-    known_hosts_path: stringFrom(target.known_hosts_path),
     rdp_security: normalizeRDPSecurity(target.rdp_security),
     rdp_ignore_certificate: target.rdp_ignore_certificate === true,
     rdp_cert_fingerprints: stringFrom(target.rdp_cert_fingerprints),
@@ -1161,13 +1176,6 @@ function normalizeRDPSecurity(value: unknown): RDPSecurity {
   return security === "nla" || security === "tls" || security === "rdp"
     ? security
     : "any";
-}
-
-function hostKeyModeForTarget(target: TargetRecord): HostKeyMode {
-  if (target.insecure_ignore_host_key === true) return "ignore";
-  if (hasValue(target.host_key_fingerprint)) return "fingerprint";
-  if (hasValue(target.known_hosts_path)) return "known_hosts";
-  return "fingerprint";
 }
 
 // ════════════════════════════════════════════════════════════════
@@ -1204,14 +1212,13 @@ function hostPayloadFromRecord(host: HostView): HostPayload {
 function buildAccountPayload(): TargetPayload {
   const host = selectedHost.value;
   const username = accountForm.username.trim();
-  const hostKey = accountHostKeyPayload();
   const protocol = selectedHostProtocol.value;
   const payload: TargetPayload = {
     id:
       accountForm.id.trim() ||
       (host ? generatedAccountID(host, username) : sanitizeID(username)),
     host_id: host ? hostId(host) : undefined,
-    name: accountForm.name.trim() || username,
+    name: username,
     group: accountForm.group.trim() || undefined,
     remark: accountForm.remark.trim() || undefined,
     disabled: accountForm.disabled,
@@ -1225,9 +1232,9 @@ function buildAccountPayload(): TargetPayload {
     private_key_path: "",
     private_key_pem: "",
     passphrase: "",
-    insecure_ignore_host_key: hostKey.insecure_ignore_host_key,
-    host_key_fingerprint: hostKey.host_key_fingerprint,
-    known_hosts_path: hostKey.known_hosts_path,
+    insecure_ignore_host_key: false,
+    host_key_fingerprint: "",
+    known_hosts_path: "",
     rdp_security: protocol === "rdp" ? accountForm.rdp_security : "any",
     rdp_ignore_certificate:
       protocol === "rdp" && accountForm.rdp_ignore_certificate,
@@ -1258,15 +1265,12 @@ function targetStatusPayload(
   target: TargetRecord,
   disabled: boolean,
 ): TargetPayload {
-  const mode = hostKeyModeForTarget(target);
   const protocol = targetProtocol(target);
+  const username = stringFrom(target.username).trim();
   return {
     id: targetId(target),
     host_id: stringFrom(target.host_id).trim() || undefined,
-    name:
-      stringFrom(target.name).trim() ||
-      stringFrom(target.username).trim() ||
-      targetId(target),
+    name: username || targetId(target),
     group: stringFrom(target.group).trim() || undefined,
     remark: stringFrom(target.remark).trim() || undefined,
     disabled,
@@ -1274,19 +1278,15 @@ function targetStatusPayload(
     host: targetHostString(target),
     port: numberFrom(target.port, defaultPort(protocol)),
     protocol,
-    username: stringFrom(target.username).trim(),
+    username,
     domain: stringFrom(target.domain).trim(),
     password: "",
     private_key_path: "",
     private_key_pem: "",
     passphrase: "",
-    insecure_ignore_host_key: mode === "ignore",
-    host_key_fingerprint:
-      mode === "fingerprint"
-        ? stringFrom(target.host_key_fingerprint).trim()
-        : "",
-    known_hosts_path:
-      mode === "known_hosts" ? stringFrom(target.known_hosts_path).trim() : "",
+    insecure_ignore_host_key: false,
+    host_key_fingerprint: "",
+    known_hosts_path: "",
     rdp_security: normalizeRDPSecurity(target.rdp_security),
     rdp_ignore_certificate: target.rdp_ignore_certificate === true,
     rdp_cert_fingerprints: stringFrom(target.rdp_cert_fingerprints).trim(),
@@ -1296,24 +1296,6 @@ function targetStatusPayload(
     rdp_file_upload: target.rdp_file_upload === true,
     rdp_file_download: target.rdp_file_download === true,
     rdp_drive_mapping: target.rdp_drive_mapping === true,
-  };
-}
-
-function accountHostKeyPayload() {
-  if (selectedHostProtocol.value === "rdp") {
-    return {
-      insecure_ignore_host_key: false,
-      host_key_fingerprint: "",
-      known_hosts_path: "",
-    };
-  }
-  const mode = accountForm.host_key_mode;
-  return {
-    insecure_ignore_host_key: mode === "ignore",
-    host_key_fingerprint:
-      mode === "fingerprint" ? accountForm.host_key_fingerprint.trim() : "",
-    known_hosts_path:
-      mode === "known_hosts" ? accountForm.known_hosts_path.trim() : "",
   };
 }
 
@@ -1362,38 +1344,6 @@ function validatePrivateKeyPEM(
   callback();
 }
 
-function validateHostKeyFingerprint(
-  _rule: unknown,
-  value: unknown,
-  callback: (error?: Error) => void,
-) {
-  if (
-    selectedHostProtocol.value === "ssh"
-    && accountForm.host_key_mode === "fingerprint"
-    && !hasValue(value)
-  ) {
-    callback(new Error("请输入 SSH 主机密钥指纹"));
-    return;
-  }
-  callback();
-}
-
-function validateKnownHostsPath(
-  _rule: unknown,
-  value: unknown,
-  callback: (error?: Error) => void,
-) {
-  if (
-    selectedHostProtocol.value === "ssh"
-    && accountForm.host_key_mode === "known_hosts"
-    && !hasValue(value)
-  ) {
-    callback(new Error("请输入 known_hosts 文件路径"));
-    return;
-  }
-  callback();
-}
-
 function handleAuthMethodChange() {
   accountFormRef.value?.clearValidate([
     "password",
@@ -1413,20 +1363,6 @@ function handleRDPDrivePolicyChange(enabled: boolean | string | number) {
     accountForm.rdp_file_upload = false;
     accountForm.rdp_file_download = false;
   }
-}
-
-function handleHostKeyModeChange() {
-  accountForm.insecure_ignore_host_key = accountForm.host_key_mode === "ignore";
-  if (accountForm.host_key_mode !== "fingerprint") {
-    accountForm.host_key_fingerprint = "";
-  }
-  if (accountForm.host_key_mode !== "known_hosts") {
-    accountForm.known_hosts_path = "";
-  }
-  accountFormRef.value?.clearValidate([
-    "host_key_fingerprint",
-    "known_hosts_path",
-  ]);
 }
 
 function triggerPrivateKeyFileSelect() {
@@ -1461,52 +1397,93 @@ async function handlePrivateKeyFileChange(event: Event) {
 // ════════════════════════════════════════════════════════════════
 
 async function fetchHosts() {
+  const requestSequence = ++hostRequestSequence;
+  const groupFilter = hostGroupFilter.value;
+  const query = keyword.value.trim() || undefined;
   hostsLoading.value = true;
   hostError.value = "";
   try {
-    const res: PageResponse<HostView> = await apiClient.getHosts({
+    const response = await apiClient.getHosts({
       page: hostPage.value,
       page_size: hostPageSize.value,
-      q: keyword.value.trim() || undefined,
+      q: query,
+      group:
+        groupFilter !== "all" && groupFilter !== UNGROUPED_HOST_FILTER
+          ? groupFilter
+          : undefined,
+      ungrouped:
+        groupFilter === UNGROUPED_HOST_FILTER ? true : undefined,
     });
-    hosts.value = res.items ?? [];
-    hostTotal.value = res.total ?? 0;
+    if (requestSequence !== hostRequestSequence) return;
+    hosts.value = response.items ?? [];
+    hostTotal.value = response.total ?? 0;
   } catch (err) {
+    if (requestSequence !== hostRequestSequence) return;
     hostError.value =
       err instanceof Error ? err.message : t("hosts.error.loadList");
   } finally {
-    hostsLoading.value = false;
+    if (requestSequence === hostRequestSequence) {
+      hostsLoading.value = false;
+    }
+  }
+}
+
+function refreshHostsFromFirstPage() {
+  const pageChanged = hostPage.value !== 1;
+  hostPage.value = 1;
+  if (!pageChanged) {
+    void fetchHosts();
   }
 }
 
 function onHostSearch(q: string) {
   keyword.value = q;
-  hostPage.value = 1;
-  fetchHosts();
+  refreshHostsFromFirstPage();
+}
+
+function setHostGroupFilter(value: string) {
+  if (hostGroupFilter.value === value) return;
+  hostGroupFilter.value = value;
+  refreshHostsFromFirstPage();
 }
 
 async function loadSelectedHostAccounts() {
   const host = selectedHost.value;
   const id = host ? hostId(host) : "";
   if (!id) return;
+  const requestSequence = ++accountRequestSequence;
+  const requestedPage = accountPage.value;
+  const requestedPageSize = accountPageSize.value;
+  const requestedConnectableOnly = accountsConnectableOnly.value;
+  const isCurrentRequest = () =>
+    requestSequence === accountRequestSequence
+    && (selectedHost.value ? hostId(selectedHost.value) : "") === id
+    && accountPage.value === requestedPage
+    && accountPageSize.value === requestedPageSize
+    && accountsConnectableOnly.value === requestedConnectableOnly;
   accountsLoading.value = true;
   accountError.value = "";
   try {
     const res: PageResponse<TargetRecord> = await apiClient.getHostAccounts(
       id,
       {
-        page: accountPage.value,
-        page_size: accountPageSize.value,
+        page: requestedPage,
+        page_size: requestedPageSize,
+        connectable: requestedConnectableOnly || undefined,
       },
     );
+    if (!isCurrentRequest()) return;
     accounts.value = res.items ?? [];
     accountTotal.value = res.total ?? 0;
   } catch (err) {
+    if (!isCurrentRequest()) return;
     accounts.value = [];
     accountError.value =
       err instanceof Error ? err.message : t("hosts.error.loadList");
   } finally {
-    accountsLoading.value = false;
+    if (isCurrentRequest()) {
+      accountsLoading.value = false;
+    }
   }
 }
 
@@ -1557,11 +1534,15 @@ async function submitHost() {
       await apiClient.updateHost(id, payload);
       ElMessage.success("主机已更新");
     } else {
-      await apiClient.createHost(payload);
-      ElMessage.success("主机已创建");
+      const created = await apiClient.createHost(payload);
+      if (created.status === "disabled" && created.identity_status === "unavailable") {
+        ElMessage.warning("主机已保存但 SSH 身份采集失败，当前保持停用；请确认地址可达后重新启用");
+      } else {
+        ElMessage.success("主机已创建");
+      }
     }
     hostDialogVisible.value = false;
-    await fetchHosts();
+    await Promise.all([fetchHosts(), loadGroupOptions()]);
   } catch (err) {
     ElMessage.error(err instanceof Error ? err.message : t("hosts.error.save"));
   } finally {
@@ -1575,15 +1556,16 @@ async function toggleHostStatus(host: HostView, active: boolean) {
   const newStatus = active ? "active" : "disabled";
   statusUpdatingId.value = hostStatusKey(host);
   try {
-    // HostPayload doesn't have a status field, so we pass it as an extra property
     await apiClient.updateHost(id, {
       ...hostPayloadFromRecord(host),
       status: newStatus,
-    } as HostPayload & { status: string });
+    });
     ElMessage.success(active ? "主机已启用" : "主机已禁用");
     await fetchHosts();
   } catch (err) {
-    ElMessage.error(err instanceof Error ? err.message : t("hosts.error.save"));
+    if (!(await showSSHHostIdentityIssue(err))) {
+      ElMessage.error(err instanceof Error ? err.message : t("hosts.error.save"));
+    }
   } finally {
     statusUpdatingId.value = "";
   }
@@ -1624,6 +1606,7 @@ async function confirmDeleteHost(host: HostView) {
 // ════════════════════════════════════════════════════════════════
 
 async function openAccountsDialog(host: HostView) {
+  accountsConnectableOnly.value = false;
   setSelectedHost(host);
   accountPage.value = 1;
   accountsDialogVisible.value = true;
@@ -1631,9 +1614,10 @@ async function openAccountsDialog(host: HostView) {
 }
 
 async function openCreateAccountDialog(host: HostView) {
+  accountDetailRequestSequence += 1;
+  accountDetailLoading.value = false;
   setSelectedHost(host);
   editingAccountId.value = null;
-  accountNameTouched.value = false;
   accountMorePanels.value = ["more"];
   accountTestResult.value = null;
   resetAccountForm();
@@ -1648,24 +1632,33 @@ async function openEditAccountDialog(target: TargetRecord) {
     ElMessage.error(t("hosts.error.missingId"));
     return;
   }
+  const requestSequence = ++accountDetailRequestSequence;
+  const isCurrentRequest = () =>
+    requestSequence === accountDetailRequestSequence
+    && editingAccountId.value === id
+    && accountFormVisible.value;
   editingAccountId.value = id;
-  accountNameTouched.value = true;
   accountMorePanels.value = [];
   accountTestResult.value = null;
   resetAccountForm(recordToAccountForm(target));
   accountFormVisible.value = true;
   accountDetailLoading.value = true;
   await nextTick();
+  if (!isCurrentRequest()) return;
   accountFormRef.value?.clearValidate();
   try {
     const detail = await apiClient.getTarget(id);
+    if (!isCurrentRequest()) return;
     resetAccountForm(recordToAccountForm(detail));
   } catch (err) {
+    if (!isCurrentRequest()) return;
     ElMessage.error(
       err instanceof Error ? err.message : t("hosts.error.loadDetail"),
     );
   } finally {
-    accountDetailLoading.value = false;
+    if (isCurrentRequest()) {
+      accountDetailLoading.value = false;
+    }
   }
 }
 
@@ -1691,7 +1684,7 @@ async function submitAccount() {
       ElMessage.success("账号已创建");
     }
     accountFormVisible.value = false;
-    await Promise.all([fetchHosts(), loadSelectedHostAccounts()]);
+    await Promise.all([fetchHosts(), loadSelectedHostAccounts(), loadGroupOptions()]);
   } catch (err) {
     ElMessage.error(err instanceof Error ? err.message : t("hosts.error.save"));
   } finally {
@@ -1730,13 +1723,43 @@ async function testConnection() {
       error: result.ok ? undefined : (result.error || result.message || "连接失败"),
     };
   } catch (err) {
+    const identityIssueHandled = await showSSHHostIdentityIssue(err);
     accountTestResult.value = {
       ok: false,
-      error: err instanceof Error ? err.message : "连接测试失败",
+      error: identityIssueHandled
+        ? "SSH 主机身份校验未通过"
+        : err instanceof Error
+          ? err.message
+          : "连接测试失败",
     };
   } finally {
     testingConnection.value = false;
   }
+}
+
+async function showSSHHostIdentityIssue(error: unknown): Promise<boolean> {
+  const issue = parseSSHHostIdentityIssue(error);
+  if (!issue) return false;
+  const notice = sshHostIdentityNotice(issue);
+  await ElMessageBox.alert(notice.message, notice.title, {
+    type: "warning",
+    confirmButtonText: "知道了",
+  }).catch(() => undefined);
+  await fetchHosts();
+  const selectedID = selectedHost.value ? hostId(selectedHost.value) : "";
+  if (selectedID) {
+    const refreshed = hosts.value.find((host) => hostId(host) === selectedID);
+    if (refreshed) selectedHost.value = refreshed;
+  }
+  return true;
+}
+
+async function handleHostIdentityChanged() {
+  await fetchHosts();
+  const selectedID = selectedHost.value ? hostId(selectedHost.value) : "";
+  if (!selectedID) return;
+  const refreshed = hosts.value.find((host) => hostId(host) === selectedID);
+  if (refreshed) selectedHost.value = refreshed;
 }
 
 async function toggleAccountStatus(target: TargetRecord, enabled: boolean) {
@@ -1811,17 +1834,63 @@ function openConnectionDialog(target: TargetRecord) {
 
 /** 从主机直接打开连接，单账号时直接弹连接窗，多账号时打开账号管理 */
 async function handleHostConnect(host: HostView) {
+  if (!hostEnabled(host)) {
+    ElMessage.warning("该主机已停用，请重新启用并完成身份采集后再连接");
+    return;
+  }
+  accountsConnectableOnly.value = false;
   setSelectedHost(host);
   accountPage.value = 1;
-  await loadSelectedHostAccounts();
-  const count = accounts.value.length;
-  if (count === 0) {
-    ElMessage.warning('该主机下无可用账号，请先新增账号');
-  } else if (count === 1) {
-    openConnectionDialog(accounts.value[0]);
-  } else {
+  const id = hostId(host);
+  const requestSequence = ++accountRequestSequence;
+  accountsLoading.value = true;
+  accountError.value = "";
+  try {
+    const response = await apiClient.getHostAccounts(id, {
+      page: 1,
+      page_size: 2,
+      connectable: true,
+    });
+    if (
+      requestSequence !== accountRequestSequence
+      || (selectedHost.value ? hostId(selectedHost.value) : "") !== id
+    ) return;
+    const previewAccounts = response.items ?? [];
+    const count = response.total ?? previewAccounts.length;
+    if (count === 0) {
+      ElMessage.warning('该主机下无可用账号，请先新增账号');
+      return;
+    }
+    if (count === 1) {
+      const onlyAccount = previewAccounts[0];
+      if (!onlyAccount) {
+        ElMessage.error('可连接账号返回异常，请刷新后重试');
+        return;
+      }
+      openConnectionDialog(onlyAccount);
+      return;
+    }
+    accountsConnectableOnly.value = true;
+    accounts.value = [];
+    accountTotal.value = count;
     accountsDialogVisible.value = true;
-    ElMessage.info('请从账号列表中选择要连接的账号');
+    await loadSelectedHostAccounts();
+    if (
+      accountsDialogVisible.value
+      && accountsConnectableOnly.value
+      && (selectedHost.value ? hostId(selectedHost.value) : "") === id
+    ) {
+      ElMessage.info('请从账号列表中选择要连接的账号');
+    }
+  } catch (error) {
+    if (requestSequence !== accountRequestSequence) return;
+    accountError.value = error instanceof Error ? error.message : "可连接账号加载失败";
+    ElMessage.error(accountError.value);
+    return;
+  } finally {
+    if (requestSequence === accountRequestSequence) {
+      accountsLoading.value = false;
+    }
   }
 }
 
@@ -1850,13 +1919,6 @@ function handleHostSessions(host: HostView) {
 }
 
 watch(
-  () => accountForm.username,
-  () => {
-    syncDefaultAccountName();
-  },
-);
-
-watch(
   () =>
     [
       hostForm.address,
@@ -1870,14 +1932,27 @@ watch(
   },
 );
 
-watch([hostPage, hostPageSize], () => fetchHosts());
+watch([hostPage, hostPageSize], () => {
+  void fetchHosts();
+});
 watch([accountPage, accountPageSize], () => {
-  if (accountsDialogVisible.value) loadSelectedHostAccounts();
+  if (accountsDialogVisible.value) void loadSelectedHostAccounts();
+});
+watch(accountsDialogVisible, (visible) => {
+  if (visible) return;
+  accountRequestSequence += 1;
+  accountsLoading.value = false;
+  accountsConnectableOnly.value = false;
+});
+watch(accountFormVisible, (visible) => {
+  if (visible) return;
+  accountDetailRequestSequence += 1;
+  accountDetailLoading.value = false;
 });
 
 onMounted(() => {
-  fetchHosts();
-  loadGroupOptions();
+  void fetchHosts();
+  void loadGroupOptions();
 });
 </script>
 
@@ -1903,6 +1978,18 @@ onMounted(() => {
   padding: 0 2px;
 }
 
+.accounts-table {
+  height: min(64dvh, 620px);
+  min-height: 360px;
+}
+
+.test-connection-result {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
 /* Form layout */
 .form-section {
   margin-bottom: 16px;
@@ -1917,6 +2004,10 @@ onMounted(() => {
   font-size: 13px;
   font-weight: 700;
   line-height: 1;
+}
+
+.host-key-note {
+  margin-bottom: 18px;
 }
 
 /* Collapse */
@@ -2015,27 +2106,10 @@ onMounted(() => {
   display: none;
 }
 
-/* Host key verification */
-.host-key-field {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  width: 100%;
-}
-.host-key-field :deep(.el-radio-group) {
-  display: flex;
-  width: 100%;
-}
-.host-key-field :deep(.el-radio-button) {
-  flex: 1;
-}
-.host-key-field :deep(.el-radio-button__inner) {
-  width: 100%;
-  padding-inline: 8px;
-  white-space: nowrap;
-}
-.host-key-alert {
-  line-height: 1.4;
+.host-identity-value :deep(input),
+.host-identity-value :deep(textarea) {
+  font-family: var(--font-family-mono, "Cascadia Code", Consolas, monospace);
+  font-size: 12px;
 }
 
 /* Expiry */
@@ -2055,12 +2129,6 @@ onMounted(() => {
 .expiry-picker-row :deep(.el-date-editor.el-input) {
   width: 100%;
 }
-.expiry-text {
-  color: var(--color-text-secondary);
-  font-size: 12px;
-  line-height: 1.4;
-}
-
 /* Connection */
 /* 弹窗底部按钮间距 */
 :deep(.el-dialog__footer .el-button + .el-button) {
@@ -2076,12 +2144,12 @@ onMounted(() => {
   margin-left: 0;
 }
 
-/* FormDialog body min-height for account edit */
-:deep(.form-dialog-body) {
-  min-height: 280px;
-}
-
 @media (max-width: 720px) {
+  .accounts-table {
+    height: min(66dvh, 520px);
+    min-height: 280px;
+  }
+
   .rdp-policy-grid {
     grid-template-columns: 1fr;
   }

@@ -7,13 +7,12 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"net"
 	"os"
 	"strings"
 
 	"golang.org/x/crypto/ssh"
-	"golang.org/x/crypto/ssh/knownhosts"
 
+	"jianmen/internal/sshhost"
 	"jianmen/internal/util"
 )
 
@@ -54,29 +53,12 @@ func ClientConfigForTarget(target TargetConfig) (*ssh.ClientConfig, error) {
 }
 
 func hostKeyCallback(target TargetConfig) (ssh.HostKeyCallback, error) {
-	if target.InsecureIgnoreHostKey {
-		return ssh.InsecureIgnoreHostKey(), nil
-	}
-	if target.HostKeyFingerprint != "" {
-		expected := normalizeFingerprint(target.HostKeyFingerprint)
-		return func(_ string, _ net.Addr, key ssh.PublicKey) error {
-			actual := normalizeFingerprint(ssh.FingerprintSHA256(key))
-			if actual != expected {
-				return fmt.Errorf("host key fingerprint mismatch: expected %s, got %s", expected, actual)
-			}
-			return nil
-		}, nil
-	}
-	if target.KnownHostsPath != "" {
-		return knownhosts.New(target.KnownHostsPath)
-	}
-	return nil, errors.New("host key verification is required: set host_key_fingerprint, known_hosts_path, or insecure_ignore_host_key")
-}
-
-func normalizeFingerprint(fp string) string {
-	fp = strings.TrimSpace(fp)
-	fp = strings.TrimPrefix(fp, "SHA256:")
-	return fp
+	return sshhost.VerificationCallback(
+		target.HostID,
+		target.HostKeyFingerprint,
+		target.KnownHosts,
+		target.HostKeyChangeHandler,
+	)
 }
 
 func loadSigner(keyPath, keyPEM, passphrase string) (ssh.Signer, error) {

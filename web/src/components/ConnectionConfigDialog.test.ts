@@ -96,11 +96,55 @@ test('ConnectionConfigDialog props use Vue-normalized casing', () => {
   assert.equal(/:\s*allowSFTP/.test(componentSource), false);
 });
 
+test('database connection dialog hides TLS metadata and setup controls while keeping direct client launch', () => {
+  const componentPath = new URL('../components/ConnectionConfigDialog.vue', import.meta.url);
+  const componentSource = readFileSync(componentPath, 'utf8');
+
+  for (const removedText of [
+    'TLS 验证名称',
+    '证书 SHA-256 指纹',
+    '数据库名称',
+    '请先下载 CA 并保存为下方命令引用的文件名',
+    '下载 CA',
+    '复制 CA',
+    '复制指纹',
+    '本地客户端设置',
+    '复制 DBeaver 配置命令',
+  ]) {
+    assert.equal(componentSource.includes(removedText), false, `unexpected control: ${removedText}`);
+  }
+
+  for (const removedSymbol of [
+    'buildDBeaverConfigurationCommand',
+    'dbeaverConfigurationCommand',
+    'copyDBeaverConfigurationCommand',
+    'downloadGatewayCA',
+    'databaseGatewayCAFileName',
+    'gateway-tls-panel',
+    'gateway-tls-hint',
+    'gateway-tls-actions',
+  ]) {
+    assert.equal(componentSource.includes(removedSymbol), false, `unexpected symbol: ${removedSymbol}`);
+  }
+  assert.match(componentSource, /data-testid="database-local-client"/);
+  assert.match(componentSource, /useDatabaseClientStore/);
+  assert.match(componentSource, /buildDatabaseProtocolURL/);
+  assert.match(componentSource, /function openDatabaseClientSettings\(\)/);
+
+  const planStart = componentSource.indexOf('const databaseConnectionPlan');
+  const planEnd = componentSource.indexOf('const databaseCommandUnavailableReason', planStart);
+  const planSource = componentSource.slice(planStart, planEnd);
+  assert.ok(planStart >= 0 && planEnd > planStart);
+  assert.match(planSource, /tls_server_name:\s*tlsServerName/);
+  assert.match(planSource, /tls_ca_pem:\s*tlsCAPEM/);
+  assert.match(planSource, /tls_cert_sha256:\s*tlsCertSHA256/);
+  assert.doesNotMatch(planSource, /databaseName/);
+});
+
 test('ConnectionConfigDialog call sites keep kebab-case attrs', () => {
   const callers = [
     { file: new URL('../views/DatabaseView.vue', import.meta.url), expected: [':allow-ssh='] },
     { file: new URL('../views/HostsView.vue', import.meta.url), expected: [':allow-ssh=', ':allow-sftp='] },
-    { file: new URL('../views/QuickConnectView.vue', import.meta.url), expected: [':allow-ssh=', ':allow-sftp='] },
   ];
 
   for (const caller of callers) {

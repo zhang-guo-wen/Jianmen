@@ -28,7 +28,6 @@ type databaseProvisioningService interface {
 
 type provisionDatabaseAccountPayload struct {
 	AdminAccountID string            `json:"admin_account_id"`
-	Host           string            `json:"host"`
 	Grants         []service.DBGrant `json:"grants"`
 	Group          string            `json:"group"`
 	Remark         string            `json:"remark"`
@@ -87,8 +86,7 @@ func (s *Server) handleDBProvisionAccount(w http.ResponseWriter, r *http.Request
 		return
 	}
 	payload.AdminAccountID = strings.TrimSpace(payload.AdminAccountID)
-	payload.Host = strings.TrimSpace(payload.Host)
-	if payload.AdminAccountID == "" || payload.Host == "" {
+	if payload.AdminAccountID == "" {
 		s.writeErrorText(w, r, http.StatusBadRequest, "invalid database provisioning request")
 		return
 	}
@@ -116,8 +114,8 @@ func (s *Server) handleDBProvisionAccount(w http.ResponseWriter, r *http.Request
 		r.Context(),
 		service.ProvisionDatabaseAccountRequest{
 			InstanceID: instanceID, AdminAccountID: payload.AdminAccountID,
-			Host: payload.Host, Grants: payload.Grants,
-			Group: payload.Group, Remark: payload.Remark, ExpiresAt: payload.ExpiresAt,
+			Grants: payload.Grants,
+			Group:  payload.Group, Remark: payload.Remark, ExpiresAt: payload.ExpiresAt,
 			Actor:          databaseProvisioningActorFromRequest(r),
 			IdempotencyKey: idempotencyKey,
 		},

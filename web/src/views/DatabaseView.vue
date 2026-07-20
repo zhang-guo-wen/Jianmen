@@ -9,13 +9,18 @@
       search-placeholder="搜索实例名称、地址、协议…"
       @search="onInstanceSearch"
     >
-      <template #toolbar-extra>
+      <template #toolbar-filter>
         <ResourceFilterBar
           :model-value="instanceFilter"
           :options="instanceQuickGroupOptions"
           :preview-limit="filterPreviewLimit"
           @update:model-value="setInstanceFilter"
         />
+      </template>
+      <template #toolbar-extra>
+        <el-button :loading="instancesLoading" :icon="Refresh" @click="loadInstances">
+          刷新
+        </el-button>
         <el-button v-if="permission.canDo('dbproxy:create')" type="primary" @click="openCreateInstance">新增实例</el-button>
       </template>
       <el-table-column prop="name" label="名称" min-width="130" show-overflow-tooltip />
@@ -25,14 +30,6 @@
       <el-table-column label="协议" width="100" align="center">
         <template #default="{ row }">
           <el-tag class="protocol-tag" size="small" :type="row.protocol === 'mysql' ? 'success' : row.protocol === 'redis' ? 'danger' : 'primary'" effect="light">{{ row.protocol === 'mysql' ? 'MySQL' : row.protocol === 'redis' ? 'Redis' : 'PostgreSQL' }}</el-tag>
-        </template>
-      </el-table-column>
-      <el-table-column label="上游 TLS" min-width="145">
-        <template #default="{ row }">
-          <div class="tls-summary">
-            <el-tag size="small" :type="tlsModeTagType(row.tls_mode)">{{ tlsModeLabel(row.tls_mode) }}</el-tag>
-            <span v-if="row.has_tls_ca" class="tls-ca-status">CA 已配置</span>
-          </div>
         </template>
       </el-table-column>
       <el-table-column label="账号管理" min-width="110" align="center">
@@ -70,11 +67,8 @@
     </DataTableCard>
 
     <!-- 创建/编辑实例弹窗 -->
-    <FormDialog v-model:visible="showInstanceDialog" :title="editingInstance ? '编辑实例' : '新增实例'" width="640px" :loading="submitting" @submit="submitInstance">
+    <FormDialog v-model:visible="showInstanceDialog" :title="editingInstance ? '编辑实例' : '新增实例'" :loading="submitting" @submit="submitInstance">
       <el-form :model="instanceForm" class="database-resource-form" label-position="top">
-        <el-form-item label="名称" required>
-          <el-input v-model="instanceForm.name" />
-        </el-form-item>
         <el-form-item label="协议" required>
           <el-select v-model="instanceForm.protocol" @change="onProtocolChange">
             <el-option label="MySQL" value="mysql" />
@@ -83,13 +77,24 @@
           </el-select>
         </el-form-item>
         <el-form-item label="上游地址" required>
-          <el-input v-model="instanceForm.address" placeholder="host:port 或 IP" />
+          <el-input
+            v-model="instanceForm.address"
+            placeholder="host:port 或 IP"
+            @input="onInstanceAddressInput"
+          />
         </el-form-item>
         <el-form-item label="端口">
           <el-input-number v-model="instanceForm.port" :min="1" :max="65535" />
         </el-form-item>
         <el-collapse v-model="instanceMorePanels">
           <el-collapse-item name="more" title="更多设置">
+            <el-form-item label="名称">
+              <el-input
+                v-model="instanceForm.name"
+                placeholder="默认 = 上游地址"
+                @input="instanceNameTouched = true"
+              />
+            </el-form-item>
             <el-form-item label="分组">
               <el-select
                 v-model="instanceForm.group"
@@ -110,63 +115,58 @@
             <el-form-item label="备注">
               <el-input v-model="instanceForm.remark" type="textarea" />
             </el-form-item>
-            <el-form-item label="上游 TLS">
+            <el-form-item label="启用 TLS">
               <el-select v-model="instanceForm.tlsMode" @change="onTLSModeChange">
-                <el-option label="不使用 TLS（默认）" value="disable" />
+                <el-option label="不启用（默认）" value="disable" />
                 <el-option label="验证证书和主机名（最安全）" value="verify-full" />
                 <el-option label="仅验证证书" value="verify-ca" />
               </el-select>
               <div class="tls-mode-help">{{ tlsModeDescription(instanceForm.tlsMode) }}</div>
-              <el-alert
-                v-if="instanceForm.tlsMode === 'disable'"
-                class="tls-risk-alert"
-                type="warning"
-                :closable="false"
-                show-icon
-              >
-                当前只关闭 Jianmen 到实际数据库的 TLS，客户端到 Jianmen 的 TLS 不受影响。请确保上游链路位于可信网络。
-              </el-alert>
             </el-form-item>
-            <el-form-item label="TLS 主机名">
-              <el-input
-                v-model="instanceForm.tlsServerName"
-                :disabled="instanceForm.tlsMode !== 'verify-full'"
-                placeholder="verify-full 时用于主机名校验，可留空使用地址"
-              />
-            </el-form-item>
-            <el-form-item label="TLS CA">
-              <div class="tls-ca-editor">
-                <div class="tls-ca-actions">
-                  <el-button size="small" :disabled="instanceForm.tlsMode === 'disable'" @click="chooseTLSCAFile">选择 PEM 文件</el-button>
-                  <input
-                    ref="tlsCAFileInput"
-                    class="tls-ca-file-input"
-                    type="file"
-                    accept=".pem,.crt,.cer,text/plain"
-                    @change="handleTLSCAFileChange"
-                  />
-                  <span v-if="instanceForm.tlsCaPem" class="tls-ca-status">已填写新的 CA</span>
-                  <span v-else-if="instanceForm.hasTlsCa" class="tls-ca-status">已配置（内容不回显）</span>
-                  <el-button
-                    v-if="instanceForm.hasTlsCa || instanceForm.tlsCaPem"
-                    link
-                    type="danger"
-                    size="small"
-                    @click="clearTLSCA"
-                  >
-                    清除 CA
-                  </el-button>
-                </div>
+            <template v-if="instanceForm.tlsMode !== 'disable'">
+              <el-form-item label="主机名">
                 <el-input
-                  v-model="instanceForm.tlsCaPem"
-                  type="textarea"
-                  :rows="4"
-                  :disabled="instanceForm.tlsMode === 'disable'"
-                  placeholder="也可以手动粘贴 PEM 内容；编辑时留空会保留已有 CA"
-                  @input="onTLSCAPEMInput"
+                  v-model="instanceForm.tlsServerName"
+                  :disabled="instanceForm.tlsMode !== 'verify-full'"
+                  placeholder="根据上游地址自动推导，也可手动修改"
                 />
-              </div>
-            </el-form-item>
+              </el-form-item>
+              <el-form-item label="自定义 CA">
+                <div class="tls-ca-editor">
+                  <div class="tls-ca-help">
+                    只有使用企业私有 CA、自签名证书时，才需要提供自定义 CA。
+                  </div>
+                  <div class="tls-ca-actions">
+                    <el-button size="small" @click="chooseTLSCAFile">选择 PEM 文件</el-button>
+                    <input
+                      ref="tlsCAFileInput"
+                      class="tls-ca-file-input"
+                      type="file"
+                      accept=".pem,.crt,.cer,text/plain"
+                      @change="handleTLSCAFileChange"
+                    />
+                    <span v-if="instanceForm.tlsCaPem" class="tls-ca-status">已填写新的 CA</span>
+                    <span v-else-if="instanceForm.hasTlsCa" class="tls-ca-status">已配置（内容不回显）</span>
+                    <el-button
+                      v-if="instanceForm.hasTlsCa || instanceForm.tlsCaPem"
+                      link
+                      type="danger"
+                      size="small"
+                      @click="clearTLSCA"
+                    >
+                      清除 CA
+                    </el-button>
+                  </div>
+                  <el-input
+                    v-model="instanceForm.tlsCaPem"
+                    type="textarea"
+                    :rows="4"
+                    placeholder="也可以手动粘贴 PEM 内容；编辑时留空会保留已有 CA"
+                    @input="onTLSCAPEMInput"
+                  />
+                </div>
+              </el-form-item>
+            </template>
           </el-collapse-item>
         </el-collapse>
       </el-form>
@@ -199,7 +199,7 @@
             自动创建
           </el-button>
         </template>
-        <el-table-column label="连接账号" min-width="130">
+        <el-table-column label="登录账号" min-width="130">
           <template #default="{ row }">{{ row.username || '-' }}</template>
         </el-table-column>
         <el-table-column label="分组" width="110">
@@ -211,8 +211,12 @@
               v-if="row.can_manage && permission.canDo('dbproxy:update')"
               :model-value="row.status === 'active'"
               :loading="statusUpdatingId === row.id"
+              :aria-label="`${row.username || '未命名账号'}账号状态：${row.status === 'active' ? '启用' : '停用'}`"
               @update:model-value="(val: boolean) => toggleAccountStatus(row, val)"
             />
+            <el-tag v-else size="small" :type="row.status === 'active' ? 'success' : 'info'">
+              {{ row.status === 'active' ? '启用' : '停用' }}
+            </el-tag>
           </template>
         </el-table-column>
         <el-table-column label="过期时间" min-width="140">
@@ -233,169 +237,29 @@
       </DataTableCard>
     </el-dialog>
 
-    <!-- 创建/编辑账号弹窗 -->
-    <FormDialog
+    <DatabaseAccountFormDialog
       v-model:visible="accountDialogVisible"
-      :title="editingAccount ? '编辑账号' : '新增账号'"
-      width="620px"
+      v-model:username="accountForm.username"
+      v-model:password="accountForm.password"
+      v-model:group="accountForm.group"
+      v-model:remark="accountForm.remark"
+      v-model:expires-at="accountForm.expiresAt"
+      v-model:more-panels="accountMorePanels"
+      :editing="Boolean(editingAccount)"
+      :protocol="selectedInstance?.protocol"
       :loading="accountSubmitting"
+      :testing="accountFormTesting"
+      :test-result="accountFormTestResult"
+      :group-options="accountGroupOptions"
+      @test="testAccountFormConnection"
       @submit="submitAccount"
-    >
-      <el-form :model="accountForm" class="database-resource-form" label-position="top">
-        <el-form-item :label="selectedInstance?.protocol === 'redis' ? '目标用户名' : '目标用户名'" :required="selectedInstance?.protocol !== 'redis'">
-          <el-input v-model="accountForm.username" :placeholder="selectedInstance?.protocol === 'redis' ? 'Redis ACL 用户名（可选，留空则使用单一密码认证）' : '数据库登录用户名'" />
-        </el-form-item>
-        <el-form-item label="目标密码">
-          <el-input v-model="accountForm.password" type="password" show-password
-            :placeholder="editingAccount ? '留空则保留原密码' : '数据库登录密码'" />
-        </el-form-item>
-        <el-form-item label="连接测试">
-          <div class="test-connection-row">
-            <el-button :loading="accountFormTesting" @click="testAccountFormConnection">测试连接</el-button>
-            <template v-if="accountFormTestResult">
-              <el-tag :type="accountFormTestResult.ok ? 'success' : 'danger'" size="small">
-                {{ accountFormTestResult.ok ? '可达' : '不可达' }}
-              </el-tag>
-              <span v-if="accountFormTestResult.latency_ms !== undefined" class="test-connection-meta">
-                延迟 {{ accountFormTestResult.latency_ms }}ms
-              </span>
-              <span v-if="accountFormTestResult.error" class="test-connection-error">
-                {{ accountFormTestResult.error }}
-              </span>
-            </template>
-          </div>
-          <div v-if="editingAccount" class="test-connection-hint">
-            点击测试连接时必须重新输入数据库密码；保存时密码留空仍会保留原密码。
-          </div>
-          <div v-if="editingAccount" class="test-connection-row saved-credential-row">
-            <span class="test-connection-meta">已保存凭据：</span>
-            <el-tag v-if="savedCredentialTesting" type="info" size="small">测试中…</el-tag>
-            <template v-else-if="savedCredentialTestResult">
-              <el-tag :type="savedCredentialTestResult.ok ? 'success' : 'danger'" size="small">
-                {{ savedCredentialTestResult.ok ? '可达' : '不可达' }}
-              </el-tag>
-              <span v-if="savedCredentialTestResult.latency_ms !== undefined" class="test-connection-meta">
-                延迟 {{ savedCredentialTestResult.latency_ms }}ms
-              </span>
-              <span v-if="savedCredentialTestResult.error" class="test-connection-error">
-                {{ savedCredentialTestResult.error }}
-              </span>
-            </template>
-          </div>
-        </el-form-item>
-        <el-form-item label="有效期">
-          <div class="expiry-presets">
-            <el-button v-for="opt in expiryOptions" :key="opt.label" size="small"
-              :type="expiryPreset === opt.label ? 'primary' : ''"
-              @click="setExpiry(opt)">{{ opt.label }}</el-button>
-          </div>
-          <el-date-picker v-model="accountForm.expiresAt" type="datetime"
-            class="expiry-picker" placeholder="自定义时间" />
-        </el-form-item>
-        <el-collapse v-model="accountMorePanels">
-          <el-collapse-item name="more" title="更多设置">
-            <el-form-item label="分组">
-              <el-select
-                v-model="accountForm.group"
-                allow-create
-                clearable
-                default-first-option
-                filterable
-                placeholder="选择或输入分组"
-              >
-                <el-option
-                  v-for="g in accountGroupOptions"
-                  :key="g"
-                  :label="g"
-                  :value="g"
-                />
-              </el-select>
-            </el-form-item>
-            <el-form-item label="备注">
-              <el-input v-model="accountForm.remark" type="textarea" placeholder="备注信息" />
-            </el-form-item>
-          </el-collapse-item>
-        </el-collapse>
-      </el-form>
-    </FormDialog>
+    />
 
-    <!-- 自动创建账号弹窗 -->
-    <el-dialog
+    <DatabaseAutoProvisionDialog
       v-model="autoProvisionVisible"
-      title="自动创建 MySQL 账号"
-      width="min(720px, calc(100vw - 32px))"
-      destroy-on-close
-      @closed="resetAutoProvision"
-    >
-      <template v-if="provisionStep === 1">
-        <el-form class="database-resource-form" label-position="top">
-          <el-form-item label="管理员凭据">
-            <el-select v-model="provision.adminAccountId" placeholder="选择用于创建账号的凭据" style="width:100%">
-              <el-option
-                v-for="acc in adminAccounts"
-                :key="acc.id"
-                :label="`${acc.username} (${acc.unique_name})`"
-                :value="acc.id"
-              />
-            </el-select>
-          </el-form-item>
-          <el-form-item label="主机">
-            <el-input v-model="provision.host" placeholder="例如 10.0.0.8（必填，禁止通配符）" />
-          </el-form-item>
-        </el-form>
-      </template>
-
-      <template v-else-if="provisionStep === 2">
-        <div v-if="loadingDatabases" class="provision-loading">
-          <el-icon class="is-loading" :size="24"><Loading /></el-icon>
-          <p>正在获取数据库列表…</p>
-        </div>
-        <template v-else>
-          <div class="grant-actions">
-            <el-button size="small" @click="setAllDBGrants('readwrite')">全部读写</el-button>
-            <el-button size="small" @click="setAllDBGrants('read')">全部只读</el-button>
-            <el-button size="small" @click="setAllDBGrants('')">全部无</el-button>
-          </div>
-          <el-table :data="dbGrants" size="small" max-height="340">
-            <el-table-column prop="database" label="数据库" />
-            <el-table-column label="权限" width="180" align="center">
-              <template #default="{ row }">
-                <el-radio-group v-model="row.privilege" size="small">
-                  <el-radio-button value="">无</el-radio-button>
-                  <el-radio-button value="read">读</el-radio-button>
-                  <el-radio-button value="readwrite">读写</el-radio-button>
-                </el-radio-group>
-              </template>
-            </el-table-column>
-          </el-table>
-        </template>
-      </template>
-
-      <template v-else-if="provisionStep === 3">
-        <div v-if="provisioning" class="provision-loading">
-          <el-icon class="is-loading" :size="28"><Loading /></el-icon>
-          <p>正在目标 MySQL 上创建账号…</p>
-        </div>
-        <template v-else-if="provisionResult">
-          <el-alert type="success" title="账号创建成功" :closable="false" show-icon />
-          <el-descriptions class="provision-result" :column="1" border size="small">
-            <el-descriptions-item label="资源标识">
-              <code>{{ provisionResult.account.resource_id }}</code>
-            </el-descriptions-item>
-            <el-descriptions-item label="主机">{{ provision.host }}</el-descriptions-item>
-          </el-descriptions>
-        </template>
-        <el-alert v-else-if="provisionError" type="error" :title="provisionError" :closable="false" show-icon />
-      </template>
-
-      <template #footer>
-        <el-button @click="autoProvisionVisible = false">取消</el-button>
-        <el-button v-if="provisionStep === 1" type="primary" :disabled="!provision.adminAccountId || !provision.host.trim()" @click="goProvisionStep2">下一步</el-button>
-        <el-button v-if="provisionStep === 2" :disabled="loadingDatabases" @click="provisionStep = 1">上一步</el-button>
-        <el-button v-if="provisionStep === 2" type="primary" :disabled="provisioning || loadingDatabases" @click="doProvision">创建</el-button>
-        <el-button v-if="provisionStep === 3 && !provisioning" type="primary" @click="closeProvisionAndRefresh">完成</el-button>
-      </template>
-    </el-dialog>
+      :instance="selectedInstance"
+      @created="handleProvisionedAccountCreated"
+    />
 
     <ConnectionConfigDialog
       v-model="connectDialogVisible"
@@ -413,16 +277,17 @@
 <script setup lang="ts">
 import { ref, reactive, watch, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { ArrowDown, Loading } from '@element-plus/icons-vue'
+import { ArrowDown, Refresh } from '@element-plus/icons-vue'
 import { useRouter } from 'vue-router'
 import DataTableCard from '@/components/DataTableCard.vue'
 import FormDialog from '@/components/FormDialog.vue'
 import ConnectionConfigDialog from '@/components/ConnectionConfigDialog.vue'
+import DatabaseAccountFormDialog from '@/components/database/DatabaseAccountFormDialog.vue'
+import DatabaseAutoProvisionDialog from '@/components/database/DatabaseAutoProvisionDialog.vue'
 import ResourceFilterBar from '@/components/ResourceFilterBar.vue'
 import StatusSwitch from '@/components/StatusSwitch.vue'
 import * as api from '@/api/client'
 import { usePermissionStore } from '@/stores/permission'
-import { createProvisionIdempotencySession, type ProvisionRequest } from '@/utils/provisioningRequest'
 import { createLatestKeyedRequest } from '@/utils/connectionRequestState'
 import {
   buildDatabaseUpstreamTLSPayload,
@@ -474,6 +339,8 @@ const accountGroupOptions = ref<string[]>([])
 const tlsCAFileInput = ref<HTMLInputElement | null>(null)
 const previousTLSMode = ref<api.DatabaseTLSMode>(DEFAULT_DATABASE_UPSTREAM_TLS_MODE)
 const originalHasTLSCA = ref(false)
+const lastAutoTLSHostName = ref('')
+const instanceNameTouched = ref(false)
 const instanceForm = reactive<InstanceForm>({
   name: '',
   protocol: 'mysql',
@@ -506,14 +373,6 @@ const accountMorePanels = ref<string[]>([])
 const accountSubmitting = ref(false)
 const statusUpdatingId = ref('')
 
-const expiryPreset = ref('')
-const expiryOptions = [
-  { label: '8小时', hours: 8 },
-  { label: '7天', hours: 7 * 24 },
-  { label: '1年', hours: 365 * 24 },
-  { label: '永久', hours: -1 },
-]
-
 const accountForm = reactive<AccountFormState>({
   username: '',
   password: '',
@@ -529,8 +388,6 @@ const connectTarget = ref<api.DBAccountRecord | null>(null)
 // ── Gateway config ──
 const accountFormTesting = ref(false)
 const accountFormTestResult = ref<{ ok: boolean; error?: string; latency_ms?: number } | null>(null)
-const savedCredentialTesting = ref(false)
-const savedCredentialTestResult = ref<{ ok: boolean; error?: string; latency_ms?: number } | null>(null)
 
 function instanceUsageCount(instance: api.DatabaseInstanceView): number {
   return instanceUsageCounts.value[String(instance.name || '').trim().toLowerCase()] || 0
@@ -610,22 +467,6 @@ function normalizeTLSMode(value: unknown): api.DatabaseTLSMode {
   return normalizeDatabaseUpstreamTLSMode(value)
 }
 
-function tlsModeLabel(value: unknown): string {
-  switch (normalizeTLSMode(value)) {
-    case 'disable': return '未加密'
-    case 'verify-ca': return '验证 CA'
-    default: return '验证 CA + 主机名'
-  }
-}
-
-function tlsModeTagType(value: unknown): 'success' | 'warning' | 'danger' {
-  switch (normalizeTLSMode(value)) {
-    case 'disable': return 'warning'
-    case 'verify-ca': return 'warning'
-    default: return 'success'
-  }
-}
-
 function tlsModeDescription(value: api.DatabaseTLSMode): string {
   switch (value) {
     case 'disable': return 'Jianmen 到实际数据库不加密；适用于未启用 TLS 的数据库或可信内网。'
@@ -683,9 +524,11 @@ function onInstanceSearch(keyword: string) {
 
 function openCreateInstance() {
   editingInstance.value = null
+  instanceNameTouched.value = false
   instanceMorePanels.value = ['more']
   originalHasTLSCA.value = false
   previousTLSMode.value = DEFAULT_DATABASE_UPSTREAM_TLS_MODE
+  lastAutoTLSHostName.value = ''
   Object.assign(instanceForm, {
     name: '',
     protocol: 'mysql',
@@ -702,12 +545,41 @@ function openCreateInstance() {
   showInstanceDialog.value = true
 }
 
+function inferTLSHostName(address: string): string {
+  const value = address.trim()
+  if (!value) return ''
+  if (value.startsWith('[')) {
+    const bracketEnd = value.indexOf(']')
+    return bracketEnd > 1 ? value.slice(1, bracketEnd) : ''
+  }
+  if ((value.match(/:/g) || []).length > 1) return value
+  const separator = value.lastIndexOf(':')
+  if (separator > 0 && /^\d+$/.test(value.slice(separator + 1))) {
+    return value.slice(0, separator)
+  }
+  return value
+}
+
+function onInstanceAddressInput(address: string) {
+  const inferred = inferTLSHostName(address)
+  if (
+    !instanceForm.tlsServerName.trim()
+    || instanceForm.tlsServerName === lastAutoTLSHostName.value
+  ) {
+    instanceForm.tlsServerName = inferred
+  }
+  lastAutoTLSHostName.value = inferred
+  syncDefaultInstanceName()
+}
+
 function editInstance(inst: api.DatabaseInstanceView) {
   editingInstance.value = inst
+  instanceNameTouched.value = true
   instanceMorePanels.value = []
   const tlsMode = normalizeTLSMode(inst.tls_mode)
   originalHasTLSCA.value = Boolean(inst.has_tls_ca)
   previousTLSMode.value = tlsMode
+  lastAutoTLSHostName.value = inferTLSHostName(inst.address || '')
   Object.assign(instanceForm, {
     name: inst.name || '',
     protocol: inst.protocol || 'mysql',
@@ -734,21 +606,28 @@ function onProtocolChange(protocol: string) {
   }
 }
 
+function defaultInstanceName(): string {
+  return instanceForm.address.trim()
+}
+
+function syncDefaultInstanceName() {
+  if (!instanceNameTouched.value) {
+    instanceForm.name = defaultInstanceName()
+  }
+}
+
 async function onTLSModeChange(mode: api.DatabaseTLSMode) {
   if (mode !== 'disable') {
-    if (mode !== 'verify-full') {
-      instanceForm.tlsServerName = ''
-    }
-    if (previousTLSMode.value === 'disable') {
-      instanceForm.hasTlsCa = originalHasTLSCA.value
-      instanceForm.clearTlsCa = false
+    if (mode === 'verify-full' && !instanceForm.tlsServerName.trim()) {
+      instanceForm.tlsServerName = inferTLSHostName(instanceForm.address)
+      lastAutoTLSHostName.value = instanceForm.tlsServerName
     }
     previousTLSMode.value = mode
     return
   }
   try {
     await ElMessageBox.confirm(
-      '关闭后，Jianmen 到实际数据库的凭据和数据将通过明文链路传输；客户端到 Jianmen 的 TLS 不受影响。确定关闭吗？',
+      '关闭后，上游数据库链路将不再使用 TLS。确定关闭吗？',
       '关闭上游 TLS',
       { type: 'warning', confirmButtonText: '确认关闭', cancelButtonText: '取消' }
     )
@@ -756,10 +635,6 @@ async function onTLSModeChange(mode: api.DatabaseTLSMode) {
     instanceForm.tlsMode = previousTLSMode.value
     return
   }
-  instanceForm.tlsCaPem = ''
-  instanceForm.tlsServerName = ''
-  instanceForm.hasTlsCa = false
-  instanceForm.clearTlsCa = editingInstance.value ? originalHasTLSCA.value : false
   previousTLSMode.value = mode
 }
 
@@ -800,8 +675,8 @@ function clearTLSCA() {
 }
 
 async function submitInstance() {
-  if (!instanceForm.name.trim() || !instanceForm.address.trim()) {
-    ElMessage.warning('请填写必填字段')
+  if (!instanceForm.address.trim()) {
+    ElMessage.warning('请填写上游地址')
     return
   }
   submitting.value = true
@@ -812,14 +687,21 @@ async function submitInstance() {
         instanceForm.tlsServerName,
         instanceForm.tlsCaPem,
       ),
-      name: instanceForm.name.trim(),
+      name: instanceForm.name.trim() || defaultInstanceName(),
       protocol: instanceForm.protocol,
       address: instanceForm.address.trim(),
       port: instanceForm.port,
       group: instanceForm.group.trim() || undefined,
       remark: instanceForm.remark.trim() || undefined
     }
-    if (instanceForm.clearTlsCa) payload.clear_tls_ca = true
+    const clearStoredTLSCA = Boolean(
+      editingInstance.value
+      && (
+        instanceForm.clearTlsCa
+        || (instanceForm.tlsMode === 'disable' && originalHasTLSCA.value)
+      )
+    )
+    if (clearStoredTLSCA) payload.clear_tls_ca = true
     if (editingInstance.value?.id) {
       await api.apiClient.updateDBInstance(editingInstance.value.id, payload)
       ElMessage.success('数据库实例已更新')
@@ -921,9 +803,7 @@ function openCreateAccount() {
   accountForm.group = ''
   accountForm.remark = ''
   accountForm.expiresAt = null
-  expiryPreset.value = ''
   accountFormTestResult.value = null
-  savedCredentialTestResult.value = null
   accountDialogVisible.value = true
 }
 
@@ -935,35 +815,8 @@ function editAccount(row: api.DBAccountRecord) {
   accountForm.group = row.group || ''
   accountForm.remark = row.remark || ''
   accountForm.expiresAt = row.expires_at ? new Date(row.expires_at) : null
-  expiryPreset.value = ''
   accountFormTestResult.value = null
-  savedCredentialTestResult.value = null
   accountDialogVisible.value = true
-  testSavedAccountConnection(row)
-}
-
-function setExpiry(opt: { label: string; hours: number }) {
-  expiryPreset.value = opt.label
-  if (opt.hours === -1) {
-    accountForm.expiresAt = null
-  } else {
-    accountForm.expiresAt = new Date(Date.now() + opt.hours * 3600 * 1000)
-  }
-}
-
-async function testSavedAccountConnection(row: api.DBAccountRecord) {
-  const id = row.id || row.resource_id || ''
-  if (!id) return
-  savedCredentialTesting.value = true
-  savedCredentialTestResult.value = null
-  try {
-    const result = await api.apiClient.testDBConnection(String(id))
-    savedCredentialTestResult.value = { ok: result.ok, latency_ms: result.latency_ms, error: result.ok ? undefined : (result.error || '连接失败') }
-  } catch (err) {
-    savedCredentialTestResult.value = { ok: false, error: err instanceof Error ? err.message : '连接失败' }
-  } finally {
-    savedCredentialTesting.value = false
-  }
 }
 
 async function testAccountFormConnection() {
@@ -973,7 +826,7 @@ async function testAccountFormConnection() {
   }
   const isRedis = selectedInstance.value.protocol === 'redis'
   if (!isRedis && !accountForm.username.trim()) {
-    ElMessage.warning('请输入目标用户名')
+    ElMessage.warning('请输入登录账号')
     return
   }
   if (!accountForm.password) {
@@ -998,7 +851,7 @@ async function testAccountFormConnection() {
 
 async function submitAccount() {
   const isRedis = selectedInstance.value?.protocol === 'redis'
-  if (!isRedis && !accountForm.username.trim()) { ElMessage.warning('请输入目标用户名'); return }
+  if (!isRedis && !accountForm.username.trim()) { ElMessage.warning('请输入登录账号'); return }
   accountSubmitting.value = true
   try {
     if (editingAccount.value) {
@@ -1008,7 +861,7 @@ async function submitAccount() {
         group: accountForm.group,
         remark: accountForm.remark,
         status: editingAccount.value.status,
-        expires_at: accountForm.expiresAt?.toISOString(),
+        expires_at: accountForm.expiresAt?.toISOString() ?? null,
       })
       ElMessage.success('账号已更新')
     } else {
@@ -1017,7 +870,7 @@ async function submitAccount() {
         password: accountForm.password,
         group: accountForm.group,
         remark: accountForm.remark,
-        expires_at: accountForm.expiresAt?.toISOString(),
+        expires_at: accountForm.expiresAt?.toISOString() ?? null,
       })
       ElMessage.success('账号已创建')
     }
@@ -1036,6 +889,7 @@ async function toggleAccountStatus(account: api.DBAccountRecord, active: boolean
       username: account.username || '',
       group: account.group || '',
       remark: account.remark || '',
+      expires_at: account.expires_at || null,
       status: active ? 'active' : 'disabled',
     })
     ElMessage.success(active ? '账号已启用' : '账号已禁用')
@@ -1115,127 +969,35 @@ onMounted(() => {
 })
 
 async function loadGroupOptions() {
-  try {
-    const resourceGroups = await api.apiClient.getResourceGroups({ group_type: 'resource' })
-    const accountGroups = await api.apiClient.getResourceGroups({ group_type: 'account' })
-    instanceGroupOptions.value = (resourceGroups.items ?? []).map(g => g.name).filter(Boolean)
-    accountGroupOptions.value = (accountGroups.items ?? []).map(g => g.name).filter(Boolean)
-  } catch {
-    // ignore
-  }
-}
-
-// ── 自动创建 ──
-interface DBGrantRow {
-  database: string
-  privilege: '' | 'read' | 'readwrite'
+  const [resourceGroups, accountGroups] = await Promise.allSettled([
+    api.apiClient.getResourceGroups({ group_type: 'resource', page_size: 200 }),
+    api.apiClient.getResourceGroups({ group_type: 'account', page_size: 200 }),
+  ])
+  instanceGroupOptions.value = resourceGroups.status === 'fulfilled'
+    ? (resourceGroups.value.items ?? []).map(group => group.name).filter(Boolean)
+    : []
+  accountGroupOptions.value = accountGroups.status === 'fulfilled'
+    ? (accountGroups.value.items ?? []).map(group => group.name).filter(Boolean)
+    : []
 }
 
 const autoProvisionVisible = ref(false)
-const provisionStep = ref(1)
-const provisioning = ref(false)
-const loadingDatabases = ref(false)
-const provisionError = ref('')
-const provisionResult = ref<any>(null)
-const dbGrants = ref<DBGrantRow[]>([])
-const adminAccounts = ref<any[]>([])
-const provisionIdempotency = createProvisionIdempotencySession()
 
-const provision = reactive({
-  adminAccountId: '',
-  host: '',
-})
-
-async function openAutoProvision() {
-  if (!selectedInstance.value) return
-  provisionIdempotency.reset()
-  const instId = selectedInstance.value.id!
-  try {
-    const res = await api.apiClient.getDBAccounts(instId, { page_size: 200 })
-    const items = res.items ?? []
-    adminAccounts.value = items.filter((a: any) => a.status === 'active')
-  } catch {
-    adminAccounts.value = []
-  }
-  if (adminAccounts.value.length > 0) {
-    provision.adminAccountId = adminAccounts.value[0].id
-  } else {
-    provision.adminAccountId = ''
-  }
-  provision.host = ''
-  provisionStep.value = 1
-  provisionError.value = ''
-  provisionResult.value = null
+function openAutoProvision() {
+  if (!selectedInstance.value?.id) return
   autoProvisionVisible.value = true
 }
 
-async function goProvisionStep2() {
-  if (!provision.adminAccountId || !selectedInstance.value) return
-  loadingDatabases.value = true
-  try {
-    const res = await api.apiClient.listDBDatabases(selectedInstance.value.id!, provision.adminAccountId)
-    const dbs: string[] = res.databases ?? []
-    dbGrants.value = dbs.map(db => ({ database: db, privilege: '' as const }))
-    provisionStep.value = 2
-  } catch (e: any) {
-    ElMessage.error('获取数据库列表失败: ' + (e.message || e))
-  } finally {
-    loadingDatabases.value = false
-  }
-}
-
-function setAllDBGrants(p: '' | 'read' | 'readwrite') {
-  dbGrants.value.forEach(row => { row.privilege = p })
-}
-
-async function doProvision() {
-  if (!selectedInstance.value || provisioning.value) return
-  provisioning.value = true
-  provisionError.value = ''
-  const payload: ProvisionRequest = {
-    admin_account_id: provision.adminAccountId,
-    host: provision.host,
-    grants: dbGrants.value
-      .filter(r => r.privilege !== '')
-      .map(r => ({ database: r.database, privilege: r.privilege })),
-  }
-  const idempotencyKey = provisionIdempotency.keyFor(payload, selectedInstance.value.id!)
-  try {
-    const res = await api.apiClient.provisionDBAccount(selectedInstance.value.id!, payload, idempotencyKey)
-    if (res.ok === false) throw new Error('自动供应未成功，请重试')
-    provisionResult.value = res
-    provisionStep.value = 3
-    provisionIdempotency.markSucceeded()
-  } catch (e: any) {
-    provisionIdempotency.markFailed()
-    provisionError.value = e.message || String(e)
-  } finally {
-    provisioning.value = false
-  }
-}
-
-function resetAutoProvision() {
-  provisionIdempotency.reset()
-  provisionStep.value = 1
-  provisionError.value = ''
-  provisionResult.value = null
-  dbGrants.value = []
-}
-
-function closeProvisionAndRefresh() {
-  autoProvisionVisible.value = false
-  loadSelectedInstanceAccounts()
+function handleProvisionedAccountCreated() {
+  void Promise.all([
+    loadSelectedInstanceAccounts(),
+    loadInstances(),
+  ])
 }
 
 </script>
 
 <style scoped>
-.dialog-stack {
-  display: flex;
-  flex-direction: column;
-  gap: 18px;
-}
-
 .accounts-table {
   height: min(64dvh, 620px);
   min-height: 360px;
@@ -1245,42 +1007,6 @@ function closeProvisionAndRefresh() {
 .database-resource-form :deep(.el-input-number),
 .database-resource-form :deep(.el-date-editor) {
   width: 100%;
-}
-
-.expiry-presets,
-.grant-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  width: 100%;
-}
-
-.expiry-presets :deep(.el-button),
-.grant-actions :deep(.el-button) {
-  margin: 0;
-}
-
-.expiry-picker {
-  width: 100%;
-  margin-top: 8px;
-}
-
-.provision-loading {
-  padding: 30px 0;
-  color: var(--color-text-secondary);
-  text-align: center;
-}
-
-.provision-loading p {
-  margin: 10px 0 0;
-}
-
-.grant-actions {
-  margin-bottom: 8px;
-}
-
-.provision-result {
-  margin-top: 12px;
 }
 
 .connect-section + .connect-section {
@@ -1311,46 +1037,10 @@ function closeProvisionAndRefresh() {
   font-weight: 650;
 }
 
-.test-connection-row {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.saved-credential-row {
-  margin-top: 8px;
-}
-
-.test-connection-meta {
-  color: #667085;
-  font-size: 12px;
-}
-
-.test-connection-error {
-  color: var(--el-color-danger);
-  font-size: 12px;
-}
-
-.test-connection-hint {
-  color: #667085;
-  font-size: 12px;
-  line-height: 1.5;
-  margin-top: 6px;
-  width: 100%;
-}
-
 /* 协议标签统一宽度 */
 .protocol-tag {
   width: 80px;
   justify-content: center;
-}
-
-.tls-summary {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 4px;
 }
 
 .tls-ca-status {
@@ -1365,12 +1055,15 @@ function closeProvisionAndRefresh() {
   margin-top: 6px;
 }
 
-.tls-risk-alert {
-  margin-top: 8px;
-}
-
 .tls-ca-editor {
   width: 100%;
+}
+
+.tls-ca-help {
+  margin-bottom: 8px;
+  color: #667085;
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 .tls-ca-actions {

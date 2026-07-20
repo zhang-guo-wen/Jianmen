@@ -42,9 +42,9 @@
       <el-dialog
         v-model="groupDialogVisible"
         :title="editingGroup ? t('resourceGrant.editGroup') : t('resourceGrant.addGroup')"
-        width="500px"
+        class="crud-form-dialog"
       >
-        <el-form :model="groupForm" label-width="100px">
+        <el-form :model="groupForm" label-position="top">
           <el-form-item :label="t('resourceGrant.groupName')" required>
             <el-input v-model="groupForm.name" :placeholder="t('resourceGrant.groupNamePlaceholder')" />
           </el-form-item>
@@ -62,7 +62,7 @@
       <el-dialog
         v-model="membersDialogVisible"
         :title="t('resourceGrant.manageMembers')"
-        width="600px"
+        class="crud-form-dialog"
       >
         <div class="members-header">
           <el-select
@@ -315,5 +315,18 @@ onMounted(async () => {
   display: flex;
   gap: 12px;
   align-items: center;
+}
+
+@media (max-width: 640px) {
+  .members-header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .members-header :deep(.el-select),
+  .members-header :deep(.el-button) {
+    width: 100% !important;
+    margin: 0;
+  }
 }
 </style>

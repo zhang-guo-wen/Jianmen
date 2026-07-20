@@ -13,7 +13,9 @@ import (
 func TestDatabaseProvisioningServiceOwnsUpstreamIdentityAndSecret(t *testing.T) {
 	repository := newProvisioningRepositoryFake()
 	provisioner := &databaseProvisionerFake{
-		onCreate: func() { repository.recordEvent("upstream_create") },
+		accountHost: "10.0.0.8",
+		onResolve:   func() { repository.recordEvent("host_resolve") },
+		onCreate:    func() { repository.recordEvent("upstream_create") },
 	}
 	provisioning := newProvisioningServiceForTest(t, repository, provisioner, nil)
 
@@ -21,7 +23,6 @@ func TestDatabaseProvisioningServiceOwnsUpstreamIdentityAndSecret(t *testing.T) 
 		context.Background(),
 		ProvisionDatabaseAccountRequest{
 			InstanceID: "instance-1", AdminAccountID: "admin-1",
-			Host:   "10.0.0.8",
 			Grants: []DBGrant{{Database: "orders", Privilege: "read"}},
 			Actor:  DatabaseProvisioningActor{UserID: "operator-1", Username: "operator"},
 		},
@@ -41,6 +42,14 @@ func TestDatabaseProvisioningServiceOwnsUpstreamIdentityAndSecret(t *testing.T) 
 		input.GrantsJSON != `[{"database":"orders","privilege":"read"}]` {
 		t.Fatalf("saga intent was not persisted: %#v", input)
 	}
+	if provisioner.createdHost != input.Host || provisioner.grantedHost != input.Host {
+		t.Fatalf(
+			"resolved host was not reused across side effects: persisted=%q create=%q grant=%q",
+			input.Host,
+			provisioner.createdHost,
+			provisioner.grantedHost,
+		)
+	}
 	if result.Account.Status != "active" || result.Account.Username != input.Username {
 		t.Fatalf("unexpected local account result: %#v", result.Account)
 	}
@@ -52,9 +61,9 @@ func TestDatabaseProvisioningServiceOwnsUpstreamIdentityAndSecret(t *testing.T) 
 		bytes.Contains(encoded, []byte("generated_password")) {
 		t.Fatalf("provisioning result exposed upstream credentials: %s", encoded)
 	}
-	if got := repository.eventsSnapshot(); len(got) < 3 ||
-		got[0] != "audit_begin" || got[1] != "operation_create" ||
-		got[2] != "upstream_create" {
+	if got := repository.eventsSnapshot(); len(got) < 4 ||
+		got[0] != "audit_begin" || got[1] != "host_resolve" ||
+		got[2] != "operation_create" || got[3] != "upstream_create" {
 		t.Fatalf("audit intent was not persisted before side effects: %#v", got)
 	}
 	if len(repository.audits) != 1 || repository.audits[0].Result != "success" {
@@ -72,17 +81,17 @@ func TestDatabaseProvisioningServiceFailsClosedWhenAuditIntentFails(t *testing.T
 		context.Background(),
 		ProvisionDatabaseAccountRequest{
 			InstanceID: "instance-1", AdminAccountID: "admin-1",
-			Host:   "10.0.0.8",
 			Grants: []DBGrant{{Database: "orders", Privilege: "read"}},
 		},
 	)
 	if !errors.Is(err, ErrDatabaseProvisioningFailed) {
 		t.Fatalf("provision error = %v, want fail-closed error", err)
 	}
-	if repository.createCalls != 0 || provisioner.createCalls != 0 {
+	if repository.createCalls != 0 || provisioner.resolveCalls != 0 || provisioner.createCalls != 0 {
 		t.Fatalf(
-			"audit failure allowed side effects: operations=%d upstream=%d",
+			"audit failure allowed side effects: operations=%d resolves=%d upstream=%d",
 			repository.createCalls,
+			provisioner.resolveCalls,
 			provisioner.createCalls,
 		)
 	}
@@ -122,7 +131,6 @@ func TestDatabaseProvisioningServicePropagatesRandomSourceFailure(t *testing.T) 
 		context.Background(),
 		ProvisionDatabaseAccountRequest{
 			InstanceID: "instance-1", AdminAccountID: "admin-1",
-			Host:   "10.0.0.8",
 			Grants: []DBGrant{{Database: "orders", Privilege: "read"}},
 		},
 	)
@@ -138,19 +146,19 @@ func TestDatabaseProvisioningServicePropagatesRandomSourceFailure(t *testing.T) 
 	}
 }
 
-func TestDatabaseProvisioningServiceRejectsWildcardHostBeforeOperation(t *testing.T) {
+func TestDatabaseProvisioningServiceRejectsResolvedWildcardHostBeforeOperation(t *testing.T) {
 	repository := newProvisioningRepositoryFake()
+	provisioner := &databaseProvisionerFake{accountHost: "%"}
 	provisioning := newProvisioningServiceForTest(
 		t,
 		repository,
-		&databaseProvisionerFake{},
+		provisioner,
 		nil,
 	)
 	_, err := provisioning.Provision(
 		context.Background(),
 		ProvisionDatabaseAccountRequest{
 			InstanceID: "instance-1", AdminAccountID: "admin-1",
-			Host:   "%",
 			Grants: []DBGrant{{Database: "orders", Privilege: "read"}},
 		},
 	)
@@ -159,6 +167,9 @@ func TestDatabaseProvisioningServiceRejectsWildcardHostBeforeOperation(t *testin
 	}
 	if repository.createCalls != 0 {
 		t.Fatalf("wildcard host created operation: %d", repository.createCalls)
+	}
+	if provisioner.resolveCalls != 1 {
+		t.Fatalf("wildcard host resolution calls = %d, want 1", provisioner.resolveCalls)
 	}
 }
 
@@ -175,7 +186,6 @@ func TestDatabaseProvisioningServiceDoesNotDropWhenCreateWasNotSent(t *testing.T
 		context.Background(),
 		ProvisionDatabaseAccountRequest{
 			InstanceID: "instance-1", AdminAccountID: "admin-1",
-			Host:   "10.0.0.8",
 			Grants: []DBGrant{{Database: "orders", Privilege: "read"}},
 		},
 	)
@@ -223,7 +233,6 @@ func TestDatabaseProvisioningServiceDropsOnlyGeneratedIdentityAfterUncertainCrea
 		requestContext,
 		ProvisionDatabaseAccountRequest{
 			InstanceID: "instance-1", AdminAccountID: "admin-1",
-			Host:   "10.0.0.8",
 			Grants: []DBGrant{{Database: "orders", Privilege: "read"}},
 		},
 	)
@@ -232,6 +241,13 @@ func TestDatabaseProvisioningServiceDropsOnlyGeneratedIdentityAfterUncertainCrea
 	}
 	if provisioner.dropCalls != 1 {
 		t.Fatalf("detached cleanup calls = %d, want 1", provisioner.dropCalls)
+	}
+	if provisioner.droppedHost != repository.createInput.Host {
+		t.Fatalf(
+			"cleanup host = %q, want persisted host %q",
+			provisioner.droppedHost,
+			repository.createInput.Host,
+		)
 	}
 	if !containsProvisioningStage(
 		repository.transitionHistory,
@@ -271,7 +287,6 @@ func TestDatabaseProvisioningServiceNeverCompensatesUnknownActivationCommit(t *t
 		context.Background(),
 		ProvisionDatabaseAccountRequest{
 			InstanceID: "instance-1", AdminAccountID: "admin-1",
-			Host:   "10.0.0.8",
 			Grants: []DBGrant{{Database: "orders", Privilege: "read"}},
 		},
 	)
@@ -297,7 +312,6 @@ func TestDatabaseProvisioningServiceLeavesActivationPendingForReconcile(t *testi
 		context.Background(),
 		ProvisionDatabaseAccountRequest{
 			InstanceID: "instance-1", AdminAccountID: "admin-1",
-			Host:   "10.0.0.8",
 			Grants: []DBGrant{{Database: "orders", Privilege: "read"}},
 		},
 	)
@@ -341,7 +355,6 @@ func TestDatabaseProvisioningSideEffectsCannotOutliveLease(t *testing.T) {
 		context.Background(),
 		ProvisionDatabaseAccountRequest{
 			InstanceID: "instance-1", AdminAccountID: "admin-1",
-			Host:   "10.0.0.8",
 			Grants: []DBGrant{{Database: "orders", Privilege: "read"}},
 		},
 	)

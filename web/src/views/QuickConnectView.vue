@@ -152,9 +152,6 @@
               @update:model-value="setDBFilter"
             />
             <div class="page-card__actions">
-              <el-button @click="openDatabaseClientSettings">
-                本地客户端设置
-              </el-button>
               <el-button :loading="dbLoading" :icon="Refresh" @click="loadDBAccounts">
                 {{ t('common.refresh') }}
               </el-button>
@@ -188,30 +185,67 @@
                 <div class="connection-card__remark" :title="databaseRemark(account)">
                   {{ databaseRemark(account) }}
                 </div>
-                <div v-if="databaseCommandUnavailableReason(account._protocol)" class="database-command-warning">
-                  {{ databaseCommandUnavailableReason(account._protocol) }}
-                </div>
                 <footer class="connection-card__actions database-card__actions">
-                  <el-button
-                    type="primary"
-                    size="small"
-                    aria-label="复制包含临时密码的数据库连接信息"
-                    title="包含临时密码，请妥善保管"
-                    :loading="databaseCopyLoading(account)"
-                    @click="copyDBConnectionInfo(account)"
+                  <el-tooltip
+                    :content="databaseCredentialUnavailableReason(account._protocol)"
+                    :disabled="!databaseCredentialUnavailableReason(account._protocol)"
+                    placement="top"
                   >
-                    复制凭据
-                  </el-button>
-                  <el-button
-                    size="small"
-                    :loading="databaseDownloadLoading(account)"
-                    @click="downloadDBGatewayCA(account)"
+                    <span
+                      class="database-action-tooltip"
+                      :tabindex="databaseCredentialUnavailableReason(account._protocol) ? 0 : undefined"
+                      :role="databaseCredentialUnavailableReason(account._protocol) ? 'button' : undefined"
+                      :aria-disabled="databaseCredentialUnavailableReason(account._protocol) ? 'true' : undefined"
+                      :aria-label="databaseCredentialUnavailableReason(account._protocol) || undefined"
+                    >
+                      <el-button
+                        type="primary"
+                        size="small"
+                        aria-label="复制包含临时密码的数据库连接信息"
+                        title="包含临时密码，请妥善保管"
+                        :disabled="Boolean(databaseCredentialUnavailableReason(account._protocol))"
+                        :loading="databaseCredentialLoading(account)"
+                        @click="copyDatabaseConnectionInfo(account)"
+                      >
+                        复制凭据
+                      </el-button>
+                    </span>
+                  </el-tooltip>
+                  <el-tooltip content="Web 数据库连接暂未开放" placement="top">
+                    <span
+                      class="database-action-tooltip"
+                      tabindex="0"
+                      role="button"
+                      aria-disabled="true"
+                      aria-label="Web 数据库连接暂未开放"
+                    >
+                      <el-button size="small" disabled>
+                        Web
+                      </el-button>
+                    </span>
+                  </el-tooltip>
+                  <el-tooltip
+                    :content="databaseClientUnavailableReason(account._protocol)"
+                    :disabled="!databaseClientUnavailableReason(account._protocol)"
+                    placement="top"
                   >
-                    下载 CA
-                  </el-button>
-                  <el-button size="small" @click="openDBConfig(account)">
-                    连接配置
-                  </el-button>
+                    <span
+                      class="database-action-tooltip"
+                      :tabindex="databaseClientUnavailableReason(account._protocol) ? 0 : undefined"
+                      :role="databaseClientUnavailableReason(account._protocol) ? 'button' : undefined"
+                      :aria-disabled="databaseClientUnavailableReason(account._protocol) ? 'true' : undefined"
+                      :aria-label="databaseClientUnavailableReason(account._protocol) || undefined"
+                    >
+                      <el-button
+                        size="small"
+                        :disabled="Boolean(databaseClientUnavailableReason(account._protocol))"
+                        :loading="databaseClientLoading(account)"
+                        @click="openDatabaseClient(account)"
+                      >
+                        客户端
+                      </el-button>
+                    </span>
+                  </el-tooltip>
                 </footer>
               </article>
             </div>
@@ -238,63 +272,49 @@
         <QuickContainerConnectPanel :active="activeTab === 'container'" />
       </el-tab-pane>
     </el-tabs>
-
-    <ConnectionConfigDialog
-      v-model="hostConfigVisible"
-      resource-type="host"
-      :target="selectedSSHTarget"
-      :resource-name="selectedSSHTarget ? quickHostName(selectedSSHTarget) : ''"
-      :source-address="selectedSSHTarget ? `${targetHost(selectedSSHTarget)}:${targetPort(selectedSSHTarget)}` : ''"
-      :source-account="String(selectedSSHTarget?.username || '')"
-      :allow-ssh="permission.canDo('session:connect')"
-      :allow-sftp="permission.canDo('sftp:connect')"
-    />
-
-    <ConnectionConfigDialog
-      v-model="configVisible"
-      resource-type="database"
-      :target="selectedDBTarget"
-      :resource-name="String(selectedDBTarget?._instance_name || '')"
-      :source-address="selectedDBTarget ? `${selectedDBTarget._instance_address || ''}:${selectedDBTarget._instance_port || 3306}` : ''"
-      :source-account="String(selectedDBTarget?.username || '')"
-      :protocol="String(selectedDBTarget?._protocol || 'mysql')"
-      :allow-ssh="false"
-    />
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue';
 import { Refresh, Search } from '@element-plus/icons-vue';
-import { ElMessage } from 'element-plus';
+import { ElMessage, ElMessageBox } from 'element-plus';
 import { useRoute, useRouter } from 'vue-router';
 
-import { apiClient, type DBAccountRecord, type HostView, type PageResponse, type TargetRecord } from '@/api/client';
-import ConnectionConfigDialog from '@/components/ConnectionConfigDialog.vue';
+import {
+  apiClient,
+  type DBAccountRecord,
+  type DBGatewayConfig,
+  type HostView,
+  type PageResponse,
+  type TargetRecord,
+} from '@/api/client';
 import QuickContainerConnectPanel from '@/components/QuickContainerConnectPanel.vue';
 import ResourceFilterBar from '@/components/ResourceFilterBar.vue';
+import { buildDatabaseProtocolURL } from '@/config/databaseClients';
 import { useI18n } from '@/i18n';
+import { useDatabaseClientStore } from '@/stores/databaseClient';
 import { usePermissionStore } from '@/stores/permission';
 import { usePreferencesStore } from '@/stores/preferences';
 import { writeClipboardText } from '@/utils/clipboard';
 import {
-  REDIS_COMMAND_UNAVAILABLE_REASON,
-  buildDatabaseGatewayConnection,
-  databaseGatewayCAFileName,
+  databaseGatewayConnectionError,
+  databaseProtocolLabel,
+} from '@/utils/databaseGatewayAvailability';
+import { loadDatabaseConnectionResources } from '@/utils/databaseConnectionOrchestration';
+import {
   hasDatabaseGatewayTLSIdentity,
   resolveDatabaseGatewayPort,
-  unifiedMySQLDetectionNotice,
 } from '@/utils/databaseGatewayCommands';
 import {
-	beginInFlightIfIdle,
-	createSingleFlight,
-	createLatestKeyedRequest,
-	endInFlight,
-  isInFlight,
-  type InFlightCounters,
+  createSingleFlight,
+  createLatestKeyedRequest,
 } from '@/utils/connectionRequestState';
 import { buildSSHDeepLink } from '@/utils/connectionLinks';
-import { loadDatabaseConnectionResources } from '@/utils/databaseConnectionOrchestration';
+import {
+  parseSSHHostIdentityIssue,
+  sshHostIdentityNotice,
+} from '@/utils/sshHostIdentity';
 
 interface HostMeta {
   name: string;
@@ -313,6 +333,18 @@ interface SSHConnectionState {
   expiresAt: string;
 }
 
+interface DatabaseConnectionState {
+  loading: boolean;
+  host: string;
+  port: number;
+  compactUser: string;
+  password: string;
+  expiresAt: string;
+  tlsIdentityReady: boolean;
+}
+
+class DatabaseGatewayConfigurationRedirect extends Error {}
+
 type QuickDBTarget = DBAccountRecord & {
   _instance_name?: string;
   _instance_group?: string;
@@ -325,6 +357,7 @@ type QuickDBTarget = DBAccountRecord & {
 const { t } = useI18n();
 const permission = usePermissionStore();
 const preferences = usePreferencesStore();
+const databaseClient = useDatabaseClientStore();
 const route = useRoute();
 const router = useRouter();
 const canConnectHost = computed(() =>
@@ -372,18 +405,14 @@ const dbKeyword = ref('');
 const dbLoading = ref(false);
 const dbError = ref('');
 const dbAccounts = ref<QuickDBTarget[]>([]);
-const dbConnectionStates = reactive<InFlightCounters>({});
+const dbClientLaunching = reactive<Record<string, boolean>>({});
+const dbConnectionStates = reactive<Record<string, DatabaseConnectionState>>({});
+const dbConnectionRequests = new Map<string, Promise<DatabaseConnectionState>>();
 const dbAccountsFlight = createSingleFlight<void>();
 const dbUsageCounts = ref<Record<string, number>>({});
 const dbFilter = ref('all');
 const dbPage = ref(1);
 const dbPageSize = ref(50);
-
-// Dialog state
-const hostConfigVisible = ref(false);
-const selectedSSHTarget = ref<TargetRecord | null>(null);
-const configVisible = ref(false);
-const selectedDBTarget = ref<QuickDBTarget | null>(null);
 
 function targetKey(target: TargetRecord): string {
   return String(target.id || target.resource_id || `${target.host_id || target.host}-${target.username || ''}`);
@@ -391,10 +420,6 @@ function targetKey(target: TargetRecord): string {
 
 function targetHost(target: TargetRecord): string {
   return String(target.host || target.address || '');
-}
-
-function targetPort(target: TargetRecord): number {
-  return Number(target.port) || (isRDPTarget(target) ? 3389 : 22);
 }
 
 function targetProtocol(target: TargetRecord): 'ssh' | 'rdp' {
@@ -674,10 +699,13 @@ async function copyAllConnectionInfo(target: TargetRecord) {
   }
 }
 
-function openWebConnection(target: TargetRecord) {
+async function openWebConnection(target: TargetRecord) {
   const targetID = String(target.id || target.resource_id || '');
   if (!targetID) {
     ElMessage.error('无法获取目标资源 ID');
+    return;
+  }
+  if (!isRDPTarget(target) && !(await preflightSSHConnection(target))) {
     return;
   }
   router.push({
@@ -688,25 +716,28 @@ function openWebConnection(target: TargetRecord) {
 
 async function openClientConnection(target: TargetRecord) {
   if (isRDPTarget(target)) {
-    openWebConnection(target);
-    return;
-  }
-  const state = await ensureConnectionInfo(target);
-  if (state.error || !state.compactUser || !state.password) {
-    ElMessage.error(state.error || '连接信息尚未生成');
+    await openWebConnection(target);
     return;
   }
   if (!preferences.loaded) {
     try {
       await preferences.fetch();
-    } catch {
-      // The connection dialog provides the client initialization flow.
+    } catch (error) {
+      ElMessage.error(error instanceof Error ? error.message : '无法加载本地 SSH 客户端配置');
+      return;
     }
   }
   if (!preferences.hasSSHClient) {
-    selectedSSHTarget.value = target;
-    hostConfigVisible.value = true;
-    ElMessage.warning('请先完成本地 SSH 客户端初始化');
+    ElMessage.warning('请先配置本地 SSH 客户端');
+    openClientSettings('ssh');
+    return;
+  }
+  if (!(await preflightSSHConnection(target))) {
+    return;
+  }
+  const state = await ensureConnectionInfo(target);
+  if (state.error || !state.compactUser || !state.password) {
+    ElMessage.error(state.error || '连接信息尚未生成');
     return;
   }
   window.location.href = buildSSHDeepLink({
@@ -825,26 +856,24 @@ function databaseRemark(account: QuickDBTarget): string {
   return String(account._instance_remark || '暂无备注');
 }
 
-function databaseCopyLoading(account: QuickDBTarget): boolean {
-  return isInFlight(dbConnectionStates, databaseTargetKey(account), 'copy');
+function databaseClientLoading(account: QuickDBTarget): boolean {
+  return dbClientLaunching[databaseTargetKey(account)] ?? false;
 }
 
-function databaseDownloadLoading(account: QuickDBTarget): boolean {
-  return isInFlight(dbConnectionStates, databaseTargetKey(account), 'download');
+function databaseCredentialLoading(account: QuickDBTarget): boolean {
+  return dbConnectionStates[databaseTargetKey(account)]?.loading ?? false;
 }
 
-function databaseCommandUnavailableReason(protocol?: string): string {
-  return String(protocol || '').toLowerCase() === 'redis' ? REDIS_COMMAND_UNAVAILABLE_REASON : '';
+function databaseCredentialUnavailableReason(protocol?: string): string {
+  return String(protocol || '').toLowerCase() === 'redis'
+    ? 'Redis 暂不支持复制临时连接凭据'
+    : '';
 }
 
-function databaseProtocolLabel(protocol?: string): string {
-  const labels: Record<string, string> = {
-    mysql: 'MySQL',
-    postgres: 'PG',
-    postgresql: 'PG',
-    redis: 'Redis',
-  };
-  return labels[String(protocol || 'mysql').toLowerCase()] || String(protocol || 'DB').toUpperCase();
+function databaseClientUnavailableReason(protocol?: string): string {
+  return String(protocol || '').toLowerCase() === 'redis'
+    ? 'Redis 暂不支持通过 DBeaver 本地客户端打开'
+    : '';
 }
 
 function onDBSearch(query: string) {
@@ -854,107 +883,194 @@ function onDBSearch(query: string) {
   dbPage.value = 1;
 }
 
-async function copyDBConnectionInfo(account: QuickDBTarget) {
+function requireConnectableDatabaseGateway(
+  gateway: DBGatewayConfig | null | undefined,
+  protocol: string,
+): DBGatewayConfig {
+  const availabilityError = databaseGatewayConnectionError(gateway, protocol);
+  if (!availabilityError && gateway) return gateway;
+  const message = availabilityError || `${databaseProtocolLabel(protocol)} 数据库网关暂不可用`;
+  if (gateway?.enabled) throw new Error(message);
+
+  if (!permission.canAccessMenu('systemSettings')) {
+    throw new Error(`${message}，请联系超级管理员完成系统配置`);
+  }
+
+  ElMessage.warning(`${message}，正在前往系统设置`);
+  void router.push({
+    path: '/system-settings',
+    query: { return_to: router.currentRoute.value.fullPath },
+  });
+  throw new DatabaseGatewayConfigurationRedirect(message);
+}
+
+function ensureDatabaseConnectionInfo(account: QuickDBTarget): Promise<DatabaseConnectionState> {
+  const key = databaseTargetKey(account);
+  const currentState = dbConnectionStates[key];
+  const expiryTime = Date.parse(currentState?.expiresAt || '');
+  const credentialUsable = currentState?.compactUser
+    && currentState.password
+    && (!currentState.expiresAt || Number.isNaN(expiryTime) || expiryTime > Date.now());
+  if (credentialUsable) return Promise.resolve(currentState);
+
+  const currentRequest = dbConnectionRequests.get(key);
+  if (currentRequest) return currentRequest;
+
+  const state: DatabaseConnectionState = {
+    loading: true,
+    host: '',
+    port: 0,
+    compactUser: '',
+    password: '',
+    expiresAt: '',
+    tlsIdentityReady: false,
+  };
+  dbConnectionStates[key] = state;
+
+  const request = (async () => {
+    try {
+      const targetID = String(account.id || account.resource_id || '');
+      if (!targetID) throw new Error('无法获取数据库账号 ID');
+      const protocol = String(account._protocol || 'mysql');
+      const { session, credential, gateway } = await loadDatabaseConnectionResources({
+        protocol,
+        targetID,
+        getGateway: value => apiClient.getDBGateway(value),
+        validateGateway: value => {
+          requireConnectableDatabaseGateway(value, protocol);
+        },
+        createSession: accountID => apiClient.createUserSession(accountID),
+        createPassword: accountID => apiClient.createConnectionPassword(accountID),
+      });
+      const connectableGateway = gateway;
+      state.tlsIdentityReady = hasDatabaseGatewayTLSIdentity(connectableGateway);
+      state.host = String(connectableGateway.tls_server_name || connectableGateway.host || window.location.hostname || '127.0.0.1');
+      state.port = resolveDatabaseGatewayPort(protocol, connectableGateway);
+      state.compactUser = String(session?.compact_username || '');
+      state.password = String(credential?.password || '');
+      state.expiresAt = String(credential?.expires_at || '');
+      if (!state.host || !state.port || !state.compactUser || !state.password) {
+        throw new Error('数据库连接信息不完整');
+      }
+      return state;
+    } finally {
+      state.loading = false;
+      dbConnectionRequests.delete(key);
+    }
+  })();
+
+  dbConnectionRequests.set(key, request);
+  return request;
+}
+
+async function copyDatabaseConnectionInfo(account: QuickDBTarget) {
+  try {
+    const state = await ensureDatabaseConnectionInfo(account);
+    const content = [
+      `数据库实例：${account._instance_name || '-'}`,
+      `数据库分组：${databaseGroup(account)}`,
+      `数据库备注：${databaseRemark(account)}`,
+      `账号名称：${account.username || '-'}`,
+      `连接地址：${state.host}:${state.port}`,
+      `连接账户：${state.compactUser}`,
+      `连接临时密码：${state.password}`,
+    ].join('\n');
+    await writeClipboardText(content);
+    ElMessage.success('数据库临时连接信息已全部复制');
+  } catch (error) {
+    if (error instanceof DatabaseGatewayConfigurationRedirect) return;
+    ElMessage.error(error instanceof Error ? error.message : '复制失败，请稍后重试');
+  }
+}
+
+async function openDatabaseClient(account: QuickDBTarget) {
   const targetID = String(account.id || account.resource_id || '');
   if (!targetID) {
     ElMessage.error('无法获取数据库账号 ID');
     return;
   }
   const protocol = String(account._protocol || 'mysql');
-  const unavailableReason = databaseCommandUnavailableReason(protocol);
+  const unavailableReason = databaseClientUnavailableReason(protocol);
   if (unavailableReason) {
     ElMessage.warning(unavailableReason);
     return;
   }
-
-  const key = databaseTargetKey(account);
-  if (!beginInFlightIfIdle(dbConnectionStates, key, 'copy')) return;
-  try {
-    const { session, credential, gateway } = await loadDatabaseConnectionResources({
-      protocol,
-      targetID,
-      getGateway: value => apiClient.getDBGateway(value),
-      createSession: value => apiClient.createUserSession(value),
-      createPassword: value => apiClient.createConnectionPassword(value),
-    });
-    if (!session || !credential) throw new Error('连接信息不完整');
-    if (!gateway?.enabled) throw new Error(`${databaseProtocolLabel(protocol)} 数据库网关未启用`);
-    const host = gateway?.tls_server_name || gateway?.host || window.location.hostname || '127.0.0.1';
-    const port = resolveDatabaseGatewayPort(protocol, gateway);
-    const compactUser = String(session.compact_username || '');
-    const password = String(credential.password || '');
-    if (!compactUser || !password) throw new Error('连接信息不完整');
-    const connection = buildDatabaseGatewayConnection({
-      protocol,
-      gateway,
-      port,
-      username: compactUser,
-      databaseName: 'postgres',
-    });
-    if (!connection) throw new Error('TLS 身份材料不完整，无法复制安全连接命令。请联系管理员配置证书、ca_file 和 server_name。');
-    if (!connection.command) throw new Error(connection.unavailableReason || '安全连接命令暂不可用');
-
-    const detectionNotice = unifiedMySQLDetectionNotice(protocol, gateway);
-    const content = [
-      `数据库实例：${account._instance_name || '-'}`,
-      `实例分组：${databaseGroup(account)}`,
-      `实例备注：${databaseRemark(account)}`,
-      `数据库账号：${account.username || '-'}`,
-      `连接地址：${host}:${port}`,
-      `连接账户：${compactUser}`,
-      `连接临时密码：${password}`,
-      `请先下载 CA：${connection.caFileName}`,
-      `${connection.commandPlatform} 连接命令：${connection.command}`,
-      ...(detectionNotice ? [`建连提示：${detectionNotice}`] : []),
-    ].join('\n');
-    await writeClipboardText(content);
-    ElMessage.success('数据库临时连接信息已复制');
-  } catch (error) {
-    ElMessage.error(error instanceof Error ? error.message : '复制数据库连接信息失败');
-  } finally {
-    endInFlight(dbConnectionStates, key, 'copy');
+  if (!databaseClient.configured) {
+    ElMessage.warning('请先配置本地 DBeaver 客户端');
+    openClientSettings('database');
+    return;
   }
-}
+  if (databaseClient.value.platform !== 'windows') {
+    ElMessage.warning('当前仅 Windows 支持从浏览器直接打开 DBeaver');
+    openClientSettings('database');
+    return;
+  }
+  if (!databaseClient.directLaunchReady) {
+    ElMessage.warning('请先执行本地协议注册命令，并在设置中确认已完成');
+    openClientSettings('database');
+    return;
+  }
 
-async function downloadDBGatewayCA(account: QuickDBTarget) {
   const key = databaseTargetKey(account);
-  if (!beginInFlightIfIdle(dbConnectionStates, key, 'download')) return;
+  if (dbClientLaunching[key]) return;
+  dbClientLaunching[key] = true;
   try {
-    const protocol = String(account._protocol || 'mysql');
-    const gateway = await apiClient.getDBGateway(protocol);
-    if (!hasDatabaseGatewayTLSIdentity(gateway)) {
-      throw new Error('TLS 身份材料不完整，无法下载 CA。请联系管理员配置证书、ca_file 和 server_name。');
+    const state = await ensureDatabaseConnectionInfo(account);
+    if (!state.tlsIdentityReady) {
+      throw new Error('数据库网关 TLS 身份材料不完整，已阻止本地客户端打开');
     }
-    const blob = new Blob([gateway.tls_ca_pem], { type: 'application/x-pem-file' });
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement('a');
-    anchor.href = url;
-    anchor.download = databaseGatewayCAFileName(protocol);
-    document.body.appendChild(anchor);
-    anchor.click();
-    anchor.remove();
-    URL.revokeObjectURL(url);
-    const unavailableReason = databaseCommandUnavailableReason(protocol);
-    ElMessage.success(unavailableReason
-      ? `CA 已下载；${unavailableReason}`
-      : 'CA 已下载。请先保存该文件，再执行 Linux/macOS/Git Bash 命令。');
+    const launchURL = buildDatabaseProtocolURL({
+      protocol,
+      host: state.host,
+      port: state.port,
+      username: state.compactUser,
+      password: state.password,
+      databaseName: ['postgres', 'postgresql'].includes(protocol.toLowerCase()) ? 'postgres' : '',
+      connectionName: `${account._instance_name || 'Jianmen'} / ${account.username || '数据库账号'}`,
+    });
+    if (!launchURL) throw new Error('连接参数不符合本地客户端安全规则');
+    ElMessage.success('正在打开 DBeaver 并使用临时密码建立连接');
+    window.location.href = launchURL;
   } catch (error) {
-    ElMessage.error(error instanceof Error ? error.message : '下载 CA 失败');
+    if (error instanceof DatabaseGatewayConfigurationRedirect) return;
+    ElMessage.error(error instanceof Error ? error.message : '无法打开本地数据库客户端');
   } finally {
-    endInFlight(dbConnectionStates, key, 'download');
+    delete dbClientLaunching[key];
   }
 }
 
-function openDBConfig(account: QuickDBTarget) {
-  selectedDBTarget.value = account;
-  configVisible.value = true;
-}
-
-function openDatabaseClientSettings() {
+function openClientSettings(tab: 'ssh' | 'database') {
   void router.push({
     path: '/settings',
-    query: { tab: 'database', return_to: router.currentRoute.value.fullPath },
+    query: { tab, return_to: router.currentRoute.value.fullPath },
   });
+}
+
+async function preflightSSHConnection(target: TargetRecord): Promise<boolean> {
+  const targetID = String(target.id || target.resource_id || '');
+  if (!targetID) {
+    ElMessage.error('无法获取目标资源 ID');
+    return false;
+  }
+  try {
+    const result = await apiClient.testTargetConnection({ id: targetID });
+    if (result.ok) return true;
+    ElMessage.error(result.error || result.message || '主机连接测试失败');
+    return false;
+  } catch (error) {
+    const issue = parseSSHHostIdentityIssue(error);
+    if (!issue) {
+      ElMessage.error(error instanceof Error ? error.message : '主机连接测试失败');
+      return false;
+    }
+    const notice = sshHostIdentityNotice(issue);
+    await ElMessageBox.alert(notice.message, notice.title, {
+      type: 'warning',
+      confirmButtonText: '知道了',
+    }).catch(() => undefined);
+    await loadTargets();
+    return false;
+  }
 }
 
 watch([targetPage, targetPageSize, sshFilter], () => {
@@ -1125,13 +1241,6 @@ onMounted(() => {
   white-space: nowrap;
 }
 
-.database-command-warning {
-  margin: 7px 12px 0;
-  color: var(--el-color-warning-dark-2);
-  font-size: 11px;
-  line-height: 1.35;
-}
-
 .connection-card__error {
   display: flex;
   align-items: center;
@@ -1169,6 +1278,25 @@ onMounted(() => {
 .database-card__actions {
   grid-template-columns: repeat(3, minmax(0, 1fr));
   padding-top: 8px;
+}
+
+.database-action-tooltip {
+  display: flex;
+  min-width: 0;
+}
+
+.database-action-tooltip :deep(.el-button) {
+  width: 100%;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .connection-card {
+    transition: none;
+  }
+
+  .connection-card:hover {
+    transform: none;
+  }
 }
 
 @media (max-width: 780px) {

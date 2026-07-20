@@ -61,11 +61,10 @@
       <FormDialog
         v-model:visible="dialogVisible"
         :title="editingId ? t('application.edit') : t('application.create')"
-        width="560px"
         :loading="submitting"
         @submit="submitApp"
       >
-        <el-form :model="form" label-width="88px">
+        <el-form :model="form" label-position="top">
           <el-form-item :label="t('application.field.address')" required>
             <div class="field-stack">
               <el-input v-model="form.address" :placeholder="t('application.placeholder.address')" />

@@ -102,11 +102,10 @@
     <FormDialog
       v-model:visible="dialogVisible"
       :title="editingId ? '编辑容器连接' : '新增容器连接'"
-      width="620px"
       :loading="submitting"
       @submit="submitEndpoint"
     >
-      <el-form :model="form" label-width="104px">
+      <el-form :model="form" label-position="top">
         <el-form-item label="运行时" required>
           <el-radio-group v-model="form.runtime" @change="onRuntimeChange">
             <el-radio-button label="docker">Docker</el-radio-button>
@@ -161,8 +160,8 @@
       </el-form>
     </FormDialog>
 
-    <el-dialog v-model="quickAccountVisible" title="快速新增主机和账号" width="520px" append-to-body destroy-on-close>
-      <el-form :model="quickAccount" label-width="90px">
+    <el-dialog v-model="quickAccountVisible" title="快速新增主机和账号" class="crud-form-dialog" append-to-body destroy-on-close>
+      <el-form :model="quickAccount" label-position="top">
         <el-form-item label="主机名称"><el-input v-model="quickAccount.host_name" placeholder="默认使用主机地址:端口" /></el-form-item>
         <el-form-item label="主机地址" required><el-input v-model="quickAccount.address" placeholder="例如 10.0.0.8" /></el-form-item>
         <el-form-item label="SSH 端口"><el-input-number v-model="quickAccount.port" :min="1" :max="65535" controls-position="right" style="width: 100%" /></el-form-item>

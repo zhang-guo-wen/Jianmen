@@ -1,6 +1,9 @@
 <template>
   <div ref="card" class="page-card data-table-card">
-    <div class="page-card__toolbar" v-if="showSearch || $slots['toolbar-extra']">
+    <div
+      v-if="showSearch || $slots['toolbar-filter'] || $slots['toolbar-extra']"
+      class="page-card__toolbar"
+    >
       <div class="page-card__search" v-if="showSearch">
         <el-input
           v-model="searchText"
@@ -17,7 +20,11 @@
           </template>
         </el-input>
       </div>
-      <div class="page-card__spacer" v-if="showSearch"></div>
+      <slot name="toolbar-filter"></slot>
+      <div
+        v-if="showSearch && !$slots['toolbar-filter']"
+        class="page-card__spacer"
+      ></div>
       <div class="page-card__actions">
         <slot name="toolbar-extra"></slot>
       </div>

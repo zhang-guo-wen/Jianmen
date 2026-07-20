@@ -91,6 +91,9 @@ func (s *Server) handleDBInstances(w http.ResponseWriter, r *http.Request) {
 		for i := range instances {
 			views[i] = databaseInstanceToStore(instances[i])
 		}
+		views = filterByGroup(views, r, func(view store.DatabaseInstanceView) string {
+			return view.Group
+		})
 		s.writeJSON(w, r, http.StatusOK, paginateSlice(views, r, func(v store.DatabaseInstanceView, q string) bool {
 			return strings.Contains(strings.ToLower(v.Name), q) || strings.Contains(strings.ToLower(v.Address), q) || strings.Contains(strings.ToLower(v.Protocol), q) || strings.Contains(strings.ToLower(v.Group), q) || strings.Contains(strings.ToLower(v.Remark), q)
 		}))

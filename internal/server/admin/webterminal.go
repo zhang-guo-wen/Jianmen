@@ -128,6 +128,9 @@ func (s *Server) handleWebTerminal(w http.ResponseWriter, r *http.Request) {
 	storedTarget := storeTargetConfig(target)
 	targetClient, err := dialWebTerminalTarget(storedTarget)
 	if err != nil {
+		if s.writeSSHHostIdentityError(w, r, err) {
+			return
+		}
 		s.writeErrorText(w, r, http.StatusBadGateway, err.Error())
 		return
 	}

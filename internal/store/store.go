@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"jianmen/internal/model"
+	"jianmen/internal/sshhost"
 )
 
 type LoginName struct {
@@ -18,30 +19,36 @@ type UserView struct {
 }
 
 type HostRecord struct {
-	ID       string `json:"id"`
-	Name     string `json:"name"`
-	Group    string `json:"group"`
-	Address  string `json:"address"`
-	Port     int    `json:"port"`
-	Protocol string `json:"protocol"`
-	Remark   string `json:"remark"`
-	Status   string `json:"status"`
+	ID                 string `json:"id"`
+	Name               string `json:"name"`
+	Group              string `json:"group"`
+	Address            string `json:"address"`
+	Port               int    `json:"port"`
+	Protocol           string `json:"protocol"`
+	Remark             string `json:"remark"`
+	Status             string `json:"status"`
+	HostKeyFingerprint string `json:"host_key_fingerprint,omitempty"`
+	KnownHosts         string `json:"known_hosts,omitempty"`
 }
 
 type HostView struct {
-	ID              string `json:"id"`
-	Name            string `json:"name"`
-	Group           string `json:"group"`
-	Address         string `json:"address"`
-	Port            int    `json:"port"`
-	Protocol        string `json:"protocol"`
-	Remark          string `json:"remark"`
-	Status          string `json:"status"`
-	LifecycleStatus string `json:"-"`
-	AccountCount    int    `json:"account_count"`
-	CreatedAt       string `json:"created_at"`
-	UpdatedAt       string `json:"updated_at"`
-	CanManage       bool   `json:"can_manage"`
+	ID                   string                                                     `json:"id"`
+	Name                 string                                                     `json:"name"`
+	Group                string                                                     `json:"group"`
+	Address              string                                                     `json:"address"`
+	Port                 int                                                        `json:"port"`
+	Protocol             string                                                     `json:"protocol"`
+	Remark               string                                                     `json:"remark"`
+	Status               string                                                     `json:"status"`
+	LifecycleStatus      string                                                     `json:"-"`
+	HostKeyFingerprint   string                                                     `json:"host_key_fingerprint,omitempty"`
+	KnownHosts           string                                                     `json:"known_hosts,omitempty"`
+	IdentityStatus       string                                                     `json:"identity_status"`
+	HostKeyChangeHandler func(change sshhost.Change) (hostDisabled bool, err error) `json:"-"`
+	AccountCount         int                                                        `json:"account_count"`
+	CreatedAt            string                                                     `json:"created_at"`
+	UpdatedAt            string                                                     `json:"updated_at"`
+	CanManage            bool                                                       `json:"can_manage"`
 }
 
 type TargetView struct {
@@ -96,7 +103,9 @@ type TargetConfig struct {
 	Passphrase            string
 	InsecureIgnoreHostKey bool
 	HostKeyFingerprint    string
+	KnownHosts            string
 	KnownHostsPath        string
+	HostKeyChangeHandler  func(change sshhost.Change) (hostDisabled bool, err error)
 	RDPSecurity           string
 	RDPIgnoreCertificate  bool
 	RDPCertFingerprints   string

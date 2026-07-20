@@ -3,7 +3,7 @@
     :model-value="visible"
     @update:model-value="emit('update:visible', $event)"
     title="批量新建用户"
-    width="800px"
+    class="crud-form-dialog"
     :close-on-click-modal="false"
     destroy-on-close
   >

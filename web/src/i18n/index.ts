@@ -2,6 +2,7 @@
 import { inject, type App, type InjectionKey } from 'vue';
 
 const zhCN = {
+  'common.experimentalFeature': '实验性功能',
   'hosts.action.delete': '删除',
   'hosts.action.edit': '编辑',
   'hosts.action.new': '新增主机',
@@ -197,8 +198,8 @@ const zhCN = {
   'database.instance.empty': '暂无数据库实例，点击上方按钮创建',
   'database.account.title': '账号管理',
   'database.account.uniqueName': '连接账号',
-  'database.account.upstreamUsername': '目标用户名',
-  'database.account.upstreamPassword': '目标密码',
+  'database.account.upstreamUsername': '登录账号',
+  'database.account.upstreamPassword': '登录密码',
   'database.account.group': '分组',
   'database.account.remark': '备注',
   'database.account.expiresAt': '有效期',
@@ -216,7 +217,7 @@ const zhCN = {
   'database.account.expireShortcuts.days7': '7 天',
   'database.account.expireShortcuts.year1': '1 年',
   'database.account.expireShortcuts.permanent': '永久',
-  'database.account.password.label': '目标密码',
+  'database.account.password.label': '登录密码',
   'database.account.password.emptyHint': '留空则保留原密码',
   // application (web app proxy)
   'application.title': '应用代理',

@@ -39,9 +39,9 @@
       <el-dialog
         v-model="dialogVisible"
         :title="editingGroup ? t('resourceGroups.edit') : t('resourceGroups.create')"
-        width="500px"
+        class="crud-form-dialog"
       >
-        <el-form :model="form" label-width="100px">
+        <el-form :model="form" label-position="top">
           <el-form-item :label="t('resourceGroups.name')" required>
             <el-input v-model="form.name" :placeholder="t('resourceGroups.namePlaceholder')" />
           </el-form-item>

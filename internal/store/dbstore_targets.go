@@ -36,6 +36,7 @@ func (s *DBStore) targetView(ctx context.Context, tx *gorm.DB, a model.HostAccou
 		name = a.ID
 	}
 	host, port := s.hostAddressPort(ctx, tx, a.Host, a.HostID)
+	hostKeyFingerprint, _ := effectiveHostIdentity(a)
 	protocol := strings.ToLower(strings.TrimSpace(a.Host.Protocol))
 	expiresAt := ""
 	if a.ExpiresAt != nil {
@@ -51,9 +52,9 @@ func (s *DBStore) targetView(ctx context.Context, tx *gorm.DB, a model.HostAccou
 		Host:            host, Port: port, Protocol: protocol,
 		Username: a.Username, Domain: a.Domain, Status: status,
 		AuthMethods:           authMethods,
-		InsecureIgnoreHostKey: a.InsecureIgnoreHostKey,
-		HostKeyFingerprint:    a.HostKeyFingerprint,
-		KnownHostsPath:        a.KnownHostsPath,
+		InsecureIgnoreHostKey: false,
+		HostKeyFingerprint:    hostKeyFingerprint,
+		KnownHostsPath:        "",
 		RDPSecurity:           normalizedRDPSecurity(a.RDPSecurity),
 		RDPIgnoreCertificate:  a.RDPIgnoreCertificate,
 		RDPCertFingerprints:   a.RDPCertFingerprints,
@@ -96,6 +97,7 @@ func (s *DBStore) targetConfig(ctx context.Context, tx *gorm.DB, a model.HostAcc
 	if accountName == "" {
 		accountName = a.Username
 	}
+	hostKeyFingerprint, knownHosts := effectiveHostIdentity(a)
 	return TargetConfig{
 		ID: a.ID, Username: a.Username,
 		Name:                  accountName,
@@ -107,9 +109,11 @@ func (s *DBStore) targetConfig(ctx context.Context, tx *gorm.DB, a model.HostAcc
 		Password:              a.Password.GetPlaintext(),
 		PrivateKeyPEM:         a.PrivateKeyPEM.GetPlaintext(),
 		Passphrase:            a.Passphrase.GetPlaintext(),
-		InsecureIgnoreHostKey: a.InsecureIgnoreHostKey,
-		HostKeyFingerprint:    a.HostKeyFingerprint,
-		KnownHostsPath:        a.KnownHostsPath,
+		InsecureIgnoreHostKey: false,
+		HostKeyFingerprint:    hostKeyFingerprint,
+		KnownHosts:            knownHosts,
+		KnownHostsPath:        "",
+		HostKeyChangeHandler:  s.hostKeyChangeHandler(newSSHHostIdentitySnapshot(a.Host)),
 		RDPSecurity:           normalizedRDPSecurity(a.RDPSecurity),
 		RDPIgnoreCertificate:  a.RDPIgnoreCertificate,
 		RDPCertFingerprints:   a.RDPCertFingerprints,
@@ -125,6 +129,9 @@ func (s *DBStore) targetConfig(ctx context.Context, tx *gorm.DB, a model.HostAcc
 	}
 }
 
+// effectiveHostIdentity uses host-level identity first. The legacy account
+// fingerprint is accepted only as a strict verifier while an old host row has
+// no identity; the legacy insecure flag and known_hosts file path are ignored.
 func queryWithContext(db *gorm.DB, tx *gorm.DB, ctx context.Context) *gorm.DB {
 	if tx != nil {
 		return tx
@@ -205,7 +212,7 @@ func (s *DBStore) AddTarget(ctx context.Context, target config.Target) (TargetVi
 		Password:              model.NewEncryptedField(target.Password),
 		PrivateKeyPEM:         model.NewEncryptedField(target.PrivateKeyPEM),
 		Passphrase:            model.NewEncryptedField(target.Passphrase),
-		InsecureIgnoreHostKey: target.InsecureIgnoreHostKey,
+		InsecureIgnoreHostKey: false,
 		HostKeyFingerprint:    target.HostKeyFingerprint,
 		KnownHostsPath:        target.KnownHostsPath,
 		RDPSecurity:           normalizedRDPSecurity(target.RDPSecurity),
@@ -319,7 +326,7 @@ func (s *DBStore) UpdateTarget(ctx context.Context, id string, target config.Tar
 		}
 		a.GroupName = target.Group
 		a.Remark = target.Remark
-		a.InsecureIgnoreHostKey = target.InsecureIgnoreHostKey
+		a.InsecureIgnoreHostKey = false
 		a.HostKeyFingerprint = target.HostKeyFingerprint
 		a.KnownHostsPath = target.KnownHostsPath
 		a.RDPSecurity = normalizedRDPSecurity(target.RDPSecurity)

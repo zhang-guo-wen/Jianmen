@@ -18,12 +18,10 @@ export interface DatabaseGatewayConnectionInput {
 
 export const DATABASE_COMMAND_PLATFORM = 'Linux/macOS/Git Bash' as const;
 export const REDIS_COMMAND_UNAVAILABLE_REASON = 'redis-cli 无法验证主机名，安全命令暂不可用';
-export const DEFAULT_MYSQL_DETECTION_DELAY_MS = 200;
 
 export interface DatabaseGatewayEndpoint {
   mode?: DatabaseGatewayMode;
   port?: number;
-  mysql_detection_delay_ms?: number;
 }
 
 export interface DatabaseGatewayConnection {
@@ -72,18 +70,6 @@ export function resolveDatabaseGatewayPort(
     return Number(port);
   }
   return databaseGatewayFallbackPort(protocol, gateway?.mode);
-}
-
-export function unifiedMySQLDetectionNotice(
-  protocol: string,
-  gateway: DatabaseGatewayEndpoint | null | undefined,
-): string {
-  if (normalizedProtocol(protocol) !== 'mysql' || gateway?.mode === 'independent') return '';
-  const configuredDelay = gateway?.mysql_detection_delay_ms;
-  const delay = Number.isInteger(configuredDelay) && Number(configuredDelay) > 0
-    ? Number(configuredDelay)
-    : DEFAULT_MYSQL_DETECTION_DELAY_MS;
-  return `统一入口需要短暂等待以识别连接协议，MySQL 每次连接会增加约 ${delay}ms 建连时间。`;
 }
 
 export function buildDatabaseGatewayConnection(input: DatabaseGatewayConnectionInput): DatabaseGatewayConnection | null {

@@ -185,6 +185,9 @@ func (s *Server) handleTestConnection(w http.ResponseWriter, r *http.Request) {
 	}
 	clientConfig, err := store.ClientConfigForTarget(storeTargetConfig(targetCfg))
 	if err != nil {
+		if s.writeSSHHostIdentityError(w, r, err) {
+			return
+		}
 		s.writeJSON(w, r, http.StatusOK, map[string]any{"ok": false, "error": "configuration error: " + err.Error()})
 		return
 	}
@@ -194,6 +197,9 @@ func (s *Server) handleTestConnection(w http.ResponseWriter, r *http.Request) {
 	latencyMS := time.Since(start).Milliseconds()
 	if err != nil {
 		s.logger.Warn("ssh connection test failed", "target", targetCfg.ID, "address", addr, "error", err)
+		if s.writeSSHHostIdentityError(w, r, err) {
+			return
+		}
 		s.writeJSON(w, r, http.StatusOK, map[string]any{"ok": false, "latency_ms": latencyMS, "error": "connection failed: " + friendlySSHError(err)})
 		return
 	}
@@ -249,6 +255,9 @@ func hostManagementActor(r *http.Request) service.HostManagementActor {
 }
 
 func (s *Server) writeHostManagementError(w http.ResponseWriter, r *http.Request, err error) {
+	if s.writeSSHHostIdentityError(w, r, err) {
+		return
+	}
 	switch {
 	case errors.Is(err, service.ErrHostAccessDenied):
 		s.forbidden(w, r)
@@ -266,7 +275,7 @@ func (s *Server) writeHostManagementError(w http.ResponseWriter, r *http.Request
 }
 
 func hostManagementHostRecord(record store.HostRecord) service.HostManagementHostRecord {
-	return service.HostManagementHostRecord{ID: record.ID, Name: record.Name, Group: record.Group, Address: record.Address, Port: record.Port, Protocol: record.Protocol, Remark: record.Remark, Status: record.Status}
+	return service.HostManagementHostRecord{ID: record.ID, Name: record.Name, Group: record.Group, Address: record.Address, Port: record.Port, Protocol: record.Protocol, Remark: record.Remark, Status: record.Status, HostKeyFingerprint: record.HostKeyFingerprint, KnownHosts: record.KnownHosts}
 }
 
 func storeHostViews(views []service.HostManagementHostView) []store.HostView {
@@ -278,7 +287,7 @@ func storeHostViews(views []service.HostManagementHostView) []store.HostView {
 }
 
 func storeHostView(view service.HostManagementHostView) store.HostView {
-	return store.HostView{ID: view.ID, Name: view.Name, Group: view.Group, Address: view.Address, Port: view.Port, Protocol: view.Protocol, Remark: view.Remark, Status: view.Status, AccountCount: view.AccountCount, CreatedAt: view.CreatedAt, UpdatedAt: view.UpdatedAt, CanManage: view.CanManage}
+	return store.HostView{ID: view.ID, Name: view.Name, Group: view.Group, Address: view.Address, Port: view.Port, Protocol: view.Protocol, Remark: view.Remark, Status: view.Status, HostKeyFingerprint: view.HostKeyFingerprint, KnownHosts: view.KnownHosts, IdentityStatus: view.IdentityStatus, HostKeyChangeHandler: storeHostKeyChangeHandler(view.HostKeyChangeHandler), AccountCount: view.AccountCount, CreatedAt: view.CreatedAt, UpdatedAt: view.UpdatedAt, CanManage: view.CanManage}
 }
 
 func storeTargetViews(views []service.HostManagementTargetView) []store.TargetView {
@@ -294,5 +303,5 @@ func storeTargetView(view service.HostManagementTargetView) store.TargetView {
 }
 
 func storeTargetConfig(config service.HostManagementTargetConfig) store.TargetConfig {
-	return store.TargetConfig{ID: config.ID, Name: config.Name, HostName: config.HostName, Host: config.Host, Port: config.Port, Protocol: config.Protocol, Username: config.Username, Domain: config.Domain, Password: config.Password, PrivateKeyPath: config.PrivateKeyPath, PrivateKeyPEM: config.PrivateKeyPEM, Passphrase: config.Passphrase, InsecureIgnoreHostKey: config.InsecureIgnoreHostKey, HostKeyFingerprint: config.HostKeyFingerprint, KnownHostsPath: config.KnownHostsPath, RDPSecurity: config.RDPSecurity, RDPIgnoreCertificate: config.RDPIgnoreCertificate, RDPCertFingerprints: config.RDPCertFingerprints, RDPApprovalRequired: config.RDPApprovalRequired, RDPClipboardRead: config.RDPClipboardRead, RDPClipboardWrite: config.RDPClipboardWrite, RDPFileUpload: config.RDPFileUpload, RDPFileDownload: config.RDPFileDownload, RDPDriveMapping: config.RDPDriveMapping, Disabled: config.Disabled, ExpiresAt: config.ExpiresAt, HostID: config.HostID}
+	return store.TargetConfig{ID: config.ID, Name: config.Name, HostName: config.HostName, Host: config.Host, Port: config.Port, Protocol: config.Protocol, Username: config.Username, Domain: config.Domain, Password: config.Password, PrivateKeyPath: config.PrivateKeyPath, PrivateKeyPEM: config.PrivateKeyPEM, Passphrase: config.Passphrase, InsecureIgnoreHostKey: config.InsecureIgnoreHostKey, HostKeyFingerprint: config.HostKeyFingerprint, KnownHosts: config.KnownHosts, KnownHostsPath: config.KnownHostsPath, HostKeyChangeHandler: storeHostKeyChangeHandler(config.HostKeyChangeHandler), RDPSecurity: config.RDPSecurity, RDPIgnoreCertificate: config.RDPIgnoreCertificate, RDPCertFingerprints: config.RDPCertFingerprints, RDPApprovalRequired: config.RDPApprovalRequired, RDPClipboardRead: config.RDPClipboardRead, RDPClipboardWrite: config.RDPClipboardWrite, RDPFileUpload: config.RDPFileUpload, RDPFileDownload: config.RDPFileDownload, RDPDriveMapping: config.RDPDriveMapping, Disabled: config.Disabled, ExpiresAt: config.ExpiresAt, HostID: config.HostID}
 }

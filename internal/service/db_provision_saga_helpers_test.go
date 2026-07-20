@@ -469,10 +469,17 @@ func (f *provisioningRepositoryFake) eventsSnapshot() []string {
 type databaseProvisionerFake struct {
 	createResult    DatabaseAccountCreateResult
 	createErr       error
+	accountHost     string
+	resolveHostErr  error
 	grant           func(context.Context) error
 	drop            func(context.Context, string) error
+	onResolve       func()
 	onCreate        func()
 	createdPassword string
+	createdHost     string
+	grantedHost     string
+	droppedHost     string
+	resolveCalls    int
 	createCalls     int
 	grantCalls      int
 	dropCalls       int
@@ -489,16 +496,35 @@ func (f *databaseProvisionerFake) ListDatabases(
 	return []string{"orders"}, f.listErr
 }
 
+func (f *databaseProvisionerFake) ResolveAccountHost(
+	context.Context,
+	model.DatabaseInstance,
+	model.DatabaseAccount,
+) (string, error) {
+	f.resolveCalls++
+	if f.onResolve != nil {
+		f.onResolve()
+	}
+	if f.resolveHostErr != nil {
+		return "", f.resolveHostErr
+	}
+	if f.accountHost == "" {
+		return "10.0.0.8", nil
+	}
+	return f.accountHost, nil
+}
+
 func (f *databaseProvisionerFake) CreateAccount(
 	_ context.Context,
 	_ model.DatabaseInstance,
 	_ model.DatabaseAccount,
 	_ string,
 	password string,
-	_ string,
+	host string,
 ) (DatabaseAccountCreateResult, error) {
 	f.createCalls++
 	f.createdPassword = password
+	f.createdHost = host
 	if f.onCreate != nil {
 		f.onCreate()
 	}
@@ -514,10 +540,11 @@ func (f *databaseProvisionerFake) GrantAccount(
 	_ model.DatabaseInstance,
 	_ model.DatabaseAccount,
 	_ string,
-	_ string,
+	host string,
 	_ []DBGrant,
 ) error {
 	f.grantCalls++
+	f.grantedHost = host
 	if f.grant != nil {
 		return f.grant(ctx)
 	}
@@ -529,9 +556,10 @@ func (f *databaseProvisionerFake) DropAccount(
 	_ model.DatabaseInstance,
 	_ model.DatabaseAccount,
 	username string,
-	_ string,
+	host string,
 ) error {
 	f.dropCalls++
+	f.droppedHost = host
 	if f.drop != nil {
 		return f.drop(ctx, username)
 	}

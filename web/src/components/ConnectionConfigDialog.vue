@@ -38,30 +38,6 @@
           <InfoValue v-if="!isRedis" label="连接账户" :value="connectionInfo.compactUser" :loading="isCopyInFlight(connectionInfo.compactUser, '连接账户')" @copy="copyValue" />
         </div>
         <el-alert
-          v-if="mysqlDetectionNotice"
-          class="mysql-detection-notice"
-          type="info"
-          :closable="false"
-          show-icon
-          :title="mysqlDetectionNotice"
-        />
-        <section v-if="resourceType === 'database' && secureGatewayTLS" class="gateway-tls-panel">
-          <InfoValue label="TLS 验证名称" :value="connectionInfo.tlsServerName" :loading="isCopyInFlight(connectionInfo.tlsServerName, 'TLS 验证名称')" @copy="copyValue" />
-          <InfoValue label="证书 SHA-256 指纹" :value="connectionInfo.tlsCertSHA256" :loading="isCopyInFlight(connectionInfo.tlsCertSHA256, '证书 SHA-256 指纹')" @copy="copyValue" />
-          <el-form-item v-if="isPostgres" label="数据库名称">
-            <el-input v-model="databaseName" placeholder="postgres" />
-          </el-form-item>
-          <p v-if="commands.length" class="gateway-tls-hint">
-            请先下载 CA 并保存为下方命令引用的文件名，再执行 Linux/macOS/Git Bash 命令。
-          </p>
-          <p v-else class="gateway-tls-hint">TLS 身份材料仍可查看和下载；当前不提供可安全执行的客户端命令。</p>
-          <div class="gateway-tls-actions">
-            <el-button size="small" :loading="isDownloadInFlight" @click="downloadGatewayCA">下载 CA</el-button>
-            <el-button size="small" :loading="isCopyInFlight(connectionInfo.tlsCAPEM, 'ca')" @click="copyValue(connectionInfo.tlsCAPEM, 'ca')">复制 CA</el-button>
-            <el-button size="small" :loading="isCopyInFlight(connectionInfo.tlsCertSHA256, 'fingerprint')" @click="copyValue(connectionInfo.tlsCertSHA256, 'fingerprint')">复制指纹</el-button>
-          </div>
-        </section>
-        <el-alert
           v-if="resourceType === 'database' && databaseCommandUnavailableReason"
           type="warning"
           :closable="false"
@@ -108,17 +84,16 @@
     </div>
 
     <template #footer>
-      <el-button data-testid="ssh-local-client" v-if="resourceType === 'host' && allowSsh" type="primary" :loading="preferences.loading" @click="openPreferredSSHClient">本地 SSH 客户端打开</el-button>
-      <el-button data-testid="ssh-browser" v-if="resourceType === 'host' && allowSsh" type="primary" @click="openInBrowser">在浏览器中打开</el-button>
-      <el-button v-if="resourceType === 'database'" @click="openDatabaseClientSettings">本地客户端设置</el-button>
+      <el-button data-testid="ssh-local-client" v-if="resourceType === 'host' && allowSsh" type="primary" :disabled="!connectionTestResult?.ok || sshIdentityBlocked" :loading="preferences.loading" @click="openPreferredSSHClient">本地 SSH 客户端打开</el-button>
+      <el-button data-testid="ssh-browser" v-if="resourceType === 'host' && allowSsh" type="primary" :disabled="!connectionTestResult?.ok || sshIdentityBlocked" @click="openInBrowser">在浏览器中打开</el-button>
       <el-button
-        v-if="resourceType === 'database' && !isRedis && databaseClient.configured"
+        v-if="resourceType === 'database' && !isRedis"
+        data-testid="database-local-client"
         type="primary"
-        :disabled="!dbeaverConfigurationCommand"
-        :loading="isCopyInFlight(dbeaverConfigurationCommand, 'dbeaver')"
-        @click="copyDBeaverConfigurationCommand"
+        :disabled="databaseClientLaunchBlocked"
+        @click="openDatabaseClient"
       >
-        复制 DBeaver 配置命令
+        本地客户端打开
       </el-button>
       <el-button @click="visible = false">关闭</el-button>
     </template>
@@ -166,14 +141,15 @@
 import { computed, defineComponent, h, reactive, ref, watch, type PropType } from 'vue';
 import { useRouter } from 'vue-router';
 import { Loading } from '@element-plus/icons-vue';
-import { ElButton, ElInput, ElMessage } from 'element-plus';
+import { ElButton, ElInput, ElMessage, ElMessageBox } from 'element-plus';
 
 import { apiClient, type DBAccountRecord, type DBGatewayConfig, type TargetRecord } from '@/api/client';
-import { buildDBeaverConfigurationCommand } from '@/config/databaseClients';
+import { buildDatabaseProtocolURL } from '@/config/databaseClients';
 import { buildSSHProtocolRegistrationCommand, isAbsoluteExecutablePath, SSH_CLIENT_OPTIONS } from '@/config/sshClients';
 import { useDatabaseClientStore } from '@/stores/databaseClient';
 import { usePreferencesStore } from '@/stores/preferences';
 import { writeClipboardText } from '@/utils/clipboard';
+import { databaseGatewayConnectionError } from '@/utils/databaseGatewayAvailability';
 import {
   isGatewayOnlyDatabaseProtocol,
   loadDatabaseConnectionResources,
@@ -181,10 +157,8 @@ import {
 import {
   REDIS_COMMAND_UNAVAILABLE_REASON,
   buildDatabaseGatewayConnection,
-  databaseGatewayCAFileName,
   hasDatabaseGatewayTLSIdentity,
   resolveDatabaseGatewayPort,
-  unifiedMySQLDetectionNotice,
 } from '@/utils/databaseGatewayCommands';
 import {
   beginInFlightIfIdle,
@@ -195,6 +169,10 @@ import {
 } from '@/utils/connectionRequestState';
 import { buildSSHDeepLink } from '@/utils/connectionLinks';
 import { buildConnectionCommands, type ConnectionCommandInput } from '@/utils/connectionConfigCommands';
+import {
+  parseSSHHostIdentityIssue,
+  sshHostIdentityNotice,
+} from '@/utils/sshHostIdentity';
 
 interface CommandItem {
   label: string;
@@ -282,7 +260,10 @@ const props = withDefaults(defineProps<{
   resourceName: '', sourceAddress: '', sourceAccount: '', protocol: 'mysql', allowSsh: true, allowSftp: false,
 });
 
-const emit = defineEmits<{ (event: 'update:modelValue', value: boolean): void }>();
+const emit = defineEmits<{
+  (event: 'update:modelValue', value: boolean): void
+  (event: 'hostIdentityChanged', hostId: string): void
+}>();
 const router = useRouter();
 const preferences = usePreferencesStore();
 const databaseClient = useDatabaseClientStore();
@@ -294,6 +275,7 @@ const creatingSession = ref(false);
 const connectionError = ref('');
 const connectionTesting = ref(false);
 const connectionTestResult = ref<{ ok: boolean; error?: string; latency_ms?: number } | null>(null);
+const sshIdentityBlocked = ref(false);
 const connectionInfo = ref<{
   host: string;
   port: number;
@@ -302,27 +284,15 @@ const connectionInfo = ref<{
   tlsServerName: string;
   tlsCAPEM: string;
   tlsCertSHA256: string;
-  gatewayMode: DBGatewayConfig['mode'];
-  mysqlDetectionDelayMs: number;
 } | null>(null);
 const temporaryPassword = ref('');
 const temporaryPasswordExpiresAt = ref('');
-const databaseName = ref('postgres');
 const initializeRequest = createLatestKeyedRequest<ConnectionResourceBundle>();
 const testRequest = createLatestKeyedRequest<{ ok: boolean; error?: string; latency_ms?: number }>();
 const operationCounters = reactive<InFlightCounters>({});
 
 const gatewayAddress = computed(() => connectionInfo.value ? `${connectionInfo.value.host}:${connectionInfo.value.port}` : '');
-const mysqlDetectionNotice = computed(() => (
-  props.resourceType === 'database' && connectionInfo.value
-    ? unifiedMySQLDetectionNotice(props.protocol, {
-      mode: connectionInfo.value.gatewayMode,
-      mysql_detection_delay_ms: connectionInfo.value.mysqlDetectionDelayMs,
-    })
-    : ''
-));
 const requiresGatewayTLSIdentity = computed(() => ['mysql', 'postgres', 'postgresql', 'redis'].includes(props.protocol.toLowerCase()));
-const isPostgres = computed(() => ['postgres', 'postgresql'].includes(props.protocol.toLowerCase()));
 const isRedis = computed(() => (
   props.resourceType === 'database' &&
   isGatewayOnlyDatabaseProtocol(props.protocol)
@@ -337,24 +307,15 @@ const secureGatewayTLS = computed(() => hasDatabaseGatewayTLSIdentity({
 const databaseConnectionPlan = computed(() => {
   if (props.resourceType !== 'database' || !connectionInfo.value) return null;
   const {
-    host,
     port,
     compactUser,
     tlsEnabled,
     tlsServerName,
     tlsCAPEM,
     tlsCertSHA256,
-    gatewayMode,
-    mysqlDetectionDelayMs,
   } = connectionInfo.value;
-  const gateway: DBGatewayConfig = {
+  const gateway = {
     enabled: true,
-    mode: gatewayMode,
-    protocol: props.protocol,
-    listen_addr: '',
-    host,
-    port,
-    mysql_detection_delay_ms: mysqlDetectionDelayMs,
     tls_enabled: tlsEnabled,
     tls_server_name: tlsServerName,
     tls_ca_pem: tlsCAPEM,
@@ -365,7 +326,6 @@ const databaseConnectionPlan = computed(() => {
     gateway,
     port,
     username: compactUser,
-    databaseName: databaseName.value,
   });
 });
 const databaseCommandUnavailableReason = computed(() => {
@@ -398,28 +358,10 @@ const sshClientUrl = computed(() => {
     port: connectionInfo.value.port,
   });
 });
-const dbeaverConfigurationCommand = computed(() => {
-  if (
-    props.resourceType !== 'database'
-    || isRedis.value
-    || !connectionInfo.value
-    || !secureGatewayTLS.value
-    || !databaseClient.configured
-  ) {
-    return '';
-  }
-  return buildDBeaverConfigurationCommand({
-    platform: databaseClient.value.platform,
-    executablePath: databaseClient.value.executablePath,
-    protocol: props.protocol,
-    host: connectionInfo.value.host,
-    port: connectionInfo.value.port,
-    username: connectionInfo.value.compactUser,
-    databaseName: databaseName.value,
-    connectionName: props.resourceName || 'Jianmen 临时连接',
-  });
-});
-
+const databaseClientLaunchBlocked = computed(() => (
+  databaseClient.directLaunchReady
+  && (!connectionInfo.value || !secureGatewayTLS.value || !temporaryPassword.value)
+));
 const initClientVisible = ref(false);
 const initClientType = ref('xshell');
 const initClientPath = ref('');
@@ -461,8 +403,6 @@ function isCopyInFlight(value: string, operation = 'value'): boolean {
   return Boolean(value) && isInFlight(operationCounters, operationCounterKey(`copy:${operation}`), 'copy');
 }
 
-const isDownloadInFlight = computed(() => isInFlight(operationCounters, operationCounterKey('download:ca'), 'download'));
-
 watch(
   () => [props.modelValue, String(props.target?.id || props.target?.resource_id || ''), props.resourceType, props.protocol] as const,
   ([isVisible, targetID]) => {
@@ -482,10 +422,10 @@ watch(
 function clearConnectionState() {
   connectionError.value = '';
   connectionTestResult.value = null;
+  sshIdentityBlocked.value = false;
   connectionInfo.value = null;
   temporaryPassword.value = '';
   temporaryPasswordExpiresAt.value = '';
-  databaseName.value = 'postgres';
   for (const key of Object.keys(operationCounters)) delete operationCounters[key];
 }
 
@@ -498,6 +438,10 @@ async function initializeConnection(snapshot: ConnectionTargetSnapshot) {
         protocol: snapshot.protocol,
         targetID,
         getGateway: protocol => apiClient.getDBGateway(protocol),
+        validateGateway: gateway => {
+          const message = databaseGatewayConnectionError(gateway, snapshot.protocol);
+          if (message) throw new Error(message);
+        },
         createSession: accountID => apiClient.createUserSession(accountID),
         createPassword: accountID => apiClient.createConnectionPassword(accountID),
       });
@@ -520,7 +464,6 @@ async function initializeConnection(snapshot: ConnectionTargetSnapshot) {
   try {
     const { session, credential, gateway } = await request.promise;
     if (!initializeRequest.isCurrent(token, currentTargetSnapshotKey())) return;
-    if (snapshot.resourceType === 'database' && !gateway?.enabled) throw new Error(`${snapshot.protocol.toUpperCase()} 数据库网关未启用`);
     connectionInfo.value = {
       host: gateway?.tls_server_name || gateway?.host || window.location.hostname,
       port: snapshot.resourceType === 'host'
@@ -531,10 +474,6 @@ async function initializeConnection(snapshot: ConnectionTargetSnapshot) {
       tlsServerName: gateway?.tls_server_name || '',
       tlsCAPEM: gateway?.tls_ca_pem || '',
       tlsCertSHA256: gateway?.tls_cert_sha256 || '',
-      gatewayMode: gateway?.mode === 'independent' ? 'independent' : 'unified',
-      mysqlDetectionDelayMs: Number.isInteger(gateway?.mysql_detection_delay_ms)
-        ? Number(gateway?.mysql_detection_delay_ms)
-        : 0,
     };
     temporaryPassword.value = credential?.password || '';
     temporaryPasswordExpiresAt.value = credential?.expires_at || '';
@@ -556,14 +495,10 @@ async function testConnection(snapshot: ConnectionTargetSnapshot) {
       return { ok: result.ok, latency_ms: result.latency_ms, error: result.ok ? undefined : result.error || '连接失败' };
     }
     const target = snapshot.target as TargetRecord;
-    const username = String(target.username || 'unknown');
+    const targetID = String(target.id || target.resource_id || '');
+    if (!targetID) throw new Error('无法获取目标资源ID');
     const result = await apiClient.testTargetConnection({
-      id: String(target.id || target.resource_id || username), name: String(target.name || username), username,
-      password: '', private_key_path: '', private_key_pem: '', passphrase: '', host: String(target.host || target.address || ''),
-      port: Number(target.port) || 22,
-      insecure_ignore_host_key: target.insecure_ignore_host_key === true,
-      host_key_fingerprint: String(target.host_key_fingerprint || ''),
-      known_hosts_path: String(target.known_hosts_path || ''),
+      id: targetID,
     });
     return { ok: result.ok, latency_ms: result.latency_ms, error: result.ok ? undefined : result.error || result.message || '连接失败' };
   });
@@ -575,7 +510,19 @@ async function testConnection(snapshot: ConnectionTargetSnapshot) {
     connectionTestResult.value = result;
   } catch (error) {
     if (!testRequest.isCurrent(token, currentTargetSnapshotKey())) return;
-    connectionTestResult.value = { ok: false, error: error instanceof Error ? error.message : '连接失败' };
+    const identityIssue = parseSSHHostIdentityIssue(error);
+    if (identityIssue) {
+      sshIdentityBlocked.value = true;
+      connectionTestResult.value = { ok: false, error: 'SSH 主机身份校验未通过' };
+      emit('hostIdentityChanged', identityIssue.hostId);
+      const notice = sshHostIdentityNotice(identityIssue);
+      await ElMessageBox.alert(notice.message, notice.title, {
+        type: 'warning',
+        confirmButtonText: '知道了',
+      }).catch(() => undefined);
+    } else {
+      connectionTestResult.value = { ok: false, error: error instanceof Error ? error.message : '连接失败' };
+    }
   } finally {
     if (testRequest.isCurrent(token, currentTargetSnapshotKey())) {
       connectionTesting.value = false;
@@ -595,23 +542,6 @@ async function copyValue(value: string, operation = 'value') {
   } finally {
     endInFlight(operationCounters, key, 'copy');
   }
-}
-
-function downloadGatewayCA() {
-  if (!connectionInfo.value?.tlsCAPEM) return;
-  const key = operationCounterKey('download:ca');
-  if (!beginInFlightIfIdle(operationCounters, key, 'download')) return;
-  void Promise.resolve().then(() => {
-    const blob = new Blob([connectionInfo.value?.tlsCAPEM || ''], { type: 'application/x-pem-file' });
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement('a');
-    anchor.href = url;
-    anchor.download = databaseGatewayCAFileName(props.protocol);
-    document.body.appendChild(anchor);
-    anchor.click();
-    anchor.remove();
-    URL.revokeObjectURL(url);
-  }).finally(() => endInFlight(operationCounters, key, 'download'));
 }
 
 async function openPreferredSSHClient() {
@@ -639,12 +569,41 @@ function openDatabaseClientSettings() {
   void router.push({ path: '/settings', query: { tab: 'database', return_to: returnTo } });
 }
 
-async function copyDBeaverConfigurationCommand() {
-  if (!dbeaverConfigurationCommand.value) {
-    ElMessage.warning('请先完成本地数据库客户端设置');
+function openDatabaseClient() {
+  if (!databaseClient.configured) {
+    ElMessage.warning('请先配置本地 DBeaver 客户端和 CA 文件路径');
+    openDatabaseClientSettings();
     return;
   }
-  await copyValue(dbeaverConfigurationCommand.value, 'dbeaver');
+  if (databaseClient.value.platform !== 'windows') {
+    ElMessage.warning('当前仅 Windows 支持从浏览器直接打开 DBeaver');
+    openDatabaseClientSettings();
+    return;
+  }
+  if (!databaseClient.directLaunchReady) {
+    ElMessage.warning('请先执行本地协议注册命令，并在设置中确认已完成');
+    openDatabaseClientSettings();
+    return;
+  }
+  if (!connectionInfo.value || !temporaryPassword.value || !secureGatewayTLS.value) {
+    ElMessage.warning('数据库安全连接信息尚未就绪');
+    return;
+  }
+  const launchURL = buildDatabaseProtocolURL({
+    protocol: props.protocol,
+    host: connectionInfo.value.host,
+    port: connectionInfo.value.port,
+    username: connectionInfo.value.compactUser,
+    password: temporaryPassword.value,
+    databaseName: ['postgres', 'postgresql'].includes(props.protocol.toLowerCase()) ? 'postgres' : '',
+    connectionName: props.resourceName || 'Jianmen 临时连接',
+  });
+  if (!launchURL) {
+    ElMessage.error('连接参数不符合本地客户端安全规则');
+    return;
+  }
+  ElMessage.success('正在打开 DBeaver 并使用临时密码建立连接');
+  window.location.href = launchURL;
 }
 
 function pickClientFile() {
@@ -695,12 +654,6 @@ function formatExpiresAt(value: string): string {
 .connectivity-row { display: flex; align-items: center; gap: 8px; color: var(--el-text-color-secondary); font-size: 13px; }
 .shared-connection-panel { overflow: hidden; border: 1px solid var(--el-border-color-light); border-radius: 10px; }
 .shared-connection-panel .detail-grid { border-top: 0; }
-.mysql-detection-notice { margin: 10px 14px; }
-.gateway-tls-panel { display: grid; gap: 1px; background: var(--el-border-color-lighter); border-top: 1px solid var(--el-border-color-lighter); }
-.gateway-tls-panel > * { background: var(--el-bg-color); }
-.gateway-tls-panel :deep(.el-form-item) { margin: 0; padding: 9px 14px; }
-.gateway-tls-hint { margin: 0; padding: 9px 14px; color: var(--el-text-color-secondary); font-size: 12px; line-height: 1.5; }
-.gateway-tls-actions { display: flex; flex-wrap: wrap; gap: 8px; padding: 10px 14px; }
 :deep(.copy-action) { justify-self: end; }
 .connect-error { color: var(--el-color-danger); }
 .loading-state { padding: 30px 0; text-align: center; }

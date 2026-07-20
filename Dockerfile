@@ -1,57 +1,29 @@
-# syntax=docker/dockerfile:1
+ARG GUACD_IMAGE=guacamole/guacd:1.6.0@sha256:8974eaa9ba32f713daf311e7cc8cd7e4cdfba1edea39eed75524e78ef4b08f4f
 
-FROM --platform=$BUILDPLATFORM node:24-bookworm-slim AS frontend
+FROM ${GUACD_IMAGE}
 
-WORKDIR /src/web
-
-COPY web/package.json web/package-lock.json ./
-RUN npm ci
-
-COPY web/ ./
-RUN npm run build
-
-
-FROM --platform=$BUILDPLATFORM golang:1.23-alpine AS backend
-
-ARG TARGETOS
-ARG TARGETARCH
-
-WORKDIR /src
-
-COPY go.mod go.sum ./
-RUN go mod download
-
-COPY . .
-COPY --from=frontend /src/web/dist /src/internal/frontend/dist
-
-RUN CGO_ENABLED=0 \
-    GOOS=${TARGETOS:-linux} \
-    GOARCH=${TARGETARCH:-amd64} \
-    go build -trimpath -ldflags="-s -w" -o /out/jianmen ./cmd/bastion-core
-
-
-FROM alpine:3.23
-
+# Run .\build.ps1 on Windows before building this Linux/amd64 runtime image.
 LABEL org.opencontainers.image.source="https://github.com/zhang-guo-wen/Jianmen"
-LABEL org.opencontainers.image.description="Jianmen bastion host"
+LABEL org.opencontainers.image.description="Jianmen bastion host with managed guacd 1.6.0"
 LABEL org.opencontainers.image.licenses="MIT"
 
-RUN apk add --no-cache ca-certificates tzdata \
-    && addgroup -S -g 10001 jianmen \
+USER root
+
+RUN addgroup -S -g 10001 jianmen \
     && adduser -S -D -H -u 10001 -G jianmen jianmen \
-    && mkdir -p /app/data \
+    && mkdir -p /app/data /app/data/rdp-spool /app/data/rdp-drive \
     && chown -R jianmen:jianmen /app
 
 WORKDIR /app
 
-COPY --from=backend --chown=jianmen:jianmen /out/jianmen /app/jianmen
-COPY --chown=jianmen:jianmen config.docker.json /app/config.json
+COPY --chown=jianmen:jianmen --chmod=0555 dist/bastion-core-linux-amd64 /app/jianmen
+COPY --chown=jianmen:jianmen --chmod=0444 config.docker.web-rdp.example.json /app/config.json
 
 USER jianmen
 
 VOLUME ["/app/data"]
 
-EXPOSE 47100 47102 33060 33061 33062 33063
+EXPOSE 47100 47102 33060 33061 33062 33063 47110-47199
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD wget -q --no-check-certificate -O /dev/null https://127.0.0.1:47100/api/init/status \

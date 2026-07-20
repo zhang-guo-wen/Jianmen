@@ -17,17 +17,18 @@ const (
 	defaultObjectStorageDir = "data/objects"
 )
 
-// WebRDPConfig configures the Go control-plane adapter around an external
-// guacd process. guacd must only be reachable from a trusted private network.
+// WebRDPConfig configures the Go control-plane adapter around guacd. guacd may
+// either be managed by Jianmen or supplied as an external service.
 type WebRDPConfig struct {
-	Enabled            bool   `json:"enabled"`
-	GuacdAddress       string `json:"guacd_address"`
-	ConnectTimeoutSecs int    `json:"connect_timeout_seconds"`
-	SpoolDir           string `json:"spool_dir"`
-	GuacdRecordingRoot string `json:"guacd_recording_root"`
-	LocalDriveRoot     string `json:"local_drive_root"`
-	GuacdDriveRoot     string `json:"guacd_drive_root"`
-	AllowUnrecorded    bool   `json:"allow_unrecorded"`
+	Enabled            bool               `json:"enabled"`
+	GuacdAddress       string             `json:"guacd_address"`
+	ManagedGuacd       ManagedGuacdConfig `json:"managed_guacd"`
+	ConnectTimeoutSecs int                `json:"connect_timeout_seconds"`
+	SpoolDir           string             `json:"spool_dir"`
+	GuacdRecordingRoot string             `json:"guacd_recording_root"`
+	LocalDriveRoot     string             `json:"local_drive_root"`
+	GuacdDriveRoot     string             `json:"guacd_drive_root"`
+	AllowUnrecorded    bool               `json:"allow_unrecorded"`
 }
 
 // ObjectStorageConfig configures the authoritative recording object store.
@@ -73,6 +74,7 @@ func (c *ObjectStorageConfig) UnmarshalJSON(data []byte) error {
 
 func (c *Config) applyWebRDPDefaults() {
 	c.WebRDP.GuacdAddress = valueOrDefault(c.WebRDP.GuacdAddress, defaultGuacdAddress)
+	c.WebRDP.ManagedGuacd.applyDefaults()
 	if c.WebRDP.ConnectTimeoutSecs == 0 {
 		c.WebRDP.ConnectTimeoutSecs = 15
 	}
@@ -122,6 +124,11 @@ func (c *Config) validateWebRDP() error {
 	}
 	if _, _, err := net.SplitHostPort(c.WebRDP.GuacdAddress); err != nil {
 		return fmt.Errorf("invalid web_rdp.guacd_address %q: %w", c.WebRDP.GuacdAddress, err)
+	}
+	if c.WebRDP.ManagedGuacd.Enabled {
+		if err := validateManagedGuacd(c.WebRDP); err != nil {
+			return err
+		}
 	}
 	if c.WebRDP.ConnectTimeoutSecs < 1 || c.WebRDP.ConnectTimeoutSecs > 300 {
 		return errors.New("web_rdp.connect_timeout_seconds must be between 1 and 300")

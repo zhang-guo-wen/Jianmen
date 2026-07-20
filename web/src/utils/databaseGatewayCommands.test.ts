@@ -331,6 +331,10 @@ test('quick database cards copy temporary connection credentials with an in-flig
   assert.match(source, /`连接账户：\$\{state\.compactUser\}`/);
   assert.match(source, /`连接临时密码：\$\{state\.password\}`/);
   assert.match(source, /Redis 暂不支持复制临时连接凭据/);
+  assert.match(
+    source,
+    /\.database-card__actions\s*\{[\s\S]*grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\)/,
+  );
 });
 
 test('database and quick-connect loaders keep request snapshots isolated', () => {

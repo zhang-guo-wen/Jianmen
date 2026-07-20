@@ -38,7 +38,6 @@ const emit = defineEmits<{
 }>()
 
 const isRedis = computed(() => props.protocol === 'redis')
-const isPermanent = computed(() => expiresAt.value === null)
 const usernamePlaceholder = computed(() => (
   isRedis.value
     ? 'Redis ACL 用户名（可选，留空则使用单一密码认证）'
@@ -48,8 +47,26 @@ const passwordPlaceholder = computed(() => (
   props.editing ? '留空则保留原密码' : '数据库登录密码'
 ))
 
+const expiryShortcuts = [
+  { text: "8小时", value: () => expiryAfter({ hours: 8 }) },
+  { text: "7天", value: () => expiryAfter({ days: 7 }) },
+  { text: "1年", value: () => expiryAfter({ years: 1 }) },
+]
+
 function setPermanentExpiry() {
   expiresAt.value = null
+}
+
+function expiryAfter(offset: {
+  hours?: number
+  days?: number
+  years?: number
+}): Date {
+  const date = new Date()
+  if (offset.hours) date.setHours(date.getHours() + offset.hours)
+  if (offset.days) date.setDate(date.getDate() + offset.days)
+  if (offset.years) date.setFullYear(date.getFullYear() + offset.years)
+  return date
 }
 </script>
 
@@ -93,21 +110,18 @@ function setPermanentExpiry() {
 
       <el-form-item label="有效期">
         <div class="expiry-control">
-          <el-date-picker
-            v-model="expiresAt"
-            type="datetime"
-            class="expiry-picker"
-            clearable
-            format="YYYY-MM-DD HH:mm"
-            placeholder="选择过期时间"
-          />
-          <el-button
-            size="small"
-            :type="isPermanent ? 'primary' : undefined"
-            @click="setPermanentExpiry"
-          >
-            永久
-          </el-button>
+          <div class="expiry-picker-row">
+            <el-date-picker
+              v-model="expiresAt"
+              type="datetime"
+              clearable
+              format="YYYY-MM-DD HH:mm"
+              placeholder="永久有效"
+              :shortcuts="expiryShortcuts"
+              style="width: 100%"
+            />
+            <el-button @click="setPermanentExpiry">永久</el-button>
+          </div>
         </div>
       </el-form-item>
 
@@ -146,14 +160,21 @@ function setPermanentExpiry() {
 }
 
 .expiry-control {
-  display: grid;
-  grid-template-columns: minmax(220px, 1fr) auto;
-  gap: 8px;
-  align-items: center;
-  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
 }
 
-.expiry-picker {
+.expiry-picker-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  width: 100%;
+  align-items: center;
+}
+
+.expiry-picker-row :deep(.el-date-editor.el-input) {
   width: 100%;
 }
 
@@ -175,7 +196,7 @@ function setPermanentExpiry() {
 }
 
 @media (max-width: 720px) {
-  .expiry-control {
+  .expiry-picker-row {
     grid-template-columns: 1fr;
   }
 }

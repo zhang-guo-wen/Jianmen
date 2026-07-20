@@ -87,7 +87,7 @@
               <div class="section-heading">
                 <div>
                   <h2>本地数据库客户端</h2>
-                  <p>配置数据库快速连接使用的 DBeaver 程序。该配置只保存在当前浏览器。</p>
+                  <p>配置数据库快速连接使用的 DBeaver 程序。</p>
                 </div>
                 <div class="section-heading__actions">
                   <el-tag :type="databaseClientStatus.type" effect="light">
@@ -98,14 +98,6 @@
                   </el-button>
                 </div>
               </div>
-
-              <el-alert
-                class="local-only-alert"
-                type="info"
-                :closable="false"
-                show-icon
-                title="本机程序路径不会上传到 Jianmen；同一浏览器中的登录账号会共用这项本机配置。"
-              />
 
               <el-form label-position="top">
                 <el-form-item label="默认客户端">
@@ -136,7 +128,7 @@
                       :placeholder="`例如 ${databaseClientPathExample}`"
                     />
                     <div class="field-help">
-                      Windows 推荐选择 dbeaverc.exe；本机路径只用于生成协议注册命令，不会上传。
+                      Windows 推荐选择 dbeaverc.exe
                     </div>
                   </el-form-item>
                   <el-form-item label="本地 CA 文件路径" required :error="databaseCAFilePathError">
@@ -153,7 +145,7 @@
                       </template>
                     </el-input>
                     <div class="field-help">
-                      浏览器会把 CA 下载到默认下载目录；请将文件保存或移动到上方填写的绝对路径。该路径只在本机使用，不会上传。
+                      浏览器会把 CA 下载到默认下载目录；请将文件保存或移动到上方填写的绝对路径。
                     </div>
                   </el-form-item>
 
@@ -171,11 +163,14 @@
                     :closable="false"
                     show-icon
                   >
-                    <template #title>首次使用或本地启动器升级后，需重新注册 Jianmen 数据库协议</template>
-                    <p class="registration-help">
-                      在 Windows CMD 中执行下面命令一次；此前注册过旧版本也需要重新执行。命令只为当前 Windows 用户注册协议，不需要管理员权限，也不会写入数据库密码。
-                    </p>
-                    <div class="command-box"><code>{{ databaseRegistrationCommand }}</code></div>
+                    <template #title>注册 Jianmen 数据库协议</template>
+                    <el-input
+                      type="textarea"
+                      :model-value="databaseRegistrationCommand"
+                      readonly
+                      :rows="4"
+                      class="registration-command-input"
+                    />
                     <div class="registration-actions">
                       <el-button
                         type="primary"
@@ -192,15 +187,6 @@
                 </template>
               </el-form>
 
-              <div class="database-client-flow">
-                <strong>数据库快速连接流程</strong>
-                <ol>
-                  <li>选择 DBeaver，填写命令行程序路径和本地 CA 文件路径。</li>
-                  <li>下载网关 CA，并将文件保存到配置的本地 CA 路径。</li>
-                  <li>在 Windows CMD 中执行一次协议注册命令，勾选“我已执行”后保存。</li>
-                  <li>在连接页面或“快速连接 → 数据库”点击“本地客户端”，Jianmen 会使用临时密码直接发起安全连接，无需再次选择 CA 或输入密码。</li>
-                </ol>
-              </div>
             </section>
           </el-tab-pane>
         </el-tabs>
@@ -596,6 +582,10 @@ async function copyRegistrationCommand(command: string) {
   text-overflow: clip;
 }
 
+:deep(.platform-segmented .el-segmented__item) {
+  min-width: fit-content;
+}
+
 .field-help {
   margin-top: 7px;
   color: var(--color-text-secondary);
@@ -628,19 +618,12 @@ async function copyRegistrationCommand(command: string) {
   white-space: nowrap;
 }
 
-.local-only-alert {
-  margin-bottom: 20px;
-}
-
 .database-registration-alert {
   margin-top: 6px;
 }
 
-.registration-help {
-  margin: 8px 0 0;
-  color: var(--color-text-secondary);
-  font-size: 12px;
-  line-height: 1.6;
+.registration-command-input {
+  margin-top: 10px;
 }
 
 .registration-actions {
@@ -649,26 +632,6 @@ async function copyRegistrationCommand(command: string) {
   flex-wrap: wrap;
   gap: 12px;
   margin-top: 10px;
-}
-
-.database-client-flow {
-  margin-top: 8px;
-  padding: 16px;
-  border: 1px solid var(--color-border);
-  border-radius: 12px;
-  background: var(--color-surface-muted);
-}
-
-.database-client-flow strong {
-  font-size: 14px;
-}
-
-.database-client-flow ol {
-  margin: 10px 0 0;
-  padding-left: 20px;
-  color: var(--color-text-secondary);
-  font-size: 13px;
-  line-height: 1.8;
 }
 
 @media (max-width: 760px) {

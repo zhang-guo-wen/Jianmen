@@ -113,7 +113,7 @@ test('host and database account creation forms keep expiry controls concise', ()
 
   assert.match(databaseAccountFormSource, /type="datetime"/);
   assert.match(databaseAccountFormSource, />\s*永久\s*</);
-  assert.doesNotMatch(databaseAccountFormSource, /8小时|7天|30天|1年/);
+  assert.match(databaseAccountFormSource, /8小时|7天|1年/);
   assert.match(databaseSource, /createDBAccount\([\s\S]*?expires_at:\s*accountForm\.expiresAt\?\.toISOString\(\) \?\? null/);
   assert.match(databaseSource, /updateDBAccount\([\s\S]*?expires_at:\s*accountForm\.expiresAt\?\.toISOString\(\) \?\? null/);
   assert.match(databaseSource, /toggleAccountStatus\([\s\S]*?expires_at:\s*account\.expires_at \|\| null/);

@@ -68,7 +68,6 @@ func canonicalProvisioningRequestHash(request ProvisionDatabaseAccountRequest) (
 		ActorID        string     `json:"actor_id"`
 		InstanceID     string     `json:"instance_id"`
 		AdminAccountID string     `json:"admin_account_id"`
-		Host           string     `json:"host"`
 		Grants         []DBGrant  `json:"grants"`
 		Group          string     `json:"group"`
 		Remark         string     `json:"remark"`
@@ -76,8 +75,8 @@ func canonicalProvisioningRequestHash(request ProvisionDatabaseAccountRequest) (
 	}
 	encoded, err := json.Marshal(canonicalRequest{
 		ActorID: actorID, InstanceID: strings.TrimSpace(request.InstanceID),
-		AdminAccountID: strings.TrimSpace(request.AdminAccountID), Host: strings.ToLower(strings.TrimSpace(request.Host)),
-		Grants: canonicalGrants, Group: strings.TrimSpace(request.Group), Remark: strings.TrimSpace(request.Remark),
+		AdminAccountID: strings.TrimSpace(request.AdminAccountID),
+		Grants:         canonicalGrants, Group: strings.TrimSpace(request.Group), Remark: strings.TrimSpace(request.Remark),
 		ExpiresAt: expiresAt,
 	})
 	if err != nil {

@@ -80,7 +80,7 @@ func TestHandleDBProvisionAccountRejectsClientSuppliedPassword(t *testing.T) {
 	server.databaseProvisioning = provisioning
 
 	body := `{"admin_account_id":"` + adminAccount.ID +
-		`","password":"client-secret","host":"10.0.0.8",` +
+		`","password":"client-secret",` +
 		`"grants":[{"database":"app","privilege":"read"}]}`
 	request := asTestUser(
 		httptest.NewRequest(
@@ -104,6 +104,37 @@ func TestHandleDBProvisionAccountRejectsClientSuppliedPassword(t *testing.T) {
 	}
 }
 
+func TestHandleDBProvisionAccountRejectsClientSuppliedHost(t *testing.T) {
+	server, db := newAdminDBTestServer(t)
+	instance, adminAccount := seedDatabaseProvisioningSecurityFixture(t, db, "db-create-user")
+	seedGlobalAction(t, db, "db-create-user", rbac.ActionDBProxyCreate)
+	grantDatabaseAccountConnection(t, db, "db-create-user", adminAccount.ID)
+	provisioning := &fakeDatabaseProvisioningService{}
+	server.databaseProvisioning = provisioning
+
+	body := `{"admin_account_id":"` + adminAccount.ID +
+		`","host":"10.0.0.8",` +
+		`"grants":[{"database":"app","privilege":"read"}]}`
+	request := asTestUser(
+		httptest.NewRequest(
+			http.MethodPost,
+			"/api/db/instances/"+instance.ID+"/provision-account",
+			bytes.NewBufferString(body),
+		),
+		"db-create-user",
+		"operator",
+	)
+	request.Header.Set("Idempotency-Key", "reject-client-host-001")
+	recorder := httptest.NewRecorder()
+	server.handleDBProvisionAccount(recorder, request, instance.ID)
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body=%s", recorder.Code, recorder.Body.String())
+	}
+	if provisioning.provisionCalls != 0 {
+		t.Fatalf("client-supplied host reached provisioning service: %d", provisioning.provisionCalls)
+	}
+}
+
 func TestHandleDBProvisionAccountRequiresValidIdempotencyKey(t *testing.T) {
 	server, db := newAdminDBTestServer(t)
 	instance, adminAccount := seedDatabaseProvisioningSecurityFixture(t, db, "db-create-user")
@@ -111,7 +142,7 @@ func TestHandleDBProvisionAccountRequiresValidIdempotencyKey(t *testing.T) {
 	grantDatabaseAccountConnection(t, db, "db-create-user", adminAccount.ID)
 	provisioning := &fakeDatabaseProvisioningService{}
 	server.databaseProvisioning = provisioning
-	body := `{"admin_account_id":"` + adminAccount.ID + `","host":"10.0.0.8","grants":[{"database":"app","privilege":"read"}]}`
+	body := `{"admin_account_id":"` + adminAccount.ID + `","grants":[{"database":"app","privilege":"read"}]}`
 	for _, key := range []string{"", "short", "valid-key-but-has-space 001", "valid-key-but-has/slash"} {
 		request := asTestUser(httptest.NewRequest(http.MethodPost, "/api/db/instances/"+instance.ID+"/provision-account", bytes.NewBufferString(body)), "db-create-user", "operator")
 		if key != "" {
@@ -137,7 +168,7 @@ func TestHandleDBProvisionAccountRejectsClientSuppliedUpstreamUsername(t *testin
 	server.databaseProvisioning = provisioning
 
 	body := `{"admin_account_id":"` + adminAccount.ID +
-		`","new_username":"existing_admin","host":"10.0.0.8",` +
+		`","new_username":"existing_admin",` +
 		`"grants":[{"database":"app","privilege":"read"}]}`
 	request := asTestUser(
 		httptest.NewRequest(
@@ -174,8 +205,7 @@ func TestHandleDBProvisionAccountReturnsOnlyLocalAccountResource(t *testing.T) {
 	server.databaseProvisioning = provisioning
 
 	body := `{"admin_account_id":"` + adminAccount.ID +
-		`","host":"10.0.0.8",` +
-		`"grants":[{"database":"app","privilege":"read"}]}`
+		`","grants":[{"database":"app","privilege":"read"}]}`
 	request := asTestUser(
 		httptest.NewRequest(
 			http.MethodPost,
@@ -193,7 +223,6 @@ func TestHandleDBProvisionAccountReturnsOnlyLocalAccountResource(t *testing.T) {
 	}
 	if provisioning.provisionCalls != 1 ||
 		provisioning.provisionRequest.InstanceID != instance.ID ||
-		provisioning.provisionRequest.Host != "10.0.0.8" ||
 		provisioning.provisionRequest.Actor.UserID != "db-create-user" {
 		t.Fatalf("handler did not delegate parsed request: %#v", provisioning.provisionRequest)
 	}
@@ -218,8 +247,7 @@ func TestHandleDBProvisionAccountReportsPersistentCleanupWithoutDetails(t *testi
 	}
 
 	body := `{"admin_account_id":"` + adminAccount.ID +
-		`","host":"10.0.0.8",` +
-		`"grants":[{"database":"app","privilege":"read"}]}`
+		`","grants":[{"database":"app","privilege":"read"}]}`
 	request := asTestUser(
 		httptest.NewRequest(
 			http.MethodPost,

@@ -21,7 +21,6 @@ func (s *DatabaseProvisioningService) Provision(
 	}
 	request.InstanceID = strings.TrimSpace(request.InstanceID)
 	request.AdminAccountID = strings.TrimSpace(request.AdminAccountID)
-	request.Host = strings.TrimSpace(request.Host)
 	key, err := normalizeDatabaseProvisioningIdempotencyKey(request.IdempotencyKey)
 	if err != nil {
 		return ProvisionDatabaseAccountResult{}, err
@@ -65,6 +64,10 @@ func (s *DatabaseProvisioningService) Provision(
 	if err := ctx.Err(); err != nil {
 		return ProvisionDatabaseAccountResult{}, ErrDatabaseProvisioningFailed
 	}
+	accountHost, err := s.provisioner.ResolveAccountHost(ctx, instance, admin)
+	if err != nil {
+		return ProvisionDatabaseAccountResult{}, ErrDatabaseProvisioningFailed
+	}
 
 	token, err := s.randomString(20, provisioningOperationAlphabet)
 	if err != nil {
@@ -79,7 +82,7 @@ func (s *DatabaseProvisioningService) Provision(
 		return ProvisionDatabaseAccountResult{}, fmt.Errorf("generate database operation lease: %w", err)
 	}
 	username := "jm_" + token
-	if err := ValidateMySQLProvisioning(username, password, request.Host, request.Grants); err != nil {
+	if err := ValidateMySQLProvisioning(username, password, accountHost, request.Grants); err != nil {
 		return ProvisionDatabaseAccountResult{}, fmt.Errorf("%w: invalid provisioning fields", ErrInvalidDatabaseProvisioningRequest)
 	}
 	grantsJSON, err := json.Marshal(request.Grants)
@@ -88,7 +91,7 @@ func (s *DatabaseProvisioningService) Provision(
 	}
 	input := DatabaseProvisioningOperationInput{
 		ID: "jmo_" + token, InstanceID: request.InstanceID, AdminAccountID: request.AdminAccountID,
-		Username: username, Password: password, Host: request.Host, GrantsJSON: string(grantsJSON),
+		Username: username, Password: password, Host: accountHost, GrantsJSON: string(grantsJSON),
 		Group: request.Group, Remark: request.Remark, ExpiresAt: request.ExpiresAt,
 		ActorID: request.Actor.UserID, IdempotencyKey: key, RequestHash: requestHash,
 		Lease:                 DatabaseProvisioningLease{Owner: s.workerID, Token: leaseToken, Duration: s.leaseDuration},

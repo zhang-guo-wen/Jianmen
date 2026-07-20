@@ -191,7 +191,6 @@ func TestDatabaseProvisioningAuditCompletionFailureWarnsWithoutSecret(t *testing
 		context.Background(),
 		ProvisionDatabaseAccountRequest{
 			InstanceID: "instance-1", AdminAccountID: "admin-1",
-			Host:   "10.0.0.8",
 			Grants: []DBGrant{{Database: "orders", Privilege: "read"}},
 		},
 	); err != nil {

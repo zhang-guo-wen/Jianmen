@@ -18,6 +18,9 @@
         />
       </template>
       <template #toolbar-extra>
+        <el-button :loading="instancesLoading" :icon="Refresh" @click="loadInstances">
+          刷新
+        </el-button>
         <el-button v-if="permission.canDo('dbproxy:create')" type="primary" @click="openCreateInstance">新增实例</el-button>
       </template>
       <el-table-column prop="name" label="名称" min-width="130" show-overflow-tooltip />
@@ -234,188 +237,29 @@
       </DataTableCard>
     </el-dialog>
 
-    <!-- 创建/编辑账号弹窗 -->
-    <FormDialog
+    <DatabaseAccountFormDialog
       v-model:visible="accountDialogVisible"
-      :title="editingAccount ? '编辑账号' : '新增账号'"
+      v-model:username="accountForm.username"
+      v-model:password="accountForm.password"
+      v-model:group="accountForm.group"
+      v-model:remark="accountForm.remark"
+      v-model:expires-at="accountForm.expiresAt"
+      v-model:more-panels="accountMorePanels"
+      :editing="Boolean(editingAccount)"
+      :protocol="selectedInstance?.protocol"
       :loading="accountSubmitting"
+      :testing="accountFormTesting"
+      :test-result="accountFormTestResult"
+      :group-options="accountGroupOptions"
+      @test="testAccountFormConnection"
       @submit="submitAccount"
-    >
-      <el-form :model="accountForm" class="database-resource-form" label-position="top">
-        <el-form-item :label="selectedInstance?.protocol === 'redis' ? '目标用户名' : '目标用户名'" :required="selectedInstance?.protocol !== 'redis'">
-          <el-input v-model="accountForm.username" :placeholder="selectedInstance?.protocol === 'redis' ? 'Redis ACL 用户名（可选，留空则使用单一密码认证）' : '数据库登录用户名'" />
-        </el-form-item>
-        <el-form-item label="目标密码">
-          <el-input v-model="accountForm.password" type="password" show-password
-            :placeholder="editingAccount ? '留空则保留原密码' : '数据库登录密码'" />
-        </el-form-item>
-        <el-form-item label="连接测试">
-          <div class="test-connection-row">
-            <el-button :loading="accountFormTesting" @click="testAccountFormConnection">测试连接</el-button>
-            <template v-if="accountFormTestResult">
-              <el-tag :type="accountFormTestResult.ok ? 'success' : 'danger'" size="small">
-                {{ accountFormTestResult.ok ? '可达' : '不可达' }}
-              </el-tag>
-              <span v-if="accountFormTestResult.latency_ms !== undefined" class="test-connection-meta">
-                延迟 {{ accountFormTestResult.latency_ms }}ms
-              </span>
-              <span v-if="accountFormTestResult.error" class="test-connection-error">
-                {{ accountFormTestResult.error }}
-              </span>
-            </template>
-          </div>
-          <div v-if="editingAccount" class="test-connection-hint">
-            点击测试连接时必须重新输入数据库密码；保存时密码留空仍会保留原密码。
-          </div>
-          <div v-if="editingAccount" class="test-connection-row saved-credential-row">
-            <span class="test-connection-meta">已保存凭据：</span>
-            <el-tag v-if="savedCredentialTesting" type="info" size="small">测试中…</el-tag>
-            <template v-else-if="savedCredentialTestResult">
-              <el-tag :type="savedCredentialTestResult.ok ? 'success' : 'danger'" size="small">
-                {{ savedCredentialTestResult.ok ? '可达' : '不可达' }}
-              </el-tag>
-              <span v-if="savedCredentialTestResult.latency_ms !== undefined" class="test-connection-meta">
-                延迟 {{ savedCredentialTestResult.latency_ms }}ms
-              </span>
-              <span v-if="savedCredentialTestResult.error" class="test-connection-error">
-                {{ savedCredentialTestResult.error }}
-              </span>
-            </template>
-          </div>
-        </el-form-item>
-        <el-form-item label="有效期">
-          <div v-if="editingAccount" class="expiry-control">
-            <el-date-picker
-              v-model="accountForm.expiresAt"
-              type="datetime"
-              class="expiry-picker"
-              clearable
-              format="YYYY-MM-DD HH:mm"
-              placeholder="选择过期时间"
-              @change="expiryPreset = ''"
-            />
-            <div class="expiry-presets">
-              <el-button
-                v-for="opt in expiryOptions"
-                :key="opt.label"
-                size="small"
-                :type="expiryPreset === opt.label ? 'primary' : ''"
-                @click="setExpiry(opt)"
-              >
-                {{ opt.label }}
-              </el-button>
-            </div>
-          </div>
-          <div v-else class="expiry-presets">
-            <el-button size="small" type="primary" @click="setPermanentAccountExpiry">
-              永久
-            </el-button>
-          </div>
-        </el-form-item>
-        <el-collapse v-model="accountMorePanels">
-          <el-collapse-item name="more" title="更多设置">
-            <el-form-item label="分组">
-              <el-select
-                v-model="accountForm.group"
-                allow-create
-                clearable
-                default-first-option
-                filterable
-                placeholder="选择或输入分组"
-              >
-                <el-option
-                  v-for="g in accountGroupOptions"
-                  :key="g"
-                  :label="g"
-                  :value="g"
-                />
-              </el-select>
-            </el-form-item>
-            <el-form-item label="备注">
-              <el-input v-model="accountForm.remark" type="textarea" placeholder="备注信息" />
-            </el-form-item>
-          </el-collapse-item>
-        </el-collapse>
-      </el-form>
-    </FormDialog>
+    />
 
-    <!-- 自动创建账号弹窗 -->
-    <el-dialog
+    <DatabaseAutoProvisionDialog
       v-model="autoProvisionVisible"
-      title="自动创建 MySQL 账号"
-      class="crud-form-dialog"
-      destroy-on-close
-      @closed="resetAutoProvision"
-    >
-      <template v-if="provisionStep === 1">
-        <el-form class="database-resource-form" label-position="top">
-          <el-form-item label="管理员凭据">
-            <el-select v-model="provision.adminAccountId" placeholder="选择用于创建账号的凭据" style="width:100%">
-              <el-option
-                v-for="acc in adminAccounts"
-                :key="acc.id"
-                :label="`${acc.username} (${acc.unique_name})`"
-                :value="acc.id"
-              />
-            </el-select>
-          </el-form-item>
-          <el-form-item label="主机">
-            <el-input v-model="provision.host" placeholder="例如 10.0.0.8（必填，禁止通配符）" />
-          </el-form-item>
-        </el-form>
-      </template>
-
-      <template v-else-if="provisionStep === 2">
-        <div v-if="loadingDatabases" class="provision-loading">
-          <el-icon class="is-loading" :size="24"><Loading /></el-icon>
-          <p>正在获取数据库列表…</p>
-        </div>
-        <template v-else>
-          <div class="grant-actions">
-            <el-button size="small" @click="setAllDBGrants('readwrite')">全部读写</el-button>
-            <el-button size="small" @click="setAllDBGrants('read')">全部只读</el-button>
-            <el-button size="small" @click="setAllDBGrants('')">全部无</el-button>
-          </div>
-          <el-table :data="dbGrants" size="small" max-height="340">
-            <el-table-column prop="database" label="数据库" />
-            <el-table-column label="权限" width="180" align="center">
-              <template #default="{ row }">
-                <el-radio-group v-model="row.privilege" size="small">
-                  <el-radio-button value="">无</el-radio-button>
-                  <el-radio-button value="read">读</el-radio-button>
-                  <el-radio-button value="readwrite">读写</el-radio-button>
-                </el-radio-group>
-              </template>
-            </el-table-column>
-          </el-table>
-        </template>
-      </template>
-
-      <template v-else-if="provisionStep === 3">
-        <div v-if="provisioning" class="provision-loading">
-          <el-icon class="is-loading" :size="28"><Loading /></el-icon>
-          <p>正在目标 MySQL 上创建账号…</p>
-        </div>
-        <template v-else-if="provisionResult">
-          <el-alert type="success" title="账号创建成功" :closable="false" show-icon />
-          <el-descriptions class="provision-result" :column="1" border size="small">
-            <el-descriptions-item label="资源标识">
-              <code>{{ provisionResult.account.resource_id }}</code>
-            </el-descriptions-item>
-            <el-descriptions-item label="主机">{{ provision.host }}</el-descriptions-item>
-          </el-descriptions>
-        </template>
-        <el-alert v-else-if="provisionError" type="error" :title="provisionError" :closable="false" show-icon />
-      </template>
-
-      <template #footer>
-        <el-button @click="autoProvisionVisible = false">取消</el-button>
-        <el-button v-if="provisionStep === 1" type="primary" :disabled="!provision.adminAccountId || !provision.host.trim()" @click="goProvisionStep2">下一步</el-button>
-        <el-button v-if="provisionStep === 2" :disabled="loadingDatabases" @click="provisionStep = 1">上一步</el-button>
-        <el-button v-if="provisionStep === 2" type="primary" :disabled="provisioning || loadingDatabases" @click="doProvision">创建</el-button>
-        <el-button v-if="provisionStep === 3 && !provisioning" type="primary" @click="closeProvisionAndRefresh">完成</el-button>
-      </template>
-    </el-dialog>
+      :instance="selectedInstance"
+      @created="handleProvisionedAccountCreated"
+    />
 
     <ConnectionConfigDialog
       v-model="connectDialogVisible"
@@ -433,16 +277,17 @@
 <script setup lang="ts">
 import { ref, reactive, watch, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { ArrowDown, Loading } from '@element-plus/icons-vue'
+import { ArrowDown, Refresh } from '@element-plus/icons-vue'
 import { useRouter } from 'vue-router'
 import DataTableCard from '@/components/DataTableCard.vue'
 import FormDialog from '@/components/FormDialog.vue'
 import ConnectionConfigDialog from '@/components/ConnectionConfigDialog.vue'
+import DatabaseAccountFormDialog from '@/components/database/DatabaseAccountFormDialog.vue'
+import DatabaseAutoProvisionDialog from '@/components/database/DatabaseAutoProvisionDialog.vue'
 import ResourceFilterBar from '@/components/ResourceFilterBar.vue'
 import StatusSwitch from '@/components/StatusSwitch.vue'
 import * as api from '@/api/client'
 import { usePermissionStore } from '@/stores/permission'
-import { createProvisionIdempotencySession, type ProvisionRequest } from '@/utils/provisioningRequest'
 import { createLatestKeyedRequest } from '@/utils/connectionRequestState'
 import {
   buildDatabaseUpstreamTLSPayload,
@@ -528,15 +373,6 @@ const accountMorePanels = ref<string[]>([])
 const accountSubmitting = ref(false)
 const statusUpdatingId = ref('')
 
-const expiryPreset = ref('')
-const expiryOptions = [
-  { label: '永久', hours: -1 },
-  { label: '8小时', hours: 8 },
-  { label: '7天', hours: 7 * 24 },
-  { label: '30天', hours: 30 * 24 },
-  { label: '1年', hours: 365 * 24 },
-]
-
 const accountForm = reactive<AccountFormState>({
   username: '',
   password: '',
@@ -552,9 +388,6 @@ const connectTarget = ref<api.DBAccountRecord | null>(null)
 // ── Gateway config ──
 const accountFormTesting = ref(false)
 const accountFormTestResult = ref<{ ok: boolean; error?: string; latency_ms?: number } | null>(null)
-const savedCredentialTesting = ref(false)
-const savedCredentialTestResult = ref<{ ok: boolean; error?: string; latency_ms?: number } | null>(null)
-const savedCredentialTestRequests = createLatestKeyedRequest<{ ok: boolean; error?: string; latency_ms?: number }>()
 
 function instanceUsageCount(instance: api.DatabaseInstanceView): number {
   return instanceUsageCounts.value[String(instance.name || '').trim().toLowerCase()] || 0
@@ -963,8 +796,6 @@ async function loadSelectedInstanceAccounts() {
 }
 
 function openCreateAccount() {
-  savedCredentialTestRequests.invalidate()
-  savedCredentialTesting.value = false
   editingAccount.value = null
   accountMorePanels.value = ['more']
   accountForm.username = ''
@@ -972,9 +803,7 @@ function openCreateAccount() {
   accountForm.group = ''
   accountForm.remark = ''
   accountForm.expiresAt = null
-  expiryPreset.value = ''
   accountFormTestResult.value = null
-  savedCredentialTestResult.value = null
   accountDialogVisible.value = true
 }
 
@@ -986,51 +815,8 @@ function editAccount(row: api.DBAccountRecord) {
   accountForm.group = row.group || ''
   accountForm.remark = row.remark || ''
   accountForm.expiresAt = row.expires_at ? new Date(row.expires_at) : null
-  expiryPreset.value = ''
   accountFormTestResult.value = null
-  savedCredentialTestResult.value = null
   accountDialogVisible.value = true
-  testSavedAccountConnection(row)
-}
-
-function setExpiry(opt: { label: string; hours: number }) {
-  expiryPreset.value = opt.label
-  if (opt.hours === -1) {
-    accountForm.expiresAt = null
-  } else {
-    accountForm.expiresAt = new Date(Date.now() + opt.hours * 3600 * 1000)
-  }
-}
-
-function setPermanentAccountExpiry() {
-  expiryPreset.value = '永久'
-  accountForm.expiresAt = null
-}
-
-async function testSavedAccountConnection(row: api.DBAccountRecord) {
-  const key = String(row.id || row.resource_id || '')
-  if (!key) return
-  const request = savedCredentialTestRequests.begin(
-    key,
-    () => api.apiClient.testDBConnection(key),
-  )
-  savedCredentialTesting.value = true
-  savedCredentialTestResult.value = null
-  const isCurrentRequest = () => (
-    accountDialogVisible.value
-    && String(editingAccount.value?.id || editingAccount.value?.resource_id || '') === key
-    && savedCredentialTestRequests.isCurrent(request.token, key)
-  )
-  try {
-    const result = await request.promise
-    if (!isCurrentRequest()) return
-    savedCredentialTestResult.value = { ok: result.ok, latency_ms: result.latency_ms, error: result.ok ? undefined : (result.error || '连接失败') }
-  } catch (err) {
-    if (!isCurrentRequest()) return
-    savedCredentialTestResult.value = { ok: false, error: err instanceof Error ? err.message : '连接失败' }
-  } finally {
-    if (isCurrentRequest()) savedCredentialTesting.value = false
-  }
 }
 
 async function testAccountFormConnection() {
@@ -1040,7 +826,7 @@ async function testAccountFormConnection() {
   }
   const isRedis = selectedInstance.value.protocol === 'redis'
   if (!isRedis && !accountForm.username.trim()) {
-    ElMessage.warning('请输入目标用户名')
+    ElMessage.warning('请输入登录账号')
     return
   }
   if (!accountForm.password) {
@@ -1065,7 +851,7 @@ async function testAccountFormConnection() {
 
 async function submitAccount() {
   const isRedis = selectedInstance.value?.protocol === 'redis'
-  if (!isRedis && !accountForm.username.trim()) { ElMessage.warning('请输入目标用户名'); return }
+  if (!isRedis && !accountForm.username.trim()) { ElMessage.warning('请输入登录账号'); return }
   accountSubmitting.value = true
   try {
     if (editingAccount.value) {
@@ -1075,7 +861,7 @@ async function submitAccount() {
         group: accountForm.group,
         remark: accountForm.remark,
         status: editingAccount.value.status,
-        expires_at: accountForm.expiresAt?.toISOString(),
+        expires_at: accountForm.expiresAt?.toISOString() ?? null,
       })
       ElMessage.success('账号已更新')
     } else {
@@ -1084,7 +870,7 @@ async function submitAccount() {
         password: accountForm.password,
         group: accountForm.group,
         remark: accountForm.remark,
-        expires_at: undefined,
+        expires_at: accountForm.expiresAt?.toISOString() ?? null,
       })
       ElMessage.success('账号已创建')
     }
@@ -1103,6 +889,7 @@ async function toggleAccountStatus(account: api.DBAccountRecord, active: boolean
       username: account.username || '',
       group: account.group || '',
       remark: account.remark || '',
+      expires_at: account.expires_at || null,
       status: active ? 'active' : 'disabled',
     })
     ElMessage.success(active ? '账号已启用' : '账号已禁用')
@@ -1176,14 +963,6 @@ watch(showInstanceDialog, visible => {
   }
 })
 
-watch(accountDialogVisible, visible => {
-  if (!visible) {
-    savedCredentialTestRequests.invalidate()
-    savedCredentialTesting.value = false
-    savedCredentialTestResult.value = null
-  }
-})
-
 onMounted(() => {
   loadInstances()
   loadGroupOptions()
@@ -1202,117 +981,23 @@ async function loadGroupOptions() {
     : []
 }
 
-// ── 自动创建 ──
-interface DBGrantRow {
-  database: string
-  privilege: '' | 'read' | 'readwrite'
-}
-
 const autoProvisionVisible = ref(false)
-const provisionStep = ref(1)
-const provisioning = ref(false)
-const loadingDatabases = ref(false)
-const provisionError = ref('')
-const provisionResult = ref<any>(null)
-const dbGrants = ref<DBGrantRow[]>([])
-const adminAccounts = ref<any[]>([])
-const provisionIdempotency = createProvisionIdempotencySession()
 
-const provision = reactive({
-  adminAccountId: '',
-  host: '',
-})
-
-async function openAutoProvision() {
-  if (!selectedInstance.value) return
-  provisionIdempotency.reset()
-  const instId = selectedInstance.value.id!
-  try {
-    const res = await api.apiClient.getDBAccounts(instId, { page_size: 200 })
-    const items = res.items ?? []
-    adminAccounts.value = items.filter((a: any) => a.status === 'active')
-  } catch {
-    adminAccounts.value = []
-  }
-  if (adminAccounts.value.length > 0) {
-    provision.adminAccountId = adminAccounts.value[0].id
-  } else {
-    provision.adminAccountId = ''
-  }
-  provision.host = ''
-  provisionStep.value = 1
-  provisionError.value = ''
-  provisionResult.value = null
+function openAutoProvision() {
+  if (!selectedInstance.value?.id) return
   autoProvisionVisible.value = true
 }
 
-async function goProvisionStep2() {
-  if (!provision.adminAccountId || !selectedInstance.value) return
-  loadingDatabases.value = true
-  try {
-    const res = await api.apiClient.listDBDatabases(selectedInstance.value.id!, provision.adminAccountId)
-    const dbs: string[] = res.databases ?? []
-    dbGrants.value = dbs.map(db => ({ database: db, privilege: '' as const }))
-    provisionStep.value = 2
-  } catch (e: any) {
-    ElMessage.error('获取数据库列表失败: ' + (e.message || e))
-  } finally {
-    loadingDatabases.value = false
-  }
-}
-
-function setAllDBGrants(p: '' | 'read' | 'readwrite') {
-  dbGrants.value.forEach(row => { row.privilege = p })
-}
-
-async function doProvision() {
-  if (!selectedInstance.value || provisioning.value) return
-  provisioning.value = true
-  provisionError.value = ''
-  const payload: ProvisionRequest = {
-    admin_account_id: provision.adminAccountId,
-    host: provision.host,
-    grants: dbGrants.value
-      .filter(r => r.privilege !== '')
-      .map(r => ({ database: r.database, privilege: r.privilege })),
-  }
-  const idempotencyKey = provisionIdempotency.keyFor(payload, selectedInstance.value.id!)
-  try {
-    const res = await api.apiClient.provisionDBAccount(selectedInstance.value.id!, payload, idempotencyKey)
-    if (res.ok === false) throw new Error('自动供应未成功，请重试')
-    provisionResult.value = res
-    provisionStep.value = 3
-    provisionIdempotency.markSucceeded()
-  } catch (e: any) {
-    provisionIdempotency.markFailed()
-    provisionError.value = e.message || String(e)
-  } finally {
-    provisioning.value = false
-  }
-}
-
-function resetAutoProvision() {
-  provisionIdempotency.reset()
-  provisionStep.value = 1
-  provisionError.value = ''
-  provisionResult.value = null
-  dbGrants.value = []
-}
-
-function closeProvisionAndRefresh() {
-  autoProvisionVisible.value = false
-  loadSelectedInstanceAccounts()
+function handleProvisionedAccountCreated() {
+  void Promise.all([
+    loadSelectedInstanceAccounts(),
+    loadInstances(),
+  ])
 }
 
 </script>
 
 <style scoped>
-.dialog-stack {
-  display: flex;
-  flex-direction: column;
-  gap: 18px;
-}
-
 .accounts-table {
   height: min(64dvh, 620px);
   min-height: 360px;
@@ -1322,53 +1007,6 @@ function closeProvisionAndRefresh() {
 .database-resource-form :deep(.el-input-number),
 .database-resource-form :deep(.el-date-editor) {
   width: 100%;
-}
-
-.grant-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  width: 100%;
-}
-
-.expiry-control {
-  display: grid;
-  grid-template-columns: minmax(220px, 1fr) auto;
-  gap: 8px;
-  width: 100%;
-}
-
-.expiry-presets {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.expiry-presets :deep(.el-button),
-.grant-actions :deep(.el-button) {
-  margin: 0;
-}
-
-.expiry-picker {
-  width: 100%;
-}
-
-.provision-loading {
-  padding: 30px 0;
-  color: var(--color-text-secondary);
-  text-align: center;
-}
-
-.provision-loading p {
-  margin: 10px 0 0;
-}
-
-.grant-actions {
-  margin-bottom: 8px;
-}
-
-.provision-result {
-  margin-top: 12px;
 }
 
 .connect-section + .connect-section {
@@ -1397,35 +1035,6 @@ function closeProvisionAndRefresh() {
   color: #344054;
   font-size: 13px;
   font-weight: 650;
-}
-
-.test-connection-row {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.saved-credential-row {
-  margin-top: 8px;
-}
-
-.test-connection-meta {
-  color: #667085;
-  font-size: 12px;
-}
-
-.test-connection-error {
-  color: var(--el-color-danger);
-  font-size: 12px;
-}
-
-.test-connection-hint {
-  color: #667085;
-  font-size: 12px;
-  line-height: 1.5;
-  margin-top: 6px;
-  width: 100%;
 }
 
 /* 协议标签统一宽度 */
@@ -1497,10 +1106,6 @@ function closeProvisionAndRefresh() {
   }
 
   .config-row {
-    grid-template-columns: 1fr;
-  }
-
-  .expiry-control {
     grid-template-columns: 1fr;
   }
 }

@@ -71,7 +71,7 @@ test('direct mutation dialogs opt into the shared form-dialog shell', () => {
     { file: 'components/BatchCreateUsersDialog.vue', model: 'visible', marker: ':model-value="visible"', topForm: false },
     { file: 'components/ResourceGroupsContent.vue', model: 'dialogVisible', topForm: true },
     { file: 'views/ContainersView.vue', model: 'quickAccountVisible', topForm: true },
-    { file: 'views/DatabaseView.vue', model: 'autoProvisionVisible', topForm: true },
+    { file: 'components/database/DatabaseAutoProvisionDialog.vue', model: 'visible', topForm: true },
     { file: 'views/ResourceGrantView.vue', model: 'grantDialogVisible', topForm: true },
     { file: 'views/TemporaryAccountsView.vue', model: 'temporaryDialogVisible', topForm: true },
     { file: 'views/TemporaryAccountsView.vue', model: 'aiDialogVisible', topForm: true },
@@ -102,6 +102,7 @@ test('direct mutation dialogs opt into the shared form-dialog shell', () => {
 test('host and database account creation forms keep expiry controls concise', () => {
   const hostsSource = source('views/HostsView.vue');
   const databaseSource = source('views/DatabaseView.vue');
+  const databaseAccountFormSource = source('components/database/DatabaseAccountFormDialog.vue');
 
   assert.doesNotMatch(
     hostsSource,
@@ -110,14 +111,45 @@ test('host and database account creation forms keep expiry controls concise', ()
   assert.doesNotMatch(hostsSource, /class="expiry-text"/);
   assert.doesNotMatch(hostsSource, /\.expiry-text\s*\{/);
 
-  assert.match(
-    databaseSource,
-    /<div v-if="editingAccount" class="expiry-control">[\s\S]*?<div v-else class="expiry-presets">[\s\S]*?永久/,
-  );
-  assert.match(
-    databaseSource,
-    /createDBAccount\([\s\S]*?expires_at:\s*undefined/,
-  );
+  assert.match(databaseAccountFormSource, /type="datetime"/);
+  assert.match(databaseAccountFormSource, />\s*永久\s*</);
+  assert.doesNotMatch(databaseAccountFormSource, /8小时|7天|30天|1年/);
+  assert.match(databaseSource, /createDBAccount\([\s\S]*?expires_at:\s*accountForm\.expiresAt\?\.toISOString\(\) \?\? null/);
+  assert.match(databaseSource, /updateDBAccount\([\s\S]*?expires_at:\s*accountForm\.expiresAt\?\.toISOString\(\) \?\? null/);
+  assert.match(databaseSource, /toggleAccountStatus\([\s\S]*?expires_at:\s*account\.expires_at \|\| null/);
+});
+
+test('database account form uses login language without saved-credential hints', () => {
+  const componentSource = source('components/database/DatabaseAccountFormDialog.vue');
+  const databaseSource = source('views/DatabaseView.vue');
+
+  assert.match(componentSource, /label="登录账号"/);
+  assert.match(componentSource, /label="登录密码"/);
+  assert.doesNotMatch(componentSource, /目标用户名|目标密码/);
+  assert.doesNotMatch(componentSource, /点击测试连接时必须重新输入数据库密码/);
+  assert.doesNotMatch(componentSource, /已保存凭据/);
+  assert.doesNotMatch(databaseSource, /savedCredentialTestRequests|testSavedAccountConnection/);
+});
+
+test('database auto provisioning stays in one dialog and loads a scrollable database list from the selected credential', () => {
+  const componentSource = source('components/database/DatabaseAutoProvisionDialog.vue');
+
+  assert.equal((componentSource.match(/<el-dialog\b/g) ?? []).length, 1);
+  assert.match(componentSource, /v-model="selectedAdminAccountId"/);
+  assert.match(componentSource, /watch\(selectedAdminAccountId/);
+  assert.match(componentSource, /loadDatabases\(instanceID, accountID\)/);
+  assert.match(componentSource, /max-height="340"/);
+  assert.doesNotMatch(componentSource, /<el-form-item label="主机"/);
+  assert.doesNotMatch(componentSource, /下一步|上一步|provisionStep/);
+  assert.doesNotMatch(componentSource, /\bhost\s*:/);
+});
+
+test('host and database management toolbars expose top-level refresh actions', () => {
+  const hostsSource = source('views/HostsView.vue');
+  const databaseSource = source('views/DatabaseView.vue');
+
+  assert.match(hostsSource, /:loading="hostsLoading" :icon="Refresh" @click="fetchHosts"/);
+  assert.match(databaseSource, /:loading="instancesLoading" :icon="Refresh" @click="loadInstances"/);
 });
 
 test('database instance name is optional, advanced, and defaults to its address', () => {

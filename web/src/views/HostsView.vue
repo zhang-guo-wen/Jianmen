@@ -20,6 +20,9 @@
           />
         </template>
         <template #toolbar-extra>
+          <el-button :loading="hostsLoading" :icon="Refresh" @click="fetchHosts">
+            刷新
+          </el-button>
           <el-button v-if="permission.canDo('host:create')" type="primary" @click="openCreateHostDialog"
             >新增主机</el-button
           >
@@ -579,7 +582,7 @@ import {
   type FormInstance,
   type FormRules,
 } from "element-plus";
-import { ArrowDown } from "@element-plus/icons-vue";
+import { ArrowDown, Refresh } from "@element-plus/icons-vue";
 import { useRouter } from "vue-router";
 import DataTableCard from "@/components/DataTableCard.vue";
 import ResourceFilterBar from "@/components/ResourceFilterBar.vue";

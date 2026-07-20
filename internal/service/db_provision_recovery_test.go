@@ -35,7 +35,7 @@ func TestRecoveryAdministratorRejectsExpiredCredentialForNewUse(t *testing.T) {
 		t.Fatal("public database listing used expired administrator")
 	}
 	_, err := service.Provision(context.Background(), ProvisionDatabaseAccountRequest{
-		InstanceID: "instance-1", AdminAccountID: "admin-1", Host: "10.0.0.8",
+		InstanceID: "instance-1", AdminAccountID: "admin-1",
 		Grants: []DBGrant{{Database: "orders", Privilege: "read"}}, Actor: DatabaseProvisioningActor{UserID: "operator"},
 	})
 	if !errors.Is(err, ErrDatabaseProvisioningFailed) || provisioner.createCalls != 0 {

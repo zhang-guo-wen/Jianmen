@@ -18,7 +18,6 @@ func TestInitializeMetadataBootstrapsSQLite(t *testing.T) {
 	cfg.Database.Enabled = true
 	cfg.Database.Driver = "sqlite"
 	cfg.Database.DSN = filepath.Join(dataDir, "metadata.db")
-	cfg.Database.AutoMigrate = true
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 
 	db, gotDataDir, cleanup, err := initializeMetadata(cfg, logger)
@@ -34,7 +33,7 @@ func TestInitializeMetadataBootstrapsSQLite(t *testing.T) {
 	}
 }
 
-func TestInitializeMetadataAutoMigrateFlagStillRemovesLegacyAITokenSecrets(t *testing.T) {
+func TestInitializeMetadataVersionedMigrationRemovesLegacyAITokenSecrets(t *testing.T) {
 	dataDir := t.TempDir()
 	dsn := filepath.Join(dataDir, "metadata.db")
 	legacyDB, err := storage.Open(storage.Config{Driver: storage.DriverSQLite, DSN: dsn})
@@ -68,7 +67,6 @@ func TestInitializeMetadataAutoMigrateFlagStillRemovesLegacyAITokenSecrets(t *te
 	cfg.Database.Enabled = true
 	cfg.Database.Driver = "sqlite"
 	cfg.Database.DSN = dsn
-	cfg.Database.AutoMigrate = true
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 
 	db, _, cleanup, err := initializeMetadata(cfg, logger)
@@ -106,7 +104,6 @@ func TestInitializeMetadataDoesNotReadOrRenameLegacySuperAdministratorFile(t *te
 	cfg.Database.Enabled = true
 	cfg.Database.Driver = "sqlite"
 	cfg.Database.DSN = filepath.Join(dataDir, "metadata.db")
-	cfg.Database.AutoMigrate = true
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 
 	db, _, cleanup, err := initializeMetadata(cfg, logger)

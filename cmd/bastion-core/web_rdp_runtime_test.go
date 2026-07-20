@@ -37,7 +37,6 @@ func TestDisabledWebRDPRuntimeKeepsAuditHandlersAvailable(t *testing.T) {
 	cfg.Database.Enabled = true
 	cfg.Database.Driver = "sqlite"
 	cfg.Database.DSN = filepath.Join(root, "metadata.db")
-	cfg.Database.AutoMigrate = true
 	cfg.WebRDP.Enabled = false
 	cfg.WebRDP.GuacdAddress = "127.0.0.1:4822"
 	cfg.WebRDP.ConnectTimeoutSecs = 15

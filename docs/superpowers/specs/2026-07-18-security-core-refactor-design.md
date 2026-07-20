@@ -299,7 +299,7 @@ resource_group_members
 
 ## 14. 数据迁移
 
-- 生产配置默认 `auto_migrate=false`。
+- 配置文件不暴露自动迁移开关。
 - 版本化 Migration 是唯一生产迁移入口。
 - 历史 Migration 不再修改。
 - 每个新实体和索引都有独立版本号。

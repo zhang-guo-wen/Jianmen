@@ -405,7 +405,7 @@ git commit -m "feat: govern audit redaction and retention"
 - Modify: config examples and README.
 
 **Interfaces:**
-- Produces immutable forward-only migrations and production default `auto_migrate=false`.
+- Produces immutable forward-only migrations without a runtime migration switch.
 
 - [ ] **Step 1: Write failing migration tests**
 
@@ -418,10 +418,10 @@ idempotent second startup.
 go test ./internal/storage -run Migration -count=1
 ```
 
-- [ ] **Step 3: Disable production AutoMigrate default**
+- [ ] **Step 3: Remove the production AutoMigrate setting**
 
-Tests may continue to use `AutoMigrate` for isolated unit fixtures, but application startup uses
-`Migrate` unless an explicit development-only setting is enabled.
+Tests may continue to use `AutoMigrate` for isolated unit fixtures, but application startup always
+uses versioned `Migrate` without a configuration switch.
 
 - [ ] **Step 4: Verify GREEN and commit**
 

@@ -56,10 +56,6 @@ func initializeMetadata(cfg *config.Config, logger *slog.Logger) (*gorm.DB, stri
 		}
 	}
 
-	migrationMode := "versioned"
-	if cfg.Database.AutoMigrate {
-		logger.Warn("database.auto_migrate is deprecated; using versioned migrations")
-	}
 	err = storage.Migrate(db)
 	if err != nil {
 		cleanup()
@@ -69,6 +65,6 @@ func initializeMetadata(cfg *config.Config, logger *slog.Logger) (*gorm.DB, stri
 		cleanup()
 		return nil, "", nil, fmt.Errorf("bootstrap metadata database: %w", err)
 	}
-	logger.Info("metadata database ready", "driver", cfg.Database.Driver, "migration_mode", migrationMode)
+	logger.Info("metadata database ready", "driver", cfg.Database.Driver, "migration_mode", "versioned")
 	return db, dataDir, cleanup, nil
 }

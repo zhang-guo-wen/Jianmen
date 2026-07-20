@@ -52,7 +52,6 @@ type DatabaseConfig struct {
 	Enabled                bool   `json:"enabled"`
 	Driver                 string `json:"driver"`
 	DSN                    string `json:"dsn"`
-	AutoMigrate            bool   `json:"auto_migrate"`
 	MaxOpenConns           int    `json:"max_open_conns"`
 	MaxIdleConns           int    `json:"max_idle_conns"`
 	ConnMaxLifetimeSeconds int    `json:"conn_max_lifetime_seconds"`

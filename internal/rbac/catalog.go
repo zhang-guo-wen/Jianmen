@@ -92,7 +92,7 @@ var permissionPages = []PermissionPageDefinition{
 	),
 	page("rbac", "权限管理", "/rbac", 70,
 		action(ActionRBACManage, "管理权限", "管理用户、角色、操作与资源授权"),
-		action(ActionAIManage, "AI ??", "????????? AI ????"),
+		action(ActionAIManage, "AI 授权", "签发和撤销 AI 访问令牌"),
 	),
 }
 

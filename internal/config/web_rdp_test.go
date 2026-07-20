@@ -19,6 +19,26 @@ func TestWebRDPDefaults(t *testing.T) {
 	if cfg.WebRDP.ConnectTimeoutSecs != 15 {
 		t.Fatalf("ConnectTimeoutSecs = %d, want 15", cfg.WebRDP.ConnectTimeoutSecs)
 	}
+	if cfg.WebRDP.ManagedGuacd.Enabled {
+		t.Fatal("managed guacd must be disabled by default")
+	}
+	if cfg.WebRDP.ManagedGuacd.BinaryPath != defaultManagedGuacdBinaryPath {
+		t.Fatalf(
+			"ManagedGuacd.BinaryPath = %q, want %q",
+			cfg.WebRDP.ManagedGuacd.BinaryPath,
+			defaultManagedGuacdBinaryPath,
+		)
+	}
+	if cfg.WebRDP.ManagedGuacd.WorkDir != "" {
+		t.Fatalf("ManagedGuacd.WorkDir = %q, want empty", cfg.WebRDP.ManagedGuacd.WorkDir)
+	}
+	if cfg.WebRDP.ManagedGuacd.StartupTimeoutSecs != defaultManagedGuacdStartupTimeout {
+		t.Fatalf(
+			"ManagedGuacd.StartupTimeoutSecs = %d, want %d",
+			cfg.WebRDP.ManagedGuacd.StartupTimeoutSecs,
+			defaultManagedGuacdStartupTimeout,
+		)
+	}
 	if cfg.WebRDP.SpoolDir != defaultRDPSpoolDir ||
 		cfg.WebRDP.GuacdRecordingRoot != defaultRDPSpoolDir {
 		t.Fatalf(
@@ -51,6 +71,11 @@ func TestWebRDPDefaultsNormalizeConfiguredValues(t *testing.T) {
 			GuacdAddress:   " guacd:4822 ",
 			SpoolDir:       " /recordings ",
 			LocalDriveRoot: " /drive ",
+			ManagedGuacd: ManagedGuacdConfig{
+				BinaryPath:         " /opt/guacamole/sbin/guacd ",
+				WorkDir:            " C:\\Jianmen ",
+				StartupTimeoutSecs: 30,
+			},
 		},
 		ObjectStorage: ObjectStorageConfig{
 			Provider: " S3 ",
@@ -68,6 +93,18 @@ func TestWebRDPDefaultsNormalizeConfiguredValues(t *testing.T) {
 	}
 	if cfg.WebRDP.GuacdDriveRoot != "/drive" {
 		t.Fatalf("GuacdDriveRoot = %q, want /drive", cfg.WebRDP.GuacdDriveRoot)
+	}
+	if cfg.WebRDP.ManagedGuacd.BinaryPath != "/opt/guacamole/sbin/guacd" {
+		t.Fatalf(
+			"ManagedGuacd.BinaryPath = %q, want /opt/guacamole/sbin/guacd",
+			cfg.WebRDP.ManagedGuacd.BinaryPath,
+		)
+	}
+	if cfg.WebRDP.ManagedGuacd.WorkDir != `C:\Jianmen` {
+		t.Fatalf("ManagedGuacd.WorkDir = %q, want C:\\Jianmen", cfg.WebRDP.ManagedGuacd.WorkDir)
+	}
+	if cfg.WebRDP.ManagedGuacd.StartupTimeoutSecs != 30 {
+		t.Fatalf("ManagedGuacd.StartupTimeoutSecs = %d, want 30", cfg.WebRDP.ManagedGuacd.StartupTimeoutSecs)
 	}
 	if cfg.ObjectStorage.Provider != "s3" {
 		t.Fatalf("ObjectStorage.Provider = %q, want s3", cfg.ObjectStorage.Provider)
@@ -276,6 +313,197 @@ func TestWebRDPValidation(t *testing.T) {
 			}
 			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
 				t.Fatalf("Validate() error = %v, want containing %q", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestManagedGuacdValidation(t *testing.T) {
+	tests := []struct {
+		name    string
+		mutate  func(*Config)
+		wantErr string
+	}{
+		{name: "packaged guacd defaults are valid"},
+		{
+			name: "custom guacd binary is valid without work directory",
+			mutate: func(cfg *Config) {
+				cfg.WebRDP.GuacdAddress = "localhost:4822"
+				cfg.WebRDP.ManagedGuacd.BinaryPath = "/opt/guacamole/sbin/guacd"
+				cfg.WebRDP.ManagedGuacd.WorkDir = ""
+			},
+		},
+		{
+			name: "IPv6 loopback is valid",
+			mutate: func(cfg *Config) {
+				cfg.WebRDP.GuacdAddress = "[::1]:4822"
+			},
+		},
+		{
+			name: "remote hostname is rejected",
+			mutate: func(cfg *Config) {
+				cfg.WebRDP.GuacdAddress = "guacd.internal:4822"
+			},
+			wantErr: "must be loopback",
+		},
+		{
+			name: "unspecified address is rejected",
+			mutate: func(cfg *Config) {
+				cfg.WebRDP.GuacdAddress = "0.0.0.0:4822"
+			},
+			wantErr: "must be loopback",
+		},
+		{
+			name: "binary path is required",
+			mutate: func(cfg *Config) {
+				cfg.WebRDP.ManagedGuacd.BinaryPath = ""
+			},
+			wantErr: "managed_guacd.binary_path is required",
+		},
+		{
+			name: "binary path must identify a file",
+			mutate: func(cfg *Config) {
+				cfg.WebRDP.ManagedGuacd.BinaryPath = "."
+			},
+			wantErr: "must identify a file",
+		},
+		{
+			name: "binary path rejects null character",
+			mutate: func(cfg *Config) {
+				cfg.WebRDP.ManagedGuacd.BinaryPath = "tools/guacd\x00/sbin/guacd"
+			},
+			wantErr: "invalid null character",
+		},
+		{
+			name: "work directory rejects null character",
+			mutate: func(cfg *Config) {
+				cfg.WebRDP.ManagedGuacd.WorkDir = "tools/guacd\x00/current"
+			},
+			wantErr: "managed_guacd.work_dir",
+		},
+		{
+			name: "zero startup timeout is rejected after defaults",
+			mutate: func(cfg *Config) {
+				cfg.WebRDP.ManagedGuacd.StartupTimeoutSecs = 0
+			},
+			wantErr: "startup_timeout_seconds",
+		},
+		{
+			name: "negative startup timeout is rejected",
+			mutate: func(cfg *Config) {
+				cfg.WebRDP.ManagedGuacd.StartupTimeoutSecs = -1
+			},
+			wantErr: "startup_timeout_seconds",
+		},
+		{
+			name: "excessive startup timeout is rejected",
+			mutate: func(cfg *Config) {
+				cfg.WebRDP.ManagedGuacd.StartupTimeoutSecs = 301
+			},
+			wantErr: "startup_timeout_seconds",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := defaultConfig()
+			cfg.WebRDP.Enabled = true
+			cfg.WebRDP.ManagedGuacd.Enabled = true
+			if tt.mutate != nil {
+				tt.mutate(cfg)
+			}
+
+			err := cfg.Validate()
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatalf("Validate() error = %v", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("Validate() error = %v, want containing %q", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestManagedGuacdValidationIsConditional(t *testing.T) {
+	tests := []struct {
+		name        string
+		webEnabled  bool
+		managedMode bool
+	}{
+		{name: "web RDP disabled", webEnabled: false, managedMode: true},
+		{name: "external guacd", webEnabled: true, managedMode: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := defaultConfig()
+			cfg.WebRDP.Enabled = tt.webEnabled
+			cfg.WebRDP.GuacdAddress = "guacd.internal:4822"
+			cfg.WebRDP.ManagedGuacd = ManagedGuacdConfig{
+				Enabled:            tt.managedMode,
+				BinaryPath:         "",
+				WorkDir:            "bad\x00dir",
+				StartupTimeoutSecs: -1,
+			}
+
+			if err := cfg.Validate(); err != nil {
+				t.Fatalf("Validate() error = %v, want managed configuration ignored", err)
+			}
+		})
+	}
+}
+
+func TestLoadManagedGuacdConfiguration(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	raw := `{
+		"web_rdp": {
+			"enabled": true,
+			"guacd_address": "127.0.0.1:4822",
+			"managed_guacd": {
+				"enabled": true,
+				"binary_path": "/opt/guacamole/sbin/guacd",
+				"work_dir": "/opt/guacamole",
+				"startup_timeout_seconds": 45
+			}
+		}
+	}`
+	if err := os.WriteFile(path, []byte(raw), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.WebRDP.ManagedGuacd.BinaryPath != "/opt/guacamole/sbin/guacd" {
+		t.Fatalf(
+			"ManagedGuacd.BinaryPath = %q, want /opt/guacamole/sbin/guacd",
+			cfg.WebRDP.ManagedGuacd.BinaryPath,
+		)
+	}
+	if cfg.WebRDP.ManagedGuacd.WorkDir != "/opt/guacamole" {
+		t.Fatalf("ManagedGuacd.WorkDir = %q, want /opt/guacamole", cfg.WebRDP.ManagedGuacd.WorkDir)
+	}
+	if cfg.WebRDP.ManagedGuacd.StartupTimeoutSecs != 45 {
+		t.Fatalf("ManagedGuacd.StartupTimeoutSecs = %d, want 45", cfg.WebRDP.ManagedGuacd.StartupTimeoutSecs)
+	}
+}
+
+func TestLoadRejectsUnknownManagedGuacdField(t *testing.T) {
+	for _, field := range []string{"args", "unexpected"} {
+		t.Run(field, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "config.json")
+			raw := `{"web_rdp":{"managed_guacd":{"` + field + `":[]}}}`
+			if err := os.WriteFile(path, []byte(raw), 0o600); err != nil {
+				t.Fatalf("write config: %v", err)
+			}
+
+			_, err := Load(path)
+			if err == nil || !strings.Contains(err.Error(), `unknown field "`+field+`"`) {
+				t.Fatalf("Load() error = %v, want unknown managed guacd field %q", err, field)
 			}
 		})
 	}

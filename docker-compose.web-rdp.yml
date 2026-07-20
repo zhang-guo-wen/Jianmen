@@ -5,31 +5,18 @@ services:
     command:
       - sh
       - -ec
-      - chown -R 10001:10001 /app-data /recordings /drive
+      - mkdir -p /app-data/rdp-spool /app-data/rdp-drive && chown 10001:10001 /app-data /app-data/rdp-spool /app-data/rdp-drive
     volumes:
       - jianmen-data:/app-data
-      - rdp-recordings:/recordings
-      - rdp-drive:/drive
     restart: "no"
 
-  guacd:
-    image: guacamole/guacd:1.6.0
-    user: "10001:10001"
-    expose:
-      - "4822"
-    volumes:
-      - rdp-recordings:/shared/recordings
-      - rdp-drive:/shared/drive
-    networks:
-      - jianmen-internal
-    depends_on:
-      volume-init:
-        condition: service_completed_successfully
-    restart: unless-stopped
-
   jianmen:
+    image: jianmen:guacd-1.6.0
+    platform: linux/amd64
     build:
       context: .
+      args:
+        GUACD_IMAGE: guacamole/guacd:1.6.0@sha256:8974eaa9ba32f713daf311e7cc8cd7e4cdfba1edea39eed75524e78ef4b08f4f
     user: "10001:10001"
     ports:
       - "127.0.0.1:47100:47100"
@@ -39,25 +26,13 @@ services:
     volumes:
       - jianmen-data:/app/data
       - jianmen-certs:/app/certs:ro
-      - rdp-recordings:/shared/recordings
-      - rdp-drive:/shared/drive
       - ./config.docker.web-rdp.example.json:/app/config.json:ro
-    networks:
-      - jianmen-internal
     depends_on:
       volume-init:
         condition: service_completed_successfully
-      guacd:
-        condition: service_started
     restart: unless-stopped
-
-networks:
-  jianmen-internal:
-    driver: bridge
 
 volumes:
   jianmen-data:
   jianmen-certs:
     external: true
-  rdp-recordings:
-  rdp-drive:

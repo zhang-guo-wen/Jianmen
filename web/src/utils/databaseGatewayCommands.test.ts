@@ -326,24 +326,46 @@ test('settings exposes local-only database client registration and never stores 
   assert.match(settingsSource, /DBeaver/);
   assert.match(settingsSource, /useDatabaseClientStore/);
   assert.match(settingsSource, /buildDatabaseProtocolRegistrationCommand/);
+  assert.match(settingsSource, /database_client_ca_path/);
+  assert.match(settingsSource, /downloadDatabaseGatewayCA/);
+  assert.match(settingsSource, /下载网关 CA/);
   assert.match(settingsSource, /我已执行以上命令/);
   assert.match(localStoreSource, /localStorage/);
+  assert.match(localStoreSource, /caFilePath/);
   assert.match(localStoreSource, /directLaunchReady/);
   assert.doesNotMatch(localStoreSource, /apiClient/);
   const preferencesSource = readFileSync(new URL('../stores/preferences.ts', import.meta.url), 'utf8');
   assert.doesNotMatch(preferencesSource, /dbeaver/i);
 });
 
-test('quick database client launch requires gateway TLS and never creates or embeds a temporary password', () => {
+test('quick database client launch requires gateway TLS and embeds only the issued temporary password', () => {
   const source = readFileSync(new URL('../views/QuickConnectView.vue', import.meta.url), 'utf8');
   const start = source.indexOf('async function openDatabaseClient');
-  const end = source.indexOf('function downloadDatabaseGatewayCA', start);
+  const end = source.indexOf('function openClientSettings', start);
   const launchSource = source.slice(start, end);
-  assert.match(launchSource, /hasDatabaseGatewayTLSIdentity\(connectableGateway\)/);
+  assert.match(launchSource, /ensureDatabaseConnectionInfo\(account\)/);
+  assert.match(launchSource, /state\.tlsIdentityReady/);
   assert.match(launchSource, /buildDatabaseProtocolURL/);
+  assert.match(launchSource, /password:\s*state\.password/);
+  assert.match(
+    launchSource,
+    /databaseName:\s*\['postgres', 'postgresql'\]\.includes\(protocol\.toLowerCase\(\)\) \? 'postgres' : ''/,
+  );
   assert.match(launchSource, /databaseClient\.directLaunchReady/);
   assert.match(launchSource, /window\.location\.href = launchURL/);
-  assert.doesNotMatch(launchSource, /createConnectionPassword|temporaryPassword|password:/);
+  assert.doesNotMatch(launchSource, /downloadDatabaseGatewayCA|new Blob|已下载网关 CA/);
+  assert.match(source, /createPassword:\s*accountID => apiClient\.createConnectionPassword\(accountID\)/);
+});
+
+test('database connection dialog opens the configured local client instead of copying a command', () => {
+  const source = readFileSync(new URL('../components/ConnectionConfigDialog.vue', import.meta.url), 'utf8');
+  assert.match(source, /data-testid="database-local-client"/);
+  assert.match(source, /@click="openDatabaseClient"/);
+  assert.match(source, /buildDatabaseProtocolURL\(\{/);
+  assert.match(source, /password:\s*temporaryPassword\.value/);
+  assert.match(source, /window\.location\.href = launchURL/);
+  assert.match(source, /if \(!databaseClient\.configured\)[\s\S]*openDatabaseClientSettings\(\)/);
+  assert.doesNotMatch(source, /复制 DBeaver 配置命令|copyDBeaverConfigurationCommand/);
 });
 
 test('quick database cards copy temporary connection credentials with an in-flight state', () => {
@@ -460,7 +482,7 @@ test('DBeaver handoff fails closed and clears temporary credentials when the dia
   const dialogSource = readFileSync(new URL('../components/ConnectionConfigDialog.vue', import.meta.url), 'utf8');
   assert.match(
     dialogSource,
-    /const dbeaverConfigurationCommand[\s\S]*\|\| !secureGatewayTLS\.value/,
+    /function openDatabaseClient\(\)[\s\S]*!connectionInfo\.value \|\| !temporaryPassword\.value \|\| !secureGatewayTLS\.value/,
   );
   assert.match(
     dialogSource,

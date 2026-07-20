@@ -1,15 +1,18 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
+import { setTimeout as delay } from 'node:timers/promises';
 
 import {
+  DATABASE_CLIENT_CA_FILE_NAME,
   buildDatabaseProtocolRegistrationCommand,
   buildDatabaseProtocolURL,
-  buildDBeaverConfigurationCommand,
+  databaseClientCAFileExample,
   databaseClientExecutableExample,
+  isValidDatabaseClientCAFilePath,
   isValidDatabaseClientExecutablePath,
 } from './databaseClients.ts';
 
@@ -21,48 +24,26 @@ test('database client executable paths are platform-aware', () => {
   assert.equal(isValidDatabaseClientExecutablePath('\\\\server\\share\\dbeaverc.exe', 'windows'), false);
   assert.equal(isValidDatabaseClientExecutablePath('C:\\Tools\\other.exe', 'windows'), false);
   assert.match(databaseClientExecutableExample('windows'), /dbeaverc\.exe$/i);
+  assert.match(databaseClientCAFileExample('windows'), new RegExp(`${DATABASE_CLIENT_CA_FILE_NAME.replace('.', '\\.')}$`, 'i'));
 });
 
-test('DBeaver configuration command never carries a password or custom browser URI', () => {
-  const command = buildDBeaverConfigurationCommand({
-    platform: 'windows',
-    executablePath: "C:\\Program Files\\DBeaver\\dbeaverc.exe",
-    protocol: 'postgres',
-    host: 'gateway.db.example',
-    port: 33060,
-    username: 'ops+account@jianmen',
-    databaseName: 'postgres',
-    connectionName: "生产库's",
-  });
-
-  assert.match(command, /driver=postgresql/);
-  assert.match(command, /connect=false/);
-  assert.match(command, /savePassword=false/);
-  assert.doesNotMatch(command, /(?:^|\|)password=/i);
-  assert.doesNotMatch(command, /jianmen-db:\/\//i);
-  assert.match(command, /生产库''s/);
+test('database client CA paths are absolute certificate files without connection separators', () => {
+  assert.equal(isValidDatabaseClientCAFilePath('C:\\Users\\Alice\\Downloads\\gateway-ca.pem', 'windows'), true);
+  assert.equal(isValidDatabaseClientCAFilePath('/home/alice/gateway-ca.crt', 'linux'), true);
+  assert.equal(isValidDatabaseClientCAFilePath('/Users/alice/gateway-ca.cer', 'macos'), true);
+  assert.equal(isValidDatabaseClientCAFilePath('gateway-ca.pem', 'windows'), false);
+  assert.equal(isValidDatabaseClientCAFilePath('C:\\Temp\\gateway-ca.txt', 'windows'), false);
+  assert.equal(isValidDatabaseClientCAFilePath('C:\\Temp\\gateway-ca.pem|password=secret', 'windows'), false);
+  assert.equal(isValidDatabaseClientCAFilePath('C:\\Temp\\gateway-ca.pem\r\nconnect=true', 'windows'), false);
 });
 
-test('DBeaver command rejects invalid paths and ports', () => {
-  const base = {
-    platform: 'linux' as const,
-    executablePath: '/usr/bin/dbeaver-ce',
-    protocol: 'mysql',
-    host: 'gateway.db.example',
-    port: 33060,
-    username: 'ops',
-  };
-  assert.equal(buildDBeaverConfigurationCommand({ ...base, executablePath: 'dbeaver' }), '');
-  assert.equal(buildDBeaverConfigurationCommand({ ...base, port: 70000 }), '');
-  assert.equal(buildDBeaverConfigurationCommand({ ...base, protocol: 'mysql|password=secret' }), '');
-});
-
-test('database client deep link is a disconnected TLS-verified draft without secrets', () => {
+test('database client deep link carries only the generated temporary password for an immediate TLS connection', () => {
   const url = buildDatabaseProtocolURL({
     protocol: 'postgres',
     host: 'gateway.db.example',
     port: 33060,
     username: 'D000100001',
+    password: 'temporary_password_1234567890',
     databaseName: 'postgres',
     connectionName: '生产库 / reporting',
   });
@@ -70,18 +51,16 @@ test('database client deep link is a disconnected TLS-verified draft without sec
 
   const payload = decodeLaunchPayload(url);
   assert.deepEqual(payload, {
-    v: 1,
+    v: 2,
     driver: 'postgresql',
     host: 'gateway.db.example',
     port: 33060,
     database: 'postgres',
     user: 'D000100001',
+    password: 'temporary_password_1234567890',
     name: '生产库 / reporting',
     tls: 'verify-full',
   });
-  const serialized = JSON.stringify(payload);
-  assert.doesNotMatch(serialized, /password/i);
-  assert.doesNotMatch(serialized, /savePassword=true|connect=true/i);
 });
 
 test('database client deep link rejects connection-field injection and cleans display names', () => {
@@ -90,10 +69,12 @@ test('database client deep link rejects connection-field injection and cleans di
     host: 'gateway.db.example',
     port: 33060,
     username: 'D000100001',
+    password: 'temporary_password_1234567890',
   };
   assert.equal(buildDatabaseProtocolURL({ ...base, host: 'gateway|password=secret' }), '');
   assert.equal(buildDatabaseProtocolURL({ ...base, username: 'ops;Start-Process' }), '');
   assert.equal(buildDatabaseProtocolURL({ ...base, protocol: 'mysql|connect=true' }), '');
+  assert.equal(buildDatabaseProtocolURL({ ...base, password: 'secret|connect=true' }), '');
 
   const payload = decodeLaunchPayload(buildDatabaseProtocolURL({
     ...base,
@@ -108,6 +89,7 @@ test('Windows registration command validates every payload field and fixes safe 
     client: 'dbeaver',
     platform: 'windows',
     executablePath: "C:\\Tools\\Bob's; Start-Process calc\\dbeaverc.exe",
+    caFilePath: "C:\\Users\\Bob's\\Downloads\\jianmen-database-gateway-ca.pem",
     protocolRegistered: false,
   });
   assert.match(command, /HKCU\\Software\\Classes\\jianmen-db/);
@@ -122,13 +104,23 @@ test('Windows registration command validates every payload field and fixes safe 
   assert.match(script, /\$properties\.Count -ne \$allowed\.Count/);
   assert.match(script, /\[string\]\$data\.host -notmatch/);
   assert.match(script, /\[string\]\$data\.user -notmatch/);
+  assert.match(script, /\[string\]\$data\.password -notmatch/);
+  assert.match(script, /\$caFile = 'C:\\Users\\Bob''s\\Downloads\\jianmen-database-gateway-ca\.pem'/);
+  assert.match(script, /Test-Path -LiteralPath \$caFile -PathType Leaf/);
+  assert.match(script, /配置的网关 CA 文件不存在/);
+  assert.match(script, /无法打开 DBeaver，请检查本地客户端路径和网关 CA 配置/);
+  assert.match(script, /WScript\.Shell/);
   assert.match(script, /'savePassword=false'/);
   assert.match(script, /'create=true'/);
   assert.match(script, /'save=false'/);
-  assert.match(script, /'connect=false'/);
+  assert.match(script, /'connect=true'/);
+  assert.match(script, /"password=\$\(\$data\.password\)"/);
   assert.match(script, /prop\.sslMode=VERIFY_IDENTITY/);
   assert.match(script, /prop\.sslmode=verify-full/);
-  assert.doesNotMatch(script, /savePassword=true|connect=true|(?:^|[|'" ])password=/im);
+  assert.match(script, /netHandler\.ssl\.ca\.cert=\$caFile/);
+  assert.match(script, /netHandler\.ssl\.sslMode=verify-full/);
+  assert.match(script, /netHandler\.ssl\.verify\.server=true/);
+  assert.doesNotMatch(script, /savePassword=true|save=true/);
   assert.match(
     script,
     /Start-Process -FilePath 'C:\\Tools\\Bob''s; Start-Process calc\\dbeaverc\.exe' -ArgumentList/,
@@ -137,16 +129,48 @@ test('Windows registration command validates every payload field and fixes safe 
 
 test('Windows protocol broker receives the URI as a real script argument', {
   skip: process.platform !== 'win32',
-}, () => {
+}, async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'jianmen-db-broker-'));
+  const helperDirectory = join(directory, 'DBeaver Helper');
+  const caDirectory = join(directory, "Bob's CA");
+  mkdirSync(helperDirectory);
+  mkdirSync(caDirectory);
+  const helperSource = join(directory, 'capture-argv.go');
+  const helperExecutable = join(helperDirectory, 'dbeaverc.exe');
+  const capturedArgumentsPath = join(directory, 'captured-arguments.json');
+  writeFileSync(helperSource, `package main
+
+import (
+  "encoding/json"
+  "os"
+)
+
+func main() {
+  encoded, err := json.Marshal(os.Args[1:])
+  if err != nil {
+    os.Exit(2)
+  }
+  if err := os.WriteFile(os.Getenv("JIANMEN_TEST_ARGV_FILE"), encoded, 0600); err != nil {
+    os.Exit(3)
+  }
+}
+`, 'utf8');
+  const buildHelper = spawnSync(
+    'go',
+    ['build', '-o', helperExecutable, helperSource],
+    { cwd: directory, encoding: 'utf8', timeout: 30_000 },
+  );
+  assert.equal(buildHelper.status, 0, buildHelper.stderr || buildHelper.stdout);
+
+  const caFilePath = join(caDirectory, 'gateway-ca.pem');
+  writeFileSync(caFilePath, 'test gateway certificate', 'utf8');
   const command = buildDatabaseProtocolRegistrationCommand({
     client: 'dbeaver',
     platform: 'windows',
-    executablePath: 'C:\\Tools\\DBeaver\\dbeaverc.exe',
+    executablePath: helperExecutable,
+    caFilePath,
     protocolRegistered: false,
   });
-  const systemRoot = process.env.SystemRoot || 'C:\\Windows';
-  const whereExecutable = join(systemRoot, 'System32', 'where.exe').replace(/'/g, "''");
-  const directory = mkdtempSync(join(tmpdir(), 'jianmen-db-broker-'));
   const installer = command.slice(0, command.indexOf(' && reg.exe add'));
   const installResult = spawnSync(installer, {
     encoding: 'utf8',
@@ -160,19 +184,12 @@ test('Windows protocol broker receives the URI as a real script argument', {
   assert.equal(existsSync(scriptPath), true);
   const installedScript = readFileSync(scriptPath, 'utf8').replace(/^\uFEFF/, '').trimEnd();
   assert.equal(installedScript, decodeBrokerPowerShell(command));
-  writeFileSync(
-    scriptPath,
-    `\uFEFF${installedScript.replace(
-      "'C:\\Tools\\DBeaver\\dbeaverc.exe'",
-      `'${whereExecutable}'`,
-    )}`,
-    'utf8',
-  );
   const url = buildDatabaseProtocolURL({
     protocol: 'postgres',
     host: 'gateway.db.example',
     port: 54320,
     username: 'D000100001',
+    password: 'temporary_password_1234567890',
     databaseName: 'postgres',
     connectionName: '进程测试',
   });
@@ -181,9 +198,29 @@ test('Windows protocol broker receives the URI as a real script argument', {
     const result = spawnSync(
       'powershell.exe',
       ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', scriptPath, url],
-      { encoding: 'utf8', timeout: 10_000 },
+      {
+        encoding: 'utf8',
+        timeout: 10_000,
+        env: { ...process.env, JIANMEN_TEST_ARGV_FILE: capturedArgumentsPath },
+      },
     );
     assert.equal(result.status, 0, result.stderr || result.stdout);
+    const deadline = Date.now() + 5_000;
+    while (!existsSync(capturedArgumentsPath) && Date.now() < deadline) {
+      await delay(25);
+    }
+    assert.equal(existsSync(capturedArgumentsPath), true, 'DBeaver test helper did not receive arguments');
+    const capturedArguments = JSON.parse(readFileSync(capturedArgumentsPath, 'utf8')) as string[];
+    assert.equal(capturedArguments.length, 2);
+    assert.equal(capturedArguments[0], '-con');
+    const connectionFields = capturedArguments[1]?.split('|') ?? [];
+    assert.ok(connectionFields.includes('driver=postgresql'));
+    assert.ok(connectionFields.includes('password=temporary_password_1234567890'));
+    assert.ok(connectionFields.includes(`netHandler.ssl.ca.cert=${caFilePath}`));
+    assert.ok(connectionFields.includes(`prop.sslrootcert=${caFilePath}`));
+    assert.ok(connectionFields.includes('connect=true'));
+    assert.ok(connectionFields.includes('save=false'));
+    assert.ok(connectionFields.includes('savePassword=false'));
 
     const extraArgument = spawnSync(
       'powershell.exe',
@@ -201,6 +238,7 @@ test('database protocol registration never pretends to support non-Windows platf
     client: 'dbeaver',
     platform: 'macos',
     executablePath: '/Applications/DBeaver.app/Contents/MacOS/dbeaver',
+    caFilePath: '/Users/alice/Downloads/jianmen-database-gateway-ca.pem',
     protocolRegistered: false,
   }), '');
 });

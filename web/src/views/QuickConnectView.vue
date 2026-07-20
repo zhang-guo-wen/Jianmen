@@ -303,7 +303,6 @@ import {
 } from '@/utils/databaseGatewayAvailability';
 import { loadDatabaseConnectionResources } from '@/utils/databaseConnectionOrchestration';
 import {
-  databaseGatewayCAFileName,
   hasDatabaseGatewayTLSIdentity,
   resolveDatabaseGatewayPort,
 } from '@/utils/databaseGatewayCommands';
@@ -341,6 +340,7 @@ interface DatabaseConnectionState {
   compactUser: string;
   password: string;
   expiresAt: string;
+  tlsIdentityReady: boolean;
 }
 
 class DatabaseGatewayConfigurationRedirect extends Error {}
@@ -923,6 +923,7 @@ function ensureDatabaseConnectionInfo(account: QuickDBTarget): Promise<DatabaseC
     compactUser: '',
     password: '',
     expiresAt: '',
+    tlsIdentityReady: false,
   };
   dbConnectionStates[key] = state;
 
@@ -942,6 +943,7 @@ function ensureDatabaseConnectionInfo(account: QuickDBTarget): Promise<DatabaseC
         createPassword: accountID => apiClient.createConnectionPassword(accountID),
       });
       const connectableGateway = gateway;
+      state.tlsIdentityReady = hasDatabaseGatewayTLSIdentity(connectableGateway);
       state.host = String(connectableGateway.tls_server_name || connectableGateway.host || window.location.hostname || '127.0.0.1');
       state.port = resolveDatabaseGatewayPort(protocol, connectableGateway);
       state.compactUser = String(session?.compact_username || '');
@@ -1013,27 +1015,21 @@ async function openDatabaseClient(account: QuickDBTarget) {
   if (dbClientLaunching[key]) return;
   dbClientLaunching[key] = true;
   try {
-    const gateway = await apiClient.getDBGateway(protocol);
-    const connectableGateway = requireConnectableDatabaseGateway(gateway, protocol);
-    const session = await apiClient.createUserSession(targetID);
-    if (!hasDatabaseGatewayTLSIdentity(connectableGateway)) {
+    const state = await ensureDatabaseConnectionInfo(account);
+    if (!state.tlsIdentityReady) {
       throw new Error('数据库网关 TLS 身份材料不完整，已阻止本地客户端打开');
     }
-    const host = connectableGateway.tls_server_name;
-    const port = resolveDatabaseGatewayPort(protocol, connectableGateway);
-    const compactUser = String(session.compact_username || '');
-    if (!compactUser) throw new Error('连接账号生成失败');
     const launchURL = buildDatabaseProtocolURL({
       protocol,
-      host,
-      port,
-      username: compactUser,
-      databaseName: 'postgres',
+      host: state.host,
+      port: state.port,
+      username: state.compactUser,
+      password: state.password,
+      databaseName: ['postgres', 'postgresql'].includes(protocol.toLowerCase()) ? 'postgres' : '',
       connectionName: `${account._instance_name || 'Jianmen'} / ${account.username || '数据库账号'}`,
     });
     if (!launchURL) throw new Error('连接参数不符合本地客户端安全规则');
-    downloadDatabaseGatewayCA(protocol, connectableGateway.tls_ca_pem);
-    ElMessage.success('已下载网关 CA，正在打开 DBeaver 连接草稿；请在 SSL 配置中选择该 CA 后连接');
+    ElMessage.success('正在打开 DBeaver 并使用临时密码建立连接');
     window.location.href = launchURL;
   } catch (error) {
     if (error instanceof DatabaseGatewayConfigurationRedirect) return;
@@ -1041,18 +1037,6 @@ async function openDatabaseClient(account: QuickDBTarget) {
   } finally {
     delete dbClientLaunching[key];
   }
-}
-
-function downloadDatabaseGatewayCA(protocol: string, pem: string) {
-  const blob = new Blob([pem], { type: 'application/x-pem-file' });
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement('a');
-  anchor.href = url;
-  anchor.download = databaseGatewayCAFileName(protocol);
-  document.body.appendChild(anchor);
-  anchor.click();
-  anchor.remove();
-  URL.revokeObjectURL(url);
 }
 
 function openClientSettings(tab: 'ssh' | 'database') {

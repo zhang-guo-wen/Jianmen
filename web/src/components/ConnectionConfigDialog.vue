@@ -102,15 +102,14 @@
     <template #footer>
       <el-button data-testid="ssh-local-client" v-if="resourceType === 'host' && allowSsh" type="primary" :disabled="!connectionTestResult?.ok || sshIdentityBlocked" :loading="preferences.loading" @click="openPreferredSSHClient">本地 SSH 客户端打开</el-button>
       <el-button data-testid="ssh-browser" v-if="resourceType === 'host' && allowSsh" type="primary" :disabled="!connectionTestResult?.ok || sshIdentityBlocked" @click="openInBrowser">在浏览器中打开</el-button>
-      <el-button v-if="resourceType === 'database'" @click="openDatabaseClientSettings">本地客户端设置</el-button>
       <el-button
-        v-if="resourceType === 'database' && !isRedis && databaseClient.configured"
+        v-if="resourceType === 'database' && !isRedis"
+        data-testid="database-local-client"
         type="primary"
-        :disabled="!dbeaverConfigurationCommand"
-        :loading="isCopyInFlight(dbeaverConfigurationCommand, 'dbeaver')"
-        @click="copyDBeaverConfigurationCommand"
+        :disabled="databaseClientLaunchBlocked"
+        @click="openDatabaseClient"
       >
-        复制 DBeaver 配置命令
+        本地客户端打开
       </el-button>
       <el-button @click="visible = false">关闭</el-button>
     </template>
@@ -161,7 +160,7 @@ import { Loading } from '@element-plus/icons-vue';
 import { ElButton, ElInput, ElMessage, ElMessageBox } from 'element-plus';
 
 import { apiClient, type DBAccountRecord, type DBGatewayConfig, type TargetRecord } from '@/api/client';
-import { buildDBeaverConfigurationCommand } from '@/config/databaseClients';
+import { buildDatabaseProtocolURL } from '@/config/databaseClients';
 import { buildSSHProtocolRegistrationCommand, isAbsoluteExecutablePath, SSH_CLIENT_OPTIONS } from '@/config/sshClients';
 import { useDatabaseClientStore } from '@/stores/databaseClient';
 import { usePreferencesStore } from '@/stores/preferences';
@@ -305,7 +304,9 @@ const connectionInfo = ref<{
 } | null>(null);
 const temporaryPassword = ref('');
 const temporaryPasswordExpiresAt = ref('');
-const databaseName = ref('postgres');
+const databaseName = ref(
+  ['postgres', 'postgresql'].includes(props.protocol.toLowerCase()) ? 'postgres' : '',
+);
 const initializeRequest = createLatestKeyedRequest<ConnectionResourceBundle>();
 const testRequest = createLatestKeyedRequest<{ ok: boolean; error?: string; latency_ms?: number }>();
 const operationCounters = reactive<InFlightCounters>({});
@@ -379,28 +380,10 @@ const sshClientUrl = computed(() => {
     port: connectionInfo.value.port,
   });
 });
-const dbeaverConfigurationCommand = computed(() => {
-  if (
-    props.resourceType !== 'database'
-    || isRedis.value
-    || !connectionInfo.value
-    || !secureGatewayTLS.value
-    || !databaseClient.configured
-  ) {
-    return '';
-  }
-  return buildDBeaverConfigurationCommand({
-    platform: databaseClient.value.platform,
-    executablePath: databaseClient.value.executablePath,
-    protocol: props.protocol,
-    host: connectionInfo.value.host,
-    port: connectionInfo.value.port,
-    username: connectionInfo.value.compactUser,
-    databaseName: databaseName.value,
-    connectionName: props.resourceName || 'Jianmen 临时连接',
-  });
-});
-
+const databaseClientLaunchBlocked = computed(() => (
+  databaseClient.directLaunchReady
+  && (!connectionInfo.value || !secureGatewayTLS.value || !temporaryPassword.value)
+));
 const initClientVisible = ref(false);
 const initClientType = ref('xshell');
 const initClientPath = ref('');
@@ -467,7 +450,7 @@ function clearConnectionState() {
   connectionInfo.value = null;
   temporaryPassword.value = '';
   temporaryPasswordExpiresAt.value = '';
-  databaseName.value = 'postgres';
+  databaseName.value = ['postgres', 'postgresql'].includes(props.protocol.toLowerCase()) ? 'postgres' : '';
   for (const key of Object.keys(operationCounters)) delete operationCounters[key];
 }
 
@@ -628,12 +611,41 @@ function openDatabaseClientSettings() {
   void router.push({ path: '/settings', query: { tab: 'database', return_to: returnTo } });
 }
 
-async function copyDBeaverConfigurationCommand() {
-  if (!dbeaverConfigurationCommand.value) {
-    ElMessage.warning('请先完成本地数据库客户端设置');
+function openDatabaseClient() {
+  if (!databaseClient.configured) {
+    ElMessage.warning('请先配置本地 DBeaver 客户端和 CA 文件路径');
+    openDatabaseClientSettings();
     return;
   }
-  await copyValue(dbeaverConfigurationCommand.value, 'dbeaver');
+  if (databaseClient.value.platform !== 'windows') {
+    ElMessage.warning('当前仅 Windows 支持从浏览器直接打开 DBeaver');
+    openDatabaseClientSettings();
+    return;
+  }
+  if (!databaseClient.directLaunchReady) {
+    ElMessage.warning('请先执行本地协议注册命令，并在设置中确认已完成');
+    openDatabaseClientSettings();
+    return;
+  }
+  if (!connectionInfo.value || !temporaryPassword.value || !secureGatewayTLS.value) {
+    ElMessage.warning('数据库安全连接信息尚未就绪');
+    return;
+  }
+  const launchURL = buildDatabaseProtocolURL({
+    protocol: props.protocol,
+    host: connectionInfo.value.host,
+    port: connectionInfo.value.port,
+    username: connectionInfo.value.compactUser,
+    password: temporaryPassword.value,
+    databaseName: databaseName.value,
+    connectionName: props.resourceName || 'Jianmen 临时连接',
+  });
+  if (!launchURL) {
+    ElMessage.error('连接参数不符合本地客户端安全规则');
+    return;
+  }
+  ElMessage.success('正在打开 DBeaver 并使用临时密码建立连接');
+  window.location.href = launchURL;
 }
 
 function pickClientFile() {

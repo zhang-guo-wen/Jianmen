@@ -329,10 +329,13 @@ test('settings exposes local-only database client registration and never stores 
   assert.match(settingsSource, /database_client_ca_path/);
   assert.match(settingsSource, /downloadDatabaseGatewayCA/);
   assert.match(settingsSource, /下载网关 CA/);
+  assert.match(settingsSource, /本地启动器升级后，需重新注册 Jianmen 数据库协议/);
   assert.match(settingsSource, /我已执行以上命令/);
   assert.match(localStoreSource, /localStorage/);
   assert.match(localStoreSource, /caFilePath/);
   assert.match(localStoreSource, /directLaunchReady/);
+  assert.match(localStoreSource, /protocolRegistrationVersion/);
+  assert.match(localStoreSource, /DATABASE_CLIENT_PROTOCOL_REGISTRATION_VERSION/);
   assert.doesNotMatch(localStoreSource, /apiClient/);
   const preferencesSource = readFileSync(new URL('../stores/preferences.ts', import.meta.url), 'utf8');
   assert.doesNotMatch(preferencesSource, /dbeaver/i);

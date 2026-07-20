@@ -5,16 +5,20 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
+import { createPinia, setActivePinia } from 'pinia';
 
 import {
   DATABASE_CLIENT_CA_FILE_NAME,
+  DATABASE_CLIENT_PROTOCOL_REGISTRATION_VERSION,
   buildDatabaseProtocolRegistrationCommand,
   buildDatabaseProtocolURL,
   databaseClientCAFileExample,
   databaseClientExecutableExample,
+  isCurrentDatabaseClientProtocolRegistration,
   isValidDatabaseClientCAFilePath,
   isValidDatabaseClientExecutablePath,
 } from './databaseClients.ts';
+import { useDatabaseClientStore } from '../stores/databaseClient.ts';
 
 test('database client executable paths are platform-aware', () => {
   assert.equal(isValidDatabaseClientExecutablePath('C:\\Program Files\\DBeaver\\dbeaverc.exe', 'windows'), true);
@@ -35,6 +39,90 @@ test('database client CA paths are absolute certificate files without connection
   assert.equal(isValidDatabaseClientCAFilePath('C:\\Temp\\gateway-ca.txt', 'windows'), false);
   assert.equal(isValidDatabaseClientCAFilePath('C:\\Temp\\gateway-ca.pem|password=secret', 'windows'), false);
   assert.equal(isValidDatabaseClientCAFilePath('C:\\Temp\\gateway-ca.pem\r\nconnect=true', 'windows'), false);
+});
+
+test('outdated database protocol registrations are invalidated after broker changes', () => {
+  assert.equal(
+    isCurrentDatabaseClientProtocolRegistration(
+      true,
+      DATABASE_CLIENT_PROTOCOL_REGISTRATION_VERSION,
+    ),
+    true,
+  );
+  assert.equal(
+    isCurrentDatabaseClientProtocolRegistration(
+      true,
+      DATABASE_CLIENT_PROTOCOL_REGISTRATION_VERSION - 1,
+    ),
+    false,
+  );
+  assert.equal(isCurrentDatabaseClientProtocolRegistration(true, undefined), false);
+  assert.equal(
+    isCurrentDatabaseClientProtocolRegistration(
+      false,
+      DATABASE_CLIENT_PROTOCOL_REGISTRATION_VERSION,
+    ),
+    false,
+  );
+});
+
+test('database client store forces an old registered broker through registration again', () => {
+  const values = new Map<string, string>();
+  const storage: Storage = {
+    get length() {
+      return values.size;
+    },
+    clear() {
+      values.clear();
+    },
+    getItem(key) {
+      return values.get(key) ?? null;
+    },
+    key(index) {
+      return [...values.keys()][index] ?? null;
+    },
+    removeItem(key) {
+      values.delete(key);
+    },
+    setItem(key, value) {
+      values.set(key, value);
+    },
+  };
+  const localStorageDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+  const navigatorDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+  Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: storage });
+  Object.defineProperty(globalThis, 'navigator', {
+    configurable: true,
+    value: { userAgent: 'Windows' },
+  });
+  storage.setItem('jianmen_local_database_client', JSON.stringify({
+    client: 'dbeaver',
+    platform: 'windows',
+    executablePath: 'C:\\DBeaver\\dbeaverc.exe',
+    caFilePath: 'C:\\Users\\Alice\\Downloads\\jianmen-database-gateway-ca.pem',
+    protocolRegistered: true,
+  }));
+
+  try {
+    setActivePinia(createPinia());
+    const store = useDatabaseClientStore();
+    assert.equal(store.configured, true);
+    assert.equal(store.value.protocolRegistered, false);
+    assert.equal(store.directLaunchReady, false);
+
+    store.update({ ...store.value, protocolRegistered: true });
+    assert.equal(store.directLaunchReady, true);
+    const persisted = JSON.parse(
+      storage.getItem('jianmen_local_database_client') || '{}',
+    ) as Record<string, unknown>;
+    assert.equal(
+      persisted.protocolRegistrationVersion,
+      DATABASE_CLIENT_PROTOCOL_REGISTRATION_VERSION,
+    );
+  } finally {
+    restoreGlobalProperty('localStorage', localStorageDescriptor);
+    restoreGlobalProperty('navigator', navigatorDescriptor);
+  }
 });
 
 test('database client deep link carries only the generated temporary password for an immediate TLS connection', () => {
@@ -110,7 +198,7 @@ test('Windows registration command validates every payload field and fixes safe 
   assert.match(script, /配置的网关 CA 文件不存在/);
   assert.match(script, /无法打开 DBeaver，请检查本地客户端路径和网关 CA 配置/);
   assert.match(script, /WScript\.Shell/);
-  assert.match(script, /'savePassword=false'/);
+  assert.match(script, /'savePassword=true'/);
   assert.match(script, /'create=true'/);
   assert.match(script, /'save=false'/);
   assert.match(script, /'connect=true'/);
@@ -120,7 +208,7 @@ test('Windows registration command validates every payload field and fixes safe 
   assert.match(script, /netHandler\.ssl\.ca\.cert=\$caFile/);
   assert.match(script, /netHandler\.ssl\.sslMode=verify-full/);
   assert.match(script, /netHandler\.ssl\.verify\.server=true/);
-  assert.doesNotMatch(script, /savePassword=true|save=true/);
+  assert.doesNotMatch(script, /savePassword=false|'save=true'/);
   assert.match(
     script,
     /Start-Process -FilePath 'C:\\Tools\\Bob''s; Start-Process calc\\dbeaverc\.exe' -ArgumentList/,
@@ -220,7 +308,7 @@ func main() {
     assert.ok(connectionFields.includes(`prop.sslrootcert=${caFilePath}`));
     assert.ok(connectionFields.includes('connect=true'));
     assert.ok(connectionFields.includes('save=false'));
-    assert.ok(connectionFields.includes('savePassword=false'));
+    assert.ok(connectionFields.includes('savePassword=true'));
 
     const extraArgument = spawnSync(
       'powershell.exe',
@@ -252,4 +340,18 @@ function decodeBrokerPowerShell(command: string): string {
   const encoded = command.match(/FromBase64String\('([A-Za-z0-9+/=]+)'\)/)?.[1];
   assert.ok(encoded);
   return Buffer.from(encoded, 'base64').toString('utf8');
+}
+
+function restoreGlobalProperty(
+  name: 'localStorage' | 'navigator',
+  descriptor: PropertyDescriptor | undefined,
+): void {
+  if (descriptor) {
+    Object.defineProperty(globalThis, name, descriptor);
+    return;
+  }
+  delete (globalThis as typeof globalThis & {
+    localStorage?: Storage;
+    navigator?: Navigator;
+  })[name];
 }

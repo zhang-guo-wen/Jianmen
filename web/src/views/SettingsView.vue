@@ -171,9 +171,9 @@
                     :closable="false"
                     show-icon
                   >
-                    <template #title>首次使用需注册 Jianmen 本地数据库协议</template>
+                    <template #title>首次使用或本地启动器升级后，需重新注册 Jianmen 数据库协议</template>
                     <p class="registration-help">
-                      在 Windows CMD 中执行下面命令一次。命令只为当前 Windows 用户注册协议，不需要管理员权限，也不会写入数据库密码。
+                      在 Windows CMD 中执行下面命令一次；此前注册过旧版本也需要重新执行。命令只为当前 Windows 用户注册协议，不需要管理员权限，也不会写入数据库密码。
                     </p>
                     <div class="command-box"><code>{{ databaseRegistrationCommand }}</code></div>
                     <div class="registration-actions">

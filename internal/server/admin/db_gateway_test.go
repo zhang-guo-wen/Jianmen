@@ -89,22 +89,25 @@ func TestHandleDBGatewayReturnsProtocolListenerToConnectOnlyUser(t *testing.T) {
 		t.Fatalf("gateway status = %d, want 200; body=%s", recorder.Code, recorder.Body.String())
 	}
 	var response struct {
-		Enabled       bool   `json:"enabled"`
-		Mode          string `json:"mode"`
-		Protocol      string `json:"protocol"`
-		ListenAddr    string `json:"listen_addr"`
-		Host          string `json:"host"`
-		Port          int    `json:"port"`
-		TLSEnabled    bool   `json:"tls_enabled"`
-		TLSServerName string `json:"tls_server_name"`
-		TLSCAPEM      string `json:"tls_ca_pem"`
-		TLSCertSHA256 string `json:"tls_cert_sha256"`
-		MySQLDelayMS  int    `json:"mysql_detection_delay_ms"`
+		Enabled           bool   `json:"enabled"`
+		Connectable       bool   `json:"connectable"`
+		UnavailableReason string `json:"unavailable_reason"`
+		Mode              string `json:"mode"`
+		Protocol          string `json:"protocol"`
+		ListenAddr        string `json:"listen_addr"`
+		Host              string `json:"host"`
+		Port              int    `json:"port"`
+		TLSEnabled        bool   `json:"tls_enabled"`
+		TLSServerName     string `json:"tls_server_name"`
+		TLSCAPEM          string `json:"tls_ca_pem"`
+		TLSCertSHA256     string `json:"tls_cert_sha256"`
+		MySQLDelayMS      int    `json:"mysql_detection_delay_ms"`
 	}
 	if err := decodeTestData(t, recorder.Body.Bytes(), &response); err != nil {
 		t.Fatalf("decode gateway response: %v", err)
 	}
-	if !response.Enabled || response.Mode != config.DatabaseGatewayModeIndependent ||
+	if !response.Enabled || !response.Connectable || response.UnavailableReason != "" ||
+		response.Mode != config.DatabaseGatewayModeIndependent ||
 		response.MySQLDelayMS != 0 ||
 		response.Protocol != "postgresql" || response.ListenAddr != "0.0.0.0:54330" ||
 		response.Host != "" || response.Port != 54330 || !response.TLSEnabled ||
@@ -157,18 +160,22 @@ func TestHandleDBGatewayUsesUnifiedEntryForEveryProtocol(t *testing.T) {
 				t.Fatalf("status = %d; body=%s", recorder.Code, recorder.Body.String())
 			}
 			var response struct {
-				Enabled      bool   `json:"enabled"`
-				Mode         string `json:"mode"`
-				Protocol     string `json:"protocol"`
-				ListenAddr   string `json:"listen_addr"`
-				Port         int    `json:"port"`
-				TLSEnabled   bool   `json:"tls_enabled"`
-				MySQLDelayMS int    `json:"mysql_detection_delay_ms"`
+				Enabled           bool   `json:"enabled"`
+				Connectable       bool   `json:"connectable"`
+				UnavailableReason string `json:"unavailable_reason"`
+				Mode              string `json:"mode"`
+				Protocol          string `json:"protocol"`
+				ListenAddr        string `json:"listen_addr"`
+				Port              int    `json:"port"`
+				TLSEnabled        bool   `json:"tls_enabled"`
+				MySQLDelayMS      int    `json:"mysql_detection_delay_ms"`
 			}
 			if err := decodeTestData(t, recorder.Body.Bytes(), &response); err != nil {
 				t.Fatalf("decode gateway response: %v", err)
 			}
 			if !response.Enabled ||
+				!response.Connectable ||
+				response.UnavailableReason != "" ||
 				response.Mode != config.DatabaseGatewayModeUnified ||
 				response.Protocol != protocol ||
 				response.ListenAddr != "0.0.0.0:33060" ||
@@ -181,7 +188,7 @@ func TestHandleDBGatewayUsesUnifiedEntryForEveryProtocol(t *testing.T) {
 	}
 }
 
-func TestHandleDBGatewayDoesNotAdvertisePostgreSQLWithoutUnifiedTLS(t *testing.T) {
+func TestHandleDBGatewaySeparatesEnabledUnifiedEntryFromPostgreSQLTLSReadiness(t *testing.T) {
 	server, db := newAdminDBTestServer(t)
 	seedTestSuperAdmin(t, db, "u-admin")
 	server.cfg.DatabaseGateway = config.DatabaseGatewayConfig{
@@ -191,8 +198,13 @@ func TestHandleDBGatewayDoesNotAdvertisePostgreSQLWithoutUnifiedTLS(t *testing.T
 			Enabled: true, Address: "127.0.0.1:33060", DetectionTimeoutMS: 200,
 		},
 	}
-	for protocol, wantEnabled := range map[string]bool{
-		"mysql": true, "postgresql": false, "redis": true,
+	for protocol, expectation := range map[string]struct {
+		connectable bool
+		reason      string
+	}{
+		"mysql":      {connectable: true},
+		"postgresql": {reason: databaseGatewayUnavailableTLSIdentityMissing},
+		"redis":      {connectable: true},
 	} {
 		t.Run(protocol, func(t *testing.T) {
 			recorder := httptest.NewRecorder()
@@ -208,18 +220,72 @@ func TestHandleDBGatewayDoesNotAdvertisePostgreSQLWithoutUnifiedTLS(t *testing.T
 				t.Fatalf("status = %d; body=%s", recorder.Code, recorder.Body.String())
 			}
 			var response struct {
-				Enabled    bool `json:"enabled"`
-				TLSEnabled bool `json:"tls_enabled"`
+				Enabled           bool   `json:"enabled"`
+				Connectable       bool   `json:"connectable"`
+				UnavailableReason string `json:"unavailable_reason"`
+				TLSEnabled        bool   `json:"tls_enabled"`
 			}
 			if err := decodeTestData(t, recorder.Body.Bytes(), &response); err != nil {
 				t.Fatalf("decode gateway response: %v", err)
 			}
-			if response.Enabled != wantEnabled || response.TLSEnabled {
+			if !response.Enabled ||
+				response.Connectable != expectation.connectable ||
+				response.UnavailableReason != expectation.reason ||
+				response.TLSEnabled {
 				t.Fatalf(
-					"%s response = %#v, want enabled=%t without TLS",
+					"%s response = %#v, want enabled unified entry with connectable=%t reason=%q without TLS",
 					protocol,
 					response,
-					wantEnabled,
+					expectation.connectable,
+					expectation.reason,
+				)
+			}
+		})
+	}
+}
+
+func TestDatabaseGatewayAvailabilityDistinguishesDisabledStates(t *testing.T) {
+	tests := []struct {
+		name            string
+		gatewayEnabled  bool
+		listenerEnabled bool
+		protocol        string
+		tlsConfigured   bool
+		wantConnectable bool
+		wantReason      string
+	}{
+		{
+			name: "gateway disabled", listenerEnabled: true, protocol: "mysql",
+			wantReason: databaseGatewayUnavailableGatewayDisabled,
+		},
+		{
+			name: "listener disabled", gatewayEnabled: true, protocol: "mysql",
+			wantReason: databaseGatewayUnavailableListenerDisabled,
+		},
+		{
+			name: "postgresql TLS missing", gatewayEnabled: true, listenerEnabled: true, protocol: "postgresql",
+			wantReason: databaseGatewayUnavailableTLSIdentityMissing,
+		},
+		{
+			name: "postgresql ready", gatewayEnabled: true, listenerEnabled: true, protocol: "postgresql",
+			tlsConfigured: true, wantConnectable: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			connectable, reason := databaseGatewayAvailability(
+				tt.gatewayEnabled,
+				tt.listenerEnabled,
+				tt.protocol,
+				tt.tlsConfigured,
+			)
+			if connectable != tt.wantConnectable || reason != tt.wantReason {
+				t.Fatalf(
+					"databaseGatewayAvailability() = (%t, %q), want (%t, %q)",
+					connectable,
+					reason,
+					tt.wantConnectable,
+					tt.wantReason,
 				)
 			}
 		})

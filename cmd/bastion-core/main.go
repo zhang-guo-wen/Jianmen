@@ -38,6 +38,10 @@ func main() {
 		logger.Error("failed to initialize system settings", "error", err)
 		os.Exit(1)
 	}
+	if err := prepareDatabaseGatewayTLS(cfg, dataDir, logger); err != nil {
+		logger.Error("failed to initialize database gateway TLS", "error", err)
+		os.Exit(1)
+	}
 	identityService, err := service.NewIdentityService(appStore)
 	if err != nil {
 		logger.Error("failed to initialize identity service", "error", err)

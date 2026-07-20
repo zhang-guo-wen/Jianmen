@@ -482,6 +482,8 @@ export interface DBConnectionRecord {
 
 export interface DBGatewayConfig {
   enabled: boolean;
+  connectable: boolean;
+  unavailable_reason: '' | 'gateway_disabled' | 'listener_disabled' | 'tls_identity_missing';
   mode: DatabaseGatewayMode;
   protocol: string;
   listen_addr: string;

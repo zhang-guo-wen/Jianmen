@@ -15,6 +15,10 @@ import {
   type DatabaseGatewayTLSIdentity,
 } from './databaseGatewayCommands.ts';
 import {
+  databaseGatewayConnectionError,
+  databaseProtocolLabel,
+} from './databaseGatewayAvailability.ts';
+import {
   beginInFlight,
   beginInFlightIfIdle,
   createLatestKeyedRequest,
@@ -31,6 +35,40 @@ const secureGateway: DatabaseGatewayTLSIdentity = {
   tls_ca_pem: '-----BEGIN CERTIFICATE-----\nCA\n-----END CERTIFICATE-----',
   tls_cert_sha256: 'aa:bb',
 };
+
+test('database gateway availability distinguishes disabled entry from missing PostgreSQL TLS', () => {
+  assert.equal(databaseProtocolLabel('postgresql'), 'PG');
+  assert.equal(
+    databaseGatewayConnectionError({
+      enabled: false,
+      connectable: false,
+      unavailable_reason: 'listener_disabled',
+      mode: 'independent',
+      protocol: 'postgresql',
+      listen_addr: '127.0.0.1:33062',
+      host: '127.0.0.1',
+      port: 33062,
+      mysql_detection_delay_ms: 0,
+      tls_enabled: false,
+    }, 'postgres'),
+    'PG 数据库网关未启用',
+  );
+  assert.equal(
+    databaseGatewayConnectionError({
+      enabled: true,
+      connectable: false,
+      unavailable_reason: 'tls_identity_missing',
+      mode: 'unified',
+      protocol: 'postgresql',
+      listen_addr: '127.0.0.1:33060',
+      host: '127.0.0.1',
+      port: 33060,
+      mysql_detection_delay_ms: 200,
+      tls_enabled: false,
+    }, 'postgresql'),
+    '统一数据库入口已启用，但 PG 连接所需的 TLS 证书尚未就绪',
+  );
+});
 
 test('database gateway fallback ports follow unified and independent modes', () => {
   for (const protocol of ['mysql', 'postgres', 'postgresql', 'redis']) {
@@ -301,7 +339,7 @@ test('quick database client launch requires gateway TLS and never creates or emb
   const start = source.indexOf('async function openDatabaseClient');
   const end = source.indexOf('function downloadDatabaseGatewayCA', start);
   const launchSource = source.slice(start, end);
-  assert.match(launchSource, /hasDatabaseGatewayTLSIdentity\(enabledGateway\)/);
+  assert.match(launchSource, /hasDatabaseGatewayTLSIdentity\(connectableGateway\)/);
   assert.match(launchSource, /buildDatabaseProtocolURL/);
   assert.match(launchSource, /databaseClient\.directLaunchReady/);
   assert.match(launchSource, /window\.location\.href = launchURL/);
@@ -340,9 +378,10 @@ test('quick-connect client buttons redirect to settings only when local configur
   assert.doesNotMatch(databaseClientButton, /type="primary"/);
 });
 
-test('disabled database gateways redirect super admins to system settings', () => {
+test('only disabled database gateways redirect super admins to system settings', () => {
   const source = readFileSync(new URL('../views/QuickConnectView.vue', import.meta.url), 'utf8');
-  assert.match(source, /function requireEnabledDatabaseGateway\(/);
+  assert.match(source, /function requireConnectableDatabaseGateway\(/);
+  assert.match(source, /if \(gateway\?\.enabled\) throw new Error\(message\)/);
   assert.match(source, /permission\.canAccessMenu\('systemSettings'\)/);
   assert.match(source, /path:\s*'\/system-settings'/);
   assert.match(source, /请联系超级管理员完成系统配置/);
@@ -502,6 +541,34 @@ test('PostgreSQL and MySQL connection orchestration keep session and password lo
       credential: { password: `${protocol}-password` },
     });
   }
+});
+
+test('database connection orchestration validates the gateway before issuing credentials', async () => {
+  const calls: string[] = [];
+  await assert.rejects(
+    loadDatabaseConnectionResources({
+      protocol: 'postgres',
+      targetID: 'database-account-1',
+      getGateway: async () => {
+        calls.push('gateway');
+        return { connectable: false };
+      },
+      validateGateway: () => {
+        calls.push('validate');
+        throw new Error('gateway unavailable');
+      },
+      createSession: async () => {
+        calls.push('session');
+        return {};
+      },
+      createPassword: async () => {
+        calls.push('password');
+        return {};
+      },
+    }),
+    /gateway unavailable/,
+  );
+  assert.deepEqual(calls, ['gateway', 'validate']);
 });
 
 function findPOSIXShell(): string | null {

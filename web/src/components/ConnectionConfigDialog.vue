@@ -166,6 +166,7 @@ import { buildSSHProtocolRegistrationCommand, isAbsoluteExecutablePath, SSH_CLIE
 import { useDatabaseClientStore } from '@/stores/databaseClient';
 import { usePreferencesStore } from '@/stores/preferences';
 import { writeClipboardText } from '@/utils/clipboard';
+import { databaseGatewayConnectionError } from '@/utils/databaseGatewayAvailability';
 import {
   isGatewayOnlyDatabaseProtocol,
   loadDatabaseConnectionResources,
@@ -479,6 +480,10 @@ async function initializeConnection(snapshot: ConnectionTargetSnapshot) {
         protocol: snapshot.protocol,
         targetID,
         getGateway: protocol => apiClient.getDBGateway(protocol),
+        validateGateway: gateway => {
+          const message = databaseGatewayConnectionError(gateway, snapshot.protocol);
+          if (message) throw new Error(message);
+        },
         createSession: accountID => apiClient.createUserSession(accountID),
         createPassword: accountID => apiClient.createConnectionPassword(accountID),
       });
@@ -501,7 +506,6 @@ async function initializeConnection(snapshot: ConnectionTargetSnapshot) {
   try {
     const { session, credential, gateway } = await request.promise;
     if (!initializeRequest.isCurrent(token, currentTargetSnapshotKey())) return;
-    if (snapshot.resourceType === 'database' && !gateway?.enabled) throw new Error(`${snapshot.protocol.toUpperCase()} 数据库网关未启用`);
     connectionInfo.value = {
       host: gateway?.tls_server_name || gateway?.host || window.location.hostname,
       port: snapshot.resourceType === 'host'

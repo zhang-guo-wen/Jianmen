@@ -5,7 +5,7 @@
         <div class="settings-toolbar">
           <div class="settings-toolbar__copy">
             <strong>个人设置</strong>
-            <span>界面偏好和客户端配置会随账号保存；换新浏览器时可从后端加载到本地缓存。</span>
+            <span>管理界面偏好与本机连接工具。</span>
           </div>
           <div class="settings-toolbar__actions">
             <span v-if="preferences.error" class="save-error">保存失败</span>
@@ -15,14 +15,14 @@
       </template>
 
       <div class="settings-tabs-shell">
-        <el-tabs v-model="activeTab" class="settings-tabs">
+        <el-tabs v-model="activeTab" class="settings-tabs" tab-position="left">
           <!-- 界面与终端 -->
           <el-tab-pane label="界面与终端" name="appearance">
             <section class="settings-section">
               <div class="section-heading">
                 <div>
                   <h2>界面与终端</h2>
-                  <p>调整系统主题以及 Web Terminal 的字体显示。</p>
+                  <p>设置主题和 Web Terminal 字体。</p>
                 </div>
               </div>
               <el-form label-position="top">
@@ -46,7 +46,7 @@
             <section class="settings-section">
               <ClientSectionHeading
                 title="本地 SSH 客户端"
-                desc="选择快速连接时使用的本地 SSH 工具。"
+                desc="设置快速连接默认使用的 SSH 工具。"
                 :configured="sshConfigured"
                 :registered="sshRegistered"
                 :load-error="preferences.error"
@@ -66,7 +66,7 @@
                     <el-input v-model="form.ssh_client_path" name="ssh_client_path" autocomplete="off" placeholder="例如 C:\Program Files\PuTTY\putty.exe">
                       <template #append><el-button @click="pickSSHExecutable">选择文件</el-button></template>
                     </el-input>
-                    <div class="field-help">程序路径必填；浏览器无法读取完整路径时，请手动粘贴。</div>
+                    <div class="field-help">无法自动读取完整路径时，请手动粘贴。</div>
                   </el-form-item>
                   <ClientRegistrationAlert
                     v-if="sshRegistrationCommand"
@@ -86,7 +86,7 @@
             <section class="settings-section">
               <ClientSectionHeading
                 title="本地数据库客户端"
-                desc="配置数据库快速连接使用的 DBeaver 程序。"
+                desc="设置数据库快速连接使用的 DBeaver。"
                 :configured="dbConfigured"
                 :registered="dbRegistered"
                 :load-error="preferences.error"
@@ -104,7 +104,7 @@
                   </el-form-item>
                   <el-form-item label="客户端路径" required :error="dbClientPathError">
                     <el-input v-model="form.db_client_path" name="db_client_path" autocomplete="off" :placeholder="`例如 ${dbClientPathExample}`" />
-                    <div class="field-help">Windows 推荐选择 dbeaverc.exe；本机路径只用于生成协议注册命令，不会上传。</div>
+                    <div class="field-help">Windows 推荐 dbeaverc.exe；路径仅保存在当前账号中。</div>
                   </el-form-item>
                   <el-form-item label="本地 CA 文件路径（私有/自签证书）" :error="dbCAFilePathError">
                     <el-input v-model="form.db_client_ca_file_path" name="db_client_ca_path" autocomplete="off" :placeholder="`例如 ${dbCAFilePathExample}`">
@@ -405,20 +405,23 @@ async function downloadDatabaseGatewayCA() {
 .settings-card { min-height: 0; border: 1px solid var(--color-border); border-radius: 18px; background: var(--color-card); }
 :deep(.settings-card > .el-card__header) { position: sticky; top: 0; z-index: 4; padding: 14px 20px; background: color-mix(in srgb, var(--color-card) 96%, transparent); border-bottom-color: var(--color-border); backdrop-filter: blur(12px); }
 :deep(.settings-card > .el-card__body) { display: flex; flex-direction: column; min-height: 0; padding: 0; overflow: visible; }
-.settings-tabs { flex: none; min-height: 0; }
-:deep(.settings-tabs > .el-tabs__header) { display: flex; align-items: center; margin: 0; padding: 0 24px; background: var(--color-card); border-bottom: 1px solid var(--color-border); }
+.settings-tabs { display: grid; grid-template-columns: 188px minmax(0, 1fr); min-height: 420px; }
+:deep(.settings-tabs > .el-tabs__header) { width: auto; margin: 0; padding: 18px 12px; background: color-mix(in srgb, var(--color-surface-muted) 72%, var(--color-card)); border-right: 1px solid var(--color-border); }
 .settings-toolbar, .settings-toolbar__actions { display: flex; align-items: center; }
 .settings-toolbar { justify-content: space-between; gap: 10px; }
 .settings-toolbar__copy { display: grid; min-width: 0; gap: 4px; }
 .settings-toolbar__copy strong { font-size: 16px; }
 .settings-toolbar__copy span { color: var(--color-text-secondary); font-size: 12px; }
 .settings-toolbar__actions { flex: 0 0 auto; gap: 10px; }
-:deep(.settings-tabs .el-tabs__nav-wrap::after) { display: none; }
-:deep(.settings-tabs .el-tabs__item) { height: 56px; padding: 0 22px; font-weight: 700; }
-:deep(.settings-tabs > .el-tabs__content) { overflow: visible; }
-.settings-section { max-width: 920px; padding: 28px 32px 24px; }
-.section-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; margin-bottom: 26px; }
-.section-heading h2 { margin: 0; font-size: 20px; line-height: 1.3; }
+:deep(.settings-tabs .el-tabs__nav-wrap::after), :deep(.settings-tabs .el-tabs__active-bar) { display: none; }
+:deep(.settings-tabs .el-tabs__nav) { width: 100%; }
+:deep(.settings-tabs .el-tabs__item) { justify-content: flex-start; width: 100%; height: 42px; margin-bottom: 4px; padding: 0 14px !important; border-radius: 9px; color: var(--color-text-secondary); font-weight: 650; text-align: left; transition: color .18s ease, background-color .18s ease; }
+:deep(.settings-tabs .el-tabs__item:hover) { color: var(--el-color-primary); background: color-mix(in srgb, var(--el-color-primary) 7%, transparent); }
+:deep(.settings-tabs .el-tabs__item.is-active) { color: var(--el-color-primary); background: color-mix(in srgb, var(--el-color-primary) 11%, transparent); }
+:deep(.settings-tabs > .el-tabs__content) { min-width: 0; overflow: visible; }
+.settings-section { width: min(100%, 1040px); padding: 24px 28px; }
+.section-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; margin-bottom: 20px; padding-bottom: 16px; border-bottom: 1px solid var(--color-border); }
+.section-heading h2 { margin: 0; font-size: 18px; line-height: 1.3; }
 .section-heading p { margin: 6px 0 0; color: var(--color-text-secondary); font-size: 13px; }
 .form-pair { display: grid; grid-template-columns: minmax(0, 1fr) 150px; gap: 14px; }
 :deep(.theme-segmented .el-segmented__item) { min-width: 88px; padding: 0 14px; white-space: nowrap; }
@@ -436,8 +439,10 @@ async function downloadDatabaseGatewayCA() {
   :deep(.settings-card > .el-card__header) { position: static; padding: 12px; }
   .settings-toolbar { align-items: stretch; flex-direction: column; }
   .settings-toolbar__actions { justify-content: space-between; }
-  :deep(.settings-tabs > .el-tabs__header) { padding: 0 12px; }
-  :deep(.settings-tabs .el-tabs__item) { padding: 0 12px; }
+  .settings-tabs { display: block; min-height: 0; }
+  :deep(.settings-tabs > .el-tabs__header) { width: 100%; padding: 8px 10px 0; border-right: 0; border-bottom: 1px solid var(--color-border); }
+  :deep(.settings-tabs .el-tabs__nav) { display: flex; }
+  :deep(.settings-tabs .el-tabs__item) { justify-content: center; margin: 0; padding: 0 10px !important; }
   .settings-section { padding: 22px 18px; }
   .form-pair { grid-template-columns: 1fr; }
   .section-heading { align-items: flex-start; flex-direction: column; gap: 10px; }

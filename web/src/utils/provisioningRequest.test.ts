@@ -9,7 +9,6 @@ import {
 
 const request = {
   admin_account_id: 'admin-1',
-  host: '10.0.0.8',
   grants: [
     { database: 'app', privilege: 'SELECT' },
     { database: 'audit', privilege: 'UPDATE' },
@@ -35,7 +34,7 @@ test('reuses an idempotency key after failure and rotates after success or reque
   session.markSucceeded();
   assert.equal(session.keyFor(request), 'key-2');
 
-  assert.equal(session.keyFor({ ...request, host: '10.0.0.9' }), 'key-3');
+  assert.equal(session.keyFor({ ...request, group: 'operations' }), 'key-3');
   session.reset();
   assert.equal(session.keyFor(request, 'instance-a'), 'key-4');
   assert.equal(session.keyFor(request, 'instance-b'), 'key-5');
@@ -46,5 +45,6 @@ test('adds Idempotency-Key without putting secrets in URL or body', () => {
   const headers = new Headers(init.headers);
   assert.equal(headers.get('Idempotency-Key'), 'key-abc');
   assert.equal(init.body, JSON.stringify(request));
+  assert.equal('host' in request, false);
   assert.doesNotMatch('/api/db/provision-account', /password@|ssh:\/\/[^/]*:[^/@]+@/);
 });

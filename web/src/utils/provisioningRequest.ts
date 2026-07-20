@@ -5,7 +5,6 @@ export interface ProvisionGrant {
 
 export interface ProvisionRequest {
   admin_account_id: string;
-  host: string;
   grants: ProvisionGrant[];
   group?: string;
   remark?: string;
@@ -22,7 +21,6 @@ export function normalizeProvisionRequest(request: ProvisionRequest): string {
 
   return JSON.stringify({
     admin_account_id: request.admin_account_id.trim(),
-    host: request.host.trim(),
     grants,
     ...(request.group?.trim() ? { group: request.group.trim() } : {}),
     ...(request.remark?.trim() ? { remark: request.remark.trim() } : {}),

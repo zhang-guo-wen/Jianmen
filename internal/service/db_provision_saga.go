@@ -172,7 +172,6 @@ type ProvisionedDatabaseAccount struct {
 type ProvisionDatabaseAccountRequest struct {
 	InstanceID     string
 	AdminAccountID string
-	Host           string
 	Grants         []DBGrant
 	Group          string
 	Remark         string
@@ -274,6 +273,11 @@ type DatabaseAccountProvisioner interface {
 		model.DatabaseInstance,
 		model.DatabaseAccount,
 	) ([]string, error)
+	ResolveAccountHost(
+		context.Context,
+		model.DatabaseInstance,
+		model.DatabaseAccount,
+	) (string, error)
 	CreateAccount(
 		context.Context,
 		model.DatabaseInstance,

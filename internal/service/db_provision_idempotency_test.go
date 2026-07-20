@@ -9,7 +9,7 @@ import (
 
 func idempotentProvisioningRequest(actor, key string, grants []DBGrant) ProvisionDatabaseAccountRequest {
 	return ProvisionDatabaseAccountRequest{
-		InstanceID: "instance-1", AdminAccountID: "admin-1", Host: "10.0.0.8",
+		InstanceID: "instance-1", AdminAccountID: "admin-1",
 		Grants: grants, Actor: DatabaseProvisioningActor{UserID: actor}, IdempotencyKey: key,
 	}
 }
@@ -23,6 +23,7 @@ func TestDatabaseProvisioningIdempotencyReusesActiveOperation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("first provisioning: %v", err)
 	}
+	provisioner.accountHost = "%"
 	second, err := provisioning.Provision(context.Background(), request)
 	if err != nil {
 		t.Fatalf("idempotent retry: %v", err)
@@ -30,8 +31,13 @@ func TestDatabaseProvisioningIdempotencyReusesActiveOperation(t *testing.T) {
 	if first.OperationID == "" || first.OperationID != second.OperationID || first.Account.ID != second.Account.ID {
 		t.Fatalf("retry did not return stable result: %#v %#v", first, second)
 	}
-	if provisioner.createCalls != 1 || provisioner.grantCalls != 1 {
-		t.Fatalf("retry repeated upstream effects: create=%d grant=%d", provisioner.createCalls, provisioner.grantCalls)
+	if provisioner.resolveCalls != 1 || provisioner.createCalls != 1 || provisioner.grantCalls != 1 {
+		t.Fatalf(
+			"retry repeated host resolution or upstream effects: resolve=%d create=%d grant=%d",
+			provisioner.resolveCalls,
+			provisioner.createCalls,
+			provisioner.grantCalls,
+		)
 	}
 }
 
@@ -42,7 +48,7 @@ func TestDatabaseProvisioningIdempotencyRejectsRequestMismatch(t *testing.T) {
 	if _, err := provisioning.Provision(context.Background(), request); err != nil {
 		t.Fatalf("first provisioning: %v", err)
 	}
-	request.Host = "10.0.0.9"
+	request.Remark = "changed request"
 	if _, err := provisioning.Provision(context.Background(), request); !errors.Is(err, ErrDatabaseProvisioningIdempotencyConflict) {
 		t.Fatalf("mismatch error = %v, want conflict", err)
 	}
@@ -112,8 +118,15 @@ func TestDatabaseProvisioningIdempotencyRetainsFailedCleanupTombstone(t *testing
 	if _, err := provisioning.Provision(context.Background(), request); !errors.Is(err, ErrDatabaseProvisioningFailed) {
 		t.Fatalf("same key retry error = %v, want stable terminal failure", err)
 	}
-	if provisioner.createCalls != 1 || provisioner.grantCalls != 1 || provisioner.dropCalls != 1 {
-		t.Fatalf("retry repeated upstream side effects: create=%d grant=%d drop=%d", provisioner.createCalls, provisioner.grantCalls, provisioner.dropCalls)
+	if provisioner.resolveCalls != 1 || provisioner.createCalls != 1 ||
+		provisioner.grantCalls != 1 || provisioner.dropCalls != 1 {
+		t.Fatalf(
+			"retry repeated host resolution or upstream side effects: resolve=%d create=%d grant=%d drop=%d",
+			provisioner.resolveCalls,
+			provisioner.createCalls,
+			provisioner.grantCalls,
+			provisioner.dropCalls,
+		)
 	}
 }
 
@@ -134,7 +147,14 @@ func TestDatabaseProvisioningIdempotencyConcurrentRequestRunsUpstreamOnce(t *tes
 	}
 	close(release)
 	wait.Wait()
-	if firstErr != nil || provisioner.createCalls != 1 || provisioner.grantCalls != 1 {
-		t.Fatalf("concurrent provisioning repeated upstream work: err=%v create=%d grant=%d", firstErr, provisioner.createCalls, provisioner.grantCalls)
+	if firstErr != nil || provisioner.resolveCalls != 1 ||
+		provisioner.createCalls != 1 || provisioner.grantCalls != 1 {
+		t.Fatalf(
+			"concurrent provisioning repeated host resolution or upstream work: err=%v resolve=%d create=%d grant=%d",
+			firstErr,
+			provisioner.resolveCalls,
+			provisioner.createCalls,
+			provisioner.grantCalls,
+		)
 	}
 }

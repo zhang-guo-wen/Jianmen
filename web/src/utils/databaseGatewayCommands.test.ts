@@ -322,6 +322,17 @@ test('quick database client launch requires gateway TLS and never creates or emb
   assert.doesNotMatch(launchSource, /createConnectionPassword|temporaryPassword|password:/);
 });
 
+test('quick database cards copy temporary connection credentials with an in-flight state', () => {
+  const source = readFileSync(new URL('../views/QuickConnectView.vue', import.meta.url), 'utf8');
+  assert.match(source, /@click="copyDatabaseConnectionInfo\(account\)"/);
+  assert.match(source, /:loading="databaseCredentialLoading\(account\)"/);
+  assert.match(source, /loadDatabaseConnectionResources\(\{/);
+  assert.match(source, /`连接地址：\$\{state\.host\}:\$\{state\.port\}`/);
+  assert.match(source, /`连接账户：\$\{state\.compactUser\}`/);
+  assert.match(source, /`连接临时密码：\$\{state\.password\}`/);
+  assert.match(source, /Redis 暂不支持复制临时连接凭据/);
+});
+
 test('database and quick-connect loaders keep request snapshots isolated', () => {
   const databaseViewSource = readFileSync(new URL('../views/DatabaseView.vue', import.meta.url), 'utf8');
   const quickConnectSource = readFileSync(new URL('../views/QuickConnectView.vue', import.meta.url), 'utf8');

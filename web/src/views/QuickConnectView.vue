@@ -189,6 +189,31 @@
                   {{ databaseRemark(account) }}
                 </div>
                 <footer class="connection-card__actions database-card__actions">
+                  <el-tooltip
+                    :content="databaseCredentialUnavailableReason(account._protocol)"
+                    :disabled="!databaseCredentialUnavailableReason(account._protocol)"
+                    placement="top"
+                  >
+                    <span
+                      class="database-action-tooltip"
+                      :tabindex="databaseCredentialUnavailableReason(account._protocol) ? 0 : undefined"
+                      :role="databaseCredentialUnavailableReason(account._protocol) ? 'button' : undefined"
+                      :aria-disabled="databaseCredentialUnavailableReason(account._protocol) ? 'true' : undefined"
+                      :aria-label="databaseCredentialUnavailableReason(account._protocol) || undefined"
+                    >
+                      <el-button
+                        type="primary"
+                        size="small"
+                        aria-label="复制包含临时密码的数据库连接信息"
+                        title="包含临时密码，请妥善保管"
+                        :disabled="Boolean(databaseCredentialUnavailableReason(account._protocol))"
+                        :loading="databaseCredentialLoading(account)"
+                        @click="copyDatabaseConnectionInfo(account)"
+                      >
+                        复制凭据
+                      </el-button>
+                    </span>
+                  </el-tooltip>
                   <el-tooltip content="Web 数据库连接暂未开放" placement="top">
                     <span
                       class="database-action-tooltip"
@@ -283,6 +308,7 @@ import { useDatabaseClientStore } from '@/stores/databaseClient';
 import { usePermissionStore } from '@/stores/permission';
 import { usePreferencesStore } from '@/stores/preferences';
 import { writeClipboardText } from '@/utils/clipboard';
+import { loadDatabaseConnectionResources } from '@/utils/databaseConnectionOrchestration';
 import {
   databaseGatewayCAFileName,
   hasDatabaseGatewayTLSIdentity,
@@ -309,6 +335,15 @@ interface HostMeta {
 interface SSHConnectionState {
   loading: boolean;
   error: string;
+  host: string;
+  port: number;
+  compactUser: string;
+  password: string;
+  expiresAt: string;
+}
+
+interface DatabaseConnectionState {
+  loading: boolean;
   host: string;
   port: number;
   compactUser: string;
@@ -377,6 +412,8 @@ const dbLoading = ref(false);
 const dbError = ref('');
 const dbAccounts = ref<QuickDBTarget[]>([]);
 const dbClientLaunching = reactive<Record<string, boolean>>({});
+const dbConnectionStates = reactive<Record<string, DatabaseConnectionState>>({});
+const dbConnectionRequests = new Map<string, Promise<DatabaseConnectionState>>();
 const dbAccountsFlight = createSingleFlight<void>();
 const dbUsageCounts = ref<Record<string, number>>({});
 const dbFilter = ref('all');
@@ -837,6 +874,16 @@ function databaseClientLoading(account: QuickDBTarget): boolean {
   return dbClientLaunching[databaseTargetKey(account)] ?? false;
 }
 
+function databaseCredentialLoading(account: QuickDBTarget): boolean {
+  return dbConnectionStates[databaseTargetKey(account)]?.loading ?? false;
+}
+
+function databaseCredentialUnavailableReason(protocol?: string): string {
+  return String(protocol || '').toLowerCase() === 'redis'
+    ? 'Redis 暂不支持复制临时连接凭据'
+    : '';
+}
+
 function databaseClientUnavailableReason(protocol?: string): string {
   return String(protocol || '').toLowerCase() === 'redis'
     ? 'Redis 暂不支持通过 DBeaver 本地客户端打开'
@@ -858,6 +905,79 @@ function onDBSearch(query: string) {
   dbKeyword.value = query;
   dbFilter.value = 'all';
   dbPage.value = 1;
+}
+
+function ensureDatabaseConnectionInfo(account: QuickDBTarget): Promise<DatabaseConnectionState> {
+  const key = databaseTargetKey(account);
+  const currentState = dbConnectionStates[key];
+  const expiryTime = Date.parse(currentState?.expiresAt || '');
+  const credentialUsable = currentState?.compactUser
+    && currentState.password
+    && (!currentState.expiresAt || Number.isNaN(expiryTime) || expiryTime > Date.now());
+  if (credentialUsable) return Promise.resolve(currentState);
+
+  const currentRequest = dbConnectionRequests.get(key);
+  if (currentRequest) return currentRequest;
+
+  const state: DatabaseConnectionState = {
+    loading: true,
+    host: '',
+    port: 0,
+    compactUser: '',
+    password: '',
+    expiresAt: '',
+  };
+  dbConnectionStates[key] = state;
+
+  const request = (async () => {
+    try {
+      const targetID = String(account.id || account.resource_id || '');
+      if (!targetID) throw new Error('无法获取数据库账号 ID');
+      const protocol = String(account._protocol || 'mysql');
+      const { session, credential, gateway } = await loadDatabaseConnectionResources({
+        protocol,
+        targetID,
+        getGateway: value => apiClient.getDBGateway(value),
+        createSession: accountID => apiClient.createUserSession(accountID),
+        createPassword: accountID => apiClient.createConnectionPassword(accountID),
+      });
+      if (!gateway?.enabled) throw new Error(`${databaseProtocolLabel(protocol)} 数据库网关未启用`);
+      state.host = String(gateway.tls_server_name || gateway.host || window.location.hostname || '127.0.0.1');
+      state.port = resolveDatabaseGatewayPort(protocol, gateway);
+      state.compactUser = String(session?.compact_username || '');
+      state.password = String(credential?.password || '');
+      state.expiresAt = String(credential?.expires_at || '');
+      if (!state.host || !state.port || !state.compactUser || !state.password) {
+        throw new Error('数据库连接信息不完整');
+      }
+      return state;
+    } finally {
+      state.loading = false;
+      dbConnectionRequests.delete(key);
+    }
+  })();
+
+  dbConnectionRequests.set(key, request);
+  return request;
+}
+
+async function copyDatabaseConnectionInfo(account: QuickDBTarget) {
+  try {
+    const state = await ensureDatabaseConnectionInfo(account);
+    const content = [
+      `数据库实例：${account._instance_name || '-'}`,
+      `数据库分组：${databaseGroup(account)}`,
+      `数据库备注：${databaseRemark(account)}`,
+      `账号名称：${account.username || '-'}`,
+      `连接地址：${state.host}:${state.port}`,
+      `连接账户：${state.compactUser}`,
+      `连接临时密码：${state.password}`,
+    ].join('\n');
+    await writeClipboardText(content);
+    ElMessage.success('数据库临时连接信息已全部复制');
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : '复制失败，请稍后重试');
+  }
 }
 
 async function openDatabaseClient(account: QuickDBTarget) {

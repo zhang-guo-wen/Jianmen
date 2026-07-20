@@ -132,7 +132,7 @@ test('database client store forces an old registered broker through registration
   }
 });
 
-test('database client deep link carries only the generated temporary password for an immediate TLS connection', () => {
+test('database client deep link defaults to a plaintext connection and carries only the temporary password', () => {
   const url = buildDatabaseProtocolURL({
     protocol: 'postgres',
     host: 'gateway.db.example',
@@ -146,7 +146,7 @@ test('database client deep link carries only the generated temporary password fo
 
   const payload = decodeLaunchPayload(url);
   assert.deepEqual(payload, {
-    v: 2,
+    v: 3,
     driver: 'postgresql',
     host: 'gateway.db.example',
     port: 33060,
@@ -154,8 +154,23 @@ test('database client deep link carries only the generated temporary password fo
     user: 'D000100001',
     password: 'temporary_password_1234567890',
     name: '生产库 / reporting',
-    tls: 'verify-full',
+    tls: 'disable',
   });
+});
+
+test('database client deep link can explicitly request a verified TLS connection', () => {
+  const payload = decodeLaunchPayload(buildDatabaseProtocolURL({
+    protocol: 'mysql',
+    host: 'gateway.db.example',
+    port: 33060,
+    username: 'D000100001',
+    password: 'temporary_password_1234567890',
+    connectionName: 'Jianmen TLS',
+    tls: 'verify-full',
+  }));
+
+  assert.equal(payload.v, 3);
+  assert.equal(payload.tls, 'verify-full');
 });
 
 test('database client deep link rejects connection-field injection and cleans display names', () => {
@@ -203,7 +218,7 @@ test('Windows registration command validates every payload field and fixes safe 
   assert.match(script, /\$caFile = 'C:\\Users\\Bob''s\\Downloads\\jianmen-database-gateway-ca\.pem'/);
   assert.match(script, /Test-Path -LiteralPath \$caFile -PathType Leaf/);
   assert.match(script, /配置的网关 CA 文件不存在/);
-  assert.match(script, /无法打开 DBeaver，请检查本地客户端路径和网关 CA 配置/);
+  assert.match(script, /无法打开 DBeaver，请检查本地客户端路径和连接配置/);
   assert.match(script, /WScript\.Shell/);
   assert.match(script, /'savePassword=true'/);
   assert.match(script, /'create=true'/);
@@ -215,11 +230,30 @@ test('Windows registration command validates every payload field and fixes safe 
   assert.match(script, /netHandler\.ssl\.ca\.cert=\$caFile/);
   assert.match(script, /netHandler\.ssl\.sslMode=verify-full/);
   assert.match(script, /netHandler\.ssl\.verify\.server=true/);
+  assert.match(script, /prop\.sslMode=DISABLED/);
+  assert.match(script, /prop\.sslmode=disable/);
   assert.doesNotMatch(script, /savePassword=false|'save=false'/);
   assert.match(
     script,
     /Start-Process -FilePath 'C:\\Tools\\Bob''s; Start-Process calc\\dbeaverc\.exe' -ArgumentList/,
   );
+});
+
+test('Windows registration allows plaintext quick connect without a CA file', () => {
+  const command = buildDatabaseProtocolRegistrationCommand({
+    client: 'dbeaver',
+    platform: 'windows',
+    executablePath: 'C:\\Program Files\\DBeaver\\dbeaverc.exe',
+    caFilePath: '',
+    protocolRegistered: false,
+  });
+
+  assert.notEqual(command, '');
+  const script = decodeBrokerPowerShell(command);
+  assert.match(script, /\$caFile = ''/);
+  assert.match(script, /\$data\.tls -ceq 'verify-full'/);
+  assert.match(script, /prop\.sslMode=DISABLED/);
+  assert.match(script, /prop\.sslmode=disable/);
 });
 
 test('Windows protocol broker receives the URI as a real script argument', {
@@ -286,6 +320,7 @@ func main() {
     username: 'D000100001',
     password: 'temporary_password_1234567890',
     databaseName: 'postgres',
+    tls: 'verify-full',
     connectionName: '进程测试',
   });
 

@@ -118,11 +118,8 @@ func (g *Gateway) serveBoundProtocolListeners(ctx context.Context, listeners []b
 func validateProtocolListenerTLS(item protocolListener) error {
 	hasCertificate := strings.TrimSpace(item.config.CertFile) != "" &&
 		strings.TrimSpace(item.config.KeyFile) != ""
-	if item.protocol == databaseProtocolPostgreSQL && !hasCertificate {
-		return errors.New("postgresql database listener requires TLS certificate and key")
-	}
 	if !hasCertificate {
-		return nil
+		return fmt.Errorf("%s database listener requires TLS certificate and key", item.protocol)
 	}
 	if _, err := dbtls.LoadServerIdentity(
 		item.config.CertFile,
@@ -258,25 +255,51 @@ func (g *Gateway) finishProtocolConnection(
 }
 
 func (g *Gateway) handleRedisConnection(ctx context.Context, client net.Conn, listenerConfig config.DatabaseProtocolListener) *gatewayConn {
-	if listenerConfig.CertFile != "" && listenerConfig.KeyFile != "" {
+	tlsConfigured := listenerConfig.CertFile != "" && listenerConfig.KeyFile != ""
+	var firstByte [1]byte
+	if _, err := readFull(client, firstByte[:]); err != nil {
+		return nil
+	}
+	if g.cfg.ClientTLSRequired() {
+		if firstByte[0] != 0x16 {
+			_, _ = client.Write([]byte("-NOAUTH TLS is required for remote AUTH\r\n"))
+			return nil
+		}
+		if !tlsConfigured {
+			return nil
+		}
 		tlsConfig, err := databaseListenerTLSConfig(listenerConfig)
 		if err != nil {
 			g.logger.Error("load Redis listener certificate", "error", err)
 			return nil
 		}
-		secured := tls.Server(client, tlsConfig)
+		prefixed := &prefixedConn{Conn: client, prefix: firstByte[:]}
+		secured := tls.Server(prefixed, tlsConfig)
 		if err := secured.HandshakeContext(ctx); err != nil {
 			return nil
 		}
 		client = secured
-	} else if !isLoopbackPeer(client.RemoteAddr()) {
-		_, _ = client.Write([]byte("-NOAUTH TLS is required for remote AUTH\r\n"))
-		return nil
+		if _, err := readFull(client, firstByte[:]); err != nil {
+			return nil
+		}
+		return g.handleRedisAfterTransport(ctx, client, firstByte[0])
 	}
 
-	firstByte := make([]byte, 1)
-	if _, err := readFull(client, firstByte); err != nil {
-		return nil
+	if firstByte[0] == 0x16 && tlsConfigured {
+		tlsConfig, err := databaseListenerTLSConfig(listenerConfig)
+		if err != nil {
+			g.logger.Error("load Redis listener certificate", "error", err)
+			return nil
+		}
+		prefixed := &prefixedConn{Conn: client, prefix: firstByte[:]}
+		secured := tls.Server(prefixed, tlsConfig)
+		if err := secured.HandshakeContext(ctx); err != nil {
+			return nil
+		}
+		if _, err := readFull(secured, firstByte[:]); err != nil {
+			return nil
+		}
+		client = secured
 	}
 	return g.handleRedisAfterTransport(ctx, client, firstByte[0])
 }
@@ -295,18 +318,6 @@ func databaseListenerTLSConfig(listener config.DatabaseProtocolListener) (*tls.C
 		return nil, fmt.Errorf("load listener certificate: %w", err)
 	}
 	return &tls.Config{Certificates: []tls.Certificate{certificate}, MinVersion: tls.VersionTLS12}, nil
-}
-
-func isLoopbackPeer(address net.Addr) bool {
-	if address == nil {
-		return false
-	}
-	host, _, err := net.SplitHostPort(address.String())
-	if err != nil {
-		return false
-	}
-	ip := net.ParseIP(strings.Trim(host, "[]"))
-	return ip != nil && ip.IsLoopback()
 }
 
 func readFull(conn net.Conn, buffer []byte) (int, error) {

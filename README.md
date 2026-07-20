@@ -147,8 +147,8 @@ docker run -d \
 | `47102` | SSH/SFTP 堡垒机入口 |
 | `33060` | 统一数据库入口（默认，MySQL/PostgreSQL/Redis） |
 | `33061` | 独立模式 MySQL 入口 |
-| `33062` | 独立模式 PostgreSQL 入口（客户端连接必须使用 TLS） |
-| `33063` | 独立模式 Redis 入口（远程客户端 AUTH 必须使用 TLS） |
+| `33062` | 独立模式 PostgreSQL 入口 |
+| `33063` | 独立模式 Redis 入口 |
 | `47110-47199` | 内网应用动态代理端口范围 |
 
 默认统一模式只需发布 `33060`。若在系统设置中切换为独立端口模式，重启容器时还需增加 `-p 33061:33061 -p 33062:33062 -p 33063:33063`；Compose 部署同样需要在 `ports` 中增加这三个映射。
@@ -171,6 +171,7 @@ docker run -d \
 
 ```json
 "mode": "unified",
+"client_tls_mode": "optional",
 "unified": {
   "enabled": true,
   "listen_addr": "0.0.0.0:33060",
@@ -182,7 +183,7 @@ docker run -d \
 }
 ```
 
-快速连接会提供 CA 下载、CA 内容和证书 SHA-256 指纹，并且只生成强校验命令：PostgreSQL 使用 `sslmode=verify-full sslrootcert=...`，MySQL 使用 `--ssl-mode=VERIFY_IDENTITY --ssl-ca=...`。TLS 身份材料不完整时不会降级为 `require` 或 `REQUIRED` 命令。
+`client_tls_mode` 支持两种模式：`optional`（默认）同时接受明文和 TLS，`required` 只接受 TLS。快速连接在 `optional` 下默认生成明文连接，可在连接弹窗中手动开启 TLS；切换为 `required` 后会强制生成强校验命令：PostgreSQL 使用 `sslmode=verify-full sslrootcert=...`，MySQL 使用 `--ssl-mode=VERIFY_IDENTITY --ssl-ca=...`。TLS 身份材料不完整时不会降级为 `require` 或 `REQUIRED` 命令。
 
 上面的本机评估流程生成的数据库叶证书 SAN 包含 `localhost` 和 `127.0.0.1`，与默认配置的 `server_name: "localhost"` 一致。生产环境使用其他网关域名时，必须同时替换 `server_name`，并重新签发包含该 DNS 名称 SAN 的数据库叶证书。
 
@@ -237,7 +238,7 @@ stream {
 - 不要添加 `listen 33060 ssl`、`ssl_certificate`、`proxy_ssl on` 或 `ssl_preread on`。MySQL 由服务端先发送 Greeting，PostgreSQL 通常先发送明文 `SSLRequest`，Nginx 的通用 TLS 监听无法在同一个端口终结三种原生协议；Redis 虽然可以直接发送 TLS ClientHello，也不能解决 MySQL 和 PostgreSQL。Web 管理端是标准 HTTPS，可以单独由 Nginx 正常终结 TLS。
 - 数据库网关证书、私钥和 CA 仍配置在 Jianmen。证书 SAN 必须包含客户端实际连接的域名或 IP。Nginx 不会终结或改变 `客户端 → Jianmen` 的原生 TLS，也不能把 `Jianmen → 实际数据库` 的 `disable` 链路变成加密链路。
 - Jianmen 当前不解析 PROXY Protocol，必须保持 `proxy_protocol off`。开启后，Nginx 会在数据库协议前插入 `PROXY ...`，导致统一入口和独立入口握手失败。Jianmen 看到的 TCP 对端会是 Nginx，真实客户端地址应从 Nginx Stream 访问日志查询。
-- 不要依赖“回环地址允许本机明文开发”作为代理部署的安全边界。Nginx 转发到 `127.0.0.1` 时，外部连接在 Jianmen 看来同样来自回环地址；只要数据库入口会被外部访问，就必须给 Jianmen 配置网关证书。
+- 不要依赖“回环地址允许本机明文开发”作为代理部署的安全边界。Nginx 转发到 `127.0.0.1` 时，外部连接在 Jianmen 看来同样来自回环地址；只要数据库入口会被外部访问，就必须给 Jianmen 配置网关证书，并将 `client_tls_mode` 设为 `required`。仅配置证书但保留默认 `optional` 仍会接受明文连接。
 - Docker 部署时只让 Nginx 发布宿主机 `33060`，Jianmen 的 `33060` 只保留在隔离容器网络，不要再使用 `-p 33060:33060` 直接发布 Jianmen。若两者共享主机网络，不能同时监听 `0.0.0.0:33060`；可以让 Jianmen 监听 `127.0.0.1:33060`，让 Nginx 仅监听服务器的具体对外 IP。
 - `proxy_timeout` 是连接连续两次读写之间允许的最大空闲时间。默认值可能误断开长期空闲的数据库连接池，示例使用 1 小时，应按业务连接池寿命调整。每条数据库会话大约占用一个客户端连接和一个上游连接；`worker_connections` 是每个 worker 的上限，应结合 worker 数量按预期并发量的两倍预留，同时检查 `worker_rlimit_nofile` 和系统文件描述符限制。
 - 不要使用 HTTP 请求或通用 TLS ClientHello 检查统一数据库端口。容器存活检查继续使用 `/api/init/status`；端口就绪检查可以建立 TCP 连接后立即关闭。端到端检查应使用 MySQL、PostgreSQL 或 Redis 原生客户端和专用监控账号。

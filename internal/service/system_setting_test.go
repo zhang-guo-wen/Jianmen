@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"jianmen/internal/config"
 	"jianmen/internal/model"
 )
 
@@ -34,6 +35,7 @@ func TestSystemSettingsBootstrapUpdateAndRestart(t *testing.T) {
 
 	desired := baseline
 	desired.DatabaseGatewayMode = "independent"
+	desired.DatabaseGatewayClientTLSMode = config.DatabaseGatewayClientTLSModeRequired
 	desired.WebRDPEnabled = true
 	desired.WebRDPConnectTimeoutSeconds = 30
 	updatedAt := startedAt.Add(time.Minute)
@@ -65,6 +67,7 @@ func TestSystemSettingsBootstrapUpdateAndRestart(t *testing.T) {
 	}
 	wantChanged := []string{
 		"database_gateway_mode",
+		"database_gateway_client_tls_mode",
 		"web_rdp_enabled",
 		"web_rdp_connect_timeout_seconds",
 	}
@@ -227,12 +230,52 @@ func TestSystemSettingsUpdateRequiresRiskConfirmation(t *testing.T) {
 	}
 }
 
+func TestSystemSettingsClientTLSDowngradeRequiresRiskConfirmation(t *testing.T) {
+	ctx := context.Background()
+	repository := &systemSettingsMemoryRepository{}
+	svc := newTestSystemSettingsService(t, repository, time.Now())
+	baseline := validSystemSettings()
+	baseline.DatabaseGatewayClientTLSMode = config.DatabaseGatewayClientTLSModeRequired
+	if _, err := svc.Bootstrap(ctx, baseline); err != nil {
+		t.Fatalf("Bootstrap() error = %v", err)
+	}
+
+	desired := baseline
+	desired.DatabaseGatewayClientTLSMode = config.DatabaseGatewayClientTLSModeOptional
+	_, err := svc.Update(ctx, SystemSettingsUpdate{
+		Settings: desired, ExpectedRevision: 1,
+	})
+	if !errors.Is(err, ErrSystemSettingsRiskConfirmationRequired) ||
+		!strings.Contains(err.Error(), "database_gateway_client_tls_mode") {
+		t.Fatalf("Update() error = %v, want client TLS downgrade confirmation", err)
+	}
+	if repository.setting.Revision != 1 || len(repository.revisions) != 1 {
+		t.Fatalf("unconfirmed downgrade was persisted: %#v", repository)
+	}
+
+	state, err := svc.Update(ctx, SystemSettingsUpdate{
+		Settings: desired, ExpectedRevision: 1, ConfirmRisk: true,
+	})
+	if err != nil {
+		t.Fatalf("confirmed Update() error = %v", err)
+	}
+	if state.Revision != 2 ||
+		state.Desired.DatabaseGatewayClientTLSMode != config.DatabaseGatewayClientTLSModeOptional ||
+		state.Effective.DatabaseGatewayClientTLSMode != config.DatabaseGatewayClientTLSModeRequired ||
+		!state.PendingRestart {
+		t.Fatalf("confirmed downgrade state = %#v", state)
+	}
+}
+
 func TestSystemSettingsValidation(t *testing.T) {
 	tests := []struct {
 		name  string
 		apply func(*SystemSettings)
 	}{
 		{name: "invalid database gateway mode", apply: func(s *SystemSettings) { s.DatabaseGatewayMode = "auto" }},
+		{name: "invalid database gateway client TLS mode", apply: func(s *SystemSettings) {
+			s.DatabaseGatewayClientTLSMode = "disabled"
+		}},
 		{name: "timeout below minimum", apply: func(s *SystemSettings) { s.WebRDPConnectTimeoutSeconds = 0 }},
 		{name: "timeout above maximum", apply: func(s *SystemSettings) { s.WebRDPConnectTimeoutSeconds = 301 }},
 		{name: "retention below minimum", apply: func(s *SystemSettings) { s.RecordingRetentionDays = 0 }},
@@ -276,6 +319,12 @@ func TestUnmarshalLegacySystemSettingsSnapshotDefaultsGatewayMode(t *testing.T) 
 	}
 	if settings.DatabaseGatewayMode != "unified" {
 		t.Fatalf("database gateway mode = %q, want unified", settings.DatabaseGatewayMode)
+	}
+	if settings.DatabaseGatewayClientTLSMode != config.DatabaseGatewayClientTLSModeOptional {
+		t.Fatalf(
+			"database gateway client TLS mode = %q, want optional",
+			settings.DatabaseGatewayClientTLSMode,
+		)
 	}
 }
 
@@ -440,6 +489,7 @@ func newTestSystemSettingsServiceWithModes(
 func validSystemSettings() SystemSettings {
 	return SystemSettings{
 		DatabaseGatewayMode:           "unified",
+		DatabaseGatewayClientTLSMode:  config.DatabaseGatewayClientTLSModeOptional,
 		WebRDPConnectTimeoutSeconds:   15,
 		RecordingEnabled:              true,
 		RecordingRecordCommands:       true,

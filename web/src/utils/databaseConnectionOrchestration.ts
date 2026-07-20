@@ -13,23 +13,12 @@ export interface DatabaseConnectionResources<Gateway, Session, Credential> {
   credential: Credential | null;
 }
 
-export function isGatewayOnlyDatabaseProtocol(protocol: string): boolean {
-  return protocol.trim().toLowerCase() === 'redis';
-}
-
 export async function loadDatabaseConnectionResources<Gateway, Session, Credential>(
   loaders: DatabaseConnectionResourceLoaders<Gateway, Session, Credential>,
 ): Promise<DatabaseConnectionResources<Gateway, Session, Credential>> {
   const protocol = loaders.protocol.trim().toLowerCase();
   const gateway = await loaders.getGateway(protocol);
   loaders.validateGateway?.(gateway);
-  if (isGatewayOnlyDatabaseProtocol(protocol)) {
-    return {
-      gateway,
-      session: null,
-      credential: null,
-    };
-  }
 
   const [session, credential] = await Promise.all([
     loaders.createSession(loaders.targetID),

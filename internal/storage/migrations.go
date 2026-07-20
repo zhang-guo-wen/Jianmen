@@ -225,6 +225,11 @@ var migrations = []Migration{
 		Name:    "SSH host identity",
 		Run:     migrateSSHHostIdentity,
 	},
+	{
+		Version: databaseGatewayClientTLSModeMigrationVersion,
+		Name:    "database gateway client TLS mode",
+		Run:     migrateDatabaseGatewayClientTLSMode,
+	},
 }
 
 func rejectDuplicateDatabaseAccounts(tx *gorm.DB) error {

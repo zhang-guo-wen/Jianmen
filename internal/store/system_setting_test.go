@@ -49,6 +49,7 @@ func TestSystemSettingStoreLifecycle(t *testing.T) {
 	changedAt := createdAt.Add(2 * time.Minute)
 	replacement.WebRDPEnabled = true
 	replacement.WebRDPConnectTimeoutSeconds = 30
+	replacement.DatabaseGatewayClientTLSMode = "required"
 	replacement.DatabaseMaxClientMessageBytes = 12 * 1024 * 1024
 	replacement.UpdatedByID = "user-1"
 	replacement.UpdatedByUsername = "admin"
@@ -62,6 +63,7 @@ func TestSystemSettingStoreLifecycle(t *testing.T) {
 		t.Fatalf("UpdateSystemSetting() error = %v", err)
 	}
 	if !updated || persisted.Revision != 2 || !persisted.WebRDPEnabled ||
+		persisted.DatabaseGatewayClientTLSMode != "required" ||
 		persisted.DatabaseMaxClientMessageBytes != 12*1024*1024 {
 		t.Fatalf("updated setting = %#v, updated = %v", persisted, updated)
 	}
@@ -176,6 +178,7 @@ func systemSettingStoreFixture() model.SystemSetting {
 	return model.SystemSetting{
 		ID:                            model.SystemSettingSingletonID,
 		DatabaseGatewayMode:           "unified",
+		DatabaseGatewayClientTLSMode:  "optional",
 		WebRDPConnectTimeoutSeconds:   15,
 		RecordingEnabled:              true,
 		RecordingRecordCommands:       true,

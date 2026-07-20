@@ -16,9 +16,13 @@ func bootstrapSystemSettings(
 	ctx context.Context,
 	cfg *config.Config,
 	repository *store.DBStore,
+	prepareEffective ...func(*config.Config) error,
 ) (*service.SystemSettingsService, error) {
 	if cfg == nil || repository == nil {
 		return nil, fmt.Errorf("system settings runtime dependencies are required")
+	}
+	if len(prepareEffective) > 1 {
+		return nil, fmt.Errorf("at most one effective configuration preparer is allowed")
 	}
 	settings, err := service.NewSystemSettingsService(
 		repository,
@@ -34,19 +38,27 @@ func bootstrapSystemSettings(
 	projected := *cfg
 	applySystemSettings(&projected, prepared.Settings)
 	if err := projected.Validate(); err != nil {
+		return nil, fmt.Errorf("validate projected system settings: %w", err)
+	}
+	if len(prepareEffective) == 1 && prepareEffective[0] != nil {
+		if err := prepareEffective[0](&projected); err != nil {
+			return nil, fmt.Errorf("prepare effective system settings: %w", err)
+		}
+	}
+	if err := projected.Validate(); err != nil {
 		return nil, fmt.Errorf("validate effective system settings: %w", err)
 	}
-	state, err := settings.ActivateBootstrap(ctx, prepared)
-	if err != nil {
+	if _, err := settings.ActivateBootstrap(ctx, prepared); err != nil {
 		return nil, fmt.Errorf("activate system settings: %w", err)
 	}
-	applySystemSettings(cfg, state.Effective)
+	*cfg = projected
 	return settings, nil
 }
 
 func systemSettingsFromConfig(cfg *config.Config) service.SystemSettings {
 	return service.SystemSettings{
 		DatabaseGatewayMode:           cfg.DatabaseGateway.EffectiveMode(),
+		DatabaseGatewayClientTLSMode:  cfg.DatabaseGateway.EffectiveClientTLSMode(),
 		WebRDPEnabled:                 cfg.WebRDP.Enabled,
 		WebRDPConnectTimeoutSeconds:   cfg.WebRDP.ConnectTimeoutSecs,
 		WebRDPAllowUnrecorded:         cfg.WebRDP.AllowUnrecorded,
@@ -62,6 +74,7 @@ func systemSettingsFromConfig(cfg *config.Config) service.SystemSettings {
 
 func applySystemSettings(cfg *config.Config, settings service.SystemSettings) {
 	cfg.DatabaseGateway.Mode = settings.DatabaseGatewayMode
+	cfg.DatabaseGateway.ClientTLSMode = settings.DatabaseGatewayClientTLSMode
 	cfg.WebRDP.Enabled = settings.WebRDPEnabled
 	cfg.WebRDP.ConnectTimeoutSecs = settings.WebRDPConnectTimeoutSeconds
 	cfg.WebRDP.AllowUnrecorded = settings.WebRDPAllowUnrecorded

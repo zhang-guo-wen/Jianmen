@@ -106,13 +106,13 @@
                     <el-input v-model="form.db_client_path" name="db_client_path" autocomplete="off" :placeholder="`例如 ${dbClientPathExample}`" />
                     <div class="field-help">Windows 推荐选择 dbeaverc.exe；本机路径只用于生成协议注册命令，不会上传。</div>
                   </el-form-item>
-                  <el-form-item label="本地 CA 文件路径" required :error="dbCAFilePathError">
+                  <el-form-item label="本地 CA 文件路径（可选）" :error="dbCAFilePathError">
                     <el-input v-model="form.db_client_ca_file_path" name="db_client_ca_path" autocomplete="off" :placeholder="`例如 ${dbCAFilePathExample}`">
                       <template #append>
                         <el-button :loading="dbCALoading" @click="downloadDatabaseGatewayCA">下载网关 CA</el-button>
                       </template>
                     </el-input>
-                    <div class="field-help">浏览器会把 CA 下载到默认下载目录；请将文件保存或移动到上方填写的绝对路径。</div>
+                    <div class="field-help">默认非 TLS 快速连接无需填写；需要 TLS 时，请下载 CA 并填写保存后的绝对路径。</div>
                   </el-form-item>
                   <el-alert v-if="form.db_client_platform !== 'windows'" type="warning" :closable="false" show-icon title="当前仅 Windows 支持从浏览器直接唤起 DBeaver。" />
                   <ClientRegistrationAlert
@@ -276,7 +276,7 @@ const dbClientPathError = computed(() => {
 });
 const dbCAFilePathError = computed(() => {
   if (!form.db_client) return '';
-  if (!form.db_client_ca_file_path.trim()) return '请输入网关 CA 在本机保存的绝对路径';
+  if (!form.db_client_ca_file_path.trim()) return '';
   if (!isValidDatabaseClientCAFilePath(form.db_client_ca_file_path, form.db_client_platform as 'windows' | 'macos' | 'linux')) {
     return `请输入 .pem、.crt 或 .cer 文件的完整路径，例如 ${dbCAFilePathExample.value}`;
   }
@@ -371,7 +371,11 @@ async function downloadDatabaseGatewayCA() {
   if (dbCALoading.value) return;
   dbCALoading.value = true;
   try {
-    const results = await Promise.allSettled([apiClient.getDBGateway('mysql'), apiClient.getDBGateway('postgres')]);
+    const results = await Promise.allSettled([
+      apiClient.getDBGateway('mysql'),
+      apiClient.getDBGateway('postgres'),
+      apiClient.getDBGateway('redis'),
+    ]);
     const certificates = results
       .flatMap(result => result.status === 'fulfilled' && hasDatabaseGatewayTLSIdentity(result.value) ? [result.value.tls_ca_pem.trim()] : [])
       .filter((cert, i, arr) => arr.indexOf(cert) === i);

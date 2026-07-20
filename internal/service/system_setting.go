@@ -30,6 +30,7 @@ var (
 
 var systemSettingFieldNames = []string{
 	"database_gateway_mode",
+	"database_gateway_client_tls_mode",
 	"web_rdp_enabled",
 	"web_rdp_connect_timeout_seconds",
 	"web_rdp_allow_unrecorded",
@@ -44,6 +45,7 @@ var systemSettingFieldNames = []string{
 
 type SystemSettings struct {
 	DatabaseGatewayMode           string
+	DatabaseGatewayClientTLSMode  string
 	WebRDPEnabled                 bool
 	WebRDPConnectTimeoutSeconds   int
 	WebRDPAllowUnrecorded         bool
@@ -294,6 +296,14 @@ func validateSystemSettings(settings SystemSettings) error {
 			config.DatabaseGatewayModeUnified,
 			config.DatabaseGatewayModeIndependent,
 		)
+	case settings.DatabaseGatewayClientTLSMode != config.DatabaseGatewayClientTLSModeRequired &&
+		settings.DatabaseGatewayClientTLSMode != config.DatabaseGatewayClientTLSModeOptional:
+		return fmt.Errorf(
+			"%w: database gateway client TLS mode must be %q or %q",
+			ErrInvalidSystemSettings,
+			config.DatabaseGatewayClientTLSModeRequired,
+			config.DatabaseGatewayClientTLSModeOptional,
+		)
 	case settings.WebRDPConnectTimeoutSeconds < 1 ||
 		settings.WebRDPConnectTimeoutSeconds > 300:
 		return fmt.Errorf("%w: web RDP connect timeout must be between 1 and 300 seconds",
@@ -340,6 +350,9 @@ func changedSystemSettingFields(before, after SystemSettings) []string {
 	if before.DatabaseGatewayMode != after.DatabaseGatewayMode {
 		changed = append(changed, "database_gateway_mode")
 	}
+	if before.DatabaseGatewayClientTLSMode != after.DatabaseGatewayClientTLSMode {
+		changed = append(changed, "database_gateway_client_tls_mode")
+	}
 	if before.WebRDPEnabled != after.WebRDPEnabled {
 		changed = append(changed, "web_rdp_enabled")
 	}
@@ -375,6 +388,10 @@ func changedSystemSettingFields(before, after SystemSettings) []string {
 
 func riskySystemSettingFields(before, after SystemSettings) []string {
 	risky := make([]string, 0, 6)
+	if before.DatabaseGatewayClientTLSMode == config.DatabaseGatewayClientTLSModeRequired &&
+		after.DatabaseGatewayClientTLSMode == config.DatabaseGatewayClientTLSModeOptional {
+		risky = append(risky, "database_gateway_client_tls_mode")
+	}
 	if !before.WebRDPAllowUnrecorded && after.WebRDPAllowUnrecorded {
 		risky = append(risky, "web_rdp_allow_unrecorded")
 	}
@@ -407,6 +424,7 @@ func systemSettingModel(settings SystemSettings, actor SystemSettingsActor) mode
 	return model.SystemSetting{
 		ID:                            model.SystemSettingSingletonID,
 		DatabaseGatewayMode:           settings.DatabaseGatewayMode,
+		DatabaseGatewayClientTLSMode:  settings.DatabaseGatewayClientTLSMode,
 		WebRDPEnabled:                 settings.WebRDPEnabled,
 		WebRDPConnectTimeoutSeconds:   settings.WebRDPConnectTimeoutSeconds,
 		WebRDPAllowUnrecorded:         settings.WebRDPAllowUnrecorded,
@@ -427,8 +445,13 @@ func systemSettingsFromModel(setting model.SystemSetting) SystemSettings {
 	if mode == "" {
 		mode = config.DatabaseGatewayModeUnified
 	}
+	clientTLSMode := strings.TrimSpace(setting.DatabaseGatewayClientTLSMode)
+	if clientTLSMode == "" {
+		clientTLSMode = config.DatabaseGatewayClientTLSModeOptional
+	}
 	return SystemSettings{
 		DatabaseGatewayMode:           mode,
+		DatabaseGatewayClientTLSMode:  clientTLSMode,
 		WebRDPEnabled:                 setting.WebRDPEnabled,
 		WebRDPConnectTimeoutSeconds:   setting.WebRDPConnectTimeoutSeconds,
 		WebRDPAllowUnrecorded:         setting.WebRDPAllowUnrecorded,

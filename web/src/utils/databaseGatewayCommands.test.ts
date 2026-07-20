@@ -11,6 +11,7 @@ import {
   databaseGatewayFallbackPort,
   hasDatabaseGatewayTLSIdentity,
   isSafeDatabaseCommandValue,
+  resolveDatabaseGatewayClientHost,
   resolveDatabaseGatewayPort,
   type DatabaseGatewayTLSIdentity,
 } from './databaseGatewayCommands.ts';
@@ -30,11 +31,32 @@ import { loadDatabaseConnectionResources } from './databaseConnectionOrchestrati
 
 const secureGateway: DatabaseGatewayTLSIdentity = {
   enabled: true,
+  host: 'gateway.db.example',
+  client_tls_mode: 'optional',
   tls_enabled: true,
   tls_server_name: 'gateway.db.example',
   tls_ca_pem: '-----BEGIN CERTIFICATE-----\nCA\n-----END CERTIFICATE-----',
   tls_cert_sha256: 'aa:bb',
 };
+
+test('database gateway client host replaces wildcard and remote-loopback listener addresses', () => {
+  assert.equal(
+    resolveDatabaseGatewayClientHost('0.0.0.0', 'jianmen.example'),
+    'jianmen.example',
+  );
+  assert.equal(
+    resolveDatabaseGatewayClientHost('127.0.0.1', 'jianmen.example'),
+    'jianmen.example',
+  );
+  assert.equal(
+    resolveDatabaseGatewayClientHost('::1', 'localhost'),
+    '::1',
+  );
+  assert.equal(
+    resolveDatabaseGatewayClientHost('10.0.0.8', 'jianmen.example'),
+    '10.0.0.8',
+  );
+});
 
 test('database gateway availability distinguishes disabled entry from missing PostgreSQL TLS', () => {
   assert.equal(databaseProtocolLabel('postgresql'), 'PG');
@@ -44,6 +66,7 @@ test('database gateway availability distinguishes disabled entry from missing Po
       connectable: false,
       unavailable_reason: 'listener_disabled',
       mode: 'independent',
+      client_tls_mode: 'optional',
       protocol: 'postgresql',
       listen_addr: '127.0.0.1:33062',
       host: '127.0.0.1',
@@ -59,6 +82,7 @@ test('database gateway availability distinguishes disabled entry from missing Po
       connectable: false,
       unavailable_reason: 'tls_identity_missing',
       mode: 'unified',
+      client_tls_mode: 'required',
       protocol: 'postgresql',
       listen_addr: '127.0.0.1:33060',
       host: '127.0.0.1',
@@ -107,14 +131,15 @@ test('PostgreSQL command has a bounded POSIX argv with dbname and GSS disabled',
     port: 54330,
     username: 'ops+account@jianmen',
     databaseName: 'main_db',
+    useTLS: true,
   });
 
   assert.ok(connection);
   assert.ok(connection.command);
   assert.equal(DATABASE_COMMAND_PLATFORM, 'Linux/macOS/Git Bash');
   assert.equal(connection.commandPlatform, DATABASE_COMMAND_PLATFORM);
-  assert.equal(connection.caFileName, 'jianmen-postgres-gateway-ca.pem');
-  assert.equal(connection.caFilePath, './jianmen-postgres-gateway-ca.pem');
+  assert.equal(connection.caFileName, 'jianmen-database-gateway-ca.pem');
+  assert.equal(connection.caFilePath, './jianmen-database-gateway-ca.pem');
   assert.doesNotMatch(connection.command, /[&|<>^%!?;\r\n]/);
 
   const shell = findPOSIXShell();
@@ -123,11 +148,11 @@ test('PostgreSQL command has a bounded POSIX argv with dbname and GSS disabled',
     return;
   }
   assert.deepEqual(captureCommandArguments(shell, 'psql', connection.command), [
-    "host='gateway.db.example' port=54330 user='ops+account@jianmen' dbname='main_db' sslmode=verify-full sslrootcert='./jianmen-postgres-gateway-ca.pem' gssencmode=disable",
+    "host='gateway.db.example' port=54330 user='ops+account@jianmen' dbname='main_db' sslmode=verify-full sslrootcert='./jianmen-database-gateway-ca.pem' gssencmode=disable",
   ]);
 });
 
-test('PostgreSQL defaults dbname to postgres', () => {
+test('PostgreSQL defaults dbname to postgres and disables TLS by default', () => {
   const connection = buildDatabaseGatewayConnection({
     protocol: 'postgres',
     gateway: secureGateway,
@@ -138,7 +163,10 @@ test('PostgreSQL defaults dbname to postgres', () => {
   assert.ok(connection?.command);
   assert.match(connection.command, /dbname=/);
   assert.match(connection.command, /postgres/);
+  assert.match(connection.command, /sslmode=disable/);
+  assert.doesNotMatch(connection.command, /sslrootcert=/);
   assert.match(connection.command, /gssencmode=disable/);
+  assert.equal(connection.usesTLS, false);
 });
 
 test('MySQL command has a bounded POSIX argv and VERIFY_IDENTITY', (context) => {
@@ -147,6 +175,7 @@ test('MySQL command has a bounded POSIX argv and VERIFY_IDENTITY', (context) => 
     gateway: secureGateway,
     port: 33060,
     username: 'ops+account@jianmen',
+    useTLS: true,
   });
 
   assert.ok(connection?.command);
@@ -160,7 +189,7 @@ test('MySQL command has a bounded POSIX argv and VERIFY_IDENTITY', (context) => 
   assert.deepEqual(captureCommandArguments(shell, 'mysql', connection.command), [
     '--protocol=tcp',
     '--ssl-mode=VERIFY_IDENTITY',
-    '--ssl-ca=./jianmen-mysql-gateway-ca.pem',
+    '--ssl-ca=./jianmen-database-gateway-ca.pem',
     '-h',
     'gateway.db.example',
     '-P',
@@ -171,7 +200,7 @@ test('MySQL command has a bounded POSIX argv and VERIFY_IDENTITY', (context) => 
   ]);
 });
 
-test('Redis keeps CA metadata but never emits a redis-cli command', () => {
+test('Redis emits a plaintext ACL command by default without putting the password in argv', () => {
   const connection = buildDatabaseGatewayConnection({
     protocol: 'redis',
     gateway: secureGateway,
@@ -180,12 +209,32 @@ test('Redis keeps CA metadata but never emits a redis-cli command', () => {
   });
 
   assert.ok(connection);
+  assert.equal(
+    connection.command,
+    "redis-cli -h 'gateway.db.example' -p 63790 --user 'redis+account@jianmen' --askpass",
+  );
+  assert.equal(connection.commandPlatform, DATABASE_COMMAND_PLATFORM);
+  assert.equal(connection.unavailableReason, null);
+  assert.equal(connection.usesTLS, false);
+  assert.equal(connection.caFileName, 'jianmen-database-gateway-ca.pem');
+  assert.equal(connection.caFilePath, './jianmen-database-gateway-ca.pem');
+});
+
+test('Redis TLS keeps CA metadata but does not emit a command without verify-full support', () => {
+  const connection = buildDatabaseGatewayConnection({
+    protocol: 'redis',
+    gateway: secureGateway,
+    port: 63790,
+    username: 'redis+account@jianmen',
+    useTLS: true,
+  });
+
+  assert.ok(connection);
   assert.equal(connection.command, null);
   assert.equal(connection.commandPlatform, null);
   assert.equal(REDIS_COMMAND_UNAVAILABLE_REASON, 'redis-cli 无法验证主机名，安全命令暂不可用');
   assert.equal(connection.unavailableReason, REDIS_COMMAND_UNAVAILABLE_REASON);
-  assert.equal(connection.caFileName, 'jianmen-redis-gateway-ca.pem');
-  assert.equal(connection.caFilePath, './jianmen-redis-gateway-ca.pem');
+  assert.equal(connection.usesTLS, true);
 });
 
 test('strict value allowlists reject CMD and POSIX metacharacters, whitespace, quotes, and NUL', () => {
@@ -201,7 +250,7 @@ test('strict value allowlists reject CMD and POSIX metacharacters, whitespace, q
   }
 
   const fields = [
-    { gateway: { ...secureGateway, tls_server_name: 'gateway&whoami' }, username: 'ops', databaseName: 'postgres' },
+    { gateway: { ...secureGateway, host: 'gateway&whoami' }, username: 'ops', databaseName: 'postgres' },
     { gateway: secureGateway, username: 'ops|whoami', databaseName: 'postgres' },
     { gateway: secureGateway, username: 'ops', databaseName: 'db;whoami' },
   ];
@@ -222,11 +271,23 @@ test('fixed CA paths contain no CMD control characters', () => {
   }
 });
 
-test('all database protocols fail closed for incomplete TLS identity or invalid ports', () => {
+test('TLS connections fail closed for incomplete identity and all modes reject invalid ports', () => {
   const noIdentity = { ...secureGateway, tls_ca_pem: '' };
   assert.equal(hasDatabaseGatewayTLSIdentity(noIdentity), false);
   for (const protocol of ['mysql', 'postgres', 'redis']) {
-    assert.equal(buildDatabaseGatewayConnection({ protocol, gateway: noIdentity, port: 33060, username: 'ops' }), null);
+    assert.equal(buildDatabaseGatewayConnection({
+      protocol,
+      gateway: noIdentity,
+      port: 33060,
+      username: 'ops',
+      useTLS: true,
+    }), null);
+    assert.ok(buildDatabaseGatewayConnection({
+      protocol,
+      gateway: noIdentity,
+      port: 33060,
+      username: 'ops',
+    }));
     assert.equal(buildDatabaseGatewayConnection({ protocol, gateway: secureGateway, port: 0, username: 'ops' }), null);
     assert.equal(buildDatabaseGatewayConnection({ protocol, gateway: secureGateway, port: 65536, username: 'ops' }), null);
   }
@@ -341,13 +402,13 @@ test('settings exposes local-only database client registration and never stores 
   assert.match(preferencesSource, /dbeaver/i);
 });
 
-test('quick database client launch requires gateway TLS and embeds only the issued temporary password', () => {
+test('quick database client launch follows the gateway TLS policy and embeds only the temporary password', () => {
   const source = readFileSync(new URL('../views/QuickConnectView.vue', import.meta.url), 'utf8');
   const start = source.indexOf('async function openDatabaseClient');
   const end = source.indexOf('function openClientSettings', start);
   const launchSource = source.slice(start, end);
   assert.match(launchSource, /ensureDatabaseConnectionInfo\(account\)/);
-  assert.match(launchSource, /state\.tlsIdentityReady/);
+  assert.match(launchSource, /state\.clientTLSMode === 'required' && !state\.tlsIdentityReady/);
   assert.match(launchSource, /buildDatabaseProtocolURL/);
   assert.match(launchSource, /password:\s*state\.password/);
   assert.match(
@@ -355,6 +416,8 @@ test('quick database client launch requires gateway TLS and embeds only the issu
     /databaseName:\s*\['postgres', 'postgresql'\]\.includes\(protocol\.toLowerCase\(\)\) \? 'postgres' : ''/,
   );
   assert.match(launchSource, /databaseClient\.directLaunchReady/);
+  assert.match(launchSource, /host:\s*databaseConnectionHost\(state\)/);
+  assert.match(launchSource, /tls:\s*state\.clientTLSMode === 'required' \? 'verify-full' : 'disable'/);
   assert.match(launchSource, /window\.location\.href = launchURL/);
   assert.doesNotMatch(launchSource, /downloadDatabaseGatewayCA|new Blob|已下载网关 CA/);
   assert.match(source, /createPassword:\s*accountID => apiClient\.createConnectionPassword\(accountID\)/);
@@ -376,10 +439,11 @@ test('quick database cards copy temporary connection credentials with an in-flig
   assert.match(source, /@click="copyDatabaseConnectionInfo\(account\)"/);
   assert.match(source, /:loading="databaseCredentialLoading\(account\)"/);
   assert.match(source, /loadDatabaseConnectionResources\(\{/);
-  assert.match(source, /`连接地址：\$\{state\.host\}:\$\{state\.port\}`/);
+  assert.match(source, /state\.tlsServerName = String\(connectableGateway\.tls_server_name \|\| ''\)/);
+  assert.match(source, /`连接地址：\$\{connectionHost\}:\$\{state\.port\}`/);
   assert.match(source, /`连接账户：\$\{state\.compactUser\}`/);
   assert.match(source, /`连接临时密码：\$\{state\.password\}`/);
-  assert.match(source, /Redis 暂不支持复制临时连接凭据/);
+  assert.doesNotMatch(source, /Redis 暂不支持复制临时连接凭据/);
   assert.match(
     source,
     /\.database-card__actions\s*\{[\s\S]*grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\)/,
@@ -484,7 +548,7 @@ test('connection dialog clears temporary credentials when it closes', () => {
   const dialogSource = readFileSync(new URL('../components/ConnectionConfigDialog.vue', import.meta.url), 'utf8');
   assert.match(
     dialogSource,
-    /function openDatabaseClient\(\)[\s\S]*!connectionInfo\.value \|\| !temporaryPassword\.value \|\| !secureGatewayTLS\.value/,
+    /function openDatabaseClient\(\)[\s\S]*!connectionInfo\.value[\s\S]*!temporaryPassword\.value[\s\S]*databaseUseTLS\.value && !secureGatewayTLS\.value/,
   );
   assert.match(
     dialogSource,
@@ -492,7 +556,7 @@ test('connection dialog clears temporary credentials when it closes', () => {
   );
   assert.match(
     dialogSource,
-    /function clearConnectionState\(\)[\s\S]*temporaryPassword\.value = ''/,
+    /function clearConnectionState\(\)[\s\S]*temporaryPassword\.value = ''[\s\S]*databaseUseTLS\.value = false/,
   );
 });
 
@@ -501,7 +565,7 @@ test('auto-provision view does not display generated upstream identity or secret
   assert.doesNotMatch(databaseViewSource, /provisionResult\.account\.username|generated_password|provision\.newUsername/);
 });
 
-test('Redis connection orchestration calls only the gateway loader', async () => {
+test('Redis connection orchestration loads the session and temporary password', async () => {
   const calls: string[] = [];
   let sessionCalls = 0;
   let passwordCalls = 0;
@@ -515,22 +579,26 @@ test('Redis connection orchestration calls only the gateway loader', async () =>
     createSession: async targetID => {
       sessionCalls += 1;
       calls.push(`session:${targetID}`);
-      return { compact_username: 'must-not-exist' };
+      return { compact_username: 'R000100001' };
     },
     createPassword: async targetID => {
       passwordCalls += 1;
       calls.push(`password:${targetID}`);
-      return { password: 'must-not-exist' };
+      return { password: 'redis-password' };
     },
   });
 
-  assert.deepEqual(calls, ['gateway:redis']);
-  assert.equal(sessionCalls, 0, 'Redis must not call createUserSession');
-  assert.equal(passwordCalls, 0, 'Redis must not call createConnectionPassword');
+  assert.deepEqual(calls.sort(), [
+    'gateway:redis',
+    'password:database-account-1',
+    'session:database-account-1',
+  ]);
+  assert.equal(sessionCalls, 1);
+  assert.equal(passwordCalls, 1);
   assert.deepEqual(result, {
     gateway: { protocol: 'redis' },
-    session: null,
-    credential: null,
+    session: { compact_username: 'R000100001' },
+    credential: { password: 'redis-password' },
   });
 });
 

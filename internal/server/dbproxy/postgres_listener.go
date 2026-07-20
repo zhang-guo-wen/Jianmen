@@ -17,20 +17,6 @@ const (
 	maxPostgresTLSRecordBytes = 18 * 1024
 )
 
-type postgresPrefixedConn struct {
-	net.Conn
-	prefix []byte
-}
-
-func (connection *postgresPrefixedConn) Read(buffer []byte) (int, error) {
-	if len(connection.prefix) == 0 {
-		return connection.Conn.Read(buffer)
-	}
-	read := copy(buffer, connection.prefix)
-	connection.prefix = connection.prefix[read:]
-	return read, nil
-}
-
 func (g *Gateway) handlePostgresConnection(
 	ctx context.Context,
 	client net.Conn,
@@ -41,7 +27,7 @@ func (g *Gateway) handlePostgresConnection(
 		return nil
 	}
 	if isPostgresDirectTLSClientHello(first) {
-		prefixed := &postgresPrefixedConn{Conn: client, prefix: append([]byte(nil), first...)}
+		prefixed := &prefixedConn{Conn: client, prefix: append([]byte(nil), first...)}
 		return g.handlePostgresTLSConnection(ctx, prefixed, listenerConfig, true)
 	}
 	if isPostgresGSSENCRequest(first) {
@@ -53,6 +39,11 @@ func (g *Gateway) handlePostgresConnection(
 		}
 	}
 	if isPostgresCancelRequestHeader(first) {
+		// CancelRequest contains no login credentials or database traffic and
+		// is authenticated by the per-session cancellation secret. Several
+		// PostgreSQL drivers send it directly on a new connection even when
+		// the main session uses TLS, so keep this protocol control packet
+		// compatible in both client TLS modes.
 		message, err := readPostgresCancelRequest(client, first)
 		if err == nil {
 			err = g.forwardPostgresCancel(ctx, message)
@@ -63,13 +54,27 @@ func (g *Gateway) handlePostgresConnection(
 		return nil
 	}
 	if !isPostgresSSLRequest(first) {
-		drainPostgresPlaintextStartup(client, first)
-		writePostgresTLSError(client)
-		return nil
+		if g.cfg.ClientTLSRequired() {
+			drainPostgresPlaintextStartup(client, first)
+			writePostgresTLSError(client)
+			return nil
+		}
+		prefixed := &prefixedConn{
+			Conn:   client,
+			prefix: append([]byte(nil), first[1:]...),
+		}
+		return g.handlePG(ctx, prefixed, first[0])
 	}
 	if listenerConfig.CertFile == "" || listenerConfig.KeyFile == "" {
 		_ = writePostgresBytes(client, []byte{'N'})
-		return nil
+		if g.cfg.ClientTLSRequired() {
+			return nil
+		}
+		var firstByte [1]byte
+		if _, err := io.ReadFull(client, firstByte[:]); err != nil {
+			return nil
+		}
+		return g.handlePG(ctx, client, firstByte[0])
 	}
 	if err := writePostgresBytes(client, []byte{'S'}); err != nil {
 		return nil

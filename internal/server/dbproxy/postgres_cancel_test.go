@@ -6,11 +6,13 @@ import (
 	"encoding/binary"
 	"errors"
 	"io"
+	"log/slog"
 	"net"
 	"os"
 	"testing"
 	"time"
 
+	"jianmen/internal/config"
 	"jianmen/internal/dbtls"
 	"jianmen/internal/model"
 )
@@ -58,6 +60,92 @@ func TestPostgresCancelRequestRejectsMalformedLengths(t *testing.T) {
 		if _, err := parsePostgresCancelRequest(message); err == nil {
 			t.Fatalf("malformed CancelRequest %d was accepted", index)
 		}
+	}
+}
+
+func TestPostgresRequiredAcceptsPlaintextCancelRequest(t *testing.T) {
+	expected := postgresCancelTestMessage(42, []byte{1, 2, 3, 4})
+	upstream, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer upstream.Close()
+
+	upstreamResult := make(chan error, 1)
+	go func() {
+		connection, acceptErr := upstream.Accept()
+		if acceptErr != nil {
+			upstreamResult <- acceptErr
+			return
+		}
+		defer connection.Close()
+		actual := make([]byte, len(expected))
+		if _, readErr := io.ReadFull(connection, actual); readErr != nil {
+			upstreamResult <- readErr
+			return
+		}
+		if string(actual) != string(expected) {
+			upstreamResult <- errors.New("forwarded CancelRequest did not match")
+			return
+		}
+		upstreamResult <- nil
+	}()
+
+	host, portText, err := net.SplitHostPort(upstream.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	port, err := net.LookupPort("tcp", portText)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gateway := &Gateway{
+		cfg: config.DatabaseGatewayConfig{
+			ClientTLSMode: config.DatabaseGatewayClientTLSModeRequired,
+		},
+		logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+	}
+	key, err := parsePostgresCancelRequest(expected)
+	if err != nil {
+		t.Fatal(err)
+	}
+	release := gateway.postgresCancels.register(key, model.DatabaseInstance{
+		ID:       "plaintext-cancel",
+		Protocol: "postgres",
+		Address:  host,
+		Port:     port,
+		TLSMode:  dbtls.ModeDisable,
+	})
+	defer release()
+
+	server, client := net.Pipe()
+	defer server.Close()
+	defer client.Close()
+	handlerDone := make(chan struct{})
+	go func() {
+		defer close(handlerDone)
+		gateway.handlePostgresConnection(
+			context.Background(),
+			server,
+			config.DatabaseProtocolListener{},
+		)
+	}()
+	if _, err := client.Write(expected); err != nil {
+		t.Fatal(err)
+	}
+
+	select {
+	case err := <-upstreamResult:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("plaintext CancelRequest was not forwarded in required mode")
+	}
+	select {
+	case <-handlerDone:
+	case <-time.After(time.Second):
+		t.Fatal("PostgreSQL cancel handler did not return")
 	}
 }
 

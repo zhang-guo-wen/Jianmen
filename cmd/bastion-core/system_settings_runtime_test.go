@@ -2,6 +2,9 @@ package main
 
 import (
 	"context"
+	"io"
+	"log/slog"
+	"os"
 	"testing"
 
 	"jianmen/internal/config"
@@ -9,6 +12,77 @@ import (
 	"jianmen/internal/storage"
 	"jianmen/internal/store"
 )
+
+func TestSystemSettingsRequiredTLSPreparesManagedIdentityBeforeValidation(t *testing.T) {
+	db, err := storage.Open(storage.Config{
+		Driver: storage.DriverSQLite,
+		DSN:    ":memory:",
+	})
+	if err != nil {
+		t.Fatalf("open metadata database: %v", err)
+	}
+	sqlDB, err := db.DB()
+	if err != nil {
+		t.Fatalf("get sql database: %v", err)
+	}
+	t.Cleanup(func() { _ = sqlDB.Close() })
+	if err := storage.Migrate(db); err != nil {
+		t.Fatalf("migrate metadata database: %v", err)
+	}
+	repository := store.NewDBStore(db)
+	dataDir := t.TempDir()
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	prepare := func(effective *config.Config) error {
+		return prepareDatabaseGatewayTLS(effective, dataDir, logger)
+	}
+
+	initial := validManagedSettingsConfig()
+	initial.DatabaseGateway.Unified.CertFile = ""
+	initial.DatabaseGateway.Unified.KeyFile = ""
+	initial.DatabaseGateway.Unified.ServerName = ""
+	settings, err := bootstrapSystemSettings(
+		context.Background(),
+		initial,
+		repository,
+		prepare,
+	)
+	if err != nil {
+		t.Fatalf("initial bootstrap: %v", err)
+	}
+	desired := systemSettingsFromConfig(initial)
+	desired.DatabaseGatewayClientTLSMode = config.DatabaseGatewayClientTLSModeRequired
+	if _, err := settings.Update(context.Background(), service.SystemSettingsUpdate{
+		Settings: desired, ExpectedRevision: 1,
+	}); err != nil {
+		t.Fatalf("store required TLS policy: %v", err)
+	}
+
+	restarted := validManagedSettingsConfig()
+	restarted.DatabaseGateway.Unified.CertFile = ""
+	restarted.DatabaseGateway.Unified.KeyFile = ""
+	restarted.DatabaseGateway.Unified.ServerName = ""
+	if _, err := bootstrapSystemSettings(
+		context.Background(),
+		restarted,
+		repository,
+		prepare,
+	); err != nil {
+		t.Fatalf("restart bootstrap with required TLS: %v", err)
+	}
+	if restarted.DatabaseGateway.EffectiveClientTLSMode() !=
+		config.DatabaseGatewayClientTLSModeRequired {
+		t.Fatalf(
+			"effective client TLS mode = %q, want required",
+			restarted.DatabaseGateway.EffectiveClientTLSMode(),
+		)
+	}
+	if _, err := os.Stat(restarted.DatabaseGateway.Unified.CertFile); err != nil {
+		t.Fatalf("managed certificate was not prepared: %v", err)
+	}
+	if _, err := os.Stat(restarted.DatabaseGateway.Unified.KeyFile); err != nil {
+		t.Fatalf("managed private key was not prepared: %v", err)
+	}
+}
 
 func TestSystemSettingsBecomeEffectiveAfterRestartBootstrap(t *testing.T) {
 	db, err := storage.Open(storage.Config{
@@ -35,6 +109,7 @@ func TestSystemSettingsBecomeEffectiveAfterRestartBootstrap(t *testing.T) {
 
 	desired := systemSettingsFromConfig(cfg)
 	desired.DatabaseGatewayMode = config.DatabaseGatewayModeIndependent
+	desired.DatabaseGatewayClientTLSMode = config.DatabaseGatewayClientTLSModeRequired
 	desired.WebRDPEnabled = true
 	desired.WebRDPConnectTimeoutSeconds = 42
 	desired.WebRDPAllowUnrecorded = true
@@ -57,6 +132,7 @@ func TestSystemSettingsBecomeEffectiveAfterRestartBootstrap(t *testing.T) {
 		t.Fatalf("updated state = %#v, want revision 2 pending restart", state)
 	}
 	if cfg.DatabaseGateway.EffectiveMode() != config.DatabaseGatewayModeUnified ||
+		cfg.DatabaseGateway.EffectiveClientTLSMode() != config.DatabaseGatewayClientTLSModeOptional ||
 		cfg.WebRDP.Enabled ||
 		cfg.WebRDP.ConnectTimeoutSecs != 15 {
 		t.Fatalf(
@@ -109,13 +185,17 @@ func validManagedSettingsConfig() *config.Config {
 	return &config.Config{
 		ListenAddr: "127.0.0.1:47102",
 		DatabaseGateway: config.DatabaseGatewayConfig{
-			Enabled: true,
-			Mode:    config.DatabaseGatewayModeUnified,
+			Enabled:       true,
+			Mode:          config.DatabaseGatewayModeUnified,
+			ClientTLSMode: config.DatabaseGatewayClientTLSModeOptional,
 			Unified: config.DatabaseUnifiedListener{
-				Enabled: true, Address: "127.0.0.1:33060", DetectionTimeoutMS: 200,
+				Enabled: true, Address: "127.0.0.1:33060",
+				CertFile: "test.crt", KeyFile: "test.key", ServerName: "localhost",
+				DetectionTimeoutMS: 200,
 			},
 			MySQL: config.DatabaseProtocolListener{
 				Enabled: true, Address: "127.0.0.1:33061",
+				CertFile: "test.crt", KeyFile: "test.key", ServerName: "localhost",
 			},
 			MaxClientMessageBytes: config.DefaultDatabaseGatewayMaxClientMessageBytes,
 		},

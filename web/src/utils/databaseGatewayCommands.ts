@@ -1,7 +1,13 @@
-import type { DatabaseGatewayMode } from '../api/systemSettings';
+import type {
+  DatabaseGatewayClientTLSMode,
+  DatabaseGatewayMode,
+} from '../api/systemSettings';
+import { DATABASE_CLIENT_CA_FILE_NAME } from '../config/databaseClients';
 
 export interface DatabaseGatewayTLSIdentity {
   enabled: boolean;
+  host?: string;
+  client_tls_mode?: DatabaseGatewayClientTLSMode;
   tls_enabled: boolean;
   tls_server_name?: string;
   tls_ca_pem?: string;
@@ -14,6 +20,7 @@ export interface DatabaseGatewayConnectionInput {
   port: number;
   username: string;
   databaseName?: string;
+  useTLS?: boolean;
 }
 
 export const DATABASE_COMMAND_PLATFORM = 'Linux/macOS/Git Bash' as const;
@@ -30,6 +37,7 @@ export interface DatabaseGatewayConnection {
   unavailableReason: string | null;
   caFileName: string;
   caFilePath: string;
+  usesTLS: boolean;
 }
 
 export function hasDatabaseGatewayTLSIdentity(gateway: DatabaseGatewayTLSIdentity | null | undefined): gateway is DatabaseGatewayTLSIdentity & Required<Pick<DatabaseGatewayTLSIdentity, 'tls_server_name' | 'tls_ca_pem' | 'tls_cert_sha256'>> {
@@ -43,7 +51,8 @@ export function hasDatabaseGatewayTLSIdentity(gateway: DatabaseGatewayTLSIdentit
 }
 
 export function databaseGatewayCAFileName(protocol: string): string {
-  return `jianmen-${normalizedProtocol(protocol)}-gateway-ca.pem`;
+  void protocol;
+  return DATABASE_CLIENT_CA_FILE_NAME;
 }
 
 export function databaseGatewayCAFilePath(protocol: string): string {
@@ -72,37 +81,68 @@ export function resolveDatabaseGatewayPort(
   return databaseGatewayFallbackPort(protocol, gateway?.mode);
 }
 
+export function resolveDatabaseGatewayClientHost(
+  listenerHost: string | null | undefined,
+  pageHost: string,
+): string {
+  const configured = listenerHost?.trim() ?? '';
+  const fallback = pageHost.trim().replace(/^\[|\]$/g, '');
+  if (!configured) return fallback;
+
+  const normalizedConfigured = normalizeNetworkHost(configured);
+  if (normalizedConfigured === '0.0.0.0' || normalizedConfigured === '::') {
+    return fallback || configured;
+  }
+  if (
+    fallback
+    && isLoopbackHost(normalizedConfigured)
+    && !isLoopbackHost(normalizeNetworkHost(fallback))
+  ) {
+    return fallback;
+  }
+  return configured;
+}
+
 export function buildDatabaseGatewayConnection(input: DatabaseGatewayConnectionInput): DatabaseGatewayConnection | null {
   const protocol = normalizedProtocol(input.protocol);
-  if (!protocol || !hasDatabaseGatewayTLSIdentity(input.gateway) || !isValidPort(input.port)) return null;
+  const gateway = input.gateway;
+  if (!protocol || !gateway?.enabled || !isValidPort(input.port)) return null;
 
   const caFileName = databaseGatewayCAFileName(protocol);
   const caFilePath = databaseGatewayCAFilePath(protocol);
-  if (protocol === 'redis') {
+  const useTLS = gateway.client_tls_mode === 'required' || input.useTLS === true;
+  if (useTLS && !hasDatabaseGatewayTLSIdentity(gateway)) return null;
+  const host = useTLS ? gateway.tls_server_name : gateway.host;
+  if (
+    !host
+    || !isSafeDatabaseCommandValue('host', host)
+    || !isSafeDatabaseCommandValue('username', input.username)
+  ) return null;
+
+  if (protocol === 'redis' && useTLS) {
     return {
       command: null,
       commandPlatform: null,
       unavailableReason: REDIS_COMMAND_UNAVAILABLE_REASON,
       caFileName,
       caFilePath,
+      usesTLS: true,
     };
   }
 
   const databaseName = input.databaseName ?? 'postgres';
   if (
-    !isSafeDatabaseCommandValue('host', input.gateway.tls_server_name) ||
-    !isSafeDatabaseCommandValue('username', input.username) ||
     (protocol === 'postgres' && !isSafeDatabaseCommandValue('databaseName', databaseName))
   ) return null;
 
   if (protocol === 'postgres') {
     const conninfo = [
-      `host=${libpqQuote(input.gateway.tls_server_name)}`,
+      `host=${libpqQuote(host)}`,
       `port=${input.port}`,
       `user=${libpqQuote(input.username)}`,
       `dbname=${libpqQuote(databaseName)}`,
-      'sslmode=verify-full',
-      `sslrootcert=${libpqQuote(caFilePath)}`,
+      useTLS ? 'sslmode=verify-full' : 'sslmode=disable',
+      ...(useTLS ? [`sslrootcert=${libpqQuote(caFilePath)}`] : []),
       'gssencmode=disable',
     ].join(' ');
     return {
@@ -111,16 +151,31 @@ export function buildDatabaseGatewayConnection(input: DatabaseGatewayConnectionI
       unavailableReason: null,
       caFileName,
       caFilePath,
+      usesTLS: useTLS,
     };
   }
 
   if (protocol === 'mysql') {
     return {
-      command: `mysql --protocol=tcp --ssl-mode=VERIFY_IDENTITY --ssl-ca=${shellQuote(caFilePath)} -h ${shellQuote(input.gateway.tls_server_name)} -P ${input.port} -u ${shellQuote(input.username)} -p`,
+      command: useTLS
+        ? `mysql --protocol=tcp --ssl-mode=VERIFY_IDENTITY --ssl-ca=${shellQuote(caFilePath)} -h ${shellQuote(host)} -P ${input.port} -u ${shellQuote(input.username)} -p`
+        : `mysql --protocol=tcp --ssl-mode=DISABLED -h ${shellQuote(host)} -P ${input.port} -u ${shellQuote(input.username)} -p`,
       commandPlatform: DATABASE_COMMAND_PLATFORM,
       unavailableReason: null,
       caFileName,
       caFilePath,
+      usesTLS: useTLS,
+    };
+  }
+
+  if (protocol === 'redis') {
+    return {
+      command: `redis-cli -h ${shellQuote(host)} -p ${input.port} --user ${shellQuote(input.username)} --askpass`,
+      commandPlatform: DATABASE_COMMAND_PLATFORM,
+      unavailableReason: null,
+      caFileName,
+      caFilePath,
+      usesTLS: false,
     };
   }
 
@@ -145,6 +200,16 @@ function normalizedProtocol(protocol: string): 'mysql' | 'postgres' | 'redis' | 
 
 function isValidPort(port: number): boolean {
   return Number.isInteger(port) && port >= 1 && port <= 65535;
+}
+
+function normalizeNetworkHost(host: string): string {
+  return host.trim().replace(/^\[|\]$/g, '').toLowerCase();
+}
+
+function isLoopbackHost(host: string): boolean {
+  return host === 'localhost'
+    || host === '::1'
+    || /^127(?:\.\d{1,3}){3}$/.test(host);
 }
 
 function shellQuote(value: string): string {

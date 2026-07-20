@@ -9,6 +9,7 @@ import (
 
 type systemSettingsSnapshot struct {
 	DatabaseGatewayMode           string `json:"database_gateway_mode"`
+	DatabaseGatewayClientTLSMode  string `json:"database_gateway_client_tls_mode"`
 	WebRDPEnabled                 bool   `json:"web_rdp_enabled"`
 	WebRDPConnectTimeoutSeconds   int    `json:"web_rdp_connect_timeout_seconds"`
 	WebRDPAllowUnrecorded         bool   `json:"web_rdp_allow_unrecorded"`
@@ -37,12 +38,16 @@ func unmarshalSystemSettings(encoded string) (SystemSettings, error) {
 	if snapshot.DatabaseGatewayMode == "" {
 		snapshot.DatabaseGatewayMode = config.DatabaseGatewayModeUnified
 	}
+	if snapshot.DatabaseGatewayClientTLSMode == "" {
+		snapshot.DatabaseGatewayClientTLSMode = config.DatabaseGatewayClientTLSModeOptional
+	}
 	return snapshot.systemSettings(), nil
 }
 
 func snapshotFromSystemSettings(settings SystemSettings) systemSettingsSnapshot {
 	return systemSettingsSnapshot{
 		DatabaseGatewayMode:           settings.DatabaseGatewayMode,
+		DatabaseGatewayClientTLSMode:  settings.DatabaseGatewayClientTLSMode,
 		WebRDPEnabled:                 settings.WebRDPEnabled,
 		WebRDPConnectTimeoutSeconds:   settings.WebRDPConnectTimeoutSeconds,
 		WebRDPAllowUnrecorded:         settings.WebRDPAllowUnrecorded,
@@ -63,6 +68,7 @@ func (snapshot systemSettingsSnapshot) systemSettings() SystemSettings {
 	}
 	return SystemSettings{
 		DatabaseGatewayMode:           snapshot.DatabaseGatewayMode,
+		DatabaseGatewayClientTLSMode:  snapshot.DatabaseGatewayClientTLSMode,
 		WebRDPEnabled:                 snapshot.WebRDPEnabled,
 		WebRDPConnectTimeoutSeconds:   snapshot.WebRDPConnectTimeoutSeconds,
 		WebRDPAllowUnrecorded:         snapshot.WebRDPAllowUnrecorded,

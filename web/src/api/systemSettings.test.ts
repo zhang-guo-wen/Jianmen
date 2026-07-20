@@ -20,6 +20,7 @@ import {
 function settings(overrides: Partial<SystemSettingsValues> = {}): SystemSettingsValues {
   return {
     database_gateway_mode: 'unified',
+    database_gateway_client_tls_mode: 'optional',
     web_rdp_enabled: true,
     web_rdp_connect_timeout_seconds: 15,
     web_rdp_allow_unrecorded: false,
@@ -43,13 +44,32 @@ test('database gateway mode participates in global settings differences', () => 
   assert.deepEqual(changedSystemSettingsFields(next, next), []);
 });
 
+test('database gateway client TLS mode participates in differences and downgrade risk detection', () => {
+  const current = settings({ database_gateway_client_tls_mode: 'required' });
+  const next = settings({ database_gateway_client_tls_mode: 'optional' });
+
+  assert.equal(SYSTEM_SETTINGS_FIELDS.includes('database_gateway_client_tls_mode'), true);
+  assert.deepEqual(
+    changedSystemSettingsFields(current, next),
+    ['database_gateway_client_tls_mode'],
+  );
+  assert.deepEqual(weakerProtectionReasons(current, next), [
+    '允许数据库客户端不使用 TLS 连接 Jianmen',
+  ]);
+  assert.deepEqual(weakerProtectionReasons(next, current), []);
+});
+
 test('system settings presents unified database entry as the default and documents MySQL connection overhead in the mode description', () => {
   const source = readFileSync(new URL('../views/SystemSettingsView.vue', import.meta.url), 'utf8');
 
   assert.match(source, /database_gateway_mode:\s*'unified'/);
+  assert.match(source, /database_gateway_client_tls_mode:\s*'optional'/);
   assert.match(source, /label="代理与审计"/);
   assert.match(source, /统一入口（默认）/);
   assert.match(source, /独立端口/);
+  assert.match(source, /强制 TLS/);
+  assert.match(source, /非强制（默认）/);
+  assert.match(source, /客户端 TLS 策略/);
   assert.match(source, /统一入口仅需开放一个数据库网关端口，但需要短暂等待以识别连接协议（MySQL 每次连接约增加 200ms 建连时间）；独立端口为每种数据库协议分别监听，连接无额外延迟。/);
 });
 

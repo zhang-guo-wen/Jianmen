@@ -112,6 +112,9 @@ func (g *Gateway) resolveAccount(ctx context.Context, rawUsername string) (*reso
 
 // resolveCompactAccount 从 compact username 解析并查找数据库账号和用户会话
 func (g *Gateway) resolveCompactAccount(ctx context.Context, username string) (*resolvedDBAccount, error) {
+	if g.db == nil {
+		return nil, errors.New("database account lookup unavailable")
+	}
 	resourceID := username[1:5]
 	sessionID := username[5:10]
 	db := g.db.WithContext(ctx)

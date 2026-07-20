@@ -101,6 +101,20 @@
                     <el-radio-button value="independent">独立端口</el-radio-button>
                   </el-radio-group>
                 </div>
+
+                <div class="setting-row">
+                  <div class="setting-copy">
+                    <strong>客户端 TLS 策略</strong>
+                    <span>强制 TLS 会拒绝未加密连接；非强制同时接受 TLS 和非 TLS 客户端，快速连接默认不启用 TLS。</span>
+                  </div>
+                  <el-radio-group
+                    v-model="form.database_gateway_client_tls_mode"
+                    class="gateway-mode-control"
+                  >
+                    <el-radio-button value="required">强制 TLS</el-radio-button>
+                    <el-radio-button value="optional">非强制（默认）</el-radio-button>
+                  </el-radio-group>
+                </div>
               </section>
 
               <section class="settings-section">
@@ -474,6 +488,7 @@ type DiagnosticKind = 'guacd' | 'object-storage';
 
 const FIELD_LABELS: Record<keyof SystemSettingsValues, string> = {
   database_gateway_mode: '数据库网关入口模式',
+  database_gateway_client_tls_mode: '数据库网关客户端 TLS 策略',
   web_rdp_enabled: 'Web RDP',
   web_rdp_connect_timeout_seconds: '连接超时',
   web_rdp_allow_unrecorded: '未录制会话策略',
@@ -548,6 +563,7 @@ onMounted(() => {
 function emptySettings(): SystemSettingsValues {
   return {
     database_gateway_mode: 'unified',
+    database_gateway_client_tls_mode: 'optional',
     web_rdp_enabled: false,
     web_rdp_connect_timeout_seconds: 15,
     web_rdp_allow_unrecorded: false,
@@ -640,6 +656,13 @@ function validateSettings(): SystemSettingsValues | null {
   const next = { ...form };
   if (next.database_gateway_mode !== 'unified' && next.database_gateway_mode !== 'independent') {
     ElMessage.warning('数据库网关入口模式必须是统一入口或独立端口');
+    return null;
+  }
+  if (
+    next.database_gateway_client_tls_mode !== 'required'
+    && next.database_gateway_client_tls_mode !== 'optional'
+  ) {
+    ElMessage.warning('数据库网关客户端 TLS 策略必须是强制或非强制');
     return null;
   }
   if (!isIntegerWithin(next.web_rdp_connect_timeout_seconds, 1, 300)) {
@@ -780,6 +803,7 @@ function formatSettingValue(
   value: SystemSettingsValues[keyof SystemSettingsValues],
 ): string {
   if (field === 'database_gateway_mode') return value === 'independent' ? '独立端口' : '统一入口';
+  if (field === 'database_gateway_client_tls_mode') return value === 'required' ? '强制 TLS' : '非强制';
   if (field === 'web_rdp_connect_timeout_seconds') return `${value} 秒`;
   if (field === 'recording_retention_days') return `${value} 天`;
   if (field === 'recording_cleanup_batch_size') return `${value} 条`;

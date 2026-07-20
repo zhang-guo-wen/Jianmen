@@ -10,7 +10,7 @@
                 {{ state.pending_restart ? '等待重启' : '运行中' }}
               </el-tag>
             </div>
-            <p>系统级配置仅对超级管理员开放，保存后需重启 Jianmen 才会应用。</p>
+            <p>管理连接、安全与审计策略。保存后重启生效。</p>
           </div>
           <div class="header-actions">
             <el-button :loading="loading" @click="loadAll">刷新</el-button>
@@ -87,14 +87,14 @@
                 <div class="section-heading">
                   <div>
                     <h2>数据库网关入口</h2>
-                    <p>选择数据库客户端连接 Jianmen 时使用统一入口，或继续按协议使用独立端口；保存后需重启 Jianmen 才会应用。</p>
+                    <p>设置数据库客户端进入 Jianmen 的端口方式。</p>
                   </div>
                 </div>
 
                 <div class="setting-row">
                   <div class="setting-copy">
                     <strong>入口模式</strong>
-                    <span>统一入口仅需开放一个数据库网关端口，但需要短暂等待以识别连接协议（MySQL 每次连接约增加 200ms 建连时间）；独立端口为每种数据库协议分别监听，连接无额外延迟。</span>
+                    <span>统一入口只开放一个端口，MySQL 建连约增加 200ms；独立端口无额外识别延迟。</span>
                   </div>
                   <el-radio-group v-model="form.database_gateway_mode" class="gateway-mode-control">
                     <el-radio-button value="unified">统一入口（默认）</el-radio-button>
@@ -105,7 +105,7 @@
                 <div class="setting-row">
                   <div class="setting-copy">
                     <strong>客户端 TLS 策略</strong>
-                    <span>强制 TLS 会拒绝未加密连接；非强制同时接受 TLS 和非 TLS 客户端，快速连接默认不启用 TLS。</span>
+                    <span>强制 TLS 拒绝未加密连接；非强制同时接受两种连接。</span>
                   </div>
                   <el-radio-group
                     v-model="form.database_gateway_client_tls_mode"
@@ -121,7 +121,7 @@
                 <div class="section-heading">
                   <div>
                     <h2>Web RDP</h2>
-                    <p>控制浏览器远程桌面的系统级可用性与连接行为。</p>
+                    <p>控制浏览器远程桌面的可用性与连接行为。</p>
                   </div>
                 </div>
 
@@ -169,7 +169,7 @@
                 <div class="section-heading">
                   <div>
                     <h2>会话录制与留存</h2>
-                    <p>配置会话审计采集、回放读取和过期数据清理策略。</p>
+                    <p>设置录制内容、保留时间与清理方式。</p>
                   </div>
                 </div>
 
@@ -864,7 +864,7 @@ function errorMessage(error: unknown, fallback: string): string {
   position: sticky;
   top: 0;
   z-index: 5;
-  padding: 16px 22px;
+  padding: 13px 20px;
   background: color-mix(in srgb, var(--color-card) 94%, transparent);
   border-bottom-color: var(--color-border);
   backdrop-filter: blur(12px);
@@ -922,8 +922,8 @@ function errorMessage(error: unknown, fallback: string): string {
   display: flex;
   align-items: center;
   gap: 12px;
-  margin: 14px 22px 0;
-  padding: 10px 14px;
+  margin: 10px 20px 0;
+  padding: 8px 12px;
   border-radius: 8px;
   border: 1px solid var(--color-border);
   background: var(--color-surface-muted);
@@ -990,12 +990,12 @@ function errorMessage(error: unknown, fallback: string): string {
 }
 
 .settings-tabs {
-  margin-top: 14px;
+  margin-top: 10px;
 }
 
 :deep(.settings-tabs > .el-tabs__header) {
   margin: 0;
-  padding: 0 22px;
+  padding: 0 20px;
   border-bottom: 1px solid var(--color-border);
 }
 
@@ -1004,16 +1004,16 @@ function errorMessage(error: unknown, fallback: string): string {
 }
 
 :deep(.settings-tabs .el-tabs__item) {
-  height: 54px;
+  height: 46px;
   font-weight: 700;
 }
 
 .policy-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 460px), 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   align-items: start;
-  gap: 18px;
-  padding: 22px;
+  gap: 14px;
+  padding: 16px 20px 20px;
 }
 
 .settings-section--wide {
@@ -1037,17 +1037,17 @@ function errorMessage(error: unknown, fallback: string): string {
 
 .infrastructure-stack {
   display: grid;
-  gap: 18px;
-  padding: 22px;
+  gap: 14px;
+  padding: 16px 20px 20px;
 }
 
 .settings-section {
   max-width: 100%;
   min-width: 0;
-  padding: 22px;
+  padding: 18px;
   border: 1px solid var(--color-border);
-  border-radius: 14px;
-  background: var(--color-card);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--color-card) 96%, var(--color-surface-muted));
 }
 
 .settings-section--wide {
@@ -1055,7 +1055,7 @@ function errorMessage(error: unknown, fallback: string): string {
 }
 
 .section-heading {
-  margin-bottom: 18px;
+  margin-bottom: 12px;
 }
 
 .section-heading--actions {
@@ -1065,7 +1065,7 @@ function errorMessage(error: unknown, fallback: string): string {
 
 .section-heading h2 {
   margin: 0;
-  font-size: 17px;
+  font-size: 16px;
 }
 
 .section-heading p {
@@ -1080,8 +1080,8 @@ function errorMessage(error: unknown, fallback: string): string {
   grid-template-columns: minmax(0, 1fr) max-content;
   align-items: center;
   gap: 22px;
-  min-height: 72px;
-  padding: 14px 0;
+  min-height: 62px;
+  padding: 11px 0;
   border-top: 1px solid var(--color-border);
 }
 
@@ -1096,7 +1096,7 @@ function errorMessage(error: unknown, fallback: string): string {
 .setting-copy {
   display: grid;
   min-width: 0;
-  gap: 5px;
+  gap: 3px;
 }
 
 .setting-copy strong {
@@ -1156,7 +1156,7 @@ code {
 }
 
 .revisions-section {
-  margin: 22px;
+  margin: 16px 20px 20px;
 }
 
 @media (max-width: 1240px) {

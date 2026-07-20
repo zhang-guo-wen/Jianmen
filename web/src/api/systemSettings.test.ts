@@ -70,7 +70,7 @@ test('system settings presents unified database entry as the default and documen
   assert.match(source, /强制 TLS/);
   assert.match(source, /非强制（默认）/);
   assert.match(source, /客户端 TLS 策略/);
-  assert.match(source, /统一入口仅需开放一个数据库网关端口，但需要短暂等待以识别连接协议（MySQL 每次连接约增加 200ms 建连时间）；独立端口为每种数据库协议分别监听，连接无额外延迟。/);
+  assert.match(source, /统一入口只开放一个端口，MySQL 建连约增加 200ms；独立端口无额外识别延迟。/);
 });
 
 test('GiB conversion preserves normal configuration values', () => {

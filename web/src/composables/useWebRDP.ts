@@ -17,6 +17,12 @@ import {
   type GuacamoleInstructionElement,
   UnicodeGuacamoleParser,
 } from '@/utils/guacamoleProtocol';
+import {
+  calculateFitScale,
+  hasScaleChanged,
+  isSameViewport,
+  type WebRDPViewport,
+} from '@/utils/webRDPViewport';
 
 export type WebRDPStatus =
   | 'idle'
@@ -34,6 +40,7 @@ interface UseWebRDPOptions {
 }
 
 const MIN_SCALE = 0.25;
+const MIN_FIT_SCALE = 0.01;
 const MAX_SCALE = 3;
 
 function defaultPolicy(): WebRDPEffectivePolicy {
@@ -239,30 +246,35 @@ export function useWebRDP({ targetId }: UseWebRDPOptions) {
   let display: GuacamoleDisplay | null = null;
   let keyboard: GuacamoleKeyboard | null = null;
   let displayContainer: HTMLElement | null = null;
+  let viewportContainer: HTMLElement | null = null;
   let resizeObserver: ResizeObserver | null = null;
   let resizeFrame = 0;
+  let lastRequestedViewport: WebRDPViewport | null = null;
   let connectionGeneration = 0;
   let manualDisconnect = false;
   let remoteClipboardText = '';
   let activeUploadReject: ((reason?: unknown) => void) | null = null;
 
   function applyFit() {
-    if (!display || !displayContainer) return;
+    if (!display || !viewportContainer) return;
     const width = display.getWidth();
     const height = display.getHeight();
     if (!width || !height) return;
 
-    const nextScale = clamp(
-      Math.min(
-        displayContainer.clientWidth / width,
-        displayContainer.clientHeight / height,
-      ),
-      MIN_SCALE,
+    const bounds = viewportContainer.getBoundingClientRect();
+    const nextScale = calculateFitScale(
+      { width: bounds.width, height: bounds.height },
+      { width, height },
+      MIN_FIT_SCALE,
       MAX_SCALE,
     );
 
-    display.scale(nextScale);
-    scale.value = nextScale;
+    if (hasScaleChanged(display.getScale(), nextScale)) {
+      display.scale(nextScale);
+      scale.value = nextScale;
+    } else {
+      scale.value = display.getScale();
+    }
   }
 
   function setScale(nextScale: number) {
@@ -278,9 +290,12 @@ export function useWebRDP({ targetId }: UseWebRDPOptions) {
   }
 
   function sendResize() {
-    if (!client || !displayContainer || status.value !== 'connected') return;
-    const { width, height } = measureViewport(displayContainer);
-    client.sendSize(width, height);
+    if (!client || !viewportContainer || status.value !== 'connected') return;
+    const viewport = measureViewport(viewportContainer);
+    if (!isSameViewport(lastRequestedViewport, viewport)) {
+      client.sendSize(viewport.width, viewport.height);
+      lastRequestedViewport = viewport;
+    }
     if (autoFit.value) applyFit();
   }
 
@@ -335,6 +350,8 @@ export function useWebRDP({ targetId }: UseWebRDPOptions) {
     display = null;
     if (displayContainer) displayContainer.replaceChildren();
     displayContainer = null;
+    viewportContainer = null;
+    lastRequestedViewport = null;
   }
 
   function disconnect() {
@@ -425,7 +442,7 @@ export function useWebRDP({ targetId }: UseWebRDPOptions) {
     };
   }
 
-  async function connect(container: HTMLElement) {
+  async function connect(container: HTMLElement, viewportElement = container) {
     const requestedTargetId = targetId.value.trim();
     const generation = ++connectionGeneration;
     manualDisconnect = false;
@@ -454,7 +471,9 @@ export function useWebRDP({ targetId }: UseWebRDPOptions) {
     }
 
     displayContainer = container;
-    const viewport = measureViewport(container);
+    viewportContainer = viewportElement;
+    const viewport = measureViewport(viewportElement);
+    lastRequestedViewport = viewport;
     status.value = 'requesting-ticket';
 
     try {
@@ -569,7 +588,7 @@ export function useWebRDP({ targetId }: UseWebRDPOptions) {
       };
 
       resizeObserver = new ResizeObserver(() => resize());
-      resizeObserver.observe(container);
+      resizeObserver.observe(viewportElement);
       status.value = 'connecting';
       sessionClient.connect('');
     } catch (caught) {

@@ -416,9 +416,8 @@ test('database and quick-connect loaders keep request snapshots isolated', () =>
   const quickConnectSource = readFileSync(new URL('../views/QuickConnectView.vue', import.meta.url), 'utf8');
   assert.match(databaseViewSource, /const instanceID = selectedInstance\.value\.id[\s\S]*const page = accountPage\.value[\s\S]*const pageSize = accountPageSize\.value/);
   assert.match(databaseViewSource, /getDBAccounts\(instanceID, \{[\s\S]*page,[\s\S]*page_size: pageSize/);
-  assert.match(databaseViewSource, /const savedCredentialTestRequests = createLatestKeyedRequest/);
-  assert.match(databaseViewSource, /savedCredentialTestRequests\.begin\([\s\S]*savedCredentialTestRequests\.isCurrent\(request\.token, key\)/);
-  assert.match(databaseViewSource, /watch\(accountDialogVisible,[\s\S]*savedCredentialTestRequests\.invalidate\(\)/);
+  assert.doesNotMatch(databaseViewSource, /savedCredentialTestRequests|savedCredentialTesting|savedCredentialTestResult/);
+  assert.doesNotMatch(databaseViewSource, /testSavedAccountConnection|已保存凭据/);
   assert.match(quickConnectSource, /const sshRequests = createLatestKeyedRequest/);
   assert.match(quickConnectSource, /sshRequests\.begin\(keyword/);
   assert.match(quickConnectSource, /sshLoading\.value = sshRequests\.isLoading\(\)/);
@@ -478,7 +477,7 @@ test('temporary password copy button exposes its in-flight state', () => {
   );
 });
 
-test('DBeaver handoff fails closed and clears temporary credentials when the dialog closes', () => {
+test('connection dialog clears temporary credentials when it closes', () => {
   const dialogSource = readFileSync(new URL('../components/ConnectionConfigDialog.vue', import.meta.url), 'utf8');
   assert.match(
     dialogSource,

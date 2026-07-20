@@ -554,7 +554,7 @@ export interface DBAccountPayload {
   password: string;
   group?: string;
   remark?: string;
-  expires_at?: string;
+  expires_at?: string | null;
 }
 
 export interface DBAccountTestPayload {
@@ -568,7 +568,7 @@ export interface DBAccountUpdatePayload {
   password?: string;
   group?: string;
   remark?: string;
-  expires_at?: string;
+  expires_at?: string | null;
   status?: string;
 }
 

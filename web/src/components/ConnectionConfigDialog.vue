@@ -37,22 +37,6 @@
           <InfoValue label="连接地址" :value="gatewayAddress" :loading="isCopyInFlight(gatewayAddress, '连接地址')" @copy="copyValue" />
           <InfoValue v-if="!isRedis" label="连接账户" :value="connectionInfo.compactUser" :loading="isCopyInFlight(connectionInfo.compactUser, '连接账户')" @copy="copyValue" />
         </div>
-        <section v-if="resourceType === 'database' && secureGatewayTLS" class="gateway-tls-panel">
-          <InfoValue label="TLS 验证名称" :value="connectionInfo.tlsServerName" :loading="isCopyInFlight(connectionInfo.tlsServerName, 'TLS 验证名称')" @copy="copyValue" />
-          <InfoValue label="证书 SHA-256 指纹" :value="connectionInfo.tlsCertSHA256" :loading="isCopyInFlight(connectionInfo.tlsCertSHA256, '证书 SHA-256 指纹')" @copy="copyValue" />
-          <el-form-item v-if="isPostgres" label="数据库名称">
-            <el-input v-model="databaseName" placeholder="postgres" />
-          </el-form-item>
-          <p v-if="commands.length" class="gateway-tls-hint">
-            请先下载 CA 并保存为下方命令引用的文件名，再执行 Linux/macOS/Git Bash 命令。
-          </p>
-          <p v-else class="gateway-tls-hint">TLS 身份材料仍可查看和下载；当前不提供可安全执行的客户端命令。</p>
-          <div class="gateway-tls-actions">
-            <el-button size="small" :loading="isDownloadInFlight" @click="downloadGatewayCA">下载 CA</el-button>
-            <el-button size="small" :loading="isCopyInFlight(connectionInfo.tlsCAPEM, 'ca')" @click="copyValue(connectionInfo.tlsCAPEM, 'ca')">复制 CA</el-button>
-            <el-button size="small" :loading="isCopyInFlight(connectionInfo.tlsCertSHA256, 'fingerprint')" @click="copyValue(connectionInfo.tlsCertSHA256, 'fingerprint')">复制指纹</el-button>
-          </div>
-        </section>
         <el-alert
           v-if="resourceType === 'database' && databaseCommandUnavailableReason"
           type="warning"
@@ -173,7 +157,6 @@ import {
 import {
   REDIS_COMMAND_UNAVAILABLE_REASON,
   buildDatabaseGatewayConnection,
-  databaseGatewayCAFileName,
   hasDatabaseGatewayTLSIdentity,
   resolveDatabaseGatewayPort,
 } from '@/utils/databaseGatewayCommands';
@@ -304,16 +287,12 @@ const connectionInfo = ref<{
 } | null>(null);
 const temporaryPassword = ref('');
 const temporaryPasswordExpiresAt = ref('');
-const databaseName = ref(
-  ['postgres', 'postgresql'].includes(props.protocol.toLowerCase()) ? 'postgres' : '',
-);
 const initializeRequest = createLatestKeyedRequest<ConnectionResourceBundle>();
 const testRequest = createLatestKeyedRequest<{ ok: boolean; error?: string; latency_ms?: number }>();
 const operationCounters = reactive<InFlightCounters>({});
 
 const gatewayAddress = computed(() => connectionInfo.value ? `${connectionInfo.value.host}:${connectionInfo.value.port}` : '');
 const requiresGatewayTLSIdentity = computed(() => ['mysql', 'postgres', 'postgresql', 'redis'].includes(props.protocol.toLowerCase()));
-const isPostgres = computed(() => ['postgres', 'postgresql'].includes(props.protocol.toLowerCase()));
 const isRedis = computed(() => (
   props.resourceType === 'database' &&
   isGatewayOnlyDatabaseProtocol(props.protocol)
@@ -347,7 +326,6 @@ const databaseConnectionPlan = computed(() => {
     gateway,
     port,
     username: compactUser,
-    databaseName: databaseName.value,
   });
 });
 const databaseCommandUnavailableReason = computed(() => {
@@ -425,8 +403,6 @@ function isCopyInFlight(value: string, operation = 'value'): boolean {
   return Boolean(value) && isInFlight(operationCounters, operationCounterKey(`copy:${operation}`), 'copy');
 }
 
-const isDownloadInFlight = computed(() => isInFlight(operationCounters, operationCounterKey('download:ca'), 'download'));
-
 watch(
   () => [props.modelValue, String(props.target?.id || props.target?.resource_id || ''), props.resourceType, props.protocol] as const,
   ([isVisible, targetID]) => {
@@ -450,7 +426,6 @@ function clearConnectionState() {
   connectionInfo.value = null;
   temporaryPassword.value = '';
   temporaryPasswordExpiresAt.value = '';
-  databaseName.value = ['postgres', 'postgresql'].includes(props.protocol.toLowerCase()) ? 'postgres' : '';
   for (const key of Object.keys(operationCounters)) delete operationCounters[key];
 }
 
@@ -569,23 +544,6 @@ async function copyValue(value: string, operation = 'value') {
   }
 }
 
-function downloadGatewayCA() {
-  if (!connectionInfo.value?.tlsCAPEM) return;
-  const key = operationCounterKey('download:ca');
-  if (!beginInFlightIfIdle(operationCounters, key, 'download')) return;
-  void Promise.resolve().then(() => {
-    const blob = new Blob([connectionInfo.value?.tlsCAPEM || ''], { type: 'application/x-pem-file' });
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement('a');
-    anchor.href = url;
-    anchor.download = databaseGatewayCAFileName(props.protocol);
-    document.body.appendChild(anchor);
-    anchor.click();
-    anchor.remove();
-    URL.revokeObjectURL(url);
-  }).finally(() => endInFlight(operationCounters, key, 'download'));
-}
-
 async function openPreferredSSHClient() {
   if (!connectionInfo.value) return;
   if (!preferences.loaded) { try { await preferences.fetch(); } catch { /* initialization remains available */ } }
@@ -637,7 +595,7 @@ function openDatabaseClient() {
     port: connectionInfo.value.port,
     username: connectionInfo.value.compactUser,
     password: temporaryPassword.value,
-    databaseName: databaseName.value,
+    databaseName: ['postgres', 'postgresql'].includes(props.protocol.toLowerCase()) ? 'postgres' : '',
     connectionName: props.resourceName || 'Jianmen 临时连接',
   });
   if (!launchURL) {
@@ -696,11 +654,6 @@ function formatExpiresAt(value: string): string {
 .connectivity-row { display: flex; align-items: center; gap: 8px; color: var(--el-text-color-secondary); font-size: 13px; }
 .shared-connection-panel { overflow: hidden; border: 1px solid var(--el-border-color-light); border-radius: 10px; }
 .shared-connection-panel .detail-grid { border-top: 0; }
-.gateway-tls-panel { display: grid; gap: 1px; background: var(--el-border-color-lighter); border-top: 1px solid var(--el-border-color-lighter); }
-.gateway-tls-panel > * { background: var(--el-bg-color); }
-.gateway-tls-panel :deep(.el-form-item) { margin: 0; padding: 9px 14px; }
-.gateway-tls-hint { margin: 0; padding: 9px 14px; color: var(--el-text-color-secondary); font-size: 12px; line-height: 1.5; }
-.gateway-tls-actions { display: flex; flex-wrap: wrap; gap: 8px; padding: 10px 14px; }
 :deep(.copy-action) { justify-self: end; }
 .connect-error { color: var(--el-color-danger); }
 .loading-state { padding: 30px 0; text-align: center; }

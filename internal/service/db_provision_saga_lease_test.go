@@ -17,7 +17,6 @@ func TestDatabaseProvisioningRenewFailurePreventsCreate(t *testing.T) {
 		context.Background(),
 		ProvisionDatabaseAccountRequest{
 			InstanceID: "instance-1", AdminAccountID: "admin-1",
-			Host:   "10.0.0.8",
 			Grants: []DBGrant{{Database: "orders", Privilege: "read"}},
 		},
 	)
@@ -62,7 +61,6 @@ func TestDatabaseProvisioningRenewFailurePreventsGrant(t *testing.T) {
 		context.Background(),
 		ProvisionDatabaseAccountRequest{
 			InstanceID: "instance-1", AdminAccountID: "admin-1",
-			Host:   "10.0.0.8",
 			Grants: []DBGrant{{Database: "orders", Privilege: "read"}},
 		},
 	)
@@ -85,7 +83,7 @@ func TestDatabaseProvisioningRenewErrorPreventsCreate(t *testing.T) {
 		context.Background(),
 		ProvisionDatabaseAccountRequest{
 			InstanceID: "instance-1", AdminAccountID: "admin-1",
-			Host: "10.0.0.8", Grants: []DBGrant{{Database: "orders", Privilege: "read"}},
+			Grants: []DBGrant{{Database: "orders", Privilege: "read"}},
 		},
 	)
 	if !errors.Is(err, ErrDatabaseProvisioningFailed) {
@@ -114,7 +112,7 @@ func TestDatabaseProvisioningRenewWindowIncludesRenewRoundTrip(t *testing.T) {
 		context.Background(),
 		ProvisionDatabaseAccountRequest{
 			InstanceID: "instance-1", AdminAccountID: "admin-1",
-			Host: "10.0.0.8", Grants: []DBGrant{{Database: "orders", Privilege: "read"}},
+			Grants: []DBGrant{{Database: "orders", Privilege: "read"}},
 		},
 	)
 	if !errors.Is(err, ErrDatabaseProvisioningFailed) {
@@ -141,7 +139,7 @@ func TestDatabaseProvisioningAdministratorLocalClockSkewDoesNotChangeLeaseOutcom
 				context.Background(),
 				ProvisionDatabaseAccountRequest{
 					InstanceID: "instance-1", AdminAccountID: "admin-1",
-					Host: "10.0.0.8", Grants: []DBGrant{{Database: "orders", Privilege: "read"}},
+					Grants: []DBGrant{{Database: "orders", Privilege: "read"}},
 				},
 			)
 			if err != nil {
@@ -165,7 +163,6 @@ func TestDatabaseProvisioningExpiredLeasePreventsCreateAfterProcessPause(t *test
 		context.Background(),
 		ProvisionDatabaseAccountRequest{
 			InstanceID: "instance-1", AdminAccountID: "admin-1",
-			Host:   "10.0.0.8",
 			Grants: []DBGrant{{Database: "orders", Privilege: "read"}},
 		},
 	)
@@ -208,7 +205,6 @@ func TestDatabaseProvisioningTimedOutWorkerCannotCommitOrCompensateAfterReclaim(
 			context.Background(),
 			ProvisionDatabaseAccountRequest{
 				InstanceID: "instance-1", AdminAccountID: "admin-1",
-				Host:   "10.0.0.8",
 				Grants: []DBGrant{{Database: "orders", Privilege: "read"}},
 			},
 		)

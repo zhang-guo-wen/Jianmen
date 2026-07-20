@@ -39,58 +39,44 @@
       </el-alert>
 
       <template v-if="state">
-        <el-alert
-          v-if="state.pending_restart"
-          class="restart-alert"
-          type="warning"
-          :closable="false"
-          show-icon
-          title="已保存的配置尚未应用"
-        >
-          <div>
-            当前进程仍在使用版本 #{{ state.effective_revision }}，重启后将应用版本 #{{ state.revision }}。
+        <div class="status-strip" :class="{ 'is-pending': state.pending_restart }">
+          <div class="status-strip__main">
+            <span class="status-strip__badge" :class="state.pending_restart ? 'is-warning' : 'is-success'">
+              {{ state.pending_restart ? '待重启' : '已同步' }}
+            </span>
+            <span v-if="state.pending_restart">
+              已保存 #{{ state.revision }} → 运行中 #{{ state.effective_revision }}
+            </span>
+            <span v-else>
+              版本 #{{ state.effective_revision }}
+            </span>
           </div>
-          <div v-if="pendingDifferences.length" class="pending-differences">
-            <div class="pending-difference pending-difference--header">
-              <span>配置项</span>
-              <span>当前运行</span>
-              <span>重启后</span>
-            </div>
-            <div
-              v-for="difference in pendingDifferences"
-              :key="difference.field"
-              class="pending-difference"
-            >
-              <strong>{{ difference.label }}</strong>
-              <span>{{ difference.effective }}</span>
-              <span>{{ difference.desired }}</span>
-            </div>
+          <div class="status-strip__meta">
+            {{ state.updated_by_username || 'system' }} 更新于 {{ formatTime(state.updated_at) }}
           </div>
-        </el-alert>
-        <el-alert
-          v-else
-          class="restart-alert"
-          type="success"
-          :closable="false"
-          show-icon
-          title="已保存配置与当前运行配置一致"
-        >
-          当前运行版本 #{{ state.effective_revision }}。
-        </el-alert>
+          <el-button
+            v-if="state.pending_restart && pendingDifferences.length"
+            link size="small" type="primary"
+            @click="showDiff = !showDiff"
+          >
+            {{ showDiff ? '收起变更' : '变更明细' }}
+          </el-button>
+        </div>
 
-        <div class="revision-strip">
-          <div class="revision-item">
-            <span>已保存版本</span>
-            <strong>#{{ state.revision }}</strong>
+        <div v-if="state.pending_restart && showDiff && pendingDifferences.length" class="pending-differences">
+          <div class="pending-difference pending-difference--header">
+            <span>配置项</span>
+            <span>当前运行</span>
+            <span>重启后</span>
           </div>
-          <div class="revision-item">
-            <span>运行版本</span>
-            <strong>#{{ state.effective_revision }}</strong>
-          </div>
-          <div class="revision-item revision-item--wide">
-            <span>最后更新</span>
-            <strong>{{ state.updated_by_username || 'system' }}</strong>
-            <small>{{ formatTime(state.updated_at) }}</small>
+          <div
+            v-for="difference in pendingDifferences"
+            :key="difference.field"
+            class="pending-difference"
+          >
+            <strong>{{ difference.label }}</strong>
+            <span>{{ difference.effective }}</span>
+            <span>{{ difference.desired }}</span>
           </div>
         </div>
 
@@ -105,18 +91,10 @@
                   </div>
                 </div>
 
-                <el-alert
-                  class="gateway-mode-alert"
-                  type="warning"
-                  :closable="false"
-                  show-icon
-                  title="统一入口需要短暂等待以识别连接协议，MySQL 每次连接会增加约 200ms 建连时间。"
-                />
-
                 <div class="setting-row">
                   <div class="setting-copy">
                     <strong>入口模式</strong>
-                    <span>统一入口仅需开放一个数据库网关端口；独立端口为每种数据库协议分别监听。</span>
+                    <span>统一入口仅需开放一个数据库网关端口，但需要短暂等待以识别连接协议（MySQL 每次连接约增加 200ms 建连时间）；独立端口为每种数据库协议分别监听，连接无额外延迟。</span>
                   </div>
                   <el-radio-group v-model="form.database_gateway_mode" class="gateway-mode-control">
                     <el-radio-button value="unified">统一入口（默认）</el-radio-button>
@@ -514,6 +492,7 @@ const saving = ref(false);
 const loadError = ref('');
 const historyLoading = ref(false);
 const historyError = ref('');
+const showDiff = ref(false);
 const diagnosticLoading = ref<DiagnosticKind | ''>('');
 const state = ref<SystemSettingsState | null>(null);
 const revisions = ref<SystemSettingsRevision[]>([]);
@@ -911,9 +890,55 @@ function errorMessage(error: unknown, fallback: string): string {
   margin-left: 0;
 }
 
-.load-error,
-.restart-alert {
+.load-error {
   margin: 18px 22px 0;
+}
+
+.status-strip {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 14px 22px 0;
+  padding: 10px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface-muted);
+  flex-wrap: wrap;
+}
+
+.status-strip.is-pending {
+  border-color: color-mix(in srgb, var(--el-color-warning) 35%, var(--color-border));
+  background: color-mix(in srgb, var(--el-color-warning) 8%, var(--color-surface-muted));
+}
+
+.status-strip__main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.status-strip__badge {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 10px;
+  line-height: 1.5;
+}
+
+.status-strip__badge.is-success {
+  color: var(--el-color-success);
+  background: color-mix(in srgb, var(--el-color-success) 15%, transparent);
+}
+
+.status-strip__badge.is-warning {
+  color: var(--el-color-warning);
+  background: color-mix(in srgb, var(--el-color-warning) 15%, transparent);
+}
+
+.status-strip__meta {
+  margin-left: auto;
+  color: var(--color-text-secondary);
+  font-size: 12px;
 }
 
 .pending-differences {
@@ -938,47 +963,6 @@ function errorMessage(error: unknown, fallback: string): string {
 .pending-difference--header {
   color: var(--color-text-secondary);
   font-size: 12px;
-}
-
-.revision-strip {
-  display: grid;
-  grid-template-columns: 150px 150px minmax(240px, 1fr);
-  gap: 1px;
-  margin: 18px 22px 0;
-  overflow: hidden;
-  border: 1px solid var(--color-border);
-  border-radius: 12px;
-  background: var(--color-border);
-}
-
-.revision-item {
-  display: flex;
-  align-items: baseline;
-  flex-wrap: wrap;
-  gap: 8px;
-  min-width: 0;
-  min-height: 58px;
-  padding: 12px 16px;
-  background: var(--color-surface-muted);
-}
-
-.revision-item span,
-.revision-item small {
-  color: var(--color-text-secondary);
-  font-size: 12px;
-}
-
-.revision-item strong {
-  font-size: 16px;
-  overflow-wrap: anywhere;
-}
-
-.revision-item--wide {
-  justify-content: flex-end;
-}
-
-.revision-item small {
-  overflow-wrap: anywhere;
 }
 
 .settings-tabs {
@@ -1010,10 +994,6 @@ function errorMessage(error: unknown, fallback: string): string {
 
 .settings-section--wide {
   grid-column: 1 / -1;
-}
-
-.gateway-mode-alert {
-  margin-bottom: 8px;
 }
 
 .gateway-mode-control {
@@ -1180,15 +1160,6 @@ code {
     flex: 1;
   }
 
-  .revision-strip {
-    grid-template-columns: 1fr 1fr;
-  }
-
-  .revision-item--wide {
-    grid-column: 1 / -1;
-    justify-content: flex-start;
-  }
-
   .policy-grid,
   .infrastructure-stack {
     padding: 14px;
@@ -1239,14 +1210,6 @@ code {
 }
 
 @media (max-width: 520px) {
-  .revision-strip {
-    grid-template-columns: 1fr;
-  }
-
-  .revision-item--wide {
-    grid-column: auto;
-  }
-
   .header-actions {
     align-items: stretch;
     flex-direction: column;

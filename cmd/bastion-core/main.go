@@ -70,7 +70,7 @@ func main() {
 	defer stop()
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	errCh := make(chan error, 5)
+	errCh := make(chan error, 6)
 	onlineSessions := online.NewRegistry()
 	auditLeases, err := service.NewAuditSessionLeaseService(appStore)
 	if err != nil {
@@ -115,6 +115,12 @@ func main() {
 	}()
 
 	dbGateway := dbproxy.NewGateway(cfg.DatabaseGateway, appStore, cfg.ReplayDir, logger, metadataDB, authorizationService, onlineSessions, appStore)
+	managedGuacd, err := startManagedGuacdRuntime(ctx, cfg, logger)
+	if err != nil {
+		logger.Error("failed to initialize managed guacd", "error", err)
+		os.Exit(1)
+	}
+	monitorManagedGuacd(ctx, errCh, managedGuacd)
 
 	if cfg.Admin.Enabled {
 		if err := startAdminRuntime(
@@ -122,6 +128,9 @@ func main() {
 			browserSessionService, authorizationService, databaseProvisioning,
 			systemSettings, systemSettingsDiagnostics, logger, dataDir, onlineSessions,
 		); err != nil {
+			if closeErr := managedGuacd.Close(); closeErr != nil {
+				logger.Error("failed to stop managed guacd", "error", closeErr)
+			}
 			logger.Error("failed to initialize admin server", "error", err)
 			os.Exit(1)
 		}
@@ -131,16 +140,8 @@ func main() {
 		errCh <- dbGateway.ListenAndServe(ctx)
 	}()
 
-	select {
-	case <-ctx.Done():
-		return
-	case err := <-errCh:
-		if err != nil && ctx.Err() == nil {
-			cancel()
-			logger.Error("server stopped", "error", err)
-			os.Exit(1)
-		}
-		cancel()
-		return
+	if err := waitForRuntime(ctx, cancel, errCh, managedGuacd, logger); err != nil {
+		logger.Error("server stopped", "error", err)
+		os.Exit(1)
 	}
 }

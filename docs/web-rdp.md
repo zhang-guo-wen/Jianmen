@@ -2,7 +2,8 @@
 
 Jianmen 的 Web RDP 使用 Apache Guacamole 的浏览器协议和 `guacd` RDP
 代理。Go 服务仍是唯一控制面，负责用户身份、`host_account`、RBAC、审批、
-一次性票据、会话状态、凭据解密、审计索引和录像访问授权。
+一次性票据、会话状态、凭据解密、审计索引和录像访问授权。默认 Docker 部署将
+Go 程序和固定版本的 `guacd` 放在同一容器中，并由 Go 进程管理其完整生命周期。
 
 ## 数据流
 
@@ -14,14 +15,16 @@ Jianmen Go 控制面
         │ 二次 RBAC / 资源授权 / 审批复核
         │ 服务端下发账号凭据和通道策略
         ▼
-私有网络中的 guacd
+同一容器内托管的 guacd
+        │ 仅监听 127.0.0.1:4822
         │ RDP + 受控虚拟通道
         ▼
 Windows 主机账号
 ```
 
-浏览器不会收到 Windows 账号密码。`guacd` 的 4822 端口不得发布到宿主机或
-公网，只允许 Jianmen 服务访问。
+浏览器不会收到 Windows 账号密码。Go 进程强制以前台模式启动 `guacd`，等待
+4822 就绪、采集日志，并在退出时停止和回收它。`guacd` 只监听同一容器的回环
+地址，Compose 不发布 4822。
 
 ## 权限模型
 
@@ -57,7 +60,8 @@ RBAC 或审批被拒绝，也会保存一条 `denied` 审计会话。
 
 ## 录像
 
-`guacd` 先把 `.guac` 图形录像写入共享临时目录。会话结束后，Jianmen：
+`guacd` 先把 `.guac` 图形录像写入同一容器文件系统中的
+`/app/data/rdp-spool`。会话结束后，Jianmen：
 
 1. 等待 `guacd` 关闭并刷新录像；
 2. 计算 SHA-256 和字节数；
@@ -100,11 +104,17 @@ RBAC 或审批被拒绝，也会保存一条 `denied` 审计会话。
   "web_rdp": {
     "enabled": true,
     "guacd_address": "127.0.0.1:4822",
+    "managed_guacd": {
+      "enabled": true,
+      "binary_path": "/opt/guacamole/sbin/guacd",
+      "work_dir": "/opt/guacamole",
+      "startup_timeout_seconds": 15
+    },
     "connect_timeout_seconds": 15,
-    "spool_dir": "data/rdp-spool",
-    "guacd_recording_root": "data/rdp-spool",
-    "local_drive_root": "data/rdp-drive",
-    "guacd_drive_root": "data/rdp-drive",
+    "spool_dir": "/app/data/rdp-spool",
+    "guacd_recording_root": "/app/data/rdp-spool",
+    "local_drive_root": "/app/data/rdp-drive",
+    "guacd_drive_root": "/app/data/rdp-drive",
     "allow_unrecorded": false
   },
   "object_storage": {
@@ -140,36 +150,58 @@ TLS 由 `secure` 控制。生产环境应保持 `secure: true`，仅在隔离的
 使用明文 S3 连接。`auto_create_bucket` 默认关闭，生产环境应预先创建存储桶并
 给 Jianmen 分配只允许该存储桶和前缀所需操作的专用凭据。
 
-`spool_dir` 与 `guacd_recording_root` 必须指向同一共享卷在 Go 容器和 guacd
-容器中的对应路径；虚拟盘两项路径同理。目录只能由这两个服务账号读写。
+托管模式下，`spool_dir` 与 `guacd_recording_root` 使用同一个
+`/app/data/rdp-spool`，虚拟盘两项路径使用同一个 `/app/data/rdp-drive`。
+Go 和 `guacd` 在同一容器内以相同 UID/GID 运行，因此无需独立共享卷。
 
 ## Docker Compose
 
-仓库中的 `docker-compose.web-rdp.yml` 提供 Jianmen 与
-`guacamole/guacd:1.6.0` 的最小组合，且不发布 4822 端口：
+仓库中的 `docker-compose.web-rdp.yml` 装配并运行一个同时包含 Jianmen 和
+`guacd` 的镜像。Dockerfile 基于以下不可变运行层：
 
-```bash
-docker volume create jianmen-certs
-# 先按 README 生成管理端和数据库网关证书
-docker compose -f docker-compose.web-rdp.yml up -d --build
+```text
+guacamole/guacd:1.6.0
+sha256:8974eaa9ba32f713daf311e7cc8cd7e4cdfba1edea39eed75524e78ef4b08f4f
 ```
+
+部署顺序不能省略：
+
+1. 在 Windows PowerShell 的仓库根目录执行 `.\build.ps1`，生成
+   `dist/bastion-core-linux-amd64`。
+2. 在 WSL Docker 中按 README 的证书步骤创建并填充外部卷
+   `jianmen-certs`。
+3. 在 WSL 的仓库根目录执行：
+
+   ```bash
+   docker compose -f docker-compose.web-rdp.yml up -d --build
+   ```
+
+Dockerfile 只把预编译的 Linux amd64 程序装配到固定 guacd 运行层，不在 Docker
+构建阶段重新下载 Go/npm 依赖。Compose 中一次性的 `volume-init` 只初始化数据
+卷权限，运行时的 Go 和 `guacd` 都位于 `jianmen` 服务容器中。
 
 示例使用文件系统对象存储，适合单机验收。生产环境应复制
 `config.docker.web-rdp.example.json`，切换为 S3 配置，通过只读挂载或密钥
 管理系统提供凭据。文件系统模式的 `/app/data/objects` 位于 `jianmen-data`
 持久卷中，不适合作为多实例共享存储；单机使用时也必须把该卷纳入备份。
 
-Compose 中两个共享卷的容器路径如下，路径必须与
+同一容器内两个进程使用完全相同的路径，必须与
 `config.docker.web-rdp.example.json` 保持一致：
 
-| 用途 | Jianmen | guacd |
+| 用途 | Go 进程 | guacd 进程 |
 |---|---|---|
-| 录像临时目录 | `/shared/recordings` | `/shared/recordings` |
-| 虚拟盘目录 | `/shared/drive` | `/shared/drive` |
+| 录像临时目录 | `/app/data/rdp-spool` | `/app/data/rdp-spool` |
+| 虚拟盘目录 | `/app/data/rdp-drive` | `/app/data/rdp-drive` |
 
-`guacd` 仅使用 Compose 的 `expose` 向内部网络声明 4822，不配置宿主机
-`ports` 映射。若需要跨主机部署，应通过防火墙或安全组只允许 Jianmen
-服务访问 guacd，并继续禁止公网入口。
+托管模式通过 `managed_guacd` 启动 `/opt/guacamole/sbin/guacd`，并从
+`guacd_address` 强制生成 `-f -b <回环地址> -l <端口> -L info`。它不需要
+sidecar、独立共享卷、Compose 内部网络
+或 4822 端口映射。
+
+如需复用外部 `guacd`，可将 `managed_guacd.enabled` 设为 `false`，并把
+`guacd_address` 改为其私有地址。外部模式下应通过防火墙或安全组只允许
+Jianmen 访问 4822，禁止发布到公网；录像与虚拟盘路径也必须在两个运行环境中
+映射到同一持久存储。
 
 ## Windows 目标要求
 

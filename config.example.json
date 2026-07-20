@@ -67,6 +67,12 @@
   "web_rdp": {
     "enabled": false,
     "guacd_address": "127.0.0.1:4822",
+    "managed_guacd": {
+      "enabled": false,
+      "binary_path": "tools/guacd/1.6.0/sbin/guacd",
+      "work_dir": "",
+      "startup_timeout_seconds": 15
+    },
     "connect_timeout_seconds": 15,
     "spool_dir": "data/rdp-spool",
     "guacd_recording_root": "data/rdp-spool",

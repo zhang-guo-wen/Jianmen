@@ -10,7 +10,8 @@ web/dist
 internal/frontend/dist
 
 bin
-dist
+dist/*
+!dist/bastion-core-linux-amd64
 data
 logs
 

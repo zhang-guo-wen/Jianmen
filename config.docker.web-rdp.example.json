@@ -68,12 +68,18 @@
   },
   "web_rdp": {
     "enabled": true,
-    "guacd_address": "guacd:4822",
+    "guacd_address": "127.0.0.1:4822",
+    "managed_guacd": {
+      "enabled": true,
+      "binary_path": "/opt/guacamole/sbin/guacd",
+      "work_dir": "/opt/guacamole",
+      "startup_timeout_seconds": 15
+    },
     "connect_timeout_seconds": 15,
-    "spool_dir": "/shared/recordings",
-    "guacd_recording_root": "/shared/recordings",
-    "local_drive_root": "/shared/drive",
-    "guacd_drive_root": "/shared/drive",
+    "spool_dir": "/app/data/rdp-spool",
+    "guacd_recording_root": "/app/data/rdp-spool",
+    "local_drive_root": "/app/data/rdp-drive",
+    "guacd_drive_root": "/app/data/rdp-drive",
     "allow_unrecorded": false
   },
   "object_storage": {

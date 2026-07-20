@@ -37,6 +37,19 @@ func TestPermissionCatalogContainsEveryAction(t *testing.T) {
 	}
 }
 
+func TestAIPermissionCatalogUsesReadableChineseMetadata(t *testing.T) {
+	item, ok := FindPermissionDefinition(ActionAIManage)
+	if !ok {
+		t.Fatal("AI permission catalog entry is missing")
+	}
+	if item.Label != "AI 授权" {
+		t.Fatalf("AI permission label = %q, want %q", item.Label, "AI 授权")
+	}
+	if item.Description != "签发和撤销 AI 访问令牌" {
+		t.Fatalf("AI permission description = %q, want %q", item.Description, "签发和撤销 AI 访问令牌")
+	}
+}
+
 func TestPermissionCatalogReturnsDefensiveCopies(t *testing.T) {
 	items := PermissionCatalog()
 	items[0].Action = "changed"

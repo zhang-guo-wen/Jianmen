@@ -86,6 +86,7 @@ test('ConnectionConfigDialog props use Vue-normalized casing', () => {
 
   assert.ok(/allowSsh\?: boolean/.test(componentSource));
   assert.ok(/allowSftp\?: boolean/.test(componentSource));
+  assert.ok(/allowWebSql\?: boolean/.test(componentSource));
   assert.equal(/allowSSH/.test(componentSource), false);
   assert.equal(/allowSFTP/.test(componentSource), false);
 
@@ -143,7 +144,7 @@ test('database connection dialog hides TLS metadata and setup controls while kee
 
 test('ConnectionConfigDialog call sites keep kebab-case attrs', () => {
   const callers = [
-    { file: new URL('../views/DatabaseView.vue', import.meta.url), expected: [':allow-ssh='] },
+    { file: new URL('../views/DatabaseView.vue', import.meta.url), expected: [':allow-ssh=', ':allow-web-sql='] },
     { file: new URL('../views/HostsView.vue', import.meta.url), expected: [':allow-ssh=', ':allow-sftp='] },
   ];
 
@@ -158,4 +159,12 @@ test('ConnectionConfigDialog call sites keep kebab-case attrs', () => {
     }
     assert.ok(/:allow-(ssh|sftp)=/.test(viewSource), `missing kebab prop in ${caller.file}`);
   }
+});
+
+test('SQL console stays routable but is hidden from the primary sidebar', () => {
+  const navigationSource = readFileSync(new URL('../navigation.ts', import.meta.url), 'utf8');
+  const appSource = readFileSync(new URL('../App.vue', import.meta.url), 'utf8');
+
+  assert.match(navigationSource, /key:\s*'sqlConsole'[\s\S]*?hidden:\s*true/);
+  assert.match(appSource, /!item\.hidden\s*&&\s*permission\.canAccessMenu\(item\.key\)/);
 });

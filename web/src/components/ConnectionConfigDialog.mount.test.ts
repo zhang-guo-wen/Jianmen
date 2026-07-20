@@ -208,7 +208,7 @@ async function mountDialog(allowSsh: boolean, allowSftp: boolean): Promise<Dialo
   return wrapper;
 }
 
-async function mountDatabaseDialog(protocol = 'postgres'): Promise<DialogWrapper> {
+async function mountDatabaseDialog(protocol = 'postgres', allowWebSql = true): Promise<DialogWrapper> {
   const wrapper = mount(ConnectionConfigDialog, {
     props: {
       modelValue: false,
@@ -222,6 +222,7 @@ async function mountDatabaseDialog(protocol = 'postgres'): Promise<DialogWrapper
       sourceAddress: 'db.internal:5432',
       sourceAccount: 'reporter',
       protocol,
+      allowWebSql,
     },
     global: {
       stubs: {
@@ -288,6 +289,29 @@ describe('ConnectionConfigDialog permission controls', () => {
 });
 
 describe('ConnectionConfigDialog database local client', () => {
+  it('opens the Web SQL console with the selected database account', async () => {
+    const wrapper = await mountDatabaseDialog();
+
+    await wrapper.get('[data-testid="database-web-sql"]').trigger('click');
+
+    assert.deepEqual(mocks.routerPush.mock.calls.at(-1)?.[0], {
+      path: '/sql-console',
+      query: { database_account_id: 'database-account-1' },
+    });
+    assert.deepEqual(wrapper.emitted('update:modelValue')?.at(-1), [false]);
+    wrapper.unmount();
+  });
+
+  it('hides the Web SQL entry without permission or for Redis accounts', async () => {
+    const unauthorizedWrapper = await mountDatabaseDialog('postgres', false);
+    assertVisibility(unauthorizedWrapper, 'database-web-sql', false);
+    unauthorizedWrapper.unmount();
+
+    const redisWrapper = await mountDatabaseDialog('redis', true);
+    assertVisibility(redisWrapper, 'database-web-sql', false);
+    redisWrapper.unmount();
+  });
+
   it('redirects to local client settings when DBeaver is not configured', async () => {
     const wrapper = await mountDatabaseDialog();
 

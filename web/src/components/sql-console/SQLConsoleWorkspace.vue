@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { computed, onMounted } from 'vue';
+import { useRoute } from 'vue-router';
 
 import { ApiError } from '@/api/client';
 import { useSQLConsole } from '@/composables/useSQLConsole';
@@ -9,6 +10,12 @@ import { useI18n } from '@/i18n';
 import SQLEditorPanel from './SQLEditorPanel.vue';
 import SQLConsoleToolbar from './SQLConsoleToolbar.vue';
 import SQLResultPanel from './SQLResultPanel.vue';
+
+const route = useRoute();
+const requestedAccountId = computed(() => {
+  const value = route.query.database_account_id;
+  return Array.isArray(value) ? String(value[0] ?? '') : String(value ?? '');
+});
 
 const {
   accounts,
@@ -22,7 +29,7 @@ const {
   loadAccounts,
   execute,
   cancel,
-} = useSQLConsole();
+} = useSQLConsole({ requestedAccountId });
 const { t } = useI18n();
 
 const executionDisabled = computed(

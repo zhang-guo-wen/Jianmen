@@ -19,6 +19,7 @@ export interface AppNavigationItem {
   key: string;
   path: string;
   name: string;
+  hidden?: boolean;
   icon: Component;
   labelKey: TranslationKey;
   titleKey: TranslationKey;
@@ -41,6 +42,7 @@ export const APP_NAV_ITEMS: AppNavigationItem[] = [
     key: 'sqlConsole',
     path: '/sql-console',
     name: 'sql-console',
+    hidden: true,
     icon: DataLine,
     labelKey: 'nav.sqlConsole',
     titleKey: 'route.sqlConsole.title',

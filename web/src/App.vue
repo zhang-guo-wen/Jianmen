@@ -98,7 +98,7 @@ const activePath = computed(() => route.path);
 const permission = usePermissionStore();
 const preferences = usePreferencesStore();
 const navItems = computed(() =>
-  APP_NAV_ITEMS.filter((item) => permission.canAccessMenu(item.key)),
+  APP_NAV_ITEMS.filter((item) => !item.hidden && permission.canAccessMenu(item.key)),
 );
 
 onMounted(async () => {

@@ -1,4 +1,13 @@
-import { computed, readonly, ref, shallowReadonly, shallowRef } from 'vue';
+import {
+  computed,
+  readonly,
+  ref,
+  shallowReadonly,
+  shallowRef,
+  toValue,
+  watch,
+  type MaybeRefOrGetter,
+} from 'vue';
 
 import {
   ApiError,
@@ -7,7 +16,11 @@ import {
   type SQLConsoleResult,
 } from '@/api/client';
 
-export function useSQLConsole() {
+export interface UseSQLConsoleOptions {
+  requestedAccountId?: MaybeRefOrGetter<string>;
+}
+
+export function useSQLConsole(options: UseSQLConsoleOptions = {}) {
   const accounts = ref<DBAccountRecord[]>([]);
   const accountId = shallowRef('');
   const database = shallowRef('');
@@ -21,6 +34,26 @@ export function useSQLConsole() {
   const selectedAccount = computed(
     () => accounts.value.find(account => account.id === accountId.value) ?? null,
   );
+  const requestedAccountId = computed(() => (
+    options.requestedAccountId ? String(toValue(options.requestedAccountId) ?? '').trim() : ''
+  ));
+
+  function applyRequestedAccount(): void {
+    const requested = requestedAccountId.value;
+    if (!requested) {
+      if (!accounts.value.some(account => account.id === accountId.value)) {
+        accountId.value = String(accounts.value[0]?.id ?? '');
+      }
+      return;
+    }
+    if (accounts.value.some(account => account.id === requested)) {
+      accountId.value = requested;
+      error.value = '';
+      return;
+    }
+    accountId.value = '';
+    error.value = '指定的数据库账号不可用或无连接权限';
+  }
 
   async function loadAccounts() {
     loadingAccounts.value = true;
@@ -35,9 +68,7 @@ export function useSQLConsole() {
         const protocol = account.instance_protocol?.toLowerCase();
         return protocol === 'mysql' || protocol === 'postgres' || protocol === 'postgresql';
       });
-      if (!accounts.value.some(account => account.id === accountId.value)) {
-        accountId.value = String(accounts.value[0]?.id ?? '');
-      }
+      applyRequestedAccount();
     } catch (cause) {
       error.value = cause instanceof Error ? cause.message : '加载数据库账号失败';
     } finally {
@@ -78,6 +109,10 @@ export function useSQLConsole() {
   function cancel() {
     activeController.value?.abort();
   }
+
+  watch(requestedAccountId, () => {
+    if (accounts.value.length > 0) applyRequestedAccount();
+  });
 
   return {
     accounts: readonly(accounts),

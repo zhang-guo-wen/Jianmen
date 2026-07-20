@@ -100,6 +100,14 @@
       <el-button data-testid="ssh-local-client" v-if="resourceType === 'host' && allowSsh" type="primary" :disabled="!connectionTestResult?.ok || sshIdentityBlocked" :loading="preferences.loading" @click="openPreferredSSHClient">本地 SSH 客户端打开</el-button>
       <el-button data-testid="ssh-browser" v-if="resourceType === 'host' && allowSsh" type="primary" :disabled="!connectionTestResult?.ok || sshIdentityBlocked" @click="openInBrowser">在浏览器中打开</el-button>
       <el-button
+        v-if="resourceType === 'database' && !isRedis && allowWebSql"
+        data-testid="database-web-sql"
+        type="primary"
+        @click="openSQLConsole"
+      >
+        Web SQL 控制台
+      </el-button>
+      <el-button
         v-if="resourceType === 'database' && !isRedis"
         data-testid="database-local-client"
         type="primary"
@@ -275,8 +283,9 @@ const props = withDefaults(defineProps<{
   protocol?: string;
   allowSsh?: boolean;
   allowSftp?: boolean;
+  allowWebSql?: boolean;
 }>(), {
-  resourceName: '', sourceAddress: '', sourceAccount: '', protocol: 'mysql', allowSsh: true, allowSftp: false,
+  resourceName: '', sourceAddress: '', sourceAccount: '', protocol: 'mysql', allowSsh: true, allowSftp: false, allowWebSql: false,
 });
 
 const emit = defineEmits<{
@@ -626,6 +635,19 @@ function openInBrowser() {
   if (!targetID) return;
   visible.value = false;
   router.push({ path: '/web-terminal', query: { target_id: targetID } });
+}
+
+function openSQLConsole() {
+  const accountID = String(props.target?.id || '').trim();
+  if (!accountID) {
+    ElMessage.warning('缺少数据库账号，无法打开 Web SQL 控制台');
+    return;
+  }
+  visible.value = false;
+  void router.push({
+    path: '/sql-console',
+    query: { database_account_id: accountID },
+  });
 }
 
 function openDatabaseClientSettings() {

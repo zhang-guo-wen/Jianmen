@@ -270,6 +270,7 @@
       :source-account="String(connectTarget?.username || '')"
       :protocol="String(selectedInstance?.protocol || 'mysql')"
       :allow-ssh="false"
+      :allow-web-sql="permission.canDo('db:query') || permission.canDo('db:execute')"
     />
   </div>
 </template>

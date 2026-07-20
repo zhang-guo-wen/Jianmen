@@ -13,6 +13,17 @@ test('encodes Guacamole lengths as Unicode codepoints', () => {
   );
 });
 
+test('encodes Guacamole boolean parameters as protocol integers', () => {
+  assert.equal(
+    encodeGuacamoleInstruction(['key', 97, true]),
+    '3.key,2.97,1.1;',
+  );
+  assert.equal(
+    encodeGuacamoleInstruction(['key', 97, false]),
+    '3.key,2.97,1.0;',
+  );
+});
+
 test('parses supplementary Unicode split across packets', () => {
   const parser = new UnicodeGuacamoleParser();
   const instructions: Array<[string, string[]]> = [];

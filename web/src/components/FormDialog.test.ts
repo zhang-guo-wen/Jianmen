@@ -119,3 +119,19 @@ test('host and database account creation forms keep expiry controls concise', ()
     /createDBAccount\([\s\S]*?expires_at:\s*undefined/,
   );
 });
+
+test('database instance name is optional, advanced, and defaults to its address', () => {
+  const databaseSource = source('views/DatabaseView.vue');
+  const dialogStart = databaseSource.indexOf(':title="editingInstance');
+  const dialogEnd = databaseSource.indexOf('</FormDialog>', dialogStart);
+  const dialogSource = databaseSource.slice(dialogStart, dialogEnd);
+
+  const moreSettingsStart = dialogSource.indexOf('title="更多设置"');
+  const nameFieldStart = dialogSource.indexOf('<el-form-item label="名称">');
+  assert.ok(moreSettingsStart >= 0 && nameFieldStart > moreSettingsStart);
+  assert.doesNotMatch(dialogSource, /<el-form-item label="名称" required>/);
+  assert.match(dialogSource, /placeholder="默认 = 上游地址"/);
+  assert.match(databaseSource, /const instanceNameTouched = ref\(false\)/);
+  assert.match(databaseSource, /function syncDefaultInstanceName\(\)/);
+  assert.match(databaseSource, /name:\s*instanceForm\.name\.trim\(\) \|\| defaultInstanceName\(\)/);
+});

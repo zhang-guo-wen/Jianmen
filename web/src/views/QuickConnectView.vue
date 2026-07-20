@@ -1299,7 +1299,7 @@ onMounted(() => {
 }
 
 .database-card__actions {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   padding-top: 8px;
 }
 

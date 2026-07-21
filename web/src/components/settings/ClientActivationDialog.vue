@@ -21,7 +21,7 @@ const emit = defineEmits<{
     destroy-on-close
     @update:model-value="emit('update:modelValue', $event)"
   >
-    <p class="activation-copy">请执行协议注册命令，激活本地客户端</p>
+    <p class="activation-copy">请在CMD终端执行协议注册命令，激活本地客户端</p>
     <el-input
       data-testid="client-activation-command"
       type="textarea"

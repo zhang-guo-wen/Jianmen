@@ -54,7 +54,7 @@ describe('ClientActivationDialog', () => {
       },
     });
 
-    expect(wrapper.text()).toContain('请执行协议注册命令，激活本地客户端');
+    expect(wrapper.text()).toContain('请在CMD终端执行协议注册命令，激活本地客户端');
     expect(wrapper.get('[data-testid="client-activation-command"]').attributes('readonly')).toBeDefined();
 
     await wrapper.get('[data-testid="client-activation-copy"]').trigger('click');

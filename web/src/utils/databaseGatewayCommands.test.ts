@@ -459,7 +459,7 @@ test('settings exposes local-only database client registration and never stores 
   assert.match(settingsSource, /data-testid="settings-save-database"/);
   assert.match(activationDialogSource, /复制命令/);
   assert.match(activationDialogSource, /已激活/);
-  assert.match(activationDialogSource, /请执行协议注册命令，激活本地客户端/);
+  assert.match(activationDialogSource, /请在CMD终端执行协议注册命令，激活本地客户端/);
   assert.doesNotMatch(settingsSource, /我已执行命令，保存到浏览器/);
   assert.doesNotMatch(settingsSource, /复制协议注册命令/);
   assert.match(settingsSource, /设置数据库快速连接使用的数据库客户端/);

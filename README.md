@@ -75,6 +75,8 @@ Windows 本地模式使用仓库的 `data/` 目录；WSL 容器模式使用 Dock
 
 ### Docker 部署
 
+默认镜像使用 Lite 变体，也就是无后缀版本标签或 `latest`：
+
 ```shell
 docker run -d \
   --name jianmen \
@@ -84,6 +86,19 @@ docker run -d \
   -p 47110-47199:47110-47199 \
   -v jianmen-data:/app/data \
   ghcr.io/zhang-guo-wen/jianmen:latest
+```
+
+如需浏览器远程桌面，请改用同版本的 `-rdp` 标签：
+
+```shell
+docker run -d \
+  --name jianmen-rdp \
+  --restart unless-stopped \
+  -p 127.0.0.1:47100:47100 \
+  -p 33060:33060 \
+  -p 47110-47199:47110-47199 \
+  -v jianmen-data:/app/data \
+  ghcr.io/zhang-guo-wen/jianmen:vX.Y.Z-rdp
 ```
 
 | 端口 | 用途 |

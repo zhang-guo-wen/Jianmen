@@ -20,4 +20,9 @@ for arch in amd64 arm64; do
   CGO_ENABLED=0 GOOS=linux GOARCH="$arch" \
     go build -trimpath -ldflags="-s -w" \
     -o "dist/jianmen-linux-${arch}-lite" ./cmd/jianmen
-done
+
+  "$ROOT/scripts/build/prepare-guacd-runtime.sh" "$arch"
+  CGO_ENABLED=0 GOOS=linux GOARCH="$arch" \
+    go build -tags embedded_guacd -trimpath -ldflags="-s -w" \
+    -o "dist/jianmen-linux-${arch}-rdp" ./cmd/jianmen
+ done

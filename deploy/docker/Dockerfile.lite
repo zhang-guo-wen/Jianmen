@@ -1,0 +1,31 @@
+FROM alpine:3.22
+
+ARG TARGETARCH
+
+LABEL org.opencontainers.image.source="https://github.com/zhang-guo-wen/Jianmen"
+LABEL org.opencontainers.image.description="Jianmen bastion host (lite)"
+LABEL org.opencontainers.image.licenses="MIT"
+
+RUN apk add --no-cache su-exec wget \
+    && addgroup -S -g 10001 jianmen \
+    && adduser -S -D -H -u 10001 -G jianmen jianmen \
+    && mkdir -p /app/data \
+    && chown -R jianmen:jianmen /app
+
+WORKDIR /app
+
+COPY --chown=jianmen:jianmen --chmod=0555 dist/jianmen-linux-${TARGETARCH}-lite /app/jianmen
+COPY --chown=jianmen:jianmen --chmod=0444 configs/config.docker.json /app/config.json
+COPY --chmod=0555 deploy/docker/docker-entrypoint.sh /usr/local/bin/jianmen-entrypoint
+
+VOLUME ["/app/data"]
+
+EXPOSE 47100 47102 33060 33061 33062 33063 47110-47199
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD wget -q -O /dev/null http://127.0.0.1:47100/api/init/status || exit 1
+
+STOPSIGNAL SIGTERM
+
+ENTRYPOINT ["/usr/local/bin/jianmen-entrypoint"]
+CMD ["/app/jianmen", "-config", "/app/config.json", "-disable-web-rdp"]

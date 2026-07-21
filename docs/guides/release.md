@@ -4,11 +4,23 @@
 
 普通分支推送和拉取请求只执行 CI 检查，不会发布容器镜像或 GitHub Release。推送
 `v1.2.3`、`v1.2.3-rc.1` 这类语义化版本 Tag 后，发布流程会生成多架构容器镜像和
-版本压缩包。镜像支持 `linux/amd64` 和 `linux/arm64`。只有正式版本 Tag 会更新
-`latest`，预发布版本不会更新该标签。
+版本压缩包。镜像支持 `linux/amd64` 和 `linux/arm64`。
+
+容器镜像自动发布以下两类变体：
+
+- Lite：默认镜像，不带 Web RDP 运行时
+- RDP：带 Web RDP / guacd 运行时
+
+标签规则如下：
+
+- `vX.Y.Z` 等价于 `vX.Y.Z-lite`
+- `vX.Y.Z-rdp` 表示带远程桌面运行时的镜像
+- 只有 Lite 会更新 `latest`
+- 预发布版本不会更新 `latest`，也不会生成 `major.minor` 兼容标签
 
 默认部署不需要准备或挂载证书。管理端在容器内提供 HTTP，生产环境应由 Nginx、Caddy
-等反向代理终止 HTTPS；本地评估时只将管理端端口绑定到宿主机回环地址：
+等反向代理终止 HTTPS；本地评估时只将管理端端口绑定到宿主机回环地址。默认示例使用
+Lite 镜像，也就是无后缀版本标签或 `latest`：
 
 ```bash
 docker run -d \
@@ -20,6 +32,20 @@ docker run -d \
   -p 47110-47199:47110-47199 \
   -v jianmen-data:/app/data \
   ghcr.io/zhang-guo-wen/jianmen:latest
+```
+
+如需浏览器远程桌面，请改用同版本的 `-rdp` 标签，例如：
+
+```bash
+docker run -d \
+  --name jianmen-rdp \
+  --restart unless-stopped \
+  -p 127.0.0.1:47100:47100 \
+  -p 47102:47102 \
+  -p 33060:33060 \
+  -p 47110-47199:47110-47199 \
+  -v jianmen-data:/app/data \
+  ghcr.io/zhang-guo-wen/jianmen:vX.Y.Z-rdp
 ```
 
 容器默认入口如下：

@@ -132,7 +132,6 @@ func AllModels() []any {
 		&AuditSSHCommand{},
 		&AuditDBQuery{},
 		&AuditSFTPEvent{},
-		&AccessRequest{},
 	}
 }
 
@@ -162,4 +161,3 @@ func (m *AuditRDPChannelEvent) BeforeCreate(_ *gorm.DB) error {
 func (m *AuditSSHCommand) BeforeCreate(_ *gorm.DB) error { return ensureID(&m.ID) }
 func (m *AuditDBQuery) BeforeCreate(_ *gorm.DB) error    { return ensureID(&m.ID) }
 func (m *AuditSFTPEvent) BeforeCreate(_ *gorm.DB) error  { return ensureID(&m.ID) }
-func (m *AccessRequest) BeforeCreate(_ *gorm.DB) error   { return ensureID(&m.ID) }

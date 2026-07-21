@@ -35,7 +35,6 @@ func (s *DBStore) WebRDPTarget(ctx context.Context, targetID string) (service.We
 		Security:               normalizedRDPSecurity(account.RDPSecurity),
 		IgnoreCertificate:      account.RDPIgnoreCertificate,
 		CertificateFingerprint: strings.TrimSpace(account.RDPCertFingerprints),
-		ApprovalRequired:       account.RDPApprovalRequired,
 		ClipboardRead:          account.RDPClipboardRead,
 		ClipboardWrite:         account.RDPClipboardWrite,
 		FileUpload:             account.RDPFileUpload,

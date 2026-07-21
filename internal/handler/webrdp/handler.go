@@ -152,19 +152,6 @@ func (h *Handler) CreateTicket(
 		writeError(w, http.StatusBadRequest, "invalid RDP target or display dimensions")
 		return
 	}
-	plan, err := h.control.Plan(r.Context(), subject.UserID, input.TargetID)
-	if err != nil {
-		h.recordDenied(
-			r,
-			subject,
-			browser,
-			input.TargetID,
-			"",
-			err,
-		)
-		writeControlError(w, err, service.WebRDPPlan{})
-		return
-	}
 	connection, err := h.control.Authorize(r.Context(), subject.UserID, input.TargetID)
 	if err != nil {
 		h.recordDenied(
@@ -175,7 +162,7 @@ func (h *Handler) CreateTicket(
 			"",
 			err,
 		)
-		writeControlError(w, err, plan)
+		writeControlError(w, err)
 		return
 	}
 	connectionID := model.NewID()
@@ -189,9 +176,7 @@ func (h *Handler) CreateTicket(
 	}
 	writeJSON(w, http.StatusCreated, map[string]any{
 		"ticket": ticket, "target_id": connection.Plan.TargetID,
-		"effective_policy":  connection.Plan.EffectivePolicy,
-		"approval_id":       connection.Plan.AccessRequestID,
-		"access_expires_at": connection.Plan.AccessExpiresAt,
+		"effective_policy": connection.Plan.EffectivePolicy,
 	})
 }
 
@@ -209,9 +194,6 @@ func (h *Handler) recordDenied(
 	failureCode := ""
 	failureMessage := ""
 	switch {
-	case errors.Is(authorizationErr, service.ErrWebRDPApprovalRequired):
-		failureCode = "approval_required"
-		failureMessage = "RDP approval is required"
 	case errors.Is(authorizationErr, service.ErrWebRDPNotAuthorized):
 		failureCode = "rbac_denied"
 		failureMessage = "RDP access is not authorized"
@@ -293,14 +275,8 @@ func validDisplay(width, height, dpi int) bool {
 		dpi >= 48 && dpi <= 480
 }
 
-func writeControlError(w http.ResponseWriter, err error, plan service.WebRDPPlan) {
+func writeControlError(w http.ResponseWriter, err error) {
 	switch {
-	case errors.Is(err, service.ErrWebRDPApprovalRequired):
-		writeAPIError(w, http.StatusConflict, "RDP_APPROVAL_REQUIRED", "RDP approval is required", map[string]any{
-			"approval_required": true,
-			"target_id":         plan.TargetID,
-			"required_actions":  plan.RequiredActions,
-		})
 	case errors.Is(err, service.ErrWebRDPNotAuthorized):
 		writeError(w, http.StatusForbidden, "RDP access is not authorized")
 	case errors.Is(err, service.ErrWebRDPUnavailable):

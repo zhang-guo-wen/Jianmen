@@ -3,7 +3,6 @@ package admin
 import (
 	"net/http"
 
-	"jianmen/internal/handler/accessrequest"
 	"jianmen/internal/handler/webrdp"
 )
 
@@ -46,26 +45,6 @@ func (s *Server) handleRDPAuditItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.webRDP.AuditItem(w, r, webrdp.AuthenticatedSubject{
-		UserID: userIDFromRequest(r), Username: usernameFromRequest(r),
-	})
-}
-
-func (s *Server) handleAccessRequests(w http.ResponseWriter, r *http.Request) {
-	if s.accessRequests == nil {
-		s.writeErrorText(w, r, http.StatusServiceUnavailable, "RDP approval is unavailable")
-		return
-	}
-	s.accessRequests.Collection(w, r, accessrequest.Subject{
-		UserID: userIDFromRequest(r), Username: usernameFromRequest(r),
-	})
-}
-
-func (s *Server) handleAccessRequest(w http.ResponseWriter, r *http.Request) {
-	if s.accessRequests == nil {
-		s.writeErrorText(w, r, http.StatusServiceUnavailable, "RDP approval is unavailable")
-		return
-	}
-	s.accessRequests.Item(w, r, accessrequest.Subject{
 		UserID: userIDFromRequest(r), Username: usernameFromRequest(r),
 	})
 }

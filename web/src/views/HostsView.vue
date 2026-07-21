@@ -479,10 +479,6 @@
               </div>
             </el-form-item>
             <template v-if="selectedHostProtocol === 'rdp'">
-              <el-form-item label="连接审批">
-                <el-switch v-model="accountForm.rdp_approval_required" />
-                <span class="inline-help">开启后，每次连接必须先取得有效审批</span>
-              </el-form-item>
               <el-form-item label="通道权限">
                 <div class="rdp-policy-grid">
                   <label>
@@ -635,7 +631,6 @@ interface AccountForm {
   rdp_security: RDPSecurity;
   rdp_ignore_certificate: boolean;
   rdp_cert_fingerprints: string;
-  rdp_approval_required: boolean;
   rdp_clipboard_read: boolean;
   rdp_clipboard_write: boolean;
   rdp_file_upload: boolean;
@@ -1112,7 +1107,6 @@ function emptyAccountForm(): AccountForm {
     rdp_security: "any",
     rdp_ignore_certificate: false,
     rdp_cert_fingerprints: "",
-    rdp_approval_required: false,
     rdp_clipboard_read: false,
     rdp_clipboard_write: false,
     rdp_file_upload: false,
@@ -1162,7 +1156,6 @@ function recordToAccountForm(target: TargetRecord): AccountForm {
     rdp_security: normalizeRDPSecurity(target.rdp_security),
     rdp_ignore_certificate: target.rdp_ignore_certificate === true,
     rdp_cert_fingerprints: stringFrom(target.rdp_cert_fingerprints),
-    rdp_approval_required: target.rdp_approval_required === true,
     rdp_clipboard_read: target.rdp_clipboard_read === true,
     rdp_clipboard_write: target.rdp_clipboard_write === true,
     rdp_file_upload: target.rdp_file_upload === true,
@@ -1242,8 +1235,6 @@ function buildAccountPayload(): TargetPayload {
       protocol === "rdp" && !accountForm.rdp_ignore_certificate
         ? accountForm.rdp_cert_fingerprints.trim()
         : "",
-    rdp_approval_required:
-      protocol === "rdp" && accountForm.rdp_approval_required,
     rdp_clipboard_read: protocol === "rdp" && accountForm.rdp_clipboard_read,
     rdp_clipboard_write: protocol === "rdp" && accountForm.rdp_clipboard_write,
     rdp_file_upload: protocol === "rdp" && accountForm.rdp_file_upload,
@@ -1290,7 +1281,6 @@ function targetStatusPayload(
     rdp_security: normalizeRDPSecurity(target.rdp_security),
     rdp_ignore_certificate: target.rdp_ignore_certificate === true,
     rdp_cert_fingerprints: stringFrom(target.rdp_cert_fingerprints).trim(),
-    rdp_approval_required: target.rdp_approval_required === true,
     rdp_clipboard_read: target.rdp_clipboard_read === true,
     rdp_clipboard_write: target.rdp_clipboard_write === true,
     rdp_file_upload: target.rdp_file_upload === true,

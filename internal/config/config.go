@@ -146,7 +146,6 @@ type Target struct {
 	RDPSecurity           string `json:"rdp_security"`
 	RDPIgnoreCertificate  bool   `json:"rdp_ignore_certificate"`
 	RDPCertFingerprints   string `json:"rdp_cert_fingerprints"`
-	RDPApprovalRequired   bool   `json:"rdp_approval_required"`
 	RDPClipboardRead      bool   `json:"rdp_clipboard_read"`
 	RDPClipboardWrite     bool   `json:"rdp_clipboard_write"`
 	RDPFileUpload         bool   `json:"rdp_file_upload"`

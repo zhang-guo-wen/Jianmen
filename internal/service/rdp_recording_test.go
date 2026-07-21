@@ -209,7 +209,7 @@ func validBeginRDPAuditInput() BeginRDPAuditInput {
 			Protocol: "rdp", Address: "10.0.0.8", Port: 3389,
 			Username: "Administrator", Password: "secret",
 		},
-		ClientIP: "192.0.2.8", AccessRequestID: "approval-1",
+		ClientIP: "192.0.2.8",
 		Policy: WebRDPChannelPolicy{
 			ClipboardRead: true,
 			FileUpload:    true,
@@ -242,7 +242,6 @@ func TestRDPRecordingServiceBeginCreatesAuditAndObjectIndexBeforeConnection(t *t
 		session.ResourceType != model.ResourceTypeHostAccount ||
 		session.ResourceID != input.Target.ID ||
 		session.AccountID != input.Target.ID ||
-		session.AccessRequestID != input.AccessRequestID ||
 		session.Outcome != model.AuditOutcomeConnecting ||
 		session.RecordingStatus != model.RecordingStatusPending {
 		t.Fatalf("audit session = %#v", session)

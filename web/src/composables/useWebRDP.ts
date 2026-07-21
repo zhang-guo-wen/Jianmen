@@ -7,7 +7,6 @@ import Guacamole, {
 } from 'guacamole-common-js';
 
 import {
-  ApiError,
   apiClient,
   type WebRDPEffectivePolicy,
   type WebRDPTicketResponse,
@@ -224,9 +223,7 @@ function safeFilename(filename: string) {
 export function useWebRDP({ targetId }: UseWebRDPOptions) {
   const status = ref<WebRDPStatus>('idle');
   const error = ref('');
-  const approvalRequired = ref(false);
   const policy = ref<WebRDPEffectivePolicy>(defaultPolicy());
-  const approvalId = ref('');
   const remoteName = ref('');
   const scale = ref(1);
   const autoFit = ref(true);
@@ -458,14 +455,12 @@ export function useWebRDP({ targetId }: UseWebRDPOptions) {
     destroyConnection();
 
     error.value = '';
-    approvalRequired.value = false;
     remoteName.value = '';
     remoteClipboardText = '';
     remoteClipboardAvailable.value = false;
     uploadProgress.value = 0;
     downloadedFilename.value = '';
     downloadBytes.value = 0;
-    approvalId.value = '';
     policy.value = defaultPolicy();
     driveStatus.value = 'disabled';
     driveName.value = '';
@@ -503,7 +498,6 @@ export function useWebRDP({ targetId }: UseWebRDPOptions) {
         file_download: ticket.effective_policy?.file_download === true,
         drive_mapping: ticket.effective_policy?.drive_mapping === true,
       };
-      approvalId.value = ticket.approval_id || '';
       driveStatus.value = policy.value.drive_mapping ? 'waiting' : 'disabled';
       downloadStatus.value = policy.value.file_download ? 'ready' : 'disabled';
 
@@ -603,14 +597,9 @@ export function useWebRDP({ targetId }: UseWebRDPOptions) {
     } catch (caught) {
       if (generation !== connectionGeneration) return;
       destroyConnection();
-      if (caught instanceof ApiError && caught.code === 'RDP_APPROVAL_REQUIRED') {
-        approvalRequired.value = true;
-      }
-      const message = approvalRequired.value
-        ? '该主机账号需要先完成 RDP 访问审批'
-        : caught instanceof Error
-          ? caught.message
-          : 'Web RDP 连接失败';
+      const message = caught instanceof Error
+        ? caught.message
+        : 'Web RDP 连接失败';
       error.value = message;
       status.value = 'error';
       throw caught;
@@ -707,9 +696,7 @@ export function useWebRDP({ targetId }: UseWebRDPOptions) {
   return {
     status,
     error,
-    approvalRequired,
     policy,
-    approvalId,
     remoteName,
     scale,
     autoFit,

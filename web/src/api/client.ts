@@ -191,7 +191,6 @@ export interface TargetRecord {
   rdp_security?: string;
   rdp_ignore_certificate?: boolean;
   rdp_cert_fingerprints?: string;
-  rdp_approval_required?: boolean;
   rdp_clipboard_read?: boolean;
   rdp_clipboard_write?: boolean;
   rdp_file_upload?: boolean;
@@ -226,7 +225,6 @@ export interface TargetPayload {
   rdp_security?: string;
   rdp_ignore_certificate?: boolean;
   rdp_cert_fingerprints?: string;
-  rdp_approval_required?: boolean;
   rdp_clipboard_read?: boolean;
   rdp_clipboard_write?: boolean;
   rdp_file_upload?: boolean;
@@ -255,8 +253,6 @@ export interface WebRDPTicketResponse {
   ticket: string;
   target_id: string;
   effective_policy: WebRDPEffectivePolicy;
-  approval_id?: string;
-  access_expires_at?: string;
 }
 
 // ── Host ───────────────────────────────────────────────────────────────
@@ -347,34 +343,6 @@ export interface RDPAuditSessionRecord {
   recording_status?: string;
   has_replay: boolean;
   log_count?: number;
-}
-
-export interface AccessRequestRecord {
-  id: string;
-  requester_id: string;
-  resource_type: string;
-  resource_id: string;
-  protocol: string;
-  actions: string[];
-  reason: string;
-  status: 'pending' | 'approved' | 'rejected' | 'cancelled' | string;
-  requested_at: string;
-  access_starts_at?: string;
-  access_expires_at?: string;
-  decided_by?: string;
-  decided_at?: string;
-  decision_remark?: string;
-  cancelled_at?: string;
-}
-
-export interface AccessRequestPayload {
-  resource_type: 'host_account';
-  resource_id: string;
-  protocol: 'rdp';
-  actions: string[];
-  reason: string;
-  access_starts_at?: string;
-  access_expires_at?: string;
 }
 
 export interface OnlineSessionRecord {
@@ -1227,6 +1195,7 @@ export const apiClient = {
   getSessionReplay: (id: string | number) =>
     request<string>(`/api/audit/ssh/${encodeURIComponent(String(id))}/replay`),
   getRDPSessions: (params?: {
+    q?: string;
     user_id?: string;
     account_id?: string;
     from?: string;
@@ -1240,33 +1209,6 @@ export const apiClient = {
     ),
   getRDPRecordingURL: (id: string | number) =>
     `${API_BASE_URL}/api/audit/rdp/${encodeURIComponent(String(id))}/recording`,
-
-  // RDP access approvals
-  getAccessRequests: (params?: {
-    requester_id?: string;
-    resource_type?: string;
-    resource_id?: string;
-    protocol?: string;
-    status?: string;
-    page?: number;
-    page_size?: number;
-  }) =>
-    request<PageResponse<AccessRequestRecord>>(
-      `/api/access-requests${buildQS(params as Record<string, string | number | undefined>)}`
-    ),
-  createAccessRequest: (payload: AccessRequestPayload) =>
-    request<AccessRequestRecord>('/api/access-requests', {
-      method: 'POST',
-      body: JSON.stringify(payload)
-    }),
-  decideAccessRequest: (id: string, decision: 'approve' | 'reject' | 'cancel', remark = '') =>
-    request<AccessRequestRecord>(
-      `/api/access-requests/${encodeURIComponent(id)}/${decision}`,
-      {
-        method: 'POST',
-        body: JSON.stringify({ remark })
-      }
-    ),
 
   // database gateway & instances
   getDBGateway: (protocol = 'mysql') =>

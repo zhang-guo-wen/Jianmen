@@ -77,7 +77,6 @@ type TargetView struct {
 	RDPSecurity           string   `json:"rdp_security,omitempty"`
 	RDPIgnoreCertificate  bool     `json:"rdp_ignore_certificate"`
 	RDPCertFingerprints   string   `json:"rdp_cert_fingerprints,omitempty"`
-	RDPApprovalRequired   bool     `json:"rdp_approval_required"`
 	RDPClipboardRead      bool     `json:"rdp_clipboard_read"`
 	RDPClipboardWrite     bool     `json:"rdp_clipboard_write"`
 	RDPFileUpload         bool     `json:"rdp_file_upload"`
@@ -109,7 +108,6 @@ type TargetConfig struct {
 	RDPSecurity           string
 	RDPIgnoreCertificate  bool
 	RDPCertFingerprints   string
-	RDPApprovalRequired   bool
 	RDPClipboardRead      bool
 	RDPClipboardWrite     bool
 	RDPFileUpload         bool

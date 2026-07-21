@@ -75,7 +75,6 @@ type AuditSession struct {
 	ResourceID      string              `json:"resource_id,omitempty"`
 	HostID          string              `json:"host_id,omitempty"`
 	AccountID       string              `json:"account_id,omitempty"`
-	AccessRequestID string              `json:"access_request_id,omitempty"`
 	TargetName      string              `json:"target_name"`
 	TargetAddress   string              `json:"target_address"`
 	AccountName     string              `json:"account_name"`

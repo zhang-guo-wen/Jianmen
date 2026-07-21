@@ -19,8 +19,8 @@ import {
 } from '@/utils/guacamoleProtocol';
 import {
   calculateFitScale,
-  hasScaleChanged,
   isSameViewport,
+  shouldApplyScale,
   type WebRDPViewport,
 } from '@/utils/webRDPViewport';
 
@@ -249,6 +249,9 @@ export function useWebRDP({ targetId }: UseWebRDPOptions) {
   let viewportContainer: HTMLElement | null = null;
   let resizeObserver: ResizeObserver | null = null;
   let resizeFrame = 0;
+  // Display.scale() also creates the stacking context required by Guacamole's
+  // negative-z-index canvas layers, so the first call must never be skipped.
+  let displayScaleInitialized = false;
   let lastRequestedViewport: WebRDPViewport | null = null;
   let connectionGeneration = 0;
   let manualDisconnect = false;
@@ -262,6 +265,7 @@ export function useWebRDP({ targetId }: UseWebRDPOptions) {
     if (!width || !height) return;
 
     const bounds = viewportContainer.getBoundingClientRect();
+    if (bounds.width <= 0 || bounds.height <= 0) return;
     const nextScale = calculateFitScale(
       { width: bounds.width, height: bounds.height },
       { width, height },
@@ -269,12 +273,15 @@ export function useWebRDP({ targetId }: UseWebRDPOptions) {
       MAX_SCALE,
     );
 
-    if (hasScaleChanged(display.getScale(), nextScale)) {
+    if (shouldApplyScale(
+      displayScaleInitialized,
+      display.getScale(),
+      nextScale,
+    )) {
       display.scale(nextScale);
-      scale.value = nextScale;
-    } else {
-      scale.value = display.getScale();
+      displayScaleInitialized = true;
     }
+    scale.value = display.getScale();
   }
 
   function setScale(nextScale: number) {
@@ -282,6 +289,7 @@ export function useWebRDP({ targetId }: UseWebRDPOptions) {
     autoFit.value = false;
     scale.value = clamp(nextScale, MIN_SCALE, MAX_SCALE);
     display.scale(scale.value);
+    displayScaleInitialized = true;
   }
 
   function fitDisplay() {
@@ -348,6 +356,7 @@ export function useWebRDP({ targetId }: UseWebRDPOptions) {
     client = null;
     tunnel = null;
     display = null;
+    displayScaleInitialized = false;
     if (displayContainer) displayContainer.replaceChildren();
     displayContainer = null;
     viewportContainer = null;

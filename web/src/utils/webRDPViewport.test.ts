@@ -5,6 +5,7 @@ import {
   calculateFitScale,
   hasScaleChanged,
   isSameViewport,
+  shouldApplyScale,
 } from './webRDPViewport';
 
 test('fits the complete remote desktop inside the viewport', () => {
@@ -65,4 +66,9 @@ test('deduplicates identical viewport requests', () => {
 test('ignores sub-pixel scale jitter', () => {
   assert.equal(hasScaleChanged(0.75, 0.7505), false);
   assert.equal(hasScaleChanged(0.75, 0.752), true);
+});
+
+test('applies the initial scale even when it is exactly 100 percent', () => {
+  assert.equal(shouldApplyScale(false, 1, 1), true);
+  assert.equal(shouldApplyScale(true, 1, 1), false);
 });

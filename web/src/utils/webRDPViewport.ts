@@ -39,3 +39,12 @@ export function hasScaleChanged(
 ) {
   return Math.abs(current - next) > epsilon;
 }
+
+export function shouldApplyScale(
+  initialized: boolean,
+  current: number,
+  next: number,
+  epsilon = 0.001,
+) {
+  return !initialized || hasScaleChanged(current, next, epsilon);
+}

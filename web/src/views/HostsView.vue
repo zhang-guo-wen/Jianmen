@@ -429,34 +429,6 @@
                 </div>
               </div>
             </el-form-item>
-            <template v-if="selectedHostProtocol === 'rdp'">
-              <el-form-item label="Windows 域">
-                <el-input
-                  v-model="accountForm.domain"
-                  clearable
-                  placeholder="可选，例如 CORP"
-                />
-              </el-form-item>
-              <el-form-item label="安全模式">
-                <el-select v-model="accountForm.rdp_security" style="width: 100%">
-                  <el-option label="自动协商（推荐）" value="any" />
-                  <el-option label="NLA" value="nla" />
-                  <el-option label="TLS" value="tls" />
-                  <el-option label="RDP 原生加密" value="rdp" />
-                </el-select>
-              </el-form-item>
-              <el-form-item label="忽略证书">
-                <el-switch v-model="accountForm.rdp_ignore_certificate" />
-                <span class="inline-help">仅建议在受控测试环境中开启</span>
-              </el-form-item>
-              <el-form-item v-if="!accountForm.rdp_ignore_certificate" label="证书指纹">
-                <el-input
-                  v-model="accountForm.rdp_cert_fingerprints"
-                  clearable
-                  placeholder="可选；多个 SHA-256 指纹用逗号分隔"
-                />
-              </el-form-item>
-            </template>
           </div>
 
           <div class="form-section">
@@ -478,46 +450,72 @@
                 </div>
               </div>
             </el-form-item>
-            <template v-if="selectedHostProtocol === 'rdp'">
-              <el-form-item label="通道权限">
-                <div class="rdp-policy-grid">
-                  <label>
-                    <span>读取远端剪贴板</span>
-                    <el-switch v-model="accountForm.rdp_clipboard_read" />
-                  </label>
-                  <label>
-                    <span>写入远端剪贴板</span>
-                    <el-switch v-model="accountForm.rdp_clipboard_write" />
-                  </label>
-                  <label>
-                    <span>上传文件</span>
-                    <el-switch
-                      v-model="accountForm.rdp_file_upload"
-                      @change="handleRDPFilePolicyChange"
-                    />
-                  </label>
-                  <label>
-                    <span>下载文件</span>
-                    <el-switch
-                      v-model="accountForm.rdp_file_download"
-                      @change="handleRDPFilePolicyChange"
-                    />
-                  </label>
-                  <label>
-                    <span>映射堡垒机磁盘</span>
-                    <el-switch
-                      v-model="accountForm.rdp_drive_mapping"
-                      @change="handleRDPDrivePolicyChange"
-                    />
-                  </label>
-                </div>
-                <span class="inline-help">文件上传和下载依赖磁盘映射，但仍分别校验权限</span>
-              </el-form-item>
-            </template>
           </div>
 
           <el-collapse v-model="accountMorePanels" class="more-collapse">
             <el-collapse-item title="更多设置" name="more">
+              <template v-if="selectedHostProtocol === 'rdp'">
+                <el-form-item label="Windows 域">
+                  <el-input
+                    v-model="accountForm.domain"
+                    clearable
+                    placeholder="可选，例如 CORP"
+                  />
+                </el-form-item>
+                <el-form-item label="安全模式">
+                  <el-select v-model="accountForm.rdp_security" style="width: 100%">
+                    <el-option label="自动协商（推荐）" value="any" />
+                    <el-option label="NLA" value="nla" />
+                    <el-option label="TLS" value="tls" />
+                    <el-option label="RDP 原生加密" value="rdp" />
+                  </el-select>
+                </el-form-item>
+                <el-form-item label="忽略证书">
+                  <el-switch v-model="accountForm.rdp_ignore_certificate" />
+                  <span class="inline-help">仅建议在受控测试环境中开启</span>
+                </el-form-item>
+                <el-form-item v-if="!accountForm.rdp_ignore_certificate" label="证书指纹">
+                  <el-input
+                    v-model="accountForm.rdp_cert_fingerprints"
+                    clearable
+                    placeholder="可选；多个 SHA-256 指纹用逗号分隔"
+                  />
+                </el-form-item>
+                <el-form-item label="通道权限">
+                  <div class="rdp-policy-grid">
+                    <label>
+                      <span>读取远端剪贴板</span>
+                      <el-switch v-model="accountForm.rdp_clipboard_read" />
+                    </label>
+                    <label>
+                      <span>写入远端剪贴板</span>
+                      <el-switch v-model="accountForm.rdp_clipboard_write" />
+                    </label>
+                    <label>
+                      <span>上传文件</span>
+                      <el-switch
+                        v-model="accountForm.rdp_file_upload"
+                        @change="handleRDPFilePolicyChange"
+                      />
+                    </label>
+                    <label>
+                      <span>下载文件</span>
+                      <el-switch
+                        v-model="accountForm.rdp_file_download"
+                        @change="handleRDPFilePolicyChange"
+                      />
+                    </label>
+                    <label>
+                      <span>映射堡垒机磁盘</span>
+                      <el-switch
+                        v-model="accountForm.rdp_drive_mapping"
+                        @change="handleRDPDrivePolicyChange"
+                      />
+                    </label>
+                  </div>
+                  <span class="inline-help">文件上传和下载依赖磁盘映射，但仍分别校验权限</span>
+                </el-form-item>
+              </template>
               <el-form-item label="账号分组">
                 <el-select
                   v-model="accountForm.group"
@@ -1105,13 +1103,13 @@ function emptyAccountForm(): AccountForm {
     private_key_pem: "",
     passphrase: "",
     rdp_security: "any",
-    rdp_ignore_certificate: false,
+    rdp_ignore_certificate: true,
     rdp_cert_fingerprints: "",
-    rdp_clipboard_read: false,
-    rdp_clipboard_write: false,
-    rdp_file_upload: false,
-    rdp_file_download: false,
-    rdp_drive_mapping: false,
+    rdp_clipboard_read: true,
+    rdp_clipboard_write: true,
+    rdp_file_upload: true,
+    rdp_file_download: true,
+    rdp_drive_mapping: true,
   };
 }
 
@@ -1608,7 +1606,7 @@ async function openCreateAccountDialog(host: HostView) {
   accountDetailLoading.value = false;
   setSelectedHost(host);
   editingAccountId.value = null;
-  accountMorePanels.value = ["more"];
+  accountMorePanels.value = [];
   accountTestResult.value = null;
   resetAccountForm();
   accountFormVisible.value = true;

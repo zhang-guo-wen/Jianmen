@@ -152,6 +152,35 @@ test('host and database management toolbars expose top-level refresh actions', (
   assert.match(databaseSource, /:loading="instancesLoading" :icon="Refresh" @click="loadInstances"/);
 });
 
+test('RDP account advanced fields live under more settings', () => {
+  const hostsSource = source('views/HostsView.vue');
+  const dialogStart = hostsSource.indexOf(':title="editingAccountId ? \'编辑账号\' : \'新增账号\'"');
+  const dialogEnd = hostsSource.indexOf('</FormDialog>', dialogStart);
+  const dialogSource = hostsSource.slice(dialogStart, dialogEnd);
+
+  const moreSettingsStart = dialogSource.indexOf('title="更多设置"');
+  assert.ok(moreSettingsStart >= 0, 'missing 更多设置 collapse');
+
+  const advancedBlock = dialogSource.slice(moreSettingsStart);
+  assert.match(advancedBlock, /<el-form-item label="Windows 域">/);
+  assert.match(advancedBlock, /<el-form-item label="安全模式">/);
+  assert.match(advancedBlock, /<el-form-item label="忽略证书">/);
+  assert.match(advancedBlock, /<el-form-item v-if="!accountForm\.rdp_ignore_certificate" label="证书指纹">/);
+  assert.match(advancedBlock, /<el-form-item label="通道权限">/);
+});
+
+test('new RDP accounts default to collapsed advanced settings and permissive toggles', () => {
+  const hostsSource = source('views/HostsView.vue');
+
+  assert.match(hostsSource, /async function openCreateAccountDialog\(host: HostView\) \{[\s\S]*?accountMorePanels\.value = \[\]/);
+  assert.match(hostsSource, /function emptyAccountForm\(\): AccountForm \{[\s\S]*?rdp_ignore_certificate: true,/);
+  assert.match(hostsSource, /function emptyAccountForm\(\): AccountForm \{[\s\S]*?rdp_clipboard_read: true,/);
+  assert.match(hostsSource, /function emptyAccountForm\(\): AccountForm \{[\s\S]*?rdp_clipboard_write: true,/);
+  assert.match(hostsSource, /function emptyAccountForm\(\): AccountForm \{[\s\S]*?rdp_file_upload: true,/);
+  assert.match(hostsSource, /function emptyAccountForm\(\): AccountForm \{[\s\S]*?rdp_file_download: true,/);
+  assert.match(hostsSource, /function emptyAccountForm\(\): AccountForm \{[\s\S]*?rdp_drive_mapping: true,/);
+});
+
 test('database instance name is optional, advanced, and defaults to its address', () => {
   const databaseSource = source('views/DatabaseView.vue');
   const dialogStart = databaseSource.indexOf(':title="editingInstance');

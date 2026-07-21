@@ -39,6 +39,7 @@ build_archive() {
   cp "$ROOT/LICENSE" "$package_dir/LICENSE"
   cp "$ROOT/README.md" "$package_dir/README.md"
   if [[ "$variant" == "rdp" ]]; then
+    cp "$ROOT/configs/config.wsl.rdp.example.json" "$package_dir/config.rdp.example.json"
     cp "$ROOT/THIRD_PARTY_NOTICES.md" "$package_dir/THIRD_PARTY_NOTICES.md"
   fi
 

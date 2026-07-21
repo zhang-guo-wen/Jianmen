@@ -78,6 +78,7 @@ git push origin v0.1.0
 - Linux arm64 RDP（内嵌可自解压的 guacd 运行时）
 
 每个压缩包都包含可执行文件、`config.example.json`、`README.md` 和 `LICENSE`。RDP
-压缩包还包含 `THIRD_PARTY_NOTICES.md`。Release 中的 `checksums.txt` 保存所有文件的
+压缩包还包含启用内嵌 guacd 的 `config.rdp.example.json` 和 `THIRD_PARTY_NOTICES.md`。
+Release 中的 `checksums.txt` 保存所有文件的
 SHA-256 校验值。RDP 压缩包基于锁定版本的 guacd 官方镜像构建，目标主机无需安装
 Docker，也无需预先安装 guacd。

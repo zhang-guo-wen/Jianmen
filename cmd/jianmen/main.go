@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"flag"
 	"os"
 	"os/signal"
 	"syscall"
@@ -17,12 +16,11 @@ import (
 )
 
 func main() {
-	configPath := flag.String("config", "config.local.json", "path to config file")
-	flag.Parse()
+	options := parseRuntimeOptions()
 	logger := newRuntimeLogger()
-	cfg, err := config.Load(*configPath)
+	cfg, err := config.Load(options.configPath)
 	if err != nil {
-		logger.Error("failed to load config", "path", *configPath, "error", err)
+		logger.Error("failed to load config", "path", options.configPath, "error", err)
 		os.Exit(1)
 	}
 	metadataDB, dataDir, cleanupMetadata, err := initializeMetadata(cfg, logger)
@@ -45,6 +43,7 @@ func main() {
 		logger.Error("failed to initialize system settings", "error", err)
 		os.Exit(1)
 	}
+	applyRuntimeOptions(cfg, options, logger)
 	identityService, err := service.NewIdentityService(appStore)
 	if err != nil {
 		logger.Error("failed to initialize identity service", "error", err)

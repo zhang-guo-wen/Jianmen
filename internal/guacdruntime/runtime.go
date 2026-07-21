@@ -38,10 +38,14 @@ func Prepare(baseDir string) (Process, error) {
 	if baseDir == "" {
 		return Process{}, fmt.Errorf("embedded guacd runtime directory is required")
 	}
+	absoluteBaseDir, err := filepath.Abs(baseDir)
+	if err != nil {
+		return Process{}, fmt.Errorf("resolve embedded guacd runtime directory: %w", err)
+	}
 
 	digest := fmt.Sprintf("%x", sha256.Sum256(archive))
 	target := filepath.Join(
-		filepath.Clean(baseDir),
+		absoluteBaseDir,
 		fmt.Sprintf("%s-linux-%s-%s", Version, runtime.GOARCH, digest[:12]),
 	)
 	if err := ensureExtracted(target, archive, digest); err != nil {

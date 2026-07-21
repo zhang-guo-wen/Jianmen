@@ -1,0 +1,103 @@
+{
+  "listen_addr": "0.0.0.0:47102",
+  "host_key_path": "data/host_key",
+  "replay_dir": "data/replay",
+  "targets_file": "data/targets.json",
+  "admin": {
+    "enabled": true,
+    "listen_addr": "127.0.0.1:47100",
+    "public_url": "",
+    "cors_allowed_origins": [],
+    "tls": {
+      "cert_file": "",
+      "key_file": "",
+      "allow_insecure_http": false
+    }
+  },
+  "database": {
+    "enabled": true,
+    "driver": "sqlite",
+    "dsn": "data/bastion.db",
+    "max_open_conns": 1,
+    "max_idle_conns": 1,
+    "conn_max_lifetime_seconds": 0
+  },
+  "database_gateway": {
+    "enabled": true,
+    "max_client_message_bytes": 10485760,
+    "mode": "unified",
+    "client_tls_mode": "optional",
+    "unified": {
+      "enabled": true,
+      "listen_addr": "127.0.0.1:33060",
+      "cert_file": "",
+      "key_file": "",
+      "ca_file": "",
+      "server_name": "localhost",
+      "detection_timeout_ms": 200
+    },
+    "mysql": {
+      "enabled": true,
+      "listen_addr": "127.0.0.1:33061",
+      "cert_file": "",
+      "key_file": "",
+      "ca_file": "",
+      "server_name": "localhost"
+    },
+    "postgresql": {
+      "enabled": true,
+      "listen_addr": "127.0.0.1:33062",
+      "cert_file": "",
+      "key_file": "",
+      "ca_file": "",
+      "server_name": "localhost"
+    },
+    "redis": {
+      "enabled": true,
+      "listen_addr": "127.0.0.1:33063",
+      "cert_file": "",
+      "key_file": "",
+      "ca_file": "",
+      "server_name": "localhost"
+    }
+  },
+  "web_rdp": {
+    "enabled": true,
+    "guacd_address": "127.0.0.1:4822",
+    "managed_guacd": {
+      "enabled": true,
+      "binary_path": "embedded",
+      "work_dir": "",
+      "startup_timeout_seconds": 15
+    },
+    "connect_timeout_seconds": 15,
+    "spool_dir": "data/rdp-spool",
+    "guacd_recording_root": "data/rdp-spool",
+    "local_drive_root": "data/rdp-drive",
+    "guacd_drive_root": "data/rdp-drive",
+    "allow_unrecorded": false
+  },
+  "object_storage": {
+    "provider": "filesystem",
+    "local_dir": "data/objects",
+    "endpoint": "",
+    "access_key_id": "",
+    "secret_access_key": "",
+    "session_token": "",
+    "bucket": "",
+    "region": "",
+    "prefix": "jianmen",
+    "secure": true,
+    "path_style": false,
+    "auto_create_bucket": false
+  },
+  "recording": {
+    "enabled": true,
+    "record_input": false,
+    "record_commands": true,
+    "retention_days": 30,
+    "max_replay_bytes": 10737418240,
+    "cleanup_batch_size": 100
+  },
+  "users": []
+}

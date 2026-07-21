@@ -1,10 +1,18 @@
-# Jianmen container startup / restart
+# Jianmen startup / restart
 # Usage:
-#   .\scripts\start.ps1             Build artifacts and image, then recreate with local HTTP
-#   .\scripts\start.ps1 -SkipBuild  Recreate the container from the existing image
+#   .\scripts\start.ps1                       Windows local mode (default, no Web RDP)
+#   .\scripts\start.ps1 -Mode Windows         Windows local mode (no Web RDP)
+#   .\scripts\start.ps1 -Mode WSL             WSL Docker container mode (with Web RDP)
+#   .\scripts\start.ps1 -Mode Windows -SkipBuild
+#   .\scripts\start.ps1 -Mode WSL -SkipBuild
+#   .\scripts\start.ps1 -Mode Windows -Stop
+#   .\scripts\start.ps1 -Mode WSL -Stop
 
 param(
-    [switch]$SkipBuild
+    [ValidateSet("Windows", "WSL")]
+    [string]$Mode = "Windows",
+    [switch]$SkipBuild,
+    [switch]$Stop
 )
 
 $ErrorActionPreference = "Stop"
@@ -23,49 +31,41 @@ function Write-Info($Message) {
     Write-Host "  $Message" -ForegroundColor Gray
 }
 
-function Resolve-DockerCommand {
-    $command = Get-Command "docker.exe" -ErrorAction SilentlyContinue
-    if (-not $command) {
-        $command = Get-Command "docker" -ErrorAction SilentlyContinue
-    }
-    if ($command) {
-        return $command.Source
-    }
-
-    $candidates = @(
-        "C:\Program Files\Docker\Docker\resources\bin\docker.exe",
-        "C:\ProgramData\DockerDesktop\version-bin\docker.exe"
-    )
-    foreach ($candidate in $candidates) {
-        if (Test-Path -LiteralPath $candidate) {
-            return $candidate
-        }
-    }
-
+function Resolve-WslDockerCommand([switch]$AllowMissing) {
+    $script:DockerPrefix = @()
+    $script:DockerDistribution = ""
     $wsl = Get-Command "wsl.exe" -ErrorAction SilentlyContinue
-    if ($wsl) {
-        $distributions = & $wsl.Source --list --quiet 2>$null
-        foreach ($distribution in $distributions) {
-            $name = ([string]$distribution).Replace([string][char]0, "").Trim()
-            if ([string]::IsNullOrWhiteSpace($name)) {
-                continue
-            }
-            & $wsl.Source -d $name -e docker info --format "{{.ServerVersion}}" *> $null
-            if ($LASTEXITCODE -eq 0) {
-                $script:DockerPrefix = @("-d", $name, "-e", "docker")
-                $script:DockerDistribution = $name
-                Write-Info "Using Docker Engine from WSL distribution $name"
-                return $wsl.Source
-            }
+    if (-not $wsl) {
+        if ($AllowMissing) {
+            return $null
+        }
+        throw "WSL is not installed. Install WSL and Docker Engine in a WSL distribution"
+    }
+
+    $distributions = & $wsl.Source --list --quiet 2>$null
+    foreach ($distribution in $distributions) {
+        $name = ([string]$distribution).Replace([string][char]0, "").Trim()
+        if ([string]::IsNullOrWhiteSpace($name)) {
+            continue
+        }
+        & $wsl.Source -d $name -e docker info --format "{{.ServerVersion}}" *> $null
+        if ($LASTEXITCODE -eq 0) {
+            $script:DockerPrefix = @("-d", $name, "-e", "docker")
+            $script:DockerDistribution = $name
+            Write-Info "Using Docker Engine from WSL distribution $name"
+            return $wsl.Source
         }
     }
 
-    throw "Docker CLI not found. Install Docker Desktop or Docker Engine in WSL, then run .\scripts\start.ps1 again"
+    if ($AllowMissing) {
+        return $null
+    }
+    throw "No working Docker Engine was found in WSL"
 }
 
 function Convert-ToDockerPath($Path) {
     if ([string]::IsNullOrWhiteSpace($script:DockerDistribution)) {
-        return $Path
+        throw "WSL Docker distribution is not selected"
     }
     $converted = (& wsl.exe -d $script:DockerDistribution -e wslpath -u $Path).Trim()
     if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($converted)) {
@@ -82,6 +82,21 @@ function Invoke-Docker($Docker, [string[]]$Arguments, [switch]$AllowFailure) {
         throw "docker $($Arguments -join ' ') failed with exit code $exitCode"
     }
     return $exitCode
+}
+
+function Invoke-DockerWithRetry($Docker, [string[]]$Arguments, [int]$Attempts = 3) {
+    for ($attempt = 1; $attempt -le $Attempts; $attempt++) {
+        $prefix = $script:DockerPrefix
+        & $Docker @prefix @Arguments
+        if ($LASTEXITCODE -eq 0) {
+            return
+        }
+        if ($attempt -eq $Attempts) {
+            throw "docker $($Arguments -join ' ') failed after $Attempts attempts"
+        }
+        Write-Info "Docker command failed; retrying ($attempt/$Attempts)..."
+        Start-Sleep -Seconds 3
+    }
 }
 
 function Get-ProcessCommandLine($ProcessId) {
@@ -126,6 +141,7 @@ function Stop-JianmenLocalServices($Root) {
         if ($rawPid -and $rawPid -match "^\d+$") {
             Stop-JianmenLocalProcess ([int]$rawPid) $pidFile $Root
         }
+        Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
     }
 
     foreach ($port in @(47100, 47101, 47102, 33060, 33061, 33062, 33063)) {
@@ -137,6 +153,56 @@ function Stop-JianmenLocalServices($Root) {
     Start-Sleep -Milliseconds 500
 }
 
+function Remove-JianmenContainers($Docker) {
+    foreach ($oldContainer in @("jianmen", "jianmen-jianmen-1", "jianmen-volume-init-1")) {
+        $prefix = $script:DockerPrefix
+        $oldContainerId = [string](& $Docker @prefix ps --all --quiet --filter "name=^/$oldContainer$")
+        if (-not [string]::IsNullOrWhiteSpace($oldContainerId)) {
+            Invoke-Docker $Docker @("rm", "-f", $oldContainer) | Out-Null
+            Write-Info "Removed previous container $oldContainer"
+        }
+    }
+}
+
+function Stop-WslContainerIfAvailable {
+    $docker = Resolve-WslDockerCommand -AllowMissing
+    if ($docker) {
+        Remove-JianmenContainers $docker
+    }
+}
+
+function Assert-LocalPortsAvailable {
+    foreach ($port in @(47100, 47102, 33060)) {
+        $listener = Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue |
+            Select-Object -First 1
+        if ($listener) {
+            $process = Get-Process -Id $listener.OwningProcess -ErrorAction SilentlyContinue
+            $processName = if ($process) { $process.ProcessName } else { "PID $($listener.OwningProcess)" }
+            throw "Port $port is already used by $processName"
+        }
+    }
+}
+
+function Wait-JianmenLocalProcess($Process, $TimeoutSeconds) {
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    while ((Get-Date) -lt $deadline) {
+        $Process.Refresh()
+        if ($Process.HasExited) {
+            throw "Windows local process exited with code $($Process.ExitCode)"
+        }
+        try {
+            $response = Invoke-WebRequest -Uri "http://127.0.0.1:47100/api/init/status" -UseBasicParsing -TimeoutSec 2
+            if ($response.StatusCode -eq 200) {
+                Write-Ok "Windows local service is healthy"
+                return
+            }
+        } catch {
+            Start-Sleep -Milliseconds 500
+        }
+    }
+    throw "Windows local service did not become healthy after ${TimeoutSeconds}s"
+}
+
 function Wait-JianmenContainer($Docker, $ContainerName, $TimeoutSeconds) {
     $prefix = $script:DockerPrefix
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
@@ -146,7 +212,7 @@ function Wait-JianmenContainer($Docker, $ContainerName, $TimeoutSeconds) {
         if ($LASTEXITCODE -ne 0) {
             $lastState = "inspect-failed"
         } elseif ($lastState -eq "running/healthy") {
-            Write-Ok "container healthy: $ContainerName"
+            Write-Ok "Container healthy: $ContainerName"
             return
         } elseif ($lastState -like "exited/*" -or $lastState -like "dead/*") {
             throw "Jianmen container stopped unexpectedly: $lastState"
@@ -154,6 +220,16 @@ function Wait-JianmenContainer($Docker, $ContainerName, $TimeoutSeconds) {
         Start-Sleep -Seconds 1
     }
     throw "Jianmen container not healthy after ${TimeoutSeconds}s: $lastState"
+}
+
+function Show-LocalDiagnostics($Root) {
+    foreach ($name in @("backend.error.log", "backend.log")) {
+        $path = Join-Path $Root "logs\$name"
+        if (Test-Path -LiteralPath $path) {
+            Write-Host "--- $name (last 80 lines) ---" -ForegroundColor DarkGray
+            Get-Content -LiteralPath $path -Tail 80 -ErrorAction SilentlyContinue
+        }
+    }
 }
 
 function Show-ContainerDiagnostics($Docker, $ContainerName) {
@@ -171,109 +247,177 @@ function Show-ContainerDiagnostics($Docker, $ContainerName) {
     }
 }
 
-$root = Split-Path -Parent $PSScriptRoot
-$containerName = "jianmen"
-$imageName = "jianmen:guacd-1.6.0"
-$docker = $null
-$webURL = "http://127.0.0.1:47100/"
+function Start-WindowsLocal($Root, [switch]$ReuseBuild) {
+    $binary = Join-Path $Root "dist\jianmen-windows-amd64.exe"
+    $configFile = Join-Path $Root "configs\config.example.json"
+    $logsDirectory = Join-Path $Root "logs"
+    $stdoutLog = Join-Path $logsDirectory "backend.log"
+    $stderrLog = Join-Path $logsDirectory "backend.error.log"
+    $pidFile = Join-Path $logsDirectory "backend.pid"
 
-try {
-    Write-Host "=== Jianmen Container Startup ===" -ForegroundColor Cyan
-    if ($SkipBuild) {
-        Write-Host "(reuse existing artifacts and image)" -ForegroundColor DarkGray
-    }
-    $configFile = Join-Path $root "configs\config.docker.local.json"
-    Write-Host ""
+    Write-Host "=== Jianmen Windows Local Startup (Web RDP disabled) ===" -ForegroundColor Cyan
+    Write-Step "[1/5] Stopping previous Jianmen runtimes..."
+    Stop-JianmenLocalServices $Root
+    Stop-WslContainerIfAvailable
+    Assert-LocalPortsAvailable
+    Write-Ok "Required local ports are available"
 
-    Write-Step "[1/5] Stopping legacy local services..."
-    Stop-JianmenLocalServices $root
-    Write-Ok "no local Go or Vite service is running"
-
-    Write-Step "[2/5] Checking Docker..."
-    $docker = Resolve-DockerCommand
-    Invoke-Docker $docker @("info", "--format", "{{.ServerVersion}}") | Out-Null
-    Write-Ok "Docker engine is ready"
-
-    if ($SkipBuild) {
-        Write-Step "[3/5] Reusing existing container image..."
-        Write-Ok "artifact and image build skipped"
+    if ($ReuseBuild) {
+        Write-Step "[2/5] Reusing Windows binary..."
+        if (-not (Test-Path -LiteralPath $binary)) {
+            throw "Windows binary not found: $binary. Run without -SkipBuild first"
+        }
+        Write-Ok "Build skipped"
     } else {
-        Write-Step "[3/5] Building Jianmen artifacts..."
-        & (Join-Path $root "scripts\build\build.ps1")
-        if ($LASTEXITCODE -ne 0) {
-            throw "Jianmen artifact build failed"
+        Write-Step "[2/5] Building Windows local artifacts..."
+        & (Join-Path $Root "scripts\build\build.ps1") -WindowsOnly
+        if (-not (Test-Path -LiteralPath $binary)) {
+            throw "Windows build did not produce $binary"
         }
-        Write-Ok "frontend and Linux container binary built"
-
-        $dockerRoot = Convert-ToDockerPath $root
-        $dockerfile = Convert-ToDockerPath (Join-Path $root "deploy\docker\Dockerfile")
-        Invoke-Docker $docker @(
-            "build", "--platform", "linux/amd64",
-            "--build-arg", "GUACD_IMAGE=guacamole/guacd:1.6.0@sha256:8974eaa9ba32f713daf311e7cc8cd7e4cdfba1edea39eed75524e78ef4b08f4f",
-            "-f", $dockerfile,
-            "-t", $imageName, $dockerRoot
-        ) | Out-Null
-        Write-Ok "container image built: $imageName"
+        Write-Ok "Windows frontend and binary built"
     }
 
-    Write-Step "[4/5] Preparing container runtime..."
-    $dataDirectory = Join-Path $root "data"
-    foreach ($directory in @(
-        $dataDirectory,
-        (Join-Path $dataDirectory "rdp-spool"),
-        (Join-Path $dataDirectory "rdp-drive")
-    )) {
-        New-Item -ItemType Directory -Force -Path $directory | Out-Null
+    Write-Step "[3/5] Validating local configuration..."
+    $localConfig = Get-Content -LiteralPath $configFile -Raw | ConvertFrom-Json
+    if ($localConfig.web_rdp.enabled -or $localConfig.web_rdp.managed_guacd.enabled) {
+        throw "Windows local config must keep web_rdp and managed_guacd disabled"
     }
-    $dockerDataDirectory = Convert-ToDockerPath $dataDirectory
-    $dockerConfigFile = Convert-ToDockerPath $configFile
+    New-Item -ItemType Directory -Force -Path $logsDirectory | Out-Null
+    New-Item -ItemType Directory -Force -Path (Join-Path $Root "data") | Out-Null
+    Remove-Item -LiteralPath $stdoutLog, $stderrLog -Force -ErrorAction SilentlyContinue
+    Write-Ok "Local configuration uses embedded Web UI without guacd"
 
-    foreach ($oldContainer in @($containerName, "jianmen-jianmen-1", "jianmen-volume-init-1")) {
-        $prefix = $script:DockerPrefix
-        $oldContainerId = [string](& $docker @prefix ps --all --quiet --filter "name=^/$oldContainer$")
-        if (-not [string]::IsNullOrWhiteSpace($oldContainerId)) {
-            Invoke-Docker $docker @("rm", "-f", $oldContainer) | Out-Null
-            Write-Info "removed previous container $oldContainer"
-        }
+    Write-Step "[4/5] Starting Windows local process..."
+    $startArguments = @{
+        FilePath               = $binary
+        ArgumentList           = @("-config", "`"$configFile`"", "-disable-web-rdp")
+        WorkingDirectory       = $Root
+        RedirectStandardOutput = $stdoutLog
+        RedirectStandardError  = $stderrLog
+        WindowStyle            = "Hidden"
+        PassThru               = $true
     }
-    Write-Ok "runtime directories and previous containers are ready"
+    $process = Start-Process @startArguments
+    Set-Content -LiteralPath $pidFile -Value $process.Id -Encoding ASCII
+    Write-Ok "Started PID $($process.Id)"
 
-    Write-Step "[5/5] Starting Jianmen with docker run..."
-    $runArguments = @(
-        "run", "-d",
-        "--name", $containerName,
-        "--restart", "unless-stopped",
-        "--platform", "linux/amd64",
-        "-p", "127.0.0.1:47100:47100",
-        "-p", "47102:47102",
-        "-p", "33060:33060",
-        "-p", "47110-47199:47110-47199",
-        "-v", "${dockerDataDirectory}:/app/data",
-        "-v", "${dockerConfigFile}:/app/config.json:ro",
-        $imageName
-    )
-    Invoke-Docker $docker $runArguments | Out-Null
-    Wait-JianmenContainer $docker $containerName 90
+    Write-Step "[5/5] Verifying Windows local service..."
+    try {
+        Wait-JianmenLocalProcess $process 60
+    } catch {
+        Stop-JianmenLocalProcess $process.Id "failed Windows local service" $Root
+        throw
+    }
 
     Write-Host ""
-    $dockerPrefix = $script:DockerPrefix
-    & $docker @dockerPrefix ps --filter "name=^/$containerName$"
-    Write-Host ""
-    Write-Host "=== Jianmen container started and verified ===" -ForegroundColor Cyan
-    Write-Host ""
-    Write-Host "  Web UI / API : $webURL" -ForegroundColor White
+    Write-Host "=== Jianmen Windows local service started ===" -ForegroundColor Cyan
+    Write-Host "  Web UI / API : http://127.0.0.1:47100/" -ForegroundColor White
     Write-Host "  SSH / SFTP   : 127.0.0.1:47102" -ForegroundColor White
     Write-Host "  DB gateway   : 127.0.0.1:33060" -ForegroundColor White
-    Write-Host "  App proxies  : 127.0.0.1:47110-47199" -ForegroundColor White
-    Write-Host ""
-    Write-Host "The local development backend and Vite server are no longer used." -ForegroundColor Gray
-    Write-Host "Future starts: .\scripts\start.ps1" -ForegroundColor Gray
-    Write-Host "Quick container restart: .\scripts\start.ps1 -SkipBuild" -ForegroundColor Gray
-    Write-Host "Production HTTPS should terminate at the reverse proxy." -ForegroundColor Gray
-    Write-Host "Container logs: docker logs -f $containerName" -ForegroundColor Gray
+    Write-Host "  Web RDP      : disabled (guacd is not started)" -ForegroundColor White
+    Write-Host "  Logs         : .\logs\backend.log" -ForegroundColor Gray
+    Write-Host "  Restart      : .\scripts\start.ps1 -Mode Windows -SkipBuild" -ForegroundColor Gray
+}
+
+function Start-WslContainer($Root, [switch]$ReuseBuild) {
+    $containerName = "jianmen"
+    $imageName = "jianmen:guacd-1.6.0"
+    $dataVolume = "jianmen-data"
+    $configFile = Join-Path $Root "configs\config.docker.local.json"
+    $docker = $null
+
+    try {
+        Write-Host "=== Jianmen WSL Container Startup (Web RDP enabled) ===" -ForegroundColor Cyan
+        Write-Step "[1/5] Stopping Windows local services..."
+        Stop-JianmenLocalServices $Root
+        Write-Ok "No Jianmen Windows process is running"
+
+        Write-Step "[2/5] Checking WSL Docker..."
+        $docker = Resolve-WslDockerCommand
+        Invoke-Docker $docker @("info", "--format", "{{.ServerVersion}}") | Out-Null
+        Write-Ok "WSL Docker Engine is ready"
+
+        if ($ReuseBuild) {
+            Write-Step "[3/5] Reusing existing container image..."
+            Write-Ok "Artifact and image build skipped"
+        } else {
+            Write-Step "[3/5] Building Jianmen artifacts and container image..."
+            & (Join-Path $Root "scripts\build\build.ps1")
+            $dockerRoot = Convert-ToDockerPath $Root
+            $dockerfile = Convert-ToDockerPath (Join-Path $Root "deploy\docker\Dockerfile")
+            Invoke-DockerWithRetry $docker @(
+                "build", "--platform", "linux/amd64",
+                "--build-arg", "GUACD_IMAGE=guacamole/guacd:1.6.0@sha256:8974eaa9ba32f713daf311e7cc8cd7e4cdfba1edea39eed75524e78ef4b08f4f",
+                "-f", $dockerfile,
+                "-t", $imageName, $dockerRoot
+            )
+            Write-Ok "Container image built: $imageName"
+        }
+
+        Write-Step "[4/5] Preparing WSL container runtime..."
+        $dockerConfigFile = Convert-ToDockerPath $configFile
+        Remove-JianmenContainers $docker
+        Invoke-Docker $docker @("volume", "create", $dataVolume) | Out-Null
+        Write-Ok "Persistent volume and previous containers are ready"
+
+        Write-Step "[5/5] Starting Jianmen in WSL Docker..."
+        $runArguments = @(
+            "run", "-d",
+            "--name", $containerName,
+            "--restart", "unless-stopped",
+            "--platform", "linux/amd64",
+            "-p", "127.0.0.1:47100:47100",
+            "-p", "47102:47102",
+            "-p", "33060:33060",
+            "-p", "47110-47199:47110-47199",
+            "-v", "${dataVolume}:/app/data",
+            "-v", "${dockerConfigFile}:/app/config.json:ro",
+            $imageName
+        )
+        Invoke-Docker $docker $runArguments | Out-Null
+        Wait-JianmenContainer $docker $containerName 90
+
+        Write-Host ""
+        $dockerPrefix = $script:DockerPrefix
+        & $docker @dockerPrefix ps --filter "name=^/$containerName$"
+        Write-Host ""
+        Write-Host "=== Jianmen WSL container started ===" -ForegroundColor Cyan
+        Write-Host "  Web UI / API : http://127.0.0.1:47100/" -ForegroundColor White
+        Write-Host "  SSH / SFTP   : 127.0.0.1:47102" -ForegroundColor White
+        Write-Host "  DB gateway   : 127.0.0.1:33060" -ForegroundColor White
+        Write-Host "  App proxies  : 127.0.0.1:47110-47199" -ForegroundColor White
+        Write-Host "  Web RDP      : enabled through managed guacd" -ForegroundColor White
+        Write-Host "  Data volume  : $dataVolume" -ForegroundColor White
+        Write-Host "  Restart      : .\scripts\start.ps1 -Mode WSL -SkipBuild" -ForegroundColor Gray
+        Write-Host "  Logs         : wsl docker logs -f $containerName" -ForegroundColor Gray
+    } catch {
+        Write-Host ""
+        Write-Host "WSL container startup failed: $($_.Exception.Message)" -ForegroundColor Red
+        Show-ContainerDiagnostics $docker $containerName
+        throw
+    }
+}
+
+$root = Split-Path -Parent $PSScriptRoot
+
+try {
+    if ($Stop -and $Mode -eq "Windows") {
+        Stop-JianmenLocalServices $root
+        Write-Ok "Windows local service stopped"
+    } elseif ($Stop) {
+        $docker = Resolve-WslDockerCommand
+        Remove-JianmenContainers $docker
+        Write-Ok "WSL container stopped"
+    } elseif ($Mode -eq "Windows") {
+        Start-WindowsLocal $root -ReuseBuild:$SkipBuild
+    } else {
+        Start-WslContainer $root -ReuseBuild:$SkipBuild
+    }
 } catch {
-    Write-Host ""
-    Write-Host "Container startup failed: $($_.Exception.Message)" -ForegroundColor Red
-    Show-ContainerDiagnostics $docker $containerName
+    if ($Mode -eq "Windows") {
+        Write-Host ""
+        Write-Host "Windows local startup failed: $($_.Exception.Message)" -ForegroundColor Red
+        Show-LocalDiagnostics $root
+    }
     exit 1
 }

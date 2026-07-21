@@ -162,14 +162,17 @@ guacamole/guacd:1.6.0
 sha256:8974eaa9ba32f713daf311e7cc8cd7e4cdfba1edea39eed75524e78ef4b08f4f
 ```
 
-Windows 本机统一在仓库根目录执行：
+Windows 上需要 Web RDP 时，在仓库根目录使用 WSL 容器模式：
 
 ```powershell
-.\scripts\start.ps1
+.\scripts\start.ps1 -Mode WSL
 ```
 
-该脚本构建前端、Linux Lite 二进制和 Docker 镜像，准备 `data/` 目录，
-随后重建并验证 `jianmen` 容器。复用已有镜像重启时使用 `.\scripts\start.ps1 -SkipBuild`。
+该脚本构建前端、Linux Lite、Linux RDP 二进制和 Docker 镜像，
+随后通过 WSL Docker 重建并验证 `jianmen` 容器。容器数据保存在 Docker 命名卷
+`jianmen-data`，不会与 Windows 本地模式的 `data/` 目录混用。复用已有镜像重启时使用
+`.\scripts\start.ps1 -Mode WSL -SkipBuild`。默认的 Windows 本地模式不启动 `guacd`，
+因此不提供 Web RDP。
 
 Dockerfile 只把预编译的 Linux amd64 Lite 程序装配到固定 guacd 运行层，不在 Docker
 构建阶段重新下载 Go/npm 依赖。运行时的 Go 和 `guacd` 都位于 `jianmen` 容器中。

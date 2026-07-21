@@ -85,20 +85,24 @@ Dockerfile 使用摘要而不是可变标签作为最终运行时基础。Jianme
 4. `guacd` 意外退出时，将其作为运行时故障处理。
 5. Jianmen 收到停止信号时，停止并回收 `guacd`。
 
-## Windows 本机启动
+## Windows 启动 WSL 容器
 
-Windows 本机统一在仓库根目录执行：
-
-```powershell
-.\scripts\start.ps1
-```
-
-脚本会自动发现 Windows 或 WSL 中的 Docker Engine，构建产物和镜像，准备数据目录，
-并等待 `jianmen` 容器进入 healthy 状态。复用已有镜像重启时执行：
+在仓库根目录执行：
 
 ```powershell
-.\scripts\start.ps1 -SkipBuild
+.\scripts\start.ps1 -Mode WSL
 ```
+
+脚本只使用 WSL 发行版中的 Docker Engine，构建产物和镜像，将数据保存到
+`jianmen-data` 命名卷，并等待 `jianmen` 容器进入 healthy 状态。命名卷不会与 Windows
+本地模式的 `data/` 目录混用。复用已有镜像重启时执行：
+
+```powershell
+.\scripts\start.ps1 -Mode WSL -SkipBuild
+```
+
+不需要 Web RDP 时，执行 `.\scripts\start.ps1 -Mode Windows`，直接启动 Windows 本机
+程序且不启动 `guacd`。
 
 固定的官方 guacd 1.6.0 镜像使用其上游发布时的 Alpine 运行层。正式发布前
 应对最终镜像执行安全扫描；长期升级时同时更新 guacd 版本和镜像摘要。

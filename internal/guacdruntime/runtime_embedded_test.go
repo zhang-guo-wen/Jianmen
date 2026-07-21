@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -32,6 +33,34 @@ func TestEmbeddedRuntimeRunsGuacdVersion(t *testing.T) {
 	}
 	if !strings.Contains(string(output), "guacd") || !strings.Contains(string(output), Version) {
 		t.Fatalf("guacd -v output = %q", output)
+	}
+}
+
+func TestEmbeddedRuntimeResolvesRelativeBaseDirectory(t *testing.T) {
+	workingDir := t.TempDir()
+	previousDir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get working directory: %v", err)
+	}
+	if err := os.Chdir(workingDir); err != nil {
+		t.Fatalf("change working directory: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := os.Chdir(previousDir); err != nil {
+			t.Errorf("restore working directory: %v", err)
+		}
+	})
+
+	process, err := Prepare(filepath.Join("data", "runtime"))
+	if err != nil {
+		t.Fatalf("Prepare() error = %v", err)
+	}
+	paths := []string{process.Command, process.WorkDir, process.ArgsPrefix[2]}
+	paths = append(paths, strings.Split(process.ArgsPrefix[1], ":")...)
+	for _, path := range paths {
+		if !filepath.IsAbs(path) {
+			t.Fatalf("embedded runtime path = %q, want absolute path", path)
+		}
 	}
 }
 

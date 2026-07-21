@@ -46,6 +46,33 @@
 - **跨平台构建** — 提供 Windows 与 Linux 构建脚本，可生成包含前端资源的独立二进制程序，提供docker部署。
 - **开发计划** - 后续开发计划见仓库项目的看板
 
+### Windows 本地启动
+
+默认启动 Windows 本机程序，自动构建并嵌入 Web 管理页面，不需要 Docker，也不会
+启动 `guacd`，因此不提供 Web 远程桌面：
+
+```powershell
+.\scripts\start.ps1
+```
+
+复用已经构建的 Windows 程序快速重启：
+
+```powershell
+.\scripts\start.ps1 -Mode Windows -SkipBuild
+```
+
+只停止当前模式可分别使用 `.\scripts\start.ps1 -Mode Windows -Stop` 和
+`.\scripts\start.ps1 -Mode WSL -Stop`。
+
+需要完整 Web 远程桌面时，使用 WSL 中的 Docker Engine 启动容器：
+
+```powershell
+.\scripts\start.ps1 -Mode WSL
+```
+
+Windows 本地模式使用仓库的 `data/` 目录；WSL 容器模式使用 Docker 命名卷
+`jianmen-data`。两种模式的数据相互独立，避免 NTFS 与 Linux 私钥权限冲突。
+
 ### Docker 部署
 
 ```shell

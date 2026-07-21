@@ -10,6 +10,8 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+$script:DockerPrefix = @()
+$script:DockerDistribution = ""
 
 function Write-Step($Message) {
     Write-Host $Message -ForegroundColor Yellow
@@ -42,11 +44,45 @@ function Resolve-DockerCommand {
         }
     }
 
-    throw "Docker CLI not found. Install and start Docker Desktop, then run .\start.ps1 again"
+    $wsl = Get-Command "wsl.exe" -ErrorAction SilentlyContinue
+    if ($wsl) {
+        $distributions = & $wsl.Source --list --quiet 2>$null
+        foreach ($distribution in $distributions) {
+            $name = ([string]$distribution).Replace([char]0, "").Trim()
+            if ([string]::IsNullOrWhiteSpace($name)) {
+                continue
+            }
+            & $wsl.Source -d $name -e docker info --format "{{.ServerVersion}}" *> $null
+            if ($LASTEXITCODE -eq 0) {
+                $script:DockerPrefix = @("-d", $name, "-e", "docker")
+                $script:DockerDistribution = $name
+                $wslEnvironment = @([string]$env:WSLENV -split ":" | Where-Object { $_ })
+                if ($wslEnvironment -notcontains "JIANMEN_CONFIG_FILE") {
+                    $env:WSLENV = (@($wslEnvironment) + "JIANMEN_CONFIG_FILE") -join ":"
+                }
+                Write-Info "Using Docker Engine from WSL distribution $name"
+                return $wsl.Source
+            }
+        }
+    }
+
+    throw "Docker CLI not found. Install Docker Desktop or Docker Engine in WSL, then run .\start.ps1 again"
+}
+
+function Convert-ToDockerPath($Path) {
+    if ([string]::IsNullOrWhiteSpace($script:DockerDistribution)) {
+        return $Path
+    }
+    $converted = (& wsl.exe -d $script:DockerDistribution -e wslpath -u $Path).Trim()
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($converted)) {
+        throw "Unable to convert Windows path for WSL Docker: $Path"
+    }
+    return $converted
 }
 
 function Invoke-Docker($Docker, [string[]]$Arguments, [switch]$AllowFailure) {
-    & $Docker @Arguments
+    $prefix = $script:DockerPrefix
+    & $Docker @prefix @Arguments
     $exitCode = $LASTEXITCODE
     if (-not $AllowFailure -and $exitCode -ne 0) {
         throw "docker $($Arguments -join ' ') failed with exit code $exitCode"
@@ -108,7 +144,8 @@ function Stop-JianmenLocalServices($Root) {
 }
 
 function Initialize-CertificateVolume($Docker) {
-    & $Docker volume inspect jianmen-certs *> $null
+    $prefix = $script:DockerPrefix
+    & $Docker @prefix volume inspect jianmen-certs *> $null
     $inspectExitCode = $LASTEXITCODE
     if ($inspectExitCode -ne 0) {
         Invoke-Docker $Docker @("volume", "create", "jianmen-certs") | Out-Null
@@ -161,7 +198,8 @@ chmod 644 /certs/admin.crt /certs/database.crt /certs/database-ca.crt
 }
 
 function Wait-JianmenContainer($Docker, $ComposeFile, $LocalComposeFile, $TimeoutSeconds) {
-    $containerId = (& $Docker compose -f $ComposeFile -f $LocalComposeFile ps -q jianmen).Trim()
+    $prefix = $script:DockerPrefix
+    $containerId = (& $Docker @prefix compose -f $ComposeFile -f $LocalComposeFile ps -q jianmen).Trim()
     if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($containerId)) {
         throw "Jianmen container was not created"
     }
@@ -169,7 +207,7 @@ function Wait-JianmenContainer($Docker, $ComposeFile, $LocalComposeFile, $Timeou
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
     $lastState = "unknown"
     while ((Get-Date) -lt $deadline) {
-        $lastState = (& $Docker inspect --format "{{.State.Status}}/{{if .State.Health}}{{.State.Health.Status}}{{else}}no-healthcheck{{end}}" $containerId).Trim()
+        $lastState = (& $Docker @prefix inspect --format "{{.State.Status}}/{{if .State.Health}}{{.State.Health.Status}}{{else}}no-healthcheck{{end}}" $containerId).Trim()
         if ($LASTEXITCODE -ne 0) {
             $lastState = "inspect-failed"
         } elseif ($lastState -eq "running/healthy") {
@@ -184,16 +222,15 @@ function Wait-JianmenContainer($Docker, $ComposeFile, $LocalComposeFile, $Timeou
 }
 
 function Show-ContainerDiagnostics($Docker, $ComposeFile, $LocalComposeFile) {
-    if (-not $Docker -or
-        -not (Test-Path -LiteralPath $ComposeFile) -or
-        -not (Test-Path -LiteralPath $LocalComposeFile)) {
+    if (-not $Docker) {
         return
     }
+    $prefix = $script:DockerPrefix
     Write-Host ""
     Write-Host "--- Docker Compose status ---" -ForegroundColor DarkGray
-    & $Docker compose -f $ComposeFile -f $LocalComposeFile ps --all
+    & $Docker @prefix compose -f $ComposeFile -f $LocalComposeFile ps --all
     Write-Host "--- Jianmen container logs (last 120 lines) ---" -ForegroundColor DarkGray
-    & $Docker compose -f $ComposeFile -f $LocalComposeFile logs --tail 120 jianmen
+    & $Docker @prefix compose -f $ComposeFile -f $LocalComposeFile logs --tail 120 jianmen
 }
 
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -224,6 +261,8 @@ try {
     $docker = Resolve-DockerCommand
     Invoke-Docker $docker @("info", "--format", "{{.ServerVersion}}") | Out-Null
     Invoke-Docker $docker @("compose", "version") | Out-Null
+    $composeFile = Convert-ToDockerPath $composeFile
+    $localComposeFile = Convert-ToDockerPath $localComposeFile
     Write-Ok "Docker engine and Compose are ready"
 
     if ($SkipBuild) {
@@ -255,7 +294,8 @@ try {
     Wait-JianmenContainer $docker $composeFile $localComposeFile 90
 
     Write-Host ""
-    & $docker compose -f $composeFile -f $localComposeFile ps
+    $dockerPrefix = $script:DockerPrefix
+    & $docker @dockerPrefix compose -f $composeFile -f $localComposeFile ps
     Write-Host ""
     Write-Host "=== Jianmen container started and verified ===" -ForegroundColor Cyan
     Write-Host ""

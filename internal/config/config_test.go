@@ -106,7 +106,7 @@ func TestAdminTLSValidation(t *testing.T) {
 	}
 }
 
-func TestDockerImageAdminTransportIsSecureByDefault(t *testing.T) {
+func TestDockerImageAdminTransportDefaultsToProxyHTTP(t *testing.T) {
 	raw, err := os.ReadFile(filepath.Join("..", "..", "configs", "config.docker.json"))
 	if err != nil {
 		t.Fatalf("read config.docker.json: %v", err)
@@ -115,14 +115,19 @@ func TestDockerImageAdminTransportIsSecureByDefault(t *testing.T) {
 	if err := json.Unmarshal(raw, &cfg); err != nil {
 		t.Fatalf("decode config.docker.json: %v", err)
 	}
-	if cfg.Admin.TLS.AllowInsecureHTTP {
-		t.Fatal("Docker image must not enable insecure Admin HTTP by default")
+	if !cfg.Admin.TLS.AllowInsecureHTTP {
+		t.Fatal("Docker image must allow internal Admin HTTP behind a reverse proxy")
 	}
-	if strings.TrimSpace(cfg.Admin.TLS.CertFile) == "" || strings.TrimSpace(cfg.Admin.TLS.KeyFile) == "" {
-		t.Fatal("Docker image must require a mounted Admin certificate and key by default")
+	if strings.TrimSpace(cfg.Admin.TLS.CertFile) != "" || strings.TrimSpace(cfg.Admin.TLS.KeyFile) != "" {
+		t.Fatal("Docker image must not require an Admin certificate or key by default")
 	}
 	if err := cfg.Validate(); err != nil {
-		t.Fatalf("secure Docker configuration must validate: %v", err)
+		t.Fatalf("proxy-friendly Docker configuration must validate: %v", err)
+	}
+	if strings.TrimSpace(cfg.DatabaseGateway.Unified.CertFile) != "" ||
+		strings.TrimSpace(cfg.DatabaseGateway.Unified.KeyFile) != "" ||
+		strings.TrimSpace(cfg.DatabaseGateway.Unified.CAFile) != "" {
+		t.Fatal("Docker image must use a managed database gateway identity by default")
 	}
 	if cfg.Recording.RecordInput {
 		t.Fatal("Docker image must not record raw terminal input by default")
@@ -319,7 +324,7 @@ func TestDatabaseProtocolListenerValidation(t *testing.T) {
 			wantErr: "cert_file and key_file",
 		},
 		{
-			name: "required mode allows a managed PostgreSQL TLS identity on loopback",
+			name: "required mode accepts a managed PostgreSQL TLS identity",
 			gateway: DatabaseGatewayConfig{
 				Enabled:       true,
 				ClientTLSMode: DatabaseGatewayClientTLSModeRequired,
@@ -327,18 +332,16 @@ func TestDatabaseProtocolListenerValidation(t *testing.T) {
 			},
 		},
 		{
-			name: "non-loopback MySQL listener requires TLS",
+			name: "optional mode accepts a managed non-loopback MySQL identity",
 			gateway: DatabaseGatewayConfig{Enabled: true,
 				MySQL: DatabaseProtocolListener{Enabled: true, Address: "0.0.0.0:33060"},
 			},
-			wantErr: "mysql requires TLS",
 		},
 		{
-			name: "non-loopback Redis listener requires TLS",
+			name: "optional mode accepts a managed IPv6 Redis identity",
 			gateway: DatabaseGatewayConfig{Enabled: true,
 				Redis: DatabaseProtocolListener{Enabled: true, Address: "[::]:63790"},
 			},
-			wantErr: "redis requires TLS",
 		},
 		{
 			name: "TLS listener requires a client validation server name",
@@ -601,11 +604,16 @@ func TestUnifiedDatabaseGatewayValidation(t *testing.T) {
 			wantErr: "between 10 and 2000",
 		},
 		{
-			name: "non-loopback requires TLS",
+			name: "optional non-loopback listener accepts a managed identity",
 			mutate: func(gateway *DatabaseGatewayConfig) {
 				gateway.Unified.Address = "0.0.0.0:33060"
 			},
-			wantErr: "unified requires TLS",
+		},
+		{
+			name: "required mode accepts a managed identity",
+			mutate: func(gateway *DatabaseGatewayConfig) {
+				gateway.ClientTLSMode = DatabaseGatewayClientTLSModeRequired
+			},
 		},
 	}
 	for _, tt := range tests {

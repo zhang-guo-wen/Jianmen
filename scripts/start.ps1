@@ -2,11 +2,9 @@
 # Usage:
 #   .\scripts\start.ps1             Build artifacts and image, then recreate with local HTTP
 #   .\scripts\start.ps1 -SkipBuild  Recreate the container from the existing image
-#   .\scripts\start.ps1 -EnableTLS  Use the certificate-backed HTTPS configuration
 
 param(
-    [switch]$SkipBuild,
-    [switch]$EnableTLS
+    [switch]$SkipBuild
 )
 
 $ErrorActionPreference = "Stop"
@@ -184,13 +182,7 @@ try {
     if ($SkipBuild) {
         Write-Host "(reuse existing artifacts and image)" -ForegroundColor DarkGray
     }
-    if ($EnableTLS) {
-        $configFile = Join-Path $root "configs\config.docker.web-rdp.example.json"
-        $webURL = "https://127.0.0.1:47100/"
-        Write-Host "(HTTPS configuration enabled)" -ForegroundColor DarkGray
-    } else {
-        $configFile = Join-Path $root "configs\config.docker.local.json"
-    }
+    $configFile = Join-Path $root "configs\config.docker.local.json"
     Write-Host ""
 
     Write-Step "[1/5] Stopping legacy local services..."
@@ -226,17 +218,14 @@ try {
 
     Write-Step "[4/5] Preparing container runtime..."
     $dataDirectory = Join-Path $root "data"
-    $certificateDirectory = Join-Path $dataDirectory "certs"
     foreach ($directory in @(
         $dataDirectory,
-        $certificateDirectory,
         (Join-Path $dataDirectory "rdp-spool"),
         (Join-Path $dataDirectory "rdp-drive")
     )) {
         New-Item -ItemType Directory -Force -Path $directory | Out-Null
     }
     $dockerDataDirectory = Convert-ToDockerPath $dataDirectory
-    $dockerCertificateDirectory = Convert-ToDockerPath $certificateDirectory
     $dockerConfigFile = Convert-ToDockerPath $configFile
 
     foreach ($oldContainer in @($containerName, "jianmen-jianmen-1", "jianmen-volume-init-1")) {
@@ -260,7 +249,6 @@ try {
         "-p", "33060:33060",
         "-p", "47110-47199:47110-47199",
         "-v", "${dockerDataDirectory}:/app/data",
-        "-v", "${dockerCertificateDirectory}:/app/certs",
         "-v", "${dockerConfigFile}:/app/config.json:ro",
         $imageName
     )
@@ -281,7 +269,7 @@ try {
     Write-Host "The local development backend and Vite server are no longer used." -ForegroundColor Gray
     Write-Host "Future starts: .\scripts\start.ps1" -ForegroundColor Gray
     Write-Host "Quick container restart: .\scripts\start.ps1 -SkipBuild" -ForegroundColor Gray
-    Write-Host "HTTPS container start: .\scripts\start.ps1 -EnableTLS" -ForegroundColor Gray
+    Write-Host "Production HTTPS should terminate at the reverse proxy." -ForegroundColor Gray
     Write-Host "Container logs: docker logs -f $containerName" -ForegroundColor Gray
 } catch {
     Write-Host ""

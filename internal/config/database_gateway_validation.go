@@ -143,9 +143,6 @@ func validateDatabaseListener(
 			return fmt.Errorf("database_gateway.%s server_name is invalid: %w", name, err)
 		}
 	}
-	if !certConfigured && !isLoopbackListenAddr(address) {
-		return fmt.Errorf("database_gateway.%s requires TLS cert_file and key_file on a non-loopback listener", name)
-	}
 	return nil
 }
 

@@ -168,7 +168,7 @@ Windows 本机统一在仓库根目录执行：
 .\scripts\start.ps1
 ```
 
-该脚本构建前端、Linux Lite 二进制和 Docker 镜像，准备 `data/` 与证书目录，
+该脚本构建前端、Linux Lite 二进制和 Docker 镜像，准备 `data/` 目录，
 随后重建并验证 `jianmen` 容器。复用已有镜像重启时使用 `.\scripts\start.ps1 -SkipBuild`。
 
 Dockerfile 只把预编译的 Linux amd64 Lite 程序装配到固定 guacd 运行层，不在 Docker

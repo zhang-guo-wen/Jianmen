@@ -15,7 +15,7 @@
 
 统一入口不会使用账号名称猜测协议。路由只依据原生协议握手：静默到期且完全没有收到字节才进入 MySQL；`0x00` 首字节进入 PostgreSQL；`*` 首字节进入 Redis；TLS ClientHello 完成一次共享 TLS 握手后，再用 ALPN 与解密后的首包交叉确认 PostgreSQL Direct TLS 或 Redis TLS。只要已收到任何字节，后续超时或解析失败就关闭连接，不会回退为 MySQL。
 
-TLS 用于加密客户端到 Jianmen 之间的认证信息与数据库流量，并验证当前连接的确是目标 Jianmen 网关。非回环监听必须配置有效证书和私钥；回环地址未填写证书路径时，Jianmen 会在数据目录生成并复用本地 TLS 身份。客户端 TLS 策略支持 `optional`（默认，同时接受明文和 TLS）与 `required`（只接受 TLS），并统一作用于 MySQL、PostgreSQL 和 Redis。为兼容 PostgreSQL 驱动，`required` 仍接受独立连接上的明文 `CancelRequest` 控制包；该包不携带登录凭据或数据库数据，且必须匹配会话下发的进程 ID 与取消密钥才会转发。
+TLS 用于加密客户端到 Jianmen 之间的认证信息与数据库流量，并验证当前连接的确是目标 Jianmen 网关。客户端 TLS 策略支持 `optional`（默认，同时接受明文和 TLS）与 `required`（只接受 TLS），并统一作用于 MySQL、PostgreSQL 和 Redis。两种模式未配置证书路径时，Jianmen 都会在数据目录自动生成并持续复用托管 TLS 身份，不区分监听地址；显式配置证书时优先使用用户证书。为兼容 PostgreSQL 驱动，`required` 仍接受独立连接上的明文 `CancelRequest` 控制包；该包不携带登录凭据或数据库数据，且必须匹配会话下发的进程 ID 与取消密钥才会转发。
 
 ## 客户端证书信任
 

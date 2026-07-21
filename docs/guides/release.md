@@ -7,43 +7,8 @@
 版本压缩包。镜像支持 `linux/amd64` 和 `linux/arm64`。只有正式版本 Tag 会更新
 `latest`，预发布版本不会更新该标签。
 
-镜像采用安全失败关闭策略：如果没有挂载 `/app/certs/admin.crt` 和
-`/app/certs/admin.key`，服务将拒绝启动。本地评估时，可以创建一个使用短期自签名
-证书的 Docker 卷：
-
-```bash
-docker volume create jianmen-certs
-docker run --rm --user 0 \
-  -v jianmen-certs:/certs \
-  alpine:3.23 sh -c \
-  'apk add --no-cache openssl &&
-   openssl req -x509 -newkey rsa:3072 -nodes -days 30 \
-     -keyout /certs/admin.key -out /certs/admin.crt \
-     -subj "/CN=localhost" \
-     -addext "subjectAltName=DNS:localhost,IP:127.0.0.1" &&
-   openssl req -x509 -newkey rsa:3072 -nodes -days 30 \
-     -keyout /tmp/database-ca.key -out /certs/database-ca.crt \
-     -subj "/CN=Jianmen local database CA" \
-     -addext "basicConstraints=critical,CA:TRUE" \
-     -addext "keyUsage=critical,keyCertSign,cRLSign" &&
-   openssl req -new -newkey rsa:3072 -nodes \
-     -keyout /certs/database.key -out /tmp/database.csr \
-     -subj "/CN=localhost" &&
-   printf "%s\n" \
-     "basicConstraints=critical,CA:FALSE" \
-     "keyUsage=critical,digitalSignature,keyEncipherment" \
-     "extendedKeyUsage=serverAuth" \
-     "subjectAltName=DNS:localhost,IP:127.0.0.1" >/tmp/database.ext &&
-   openssl x509 -req -in /tmp/database.csr \
-     -CA /certs/database-ca.crt -CAkey /tmp/database-ca.key -CAcreateserial \
-     -out /certs/database.crt -days 30 -sha256 -extfile /tmp/database.ext &&
-   rm -f /certs/database-ca.srl /tmp/database-ca.key /tmp/database.csr /tmp/database.ext &&
-   chown 10001:10001 /certs/admin.key /certs/admin.crt /certs/database.key /certs/database.crt /certs/database-ca.crt &&
-   chmod 600 /certs/admin.key /certs/database.key &&
-   chmod 644 /certs/admin.crt /certs/database.crt /certs/database-ca.crt'
-```
-
-运行最新发布镜像时，只将管理端 HTTPS 端口绑定到宿主机回环地址：
+默认部署不需要准备或挂载证书。管理端在容器内提供 HTTP，生产环境应由 Nginx、Caddy
+等反向代理终止 HTTPS；本地评估时只将管理端端口绑定到宿主机回环地址：
 
 ```bash
 docker run -d \
@@ -54,13 +19,12 @@ docker run -d \
   -p 33060:33060 \
   -p 47110-47199:47110-47199 \
   -v jianmen-data:/app/data \
-  -v jianmen-certs:/app/certs:ro \
   ghcr.io/zhang-guo-wen/jianmen:latest
 ```
 
 容器默认入口如下：
 
-- Web 管理端（仅限本地评估）：`https://127.0.0.1:47100`
+- Web 管理端（仅限本地评估）：`http://127.0.0.1:47100`
 - SSH 网关：`主机地址:47102`
 - 统一数据库网关（默认，MySQL/PostgreSQL/Redis）：`主机地址:33060`
 - 独立 MySQL 网关：`主机地址:33061`
@@ -69,10 +33,9 @@ docker run -d \
 - 应用代理入口：`主机地址:47110-47199`
 
 如果 `configs/config.docker.json` 的默认设置不适用，请将自定义配置文件挂载到
-`/app/config.json`。默认镜像不会启用明文管理端 HTTP。使用反向代理部署时，应采用
-`configs/config.docker.proxy.example.json`，将 Jianmen 容器和代理置于隔离的 Docker
-网络中，并且不要发布 Jianmen 的 `47100` 端口。完整的 Caddy 命令和 Nginx Stream
-数据库网关注意事项见 `README.md`。
+`/app/config.json`。使用反向代理部署时，将 Jianmen 容器和代理置于隔离的 Docker
+网络中，不要向公网直接发布 Jianmen 的 `47100` 端口。完整的 Caddy 命令和 Nginx
+Stream 数据库网关注意事项见 `README.md`。
 
 默认 `unified` 模式允许 MySQL、PostgreSQL 和 Redis 原生客户端共用 `33060` 端口。
 MySQL 新连接需要等待 200 毫秒的协议探测窗口，但已建立会话的吞吐量不受影响。
@@ -81,15 +44,15 @@ MySQL 新连接需要等待 200 毫秒的协议探测窗口，但已建立会话
 `33061:33061`、`33062:33062` 和 `33063:33063` 端口映射，再重启容器。
 
 面向客户端的 TLS 支持两种策略：默认的 `optional` 同时接受 MySQL、PostgreSQL 和
-Redis 明文连接及 TLS 连接；`required` 会拒绝明文认证和数据库流量。PostgreSQL 的
-明文 `CancelRequest` 控制包仍保持兼容，因为它不携带登录凭据或数据库数据，并且必须
-匹配对应会话的取消密钥。
+Redis 明文连接及 TLS 连接，`required` 会拒绝明文认证和数据库流量。两种模式没有
+配置证书时，Jianmen 都会在 `/app/data` 中自动生成并持续复用托管证书，因此无需单独
+的证书卷；显式配置证书时优先使用用户证书。PostgreSQL 的明文 `CancelRequest` 控制包
+仍保持兼容，因为它不携带登录凭据或数据库数据，并且必须匹配对应会话的取消密钥。
 
-默认 Docker 配置使用 `database.crt`、`database.key` 和 `database-ca.crt` 作为本地
-自定义 CA 示例。使用公共 CA 签发的证书时，应配置叶证书在前的完整证书链
-`cert_file`、匹配的 `key_file`，以及被证书 SAN 覆盖的 `server_name`，同时省略
-`ca_file`。Jianmen 启动时会使用运行环境的系统证书池验证证书链；如果证书链、有效期、
-密钥用途或主机名无效，服务将安全失败关闭。证书文件必须包含验证所需的全部中间证书。
+使用公共 CA 签发的证书时，应配置叶证书在前的完整证书链 `cert_file`、匹配的
+`key_file`，以及被证书 SAN 覆盖的 `server_name`，同时省略 `ca_file`。Jianmen 启动
+时会使用运行环境的系统证书池验证证书链；如果证书链、有效期、密钥用途或主机名无效，
+服务将安全失败关闭。证书文件必须包含验证所需的全部中间证书。
 
 网关 API 会报告已验证身份使用的是 `custom` 还是 `system` 信任模式，但绝不会暴露
 私钥材料。DBeaver 使用 Java 默认信任库验证系统信任证书。`psql` 使用系统信任需要

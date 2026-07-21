@@ -40,46 +40,20 @@ func TestSystemSettingsRequiredTLSPreparesManagedIdentityBeforeValidation(t *tes
 	initial.DatabaseGateway.Unified.CertFile = ""
 	initial.DatabaseGateway.Unified.KeyFile = ""
 	initial.DatabaseGateway.Unified.ServerName = ""
-	settings, err := bootstrapSystemSettings(
+	initial.DatabaseGateway.Unified.Address = "0.0.0.0:33060"
+	initial.DatabaseGateway.ClientTLSMode = config.DatabaseGatewayClientTLSModeRequired
+	if _, err := bootstrapSystemSettings(
 		context.Background(),
 		initial,
 		repository,
 		prepare,
-	)
-	if err != nil {
+	); err != nil {
 		t.Fatalf("initial bootstrap: %v", err)
 	}
-	desired := systemSettingsFromConfig(initial)
-	desired.DatabaseGatewayClientTLSMode = config.DatabaseGatewayClientTLSModeRequired
-	if _, err := settings.Update(context.Background(), service.SystemSettingsUpdate{
-		Settings: desired, ExpectedRevision: 1,
-	}); err != nil {
-		t.Fatalf("store required TLS policy: %v", err)
-	}
-
-	restarted := validManagedSettingsConfig()
-	restarted.DatabaseGateway.Unified.CertFile = ""
-	restarted.DatabaseGateway.Unified.KeyFile = ""
-	restarted.DatabaseGateway.Unified.ServerName = ""
-	if _, err := bootstrapSystemSettings(
-		context.Background(),
-		restarted,
-		repository,
-		prepare,
-	); err != nil {
-		t.Fatalf("restart bootstrap with required TLS: %v", err)
-	}
-	if restarted.DatabaseGateway.EffectiveClientTLSMode() !=
-		config.DatabaseGatewayClientTLSModeRequired {
-		t.Fatalf(
-			"effective client TLS mode = %q, want required",
-			restarted.DatabaseGateway.EffectiveClientTLSMode(),
-		)
-	}
-	if _, err := os.Stat(restarted.DatabaseGateway.Unified.CertFile); err != nil {
+	if _, err := os.Stat(initial.DatabaseGateway.Unified.CertFile); err != nil {
 		t.Fatalf("managed certificate was not prepared: %v", err)
 	}
-	if _, err := os.Stat(restarted.DatabaseGateway.Unified.KeyFile); err != nil {
+	if _, err := os.Stat(initial.DatabaseGateway.Unified.KeyFile); err != nil {
 		t.Fatalf("managed private key was not prepared: %v", err)
 	}
 }

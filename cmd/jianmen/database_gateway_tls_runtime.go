@@ -18,10 +18,10 @@ func prepareDatabaseGatewayTLS(
 		dataDir,
 	)
 	if err != nil {
-		return fmt.Errorf("prepare local database gateway identity: %w", err)
+		return fmt.Errorf("prepare managed database gateway identity: %w", err)
 	}
 	if generated {
-		logger.Info("generated local database gateway TLS identity")
+		logger.Info("generated managed database gateway TLS identity")
 	}
 	return nil
 }

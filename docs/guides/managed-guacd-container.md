@@ -93,8 +93,8 @@ Windows 本机统一在仓库根目录执行：
 .\scripts\start.ps1
 ```
 
-脚本会自动发现 Windows 或 WSL 中的 Docker Engine，构建产物和镜像，准备数据与
-证书目录，并等待 `jianmen` 容器进入 healthy 状态。复用已有镜像重启时执行：
+脚本会自动发现 Windows 或 WSL 中的 Docker Engine，构建产物和镜像，准备数据目录，
+并等待 `jianmen` 容器进入 healthy 状态。复用已有镜像重启时执行：
 
 ```powershell
 .\scripts\start.ps1 -SkipBuild

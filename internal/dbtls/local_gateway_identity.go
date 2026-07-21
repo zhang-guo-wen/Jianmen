@@ -4,7 +4,6 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
-	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -23,8 +22,8 @@ const (
 )
 
 // EnsureLocalGatewayIdentities prepares managed TLS identities for every
-// enabled listener in the selected mode that is bound to a loopback address.
-// Explicit certificate and key paths are always left untouched.
+// enabled listener without an explicit identity. Explicit certificate and key
+// paths are always left untouched.
 func EnsureLocalGatewayIdentities(
 	gateway *config.DatabaseGatewayConfig,
 	dataDir string,
@@ -51,7 +50,6 @@ func EnsureLocalGatewayIdentities(
 	for _, item := range listeners {
 		generated, err := ensureLocalListenerIdentity(
 			item.listener.Enabled,
-			item.listener.Address,
 			&item.listener.CertFile,
 			&item.listener.KeyFile,
 			item.listener.CAFile,
@@ -68,7 +66,7 @@ func EnsureLocalGatewayIdentities(
 }
 
 // EnsureLocalUnifiedGatewayIdentity prepares a managed TLS identity for an
-// enabled unified gateway bound to a loopback listener.
+// enabled unified gateway without an explicit identity.
 func EnsureLocalUnifiedGatewayIdentity(
 	gateway *config.DatabaseGatewayConfig,
 	dataDir string,
@@ -84,7 +82,6 @@ func EnsureLocalUnifiedGatewayIdentity(
 	}
 	return ensureLocalListenerIdentity(
 		listener.Enabled,
-		listener.Address,
 		&listener.CertFile,
 		&listener.KeyFile,
 		listener.CAFile,
@@ -96,7 +93,6 @@ func EnsureLocalUnifiedGatewayIdentity(
 
 func ensureLocalListenerIdentity(
 	enabled bool,
-	address string,
 	certFile *string,
 	keyFile *string,
 	caFile string,
@@ -119,9 +115,6 @@ func ensureLocalListenerIdentity(
 		if _, err := LoadServerIdentity(*certFile, caFile, strings.TrimSpace(*serverName)); err != nil {
 			return false, fmt.Errorf("validate database gateway server identity: %w", err)
 		}
-		return false, nil
-	}
-	if !isLoopbackDatabaseListener(address) {
 		return false, nil
 	}
 	if strings.TrimSpace(caFile) != "" {
@@ -200,17 +193,4 @@ func ensureManagedLocalGatewayIdentity(
 		return false, nil
 	}
 	return true, nil
-}
-
-func isLoopbackDatabaseListener(address string) bool {
-	host, _, err := net.SplitHostPort(address)
-	if err != nil {
-		return false
-	}
-	host = strings.Trim(host, "[]")
-	if strings.EqualFold(host, "localhost") {
-		return true
-	}
-	ip := net.ParseIP(host)
-	return ip != nil && ip.IsLoopback()
 }

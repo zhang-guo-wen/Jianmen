@@ -11,10 +11,10 @@ LABEL org.opencontainers.image.licenses="MIT"
 
 USER root
 
-RUN apk add --no-cache openssl su-exec \
+RUN apk add --no-cache su-exec \
     && addgroup -S -g 10001 jianmen \
     && adduser -S -D -H -u 10001 -G jianmen jianmen \
-    && mkdir -p /app/data /app/data/rdp-spool /app/data/rdp-drive /app/certs \
+    && mkdir -p /app/data /app/data/rdp-spool /app/data/rdp-drive \
     && chown -R jianmen:jianmen /app
 
 WORKDIR /app
@@ -28,9 +28,7 @@ VOLUME ["/app/data"]
 EXPOSE 47100 47102 33060 33061 33062 33063 47110-47199
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD wget -q --no-check-certificate -O /dev/null https://127.0.0.1:47100/api/init/status \
-        || wget -q -O /dev/null http://127.0.0.1:47100/api/init/status \
-        || exit 1
+    CMD wget -q -O /dev/null http://127.0.0.1:47100/api/init/status || exit 1
 
 STOPSIGNAL SIGTERM
 

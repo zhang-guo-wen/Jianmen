@@ -33,34 +33,34 @@
     "unified": {
       "enabled": true,
       "listen_addr": "127.0.0.1:33060",
-      "cert_file": "certs/database.crt",
-      "key_file": "certs/database.key",
-      "ca_file": "certs/database-ca.crt",
+      "cert_file": "",
+      "key_file": "",
+      "ca_file": "",
       "server_name": "localhost",
       "detection_timeout_ms": 200
     },
     "mysql": {
       "enabled": true,
       "listen_addr": "127.0.0.1:33061",
-      "cert_file": "certs/database.crt",
-      "key_file": "certs/database.key",
-      "ca_file": "certs/database-ca.crt",
+      "cert_file": "",
+      "key_file": "",
+      "ca_file": "",
       "server_name": "localhost"
     },
     "postgresql": {
       "enabled": true,
       "listen_addr": "127.0.0.1:33062",
-      "cert_file": "certs/database.crt",
-      "key_file": "certs/database.key",
-      "ca_file": "certs/database-ca.crt",
+      "cert_file": "",
+      "key_file": "",
+      "ca_file": "",
       "server_name": "localhost"
     },
     "redis": {
       "enabled": true,
       "listen_addr": "127.0.0.1:33063",
-      "cert_file": "certs/database.crt",
-      "key_file": "certs/database.key",
-      "ca_file": "certs/database-ca.crt",
+      "cert_file": "",
+      "key_file": "",
+      "ca_file": "",
       "server_name": "localhost"
     }
   },

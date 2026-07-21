@@ -14,6 +14,7 @@ import (
 func TestEnsureLocalUnifiedGatewayIdentityGeneratesServerAuthIdentity(t *testing.T) {
 	dataDir := t.TempDir()
 	gateway := newLocalUnifiedGatewayConfig()
+	gateway.Unified.Address = "0.0.0.0:33060"
 
 	generated, err := EnsureLocalUnifiedGatewayIdentity(&gateway, dataDir)
 	if err != nil {
@@ -101,19 +102,19 @@ func TestEnsureLocalUnifiedGatewayIdentityReusesValidIdentity(t *testing.T) {
 	}
 }
 
-func TestEnsureLocalGatewayIdentitiesCoversIndependentLoopbackListeners(t *testing.T) {
+func TestEnsureLocalGatewayIdentitiesCoversIndependentListeners(t *testing.T) {
 	dataDir := t.TempDir()
 	gateway := config.DatabaseGatewayConfig{
 		Enabled: true,
 		Mode:    config.DatabaseGatewayModeIndependent,
 		MySQL: config.DatabaseProtocolListener{
-			Enabled: true, Address: "127.0.0.1:33061",
+			Enabled: true, Address: "0.0.0.0:33061",
 		},
 		PostgreSQL: config.DatabaseProtocolListener{
-			Enabled: true, Address: "localhost:33062",
+			Enabled: true, Address: "[::]:33062",
 		},
 		Redis: config.DatabaseProtocolListener{
-			Enabled: true, Address: "[::1]:33063",
+			Enabled: true, Address: "0.0.0.0:33063",
 		},
 	}
 
@@ -181,9 +182,6 @@ func TestEnsureLocalUnifiedGatewayIdentityOnlyHandlesEligibleListener(t *testing
 		}},
 		{name: "unified listener disabled", mutate: func(g *config.DatabaseGatewayConfig) {
 			g.Unified.Enabled = false
-		}},
-		{name: "non-loopback listener", mutate: func(g *config.DatabaseGatewayConfig) {
-			g.Unified.Address = "0.0.0.0:33060"
 		}},
 	}
 

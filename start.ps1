@@ -166,8 +166,11 @@ function Show-ContainerDiagnostics($Docker, $ContainerName) {
     Write-Host ""
     Write-Host "--- Docker container status ---" -ForegroundColor DarkGray
     & $Docker @prefix ps --all --filter "name=^/$ContainerName$"
-    Write-Host "--- Jianmen container logs (last 120 lines) ---" -ForegroundColor DarkGray
-    & $Docker @prefix logs --tail 120 $ContainerName
+    $containerId = [string](& $Docker @prefix ps --all --quiet --filter "name=^/$ContainerName$")
+    if (-not [string]::IsNullOrWhiteSpace($containerId)) {
+        Write-Host "--- Jianmen container logs (last 120 lines) ---" -ForegroundColor DarkGray
+        & $Docker @prefix logs --tail 120 $ContainerName
+    }
 }
 
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -236,8 +239,8 @@ try {
 
     foreach ($oldContainer in @($containerName, "jianmen-jianmen-1", "jianmen-volume-init-1")) {
         $prefix = $script:DockerPrefix
-        & $docker @prefix inspect $oldContainer *> $null
-        if ($LASTEXITCODE -eq 0) {
+        $oldContainerId = [string](& $docker @prefix ps --all --quiet --filter "name=^/$oldContainer$")
+        if (-not [string]::IsNullOrWhiteSpace($oldContainerId)) {
             Invoke-Docker $docker @("rm", "-f", $oldContainer) | Out-Null
             Write-Info "removed previous container $oldContainer"
         }

@@ -56,10 +56,6 @@ function Resolve-DockerCommand {
             if ($LASTEXITCODE -eq 0) {
                 $script:DockerPrefix = @("-d", $name, "-e", "docker")
                 $script:DockerDistribution = $name
-                $wslEnvironment = @([string]$env:WSLENV -split ":" | Where-Object { $_ })
-                if ($wslEnvironment -notcontains "JIANMEN_CONFIG_FILE") {
-                    $env:WSLENV = (@($wslEnvironment) + "JIANMEN_CONFIG_FILE") -join ":"
-                }
                 Write-Info "Using Docker Engine from WSL distribution $name"
                 return $wsl.Source
             }
@@ -143,83 +139,16 @@ function Stop-JianmenLocalServices($Root) {
     Start-Sleep -Milliseconds 500
 }
 
-function Initialize-CertificateVolume($Docker) {
+function Wait-JianmenContainer($Docker, $ContainerName, $TimeoutSeconds) {
     $prefix = $script:DockerPrefix
-    & $Docker @prefix volume inspect jianmen-certs *> $null
-    $inspectExitCode = $LASTEXITCODE
-    if ($inspectExitCode -ne 0) {
-        Invoke-Docker $Docker @("volume", "create", "jianmen-certs") | Out-Null
-        Write-Ok "created certificate volume jianmen-certs"
-    }
-
-    $certificateScript = @'
-set -eu
-if [ -s /certs/admin.key ] && [ -s /certs/admin.crt ] && \
-   [ -s /certs/database.key ] && [ -s /certs/database.crt ] && \
-   [ -s /certs/database-ca.crt ]; then
-  exit 0
-fi
-apk add --no-cache openssl >/dev/null
-rm -f /certs/admin.key /certs/admin.crt /certs/database.key \
-  /certs/database.crt /certs/database-ca.crt /certs/database-ca.srl
-openssl req -x509 -newkey rsa:3072 -nodes -days 3650 \
-  -keyout /certs/admin.key -out /certs/admin.crt \
-  -subj "/CN=localhost" \
-  -addext "subjectAltName=DNS:localhost,IP:127.0.0.1" >/dev/null 2>&1
-openssl req -x509 -newkey rsa:3072 -nodes -days 3650 \
-  -keyout /tmp/database-ca.key -out /certs/database-ca.crt \
-  -subj "/CN=Jianmen local database CA" \
-  -addext "basicConstraints=critical,CA:TRUE" \
-  -addext "keyUsage=critical,keyCertSign,cRLSign" >/dev/null 2>&1
-openssl req -new -newkey rsa:3072 -nodes \
-  -keyout /certs/database.key -out /tmp/database.csr \
-  -subj "/CN=localhost" >/dev/null 2>&1
-printf '%s\n' \
-  'basicConstraints=critical,CA:FALSE' \
-  'keyUsage=critical,digitalSignature,keyEncipherment' \
-  'extendedKeyUsage=serverAuth' \
-  'subjectAltName=DNS:localhost,IP:127.0.0.1' >/tmp/database.ext
-openssl x509 -req -in /tmp/database.csr \
-  -CA /certs/database-ca.crt -CAkey /tmp/database-ca.key -CAcreateserial \
-  -out /certs/database.crt -days 3650 -sha256 -extfile /tmp/database.ext >/dev/null 2>&1
-rm -f /certs/database-ca.srl /tmp/database-ca.key /tmp/database.csr /tmp/database.ext
-chown 10001:10001 /certs/admin.key /certs/admin.crt /certs/database.key \
-  /certs/database.crt /certs/database-ca.crt
-chmod 600 /certs/admin.key /certs/database.key
-chmod 644 /certs/admin.crt /certs/database.crt /certs/database-ca.crt
-'@
-
-    # wsl.exe does not preserve multiline arguments reliably on Windows
-    # PowerShell 5. Encode the script so Docker receives one plain argument.
-    $linuxCertificateScript = $certificateScript.Replace("`r`n", "`n")
-    $certificateScriptBase64 = [Convert]::ToBase64String(
-        [Text.Encoding]::UTF8.GetBytes($linuxCertificateScript)
-    )
-    $certificateCommand = "printf '%s' '$certificateScriptBase64' | base64 -d | sh"
-
-    Invoke-Docker $Docker @(
-        "run", "--rm", "--user", "0",
-        "-v", "jianmen-certs:/certs",
-        "alpine:3.23", "sh", "-ec", $certificateCommand
-    ) | Out-Null
-    Write-Ok "certificate volume ready"
-}
-
-function Wait-JianmenContainer($Docker, $ComposeFile, $LocalComposeFile, $TimeoutSeconds) {
-    $prefix = $script:DockerPrefix
-    $containerId = (& $Docker @prefix compose -f $ComposeFile -f $LocalComposeFile ps -q jianmen).Trim()
-    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($containerId)) {
-        throw "Jianmen container was not created"
-    }
-
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
     $lastState = "unknown"
     while ((Get-Date) -lt $deadline) {
-        $lastState = (& $Docker @prefix inspect --format "{{.State.Status}}/{{if .State.Health}}{{.State.Health.Status}}{{else}}no-healthcheck{{end}}" $containerId).Trim()
+        $lastState = (& $Docker @prefix inspect --format "{{.State.Status}}/{{if .State.Health}}{{.State.Health.Status}}{{else}}no-healthcheck{{end}}" $ContainerName 2>$null).Trim()
         if ($LASTEXITCODE -ne 0) {
             $lastState = "inspect-failed"
         } elseif ($lastState -eq "running/healthy") {
-            Write-Ok "container healthy: $containerId"
+            Write-Ok "container healthy: $ContainerName"
             return
         } elseif ($lastState -like "exited/*" -or $lastState -like "dead/*") {
             throw "Jianmen container stopped unexpectedly: $lastState"
@@ -229,21 +158,21 @@ function Wait-JianmenContainer($Docker, $ComposeFile, $LocalComposeFile, $Timeou
     throw "Jianmen container not healthy after ${TimeoutSeconds}s: $lastState"
 }
 
-function Show-ContainerDiagnostics($Docker, $ComposeFile, $LocalComposeFile) {
+function Show-ContainerDiagnostics($Docker, $ContainerName) {
     if (-not $Docker) {
         return
     }
     $prefix = $script:DockerPrefix
     Write-Host ""
-    Write-Host "--- Docker Compose status ---" -ForegroundColor DarkGray
-    & $Docker @prefix compose -f $ComposeFile -f $LocalComposeFile ps --all
+    Write-Host "--- Docker container status ---" -ForegroundColor DarkGray
+    & $Docker @prefix ps --all --filter "name=^/$ContainerName$"
     Write-Host "--- Jianmen container logs (last 120 lines) ---" -ForegroundColor DarkGray
-    & $Docker @prefix compose -f $ComposeFile -f $LocalComposeFile logs --tail 120 jianmen
+    & $Docker @prefix logs --tail 120 $ContainerName
 }
 
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
-$composeFile = Join-Path $root "docker-compose.web-rdp.yml"
-$localComposeFile = Join-Path $root "docker-compose.local.yml"
+$containerName = "jianmen"
+$imageName = "jianmen:guacd-1.6.0"
 $docker = $null
 $webURL = "http://127.0.0.1:47100/"
 
@@ -253,11 +182,11 @@ try {
         Write-Host "(reuse existing artifacts and image)" -ForegroundColor DarkGray
     }
     if ($EnableTLS) {
-        $env:JIANMEN_CONFIG_FILE = "./config.docker.web-rdp.example.json"
+        $configFile = Join-Path $root "config.docker.web-rdp.example.json"
         $webURL = "https://127.0.0.1:47100/"
         Write-Host "(HTTPS configuration enabled)" -ForegroundColor DarkGray
     } else {
-        $env:JIANMEN_CONFIG_FILE = "./config.docker.local.json"
+        $configFile = Join-Path $root "config.docker.local.json"
     }
     Write-Host ""
 
@@ -268,10 +197,7 @@ try {
     Write-Step "[2/5] Checking Docker..."
     $docker = Resolve-DockerCommand
     Invoke-Docker $docker @("info", "--format", "{{.ServerVersion}}") | Out-Null
-    Invoke-Docker $docker @("compose", "version") | Out-Null
-    $composeFile = Convert-ToDockerPath $composeFile
-    $localComposeFile = Convert-ToDockerPath $localComposeFile
-    Write-Ok "Docker engine and Compose are ready"
+    Write-Ok "Docker engine is ready"
 
     if ($SkipBuild) {
         Write-Step "[3/5] Reusing existing container image..."
@@ -283,27 +209,62 @@ try {
             throw "Jianmen artifact build failed"
         }
         Write-Ok "frontend and Linux container binary built"
+
+        $dockerRoot = Convert-ToDockerPath $root
+        Invoke-Docker $docker @(
+            "build", "--platform", "linux/amd64",
+            "--build-arg", "GUACD_IMAGE=guacamole/guacd:1.6.0@sha256:8974eaa9ba32f713daf311e7cc8cd7e4cdfba1edea39eed75524e78ef4b08f4f",
+            "-t", $imageName, $dockerRoot
+        ) | Out-Null
+        Write-Ok "container image built: $imageName"
     }
 
     Write-Step "[4/5] Preparing container runtime..."
-    Initialize-CertificateVolume $docker
-
-    Write-Step "[5/5] Recreating Jianmen container..."
-    $composeArguments = @(
-        "compose", "-f", $composeFile, "-f", $localComposeFile,
-        "up", "-d", "--force-recreate", "--remove-orphans"
-    )
-    if ($SkipBuild) {
-        $composeArguments += "--no-build"
-    } else {
-        $composeArguments += "--build"
+    $dataDirectory = Join-Path $root "data"
+    $certificateDirectory = Join-Path $dataDirectory "certs"
+    foreach ($directory in @(
+        $dataDirectory,
+        $certificateDirectory,
+        (Join-Path $dataDirectory "rdp-spool"),
+        (Join-Path $dataDirectory "rdp-drive")
+    )) {
+        New-Item -ItemType Directory -Force -Path $directory | Out-Null
     }
-    Invoke-Docker $docker $composeArguments | Out-Null
-    Wait-JianmenContainer $docker $composeFile $localComposeFile 90
+    $dockerDataDirectory = Convert-ToDockerPath $dataDirectory
+    $dockerCertificateDirectory = Convert-ToDockerPath $certificateDirectory
+    $dockerConfigFile = Convert-ToDockerPath $configFile
+
+    foreach ($oldContainer in @($containerName, "jianmen-jianmen-1", "jianmen-volume-init-1")) {
+        $prefix = $script:DockerPrefix
+        & $docker @prefix inspect $oldContainer *> $null
+        if ($LASTEXITCODE -eq 0) {
+            Invoke-Docker $docker @("rm", "-f", $oldContainer) | Out-Null
+            Write-Info "removed previous container $oldContainer"
+        }
+    }
+    Write-Ok "runtime directories and previous containers are ready"
+
+    Write-Step "[5/5] Starting Jianmen with docker run..."
+    $runArguments = @(
+        "run", "-d",
+        "--name", $containerName,
+        "--restart", "unless-stopped",
+        "--platform", "linux/amd64",
+        "-p", "127.0.0.1:47100:47100",
+        "-p", "47102:47102",
+        "-p", "33060:33060",
+        "-p", "47110-47199:47110-47199",
+        "-v", "${dockerDataDirectory}:/app/data",
+        "-v", "${dockerCertificateDirectory}:/app/certs",
+        "-v", "${dockerConfigFile}:/app/config.json:ro",
+        $imageName
+    )
+    Invoke-Docker $docker $runArguments | Out-Null
+    Wait-JianmenContainer $docker $containerName 90
 
     Write-Host ""
     $dockerPrefix = $script:DockerPrefix
-    & $docker @dockerPrefix compose -f $composeFile -f $localComposeFile ps
+    & $docker @dockerPrefix ps --filter "name=^/$containerName$"
     Write-Host ""
     Write-Host "=== Jianmen container started and verified ===" -ForegroundColor Cyan
     Write-Host ""
@@ -316,10 +277,10 @@ try {
     Write-Host "Future starts: .\start.ps1" -ForegroundColor Gray
     Write-Host "Quick container restart: .\start.ps1 -SkipBuild" -ForegroundColor Gray
     Write-Host "HTTPS container start: .\start.ps1 -EnableTLS" -ForegroundColor Gray
-    Write-Host "Container logs: docker compose -f docker-compose.web-rdp.yml -f docker-compose.local.yml logs -f jianmen" -ForegroundColor Gray
+    Write-Host "Container logs: docker logs -f $containerName" -ForegroundColor Gray
 } catch {
     Write-Host ""
     Write-Host "Container startup failed: $($_.Exception.Message)" -ForegroundColor Red
-    Show-ContainerDiagnostics $docker $composeFile $localComposeFile
+    Show-ContainerDiagnostics $docker $containerName
     exit 1
 }

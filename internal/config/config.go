@@ -34,12 +34,13 @@ type Config struct {
 }
 
 type AdminConfig struct {
-	Enabled            bool           `json:"enabled"`
-	ListenAddr         string         `json:"listen_addr"`
-	PublicURL          string         `json:"public_url"`
-	CORSAllowedOrigins []string       `json:"cors_allowed_origins"`
-	Dev                bool           `json:"dev"`
-	TLS                AdminTLSConfig `json:"tls"`
+	Enabled             bool           `json:"enabled"`
+	ListenAddr          string         `json:"listen_addr"`
+	PublicURL           string         `json:"public_url"`
+	CORSAllowedOrigins  []string       `json:"cors_allowed_origins"`
+	LoginCaptchaEnabled bool           `json:"login_captcha_enabled"`
+	Dev                 bool           `json:"dev"`
+	TLS                 AdminTLSConfig `json:"tls"`
 }
 
 type AdminTLSConfig struct {

@@ -89,6 +89,7 @@ export interface LoginCaptchaChallenge {
 
 export interface InitStatusResponse {
   initialized: boolean;
+  login_captcha_enabled: boolean;
 }
 
 export interface UserRecord {
@@ -1571,7 +1572,7 @@ export const apiClient = {
   // auth & init
   getLoginCaptchaChallenge: () =>
     request<LoginCaptchaChallenge>('/api/login/challenge'),
-  login: (username: string, password: string, captchaPayload: string) =>
+  login: (username: string, password: string, captchaPayload = '') =>
     request<{ csrf_token: string }>('/api/login', {
       method: 'POST',
       body: JSON.stringify({ username, password, captcha_payload: captchaPayload }),

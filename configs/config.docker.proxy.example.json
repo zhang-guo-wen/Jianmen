@@ -7,6 +7,7 @@
     "enabled": true,
     "listen_addr": "0.0.0.0:47100",
     "public_url": "https://jianmen.example.com",
+    "login_captcha_enabled": false,
     "cors_allowed_origins": [],
     "tls": {
       "cert_file": "",

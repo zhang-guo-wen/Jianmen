@@ -26,7 +26,7 @@
             @keyup.enter="submit"
           />
         </el-form-item>
-        <div class="login-captcha-section">
+        <div v-if="loginCaptchaEnabled" class="login-captcha-section">
           <div class="login-captcha-label">{{ t('login.captchaLabel') }}</div>
           <altcha-widget
             ref="captchaRef"
@@ -43,7 +43,7 @@
         <div v-if="loginError" class="login-error">{{ loginError }}</div>
         <el-button
           class="login-button"
-          :disabled="!captchaPayload"
+          :disabled="loginCaptchaEnabled && !captchaPayload"
           :loading="submitting"
           native-type="submit"
           type="primary"
@@ -56,7 +56,7 @@
 </template>
 
 <script setup lang="ts">
-import { reactive, ref } from 'vue';
+import { onMounted, reactive, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import type { FormInstance, FormRules } from 'element-plus';
 import 'altcha';
@@ -79,6 +79,7 @@ const preferences = usePreferencesStore();
 const formRef = ref<FormInstance>();
 const captchaRef = ref<LoginCaptchaWidget>();
 const captchaPayload = ref('');
+const loginCaptchaEnabled = ref(false);
 const submitting = ref(false);
 const loginError = ref('');
 
@@ -112,10 +113,20 @@ function resetCaptcha() {
   captchaRef.value?.reset();
 }
 
+onMounted(async () => {
+  try {
+    const status = await apiClient.getInitStatus();
+    loginCaptchaEnabled.value = status.login_captcha_enabled;
+  } catch {
+    // The server remains authoritative and rejects a missing captcha if enabled.
+    loginCaptchaEnabled.value = false;
+  }
+});
+
 async function submit() {
   const valid = await formRef.value?.validate().catch(() => false);
   if (!valid) return;
-  if (!captchaPayload.value) {
+  if (loginCaptchaEnabled.value && !captchaPayload.value) {
     loginError.value = t('login.captchaRequired');
     return;
   }

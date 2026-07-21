@@ -14,7 +14,8 @@ import (
 )
 
 type InitStatusResponse struct {
-	Initialized bool `json:"initialized"`
+	Initialized         bool `json:"initialized"`
+	LoginCaptchaEnabled bool `json:"login_captcha_enabled"`
 }
 
 type SetupRequest struct {
@@ -52,13 +53,20 @@ func (s *Server) handleInitStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Cache-Control", "no-store, max-age=0")
-	s.writeJSON(w, r, http.StatusOK, InitStatusResponse{Initialized: initialized})
+	s.writeJSON(w, r, http.StatusOK, InitStatusResponse{
+		Initialized:         initialized,
+		LoginCaptchaEnabled: s.cfg.Admin.LoginCaptchaEnabled,
+	})
 }
 
 func (s *Server) handleLoginCaptchaChallenge(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		w.Header().Set("Allow", http.MethodGet)
 		s.writeErrorText(w, r, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	if !s.cfg.Admin.LoginCaptchaEnabled {
+		s.writeErrorText(w, r, http.StatusNotFound, "login captcha is disabled")
 		return
 	}
 	if s.loginCaptcha == nil {
@@ -109,11 +117,6 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		s.writeErrorText(w, r, http.StatusBadRequest, "username and password are required")
 		return
 	}
-	if s.loginCaptcha == nil {
-		s.writeErrorText(w, r, http.StatusServiceUnavailable, "login captcha unavailable")
-		return
-	}
-
 	now := time.Now().UTC()
 	limiter := s.loginLimiterForRequest()
 	limitKey := loginLimitKey(r, username)
@@ -123,16 +126,22 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		s.writeErrorText(w, r, http.StatusTooManyRequests, "too many failed login attempts; try again later")
 		return
 	}
-	if err := s.loginCaptcha.Verify(req.CaptchaPayload); err != nil {
-		s.logLogin(r, username, "", "failure", "captcha_failed")
-		message := "security verification failed; please try again"
-		if errors.Is(err, service.ErrLoginCaptchaMissing) {
-			message = "security verification is required"
-		} else if errors.Is(err, service.ErrLoginCaptchaExpired) {
-			message = "security verification expired; please try again"
+	if s.cfg.Admin.LoginCaptchaEnabled {
+		if s.loginCaptcha == nil {
+			s.writeErrorText(w, r, http.StatusServiceUnavailable, "login captcha unavailable")
+			return
 		}
-		s.writeErrorText(w, r, http.StatusBadRequest, message)
-		return
+		if err := s.loginCaptcha.Verify(req.CaptchaPayload); err != nil {
+			s.logLogin(r, username, "", "failure", "captcha_failed")
+			message := "security verification failed; please try again"
+			if errors.Is(err, service.ErrLoginCaptchaMissing) {
+				message = "security verification is required"
+			} else if errors.Is(err, service.ErrLoginCaptchaExpired) {
+				message = "security verification expired; please try again"
+			}
+			s.writeErrorText(w, r, http.StatusBadRequest, message)
+			return
+		}
 	}
 
 	login, err := s.adminAuth.VerifyLogin(r.Context(), username, req.Password)

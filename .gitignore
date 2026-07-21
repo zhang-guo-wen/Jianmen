@@ -28,3 +28,4 @@ internal/guacdruntime/assets/*.tar.gz
 .claude/worktrees/
 /.superpowers/
 /.worktrees/v1-backend/
+/docs/superpowers/

@@ -118,6 +118,9 @@ func TestDockerImageAdminTransportDefaultsToProxyHTTP(t *testing.T) {
 	if !cfg.Admin.TLS.AllowInsecureHTTP {
 		t.Fatal("Docker image must allow internal Admin HTTP behind a reverse proxy")
 	}
+	if cfg.Admin.LoginCaptchaEnabled {
+		t.Fatal("Docker image must keep the login captcha disabled by default")
+	}
 	if strings.TrimSpace(cfg.Admin.TLS.CertFile) != "" || strings.TrimSpace(cfg.Admin.TLS.KeyFile) != "" {
 		t.Fatal("Docker image must not require an Admin certificate or key by default")
 	}

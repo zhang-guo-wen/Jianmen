@@ -446,6 +446,7 @@ func TestInitStatusReturnsInitializedWithoutAdminSummary(t *testing.T) {
 
 func TestLoginRequiresCaptcha(t *testing.T) {
 	server, db := newAdminDBTestServer(t)
+	server.cfg.Admin.LoginCaptchaEnabled = true
 	passwordHash, err := hashPassword("correct-password")
 	if err != nil {
 		t.Fatalf("hash password: %v", err)
@@ -465,8 +466,27 @@ func TestLoginRequiresCaptcha(t *testing.T) {
 	}
 }
 
+func TestLoginAllowsMissingCaptchaWhenDisabled(t *testing.T) {
+	server, db := newAdminDBTestServer(t)
+	passwordHash, err := hashPassword("correct-password")
+	if err != nil {
+		t.Fatalf("hash password: %v", err)
+	}
+	if err := db.Create(&model.User{ID: "no-captcha-user", Username: "no-captcha-user", PasswordHash: passwordHash, Status: "active"}).Error; err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/login", bytes.NewBufferString(`{"username":"no-captcha-user","password":"correct-password"}`))
+	rec := httptest.NewRecorder()
+	server.handleLogin(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+}
+
 func TestLoginCaptchaChallengeIsNotCached(t *testing.T) {
 	server, _ := newAdminDBTestServer(t)
+	server.cfg.Admin.LoginCaptchaEnabled = true
 	captcha, err := service.NewLoginCaptcha()
 	if err != nil {
 		t.Fatalf("create captcha: %v", err)

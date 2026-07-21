@@ -47,6 +47,15 @@ Write-Host ""
 Write-Host "[1/6] Building frontend..." -ForegroundColor Cyan
 Push-Location (Join-Path $root "web")
 try {
+    $frontendTools = @("vitest.cmd", "vue-tsc.cmd", "vite.cmd")
+    $missingFrontendTool = $frontendTools | Where-Object {
+        -not (Test-Path (Join-Path "node_modules\.bin" $_))
+    } | Select-Object -First 1
+    if ($missingFrontendTool) {
+        Write-Host "  Installing locked frontend dependencies..." -ForegroundColor Cyan
+        npm ci
+        if ($LASTEXITCODE -ne 0) { throw "Frontend dependency installation failed" }
+    }
     npm run build
     if ($LASTEXITCODE -ne 0) { throw "Frontend build failed" }
 } finally {

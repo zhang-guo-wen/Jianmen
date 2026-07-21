@@ -191,8 +191,9 @@ chmod 644 /certs/admin.crt /certs/database.crt /certs/database-ca.crt
 
     # wsl.exe does not preserve multiline arguments reliably on Windows
     # PowerShell 5. Encode the script so Docker receives one plain argument.
+    $linuxCertificateScript = $certificateScript.Replace("`r`n", "`n")
     $certificateScriptBase64 = [Convert]::ToBase64String(
-        [Text.Encoding]::UTF8.GetBytes($certificateScript)
+        [Text.Encoding]::UTF8.GetBytes($linuxCertificateScript)
     )
     $certificateCommand = "printf '%s' '$certificateScriptBase64' | base64 -d | sh"
 

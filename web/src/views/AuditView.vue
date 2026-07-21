@@ -613,6 +613,11 @@ import {
 import { useI18n } from '@/i18n';
 import { usePermissionStore } from '@/stores/permission';
 import { installUnicodeGuacamoleParser } from '@/utils/guacamoleProtocol';
+import {
+  bindRDPReplayDisplay,
+  type RDPReplayDisplayBinding,
+  type RDPReplayScaleDisplay,
+} from '@/utils/rdpReplayDisplay';
 
 type AuditScope = 'logins' | 'operations' | 'ssh' | 'rdp' | 'db' | 'online';
 type DetailKind = '' | 'meta' | 'commands' | 'files' | 'file-summary' | 'queries' | 'replay';
@@ -627,11 +632,8 @@ type ReplayData = {
   raw: string;
 };
 
-interface RDPReplayDisplay {
+interface RDPReplayDisplay extends RDPReplayScaleDisplay {
   getElement(): HTMLDivElement;
-  getWidth(): number;
-  getHeight(): number;
-  scale(scale: number): void;
 }
 
 interface RDPRecording {
@@ -723,6 +725,7 @@ const rdpReplayPosition = ref(0);
 const rdpReplayDuration = ref(0);
 let rdpRecording: RDPRecording | undefined;
 let rdpReplayResizeObserver: ResizeObserver | undefined;
+let rdpReplayDisplayBinding: RDPReplayDisplayBinding | undefined;
 
 // Login and management operation audit state
 const loginAuditLogs = ref<LoginAuditRecord[]>([]);
@@ -1017,24 +1020,20 @@ async function openRDPReplay(session: RDPAuditSessionRecord) {
   const displayElement = display.getElement();
   displayElement.classList.add('rdp-recording-canvas');
   host.replaceChildren(displayElement);
-  const scaleDisplay = () => {
-    const width = display.getWidth();
-    const height = display.getHeight();
-    if (!width || !height || !host.clientWidth || !host.clientHeight) return;
-    display.scale(Math.min(host.clientWidth / width, host.clientHeight / height));
-  };
-  rdpReplayResizeObserver = new ResizeObserver(scaleDisplay);
+  const displayBinding = bindRDPReplayDisplay(display, host);
+  rdpReplayDisplayBinding = displayBinding;
+  rdpReplayResizeObserver = new ResizeObserver(() => displayBinding.fit());
   rdpReplayResizeObserver.observe(host);
 
   recording.onprogress = duration => {
     rdpReplayDuration.value = duration;
     rdpReplayLoading.value = false;
-    scaleDisplay();
+    displayBinding.fit();
   };
   recording.onload = () => {
     rdpReplayDuration.value = recording.getDuration();
     rdpReplayLoading.value = false;
-    scaleDisplay();
+    displayBinding.fit();
   };
   recording.onerror = message => {
     rdpReplayLoading.value = false;
@@ -1080,7 +1079,16 @@ function formatRDPReplayTime(milliseconds: number): string {
 function destroyRDPReplay() {
   rdpReplayResizeObserver?.disconnect();
   rdpReplayResizeObserver = undefined;
+  rdpReplayDisplayBinding?.detach();
+  rdpReplayDisplayBinding = undefined;
   if (rdpRecording) {
+    rdpRecording.onload = null;
+    rdpRecording.onerror = null;
+    rdpRecording.onprogress = null;
+    rdpRecording.onplay = null;
+    rdpRecording.onpause = null;
+    rdpRecording.onseek = null;
+    rdpRecording.pause();
     try {
       rdpRecording.abort();
     } catch {

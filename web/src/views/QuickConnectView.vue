@@ -211,15 +211,23 @@
                       </el-button>
                     </span>
                   </el-tooltip>
-                  <el-tooltip content="Web 数据库连接暂未开放" placement="top">
+                  <el-tooltip
+                    :content="databaseWebUnavailableReason(account)"
+                    :disabled="!databaseWebUnavailableReason(account)"
+                    placement="top"
+                  >
                     <span
                       class="database-action-tooltip"
-                      tabindex="0"
-                      role="button"
-                      aria-disabled="true"
-                      aria-label="Web 数据库连接暂未开放"
+                      :tabindex="databaseWebUnavailableReason(account) ? 0 : undefined"
+                      :role="databaseWebUnavailableReason(account) ? 'button' : undefined"
+                      :aria-disabled="databaseWebUnavailableReason(account) ? 'true' : undefined"
+                      :aria-label="databaseWebUnavailableReason(account) || undefined"
                     >
-                      <el-button size="small" disabled>
+                      <el-button
+                        size="small"
+                        :disabled="Boolean(databaseWebUnavailableReason(account))"
+                        @click="openDatabaseWeb(account)"
+                      >
                         Web
                       </el-button>
                     </span>
@@ -881,6 +889,17 @@ function databaseClientUnavailableReason(protocol?: string): string {
     : '';
 }
 
+function databaseWebUnavailableReason(account: QuickDBTarget): string {
+  if (String(account._protocol || '').toLowerCase() === 'redis') {
+    return 'Redis 暂不支持 Web SQL 控制台';
+  }
+  if (!permission.canDo('db:query') && !permission.canDo('db:execute')) {
+    return '当前账号没有在线 SQL 执行权限';
+  }
+  if (!account.id) return '缺少数据库账号 ID';
+  return '';
+}
+
 function onDBSearch(query: string) {
   dbSearchInput.value = query;
   dbKeyword.value = query;
@@ -921,7 +940,7 @@ function ensureDatabaseConnectionInfo(account: QuickDBTarget): Promise<DatabaseC
   const currentRequest = dbConnectionRequests.get(key);
   if (currentRequest) return currentRequest;
 
-  const state: DatabaseConnectionState = {
+  dbConnectionStates[key] = {
     loading: true,
     host: '',
     tlsServerName: '',
@@ -933,7 +952,7 @@ function ensureDatabaseConnectionInfo(account: QuickDBTarget): Promise<DatabaseC
     clientTLSMode: 'optional',
     tlsTrustMode: undefined,
   };
-  dbConnectionStates[key] = state;
+  const state = dbConnectionStates[key];
 
   const request = (async () => {
     try {
@@ -1006,6 +1025,18 @@ async function copyDatabaseConnectionInfo(account: QuickDBTarget) {
     if (error instanceof DatabaseGatewayConfigurationRedirect) return;
     ElMessage.error(error instanceof Error ? error.message : '复制失败，请稍后重试');
   }
+}
+
+function openDatabaseWeb(account: QuickDBTarget) {
+  const unavailableReason = databaseWebUnavailableReason(account);
+  if (unavailableReason) {
+    ElMessage.warning(unavailableReason);
+    return;
+  }
+  void router.push({
+    path: '/sql-console',
+    query: { database_account_id: String(account.id) },
+  });
 }
 
 async function openDatabaseClient(account: QuickDBTarget) {

@@ -2,13 +2,10 @@
 
 ## Container images
 
-Every push to `dev` publishes a multi-architecture image to GitHub Container Registry:
-
-```text
-ghcr.io/zhang-guo-wen/jianmen:dev
-```
-
-Every `v*` tag publishes version, major/minor, `latest`, and commit SHA tags. The image supports `linux/amd64` and `linux/arm64`.
+Normal branch pushes and pull requests run CI checks only. They never publish a container image or
+GitHub release. A semantic version tag such as `v1.2.3` or `v1.2.3-rc.1` publishes the
+multi-architecture container image and release archives. The image supports `linux/amd64` and
+`linux/arm64`. Only a stable tag updates `latest`; a prerelease tag does not.
 
 The image fails closed unless `/app/certs/admin.crt` and
 `/app/certs/admin.key` are mounted. Create a short-lived self-signed
@@ -46,7 +43,7 @@ docker run --rm --user 0 \
    chmod 644 /certs/admin.crt /certs/database.crt /certs/database-ca.crt'
 ```
 
-Run the development image with the Admin HTTPS port bound only to the host
+Run the latest released image with the Admin HTTPS port bound only to the host
 loopback interface:
 
 ```bash
@@ -59,7 +56,7 @@ docker run -d \
   -p 47110-47199:47110-47199 \
   -v jianmen-data:/app/data \
   -v jianmen-certs:/app/certs:ro \
-  ghcr.io/zhang-guo-wen/jianmen:dev
+  ghcr.io/zhang-guo-wen/jianmen:latest
 ```
 
 The default container endpoints are:
@@ -106,7 +103,7 @@ identity verification.
 
 ## GitHub releases
 
-Create and push a version tag to publish release archives:
+Create and push a semantic version tag to build and publish release archives:
 
 ```bash
 git tag v0.1.0
@@ -117,7 +114,12 @@ The release workflow builds these archives with the Vue frontend embedded in the
 
 - Windows amd64
 - Windows arm64
-- Linux amd64
-- Linux arm64
+- Linux amd64 Lite (no embedded guacd runtime)
+- Linux amd64 RDP (self-extracting embedded guacd runtime)
+- Linux arm64 Lite (no embedded guacd runtime)
+- Linux arm64 RDP (self-extracting embedded guacd runtime)
 
-Each archive includes the executable, `config.example.json`, `README.md`, and `LICENSE`. The release also contains `checksums.txt` with SHA-256 checksums.
+Each archive includes the executable, `config.example.json`, `README.md`, and `LICENSE`. RDP
+archives also include `THIRD_PARTY_NOTICES.md`. The release contains `checksums.txt` with SHA-256
+checksums. RDP archives are built from the pinned official guacd image; the target host does not
+need Docker or a preinstalled guacd.

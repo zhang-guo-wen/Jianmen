@@ -10,7 +10,7 @@ Go 程序在 Windows 中交叉编译，WSL 只负责装配和运行 Linux 容器
 
 ```text
 Windows build.ps1
-    -> dist/bastion-core-linux-amd64
+    -> dist/jianmen-linux-amd64-lite
     -> 固定版 guacd Linux 运行层
     -> jianmen:guacd-1.6.0
 ```
@@ -24,7 +24,11 @@ Windows build.ps1
 Dockerfile 只复制上述 Linux 二进制，不会在 WSL 或 Docker 构建阶段重新下载
 Go/npm 依赖，也不会重复编译前端和后端。
 
-当前成品明确为 `linux/amd64`。`dist` 不进入版本库，因此每次从干净工作区
+构建脚本同时生成可独立部署的 `jianmen-linux-amd64-rdp`。该版本把固定摘要
+镜像中的 guacd 运行时嵌入 Go 二进制，首次启动自动释放，不要求目标主机安装
+Docker。容器镜像继续使用 Lite 版，避免重复携带 guacd。
+
+`dist` 不进入版本库，因此每次从干净工作区
 构建镜像前都必须先执行 `build.ps1`；缺少 Linux 产物时 Docker 构建会直接失败，
 避免误用旧二进制。
 

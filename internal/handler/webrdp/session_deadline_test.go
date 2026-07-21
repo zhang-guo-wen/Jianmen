@@ -2,8 +2,11 @@ package webrdp
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
+
+	"github.com/gorilla/websocket"
 
 	"jianmen/internal/model"
 	"jianmen/internal/service"
@@ -46,6 +49,21 @@ func TestRelayOutcomeRecordsExpiredAccount(t *testing.T) {
 		message != "" {
 		t.Fatalf(
 			"relay outcome = (%q, %q, %q), want account expiry",
+			outcome,
+			code,
+			message,
+		)
+	}
+}
+
+func TestRelayOutcomeTreatsCloseSentAsSucceeded(t *testing.T) {
+	outcome, code, message := relayOutcome(
+		fmt.Errorf("finish websocket relay: %w", websocket.ErrCloseSent),
+		context.Background(),
+	)
+	if outcome != model.AuditOutcomeSucceeded || code != "" || message != "" {
+		t.Fatalf(
+			"relay outcome = (%q, %q, %q), want successful close",
 			outcome,
 			code,
 			message,

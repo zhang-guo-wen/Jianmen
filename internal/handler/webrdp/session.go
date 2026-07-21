@@ -266,7 +266,8 @@ func preRelayOutcome(
 }
 
 func expectedRelayError(err error) bool {
-	if err == nil || errors.Is(err, io.EOF) || errors.Is(err, net.ErrClosed) {
+	if err == nil || errors.Is(err, io.EOF) || errors.Is(err, net.ErrClosed) ||
+		errors.Is(err, websocket.ErrCloseSent) {
 		return true
 	}
 	if websocket.IsCloseError(

@@ -13,7 +13,11 @@ import (
 	"jianmen/internal/model"
 )
 
-var errVerifiedTLSRequired = errors.New("verified TLS is required for database authentication")
+var (
+	errVerifiedTLSRequired = errors.New("verified TLS is required for database authentication")
+	// ErrUpstreamTLSUnsupported identifies a server that explicitly does not offer TLS on the configured port.
+	ErrUpstreamTLSUnsupported = errors.New("upstream database does not support TLS")
+)
 
 func upstreamTLSPolicy(instance model.DatabaseInstance) (dbtls.Config, string, error) {
 	mode, err := dbtls.NormalizeMode(instance.TLSMode)
@@ -131,7 +135,7 @@ func dialMySQLUpstream(
 		return connection, handshake, nil
 	}
 	if handshake.CapabilityFlags&mysqlClientSSL == 0 {
-		return closeOnError(errors.New("MySQL upstream does not support TLS"))
+		return closeOnError(fmt.Errorf("%w: mysql server did not advertise CLIENT_SSL", ErrUpstreamTLSUnsupported))
 	}
 	selectDatabase := database != "" &&
 		handshake.CapabilityFlags&mysqlClientConnectWithDB != 0
@@ -198,12 +202,17 @@ func dialPostgresUpstream(ctx context.Context, instance model.DatabaseInstance) 
 		return nil, fmt.Errorf("write PostgreSQL SSL request: %w", err)
 	}
 	response := []byte{0}
-	if _, err := readFull(connection, response); err != nil || response[0] != 'S' {
+	if _, err := readFull(connection, response); err != nil {
 		_ = connection.Close()
-		if err != nil {
-			return nil, fmt.Errorf("read PostgreSQL SSL response: %w", err)
-		}
-		return nil, errors.New("PostgreSQL upstream refused TLS")
+		return nil, fmt.Errorf("read PostgreSQL SSL response: %w", err)
+	}
+	if response[0] == 'N' {
+		_ = connection.Close()
+		return nil, fmt.Errorf("%w: postgresql server refused SSLRequest", ErrUpstreamTLSUnsupported)
+	}
+	if response[0] != 'S' {
+		_ = connection.Close()
+		return nil, errors.New("invalid postgresql SSL response")
 	}
 	secured, err := dbtls.HandshakeClient(ctx, connection, policy, upstreamAddress(instance))
 	if err != nil {

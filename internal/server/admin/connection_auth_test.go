@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -17,6 +18,7 @@ import (
 	"jianmen/internal/config"
 	"jianmen/internal/model"
 	"jianmen/internal/rbac"
+	"jianmen/internal/server/dbproxy"
 	"jianmen/internal/store"
 )
 
@@ -230,6 +232,12 @@ func TestDatabaseProbeErrorMessageDoesNotExposeUpstreamResponse(t *testing.T) {
 	tlsMessage := databaseProbeErrorMessage(errors.New("verified TLS is required for database authentication"))
 	if tlsMessage != "database connection requires TLS" {
 		t.Fatalf("TLS policy response = %q", tlsMessage)
+	}
+
+	unsupportedTLSMessage := databaseProbeErrorMessage(fmt.Errorf("probe failed: %w", dbproxy.ErrUpstreamTLSUnsupported))
+	const expectedUnsupportedTLSMessage = "远程数据库未启用 SSL/TLS，请先在数据库服务端启用 TLS，或将上游 TLS 模式改为“不启用”"
+	if unsupportedTLSMessage != expectedUnsupportedTLSMessage {
+		t.Fatalf("unsupported TLS response = %q, want %q", unsupportedTLSMessage, expectedUnsupportedTLSMessage)
 	}
 }
 

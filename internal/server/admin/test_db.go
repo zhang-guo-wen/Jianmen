@@ -73,6 +73,9 @@ func (s *Server) writeDatabaseProbeResult(w http.ResponseWriter, r *http.Request
 }
 
 func databaseProbeErrorMessage(err error) string {
+	if errors.Is(err, dbproxy.ErrUpstreamTLSUnsupported) {
+		return "远程数据库未启用 SSL/TLS，请先在数据库服务端启用 TLS，或将上游 TLS 模式改为“不启用”"
+	}
 	for current := err; current != nil; current = errors.Unwrap(current) {
 		message := strings.ToLower(current.Error())
 		if strings.Contains(message, "requires tls") || strings.Contains(message, "verified tls") || strings.Contains(message, "tls is required") {

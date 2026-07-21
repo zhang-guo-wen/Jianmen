@@ -3,6 +3,8 @@ package dbproxy
 import (
 	"context"
 	"crypto/tls"
+	"errors"
+	"io"
 	"net"
 	"os"
 	"testing"
@@ -58,6 +60,107 @@ func TestPostgresCleartextPasswordRequiresVerifiedTLS(t *testing.T) {
 	defer client.Close()
 	if err := requireVerifiedPostgresTLS(client); err == nil {
 		t.Fatal("cleartext PostgreSQL password was allowed without verified TLS")
+	}
+}
+
+func TestProbeMySQLReportsUpstreamTLSUnsupported(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	serverDone := make(chan error, 1)
+	go func() {
+		connection, acceptErr := listener.Accept()
+		if acceptErr != nil {
+			serverDone <- acceptErr
+			return
+		}
+		defer connection.Close()
+		_, writeErr := sendFakeMySQLHandshakeWithTLS(connection, false)
+		serverDone <- writeErr
+	}()
+	host, port := splitTestListenerAddress(t, listener)
+	err = ProbeDatabaseAuthentication(context.Background(), model.DatabaseInstance{
+		Protocol: "mysql", Address: host, Port: port, TLSMode: dbtls.ModeVerifyCA,
+	}, "probe", "secret")
+	if !errors.Is(err, ErrUpstreamTLSUnsupported) {
+		t.Fatalf("ProbeDatabaseAuthentication() error = %v, want ErrUpstreamTLSUnsupported", err)
+	}
+	if err := <-serverDone; err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestProbePostgresReportsUpstreamTLSUnsupported(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	serverDone := make(chan error, 1)
+	go func() {
+		connection, acceptErr := listener.Accept()
+		if acceptErr != nil {
+			serverDone <- acceptErr
+			return
+		}
+		defer connection.Close()
+		request := make([]byte, 8)
+		if _, readErr := io.ReadFull(connection, request); readErr != nil {
+			serverDone <- readErr
+			return
+		}
+		if !isPostgresSSLRequest(request) {
+			serverDone <- errors.New("invalid postgresql SSLRequest")
+			return
+		}
+		_, writeErr := connection.Write([]byte{'N'})
+		serverDone <- writeErr
+	}()
+	host, port := splitTestListenerAddress(t, listener)
+	err = ProbeDatabaseAuthentication(context.Background(), model.DatabaseInstance{
+		Protocol: "postgres", Address: host, Port: port, TLSMode: dbtls.ModeVerifyCA,
+	}, "probe", "secret")
+	if !errors.Is(err, ErrUpstreamTLSUnsupported) {
+		t.Fatalf("ProbeDatabaseAuthentication() error = %v, want ErrUpstreamTLSUnsupported", err)
+	}
+	if err := <-serverDone; err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestProbePostgresDoesNotMisclassifyInvalidSSLResponse(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	serverDone := make(chan error, 1)
+	go func() {
+		connection, acceptErr := listener.Accept()
+		if acceptErr != nil {
+			serverDone <- acceptErr
+			return
+		}
+		defer connection.Close()
+		request := make([]byte, 8)
+		if _, readErr := io.ReadFull(connection, request); readErr != nil {
+			serverDone <- readErr
+			return
+		}
+		_, writeErr := connection.Write([]byte{'?'})
+		serverDone <- writeErr
+	}()
+	host, port := splitTestListenerAddress(t, listener)
+	err = ProbeDatabaseAuthentication(context.Background(), model.DatabaseInstance{
+		Protocol: "postgres", Address: host, Port: port, TLSMode: dbtls.ModeVerifyCA,
+	}, "probe", "secret")
+	if err == nil || errors.Is(err, ErrUpstreamTLSUnsupported) {
+		t.Fatalf("ProbeDatabaseAuthentication() error = %v, want non-TLS-unsupported protocol error", err)
+	}
+	if err := <-serverDone; err != nil {
+		t.Fatal(err)
 	}
 }
 

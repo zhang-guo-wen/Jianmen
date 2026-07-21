@@ -248,8 +248,8 @@ async function loadEndpoints() {
       apiClient.getHosts({ page: 1, page_size: 200 }),
       apiClient.getResourceGroups({ group_type: 'resource', page: 1, page_size: 200 }),
     ])
-    endpoints.value = endpointPage.items
-    hosts.value = hostPage.items
+    endpoints.value = endpointPage.items ?? []
+    hosts.value = hostPage.items ?? []
     groups.value = (resourceGroups.items || []).map(item => item.name).filter(Boolean)
     if (selectedEndpoint.value && !endpoints.value.some(item => item.id === selectedEndpoint.value?.id)) {
       stopContainerListRequest()
@@ -475,7 +475,7 @@ function onConnectionModeChange(mode: string) {
 
 async function loadHosts() {
   const result = await apiClient.getHosts({ page: 1, page_size: 200 })
-  hosts.value = result.items
+  hosts.value = result.items ?? []
 }
 
 async function onHostChange(hostID: string) {
@@ -489,7 +489,7 @@ async function loadHostAccounts(hostID: string) {
     return
   }
   const result = await apiClient.getHostAccounts(hostID, { page: 1, page_size: 200 })
-  hostAccounts.value = result.items
+  hostAccounts.value = result.items ?? []
 }
 
 function buildPayload(): ContainerEndpointPayload {

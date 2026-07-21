@@ -189,10 +189,17 @@ chmod 600 /certs/admin.key /certs/database.key
 chmod 644 /certs/admin.crt /certs/database.crt /certs/database-ca.crt
 '@
 
+    # wsl.exe does not preserve multiline arguments reliably on Windows
+    # PowerShell 5. Encode the script so Docker receives one plain argument.
+    $certificateScriptBase64 = [Convert]::ToBase64String(
+        [Text.Encoding]::UTF8.GetBytes($certificateScript)
+    )
+    $certificateCommand = "printf '%s' '$certificateScriptBase64' | base64 -d | sh"
+
     Invoke-Docker $Docker @(
         "run", "--rm", "--user", "0",
         "-v", "jianmen-certs:/certs",
-        "alpine:3.23", "sh", "-ec", $certificateScript
+        "alpine:3.23", "sh", "-ec", $certificateCommand
     ) | Out-Null
     Write-Ok "certificate volume ready"
 }

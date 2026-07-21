@@ -4,15 +4,23 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ARCH="${1:?usage: prepare-guacd-runtime.sh <amd64|arm64> [output]}"
 OUTPUT="${2:-$ROOT/internal/guacdruntime/assets/guacd-linux-${ARCH}.tar.gz}"
-IMAGE="guacamole/guacd:1.6.0@sha256:8974eaa9ba32f713daf311e7cc8cd7e4cdfba1edea39eed75524e78ef4b08f4f"
+IMAGE_REPOSITORY="guacamole/guacd"
+IMAGE_VERSION="1.6.0"
 
 case "$ARCH" in
-  amd64|arm64) ;;
+  amd64)
+    IMAGE_DIGEST="sha256:f39258e35244b6bf79bc6ac4e60eee176aea6f6a5adb13e8c3090e48df8ae515"
+    ;;
+  arm64)
+    IMAGE_DIGEST="sha256:769987c20e99f59578305505ffa23418c24da73d579364f097cdf01d9866e5e5"
+    ;;
   *)
     echo "unsupported guacd runtime architecture: $ARCH" >&2
     exit 2
     ;;
 esac
+
+IMAGE="${IMAGE_REPOSITORY}:${IMAGE_VERSION}@${IMAGE_DIGEST}"
 
 command -v docker >/dev/null 2>&1 || {
   echo "Docker is required to prepare the embedded guacd runtime" >&2

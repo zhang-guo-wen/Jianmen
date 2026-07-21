@@ -17,7 +17,10 @@ jianmen/
 │   ├── store/           # 数据存储接口与实现
 │   └── model/           # 数据模型
 ├── web/                 # Vue 3 前端
-└── config.example.json  # 配置示例
+├── configs/             # 配置示例
+├── deploy/docker/       # 容器部署文件
+├── scripts/             # 构建、CI 与开发辅助脚本
+└── docs/                # 指南、审查和历史资料
 ```
 
 ## 快速开始
@@ -30,20 +33,13 @@ jianmen/
 
 ### 安装与运行
 
-```bash
+```powershell
 # 克隆项目
 git clone https://github.com/your-org/jianmen.git
 cd jianmen
 
-# 编译
-go build -o bin/bastion-core.exe ./cmd/bastion-core
-
-# 准备配置
-cp config.example.json config.local.json
-# 编辑 config.local.json，配置堡垒机用户和目标主机信息
-
-# 启动服务
-./bin/bastion-core.exe -config config.local.json
+# Windows 本机统一通过 Docker 构建并启动
+.\start.ps1
 ```
 
 启动后：
@@ -116,7 +112,7 @@ npm run build      # 生产构建
 - 页面管理系统里，资源应全部来自管理页面创建和维护。
 - 不应出现“配置文件账号不能删除”“配置文件实例不能删除”这类状态。
 - 删除、禁用、编辑都应对页面管理资源生效。
-- `config.example.json` 不应预置 demo 主机账号或数据库代理，避免用户误以为这些是页面创建的数据。
+- `configs/config.example.json` 不应预置 demo 主机账号或数据库代理，避免用户误以为这些是页面创建的数据。
 
 ## 主机管理页面问题
 

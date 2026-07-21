@@ -107,7 +107,7 @@ func TestAdminTLSValidation(t *testing.T) {
 }
 
 func TestDockerImageAdminTransportIsSecureByDefault(t *testing.T) {
-	raw, err := os.ReadFile(filepath.Join("..", "..", "config.docker.json"))
+	raw, err := os.ReadFile(filepath.Join("..", "..", "configs", "config.docker.json"))
 	if err != nil {
 		t.Fatalf("read config.docker.json: %v", err)
 	}
@@ -680,7 +680,7 @@ func TestDatabaseGatewayAvailableModesReflectConfiguredListeners(t *testing.T) {
 }
 
 func TestDockerfileExposesEveryDefaultDatabaseGatewayPort(t *testing.T) {
-	raw, err := os.ReadFile(filepath.Join("..", "..", "Dockerfile"))
+	raw, err := os.ReadFile(filepath.Join("..", "..", "deploy", "docker", "Dockerfile"))
 	if err != nil {
 		t.Fatalf("read Dockerfile: %v", err)
 	}

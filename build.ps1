@@ -96,7 +96,7 @@ try {
 
         Write-Host "[5/6] Preparing embedded guacd runtime..." -ForegroundColor Cyan
         $distribution = Resolve-WslDockerDistribution
-        $prepareScript = Convert-ToWslPath $distribution (Join-Path $root "scripts\prepare-guacd-runtime.sh")
+        $prepareScript = Convert-ToWslPath $distribution (Join-Path $root "scripts\build\prepare-guacd-runtime.sh")
         $runtimeAsset = Convert-ToWslPath $distribution (Join-Path $root "internal\guacdruntime\assets\guacd-linux-amd64.tar.gz")
         & wsl.exe -d $distribution -e bash $prepareScript amd64 $runtimeAsset
         if ($LASTEXITCODE -ne 0) { throw "Embedded guacd runtime preparation failed" }

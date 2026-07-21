@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 EMBED_DIR="$ROOT/internal/frontend/dist"
 
 cd "$ROOT/web"

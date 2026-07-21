@@ -548,7 +548,7 @@ func TestConfigurationExamplesLoadAndValidate(t *testing.T) {
 
 	for _, name := range examples {
 		t.Run(name, func(t *testing.T) {
-			path := filepath.Join("..", "..", name)
+			path := filepath.Join("..", "..", "configs", name)
 			if _, err := Load(path); err != nil {
 				t.Fatalf("load %s: %v", name, err)
 			}

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 VERSION="${1:-dev}"
 FRONTEND_DIST="$ROOT/web/dist"
 EMBED_DIR="$ROOT/internal/frontend/dist"
@@ -22,7 +22,7 @@ build_archive() {
   fi
 
   if [[ "$variant" == "rdp" ]]; then
-    "$ROOT/scripts/prepare-guacd-runtime.sh" "$arch"
+    "$ROOT/scripts/build/prepare-guacd-runtime.sh" "$arch"
     build_tags=(-tags embedded_guacd)
   fi
 
@@ -35,7 +35,7 @@ build_archive() {
     go build "${build_tags[@]}" -trimpath -ldflags="-s -w" \
     -o "$package_dir/$executable" ./cmd/bastion-core
 
-  cp "$ROOT/config.example.json" "$package_dir/config.example.json"
+  cp "$ROOT/configs/config.example.json" "$package_dir/config.example.json"
   cp "$ROOT/LICENSE" "$package_dir/LICENSE"
   cp "$ROOT/README.md" "$package_dir/README.md"
   if [[ "$variant" == "rdp" ]]; then

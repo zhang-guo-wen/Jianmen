@@ -1,7 +1,7 @@
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
-$repoRoot = Split-Path -Parent $PSScriptRoot
+$repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $ciWorkflowPath = Join-Path $repoRoot '.github/workflows/ci.yml'
 $releaseWorkflowPath = Join-Path $repoRoot '.github/workflows/release.yml'
 
@@ -51,7 +51,7 @@ $releaseJob = Get-WorkflowJobBlock -Content $releaseContent -Name 'release'
 
 $requiredPackageContract = @(
   'needs: quality-gates',
-  './scripts/package-release.sh',
+  './scripts/build/package-release.sh',
   'uses: actions/upload-artifact@v4',
   'name: release-packages',
   'path: dist/release'
@@ -76,7 +76,7 @@ foreach ($expected in $requiredReleaseContract) {
 }
 
 $releaseBuildCommands = @(
-  './scripts/package-release.sh',
+  './scripts/build/package-release.sh',
   'npm run',
   'go build',
   'go test',

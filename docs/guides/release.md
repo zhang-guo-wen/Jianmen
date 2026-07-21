@@ -70,9 +70,9 @@ The default container endpoints are:
 - Application gateways: `HOST:47110-47199`
 
 Mount a custom configuration file at `/app/config.json` when the defaults in
-`config.docker.json` are not suitable. The default image never enables
+`configs/config.docker.json` are not suitable. The default image never enables
 plaintext Admin HTTP. For a reverse-proxy deployment, use
-`config.docker.proxy.example.json`, keep the Jianmen container and proxy on an
+`configs/config.docker.proxy.example.json`, keep the Jianmen container and proxy on an
 isolated Docker network, and do not publish Jianmen's port `47100`. The complete
 Caddy command sequence and the Nginx Stream database-gateway precautions are
 documented in `README.md`.

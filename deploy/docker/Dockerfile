@@ -20,8 +20,8 @@ RUN apk add --no-cache openssl su-exec \
 WORKDIR /app
 
 COPY --chown=jianmen:jianmen --chmod=0555 dist/jianmen-linux-${TARGETARCH}-lite /app/jianmen
-COPY --chown=jianmen:jianmen --chmod=0444 config.docker.web-rdp.example.json /app/config.json
-COPY --chmod=0555 docker-entrypoint.sh /usr/local/bin/jianmen-entrypoint
+COPY --chown=jianmen:jianmen --chmod=0444 configs/config.docker.web-rdp.example.json /app/config.json
+COPY --chmod=0555 deploy/docker/docker-entrypoint.sh /usr/local/bin/jianmen-entrypoint
 
 VOLUME ["/app/data"]
 

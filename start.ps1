@@ -185,11 +185,11 @@ try {
         Write-Host "(reuse existing artifacts and image)" -ForegroundColor DarkGray
     }
     if ($EnableTLS) {
-        $configFile = Join-Path $root "config.docker.web-rdp.example.json"
+        $configFile = Join-Path $root "configs\config.docker.web-rdp.example.json"
         $webURL = "https://127.0.0.1:47100/"
         Write-Host "(HTTPS configuration enabled)" -ForegroundColor DarkGray
     } else {
-        $configFile = Join-Path $root "config.docker.local.json"
+        $configFile = Join-Path $root "configs\config.docker.local.json"
     }
     Write-Host ""
 
@@ -214,9 +214,11 @@ try {
         Write-Ok "frontend and Linux container binary built"
 
         $dockerRoot = Convert-ToDockerPath $root
+        $dockerfile = Convert-ToDockerPath (Join-Path $root "deploy\docker\Dockerfile")
         Invoke-Docker $docker @(
             "build", "--platform", "linux/amd64",
             "--build-arg", "GUACD_IMAGE=guacamole/guacd:1.6.0@sha256:8974eaa9ba32f713daf311e7cc8cd7e4cdfba1edea39eed75524e78ef4b08f4f",
+            "-f", $dockerfile,
             "-t", $imageName, $dockerRoot
         ) | Out-Null
         Write-Ok "container image built: $imageName"

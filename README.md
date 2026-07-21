@@ -39,7 +39,7 @@
 两种模式不会同时监听；在“系统设置”切换并重启服务后生效。快速连接会读取当前生效配置并自动生成正确端口。
 完整启用三种协议需要数据库网关 TLS 身份。仅回环地址、未填写证书路径的本机配置会在数据目录自动生成并持久化本地 TLS 身份，使 PostgreSQL 可直接使用；非回环监听仍必须显式配置受信任的证书与私钥。
 
-以上是默认回归兼容范围；未列出的版本或扩展可能可以使用，但不作兼容承诺。认证路径、TLS 边界、明确不支持项和测试方法见 [数据库真实协议兼容矩阵](docs/database-protocol-compatibility.md)。
+以上是默认回归兼容范围；未列出的版本或扩展可能可以使用，但不作兼容承诺。认证路径、TLS 边界、明确不支持项和测试方法见 [数据库真实协议兼容矩阵](docs/guides/database-protocol-compatibility.md)。
 
 ### 审计与追溯
 
@@ -56,13 +56,31 @@
 - **跨平台构建** — 提供 Windows 与 Linux 构建脚本，可生成包含前端资源的独立二进制程序，提供docker部署。
 - **开发计划** - 后续开发计划见仓库项目的看板
 
+## 项目结构
+
+```text
+cmd/                 Go 服务入口
+internal/            后端模型、存储、服务、处理器与协议实现
+web/                 Vue 3 前端
+configs/             本机、容器与反向代理配置示例
+deploy/docker/       Dockerfile、入口脚本与 Compose 示例
+scripts/build/       构建和发布脚本
+scripts/ci/          CI 合约检查脚本
+scripts/dev/         本地测试环境辅助脚本
+docs/guides/         使用与部署指南
+docs/reviews/        审查报告
+docs/archive/        已完成的历史设计与实施计划
+```
+
+完整文档目录见 [文档索引](docs/README.md)。
+
 ## 部署
 
 Web RDP 的默认容器部署把 Jianmen Go 程序和固定版本的 `guacd` 放在同一镜像、
 同一容器中。Go 进程强制以前台模式启动并停止 `guacd`，后者只监听容器回环地址
 `127.0.0.1:4822`，不需要独立 sidecar、共享卷或内部网络端口。需要复用已有
 `guacd` 集群时，仍可关闭托管模式并配置外部私有地址。完整权限边界、对象存储
-配置和 Compose 示例见 [Web RDP 部署与安全边界](docs/web-rdp.md)。
+配置和 Compose 示例见 [Web RDP 部署与安全边界](docs/guides/web-rdp.md)。
 
 ### 审计保留与回放配额
 
@@ -133,7 +151,7 @@ docker run -d \
   -p 47110-47199:47110-47199 \
   -v "$PWD/data:/app/data" \
   -v "$PWD/data/certs:/app/certs" \
-  -v "$PWD/config.docker.local.json:/app/config.json:ro" \
+  -v "$PWD/configs/config.docker.local.json:/app/config.json:ro" \
   jianmen:guacd-1.6.0
 ```
 
@@ -288,13 +306,13 @@ https://127.0.0.1:47100
 主机名和 `admin.listen_addr` 的端口生成登录地址。
 
 如在隔离 Docker 网络内由 Caddy 等反向代理终止 TLS，可使用仓库提供的
-`config.docker.proxy.example.json`。下面的完整示例不会把容器内的明文 `47100` 发布到
+`configs/config.docker.proxy.example.json`。下面的完整示例不会把容器内的明文 `47100` 发布到
 宿主机；它只代理 Web 管理端，示例中的 `33060` 仍由 Jianmen 直接发布，不代表 Caddy
 同时代理数据库入口。使用前请把示例域名替换为真实域名并完成 DNS 解析：
 
 ```bash
 mkdir -p /opt/jianmen
-cp config.docker.proxy.example.json /opt/jianmen/config.json
+cp configs/config.docker.proxy.example.json /opt/jianmen/config.json
 sed -i 's/jianmen\.example\.com/your.real.domain/g' /opt/jianmen/config.json
 printf '%s\n' \
   'your.real.domain {' \
@@ -339,13 +357,13 @@ Admin 管理端默认仅允许回环地址使用 HTTP，适合本机开发。非
 }
 ```
 
-镜像内置的 `config.docker.json` 默认要求证书，且不会启用
+镜像内置的 `configs/config.docker.json` 默认要求证书，且不会启用
 `allow_insecure_http`。只有类似上述代理示例、容器明文端口不离开受控内部网络时，才可在
 挂载的自定义配置中显式打开该开关；不得把这种配置下的 `47100` 发布到公网。
 
 新增或编辑应用时，只需填写完整应用地址，例如 `http://47.121.184.68:18848/nacos/#/login`。系统会自动解析协议、主机、端口和默认访问路径，并在应用列表中生成可复制、可直接打开的代理访问地址。
 
-容器默认使用仓库中的 `config.docker.json`。如需自定义数据库、监听地址或端口，可以挂载自己的配置文件：
+容器默认使用仓库中的 `configs/config.docker.json`。如需自定义数据库、监听地址或端口，可以挂载自己的配置文件：
 
 ```bash
 docker run -d \
@@ -384,23 +402,23 @@ docker rm -f jianmen
 
 ## 截图
 快速连接
-![img.png](docs/picture/img.png)
+![img.png](docs/assets/screenshots/img.png)
 主机和数据库管理
-![img_1.png](docs/picture/img_1.png)
+![img_1.png](docs/assets/screenshots/img_1.png)
 web终端功能
-![img_7.png](docs/picture/img_7.png)
+![img_7.png](docs/assets/screenshots/img_7.png)
 审计回放功能
-![img_6.png](docs/picture/img_6.png)
+![img_6.png](docs/assets/screenshots/img_6.png)
 ssh和xftp审计日志
-![img10.png](docs/picture/img10.png)
+![img10.png](docs/assets/screenshots/img10.png)
 数据库审计功能
-![img_3.png](docs/picture/img_3.png)
+![img_3.png](docs/assets/screenshots/img_3.png)
 内网应用代理功能
-![img_2.png](docs/picture/img_2.png)
+![img_2.png](docs/assets/screenshots/img_2.png)
 
 权限管理
-![img_4.png](docs/picture/img_4.png)
-![img_5.png](docs/picture/img_5.png)
+![img_4.png](docs/assets/screenshots/img_4.png)
+![img_5.png](docs/assets/screenshots/img_5.png)
 
 ## 许可证
 

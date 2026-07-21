@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 ARCH="${1:?usage: prepare-guacd-runtime.sh <amd64|arm64> [output]}"
 OUTPUT="${2:-$ROOT/internal/guacdruntime/assets/guacd-linux-${ARCH}.tar.gz}"
 IMAGE_REPOSITORY="guacamole/guacd"

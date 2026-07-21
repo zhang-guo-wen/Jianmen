@@ -47,7 +47,7 @@ lite_size=$(du -h "$OUTPUT_DIR/jianmen-linux-amd64-lite" | cut -f1)
 echo -e "${GREEN}  ✓ jianmen-linux-amd64-lite  (${lite_size})${NC}"
 
 echo -e "${CYAN}[5/6] 准备 Linux amd64 guacd 运行时...${NC}"
-"$ROOT/scripts/prepare-guacd-runtime.sh" amd64
+"$ROOT/scripts/build/prepare-guacd-runtime.sh" amd64
 
 echo -e "${CYAN}[6/6] 编译 Linux amd64 RDP...${NC}"
 GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -tags embedded_guacd \

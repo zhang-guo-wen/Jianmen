@@ -1,6 +1,6 @@
 # Jianmen 测试环境一键创建脚本
 # 功能：在 WSL Debian 中启动 MySQL、PostgreSQL、SSH 容器
-# 用法：在 PowerShell 中运行: .\scripts\setup-test-containers.ps1 [start|stop|clean|status]
+# 用法：在 PowerShell 中运行: .\scripts\dev\setup-test-containers.ps1 [start|stop|clean|status]
 
 param(
     [string]$Action = "start"

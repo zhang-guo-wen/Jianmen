@@ -1,6 +1,6 @@
 # 自动将测试容器注册到 Jianmen 的配置脚本
 # 前提：Jianmen 后端已启动，测试容器已运行
-# 用法：.\scripts\register-test-containers.ps1
+# 用法：.\scripts\dev\register-test-containers.ps1
 
 $ErrorActionPreference = "Continue"
 

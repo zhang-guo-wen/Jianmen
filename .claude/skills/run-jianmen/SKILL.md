@@ -43,7 +43,7 @@ Start-Sleep -Seconds 1
 
 ```powershell
 # Copy config template (first time only)
-if (-not (Test-Path config.local.json)) { Copy-Item config.example.json config.local.json }
+if (-not (Test-Path config.local.json)) { Copy-Item configs/config.example.json config.local.json }
 
 # Build and run
 New-Item -ItemType Directory -Force -Path logs,bin | Out-Null
@@ -87,7 +87,7 @@ The Vue dev server proxies `/api` requests to the Admin API (default `http://loc
 
 | Symptom | Cause | Fix |
 |---------|-------|-----|
-| `config.local.json` not found | First run, config not copied | Copy `config.example.json` → `config.local.json` |
+| `config.local.json` not found | First run, config not copied | Copy `configs/config.example.json` → `config.local.json` |
 | Port 47100/47101/47102/33060 in use | Previous instance still running | Run `./start.ps1`; it cleans PID files and fixed ports before restart |
 | Script exits with `Startup failed` | A readiness check failed | Read the log tail printed by the script, then inspect `logs/backend.err.log`, `logs/backend.log`, `logs/frontend.err.log`, `logs/frontend.log` |
 | Backend starts but curl returns empty/502 | System `http_proxy` env var routing localhost through external proxy | Use `--noproxy '*'` with curl, or PowerShell `Invoke-WebRequest` |

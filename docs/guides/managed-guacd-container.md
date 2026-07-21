@@ -94,7 +94,7 @@ PowerShell 中执行：
 
 ```powershell
 wsl.exe -d Debian -u root --exec docker compose `
-  -f /mnt/c/02-codespace/Jianmen/docker-compose.web-rdp.yml `
+  -f /mnt/c/02-codespace/Jianmen/deploy/docker/docker-compose.web-rdp.yml `
   up -d --build
 ```
 
@@ -102,7 +102,7 @@ wsl.exe -d Debian -u root --exec docker compose `
 
 ```powershell
 wsl.exe -d Debian -u root --exec docker compose `
-  -f /mnt/c/02-codespace/Jianmen/docker-compose.web-rdp.yml `
+  -f /mnt/c/02-codespace/Jianmen/deploy/docker/docker-compose.web-rdp.yml `
   ps
 ```
 

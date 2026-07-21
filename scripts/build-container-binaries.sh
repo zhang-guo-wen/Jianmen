@@ -5,7 +5,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 EMBED_DIR="$ROOT/internal/frontend/dist"
 
 cd "$ROOT/web"
-if [[ ! -d node_modules ]]; then
+if [[ ! -x node_modules/.bin/vitest || ! -x node_modules/.bin/vue-tsc || ! -x node_modules/.bin/vite ]]; then
   npm ci
 fi
 npm run build

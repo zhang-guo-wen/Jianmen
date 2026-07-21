@@ -20,6 +20,9 @@ echo ""
 
 echo -e "${CYAN}[1/6] 构建前端...${NC}"
 cd "$ROOT/web"
+if [[ ! -x node_modules/.bin/vitest || ! -x node_modules/.bin/vue-tsc || ! -x node_modules/.bin/vite ]]; then
+  npm ci
+fi
 npm run build
 echo -e "${GREEN}  ✓ 前端构建完成${NC}"
 

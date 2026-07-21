@@ -662,6 +662,7 @@ export function useWebRDP({ targetId }: UseWebRDPOptions) {
 
     return new Promise<void>((resolve, reject) => {
       let settled = false;
+      let uploadStarted = false;
       const fail = (reason: unknown) => {
         if (settled) return;
         settled = true;
@@ -674,6 +675,17 @@ export function useWebRDP({ targetId }: UseWebRDPOptions) {
       writer.onack = (ackStatus) => {
         if (ackStatus.isError()) {
           fail(new Error(statusError(ackStatus, '远程端拒绝接收文件')));
+          return;
+        }
+        if (!uploadStarted && !settled) {
+          uploadStarted = true;
+          try {
+            // The first acknowledgement accepts the file stream itself.
+            // BlobWriter owns all subsequent per-blob acknowledgements.
+            writer.sendBlob(file);
+          } catch (caught) {
+            fail(caught instanceof Error ? caught : new Error('读取本地文件失败'));
+          }
         }
       };
       writer.onprogress = (_blob, offset) => {
@@ -693,7 +705,6 @@ export function useWebRDP({ targetId }: UseWebRDPOptions) {
         uploading.value = false;
         resolve();
       };
-      writer.sendBlob(file);
     });
   }
 

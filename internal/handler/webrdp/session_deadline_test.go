@@ -9,14 +9,11 @@ import (
 	"jianmen/internal/service"
 )
 
-func TestWebRDPSessionContextUsesEarliestAccessDeadline(t *testing.T) {
-	now := time.Now().UTC()
-	approvalExpiry := now.Add(2 * time.Hour)
-	accountExpiry := now.Add(time.Hour)
+func TestWebRDPSessionContextUsesAccountExpiry(t *testing.T) {
+	accountExpiry := time.Now().UTC().Add(time.Hour)
 	ctx, cancel, reason := webRDPSessionContext(
 		context.Background(),
 		service.WebRDPConnection{
-			Plan: service.WebRDPPlan{AccessExpiresAt: &approvalExpiry},
 			Target: service.WebRDPTarget{
 				ExpiresAt: &accountExpiry,
 			},
@@ -33,26 +30,7 @@ func TestWebRDPSessionContextUsesEarliestAccessDeadline(t *testing.T) {
 	}
 }
 
-func TestWebRDPSessionContextUsesApprovalExpiry(t *testing.T) {
-	approvalExpiry := time.Now().UTC().Add(time.Hour)
-	ctx, cancel, reason := webRDPSessionContext(
-		context.Background(),
-		service.WebRDPConnection{
-			Plan: service.WebRDPPlan{AccessExpiresAt: &approvalExpiry},
-		},
-	)
-	defer cancel()
-
-	deadline, ok := ctx.Deadline()
-	if !ok || !deadline.Equal(approvalExpiry) {
-		t.Fatalf("session deadline = %v, %v; want %v", deadline, ok, approvalExpiry)
-	}
-	if reason != "approval_expired" {
-		t.Fatalf("deadline reason = %q, want approval_expired", reason)
-	}
-}
-
-func TestRelayOutcomeRecordsExpiredAccessWindow(t *testing.T) {
+func TestRelayOutcomeRecordsExpiredAccount(t *testing.T) {
 	expired := time.Now().UTC().Add(-time.Second)
 	ctx, cancel := context.WithDeadline(context.Background(), expired)
 	defer cancel()
@@ -61,13 +39,13 @@ func TestRelayOutcomeRecordsExpiredAccessWindow(t *testing.T) {
 	outcome, code, message := relayOutcomeWithDeadline(
 		ctx.Err(),
 		ctx,
-		"approval_expired",
+		"account_expired",
 	)
 	if outcome != model.AuditOutcomeTerminated ||
-		code != "approval_expired" ||
+		code != "account_expired" ||
 		message != "" {
 		t.Fatalf(
-			"relay outcome = (%q, %q, %q), want approval expiry",
+			"relay outcome = (%q, %q, %q), want account expiry",
 			outcome,
 			code,
 			message,

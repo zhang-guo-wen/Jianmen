@@ -39,14 +39,13 @@ type RDPRecordingConfig struct {
 }
 
 type BeginRDPAuditInput struct {
-	ID              string
-	UserSessionID   string
-	UserID          string
-	Username        string
-	Target          WebRDPTarget
-	ClientIP        string
-	AccessRequestID string
-	Policy          WebRDPChannelPolicy
+	ID            string
+	UserSessionID string
+	UserID        string
+	Username      string
+	Target        WebRDPTarget
+	ClientIP      string
+	Policy        WebRDPChannelPolicy
 }
 
 type DeniedRDPAuditInput struct {
@@ -134,10 +133,9 @@ func (s *RDPRecordingService) Begin(
 		Protocol: "rdp", ProtocolSubtype: "web-rdp",
 		ResourceType: model.ResourceTypeHostAccount, ResourceID: input.Target.ID,
 		HostID: input.Target.HostID, AccountID: input.Target.ID,
-		AccessRequestID: input.AccessRequestID,
-		TargetName:      input.Target.HostName,
-		TargetAddress:   fmt.Sprintf("%s:%d", input.Target.Address, input.Target.Port),
-		AccountName:     input.Target.Username, AccountUsername: input.Target.Username,
+		TargetName:    input.Target.HostName,
+		TargetAddress: fmt.Sprintf("%s:%d", input.Target.Address, input.Target.Port),
+		AccountName:   input.Target.Username, AccountUsername: input.Target.Username,
 		ClientIP: input.ClientIP, StartedAt: startedAt, State: "started",
 		Outcome: model.AuditOutcomeConnecting, PolicySnapshot: string(policyJSON),
 		RecordingStatus: model.RecordingStatusNone,

@@ -17,8 +17,8 @@ func TestRDPRecordingServiceRecordsDeniedAttemptWithoutArtifact(t *testing.T) {
 	err := service.RecordDenied(context.Background(), DeniedRDPAuditInput{
 		ID: "connection-1", UserSessionID: "browser-session-1",
 		UserID: "user-1", Username: "alice", TargetID: "account-1",
-		ClientIP: "192.0.2.10", FailureCode: "approval_required",
-		FailureMessage: "RDP approval is required",
+		ClientIP: "192.0.2.10", FailureCode: "rbac_denied",
+		FailureMessage: "RDP access is not authorized",
 	})
 	if err != nil {
 		t.Fatalf("RecordDenied() error = %v", err)
@@ -37,7 +37,7 @@ func TestRDPRecordingServiceRecordsDeniedAttemptWithoutArtifact(t *testing.T) {
 		session.Outcome != model.AuditOutcomeDenied ||
 		session.State != "ended" ||
 		session.EndedAt == nil ||
-		session.FailureCode != "approval_required" ||
+		session.FailureCode != "rbac_denied" ||
 		session.RecordingStatus != model.RecordingStatusNone {
 		t.Fatalf("denied audit session = %#v", session)
 	}

@@ -78,7 +78,7 @@ func startAdminRuntime(
 	adminServer, err := admin.New(
 		cfg, appStore, metadataDB, identity, browserSessions, authorization,
 		resourceGrants, resourceGroups, databaseProvisioning, logger, dataDir,
-		appProxy, onlineSessions, webRuntime.webRDP, webRuntime.accessRequests,
+		appProxy, onlineSessions, webRuntime.webRDP,
 		settingsHandler,
 		sqlConsoleHandler,
 	)

@@ -12,9 +12,8 @@ import (
 )
 
 var (
-	ErrWebRDPUnavailable      = errors.New("web RDP is unavailable")
-	ErrWebRDPNotAuthorized    = errors.New("web RDP is not authorized")
-	ErrWebRDPApprovalRequired = errors.New("web RDP approval is required")
+	ErrWebRDPUnavailable   = errors.New("web RDP is unavailable")
+	ErrWebRDPNotAuthorized = errors.New("web RDP is not authorized")
 )
 
 // WebRDPTarget contains the server-owned RDP connection settings for one host
@@ -32,7 +31,6 @@ type WebRDPTarget struct {
 	Security               string
 	IgnoreCertificate      bool
 	CertificateFingerprint string
-	ApprovalRequired       bool
 	ClipboardRead          bool
 	ClipboardWrite         bool
 	FileUpload             bool
@@ -69,8 +67,6 @@ type WebRDPPlan struct {
 	TargetName      string              `json:"target_name"`
 	EffectivePolicy WebRDPChannelPolicy `json:"effective_policy"`
 	RequiredActions []string            `json:"required_actions"`
-	AccessRequestID string              `json:"access_request_id,omitempty"`
-	AccessExpiresAt *time.Time          `json:"access_expires_at,omitempty"`
 }
 
 type WebRDPConnection struct {
@@ -81,14 +77,12 @@ type WebRDPConnection struct {
 type WebRDPService struct {
 	targets    WebRDPTargetRepository
 	authorizer WebRDPAuthorizer
-	approvals  *AccessRequestService
 	now        func() time.Time
 }
 
 func NewWebRDPService(
 	targets WebRDPTargetRepository,
 	authorizer WebRDPAuthorizer,
-	approvals *AccessRequestService,
 ) (*WebRDPService, error) {
 	if targets == nil {
 		return nil, errors.New("web RDP target repository is required")
@@ -96,17 +90,13 @@ func NewWebRDPService(
 	if authorizer == nil {
 		return nil, errors.New("web RDP authorizer is required")
 	}
-	if approvals == nil {
-		return nil, errors.New("web RDP approval service is required")
-	}
 	return &WebRDPService{
-		targets: targets, authorizer: authorizer, approvals: approvals,
+		targets: targets, authorizer: authorizer,
 		now: func() time.Time { return time.Now().UTC() },
 	}, nil
 }
 
-// Plan re-evaluates account state, RBAC and every optional channel. It does
-// not grant access and deliberately leaves the approval gate for Authorize.
+// Plan re-evaluates account state, RBAC and every optional channel.
 func (s *WebRDPService) Plan(ctx context.Context, userID, targetID string) (WebRDPPlan, error) {
 	target, plan, err := s.evaluate(ctx, userID, targetID)
 	if err != nil {
@@ -126,27 +116,6 @@ func (s *WebRDPService) Authorize(
 	target, plan, err := s.evaluate(ctx, userID, targetID)
 	if err != nil {
 		return WebRDPConnection{}, err
-	}
-	if target.ApprovalRequired {
-		approval, found, approvalErr := s.approvals.ActiveApproval(
-			ctx,
-			strings.TrimSpace(userID),
-			model.ResourceTypeHostAccount,
-			target.ID,
-			"rdp",
-			plan.RequiredActions,
-		)
-		if approvalErr != nil {
-			return WebRDPConnection{}, fmt.Errorf("check RDP approval: %w", approvalErr)
-		}
-		if !found {
-			return WebRDPConnection{}, ErrWebRDPApprovalRequired
-		}
-		plan.AccessRequestID = approval.ID
-		if approval.AccessExpiresAt != nil {
-			expiresAt := approval.AccessExpiresAt.UTC()
-			plan.AccessExpiresAt = &expiresAt
-		}
 	}
 	return WebRDPConnection{Plan: plan, Target: target}, nil
 }

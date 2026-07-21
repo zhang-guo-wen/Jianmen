@@ -8,8 +8,8 @@
     "build": "npm run test:connection-dialog && npm run test:connection-commands && npm run test:dialog-layout && vue-tsc --noEmit && vite build",
     "preview": "vite preview",
     "typecheck": "vue-tsc --noEmit",
-    "test:connection-commands": "tsx --test src/utils/databaseGatewayCommands.test.ts src/utils/databaseUpstreamTLS.test.ts src/utils/provisioningRequest.test.ts src/utils/connectionLinks.test.ts src/utils/guacamoleProtocol.test.ts src/utils/rdpReplayDisplay.test.ts src/utils/webRDPViewport.test.ts src/utils/sshHostIdentity.test.ts src/config/databaseClients.test.ts src/components/ConnectionConfigDialog.test.ts src/api/systemSettings.test.ts",
-    "test:connection-dialog": "vitest run src/components/ConnectionConfigDialog.mount.test.ts src/components/database/DatabaseAutoProvisionDialog.mount.test.ts src/composables/useSQLConsole.test.ts src/composables/useDatabaseTLSPreflight.test.ts src/composables/useWebRDP.test.ts src/views/DatabaseView.tls.mount.test.ts",
+    "test:connection-commands": "tsx --test src/utils/databaseGatewayCommands.test.ts src/utils/databaseUpstreamTLS.test.ts src/utils/provisioningRequest.test.ts src/utils/connectionLinks.test.ts src/utils/guacamoleProtocol.test.ts src/utils/rdpReplayDisplay.test.ts src/utils/webRDPViewport.test.ts src/utils/sshHostIdentity.test.ts src/config/databaseClients.test.ts src/config/sshClients.test.ts src/stores/preferences.test.ts src/components/ConnectionConfigDialog.test.ts src/api/systemSettings.test.ts",
+    "test:connection-dialog": "vitest run src/components/ConnectionConfigDialog.mount.test.ts src/components/settings/ClientActivationDialog.mount.test.ts src/components/database/DatabaseAutoProvisionDialog.mount.test.ts src/composables/useSQLConsole.test.ts src/composables/useDatabaseTLSPreflight.test.ts src/composables/useWebRDP.test.ts src/views/DatabaseView.tls.mount.test.ts src/views/SettingsView.mount.test.ts",
     "test:dialog-layout": "tsx --test src/components/FormDialog.test.ts"
   },
   "dependencies": {

@@ -9,22 +9,21 @@
           </div>
           <div class="settings-toolbar__actions">
             <span v-if="preferences.error" class="save-error">保存失败</span>
-            <el-button type="primary" :loading="preferences.saving" @click="saveAll">保存配置</el-button>
           </div>
         </div>
       </template>
 
       <div class="settings-tabs-shell">
         <el-tabs v-model="activeTab" class="settings-tabs">
-          <!-- 界面与终端 -->
           <el-tab-pane label="界面与终端" name="appearance">
             <section class="settings-section">
-              <div class="section-heading">
-                <div>
-                  <h2>界面与终端</h2>
-                  <p>设置主题和 Web Terminal 字体。</p>
-                </div>
-              </div>
+              <ClientSectionHeading title="界面与终端" desc="设置主题和 Web Terminal 字体。" :configured="true" :registered="true">
+                <template #actions>
+                  <el-button data-testid="settings-save-appearance" type="primary" :loading="appearanceSaving" @click="saveAppearanceSettings">
+                    保存配置
+                  </el-button>
+                </template>
+              </ClientSectionHeading>
               <el-form label-position="top">
                 <el-form-item label="主题">
                   <el-segmented v-model="form.theme" :options="themeOptions" class="theme-segmented" block />
@@ -41,7 +40,6 @@
             </section>
           </el-tab-pane>
 
-          <!-- SSH 客户端 -->
           <el-tab-pane label="SSH 客户端" name="ssh">
             <section class="settings-section">
               <ClientSectionHeading
@@ -49,46 +47,52 @@
                 desc="设置快速连接默认使用的 SSH 工具。"
                 :configured="sshConfigured"
                 :registered="sshRegistered"
-              />
+              >
+                <template #actions>
+                  <el-button data-testid="settings-save-ssh" type="primary" @click="openSSHActivationDialog">保存配置</el-button>
+                </template>
+              </ClientSectionHeading>
               <el-form label-position="top">
                 <el-form-item label="默认客户端">
                   <el-select v-model="form.ssh_client" placeholder="选择本地 SSH 客户端" style="width: 100%">
-                    <el-option v-for="option in SSH_CLIENT_OPTIONS" :key="option.command" :label="option.label" :value="option.command" />
+                    <el-option
+                      v-for="option in sshClientOptions"
+                      :key="option.command"
+                      :label="option.label"
+                      :value="option.command"
+                      :disabled="option.disabled"
+                    />
                   </el-select>
                 </el-form-item>
-                <template v-if="form.ssh_client && form.ssh_client !== 'default'">
+                <template v-if="form.ssh_client">
                   <el-form-item label="操作系统">
-                    <el-segmented v-model="form.ssh_client_platform" :options="CLIENT_PLATFORM_OPTIONS" class="platform-segmented" block />
+                    <el-segmented v-model="form.ssh_client_platform" :options="settingsClientPlatformOptions" class="platform-segmented" block />
                   </el-form-item>
                   <el-form-item label="客户端路径" required :error="sshClientPathError">
-                    <el-input v-model="form.ssh_client_path" name="ssh_client_path" autocomplete="off" placeholder="例如 C:\Program Files\PuTTY\putty.exe">
-                      <template #append><el-button @click="pickSSHExecutable">选择文件</el-button></template>
+                    <el-input v-model="form.ssh_client_path" name="ssh_client_path" autocomplete="off" placeholder="例如 C:\Program Files\Xshell\Xshell.exe">
+                      <template #append>
+                        <el-button @click="pickSSHExecutable">选择文件</el-button>
+                      </template>
                     </el-input>
                     <div class="field-help">无法自动读取完整路径时，请手动粘贴。</div>
                   </el-form-item>
-                  <ClientRegistrationAlert
-                    v-if="sshRegistrationCommand"
-                    title="请使用管理员权限在 CMD 中执行下面命令，授权打开本地 SSH 客户端"
-                    :command="sshRegistrationCommand"
-                    :registered="sshRegistered"
-                    :loading="sshRegistrationSaving"
-                    @copy="copyText(sshRegistrationCommand, 'SSH 协议注册命令已复制，请在管理员 CMD 中执行一次')"
-                    @confirm="confirmSSHRegistration"
-                  />
                 </template>
               </el-form>
             </section>
           </el-tab-pane>
 
-          <!-- 数据库客户端 -->
           <el-tab-pane label="数据库客户端" name="database">
             <section class="settings-section">
               <ClientSectionHeading
                 title="本地数据库客户端"
-                desc="设置数据库快速连接使用的 DBeaver。"
+                desc="设置数据库快速连接使用的数据库客户端。"
                 :configured="dbConfigured"
                 :registered="dbRegistered"
-              />
+              >
+                <template #actions>
+                  <el-button data-testid="settings-save-database" type="primary" @click="openDatabaseActivationDialog">保存配置</el-button>
+                </template>
+              </ClientSectionHeading>
               <el-form label-position="top">
                 <el-form-item label="默认客户端">
                   <el-select v-model="form.db_client" placeholder="选择本地数据库客户端" style="width: 100%">
@@ -97,11 +101,15 @@
                 </el-form-item>
                 <template v-if="form.db_client">
                   <el-form-item label="操作系统">
-                    <el-segmented v-model="form.db_client_platform" :options="CLIENT_PLATFORM_OPTIONS" class="platform-segmented" block />
+                    <el-segmented v-model="form.db_client_platform" :options="settingsClientPlatformOptions" class="platform-segmented" block />
                   </el-form-item>
                   <el-form-item label="客户端路径" required :error="dbClientPathError">
-                    <el-input v-model="form.db_client_path" name="db_client_path" autocomplete="off" :placeholder="`例如 ${dbClientPathExample}`" />
-                    <div class="field-help">Windows 推荐 dbeaverc.exe；路径仅保存在当前账号中。</div>
+                    <el-input v-model="form.db_client_path" name="db_client_path" autocomplete="off" :placeholder="`例如 ${dbClientPathExample}`">
+                      <template #append>
+                        <el-button @click="pickDatabaseExecutable">选择文件</el-button>
+                      </template>
+                    </el-input>
+                    <div class="field-help">无法自动读取完整路径时，请手动粘贴。</div>
                   </el-form-item>
                   <el-form-item label="本地 CA 文件路径（私有/自签证书）" :error="dbCAFilePathError">
                     <el-input v-model="form.db_client_ca_file_path" name="db_client_ca_path" autocomplete="off" :placeholder="`例如 ${dbCAFilePathExample}`">
@@ -109,34 +117,43 @@
                         <el-button :loading="dbCALoading" @click="downloadDatabaseGatewayCA">下载网关 CA</el-button>
                       </template>
                     </el-input>
-                    <div class="field-help">公网 CA 证书通过 DBeaver/Java 默认信任库校验，无需填写；私有 CA、自签证书或原生命令行兼容回退可下载 CA。</div>
+                    <div class="field-help">当使用私有CA、自签证书且开启客户端TLS连接时下载网关CA到电脑，然后填写文件在电脑的路径</div>
                   </el-form-item>
-                  <el-alert v-if="form.db_client_platform !== 'windows'" type="warning" :closable="false" show-icon title="当前仅 Windows 支持从浏览器直接唤起 DBeaver。" />
-                  <ClientRegistrationAlert
-                    v-else-if="dbRegistrationCommand"
-                    title="注册 Jianmen 数据库协议"
-                    :command="dbRegistrationCommand"
-                    :registered="dbRegistered"
-                    :loading="dbRegistrationSaving"
-                    @copy="copyText(dbRegistrationCommand, '协议注册命令已复制；执行后请点击[我已执行命令]')"
-                    @confirm="confirmDBRegistration"
-                  />
                 </template>
               </el-form>
             </section>
           </el-tab-pane>
         </el-tabs>
       </div>
+
+      <ClientActivationDialog
+        v-model="sshDialogVisible"
+        title="激活本地 SSH 客户端"
+        :command="sshRegistrationCommand"
+        :loading="sshRegistrationSaving"
+        @copy="copyText(sshRegistrationCommand, '协议注册命令已复制')"
+        @confirm="confirmSSHActivation"
+      />
+      <ClientActivationDialog
+        v-model="databaseDialogVisible"
+        title="激活本地数据库客户端"
+        :command="dbRegistrationCommand"
+        :loading="dbRegistrationSaving"
+        @copy="copyText(dbRegistrationCommand, '协议注册命令已复制')"
+        @confirm="confirmDatabaseActivation"
+      />
     </el-card>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, defineComponent, h, onMounted, reactive, ref, shallowRef, watch } from 'vue';
-import { ElButton, ElInput, ElMessage } from 'element-plus';
+import { computed, onMounted, reactive, ref, shallowRef, watch } from 'vue';
+import { ElMessage } from 'element-plus';
 import { useRoute, useRouter } from 'vue-router';
 
-import { apiClient } from '@/api/client';
+import { apiClient, type UserPreferences } from '@/api/client';
+import ClientActivationDialog from '@/components/settings/ClientActivationDialog.vue';
+import ClientSectionHeading from '@/components/settings/ClientSectionHeading.vue';
 import {
   DATABASE_CLIENT_CA_FILE_NAME,
   DATABASE_CLIENT_OPTIONS,
@@ -147,10 +164,11 @@ import {
   isValidDatabaseClientExecutablePath,
 } from '@/config/databaseClients';
 import {
+  buildSettingsSSHClientOptions,
   buildSSHProtocolRegistrationCommand,
   isAbsoluteExecutablePath,
-  SSH_CLIENT_OPTIONS,
-  CLIENT_PLATFORM_OPTIONS,
+  isSupportedSSHClientForActivation,
+  SETTINGS_CLIENT_PLATFORM_OPTIONS,
   type ClientPlatform,
 } from '@/config/sshClients';
 import { useDatabaseClientStore } from '@/stores/databaseClient';
@@ -158,80 +176,23 @@ import { usePreferencesStore } from '@/stores/preferences';
 import { writeClipboardText } from '@/utils/clipboard';
 import { hasDatabaseGatewayTLSIdentity } from '@/utils/databaseGatewayCommands';
 
-// ── 统一标题行组件（含状态标签 + 加载到浏览器按钮） ──
-const ClientSectionHeading = defineComponent({
-  props: {
-    title: { type: String, required: true },
-    desc: { type: String, default: '' },
-    configured: { type: Boolean, default: false },
-    registered: { type: Boolean, default: false },
-  },
-  setup(props) {
-    const statusLabel = computed(() => {
-      if (!props.configured) return '未配置';
-      return props.registered ? '已就绪' : '待注册协议';
-    });
-    const statusType = computed(() => {
-      if (!props.configured) return 'info';
-      return props.registered ? 'success' : 'warning';
-    });
-    return () => h('div', { class: 'section-heading' }, [
-      h('div', [h('h2', props.title), h('p', props.desc)]),
-      h('div', { class: 'section-heading__actions' }, [
-        h('el-tag', { type: statusType.value, effect: 'light' }, () => statusLabel.value),
-      ]),
-    ]);
-  },
-});
+const APPEARANCE_FIELDS = ['theme', 'terminal_font_family', 'terminal_font_size'] as const;
+const SSH_FIELDS = ['ssh_client', 'ssh_client_platform', 'ssh_client_path'] as const;
+const DATABASE_FIELDS = ['db_client', 'db_client_platform', 'db_client_path', 'db_client_ca_file_path'] as const;
 
-// ── 统一注册命令组件（textarea + 复制按钮 + 勾选） ──
-const ClientRegistrationAlert = defineComponent({
-  props: {
-    title: { type: String, required: true },
-    command: { type: String, required: true },
-    registered: { type: Boolean, default: false },
-    loading: { type: Boolean, default: false },
-  },
-  emits: ['copy', 'confirm'],
-  setup(props, { emit }) {
-    return () => h('el-alert', { type: 'info', closable: false, showIcon: true, class: 'registration-alert' }, {
-      title: () => props.title,
-      default: () => [
-        h('div', { class: 'registration-command-wrapper' }, [
-          h(ElInput, {
-            type: 'textarea',
-            modelValue: props.command,
-            readonly: true,
-            rows: 4,
-            class: 'registration-command-input',
-          }),
-        ]),
-        h('div', { class: 'registration-actions' }, [
-          h(ElButton, {
-            type: 'primary',
-            plain: true,
-            onClick: () => emit('copy'),
-          }, () => '复制协议注册命令'),
-          h(ElButton, {
-            type: 'success',
-            loading: props.loading,
-            disabled: !props.command || props.registered,
-            onClick: () => emit('confirm'),
-          }, () => props.registered ? '已确认执行' : '我已执行命令，保存到浏览器'),
-        ]),
-      ],
-    });
-  },
-});
+type PreferenceField = keyof UserPreferences;
 
 const route = useRoute();
 const router = useRouter();
 const preferences = usePreferencesStore();
 const databaseClient = useDatabaseClientStore();
-const form = reactive({ ...preferences.value });
+const form = reactive<UserPreferences>({ ...normalizePreferences(preferences.value) });
 const dbCALoading = shallowRef(false);
+const appearanceSaving = shallowRef(false);
 const sshRegistrationSaving = shallowRef(false);
 const dbRegistrationSaving = shallowRef(false);
+const sshDialogVisible = shallowRef(false);
+const databaseDialogVisible = shallowRef(false);
 
 const sshRegistered = ref(preferences.sshProtocolRegistered);
 const dbRegistered = ref(databaseClient.protocolRegistered);
@@ -246,10 +207,20 @@ const themeOptions = [
   { label: '浅色', value: 'light' },
   { label: '深色', value: 'dark' },
 ];
+const sshClientOptions = computed(() => buildSettingsSSHClientOptions(form.ssh_client));
+const settingsClientPlatformOptions = SETTINGS_CLIENT_PLATFORM_OPTIONS;
 
-const sshClientPathError = computed(() => executablePathError(form.ssh_client, form.ssh_client_path));
-const sshConfigured = computed(() => !!(form.ssh_client && form.ssh_client !== 'default' && isAbsoluteExecutablePath(form.ssh_client_path)));
-const sshRegistrationCommand = computed(() => buildSSHProtocolRegistrationCommand(form.ssh_client, form.ssh_client_path, form.ssh_client_platform as ClientPlatform));
+const sshClientPathError = computed(() => {
+  if (!form.ssh_client || !isSupportedSSHClientForActivation(form.ssh_client)) return '';
+  if (!form.ssh_client_path.trim()) return '请输入客户端路径';
+  if (!isAbsoluteExecutablePath(form.ssh_client_path)) return '请输入完整的 Windows 绝对路径';
+  return '';
+});
+const sshConfigured = computed(() => isSupportedSSHClientForActivation(form.ssh_client) && isAbsoluteExecutablePath(form.ssh_client_path));
+const sshRegistrationCommand = computed(() => {
+  if (!isSupportedSSHClientForActivation(form.ssh_client)) return '';
+  return buildSSHProtocolRegistrationCommand(form.ssh_client, form.ssh_client_path, form.ssh_client_platform as ClientPlatform);
+});
 
 const dbClientPathExample = computed(() => databaseClientExecutableExample(form.db_client_platform as 'windows' | 'macos' | 'linux'));
 const dbCAFilePathExample = computed(() => databaseClientCAFileExample(form.db_client_platform as 'windows' | 'macos' | 'linux'));
@@ -278,9 +249,8 @@ const dbCAFilePathError = computed(() => {
   }
   return '';
 });
-const dbConfigured = computed(() => form.db_client === 'dbeaver' && !dbClientPathError.value && !dbCAFilePathError.value);
+const dbConfigured = computed(() => form.db_client === 'dbeaver' && form.db_client_platform === 'windows' && !dbClientPathError.value && !dbCAFilePathError.value);
 
-// 路径变更时重置勾选
 watch(() => [form.ssh_client, form.ssh_client_platform, form.ssh_client_path] as const, (value, previous) => {
   if (previous && value.some((item, index) => item !== previous[index])) {
     sshRegistered.value = false;
@@ -293,14 +263,12 @@ watch(() => [form.db_client, form.db_client_platform, form.db_client_path, form.
     databaseClient.markUnregistered();
   }
 });
-
-watch(() => form.ssh_client, (client) => {
-  if (client === 'default' || !client) form.ssh_client_path = '';
-});
 watch(() => form.db_client, (client) => {
-  if (!client) { form.db_client_path = ''; form.db_client_ca_file_path = ''; }
+  if (!client) {
+    form.db_client_path = '';
+    form.db_client_ca_file_path = '';
+  }
 });
-
 watch(activeTab, (tab) => {
   if (route.name !== 'settings' || route.query.tab === tab) return;
   void router.replace({ query: { ...route.query, tab } });
@@ -309,76 +277,122 @@ watch(activeTab, (tab) => {
 onMounted(async () => {
   try {
     const loaded = await preferences.fetch();
-    Object.assign(form, loaded);
+    Object.assign(form, normalizePreferences(loaded));
     sshRegistered.value = preferences.sshProtocolRegistered;
     dbRegistered.value = databaseClient.protocolRegistered;
-  } catch { /* store 已暴露错误 */ }
+  } catch {
+    /* store 已暴露错误 */
+  }
 });
 
-function executablePathError(client: string, path: string): string {
-  if (!client || client === 'default') return '';
-  if (!path.trim()) return '请输入客户端路径';
-  if (!isAbsoluteExecutablePath(path)) return '请输入完整的 Windows 绝对路径';
-  return '';
+function normalizePreferences(value: UserPreferences): UserPreferences {
+  return {
+    ...value,
+    ssh_client: value.ssh_client?.trim() ? value.ssh_client : 'xshell',
+  };
 }
 
-async function saveAll() {
-  const error = sshClientPathError.value || dbClientPathError.value || dbCAFilePathError.value;
-  if (error) { ElMessage.warning(error); return; }
+function pickFormPatch<K extends PreferenceField>(keys: readonly K[]): Pick<UserPreferences, K> {
+  const patch = {} as Pick<UserPreferences, K>;
+  for (const key of keys) {
+    patch[key] = form[key] as Pick<UserPreferences, K>[K];
+  }
+  return patch;
+}
 
-  try {
-    const saved = await preferences.update({ ...form });
-    Object.assign(form, saved);
-    if (dbRegistered.value) databaseClient.markRegistered();
-    else databaseClient.markUnregistered();
-    ElMessage.success('配置已保存');
-  } catch {
-    ElMessage.error(preferences.error || '保存失败');
+function applySavedFields<K extends PreferenceField>(keys: readonly K[], saved: UserPreferences) {
+  for (const key of keys) {
+    form[key] = saved[key] as UserPreferences[K];
   }
 }
 
-async function confirmSSHRegistration() {
-  const error = sshClientPathError.value;
-  if (error) { ElMessage.warning(error); return; }
-  if (hasUnsavedClientConfig()) { ElMessage.warning('请先保存配置，再确认已执行命令'); return; }
+async function saveAppearanceSettings() {
+  appearanceSaving.value = true;
+  try {
+    const patch = pickFormPatch(APPEARANCE_FIELDS);
+    const saved = normalizePreferences(await preferences.update(patch));
+    applySavedFields(APPEARANCE_FIELDS, saved);
+    preferences.persistPartialToBrowser(patch);
+    ElMessage.success('配置已保存');
+  } catch {
+    ElMessage.error(preferences.error || '保存失败');
+  } finally {
+    appearanceSaving.value = false;
+  }
+}
+
+function openSSHActivationDialog() {
+  if (!isSupportedSSHClientForActivation(form.ssh_client)) {
+    ElMessage.warning('请选择受支持的 SSH 客户端');
+    return;
+  }
+  if (form.ssh_client_platform !== 'windows') {
+    ElMessage.warning('请先将操作系统改为 Windows');
+    return;
+  }
+  if (sshClientPathError.value || !sshRegistrationCommand.value) {
+    ElMessage.warning(sshClientPathError.value || '请先完善 SSH 客户端配置');
+    return;
+  }
+  sshDialogVisible.value = true;
+}
+
+async function confirmSSHActivation() {
+  if (sshClientPathError.value || !sshRegistrationCommand.value) {
+    ElMessage.warning(sshClientPathError.value || '请先完善 SSH 客户端配置');
+    return;
+  }
   sshRegistrationSaving.value = true;
   try {
-    const loaded = await preferences.loadToBrowser();
-    Object.assign(form, loaded);
-    sshRegistered.value = true;
+    const patch = pickFormPatch(SSH_FIELDS);
+    const saved = normalizePreferences(await preferences.update(patch));
+    applySavedFields(SSH_FIELDS, saved);
+    preferences.persistPartialToBrowser(patch);
     preferences.markSSHProtocolRegistered(true);
-    ElMessage.success('已确认执行，SSH 配置已加载到当前浏览器');
+    sshRegistered.value = true;
+    sshDialogVisible.value = false;
+    ElMessage.success('SSH 客户端配置已保存');
   } catch {
-    ElMessage.error(preferences.error || '加载配置失败');
-  } finally { sshRegistrationSaving.value = false; }
+    ElMessage.error(preferences.error || '保存失败');
+  } finally {
+    sshRegistrationSaving.value = false;
+  }
 }
 
-async function confirmDBRegistration() {
+function openDatabaseActivationDialog() {
   const error = dbClientPathError.value || dbCAFilePathError.value;
-  if (error) { ElMessage.warning(error); return; }
-  if (hasUnsavedClientConfig()) { ElMessage.warning('请先保存配置，再确认已执行命令'); return; }
+  if (form.db_client_platform !== 'windows') {
+    ElMessage.warning('请先将操作系统改为 Windows');
+    return;
+  }
+  if (error || !dbRegistrationCommand.value) {
+    ElMessage.warning(error || '请先完善数据库客户端配置');
+    return;
+  }
+  databaseDialogVisible.value = true;
+}
+
+async function confirmDatabaseActivation() {
+  const error = dbClientPathError.value || dbCAFilePathError.value;
+  if (error || !dbRegistrationCommand.value) {
+    ElMessage.warning(error || '请先完善数据库客户端配置');
+    return;
+  }
   dbRegistrationSaving.value = true;
   try {
-    const loaded = await preferences.loadToBrowser();
-    Object.assign(form, loaded);
-    dbRegistered.value = true;
+    const patch = pickFormPatch(DATABASE_FIELDS);
+    const saved = normalizePreferences(await preferences.update(patch));
+    applySavedFields(DATABASE_FIELDS, saved);
+    preferences.persistPartialToBrowser(patch);
     databaseClient.markRegistered();
-    ElMessage.success('已确认执行，DBeaver 配置已加载到当前浏览器');
+    dbRegistered.value = true;
+    databaseDialogVisible.value = false;
+    ElMessage.success('数据库客户端配置已保存');
   } catch {
-    ElMessage.error(preferences.error || '加载配置失败');
-  } finally { dbRegistrationSaving.value = false; }
-}
-
-function hasUnsavedClientConfig(): boolean {
-  return [
-    'ssh_client',
-    'ssh_client_platform',
-    'ssh_client_path',
-    'db_client',
-    'db_client_platform',
-    'db_client_path',
-    'db_client_ca_file_path',
-  ].some(key => form[key as keyof typeof form] !== preferences.value[key as keyof typeof preferences.value]);
+    ElMessage.error(preferences.error || '保存失败');
+  } finally {
+    dbRegistrationSaving.value = false;
+  }
 }
 
 async function copyText(value: string, successMsg: string) {
@@ -393,11 +407,24 @@ async function copyText(value: string, successMsg: string) {
 
 function pickSSHExecutable() {
   const input = document.createElement('input');
-  input.type = 'file'; input.accept = '.exe';
+  input.type = 'file';
+  input.accept = '.exe';
   input.onchange = event => {
     const file = (event.target as HTMLInputElement).files?.[0];
     if (!file) return;
     form.ssh_client_path = (file as File & { path?: string }).path || file.name;
+  };
+  input.click();
+}
+
+function pickDatabaseExecutable() {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = '.exe';
+  input.onchange = event => {
+    const file = (event.target as HTMLInputElement).files?.[0];
+    if (!file) return;
+    form.db_client_path = (file as File & { path?: string }).path || file.name;
   };
   input.click();
 }
@@ -417,21 +444,26 @@ async function downloadDatabaseGatewayCA() {
         const certificate = result.value.tls_ca_pem?.trim();
         return certificate ? [certificate] : [];
       })
-      .filter((cert, i, arr) => arr.indexOf(cert) === i);
+      .filter((cert, index, arr) => arr.indexOf(cert) === index);
     if (!certificates.length) {
-      const rejected = results.find((r): r is PromiseRejectedResult => r.status === 'rejected');
+      const rejected = results.find((result): result is PromiseRejectedResult => result.status === 'rejected');
       throw rejected?.reason instanceof Error ? rejected.reason : new Error('数据库网关 TLS 身份材料尚未就绪');
     }
     const blob = new Blob([`${certificates.join('\n')}\n`], { type: 'application/x-pem-file' });
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement('a');
-    anchor.href = url; anchor.download = DATABASE_CLIENT_CA_FILE_NAME;
-    document.body.appendChild(anchor); anchor.click(); anchor.remove();
+    anchor.href = url;
+    anchor.download = DATABASE_CLIENT_CA_FILE_NAME;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
     URL.revokeObjectURL(url);
     ElMessage.success('网关 CA 已下载，请保存或移动到上方配置的本地路径');
   } catch (error) {
     ElMessage.error(error instanceof Error ? error.message : '网关 CA 下载失败');
-  } finally { dbCALoading.value = false; }
+  } finally {
+    dbCALoading.value = false;
+  }
 }
 </script>
 
@@ -454,20 +486,12 @@ async function downloadDatabaseGatewayCA() {
 :deep(.settings-tabs .el-tabs__item.is-active) { color: var(--el-color-primary); }
 :deep(.settings-tabs > .el-tabs__content) { min-width: 0; overflow: visible; }
 .settings-section { width: min(100%, 1040px); padding: 24px 28px; }
-.section-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; margin-bottom: 20px; padding-bottom: 16px; border-bottom: 1px solid var(--color-border); }
-.section-heading h2 { margin: 0; font-size: 18px; line-height: 1.3; }
-.section-heading p { margin: 6px 0 0; color: var(--color-text-secondary); font-size: 13px; }
 .form-pair { display: grid; grid-template-columns: minmax(0, 1fr) 150px; gap: 14px; }
 :deep(.theme-segmented .el-segmented__item) { min-width: 88px; padding: 0 14px; white-space: nowrap; }
 :deep(.theme-segmented .el-segmented__item-label) { overflow: visible; text-overflow: clip; }
 :deep(.platform-segmented .el-segmented__item) { min-width: fit-content; }
 .field-help { margin-top: 7px; color: var(--color-text-secondary); font-size: 12px; line-height: 1.5; }
-.section-heading__actions { display: flex; flex: 0 0 auto; align-items: center; gap: 10px; }
 .save-error { color: var(--el-color-danger); font-size: 12px; white-space: nowrap; }
-.registration-alert { margin-top: 6px; }
-.registration-command-wrapper { margin-top: 10px; }
-.registration-command-input :deep(.el-textarea__inner) { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 12px; line-height: 1.5; max-height: 140px; }
-.registration-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin-top: 10px; }
 
 @media (max-width: 760px) {
   :deep(.settings-card > .el-card__header) { position: static; padding: 12px; }
@@ -478,8 +502,6 @@ async function downloadDatabaseGatewayCA() {
   :deep(.settings-tabs .el-tabs__item) { padding: 0 10px; }
   .settings-section { padding: 22px 18px; }
   .form-pair { grid-template-columns: 1fr; }
-  .section-heading { align-items: flex-start; flex-direction: column; gap: 10px; }
-  .section-heading__actions { width: 100%; flex-wrap: wrap; }
   :deep(.theme-segmented .el-segmented__item) { min-width: 0; padding-inline: 8px; }
 }
 </style>

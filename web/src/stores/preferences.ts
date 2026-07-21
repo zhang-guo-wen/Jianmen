@@ -11,7 +11,7 @@ const SSH_PROTOCOL_REGISTRATION_KEY = 'jianmen_ssh_protocol_registered';
 
 const defaults: UserPreferences = {
   theme: 'light',
-  ssh_client: '',
+  ssh_client: 'xshell',
   ssh_client_path: '',
   ssh_client_platform: 'windows',
   db_client: 'dbeaver',
@@ -48,7 +48,7 @@ function cachedClientConfig(): Partial<UserPreferences> {
     const cached = JSON.parse(localStorage.getItem(CLIENT_CACHE_KEY) || '{}') as Partial<UserPreferences>;
     const validPlatforms = ['windows', 'macos', 'linux'];
     return {
-      ...(typeof cached.ssh_client === 'string' ? { ssh_client: cached.ssh_client } : {}),
+      ...(typeof cached.ssh_client === 'string' && cached.ssh_client.trim() ? { ssh_client: cached.ssh_client } : {}),
       ...(typeof cached.ssh_client_path === 'string' ? { ssh_client_path: cached.ssh_client_path } : {}),
       ...(typeof cached.ssh_client_platform === 'string' && validPlatforms.includes(cached.ssh_client_platform) ? { ssh_client_platform: cached.ssh_client_platform } : {}),
       ...(typeof cached.db_client === 'string' ? { db_client: cached.db_client } : {}),
@@ -91,6 +91,13 @@ export const usePreferencesStore = defineStore('preferences', () => {
   /** 将数据库中的完整配置写入当前浏览器缓存。 */
   function persistClientConfig() {
     localStorage.setItem(CLIENT_CACHE_KEY, JSON.stringify(value.value));
+  }
+
+  function persistPartialToBrowser(patch: Partial<UserPreferences>) {
+    localStorage.setItem(CLIENT_CACHE_KEY, JSON.stringify({
+      ...JSON.parse(localStorage.getItem(CLIENT_CACHE_KEY) || '{}'),
+      ...patch,
+    }));
   }
 
   function persistAppearance() {
@@ -197,5 +204,5 @@ export const usePreferencesStore = defineStore('preferences', () => {
     apply();
   }
 
-  return { value, loaded, loading, saving, error, sshProtocolRegistered, hasSSHClient, hasDBClient, fetch, update, loadToBrowser, markSSHProtocolRegistered, apply, reset };
+  return { value, loaded, loading, saving, error, sshProtocolRegistered, hasSSHClient, hasDBClient, fetch, update, loadToBrowser, persistPartialToBrowser, markSSHProtocolRegistered, apply, reset };
 });

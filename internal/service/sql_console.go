@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"jianmen/internal/model"
@@ -17,6 +18,7 @@ var (
 	ErrSQLConsoleUnavailable = errors.New("database account is unavailable")
 	ErrSQLConsoleAudit       = errors.New("SQL console audit failed")
 	ErrSQLConsoleExecution   = errors.New("SQL execution failed")
+	ErrSQLConsoleSession     = errors.New("SQL console session not found")
 )
 
 type SQLConsoleRepository interface {
@@ -36,7 +38,7 @@ type SQLConsoleActor struct {
 }
 
 type SQLConsoleRequest struct {
-	AccountID, Database, SQL string
+	SessionID, Database, SQL string
 	ConfirmWrite             bool
 }
 
@@ -57,6 +59,9 @@ type SQLConsoleService struct {
 	authorizer SQLConsoleAuthorizer
 	executor   SQLConsoleExecutor
 	now        func() time.Time
+	sessionsMu sync.Mutex
+	sessions   map[string]*sqlConsoleSession
+	idleTTL    time.Duration
 }
 
 func NewSQLConsoleService(
@@ -78,6 +83,8 @@ func NewSQLConsoleService(
 		authorizer: authorizer,
 		executor:   executor,
 		now:        time.Now,
+		sessions:   make(map[string]*sqlConsoleSession),
+		idleTTL:    15 * time.Minute,
 	}, nil
 }
 
@@ -86,8 +93,12 @@ func (s *SQLConsoleService) Execute(
 	actor SQLConsoleActor,
 	request SQLConsoleRequest,
 ) (SQLConsoleResult, error) {
-	if ctx == nil || strings.TrimSpace(actor.UserID) == "" || strings.TrimSpace(request.AccountID) == "" {
+	if ctx == nil || strings.TrimSpace(actor.UserID) == "" || strings.TrimSpace(request.SessionID) == "" {
 		return SQLConsoleResult{}, ErrSQLConsoleInvalid
+	}
+	webSession, err := s.sessionForActor(strings.TrimSpace(request.SessionID), strings.TrimSpace(actor.UserID))
+	if err != nil {
+		return SQLConsoleResult{}, err
 	}
 	policy, err := inspectSQLStatement(request.SQL)
 	if err != nil {
@@ -105,7 +116,7 @@ func (s *SQLConsoleService) Execute(
 		strings.TrimSpace(actor.UserID),
 		[]string{action},
 		model.ResourceTypeDatabaseAccount,
-		strings.TrimSpace(request.AccountID),
+		webSession.accountID,
 	)
 	if err != nil {
 		return SQLConsoleResult{}, fmt.Errorf("authorize SQL console: %w", err)
@@ -113,19 +124,13 @@ func (s *SQLConsoleService) Execute(
 	if !allowed {
 		return SQLConsoleResult{}, ErrSQLConsoleForbidden
 	}
-	account, found, err := s.repository.FindActiveDatabaseAccount(ctx, strings.TrimSpace(request.AccountID))
+	account, now, err := s.loadSQLConsoleAccount(ctx, webSession.accountID)
 	if err != nil {
-		return SQLConsoleResult{}, fmt.Errorf("load database account: %w", err)
+		return SQLConsoleResult{}, err
 	}
-	if !found {
-		return SQLConsoleResult{}, ErrSQLConsoleNotFound
-	}
-	now := s.now().UTC()
-	if account.Instance.Status != "active" || account.ExpiresAt != nil && !account.ExpiresAt.After(now) {
-		return SQLConsoleResult{}, ErrSQLConsoleUnavailable
-	}
-	if account.Password.GetPlaintext() == "" {
-		return SQLConsoleResult{}, ErrSQLConsoleUnavailable
+	database := strings.TrimSpace(request.Database)
+	if database == "" || !webSession.databaseAllowed(database) {
+		return SQLConsoleResult{}, ErrSQLConsoleInvalid
 	}
 
 	session := newSQLConsoleAuditSession(actor, account, now)
@@ -145,7 +150,7 @@ func (s *SQLConsoleService) Execute(
 	}
 
 	started := s.now()
-	execution, executionErr := s.executor.Execute(ctx, account, strings.TrimSpace(request.Database), policy.SQL, policy.ReadOnly)
+	execution, executionErr := webSession.connection.Execute(ctx, database, policy.SQL, policy.ReadOnly)
 	duration := s.now().Sub(started).Milliseconds()
 	if duration < 0 {
 		duration = 0

@@ -1,5 +1,6 @@
 import {
   computed,
+  onScopeDispose,
   readonly,
   ref,
   shallowReadonly,
@@ -22,18 +23,24 @@ export interface UseSQLConsoleOptions {
 
 export function useSQLConsole(options: UseSQLConsoleOptions = {}) {
   const accounts = ref<DBAccountRecord[]>([]);
+  const databases = ref<string[]>([]);
   const accountId = shallowRef('');
   const database = shallowRef('');
+  const sessionId = shallowRef('');
   const sql = shallowRef('SELECT 1 AS ready;');
   const loadingAccounts = shallowRef(false);
+  const connecting = shallowRef(false);
   const executing = shallowRef(false);
   const error = shallowRef('');
   const result = shallowRef<SQLConsoleResult | null>(null);
   const activeController = shallowRef<AbortController | null>(null);
+  const connectionController = shallowRef<AbortController | null>(null);
+  let connectionGeneration = 0;
 
   const selectedAccount = computed(
     () => accounts.value.find(account => account.id === accountId.value) ?? null,
   );
+  const connected = computed(() => Boolean(sessionId.value));
   const requestedAccountId = computed(() => (
     options.requestedAccountId ? String(toValue(options.requestedAccountId) ?? '').trim() : ''
   ));
@@ -55,7 +62,7 @@ export function useSQLConsole(options: UseSQLConsoleOptions = {}) {
     error.value = '指定的数据库账号不可用或无连接权限';
   }
 
-  async function loadAccounts() {
+  async function loadAccounts(): Promise<void> {
     loadingAccounts.value = true;
     error.value = '';
     try {
@@ -69,6 +76,7 @@ export function useSQLConsole(options: UseSQLConsoleOptions = {}) {
         return protocol === 'mysql' || protocol === 'postgres' || protocol === 'postgresql';
       });
       applyRequestedAccount();
+      await connect();
     } catch (cause) {
       error.value = cause instanceof Error ? cause.message : '加载数据库账号失败';
     } finally {
@@ -76,22 +84,74 @@ export function useSQLConsole(options: UseSQLConsoleOptions = {}) {
     }
   }
 
-  async function execute(confirmWrite = false) {
+  async function connect(): Promise<void> {
+    const generation = ++connectionGeneration;
+    const targetAccountId = accountId.value;
+    connectionController.value?.abort();
+    activeController.value?.abort();
+    const previousSessionId = sessionId.value;
+    sessionId.value = '';
+    databases.value = [];
+    database.value = '';
+    result.value = null;
+    if (previousSessionId) {
+      void apiClient.closeSQLConsoleSession(previousSessionId).catch(() => undefined);
+    }
+    if (!targetAccountId) {
+      connecting.value = false;
+      return;
+    }
+
+    const controller = new AbortController();
+    connectionController.value = controller;
+    connecting.value = true;
     error.value = '';
+    try {
+      const session = await apiClient.createSQLConsoleSession(targetAccountId, controller.signal);
+      if (controller.signal.aborted || generation !== connectionGeneration || accountId.value !== targetAccountId) {
+        void apiClient.closeSQLConsoleSession(session.id).catch(() => undefined);
+        return;
+      }
+      sessionId.value = session.id;
+      databases.value = session.databases ?? [];
+      database.value = session.default_database || databases.value[0] || '';
+    } catch (cause) {
+      if (!controller.signal.aborted && generation === connectionGeneration) {
+        error.value = cause instanceof Error ? cause.message : '连接数据库失败';
+      }
+    } finally {
+      if (connectionController.value === controller) {
+        connectionController.value = null;
+        connecting.value = false;
+      }
+    }
+  }
+
+  async function execute(confirmWrite = false): Promise<SQLConsoleResult> {
+    error.value = '';
+    const currentSessionId = sessionId.value;
+    if (!currentSessionId || !database.value) {
+      throw new Error('数据库连接尚未就绪');
+    }
     const controller = new AbortController();
     activeController.value = controller;
     executing.value = true;
     try {
-      const response = await apiClient.executeSQL({
-        account_id: accountId.value,
-        database: database.value.trim(),
+      const response = await apiClient.executeSQL(currentSessionId, {
+        database: database.value,
         sql: sql.value,
         confirm_write: confirmWrite,
       }, controller.signal);
       result.value = response;
       return response;
     } catch (cause) {
-      if (
+      if (cause instanceof ApiError && cause.statusCode === 404) {
+        sessionId.value = '';
+        await connect();
+        const sessionError = new Error('连接已过期，已自动重新连接，请再次执行');
+        error.value = sessionError.message;
+        throw sessionError;
+      } else if (
         !controller.signal.aborted &&
         (!(cause instanceof ApiError) || cause.code !== 'PRECONDITION_FAILED')
       ) {
@@ -106,26 +166,51 @@ export function useSQLConsole(options: UseSQLConsoleOptions = {}) {
     }
   }
 
-  function cancel() {
+  function cancel(): void {
     activeController.value?.abort();
   }
 
+  async function disconnect(): Promise<void> {
+    ++connectionGeneration;
+    connectionController.value?.abort();
+    activeController.value?.abort();
+    const currentSessionId = sessionId.value;
+    sessionId.value = '';
+    databases.value = [];
+    database.value = '';
+    if (currentSessionId) {
+      await apiClient.closeSQLConsoleSession(currentSessionId).catch(() => undefined);
+    }
+  }
+
   watch(requestedAccountId, () => {
-    if (accounts.value.length > 0) applyRequestedAccount();
+    if (accounts.value.length === 0) return;
+    const previousAccountId = accountId.value;
+    applyRequestedAccount();
+    if (accountId.value !== previousAccountId) void connect();
+  });
+
+  onScopeDispose(() => {
+    void disconnect();
   });
 
   return {
     accounts: readonly(accounts),
+    databases: readonly(databases),
     accountId,
     database,
     sql,
     loadingAccounts: readonly(loadingAccounts),
+    connecting: readonly(connecting),
+    connected,
     executing: readonly(executing),
     error: readonly(error),
     result: shallowReadonly(result),
     selectedAccount,
     loadAccounts,
+    connect,
     execute,
     cancel,
+    disconnect,
   };
 }

@@ -64,6 +64,10 @@ func startAdminRuntime(
 	if err != nil {
 		return err
 	}
+	go func() {
+		<-ctx.Done()
+		sqlConsoleService.Close()
+	}()
 	sqlConsoleHandler, err := sqlconsole.New(sqlConsoleService)
 	if err != nil {
 		return err

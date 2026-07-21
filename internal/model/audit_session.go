@@ -30,7 +30,6 @@ type AuditSession struct {
 	ResourceID      string     `gorm:"index:idx_audit_sessions_resource_started,priority:2;size:64" json:"resource_id,omitempty"`
 	HostID          string     `gorm:"index;size:64" json:"host_id,omitempty"`
 	AccountID       string     `gorm:"index;size:64" json:"account_id,omitempty"`
-	AccessRequestID string     `gorm:"index;size:64" json:"access_request_id,omitempty"`
 	TargetName      string     `gorm:"size:255" json:"target_name"`
 	TargetAddress   string     `gorm:"size:255" json:"target_address"`
 	AccountName     string     `gorm:"size:128" json:"account_name"`

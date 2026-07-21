@@ -3,16 +3,13 @@ package webrdp
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
 
-	"jianmen/internal/model"
 	"jianmen/internal/rbac"
 	"jianmen/internal/service"
 )
@@ -109,59 +106,6 @@ func (s *authorizerStub) AuthorizeConnection(
 	return true, nil
 }
 
-type approvalRepositoryStub struct {
-	active model.AccessRequest
-	found  bool
-	err    error
-}
-
-func (s *approvalRepositoryStub) CreateAccessRequest(context.Context, *model.AccessRequest) error {
-	return errors.New("unexpected access request create")
-}
-
-func (s *approvalRepositoryStub) AccessRequest(context.Context, string) (model.AccessRequest, error) {
-	return model.AccessRequest{}, service.ErrAccessRequestNotFound
-}
-
-func (s *approvalRepositoryStub) ListAccessRequests(
-	context.Context,
-	service.AccessRequestListParams,
-) ([]model.AccessRequest, int64, error) {
-	return nil, 0, nil
-}
-
-func (s *approvalRepositoryStub) DecideAccessRequest(
-	context.Context,
-	string,
-	string,
-	string,
-	string,
-	time.Time,
-) (model.AccessRequest, error) {
-	return model.AccessRequest{}, errors.New("unexpected access request decision")
-}
-
-func (s *approvalRepositoryStub) CancelAccessRequest(
-	context.Context,
-	string,
-	string,
-	time.Time,
-) (model.AccessRequest, error) {
-	return model.AccessRequest{}, errors.New("unexpected access request cancellation")
-}
-
-func (s *approvalRepositoryStub) FindActiveAccessRequest(
-	context.Context,
-	string,
-	string,
-	string,
-	string,
-	time.Time,
-	[]string,
-) (model.AccessRequest, bool, error) {
-	return s.active, s.found, s.err
-}
-
 type identityStub struct {
 	subject service.IdentitySubject
 	found   bool
@@ -238,82 +182,6 @@ func TestCreateTicketRejectsInvalidDisplayDimensions(t *testing.T) {
 	}
 }
 
-func TestCreateTicketReturnsApprovalConflictBeforeIssuingTicket(t *testing.T) {
-	target := validTestTarget()
-	target.ApprovalRequired = true
-	authorizer := allowRDP(target.ID, rbac.ActionRDPConnect)
-	control := newTestWebRDPService(t, target, authorizer, &approvalRepositoryStub{})
-	tickets := &ticketStub{createTicket: "must-not-be-created"}
-	handler := ticketHandler(control, tickets)
-	audit := &auditRepositoryStub{}
-	recording, err := service.NewRDPRecordingService(
-		service.RDPRecordingConfig{
-			SpoolRoot:          t.TempDir(),
-			GuacdRecordingRoot: "/recordings",
-		},
-		audit,
-		&memoryObjectStore{},
-	)
-	if err != nil {
-		t.Fatalf("new recording service: %v", err)
-	}
-	handler.recording = recording
-
-	recorder := httptest.NewRecorder()
-	request := httptest.NewRequest(
-		http.MethodPost,
-		TicketPath,
-		strings.NewReader(`{"target_id":"account-1","width":1280,"height":720,"dpi":96}`),
-	)
-	handler.CreateTicket(
-		recorder,
-		request,
-		AuthenticatedSubject{UserID: "user-1"},
-		service.BrowserSessionSubject{SessionID: "browser-1", UserID: "user-1"},
-	)
-
-	if recorder.Code != http.StatusConflict {
-		t.Fatalf("status = %d, want %d: %s", recorder.Code, http.StatusConflict, recorder.Body.String())
-	}
-	if tickets.createCalls != 0 {
-		t.Fatalf("ticket create calls = %d, want 0", tickets.createCalls)
-	}
-	if len(audit.begun) != 1 ||
-		audit.begun[0].Outcome != model.AuditOutcomeDenied ||
-		audit.begun[0].FailureCode != "approval_required" ||
-		audit.begun[0].ResourceID != target.ID ||
-		audit.begun[0].RecordingStatus != model.RecordingStatusNone {
-		t.Fatalf("denied audit sessions = %#v", audit.begun)
-	}
-	var response struct {
-		Code  int `json:"code"`
-		Error struct {
-			Code    string `json:"code"`
-			Details struct {
-				ApprovalRequired bool     `json:"approval_required"`
-				TargetID         string   `json:"target_id"`
-				RequiredActions  []string `json:"required_actions"`
-			} `json:"details"`
-		} `json:"error"`
-	}
-	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if response.Code != http.StatusConflict ||
-		response.Error.Code != "RDP_APPROVAL_REQUIRED" ||
-		!response.Error.Details.ApprovalRequired ||
-		response.Error.Details.TargetID != target.ID {
-		t.Fatalf("approval response = %#v", response)
-	}
-	if len(response.Error.Details.RequiredActions) != 1 ||
-		response.Error.Details.RequiredActions[0] != rbac.ActionRDPConnect {
-		t.Fatalf(
-			"required actions = %#v, want rdp connect",
-			response.Error.Details.RequiredActions,
-		)
-	}
-}
-
 func TestCreateTicketBindsPurposeTargetConnectionAndReturnsEffectivePolicy(t *testing.T) {
 	target := validTestTarget()
 	target.ClipboardRead = true
@@ -328,7 +196,7 @@ func TestCreateTicketBindsPurposeTargetConnectionAndReturnsEffectivePolicy(t *te
 		rbac.ActionRDPFileUpload,
 		rbac.ActionRDPDriveMap,
 	)
-	control := newTestWebRDPService(t, target, authorizer, &approvalRepositoryStub{})
+	control := newTestWebRDPService(t, target, authorizer)
 	tickets := &ticketStub{createTicket: "single-use-ticket"}
 	handler := ticketHandler(control, tickets)
 	browser := service.BrowserSessionSubject{
@@ -452,14 +320,9 @@ func newTestWebRDPService(
 	t *testing.T,
 	target service.WebRDPTarget,
 	authorizer *authorizerStub,
-	approvals *approvalRepositoryStub,
 ) *service.WebRDPService {
 	t.Helper()
-	approvalService, err := service.NewAccessRequestService(approvals)
-	if err != nil {
-		t.Fatalf("new approval service: %v", err)
-	}
-	control, err := service.NewWebRDPService(rdpTargetStub{target: target}, authorizer, approvalService)
+	control, err := service.NewWebRDPService(rdpTargetStub{target: target}, authorizer)
 	if err != nil {
 		t.Fatalf("new web RDP service: %v", err)
 	}

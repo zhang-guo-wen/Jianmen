@@ -90,7 +90,7 @@ func TestDisabledWebRDPRuntimeKeepsAuditHandlersAvailable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newWebRDPRuntime() error = %v", err)
 	}
-	if runtime.webRDP == nil || runtime.accessRequests == nil {
-		t.Fatalf("disabled runtime handlers = %#v, want audit and approval handlers", runtime)
+	if runtime.webRDP == nil {
+		t.Fatalf("disabled runtime handler = %#v, want RDP audit handler", runtime)
 	}
 }

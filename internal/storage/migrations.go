@@ -235,6 +235,11 @@ var migrations = []Migration{
 		Name:    "user preference local client fields",
 		Run:     migrateUserPreferenceClients,
 	},
+	{
+		Version: removeRDPApprovalMigrationVersion,
+		Name:    "remove RDP access approval",
+		Run:     migrateRemoveRDPApproval,
+	},
 }
 
 func rejectDuplicateDatabaseAccounts(tx *gorm.DB) error {

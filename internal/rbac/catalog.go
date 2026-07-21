@@ -90,7 +90,6 @@ var permissionPages = []PermissionPageDefinition{
 		action(ActionAuditView, "查看 SSH 审计", "查看 SSH 会话、命令与文件审计"),
 		action(ActionDBAuditView, "查看数据库审计", "查看数据库连接与 SQL 审计"),
 		action(ActionRDPRecordingView, "查看 RDP 录像", "查询并回放有权访问的 RDP 会话录像", model.ResourceTypeHostAccount),
-		action(ActionRDPApprovalManage, "审批 RDP 访问", "审批或拒绝指定主机账号的 RDP 访问申请", model.ResourceTypeHostAccount),
 		action(ActionSessionView, "查看会话", "查看在线及历史会话"),
 		action(ActionSessionDisconnect, "断开会话", "强制中断在线会话"),
 	),
@@ -139,7 +138,7 @@ var pageVisibilityActions = map[string][]string{
 	"platformAccounts": {ActionPlatformAccountView},
 	"applications":     {ActionAppView},
 	"containers":       {ActionContainerView},
-	"audit":            {ActionAuditView, ActionDBAuditView, ActionRDPConnect, ActionRDPRecordingView, ActionRDPApprovalManage, ActionSessionView},
+	"audit":            {ActionAuditView, ActionDBAuditView, ActionRDPConnect, ActionRDPRecordingView, ActionSessionView},
 	"rbac":             {ActionRBACManage},
 }
 

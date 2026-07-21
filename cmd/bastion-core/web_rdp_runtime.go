@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"jianmen/internal/config"
-	"jianmen/internal/handler/accessrequest"
 	"jianmen/internal/handler/webrdp"
 	"jianmen/internal/objectstore"
 	"jianmen/internal/online"
@@ -17,8 +16,7 @@ import (
 )
 
 type webRDPRuntime struct {
-	webRDP         *webrdp.Handler
-	accessRequests *accessrequest.Handler
+	webRDP *webrdp.Handler
 }
 
 func newWebRDPRuntime(
@@ -35,11 +33,7 @@ func newWebRDPRuntime(
 	if objects == nil {
 		return webRDPRuntime{}, errors.New("RDP recording object store is required")
 	}
-	approvals, err := service.NewAccessRequestService(appStore)
-	if err != nil {
-		return webRDPRuntime{}, err
-	}
-	control, err := service.NewWebRDPService(appStore, authorization, approvals)
+	control, err := service.NewWebRDPService(appStore, authorization)
 	if err != nil {
 		return webRDPRuntime{}, err
 	}
@@ -68,11 +62,7 @@ func newWebRDPRuntime(
 	if err != nil {
 		return webRDPRuntime{}, err
 	}
-	accessHandler, err := accessrequest.New(approvals, control, authorization)
-	if err != nil {
-		return webRDPRuntime{}, err
-	}
-	return webRDPRuntime{webRDP: webRDPHandler, accessRequests: accessHandler}, nil
+	return webRDPRuntime{webRDP: webRDPHandler}, nil
 }
 
 func newRDPObjectStore(

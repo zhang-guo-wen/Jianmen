@@ -1,0 +1,17 @@
+# Local startup override used by start.ps1.
+# Keep runtime state in the repository's ignored data/ directory so switching
+# from the former native Go/Vite startup to containers preserves local data.
+services:
+  volume-init:
+    command:
+      - sh
+      - -ec
+      - mkdir -p /app-data/rdp-spool /app-data/rdp-drive
+    volumes:
+      - ./data:/app-data
+
+  jianmen:
+    volumes:
+      - ./data:/app/data
+      - jianmen-certs:/app/certs:ro
+      - "${JIANMEN_CONFIG_FILE:-./config.docker.local.json}:/app/config.json:ro"

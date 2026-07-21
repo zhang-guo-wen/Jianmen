@@ -120,7 +120,7 @@ func (r adminAuditQueryRepository) ListLoginAuditLogs(ctx context.Context, param
 func auditQuerySession(item model.AuditSession) service.AuditSession {
 	return service.AuditSession{
 		ID: item.ID, UserSessionID: item.UserSessionID, UserID: item.UserID, Username: item.Username, Protocol: item.Protocol, ProtocolSubtype: item.ProtocolSubtype,
-		ResourceType: item.ResourceType, ResourceID: item.ResourceID, HostID: item.HostID, AccountID: item.AccountID, AccessRequestID: item.AccessRequestID,
+		ResourceType: item.ResourceType, ResourceID: item.ResourceID, HostID: item.HostID, AccountID: item.AccountID,
 		TargetName: item.TargetName, TargetAddress: item.TargetAddress, AccountName: item.AccountName, AccountUsername: item.AccountUsername, ClientIP: item.ClientIP,
 		StartedAt: item.StartedAt, EndedAt: item.EndedAt, State: item.State, Outcome: item.Outcome, FailureCode: item.FailureCode, FailureMessage: item.FailureMessage,
 		PolicySnapshot: item.PolicySnapshot, RecordingStatus: item.RecordingStatus, CreatedAt: item.CreatedAt, UpdatedAt: item.UpdatedAt, ReplayDir: item.ReplayDir,

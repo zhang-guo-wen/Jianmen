@@ -78,7 +78,7 @@ func (h *Handler) Connect(w http.ResponseWriter, r *http.Request) {
 			ticket.ConnectionID,
 			err,
 		)
-		writeControlError(w, err, service.WebRDPPlan{})
+		writeControlError(w, err)
 		return
 	}
 	sessionCtx, cancelSession, deadlineReason := webRDPSessionContext(
@@ -90,8 +90,7 @@ func (h *Handler) Connect(w http.ResponseWriter, r *http.Request) {
 		ID: ticket.ConnectionID, UserSessionID: ticket.SessionID,
 		UserID: identity.ID, Username: identity.Username,
 		Target: connection.Target, ClientIP: clientIP(r),
-		AccessRequestID: connection.Plan.AccessRequestID,
-		Policy:          connection.Plan.EffectivePolicy,
+		Policy: connection.Plan.EffectivePolicy,
 	})
 	if err != nil {
 		h.logger.Error("start Web RDP audit", "target_id", targetID, "error", err)
@@ -205,7 +204,6 @@ func webRDPSessionContext(
 			reason = candidateReason
 		}
 	}
-	choose(connection.Plan.AccessExpiresAt, "approval_expired")
 	choose(connection.Target.ExpiresAt, "account_expired")
 	if deadline.IsZero() {
 		ctx, cancel := context.WithCancel(parent)

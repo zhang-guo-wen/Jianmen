@@ -1,0 +1,96 @@
+{
+  "listen_addr": "0.0.0.0:47102",
+  "host_key_path": "/app/data/host_key",
+  "replay_dir": "/app/data/replay",
+  "targets_file": "/app/data/targets.json",
+  "admin": {
+    "enabled": true,
+    "listen_addr": "0.0.0.0:47100",
+    "public_url": "http://127.0.0.1:47100",
+    "cors_allowed_origins": [],
+    "tls": {
+      "cert_file": "",
+      "key_file": "",
+      "allow_insecure_http": true
+    }
+  },
+  "database": {
+    "enabled": true,
+    "driver": "sqlite",
+    "dsn": "/app/data/bastion.db",
+    "max_open_conns": 1,
+    "max_idle_conns": 1,
+    "conn_max_lifetime_seconds": 0
+  },
+  "database_gateway": {
+    "enabled": true,
+    "max_client_message_bytes": 10485760,
+    "mode": "unified",
+    "client_tls_mode": "optional",
+    "unified": {
+      "enabled": true,
+      "listen_addr": "0.0.0.0:33060",
+      "cert_file": "/app/certs/database.crt",
+      "key_file": "/app/certs/database.key",
+      "ca_file": "/app/certs/database-ca.crt",
+      "server_name": "localhost",
+      "detection_timeout_ms": 200
+    },
+    "mysql": {
+      "enabled": true,
+      "listen_addr": "0.0.0.0:33061",
+      "cert_file": "/app/certs/database.crt",
+      "key_file": "/app/certs/database.key",
+      "ca_file": "/app/certs/database-ca.crt",
+      "server_name": "localhost"
+    },
+    "postgresql": {
+      "enabled": true,
+      "listen_addr": "0.0.0.0:33062",
+      "cert_file": "/app/certs/database.crt",
+      "key_file": "/app/certs/database.key",
+      "ca_file": "/app/certs/database-ca.crt",
+      "server_name": "localhost"
+    },
+    "redis": {
+      "enabled": true,
+      "listen_addr": "0.0.0.0:33063",
+      "cert_file": "/app/certs/database.crt",
+      "key_file": "/app/certs/database.key",
+      "ca_file": "/app/certs/database-ca.crt",
+      "server_name": "localhost"
+    }
+  },
+  "application_gateway": {
+    "enabled": true,
+    "port_start": 47110,
+    "port_end": 47199
+  },
+  "web_rdp": {
+    "enabled": true,
+    "guacd_address": "127.0.0.1:4822",
+    "managed_guacd": {
+      "enabled": true,
+      "binary_path": "/opt/guacamole/sbin/guacd",
+      "work_dir": "/opt/guacamole",
+      "startup_timeout_seconds": 15
+    },
+    "connect_timeout_seconds": 15,
+    "spool_dir": "/app/data/rdp-spool",
+    "guacd_recording_root": "/app/data/rdp-spool",
+    "local_drive_root": "/app/data/rdp-drive",
+    "guacd_drive_root": "/app/data/rdp-drive",
+    "allow_unrecorded": false
+  },
+  "object_storage": {
+    "provider": "filesystem",
+    "local_dir": "/app/data/objects",
+    "prefix": "jianmen"
+  },
+  "recording": {
+    "enabled": true,
+    "record_input": true,
+    "record_commands": true
+  },
+  "users": []
+}

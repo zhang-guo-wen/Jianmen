@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"jianmen/internal/config"
-	"jianmen/internal/handler/accessrequest"
 	"jianmen/internal/handler/sqlconsole"
 	"jianmen/internal/handler/systemsettings"
 	"jianmen/internal/handler/webrdp"
@@ -98,7 +97,7 @@ func TestNewAcceptsCompleteDBStoreRepository(t *testing.T) {
 		t.Fatalf("new resource group service: %v", err)
 	}
 	var nilAuthorization *typedNilAuthorization
-	if _, err := New(&config.Config{}, repository, db, identity, browserSessions, nilAuthorization, resourceGrants, resourceGroups, repositoryTestProvisioning{}, slog.New(slog.NewTextHandler(io.Discard, nil)), t.TempDir(), nil, online.NewRegistry(), &webrdp.Handler{}, &accessrequest.Handler{}, nil, nil); err == nil {
+	if _, err := New(&config.Config{}, repository, db, identity, browserSessions, nilAuthorization, resourceGrants, resourceGroups, repositoryTestProvisioning{}, slog.New(slog.NewTextHandler(io.Discard, nil)), t.TempDir(), nil, online.NewRegistry(), &webrdp.Handler{}, nil, nil); err == nil {
 		t.Fatal("New accepted typed-nil authorization service")
 	}
 	sqlConsoleService, err := service.NewSQLConsoleService(
@@ -129,7 +128,6 @@ func TestNewAcceptsCompleteDBStoreRepository(t *testing.T) {
 		nil,
 		online.NewRegistry(),
 		&webrdp.Handler{},
-		&accessrequest.Handler{},
 		&systemsettings.Handler{},
 		sqlConsoleHandler,
 	)

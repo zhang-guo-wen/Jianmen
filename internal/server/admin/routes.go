@@ -107,8 +107,6 @@ func (s *Server) routes() http.Handler {
 	s.muxHandle(mux, "/api/resource-grants", s.withAuthAndUser(s.handleResourceGrants))
 	s.muxHandle(mux, "/api/resource-grants/check", s.withAuthAndUser(s.handleResourceGrantCheck))
 	s.muxHandle(mux, "/api/resource-grants/", s.withAuthAndUser(s.handleResourceGrant))
-	s.muxHandle(mux, "/api/access-requests", s.withAuthAndUser(s.handleAccessRequests))
-	s.muxHandle(mux, "/api/access-requests/", s.withAuthAndUser(s.handleAccessRequest))
 
 	return logRequests(s.logger, withCORS(s.cfg.Admin.CORSAllowedOrigins, mux))
 }

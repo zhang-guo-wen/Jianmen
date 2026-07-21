@@ -37,7 +37,6 @@ type HostAccount struct {
 	RDPSecurity           string         `gorm:"size:32;not null;default:any" json:"rdp_security,omitempty"`
 	RDPIgnoreCertificate  bool           `gorm:"not null;default:false" json:"rdp_ignore_certificate"`
 	RDPCertFingerprints   string         `gorm:"type:text" json:"rdp_cert_fingerprints,omitempty"`
-	RDPApprovalRequired   bool           `gorm:"not null;default:false" json:"rdp_approval_required"`
 	RDPClipboardRead      bool           `gorm:"not null;default:false" json:"rdp_clipboard_read"`
 	RDPClipboardWrite     bool           `gorm:"not null;default:false" json:"rdp_clipboard_write"`
 	RDPFileUpload         bool           `gorm:"not null;default:false" json:"rdp_file_upload"`

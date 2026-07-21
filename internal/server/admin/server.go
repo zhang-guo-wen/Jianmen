@@ -7,7 +7,6 @@ import (
 	"reflect"
 
 	"jianmen/internal/config"
-	"jianmen/internal/handler/accessrequest"
 	"jianmen/internal/handler/sqlconsole"
 	"jianmen/internal/handler/systemsettings"
 	"jianmen/internal/handler/webrdp"
@@ -60,7 +59,6 @@ type Server struct {
 	temporaryAccess        *service.TemporaryAccessService
 	browserSessions        *service.BrowserSessionService
 	webRDP                 *webrdp.Handler
-	accessRequests         *accessrequest.Handler
 	systemSettings         *systemsettings.Handler
 	sqlConsole             *sqlconsole.Handler
 }
@@ -80,7 +78,6 @@ func New(
 	appProxy *appproxy.Server,
 	onlineSessions *online.Registry,
 	webRDP *webrdp.Handler,
-	accessRequests *accessrequest.Handler,
 	systemSettings *systemsettings.Handler,
 	sqlConsole *sqlconsole.Handler,
 ) (*Server, error) {
@@ -105,8 +102,8 @@ func New(
 		return nil, errors.New("admin logger is required")
 	case onlineSessions == nil:
 		return nil, errors.New("admin online session registry is required")
-	case webRDP == nil || accessRequests == nil:
-		return nil, errors.New("admin Web RDP audit and approval handlers are required")
+	case webRDP == nil:
+		return nil, errors.New("admin Web RDP audit handler is required")
 	case systemSettings == nil:
 		return nil, errors.New("admin system settings handler is required")
 	case sqlConsole == nil:
@@ -239,9 +236,9 @@ func New(
 		identity:       identity, authorization: authorization, resourceAccess: dependencies.resourceAccess,
 		resourceGrants: resourceGrants, resourceGroups: resourceGroups, userManagement: userManagement, userGroups: userGroups, roleManagement: roleManagement, databaseProvisioning: databaseProvisioning, temporaryAccess: temporaryAccess,
 		browserSessions: browserSessions,
-		webRDP:          webRDP, accessRequests: accessRequests,
-		systemSettings: systemSettings,
-		sqlConsole:     sqlConsole,
+		webRDP:          webRDP,
+		systemSettings:  systemSettings,
+		sqlConsole:      sqlConsole,
 	}, nil
 }
 

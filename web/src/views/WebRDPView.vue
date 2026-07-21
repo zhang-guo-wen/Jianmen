@@ -9,9 +9,6 @@
         <span class="target-name" :title="displayTargetName">
           {{ displayTargetName }}
         </span>
-        <el-tag v-if="approvalId" class="approval-tag" size="small" type="warning" effect="dark">
-          审批 {{ approvalId }}
-        </el-tag>
         <span class="status-badge" :class="status" role="status" aria-live="polite">
           <span class="status-dot"></span>
           {{ statusLabel }}
@@ -195,9 +192,6 @@
         <span>{{ error || '无法建立 Web RDP 连接' }}</span>
         <div class="overlay-actions">
           <el-button @click="goBack">返回</el-button>
-          <el-button v-if="approvalRequired" type="warning" @click="requestAccess">
-            申请访问
-          </el-button>
           <el-button type="primary" @click="retryConnection">
             <el-icon><Refresh /></el-icon>
             重试
@@ -277,9 +271,7 @@ const isFullscreen = ref(false);
 const {
   status,
   error,
-  approvalRequired,
   policy,
-  approvalId,
   remoteName,
   scale,
   autoFit,
@@ -423,14 +415,6 @@ async function startConnection() {
 
 function retryConnection() {
   void startConnection();
-}
-
-function requestAccess() {
-  disconnect();
-  void router.push({
-    path: '/audit',
-    query: { scope: 'rdp', section: 'approvals', account_id: targetId.value },
-  });
 }
 
 function goBack() {
@@ -615,12 +599,6 @@ onUnmounted(() => {
   white-space: nowrap;
 }
 
-.approval-tag {
-  max-width: 150px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
 .status-badge {
   display: inline-flex;
   align-items: center;
@@ -798,10 +776,6 @@ onUnmounted(() => {
   .toolbar-secondary-actions {
     padding-right: 8px;
     mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent);
-  }
-
-  .approval-tag {
-    display: none;
   }
 
   .target-name {

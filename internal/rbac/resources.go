@@ -19,7 +19,6 @@ const (
 	ActionRDPFileDownload   = "rdp:file:download"
 	ActionRDPDriveMap       = "rdp:drive:map"
 	ActionRDPRecordingView  = "rdp:recording:view"
-	ActionRDPApprovalManage = "rdp:approval:manage"
 	ActionAuditView         = "audit:view"
 	ActionDBAuditView       = "db:audit:view"
 	ActionHostCreate        = "host:create"

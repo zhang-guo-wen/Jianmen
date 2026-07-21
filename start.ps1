@@ -1,11 +1,17 @@
-# Jianmen dev startup / restart
+# Jianmen container startup / restart
 # Usage:
-#   .\start.ps1           - Full: stop old, build, launch, verify
-#   .\start.ps1 -SkipBuild - Skip build step (quick restart after code changes)
+#   .\start.ps1             Build artifacts and image, then recreate with local HTTP
+#   .\start.ps1 -SkipBuild  Recreate the container from the existing image
+#   .\start.ps1 -EnableTLS  Use the certificate-backed HTTPS configuration
 
-param([switch]$SkipBuild)
+param(
+    [switch]$SkipBuild,
+    [switch]$EnableTLS
+)
 
 $ErrorActionPreference = "Stop"
+$script:DockerPrefix = @()
+$script:DockerDistribution = ""
 
 function Write-Step($Message) {
     Write-Host $Message -ForegroundColor Yellow
@@ -19,286 +25,300 @@ function Write-Info($Message) {
     Write-Host "  $Message" -ForegroundColor Gray
 }
 
-function Show-LogTail($Path, $Lines) {
-    if (Test-Path $Path) {
-        Write-Host "--- $Path (last $Lines lines) ---" -ForegroundColor DarkGray
-        Get-Content $Path -Tail $Lines
-    } else {
-        Write-Host "--- $Path not found ---" -ForegroundColor DarkGray
+function Resolve-DockerCommand {
+    $command = Get-Command "docker.exe" -ErrorAction SilentlyContinue
+    if (-not $command) {
+        $command = Get-Command "docker" -ErrorAction SilentlyContinue
     }
-}
-
-function Stop-ProcessFromPidFile($PidFile, $Name) {
-    if (Test-Path $PidFile) {
-        $rawPid = (Get-Content $PidFile -ErrorAction SilentlyContinue | Select-Object -First 1)
-        if ($rawPid) {
-            $proc = Get-Process -Id ([int]$rawPid) -ErrorAction SilentlyContinue
-            if ($proc) {
-                Write-Info "Stopping $Name PID $rawPid"
-                Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
-            }
-        }
-        Remove-Item $PidFile -Force -ErrorAction SilentlyContinue
+    if ($command) {
+        return $command.Source
     }
-}
 
-function Stop-ProcessOnPort($Port, $Name) {
-    $connections = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue
-    foreach ($connection in $connections) {
-        $proc = Get-Process -Id $connection.OwningProcess -ErrorAction SilentlyContinue
-        if ($proc) {
-            Write-Info "Stopping $Name port $Port PID $($proc.Id) ($($proc.ProcessName))"
-            Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+    $candidates = @(
+        "C:\Program Files\Docker\Docker\resources\bin\docker.exe",
+        "C:\ProgramData\DockerDesktop\version-bin\docker.exe"
+    )
+    foreach ($candidate in $candidates) {
+        if (Test-Path -LiteralPath $candidate) {
+            return $candidate
         }
     }
-}
 
-function Wait-HttpOk($Name, $Url, $TimeoutSeconds, $Headers, $WebSession) {
-    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
-    $lastError = $null
-    while ((Get-Date) -lt $deadline) {
-        try {
-            if ($Headers) {
-                $response = Invoke-WebRequest $Url -UseBasicParsing -TimeoutSec 2 -Headers $Headers -WebSession $WebSession
-            } else {
-                $response = Invoke-WebRequest $Url -UseBasicParsing -TimeoutSec 2 -WebSession $WebSession
+    $wsl = Get-Command "wsl.exe" -ErrorAction SilentlyContinue
+    if ($wsl) {
+        $distributions = & $wsl.Source --list --quiet 2>$null
+        foreach ($distribution in $distributions) {
+            $name = ([string]$distribution).Replace([string][char]0, "").Trim()
+            if ([string]::IsNullOrWhiteSpace($name)) {
+                continue
             }
-            if ($response.StatusCode -ge 200 -and $response.StatusCode -lt 300) {
-                Write-Ok "$Name ready: $Url ($($response.StatusCode))"
-                return
-            }
-        } catch {
-            $lastError = $_.Exception.Message
-            if ($_.Exception.Response -and $_.Exception.Response.StatusCode) {
-                $statusCode = [int]$_.Exception.Response.StatusCode
-                if ($statusCode -ge 200 -and $statusCode -lt 300) {
-                    Write-Ok "$Name ready: $Url ($statusCode)"
-                    return
+            & $wsl.Source -d $name -e docker info --format "{{.ServerVersion}}" *> $null
+            if ($LASTEXITCODE -eq 0) {
+                $script:DockerPrefix = @("-d", $name, "-e", "docker")
+                $script:DockerDistribution = $name
+                $wslEnvironment = @([string]$env:WSLENV -split ":" | Where-Object { $_ })
+                if ($wslEnvironment -notcontains "JIANMEN_CONFIG_FILE") {
+                    $env:WSLENV = (@($wslEnvironment) + "JIANMEN_CONFIG_FILE") -join ":"
                 }
+                Write-Info "Using Docker Engine from WSL distribution $name"
+                return $wsl.Source
             }
         }
-        Start-Sleep -Milliseconds 500
     }
-    throw "$Name not ready after ${TimeoutSeconds}s: $Url; last error: $lastError"
+
+    throw "Docker CLI not found. Install Docker Desktop or Docker Engine in WSL, then run .\start.ps1 again"
 }
 
-function New-LoginCaptchaPayload($Challenge) {
-    foreach ($property in @('algorithm', 'challenge', 'maxNumber', 'salt', 'signature')) {
-        if ($null -eq $Challenge.$property -or [string]::IsNullOrWhiteSpace([string]$Challenge.$property)) {
-            throw "Login challenge is missing $property"
+function Convert-ToDockerPath($Path) {
+    if ([string]::IsNullOrWhiteSpace($script:DockerDistribution)) {
+        return $Path
+    }
+    $converted = (& wsl.exe -d $script:DockerDistribution -e wslpath -u $Path).Trim()
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($converted)) {
+        throw "Unable to convert Windows path for WSL Docker: $Path"
+    }
+    return $converted
+}
+
+function Invoke-Docker($Docker, [string[]]$Arguments, [switch]$AllowFailure) {
+    $prefix = $script:DockerPrefix
+    & $Docker @prefix @Arguments
+    $exitCode = $LASTEXITCODE
+    if (-not $AllowFailure -and $exitCode -ne 0) {
+        throw "docker $($Arguments -join ' ') failed with exit code $exitCode"
+    }
+    return $exitCode
+}
+
+function Get-ProcessCommandLine($ProcessId) {
+    $process = Get-CimInstance Win32_Process -Filter "ProcessId = $ProcessId" -ErrorAction SilentlyContinue
+    if ($process) {
+        return [string]$process.CommandLine
+    }
+    return ""
+}
+
+function Test-JianmenLocalProcess($ProcessId, $Root) {
+    $process = Get-Process -Id $ProcessId -ErrorAction SilentlyContinue
+    if (-not $process) {
+        return $false
+    }
+    if ($process.ProcessName -eq "bastion-core") {
+        return [string]$process.Path -like "$Root*"
+    }
+    if ($process.ProcessName -notin @("node", "cmd")) {
+        return $false
+    }
+    $commandLine = Get-ProcessCommandLine $ProcessId
+    return $commandLine -like "*$Root*" -and (
+        $commandLine -like "*vite*" -or $commandLine -like "*npm*run*dev*"
+    )
+}
+
+function Stop-JianmenLocalProcess($ProcessId, $Name, $Root) {
+    if (Test-JianmenLocalProcess $ProcessId $Root) {
+        Write-Info "Stopping local $Name PID $ProcessId"
+        Stop-Process -Id $ProcessId -Force -ErrorAction SilentlyContinue
+    }
+}
+
+function Stop-JianmenLocalServices($Root) {
+    foreach ($pidFile in @("logs\backend.pid", "logs\frontend.pid")) {
+        $path = Join-Path $Root $pidFile
+        if (-not (Test-Path -LiteralPath $path)) {
+            continue
+        }
+        $rawPid = Get-Content -LiteralPath $path -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($rawPid -and $rawPid -match "^\d+$") {
+            Stop-JianmenLocalProcess ([int]$rawPid) $pidFile $Root
         }
     }
 
-    $sha256 = [System.Security.Cryptography.SHA256]::Create()
-    try {
-        $solutionNumber = -1
-        for ($number = 0; $number -le [int64]$Challenge.maxNumber; $number++) {
-            $bytes = [System.Text.Encoding]::UTF8.GetBytes("$($Challenge.salt)$number")
-            $hash = $sha256.ComputeHash($bytes)
-            $hex = ([System.BitConverter]::ToString($hash)).Replace('-', '').ToLowerInvariant()
-            if ($hex -eq [string]$Challenge.challenge) {
-                $solutionNumber = $number
-                break
-            }
+    foreach ($port in @(47100, 47101, 47102, 33060, 33061, 33062, 33063)) {
+        $listeners = Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue
+        foreach ($listener in $listeners) {
+            Stop-JianmenLocalProcess $listener.OwningProcess "service on port $port" $Root
         }
-    } finally {
-        $sha256.Dispose()
     }
-
-    if ($solutionNumber -lt 0) {
-        throw "Unable to solve login challenge"
-    }
-
-    $payload = [ordered]@{
-        algorithm = [string]$Challenge.algorithm
-        challenge = [string]$Challenge.challenge
-        number    = [int64]$solutionNumber
-        salt      = [string]$Challenge.salt
-        signature = [string]$Challenge.signature
-    } | ConvertTo-Json -Compress
-    return [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($payload))
+    Start-Sleep -Milliseconds 500
 }
 
-function Wait-TcpPort($Name, $HostName, $Port, $TimeoutSeconds) {
+function Initialize-CertificateVolume($Docker) {
+    $prefix = $script:DockerPrefix
+    & $Docker @prefix volume inspect jianmen-certs *> $null
+    $inspectExitCode = $LASTEXITCODE
+    if ($inspectExitCode -ne 0) {
+        Invoke-Docker $Docker @("volume", "create", "jianmen-certs") | Out-Null
+        Write-Ok "created certificate volume jianmen-certs"
+    }
+
+    $certificateScript = @'
+set -eu
+if [ -s /certs/admin.key ] && [ -s /certs/admin.crt ] && \
+   [ -s /certs/database.key ] && [ -s /certs/database.crt ] && \
+   [ -s /certs/database-ca.crt ]; then
+  exit 0
+fi
+apk add --no-cache openssl >/dev/null
+rm -f /certs/admin.key /certs/admin.crt /certs/database.key \
+  /certs/database.crt /certs/database-ca.crt /certs/database-ca.srl
+openssl req -x509 -newkey rsa:3072 -nodes -days 3650 \
+  -keyout /certs/admin.key -out /certs/admin.crt \
+  -subj "/CN=localhost" \
+  -addext "subjectAltName=DNS:localhost,IP:127.0.0.1" >/dev/null 2>&1
+openssl req -x509 -newkey rsa:3072 -nodes -days 3650 \
+  -keyout /tmp/database-ca.key -out /certs/database-ca.crt \
+  -subj "/CN=Jianmen local database CA" \
+  -addext "basicConstraints=critical,CA:TRUE" \
+  -addext "keyUsage=critical,keyCertSign,cRLSign" >/dev/null 2>&1
+openssl req -new -newkey rsa:3072 -nodes \
+  -keyout /certs/database.key -out /tmp/database.csr \
+  -subj "/CN=localhost" >/dev/null 2>&1
+printf '%s\n' \
+  'basicConstraints=critical,CA:FALSE' \
+  'keyUsage=critical,digitalSignature,keyEncipherment' \
+  'extendedKeyUsage=serverAuth' \
+  'subjectAltName=DNS:localhost,IP:127.0.0.1' >/tmp/database.ext
+openssl x509 -req -in /tmp/database.csr \
+  -CA /certs/database-ca.crt -CAkey /tmp/database-ca.key -CAcreateserial \
+  -out /certs/database.crt -days 3650 -sha256 -extfile /tmp/database.ext >/dev/null 2>&1
+rm -f /certs/database-ca.srl /tmp/database-ca.key /tmp/database.csr /tmp/database.ext
+chown 10001:10001 /certs/admin.key /certs/admin.crt /certs/database.key \
+  /certs/database.crt /certs/database-ca.crt
+chmod 600 /certs/admin.key /certs/database.key
+chmod 644 /certs/admin.crt /certs/database.crt /certs/database-ca.crt
+'@
+
+    # wsl.exe does not preserve multiline arguments reliably on Windows
+    # PowerShell 5. Encode the script so Docker receives one plain argument.
+    $certificateScriptBase64 = [Convert]::ToBase64String(
+        [Text.Encoding]::UTF8.GetBytes($certificateScript)
+    )
+    $certificateCommand = "printf '%s' '$certificateScriptBase64' | base64 -d | sh"
+
+    Invoke-Docker $Docker @(
+        "run", "--rm", "--user", "0",
+        "-v", "jianmen-certs:/certs",
+        "alpine:3.23", "sh", "-ec", $certificateCommand
+    ) | Out-Null
+    Write-Ok "certificate volume ready"
+}
+
+function Wait-JianmenContainer($Docker, $ComposeFile, $LocalComposeFile, $TimeoutSeconds) {
+    $prefix = $script:DockerPrefix
+    $containerId = (& $Docker @prefix compose -f $ComposeFile -f $LocalComposeFile ps -q jianmen).Trim()
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($containerId)) {
+        throw "Jianmen container was not created"
+    }
+
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    $lastState = "unknown"
     while ((Get-Date) -lt $deadline) {
-        $client = New-Object System.Net.Sockets.TcpClient
-        try {
-            $iar = $client.BeginConnect($HostName, $Port, $null, $null)
-            if ($iar.AsyncWaitHandle.WaitOne(1000, $false)) {
-                $client.EndConnect($iar)
-                Write-Ok "$Name ready: ${HostName}:$Port"
-                return
-            }
-        } catch {
-        } finally {
-            $client.Close()
+        $lastState = (& $Docker @prefix inspect --format "{{.State.Status}}/{{if .State.Health}}{{.State.Health.Status}}{{else}}no-healthcheck{{end}}" $containerId).Trim()
+        if ($LASTEXITCODE -ne 0) {
+            $lastState = "inspect-failed"
+        } elseif ($lastState -eq "running/healthy") {
+            Write-Ok "container healthy: $containerId"
+            return
+        } elseif ($lastState -like "exited/*" -or $lastState -like "dead/*") {
+            throw "Jianmen container stopped unexpectedly: $lastState"
         }
-        Start-Sleep -Milliseconds 500
+        Start-Sleep -Seconds 1
     }
-    throw "$Name not ready after ${TimeoutSeconds}s: ${HostName}:$Port"
+    throw "Jianmen container not healthy after ${TimeoutSeconds}s: $lastState"
 }
 
-function Wait-AnyTcpPort($Name, $HostName, $Ports, $TimeoutSeconds) {
-    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
-    while ((Get-Date) -lt $deadline) {
-        foreach ($port in $Ports) {
-            $client = New-Object System.Net.Sockets.TcpClient
-            try {
-                $iar = $client.BeginConnect($HostName, $port, $null, $null)
-                if ($iar.AsyncWaitHandle.WaitOne(250, $false)) {
-                    $client.EndConnect($iar)
-                    Write-Ok "$Name ready: ${HostName}:$port"
-                    return $port
-                }
-            } catch {
-            } finally {
-                $client.Close()
-            }
-        }
-        Start-Sleep -Milliseconds 250
+function Show-ContainerDiagnostics($Docker, $ComposeFile, $LocalComposeFile) {
+    if (-not $Docker) {
+        return
     }
-    throw "$Name not ready after ${TimeoutSeconds}s: ${HostName}:$($Ports -join ',')"
-}
-
-function Fail-WithDiagnostics($Message) {
+    $prefix = $script:DockerPrefix
     Write-Host ""
-    Write-Host "Startup failed: $Message" -ForegroundColor Red
-    Show-LogTail "logs\backend.err.log" 80
-    Show-LogTail "logs\backend.log" 80
-    Show-LogTail "logs\frontend.err.log" 80
-    Show-LogTail "logs\frontend.log" 80
-    exit 1
+    Write-Host "--- Docker Compose status ---" -ForegroundColor DarkGray
+    & $Docker @prefix compose -f $ComposeFile -f $LocalComposeFile ps --all
+    Write-Host "--- Jianmen container logs (last 120 lines) ---" -ForegroundColor DarkGray
+    & $Docker @prefix compose -f $ComposeFile -f $LocalComposeFile logs --tail 120 jianmen
 }
+
+$root = Split-Path -Parent $MyInvocation.MyCommand.Path
+$composeFile = Join-Path $root "docker-compose.web-rdp.yml"
+$localComposeFile = Join-Path $root "docker-compose.local.yml"
+$docker = $null
+$webURL = "http://127.0.0.1:47100/"
 
 try {
-    $root = (Get-Location).Path
-    $logsDir = Join-Path $root "logs"
-    $binDir = Join-Path $root "bin"
-    $backendLog = Join-Path $logsDir "backend.log"
-    $backendErrLog = Join-Path $logsDir "backend.err.log"
-    $backendPid = Join-Path $logsDir "backend.pid"
-    $frontendLog = Join-Path $logsDir "frontend.log"
-    $frontendErrLog = Join-Path $logsDir "frontend.err.log"
-    $frontendPid = Join-Path $logsDir "frontend.pid"
-
-    Write-Host "=== Jianmen Dev Startup ===" -ForegroundColor Cyan
-    if ($SkipBuild) { Write-Host "(skip build)" -ForegroundColor DarkGray }
-    Write-Host ""
-
-    Write-Step "[1/5] Preparing directories..."
-    New-Item -ItemType Directory -Force -Path $binDir | Out-Null
-    New-Item -ItemType Directory -Force -Path $logsDir | Out-Null
-    Write-Ok "runtime directories ready"
-
-    Write-Step "[2/5] Stopping old instances..."
-    Stop-ProcessFromPidFile $backendPid "bastion-core"
-    Stop-ProcessFromPidFile $frontendPid "vite-dev"
-    Stop-ProcessOnPort 47100 "Admin API"
-    Stop-ProcessOnPort 47101 "Web UI"
-    Stop-ProcessOnPort 47102 "SSH gateway"
-    foreach ($databasePort in 33060..33063) {
-        Stop-ProcessOnPort $databasePort "Database gateway"
+    Write-Host "=== Jianmen Container Startup ===" -ForegroundColor Cyan
+    if ($SkipBuild) {
+        Write-Host "(reuse existing artifacts and image)" -ForegroundColor DarkGray
     }
-    Get-Process -Name "bastion-core" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
-    $oldNode = Get-Process -Name "node" -ErrorAction SilentlyContinue | Where-Object { $_.CommandLine -like "*vite*" -or $_.CommandLine -like "*npm*run*dev*" }
-    if ($oldNode) { $oldNode | Stop-Process -Force -ErrorAction SilentlyContinue }
-    Start-Sleep -Seconds 1
-    Write-Ok "old instances stopped"
-
-    if (-not $SkipBuild) {
-        Write-Step "[3/5] Building backend..."
-        go build -o "bin\bastion-core.exe" ".\cmd\bastion-core"
-        if ($LASTEXITCODE -ne 0) { throw "Backend build failed" }
-        Write-Ok "backend built: bin\bastion-core.exe"
+    if ($EnableTLS) {
+        $env:JIANMEN_CONFIG_FILE = "./config.docker.web-rdp.example.json"
+        $webURL = "https://127.0.0.1:47100/"
+        Write-Host "(HTTPS configuration enabled)" -ForegroundColor DarkGray
     } else {
-        Write-Step "[3/5] Skipping build..."
-        if (-not (Test-Path "bin\bastion-core.exe")) {
-            Write-Info "binary not found, building anyway..."
-            go build -o "bin\bastion-core.exe" ".\cmd\bastion-core"
-            if ($LASTEXITCODE -ne 0) { throw "Backend build failed" }
-            Write-Ok "backend built: bin\bastion-core.exe"
-        } else {
-            Write-Ok "using existing binary"
+        $env:JIANMEN_CONFIG_FILE = "./config.docker.local.json"
+    }
+    Write-Host ""
+
+    Write-Step "[1/5] Stopping legacy local services..."
+    Stop-JianmenLocalServices $root
+    Write-Ok "no local Go or Vite service is running"
+
+    Write-Step "[2/5] Checking Docker..."
+    $docker = Resolve-DockerCommand
+    Invoke-Docker $docker @("info", "--format", "{{.ServerVersion}}") | Out-Null
+    Invoke-Docker $docker @("compose", "version") | Out-Null
+    $composeFile = Convert-ToDockerPath $composeFile
+    $localComposeFile = Convert-ToDockerPath $localComposeFile
+    Write-Ok "Docker engine and Compose are ready"
+
+    if ($SkipBuild) {
+        Write-Step "[3/5] Reusing existing container image..."
+        Write-Ok "artifact and image build skipped"
+    } else {
+        Write-Step "[3/5] Building Jianmen artifacts..."
+        & (Join-Path $root "build.ps1")
+        if ($LASTEXITCODE -ne 0) {
+            throw "Jianmen artifact build failed"
         }
+        Write-Ok "frontend and Linux container binary built"
     }
 
-    Write-Step "[4/5] Starting backend..."
-    Remove-Item $backendLog, $backendErrLog -Force -ErrorAction SilentlyContinue
-    $backend = Start-Process -FilePath (Join-Path $binDir "bastion-core.exe") -ArgumentList "-config", "config.local.json" -WorkingDirectory $root -RedirectStandardOutput $backendLog -RedirectStandardError $backendErrLog -WindowStyle Hidden -PassThru
-    Set-Content -Path $backendPid -Value $backend.Id -Encoding ascii
-    Write-Ok "backend process started: PID $($backend.Id)"
+    Write-Step "[4/5] Preparing container runtime..."
+    Initialize-CertificateVolume $docker
 
-    # Wait for TCP ports first
-    Wait-TcpPort "Admin API port" "127.0.0.1" 47100 20
-    $databaseGatewayPort = Wait-AnyTcpPort "Database gateway" "127.0.0.1" @(33060, 33061, 33062, 33063) 10
-    Wait-TcpPort "SSH gateway" "127.0.0.1" 47102 10
-
-    # Login through the production challenge flow and retain the HttpOnly session cookie.
-    $webSession = New-Object Microsoft.PowerShell.Commands.WebRequestSession
-    $challenge = Invoke-RestMethod -Uri "http://127.0.0.1:47100/api/login/challenge" -Method Get -WebSession $webSession -TimeoutSec 5 -ErrorAction Stop
-    $captchaPayload = New-LoginCaptchaPayload $challenge
-    $loginBody = [ordered]@{
-        username       = "admin"
-        password       = "admin"
-        captcha_payload = $captchaPayload
-    } | ConvertTo-Json -Compress
-    $loginResp = Invoke-RestMethod -Uri "http://127.0.0.1:47100/api/login" -Method Post -Body $loginBody -ContentType "application/json" -WebSession $webSession -TimeoutSec 5 -ErrorAction Stop
-    if ([string]::IsNullOrWhiteSpace([string]$loginResp.data.csrf_token)) {
-        throw "Login response did not include csrf_token"
+    Write-Step "[5/5] Recreating Jianmen container..."
+    $composeArguments = @(
+        "compose", "-f", $composeFile, "-f", $localComposeFile,
+        "up", "-d", "--force-recreate", "--remove-orphans"
+    )
+    if ($SkipBuild) {
+        $composeArguments += "--no-build"
+    } else {
+        $composeArguments += "--build"
     }
-    $sessionCookie = $webSession.Cookies.GetCookies("http://127.0.0.1:47100/") | Where-Object { $_.Name -eq "jianmen_session" }
-    if (-not $sessionCookie) {
-        throw "Login response did not establish a browser session"
-    }
-    Write-Ok "Admin login OK (browser session established)"
-
-    # Health check with real token
-    Wait-HttpOk "Admin API" "http://127.0.0.1:47100/api/health" 5 $null $webSession
-
-    Write-Step "[5/5] Starting frontend..."
-    Push-Location "web"
-    try {
-        if (-not (Test-Path "node_modules")) {
-            Write-Info "installing npm dependencies..."
-            npm install
-            if ($LASTEXITCODE -ne 0) { throw "npm install failed" }
-        }
-    } finally {
-        Pop-Location
-    }
-
-    Remove-Item $frontendLog, $frontendErrLog -Force -ErrorAction SilentlyContinue
-    $npmCommand = (Get-Command "npm.cmd" -ErrorAction SilentlyContinue).Source
-    if (-not $npmCommand) { $npmCommand = (Get-Command "npm" -ErrorAction Stop).Source }
-    $frontend = Start-Process -FilePath $npmCommand -ArgumentList "run", "dev", "--", "--host", "127.0.0.1", "--strictPort" -WorkingDirectory (Join-Path $root "web") -RedirectStandardOutput $frontendLog -RedirectStandardError $frontendErrLog -WindowStyle Hidden -PassThru
-    Set-Content -Path $frontendPid -Value $frontend.Id -Encoding ascii
-    Write-Ok "frontend process started: PID $($frontend.Id)"
-
-    Wait-HttpOk "Web UI" "http://127.0.0.1:47101/" 30 $null
-
-    # Verify API proxy with the authenticated browser session.
-    Wait-HttpOk "Frontend API proxy" "http://127.0.0.1:47101/api/hosts" 15 $null $webSession
+    Invoke-Docker $docker $composeArguments | Out-Null
+    Wait-JianmenContainer $docker $composeFile $localComposeFile 90
 
     Write-Host ""
-    Write-Host "=== All services started and verified ===" -ForegroundColor Cyan
+    $dockerPrefix = $script:DockerPrefix
+    & $docker @dockerPrefix compose -f $composeFile -f $localComposeFile ps
     Write-Host ""
-    Write-Host "  Admin API : http://127.0.0.1:47100/" -ForegroundColor White
-    Write-Host "  Web UI    : http://127.0.0.1:47101/" -ForegroundColor White
-    Write-Host "  SSH GW    : 127.0.0.1:47102" -ForegroundColor White
-    $databaseGatewayMode = if ($databaseGatewayPort -eq 33060) { "unified" } else { "independent" }
-    Write-Host "  DB GW     : 127.0.0.1:$databaseGatewayPort ($databaseGatewayMode)" -ForegroundColor White
-    Write-Host "  Auth      : browser session established" -ForegroundColor Gray
+    Write-Host "=== Jianmen container started and verified ===" -ForegroundColor Cyan
     Write-Host ""
-    Write-Host "Logs:" -ForegroundColor Gray
-    Write-Host "  logs\backend.log" -ForegroundColor Gray
-    Write-Host "  logs\backend.err.log" -ForegroundColor Gray
-    Write-Host "  logs\frontend.log" -ForegroundColor Gray
-    Write-Host "  logs\frontend.err.log" -ForegroundColor Gray
+    Write-Host "  Web UI / API : $webURL" -ForegroundColor White
+    Write-Host "  SSH / SFTP   : 127.0.0.1:47102" -ForegroundColor White
+    Write-Host "  DB gateway   : 127.0.0.1:33060" -ForegroundColor White
+    Write-Host "  App proxies  : 127.0.0.1:47110-47199" -ForegroundColor White
     Write-Host ""
-    Write-Host "Stop with:" -ForegroundColor Gray
-    Write-Host "  Stop-Process -Id (Get-Content logs\backend.pid) -Force" -ForegroundColor Gray
-    Write-Host "  Stop-Process -Id (Get-Content logs\frontend.pid) -Force" -ForegroundColor Gray
+    Write-Host "The local development backend and Vite server are no longer used." -ForegroundColor Gray
+    Write-Host "Future starts: .\start.ps1" -ForegroundColor Gray
+    Write-Host "Quick container restart: .\start.ps1 -SkipBuild" -ForegroundColor Gray
+    Write-Host "HTTPS container start: .\start.ps1 -EnableTLS" -ForegroundColor Gray
+    Write-Host "Container logs: docker compose -f docker-compose.web-rdp.yml -f docker-compose.local.yml logs -f jianmen" -ForegroundColor Gray
 } catch {
-    Fail-WithDiagnostics $_.Exception.Message
+    Write-Host ""
+    Write-Host "Container startup failed: $($_.Exception.Message)" -ForegroundColor Red
+    Show-ContainerDiagnostics $docker $composeFile $localComposeFile
+    exit 1
 }

@@ -86,6 +86,19 @@ Web RDP 的默认容器部署把 Jianmen Go 程序和固定版本的 `guacd` 放
 
 ### Docker 部署
 
+Windows 本地开发和重启统一通过容器启动脚本完成。脚本会停止旧的本机 Go/Vite
+进程，构建前端与 Linux 二进制，准备本地证书卷，随后重建并验证 Compose 容器。
+本地启动覆盖文件会把现有 `data/` 挂载到容器，切换运行方式时不会创建一套空数据：
+
+```powershell
+.\start.ps1
+```
+
+默认本机配置不开启管理页面证书，容器管理页面地址为
+`http://127.0.0.1:47100`。仅使用现有镜像快速重启时执行
+`.\start.ps1 -SkipBuild`，需要使用证书版 HTTPS 配置时执行
+`.\start.ps1 -EnableTLS`。容器模式不再启动 `47101` 端口的 Vite 开发服务。
+
 默认 Docker 流程由 Windows 交叉编译 Linux amd64 程序，再由 WSL Docker
 装配单镜像。必须先在仓库根目录的 Windows PowerShell 中执行：
 

@@ -10,23 +10,37 @@ OUTPUT_DIR="$ROOT/dist/release"
 build_archive() {
   local os="$1"
   local arch="$2"
+  local variant="${3:-}"
   local executable="jianmen"
-  local archive_name="jianmen-${VERSION}-${os}-${arch}"
-  local package_dir="$OUTPUT_DIR/$archive_name"
+  local suffix="${os}-${arch}"
+  local build_tags=()
 
   if [[ "$os" == "windows" ]]; then
     executable="jianmen.exe"
+  elif [[ -n "$variant" ]]; then
+    suffix="${suffix}-${variant}"
   fi
 
+  if [[ "$variant" == "rdp" ]]; then
+    "$ROOT/scripts/prepare-guacd-runtime.sh" "$arch"
+    build_tags=(-tags embedded_guacd)
+  fi
+
+  local archive_name="jianmen-${VERSION}-${suffix}"
+  local package_dir="$OUTPUT_DIR/$archive_name"
   rm -rf "$package_dir"
   mkdir -p "$package_dir"
 
   CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" \
-    go build -trimpath -ldflags="-s -w" -o "$package_dir/$executable" ./cmd/bastion-core
+    go build "${build_tags[@]}" -trimpath -ldflags="-s -w" \
+    -o "$package_dir/$executable" ./cmd/bastion-core
 
   cp "$ROOT/config.example.json" "$package_dir/config.example.json"
   cp "$ROOT/LICENSE" "$package_dir/LICENSE"
   cp "$ROOT/README.md" "$package_dir/README.md"
+  if [[ "$variant" == "rdp" ]]; then
+    cp "$ROOT/THIRD_PARTY_NOTICES.md" "$package_dir/THIRD_PARTY_NOTICES.md"
+  fi
 
   if [[ "$os" == "windows" ]]; then
     python - "$package_dir" "$OUTPUT_DIR/${archive_name}.zip" <<'PY'
@@ -62,12 +76,14 @@ mkdir -p "$OUTPUT_DIR"
 
 build_archive windows amd64
 build_archive windows arm64
-build_archive linux amd64
-build_archive linux arm64
+for arch in amd64 arm64; do
+  build_archive linux "$arch" lite
+  build_archive linux "$arch" rdp
+done
 
 (
   cd "$OUTPUT_DIR"
-  sha256sum *.zip *.tar.gz > checksums.txt
+  sha256sum *.zip *.tar.gz >checksums.txt
 )
 
 echo "Release packages created in $OUTPUT_DIR"

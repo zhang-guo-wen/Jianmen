@@ -3,7 +3,7 @@ name: Publish release
 "on":
   push:
     tags:
-      - "v*"
+      - "v*.*.*"
 
 jobs:
   quality-gates:
@@ -13,6 +13,14 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
+
+      - name: Validate release tag
+        shell: bash
+        run: |
+          if [[ ! "${GITHUB_REF_NAME}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
+            echo "release tag must look like v1.2.3 or v1.2.3-rc.1" >&2
+            exit 1
+          fi
 
       - name: Set up Node.js
         uses: actions/setup-node@v6

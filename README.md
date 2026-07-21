@@ -106,11 +106,19 @@ Windows 本地开发和重启统一通过容器启动脚本完成。脚本会停
 .\build.ps1
 ```
 
-该脚本会构建前端，并生成包含前端资源的
-`dist/bastion-core-linux-amd64`。Dockerfile 不会重复下载 Go/npm 依赖，
-而是把这个产物装配到固定的
+该脚本会构建前端，并生成两个包含前端资源的 Linux 产物：
+
+- `dist/jianmen-linux-amd64-rdp`：默认完整版，内嵌 guacd 1.6.0 及其运行库；首次启动自动释放到 `data/runtime/guacd`，目标 Linux 无需安装 guacd 或 Docker。
+- `dist/jianmen-linux-amd64-lite`：轻量版，不内嵌远程桌面运行时；Web RDP 必须关闭或连接外部 guacd。
+
+Dockerfile 使用 Lite 产物，避免在已经包含 guacd 的容器镜像中重复嵌入运行时，
+再把它装配到固定的
 `guacamole/guacd:1.6.0@sha256:8974eaa9ba32f713daf311e7cc8cd7e4cdfba1edea39eed75524e78ef4b08f4f`
 运行层中。
+
+独立 Linux 完整版启用 Web RDP 时，将 `web_rdp.enabled`、
+`web_rdp.managed_guacd.enabled` 设为 `true`，并使用
+`"binary_path": "embedded"`。Lite 版若使用该值会明确报错，不会尝试安装或下载 guacd。
 
 启动脚本实际使用的服务启动命令等价于：
 

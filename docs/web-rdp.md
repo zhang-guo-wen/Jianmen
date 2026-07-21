@@ -165,7 +165,8 @@ sha256:8974eaa9ba32f713daf311e7cc8cd7e4cdfba1edea39eed75524e78ef4b08f4f
 部署顺序不能省略：
 
 1. 在 Windows PowerShell 的仓库根目录执行 `.\build.ps1`，生成
-   `dist/bastion-core-linux-amd64`。
+   `dist/jianmen-linux-amd64-lite` 和 `dist/jianmen-linux-amd64-rdp`。Docker
+   镜像使用 Lite 版，独立 Linux 部署默认使用 RDP 版。
 2. 在 WSL Docker 中按 README 的证书步骤创建并填充外部卷
    `jianmen-certs`。
 3. 在 WSL 的仓库根目录执行：
@@ -174,7 +175,7 @@ sha256:8974eaa9ba32f713daf311e7cc8cd7e4cdfba1edea39eed75524e78ef4b08f4f
    docker compose -f docker-compose.web-rdp.yml up -d --build
    ```
 
-Dockerfile 只把预编译的 Linux amd64 程序装配到固定 guacd 运行层，不在 Docker
+Dockerfile 只把预编译的 Linux amd64 Lite 程序装配到固定 guacd 运行层，不在 Docker
 构建阶段重新下载 Go/npm 依赖。Compose 中一次性的 `volume-init` 只初始化数据
 卷权限，运行时的 Go 和 `guacd` 都位于 `jianmen` 服务容器中。
 

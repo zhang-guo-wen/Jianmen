@@ -2,7 +2,9 @@ ARG GUACD_IMAGE=guacamole/guacd:1.6.0@sha256:8974eaa9ba32f713daf311e7cc8cd7e4cdf
 
 FROM ${GUACD_IMAGE}
 
-# Run .\build.ps1 on Windows before building this Linux/amd64 runtime image.
+ARG TARGETARCH
+
+# Build the matching Lite binaries before assembling the multi-architecture image.
 LABEL org.opencontainers.image.source="https://github.com/zhang-guo-wen/Jianmen"
 LABEL org.opencontainers.image.description="Jianmen bastion host with managed guacd 1.6.0"
 LABEL org.opencontainers.image.licenses="MIT"
@@ -17,7 +19,7 @@ RUN apk add --no-cache openssl su-exec \
 
 WORKDIR /app
 
-COPY --chown=jianmen:jianmen --chmod=0555 dist/bastion-core-linux-amd64 /app/jianmen
+COPY --chown=jianmen:jianmen --chmod=0555 dist/jianmen-linux-${TARGETARCH}-lite /app/jianmen
 COPY --chown=jianmen:jianmen --chmod=0444 config.docker.web-rdp.example.json /app/config.json
 COPY --chmod=0555 docker-entrypoint.sh /usr/local/bin/jianmen-entrypoint
 

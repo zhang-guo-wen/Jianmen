@@ -11,7 +11,8 @@ internal/frontend/dist
 
 bin
 dist/*
-!dist/bastion-core-linux-amd64
+!dist/jianmen-linux-amd64-lite
+!dist/jianmen-linux-arm64-lite
 data
 logs
 

@@ -2,11 +2,8 @@ name: Publish container
 
 "on":
   push:
-    branches:
-      - dev
     tags:
-      - "v*"
-  workflow_dispatch:
+      - "v*.*.*"
 
 env:
   REGISTRY: ghcr.io
@@ -20,6 +17,14 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
+
+      - name: Validate release tag
+        shell: bash
+        run: |
+          if [[ ! "${GITHUB_REF_NAME}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
+            echo "release tag must look like v1.2.3 or v1.2.3-rc.1" >&2
+            exit 1
+          fi
 
       - name: Set up Node.js
         uses: actions/setup-node@v6
@@ -58,6 +63,9 @@ jobs:
       - name: Vet backend
         run: go vet ./...
 
+      - name: Build container binaries
+        run: ./scripts/build-container-binaries.sh
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
 
@@ -81,6 +89,22 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v6
 
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build container binaries
+        run: ./scripts/build-container-binaries.sh
+
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v4
 
@@ -100,10 +124,9 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
-            type=raw,value=dev,enable=${{ github.ref == 'refs/heads/dev' }}
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
-            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+            type=raw,value=latest,enable=${{ !contains(github.ref_name, '-') }}
             type=sha,prefix=sha-
 
       - name: Build and push image

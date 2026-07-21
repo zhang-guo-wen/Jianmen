@@ -6,10 +6,13 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"jianmen/internal/config"
 	"jianmen/internal/guacd"
+	"jianmen/internal/guacdruntime"
 )
 
 type managedGuacdRuntime interface {
@@ -47,11 +50,27 @@ func managedGuacdProcessConfig(cfg *config.Config) (guacd.Config, error) {
 			err,
 		)
 	}
+	command := managed.BinaryPath
+	args := []string{"-f", "-b", host, "-l", port, "-L", "info"}
+	workDir := managed.WorkDir
+	var environment map[string]string
+	if strings.EqualFold(strings.TrimSpace(command), guacdruntime.EmbeddedBinaryPath) {
+		runtimeDir := filepath.Join(filepath.Dir(cfg.WebRDP.SpoolDir), "runtime", "guacd")
+		prepared, prepareErr := guacdruntime.Prepare(runtimeDir)
+		if prepareErr != nil {
+			return guacd.Config{}, fmt.Errorf("prepare embedded guacd runtime: %w", prepareErr)
+		}
+		command = prepared.Command
+		args = append(append([]string{}, prepared.ArgsPrefix...), args...)
+		workDir = prepared.WorkDir
+		environment = prepared.Env
+	}
 	return guacd.Config{
 		Enabled:        enabled,
-		Command:        managed.BinaryPath,
-		Args:           []string{"-f", "-b", host, "-l", port, "-L", "info"},
-		WorkDir:        managed.WorkDir,
+		Command:        command,
+		Args:           args,
+		Env:            environment,
+		WorkDir:        workDir,
 		ReadyAddress:   cfg.WebRDP.GuacdAddress,
 		StartupTimeout: time.Duration(managed.StartupTimeoutSecs) * time.Second,
 	}, nil

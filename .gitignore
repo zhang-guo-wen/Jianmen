@@ -21,6 +21,9 @@ coverage.out
 *.p12
 *.pfx
 
+# Generated from the pinned official guacd image by the build scripts.
+internal/guacdruntime/assets/*.tar.gz
+
 .vite/
 .claude/worktrees/
 /.superpowers/

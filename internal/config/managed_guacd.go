@@ -9,7 +9,7 @@ import (
 )
 
 const (
-	defaultManagedGuacdBinaryPath     = "tools/guacd/1.6.0/sbin/guacd"
+	defaultManagedGuacdBinaryPath     = "embedded"
 	defaultManagedGuacdStartupTimeout = 15
 )
 

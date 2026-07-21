@@ -24,10 +24,25 @@ type ContainerActor struct {
 }
 
 type ContainerEndpoint struct {
-	ID, Name, Group, Runtime, ConnectionMode, Address, HostID, HostName, HostAddress, HostGroup, HostRemark, HostAccountID, HostAccountName, Remark, Status string
-	Port                                                                                                                                                    int
-	CreatedAt, UpdatedAt                                                                                                                                    string
-	CanManage                                                                                                                                               bool
+	ID              string `json:"id"`
+	Name            string `json:"name"`
+	Group           string `json:"group"`
+	Runtime         string `json:"runtime"`
+	ConnectionMode  string `json:"connection_mode"`
+	Address         string `json:"address"`
+	Port            int    `json:"port"`
+	HostID          string `json:"host_id"`
+	HostName        string `json:"host_name"`
+	HostAddress     string `json:"host_address"`
+	HostGroup       string `json:"host_group"`
+	HostRemark      string `json:"host_remark"`
+	HostAccountID   string `json:"host_account_id"`
+	HostAccountName string `json:"host_account_name"`
+	Remark          string `json:"remark"`
+	Status          string `json:"status"`
+	CreatedAt       string `json:"created_at"`
+	UpdatedAt       string `json:"updated_at"`
+	CanManage       bool   `json:"can_manage"`
 }
 
 type ContainerEndpointRequest struct {
@@ -40,8 +55,10 @@ type ContainerListRequest struct {
 	Query, Status  string
 }
 type ContainerPage struct {
-	Items                 []ContainerEndpoint
-	Total, Page, PageSize int
+	Items    []ContainerEndpoint `json:"items"`
+	Total    int                 `json:"total"`
+	Page     int                 `json:"page"`
+	PageSize int                 `json:"page_size"`
 }
 type ContainerHostAccount struct {
 	ID, HostID  string

@@ -12,7 +12,6 @@ import (
 
 	"jianmen/internal/model"
 	"jianmen/internal/rbac"
-	"jianmen/internal/store"
 )
 
 func TestContainerRuntimeRequiresEndpointGrant(t *testing.T) {
@@ -102,15 +101,21 @@ func TestContainerEndpointListOnlyReturnsAuthorizedEndpoints(t *testing.T) {
 	}
 
 	var response struct {
-		Data struct {
-			Items []store.ContainerEndpointView `json:"items"`
-		} `json:"data"`
+		Data map[string]json.RawMessage `json:"data"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
 		t.Fatalf("decode list response: %v", err)
 	}
-	if len(response.Data.Items) != 1 || response.Data.Items[0].ID != "endpoint-visible" {
-		t.Fatalf("authorized endpoints = %#v, want only visible endpoint", response.Data.Items)
+	itemsJSON, ok := response.Data["items"]
+	if !ok {
+		t.Fatalf("list response fields = %#v, want items", response.Data)
+	}
+	var items []map[string]any
+	if err := json.Unmarshal(itemsJSON, &items); err != nil {
+		t.Fatalf("decode list items: %v", err)
+	}
+	if len(items) != 1 || items[0]["id"] != "endpoint-visible" {
+		t.Fatalf("authorized endpoints = %#v, want only visible endpoint", items)
 	}
 }
 

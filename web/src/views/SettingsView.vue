@@ -15,7 +15,7 @@
       </template>
 
       <div class="settings-tabs-shell">
-        <el-tabs v-model="activeTab" class="settings-tabs" tab-position="left">
+        <el-tabs v-model="activeTab" class="settings-tabs">
           <!-- 界面与终端 -->
           <el-tab-pane label="界面与终端" name="appearance">
             <section class="settings-section">
@@ -49,8 +49,6 @@
                 desc="设置快速连接默认使用的 SSH 工具。"
                 :configured="sshConfigured"
                 :registered="sshRegistered"
-                :load-error="preferences.error"
-                @load="loadToBrowser"
               />
               <el-form label-position="top">
                 <el-form-item label="默认客户端">
@@ -73,8 +71,9 @@
                     title="请使用管理员权限在 CMD 中执行下面命令，授权打开本地 SSH 客户端"
                     :command="sshRegistrationCommand"
                     :registered="sshRegistered"
+                    :loading="sshRegistrationSaving"
                     @copy="copyText(sshRegistrationCommand, 'SSH 协议注册命令已复制，请在管理员 CMD 中执行一次')"
-                    @update:registered="sshRegistered = $event"
+                    @confirm="confirmSSHRegistration"
                   />
                 </template>
               </el-form>
@@ -89,12 +88,10 @@
                 desc="设置数据库快速连接使用的 DBeaver。"
                 :configured="dbConfigured"
                 :registered="dbRegistered"
-                :load-error="preferences.error"
-                @load="loadToBrowser"
               />
               <el-form label-position="top">
                 <el-form-item label="默认客户端">
-                  <el-select v-model="form.db_client" clearable placeholder="选择本地数据库客户端" style="width: 100%">
+                  <el-select v-model="form.db_client" placeholder="选择本地数据库客户端" style="width: 100%">
                     <el-option v-for="option in DATABASE_CLIENT_OPTIONS" :key="option.value" :label="option.label" :value="option.value" />
                   </el-select>
                 </el-form-item>
@@ -120,8 +117,9 @@
                     title="注册 Jianmen 数据库协议"
                     :command="dbRegistrationCommand"
                     :registered="dbRegistered"
-                    @copy="copyText(dbRegistrationCommand, '协议注册命令已复制；执行后请勾选[我已执行]')"
-                    @update:registered="dbRegistered = $event"
+                    :loading="dbRegistrationSaving"
+                    @copy="copyText(dbRegistrationCommand, '协议注册命令已复制；执行后请点击[我已执行命令]')"
+                    @confirm="confirmDBRegistration"
                   />
                 </template>
               </el-form>
@@ -135,7 +133,7 @@
 
 <script setup lang="ts">
 import { computed, defineComponent, h, onMounted, reactive, ref, shallowRef, watch } from 'vue';
-import { ElButton, ElCheckbox, ElInput, ElMessage } from 'element-plus';
+import { ElButton, ElInput, ElMessage } from 'element-plus';
 import { useRoute, useRouter } from 'vue-router';
 
 import { apiClient } from '@/api/client';
@@ -168,8 +166,7 @@ const ClientSectionHeading = defineComponent({
     configured: { type: Boolean, default: false },
     registered: { type: Boolean, default: false },
   },
-  emits: ['load'],
-  setup(props, { emit }) {
+  setup(props) {
     const statusLabel = computed(() => {
       if (!props.configured) return '未配置';
       return props.registered ? '已就绪' : '待注册协议';
@@ -182,12 +179,6 @@ const ClientSectionHeading = defineComponent({
       h('div', [h('h2', props.title), h('p', props.desc)]),
       h('div', { class: 'section-heading__actions' }, [
         h('el-tag', { type: statusType.value, effect: 'light' }, () => statusLabel.value),
-        h(ElButton, {
-          type: 'primary',
-          plain: true,
-          disabled: Boolean(!props.configured || !props.registered),
-          onClick: () => emit('load'),
-        }, () => '加载到浏览器'),
       ]),
     ]);
   },
@@ -199,8 +190,9 @@ const ClientRegistrationAlert = defineComponent({
     title: { type: String, required: true },
     command: { type: String, required: true },
     registered: { type: Boolean, default: false },
+    loading: { type: Boolean, default: false },
   },
-  emits: ['copy', 'update:registered'],
+  emits: ['copy', 'confirm'],
   setup(props, { emit }) {
     return () => h('el-alert', { type: 'info', closable: false, showIcon: true, class: 'registration-alert' }, {
       title: () => props.title,
@@ -220,10 +212,12 @@ const ClientRegistrationAlert = defineComponent({
             plain: true,
             onClick: () => emit('copy'),
           }, () => '复制协议注册命令'),
-          h(ElCheckbox, {
-            modelValue: props.registered,
-            'onUpdate:modelValue': (val: string | number | boolean) => emit('update:registered', Boolean(val)),
-          }, () => '我已执行以上命令'),
+          h(ElButton, {
+            type: 'success',
+            loading: props.loading,
+            disabled: !props.command || props.registered,
+            onClick: () => emit('confirm'),
+          }, () => props.registered ? '已确认执行' : '我已执行命令，保存到浏览器'),
         ]),
       ],
     });
@@ -236,8 +230,10 @@ const preferences = usePreferencesStore();
 const databaseClient = useDatabaseClientStore();
 const form = reactive({ ...preferences.value });
 const dbCALoading = shallowRef(false);
+const sshRegistrationSaving = shallowRef(false);
+const dbRegistrationSaving = shallowRef(false);
 
-const sshRegistered = ref(preferences.hasSSHClient);
+const sshRegistered = ref(preferences.sshProtocolRegistered);
 const dbRegistered = ref(databaseClient.protocolRegistered);
 
 const settingsTabs = ['appearance', 'ssh', 'database'] as const;
@@ -286,10 +282,16 @@ const dbConfigured = computed(() => form.db_client === 'dbeaver' && !dbClientPat
 
 // 路径变更时重置勾选
 watch(() => [form.ssh_client, form.ssh_client_platform, form.ssh_client_path] as const, (value, previous) => {
-  if (previous && value.some((item, index) => item !== previous[index])) sshRegistered.value = false;
+  if (previous && value.some((item, index) => item !== previous[index])) {
+    sshRegistered.value = false;
+    preferences.markSSHProtocolRegistered(false);
+  }
 });
 watch(() => [form.db_client, form.db_client_platform, form.db_client_path, form.db_client_ca_file_path] as const, (value, previous) => {
-  if (previous && value.some((item, index) => item !== previous[index])) dbRegistered.value = false;
+  if (previous && value.some((item, index) => item !== previous[index])) {
+    dbRegistered.value = false;
+    databaseClient.markUnregistered();
+  }
 });
 
 watch(() => form.ssh_client, (client) => {
@@ -308,6 +310,7 @@ onMounted(async () => {
   try {
     const loaded = await preferences.fetch();
     Object.assign(form, loaded);
+    sshRegistered.value = preferences.sshProtocolRegistered;
     dbRegistered.value = databaseClient.protocolRegistered;
   } catch { /* store 已暴露错误 */ }
 });
@@ -334,16 +337,48 @@ async function saveAll() {
   }
 }
 
-async function loadToBrowser() {
+async function confirmSSHRegistration() {
+  const error = sshClientPathError.value;
+  if (error) { ElMessage.warning(error); return; }
+  if (hasUnsavedClientConfig()) { ElMessage.warning('请先保存配置，再确认已执行命令'); return; }
+  sshRegistrationSaving.value = true;
   try {
     const loaded = await preferences.loadToBrowser();
     Object.assign(form, loaded);
-    sshRegistered.value = preferences.hasSSHClient;
-    dbRegistered.value = databaseClient.protocolRegistered;
-    ElMessage.success('配置已加载到当前浏览器缓存');
+    sshRegistered.value = true;
+    preferences.markSSHProtocolRegistered(true);
+    ElMessage.success('已确认执行，SSH 配置已加载到当前浏览器');
   } catch {
     ElMessage.error(preferences.error || '加载配置失败');
-  }
+  } finally { sshRegistrationSaving.value = false; }
+}
+
+async function confirmDBRegistration() {
+  const error = dbClientPathError.value || dbCAFilePathError.value;
+  if (error) { ElMessage.warning(error); return; }
+  if (hasUnsavedClientConfig()) { ElMessage.warning('请先保存配置，再确认已执行命令'); return; }
+  dbRegistrationSaving.value = true;
+  try {
+    const loaded = await preferences.loadToBrowser();
+    Object.assign(form, loaded);
+    dbRegistered.value = true;
+    databaseClient.markRegistered();
+    ElMessage.success('已确认执行，DBeaver 配置已加载到当前浏览器');
+  } catch {
+    ElMessage.error(preferences.error || '加载配置失败');
+  } finally { dbRegistrationSaving.value = false; }
+}
+
+function hasUnsavedClientConfig(): boolean {
+  return [
+    'ssh_client',
+    'ssh_client_platform',
+    'ssh_client_path',
+    'db_client',
+    'db_client_platform',
+    'db_client_path',
+    'db_client_ca_file_path',
+  ].some(key => form[key as keyof typeof form] !== preferences.value[key as keyof typeof preferences.value]);
 }
 
 async function copyText(value: string, successMsg: string) {
@@ -405,19 +440,18 @@ async function downloadDatabaseGatewayCA() {
 .settings-card { min-height: 0; border: 1px solid var(--color-border); border-radius: 18px; background: var(--color-card); }
 :deep(.settings-card > .el-card__header) { position: sticky; top: 0; z-index: 4; padding: 14px 20px; background: color-mix(in srgb, var(--color-card) 96%, transparent); border-bottom-color: var(--color-border); backdrop-filter: blur(12px); }
 :deep(.settings-card > .el-card__body) { display: flex; flex-direction: column; min-height: 0; padding: 0; overflow: visible; }
-.settings-tabs { display: grid; grid-template-columns: 188px minmax(0, 1fr); min-height: 420px; }
-:deep(.settings-tabs > .el-tabs__header) { width: auto; margin: 0; padding: 18px 12px; background: color-mix(in srgb, var(--color-surface-muted) 72%, var(--color-card)); border-right: 1px solid var(--color-border); }
+.settings-tabs { min-height: 420px; }
+:deep(.settings-tabs > .el-tabs__header) { width: auto; margin: 0; padding: 0 20px; background: color-mix(in srgb, var(--color-surface-muted) 48%, var(--color-card)); border-bottom: 1px solid var(--color-border); }
 .settings-toolbar, .settings-toolbar__actions { display: flex; align-items: center; }
 .settings-toolbar { justify-content: space-between; gap: 10px; }
 .settings-toolbar__copy { display: grid; min-width: 0; gap: 4px; }
 .settings-toolbar__copy strong { font-size: 16px; }
 .settings-toolbar__copy span { color: var(--color-text-secondary); font-size: 12px; }
 .settings-toolbar__actions { flex: 0 0 auto; gap: 10px; }
-:deep(.settings-tabs .el-tabs__nav-wrap::after), :deep(.settings-tabs .el-tabs__active-bar) { display: none; }
-:deep(.settings-tabs .el-tabs__nav) { width: 100%; }
-:deep(.settings-tabs .el-tabs__item) { justify-content: flex-start; width: 100%; height: 42px; margin-bottom: 4px; padding: 0 14px !important; border-radius: 9px; color: var(--color-text-secondary); font-weight: 650; text-align: left; transition: color .18s ease, background-color .18s ease; }
+:deep(.settings-tabs .el-tabs__nav-wrap::after) { background-color: transparent; }
+:deep(.settings-tabs .el-tabs__item) { height: 46px; padding: 0 16px; color: var(--color-text-secondary); font-weight: 650; transition: color .18s ease, background-color .18s ease; }
 :deep(.settings-tabs .el-tabs__item:hover) { color: var(--el-color-primary); background: color-mix(in srgb, var(--el-color-primary) 7%, transparent); }
-:deep(.settings-tabs .el-tabs__item.is-active) { color: var(--el-color-primary); background: color-mix(in srgb, var(--el-color-primary) 11%, transparent); }
+:deep(.settings-tabs .el-tabs__item.is-active) { color: var(--el-color-primary); }
 :deep(.settings-tabs > .el-tabs__content) { min-width: 0; overflow: visible; }
 .settings-section { width: min(100%, 1040px); padding: 24px 28px; }
 .section-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; margin-bottom: 20px; padding-bottom: 16px; border-bottom: 1px solid var(--color-border); }
@@ -439,10 +473,9 @@ async function downloadDatabaseGatewayCA() {
   :deep(.settings-card > .el-card__header) { position: static; padding: 12px; }
   .settings-toolbar { align-items: stretch; flex-direction: column; }
   .settings-toolbar__actions { justify-content: space-between; }
-  .settings-tabs { display: block; min-height: 0; }
-  :deep(.settings-tabs > .el-tabs__header) { width: 100%; padding: 8px 10px 0; border-right: 0; border-bottom: 1px solid var(--color-border); }
-  :deep(.settings-tabs .el-tabs__nav) { display: flex; }
-  :deep(.settings-tabs .el-tabs__item) { justify-content: center; margin: 0; padding: 0 10px !important; }
+  .settings-tabs { min-height: 0; }
+  :deep(.settings-tabs > .el-tabs__header) { width: 100%; padding: 0 10px; }
+  :deep(.settings-tabs .el-tabs__item) { padding: 0 10px; }
   .settings-section { padding: 22px 18px; }
   .form-pair { grid-template-columns: 1fr; }
   .section-heading { align-items: flex-start; flex-direction: column; gap: 10px; }

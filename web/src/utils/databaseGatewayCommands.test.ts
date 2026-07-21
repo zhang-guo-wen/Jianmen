@@ -460,7 +460,10 @@ test('settings exposes local-only database client registration and never stores 
   assert.match(settingsSource, /downloadDatabaseGatewayCA/);
   assert.match(settingsSource, /下载网关 CA/);
   assert.match(settingsSource, /注册 Jianmen 数据库协议/);
-  assert.match(settingsSource, /我已执行以上命令/);
+  assert.match(settingsSource, /我已执行命令，保存到浏览器/);
+  assert.match(settingsSource, /confirmDBRegistration/);
+  assert.match(settingsSource, /<el-tabs v-model="activeTab" class="settings-tabs">/);
+  assert.doesNotMatch(settingsSource, /tab-position="left"/);
   assert.match(localStoreSource, /localStorage/);
   assert.match(localStoreSource, /caFilePath/);
   assert.match(localStoreSource, /directLaunchReady/);

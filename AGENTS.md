@@ -18,6 +18,15 @@
 本产品还没有发布，不需要考虑兼容性，直接该重构的就重构。不用考虑以前的数据，功能失效。
 如果是在worktree目录下，不启动服务，要回到主目录，合并代码回去，启动
 
+## 本机运行方式
+
+- Jianmen 本机运行统一使用仓库根目录的 `start.ps1` 启动 Docker 容器。
+- 禁止直接启动 `bin/bastion-core.exe`、`go run`、`npm run dev` 或 Vite 开发服务。
+- Windows 没有 `docker.exe` 时，`start.ps1` 会自动发现 WSL 中的 Docker Engine；WSL Docker 也属于有效 Docker 环境。
+- Docker 不可用时必须直接报告错误，不得回退到本机 Go/Vite 进程。
+- 完整重建使用 `.\start.ps1`，复用已有镜像重启使用 `.\start.ps1 -SkipBuild`。
+- 运行验收必须确认容器 `jianmen` 为 healthy，并确认没有 Jianmen 的本机 `bastion-core.exe` 或 Vite 进程。
+
 ## 编译打包
 
 - Windows: `.\build.ps1`

@@ -19,21 +19,25 @@ const requestedAccountId = computed(() => {
 
 const {
   accounts,
+  databases,
   accountId,
   database,
   sql,
   loadingAccounts,
+  connecting,
+  connected,
   executing,
   error,
   result,
   loadAccounts,
+  connect,
   execute,
   cancel,
 } = useSQLConsole({ requestedAccountId });
 const { t } = useI18n();
 
 const executionDisabled = computed(
-  () => executing.value || !accountId.value || !sql.value.trim(),
+  () => executing.value || connecting.value || !connected.value || !database.value || !sql.value.trim(),
 );
 
 onMounted(() => {
@@ -43,6 +47,10 @@ onMounted(() => {
 async function handleExecute() {
   if (!accountId.value) {
     ElMessage.warning(t('sqlConsole.error.missingAccount'));
+    return;
+  }
+  if (!database.value) {
+    ElMessage.warning(t('sqlConsole.error.missingDatabase'));
     return;
   }
   if (!sql.value.trim()) {
@@ -95,8 +103,12 @@ async function confirmAndExecuteWrite() {
       v-model:account-id="accountId"
       v-model:database="database"
       :accounts="accounts"
+      :databases="databases"
       :loading="loadingAccounts"
+      :connecting="connecting"
+      :connected="connected"
       :executing="executing"
+      @account-change="connect"
       @refresh="loadAccounts"
     />
 

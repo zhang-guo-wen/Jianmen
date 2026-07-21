@@ -6,11 +6,15 @@ import { useI18n } from '@/i18n';
 
 defineProps<{
   accounts: readonly DBAccountRecord[];
+  databases: readonly string[];
   loading: boolean;
+  connecting: boolean;
+  connected: boolean;
   executing: boolean;
 }>();
 
 const emit = defineEmits<{
+  accountChange: [];
   refresh: [];
 }>();
 
@@ -32,7 +36,9 @@ function accountLabel(account: DBAccountRecord): string {
       </span>
       <div>
         <strong id="sql-console-session-title">{{ t('sqlConsole.sessionControlled') }}</strong>
-        <span>{{ t('sqlConsole.sessionHint') }}</span>
+        <span v-if="connecting">{{ t('sqlConsole.connecting') }}</span>
+        <span v-else-if="connected">{{ t('sqlConsole.connectedHint') }}</span>
+        <span v-else>{{ t('sqlConsole.sessionHint') }}</span>
       </div>
     </div>
 
@@ -43,8 +49,9 @@ function accountLabel(account: DBAccountRecord): string {
           v-model="accountId"
           filterable
           :loading="loading"
-          :disabled="executing"
+          :disabled="executing || connecting"
           :placeholder="t('sqlConsole.account')"
+          @change="emit('accountChange')"
         >
           <el-option
             v-for="account in accounts"
@@ -62,19 +69,27 @@ function accountLabel(account: DBAccountRecord): string {
 
       <label class="resource-field resource-field--database">
         <span>{{ t('sqlConsole.database') }}</span>
-        <el-input
+        <el-select
           v-model="database"
-          :disabled="executing"
-          :placeholder="t('sqlConsole.databaseOptional')"
-          clearable
-        />
+          filterable
+          :loading="connecting"
+          :disabled="executing || connecting || !connected"
+          :placeholder="connecting ? t('sqlConsole.connecting') : t('sqlConsole.databasePlaceholder')"
+        >
+          <el-option
+            v-for="item in databases"
+            :key="item"
+            :label="item"
+            :value="item"
+          />
+        </el-select>
       </label>
 
       <el-button
         class="refresh-button"
         :icon="loading ? Loading : undefined"
         :loading="loading"
-        :disabled="executing"
+        :disabled="executing || connecting"
         @click="emit('refresh')"
       >
         {{ t('common.refresh') }}

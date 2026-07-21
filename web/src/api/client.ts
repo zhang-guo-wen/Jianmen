@@ -518,10 +518,15 @@ export interface DBAccountRecord {
 }
 
 export interface SQLConsoleExecutePayload {
-  account_id: string;
-  database?: string;
+  database: string;
   sql: string;
   confirm_write?: boolean;
+}
+
+export interface SQLConsoleSession {
+  id: string;
+  databases: string[];
+  default_database: string;
 }
 
 export interface SQLConsoleResult {
@@ -1299,11 +1304,21 @@ export const apiClient = {
       method: 'POST',
       body: JSON.stringify(payload)
     }),
-  executeSQL: (payload: SQLConsoleExecutePayload, signal?: AbortSignal) =>
-    request<SQLConsoleResult>('/api/sql-console/execute', {
+  createSQLConsoleSession: (accountId: string, signal?: AbortSignal) =>
+    request<SQLConsoleSession>('/api/sql-console/sessions', {
+      method: 'POST',
+      body: JSON.stringify({ account_id: accountId }),
+      signal,
+    }),
+  executeSQL: (sessionId: string, payload: SQLConsoleExecutePayload, signal?: AbortSignal) =>
+    request<SQLConsoleResult>(`/api/sql-console/sessions/${encodeURIComponent(sessionId)}/execute`, {
       method: 'POST',
       body: JSON.stringify(payload),
       signal,
+    }),
+  closeSQLConsoleSession: (sessionId: string) =>
+    request<void>(`/api/sql-console/sessions/${encodeURIComponent(sessionId)}`, {
+      method: 'DELETE',
     }),
 
   // auto-provision

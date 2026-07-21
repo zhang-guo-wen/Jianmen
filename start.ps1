@@ -48,7 +48,7 @@ function Resolve-DockerCommand {
     if ($wsl) {
         $distributions = & $wsl.Source --list --quiet 2>$null
         foreach ($distribution in $distributions) {
-            $name = ([string]$distribution).Replace([char]0, "").Trim()
+            $name = ([string]$distribution).Replace([string][char]0, "").Trim()
             if ([string]::IsNullOrWhiteSpace($name)) {
                 continue
             }

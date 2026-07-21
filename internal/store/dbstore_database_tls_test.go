@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"encoding/pem"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -102,6 +103,40 @@ func TestDatabaseInstanceUpdateWithoutStatusPreservesDisabledState(t *testing.T)
 	}
 	if stored.Status != "disabled" {
 		t.Fatalf("stored status = %q, want disabled", stored.Status)
+	}
+}
+
+func TestDatabaseInstanceTLSProofRejectsConcurrentTLSChange(t *testing.T) {
+	repository, db := newDatabaseTLSTestStore(t)
+	created, err := repository.AddDatabaseInstance(context.Background(), DatabaseInstanceInput{
+		Name: "orders", Protocol: "mysql", Address: "db.internal", Port: 3306,
+		TLSMode: dbtls.ModeVerifyFull, TLSServerName: "db.internal",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	proof := DatabaseInstanceTLSState{
+		Protocol: "mysql", Address: "db.internal", Port: 3306,
+		TLSMode: dbtls.ModeVerifyFull, TLSServerName: "db.internal",
+	}
+	if err := db.Model(&model.DatabaseInstance{}).Where("id = ?", created.ID).Updates(map[string]any{
+		"tls_mode": dbtls.ModeDisable, "tls_server_name": "",
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	_, err = repository.UpdateDatabaseInstanceWithTLSProof(context.Background(), created.ID, DatabaseInstanceInput{
+		Name: "renamed", Protocol: "mysql", Address: "db.internal", Port: 3306,
+		TLSMode: dbtls.ModeVerifyFull, TLSServerName: "db.internal",
+	}, proof)
+	if !errors.Is(err, ErrDBInstanceTLSStateChanged) {
+		t.Fatalf("proof update error = %v", err)
+	}
+	var stored model.DatabaseInstance
+	if err := db.First(&stored, "id = ?", created.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if stored.TLSMode != dbtls.ModeDisable || stored.Name != "orders" {
+		t.Fatalf("stale proof overwrote concurrent state: mode %q name %q", stored.TLSMode, stored.Name)
 	}
 }
 

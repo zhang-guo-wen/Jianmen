@@ -12,6 +12,14 @@ import (
 )
 
 func (s *DBStore) UpdateDatabaseInstance(ctx context.Context, id string, input DatabaseInstanceInput) (DatabaseInstanceView, error) {
+	return s.updateDatabaseInstance(ctx, id, input, nil)
+}
+
+func (s *DBStore) UpdateDatabaseInstanceWithTLSProof(ctx context.Context, id string, input DatabaseInstanceInput, proof DatabaseInstanceTLSState) (DatabaseInstanceView, error) {
+	return s.updateDatabaseInstance(ctx, id, input, &proof)
+}
+
+func (s *DBStore) updateDatabaseInstance(ctx context.Context, id string, input DatabaseInstanceInput, proof *DatabaseInstanceTLSState) (DatabaseInstanceView, error) {
 	id = strings.TrimSpace(id)
 	var (
 		inst         model.DatabaseInstance
@@ -24,6 +32,9 @@ func (s *DBStore) UpdateDatabaseInstance(ctx context.Context, id string, input D
 				return fmt.Errorf("%w: %q", ErrDBInstanceNotFound, id)
 			}
 			return err
+		}
+		if proof != nil && !databaseInstanceMatchesTLSProof(locked, *proof) {
+			return fmt.Errorf("%w: %q", ErrDBInstanceTLSStateChanged, id)
 		}
 		if strings.TrimSpace(input.TLSMode) == "" {
 			input.TLSMode = locked.TLSMode
@@ -65,6 +76,15 @@ func (s *DBStore) UpdateDatabaseInstance(ctx context.Context, id string, input D
 		return DatabaseInstanceView{}, err
 	}
 	return s.databaseInstanceView(inst, accountCount), nil
+}
+
+func databaseInstanceMatchesTLSProof(instance model.DatabaseInstance, proof DatabaseInstanceTLSState) bool {
+	return instance.Protocol == proof.Protocol &&
+		instance.Address == proof.Address &&
+		instance.Port == proof.Port &&
+		instance.TLSMode == proof.TLSMode &&
+		instance.TLSServerName == proof.TLSServerName &&
+		instance.TLSCAPEM == proof.TLSCAPEM
 }
 
 func (s *DBStore) DeleteDatabaseInstance(ctx context.Context, id string) error {

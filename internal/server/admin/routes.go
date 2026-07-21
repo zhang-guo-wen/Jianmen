@@ -55,6 +55,7 @@ func (s *Server) routes() http.Handler {
 
 	s.muxHandle(mux, "/api/db/gateway", s.withAuthAndUser(s.handleDBGateway))
 	s.muxHandle(mux, "/api/db/instances", s.withAuthAndUser(s.handleDBInstances))
+	s.muxHandle(mux, "/api/db/instances/tls-preflight", s.withAuthAndUser(s.handleDatabaseTLSPreflight))
 	s.muxHandle(mux, "/api/db/instances/", s.withAuthAndUser(s.handleDBInstance))
 	s.muxHandle(mux, "/api/db/accounts/test", s.withAuthAndUser(s.handleTestDBConnection))
 	s.muxHandle(mux, "/api/db/accounts/test/", s.withAuthAndUser(s.handleTestDBConnection))

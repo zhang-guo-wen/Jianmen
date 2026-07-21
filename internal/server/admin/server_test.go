@@ -931,18 +931,34 @@ func newAdminDBTestServer(t *testing.T) (*Server, *gorm.DB) {
 		resourceGroups:  resourceGroups,
 		browserSessions: browserSessions,
 	}
+	databaseTLSPreflight, err := service.NewDatabaseTLSPreflightService(
+		databaseManagementRepositoryAdapter{repository: storeInst},
+		authorizationService,
+		testDatabaseTLSPreflightProber{},
+	)
+	if err != nil {
+		t.Fatalf("new database TLS preflight service: %v", err)
+	}
 	databaseManagement, err := service.NewDatabaseManagementService(
 		databaseManagementRepositoryAdapter{repository: storeInst},
 		authorizationService,
 		&fakeDatabaseProvisioningService{},
+		databaseTLSPreflight,
 	)
 	if err != nil {
 		t.Fatalf("new database management service: %v", err)
 	}
 	server.databaseManagement = databaseManagement
+	server.databaseTLSPreflight = databaseTLSPreflight
 	applyTestAdminDependencies(t, server, storeInst)
 	applyTestAdminServices(t, server, storeInst)
 	return server, db
+}
+
+type testDatabaseTLSPreflightProber struct{}
+
+func (testDatabaseTLSPreflightProber) ProbeTLS(context.Context, service.DatabaseInstanceRecord) error {
+	return nil
 }
 
 func replaceTestAdminAuth(

@@ -217,6 +217,7 @@ type adminDatabaseRepository interface {
 	DatabaseInstance(context.Context, string) (store.DatabaseInstanceView, error)
 	AddDatabaseInstance(context.Context, store.DatabaseInstanceInput) (store.DatabaseInstanceView, error)
 	UpdateDatabaseInstance(context.Context, string, store.DatabaseInstanceInput) (store.DatabaseInstanceView, error)
+	UpdateDatabaseInstanceWithTLSProof(context.Context, string, store.DatabaseInstanceInput, store.DatabaseInstanceTLSState) (store.DatabaseInstanceView, error)
 	DeleteDatabaseInstance(context.Context, string) error
 	DatabaseAccounts(context.Context) ([]store.DatabaseAccountView, error)
 	ListDatabaseAccountsByInstance(context.Context, string) ([]store.DatabaseAccountView, error)

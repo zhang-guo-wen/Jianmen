@@ -305,6 +305,11 @@ func (s *Server) writeDatabaseManagementError(w http.ResponseWriter, r *http.Req
 		s.writeErrorText(w, r, http.StatusForbidden, "account has expired")
 	case errors.Is(err, service.ErrDatabaseManagementInvalid):
 		s.writeErrorText(w, r, http.StatusBadRequest, strings.TrimPrefix(err.Error(), service.ErrDatabaseManagementInvalid.Error()+": "))
+	case errors.Is(err, service.ErrDatabaseTLSPreflightFailed):
+		failure := classifyDatabaseTLSPreflightError(err)
+		s.writeErrorText(w, r, http.StatusUnprocessableEntity, failure.Message)
+	case errors.Is(err, service.ErrDatabaseTLSPreflightStale):
+		s.writeErrorText(w, r, http.StatusConflict, "数据库实例的 TLS 配置已被其他操作修改，请刷新后重试")
 	case errors.Is(err, store.ErrDBInstanceNotFound), errors.Is(err, store.ErrDBAccountNotFound):
 		s.writeErrorText(w, r, http.StatusNotFound, "database resource not found")
 	default:

@@ -2,6 +2,7 @@ package admin
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"jianmen/internal/model"
@@ -31,6 +32,13 @@ func (a databaseManagementRepositoryAdapter) CreateDatabaseInstanceWithCreatorGr
 }
 func (a databaseManagementRepositoryAdapter) UpdateDatabaseInstance(ctx context.Context, id string, input service.DatabaseInstanceInput) (service.DatabaseInstance, error) {
 	value, err := a.repository.UpdateDatabaseInstance(ctx, id, databaseInstanceInputToStore(input))
+	return databaseInstanceFromStore(value), err
+}
+func (a databaseManagementRepositoryAdapter) UpdateDatabaseInstanceWithTLSProof(ctx context.Context, id string, input service.DatabaseInstanceInput, proof service.DatabaseInstanceTLSState) (service.DatabaseInstance, error) {
+	value, err := a.repository.UpdateDatabaseInstanceWithTLSProof(ctx, id, databaseInstanceInputToStore(input), databaseInstanceTLSStateToStore(proof))
+	if errors.Is(err, store.ErrDBInstanceTLSStateChanged) {
+		return service.DatabaseInstance{}, service.ErrDatabaseTLSPreflightStale
+	}
 	return databaseInstanceFromStore(value), err
 }
 func (a databaseManagementRepositoryAdapter) DeleteDatabaseInstance(ctx context.Context, id string) error {
@@ -87,6 +95,9 @@ func databaseAccountFromStore(v store.DatabaseAccountView) service.DatabaseAccou
 }
 func databaseInstanceInputToStore(v service.DatabaseInstanceInput) store.DatabaseInstanceInput {
 	return store.DatabaseInstanceInput{Name: v.Name, Protocol: v.Protocol, Address: v.Address, Port: v.Port, TLSMode: v.TLSMode, TLSServerName: v.TLSServerName, TLSCAPEM: v.TLSCAPEM, ClearTLSCA: v.ClearTLSCA, Group: v.Group, Remark: v.Remark, Status: v.Status}
+}
+func databaseInstanceTLSStateToStore(v service.DatabaseInstanceTLSState) store.DatabaseInstanceTLSState {
+	return store.DatabaseInstanceTLSState{Protocol: v.Protocol, Address: v.Address, Port: v.Port, TLSMode: v.TLSMode, TLSServerName: v.TLSServerName, TLSCAPEM: v.TLSCAPEM}
 }
 func databaseInstanceRecordFromModel(v model.DatabaseInstance) service.DatabaseInstanceRecord {
 	return service.DatabaseInstanceRecord{ID: v.ID, Name: v.Name, Protocol: v.Protocol, Address: v.Address, Port: v.Port, TLSMode: v.TLSMode, TLSServerName: v.TLSServerName, TLSCAPEM: v.TLSCAPEM, GroupName: v.GroupName, Remark: v.Remark, Status: v.Status}

@@ -67,7 +67,7 @@
     </DataTableCard>
 
     <!-- 创建/编辑实例弹窗 -->
-    <FormDialog v-model:visible="showInstanceDialog" :title="editingInstance ? '编辑实例' : '新增实例'" :loading="submitting" @submit="submitInstance">
+    <FormDialog v-model:visible="showInstanceDialog" :title="editingInstance ? '编辑实例' : '新增实例'" :loading="submitting || tlsPreflightChecking" @submit="submitInstance">
       <el-form :model="instanceForm" class="database-resource-form" label-position="top">
         <el-form-item label="协议" required>
           <el-select v-model="instanceForm.protocol" @change="onProtocolChange">
@@ -84,7 +84,7 @@
           />
         </el-form-item>
         <el-form-item label="端口">
-          <el-input-number v-model="instanceForm.port" :min="1" :max="65535" />
+          <el-input-number v-model="instanceForm.port" :min="1" :max="65535" @change="invalidateTLSPreflightConfiguration" />
         </el-form-item>
         <el-collapse v-model="instanceMorePanels">
           <el-collapse-item name="more" title="更多设置">
@@ -116,19 +116,20 @@
               <el-input v-model="instanceForm.remark" type="textarea" />
             </el-form-item>
             <el-form-item label="启用 TLS">
-              <el-select v-model="instanceForm.tlsMode" @change="onTLSModeChange">
+              <el-select :model-value="displayedTLSMode" :disabled="tlsPreflightChecking" @change="onTLSModeChange">
                 <el-option label="不启用（默认）" value="disable" />
                 <el-option label="验证证书和主机名（远程需启用 TLS，推荐）" value="verify-full" />
                 <el-option label="仅验证证书" value="verify-ca" />
               </el-select>
-              <div class="tls-mode-help">{{ tlsModeDescription(instanceForm.tlsMode) }}</div>
+              <div class="tls-mode-help">{{ tlsModeDescription(displayedTLSMode) }}</div>
             </el-form-item>
-            <template v-if="instanceForm.tlsMode !== 'disable'">
+            <template v-if="displayedTLSMode !== 'disable'">
               <el-form-item label="主机名">
                 <el-input
                   v-model="instanceForm.tlsServerName"
-                  :disabled="instanceForm.tlsMode !== 'verify-full'"
+                  :disabled="displayedTLSMode !== 'verify-full' || tlsPreflightChecking"
                   placeholder="根据上游地址自动推导，也可手动修改"
+                  @input="invalidateTLSPreflightConfiguration"
                 />
               </el-form-item>
               <el-form-item label="自定义 CA">
@@ -137,7 +138,7 @@
                     只有使用企业私有 CA、自签名证书时，才需要提供自定义 CA。
                   </div>
                   <div class="tls-ca-actions">
-                    <el-button size="small" @click="chooseTLSCAFile">选择 PEM 文件</el-button>
+                    <el-button size="small" :disabled="tlsPreflightChecking" @click="chooseTLSCAFile">选择 PEM 文件</el-button>
                     <input
                       ref="tlsCAFileInput"
                       class="tls-ca-file-input"
@@ -152,6 +153,7 @@
                       link
                       type="danger"
                       size="small"
+                      :disabled="tlsPreflightChecking"
                       @click="clearTLSCA"
                     >
                       清除 CA
@@ -161,11 +163,50 @@
                     v-model="instanceForm.tlsCaPem"
                     type="textarea"
                     :rows="4"
+                    :disabled="tlsPreflightChecking"
                     placeholder="也可以手动粘贴 PEM 内容；编辑时留空会保留已有 CA"
                     @input="onTLSCAPEMInput"
                   />
                 </div>
               </el-form-item>
+              <div class="tls-preflight-status">
+                <el-alert
+                  v-if="tlsPreflightChecking"
+                  title="正在检测远程数据库 TLS，请稍候…"
+                  type="info"
+                  :closable="false"
+                  show-icon
+                />
+                <el-alert
+                  v-else-if="tlsPreflightResult?.ok"
+                  title="TLS 检测通过，可以保存"
+                  type="success"
+                  :closable="false"
+                  show-icon
+                />
+                <el-alert
+                  v-else-if="tlsPreflightResult && tlsPreflightResult.code !== 'cancelled'"
+                  :title="tlsPreflightResult.error || tlsPreflightResult.message || 'TLS 检测失败，TLS 尚未开启'"
+                  type="error"
+                  :closable="false"
+                  show-icon
+                />
+                <el-alert
+                  v-else-if="tlsSetupMode"
+                  title="TLS 尚未开启；配置调整后请重新检测"
+                  type="warning"
+                  :closable="false"
+                  show-icon
+                />
+                <div v-if="tlsSetupMode && !tlsPreflightChecking" class="tls-preflight-actions">
+                  <el-button size="small" type="primary" plain @click="retryTLSPreflight">
+                    重新检测并开启
+                  </el-button>
+                  <el-button size="small" @click="cancelTLSSetup">
+                    {{ instanceForm.tlsMode === 'disable' ? '取消开启' : '保留当前模式' }}
+                  </el-button>
+                </div>
+              </div>
             </template>
           </el-collapse-item>
         </el-collapse>
@@ -276,7 +317,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, watch, computed, onMounted } from 'vue'
+import { ref, shallowRef, reactive, watch, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { ArrowDown, Refresh } from '@element-plus/icons-vue'
 import { useRouter } from 'vue-router'
@@ -290,6 +331,10 @@ import StatusSwitch from '@/components/StatusSwitch.vue'
 import * as api from '@/api/client'
 import { usePermissionStore } from '@/stores/permission'
 import { createLatestKeyedRequest } from '@/utils/connectionRequestState'
+import {
+  databaseTLSPreflightFingerprint,
+  useDatabaseTLSPreflight,
+} from '@/composables/useDatabaseTLSPreflight'
 import {
   buildDatabaseUpstreamTLSPayload,
   DEFAULT_DATABASE_UPSTREAM_TLS_MODE,
@@ -338,7 +383,8 @@ const instanceMorePanels = ref<string[]>([])
 const instanceGroupOptions = ref<string[]>([])
 const accountGroupOptions = ref<string[]>([])
 const tlsCAFileInput = ref<HTMLInputElement | null>(null)
-const previousTLSMode = ref<api.DatabaseTLSMode>(DEFAULT_DATABASE_UPSTREAM_TLS_MODE)
+const tlsSetupMode = shallowRef<api.EnabledDatabaseTLSMode | null>(null)
+const tlsBaselineFingerprint = shallowRef('')
 const originalHasTLSCA = ref(false)
 const lastAutoTLSHostName = ref('')
 const instanceNameTouched = ref(false)
@@ -355,6 +401,16 @@ const instanceForm = reactive<InstanceForm>({
   hasTlsCa: false,
   clearTlsCa: false
 })
+const {
+  checking: tlsPreflightChecking,
+  result: tlsPreflightResult,
+  accept: acceptTLSPreflight,
+  invalidate: invalidateTLSPreflight,
+  isVerified: isTLSPreflightVerified,
+  reset: resetTLSPreflight,
+  verify: verifyTLSPreflight,
+} = useDatabaseTLSPreflight()
+const displayedTLSMode = computed<api.DatabaseTLSMode>(() => tlsSetupMode.value ?? instanceForm.tlsMode)
 
 // ── Account dialog state ──
 const accountsDialogVisible = ref(false)
@@ -525,10 +581,12 @@ function onInstanceSearch(keyword: string) {
 
 function openCreateInstance() {
   editingInstance.value = null
+  resetTLSPreflight()
+  tlsSetupMode.value = null
+  tlsBaselineFingerprint.value = ''
   instanceNameTouched.value = false
   instanceMorePanels.value = ['more']
   originalHasTLSCA.value = false
-  previousTLSMode.value = DEFAULT_DATABASE_UPSTREAM_TLS_MODE
   lastAutoTLSHostName.value = ''
   Object.assign(instanceForm, {
     name: '',
@@ -562,6 +620,7 @@ function inferTLSHostName(address: string): string {
 }
 
 function onInstanceAddressInput(address: string) {
+  invalidateTLSPreflightConfiguration()
   const inferred = inferTLSHostName(address)
   if (
     !instanceForm.tlsServerName.trim()
@@ -575,11 +634,13 @@ function onInstanceAddressInput(address: string) {
 
 function editInstance(inst: api.DatabaseInstanceView) {
   editingInstance.value = inst
+  resetTLSPreflight()
+  tlsSetupMode.value = null
+  tlsBaselineFingerprint.value = ''
   instanceNameTouched.value = true
   instanceMorePanels.value = []
   const tlsMode = normalizeTLSMode(inst.tls_mode)
   originalHasTLSCA.value = Boolean(inst.has_tls_ca)
-  previousTLSMode.value = tlsMode
   lastAutoTLSHostName.value = inferTLSHostName(inst.address || '')
   Object.assign(instanceForm, {
     name: inst.name || '',
@@ -594,6 +655,13 @@ function editInstance(inst: api.DatabaseInstanceView) {
     hasTlsCa: originalHasTLSCA.value,
     clearTlsCa: false
   })
+  if (tlsMode !== 'disable') {
+    const payload = buildTLSPreflightPayload(tlsMode)
+    if (payload) {
+      tlsBaselineFingerprint.value = databaseTLSPreflightFingerprint(payload)
+      acceptTLSPreflight(payload)
+    }
+  }
   showInstanceDialog.value = true
 }
 
@@ -605,6 +673,7 @@ function onProtocolChange(protocol: string) {
       default: instanceForm.port = 3306; break
     }
   }
+  invalidateTLSPreflightConfiguration()
 }
 
 function defaultInstanceName(): string {
@@ -618,25 +687,95 @@ function syncDefaultInstanceName() {
 }
 
 async function onTLSModeChange(mode: api.DatabaseTLSMode) {
-  if (mode !== 'disable') {
-    if (mode === 'verify-full' && !instanceForm.tlsServerName.trim()) {
-      instanceForm.tlsServerName = inferTLSHostName(instanceForm.address)
-      lastAutoTLSHostName.value = instanceForm.tlsServerName
+  if (tlsPreflightChecking.value) return
+  if (tlsSetupMode.value && mode === instanceForm.tlsMode) {
+    cancelTLSSetup()
+    return
+  }
+  if (mode === 'disable') {
+    if (instanceForm.tlsMode !== 'disable') {
+      try {
+        await ElMessageBox.confirm(
+          '关闭后，上游数据库链路将不再使用 TLS。确定关闭吗？',
+          '关闭上游 TLS',
+          { type: 'warning', confirmButtonText: '确认关闭', cancelButtonText: '取消' }
+        )
+      } catch {
+        return
+      }
     }
-    previousTLSMode.value = mode
+    resetTLSPreflight()
+    tlsSetupMode.value = null
+    instanceForm.tlsMode = 'disable'
     return
   }
-  try {
-    await ElMessageBox.confirm(
-      '关闭后，上游数据库链路将不再使用 TLS。确定关闭吗？',
-      '关闭上游 TLS',
-      { type: 'warning', confirmButtonText: '确认关闭', cancelButtonText: '取消' }
-    )
-  } catch {
-    instanceForm.tlsMode = previousTLSMode.value
-    return
+  tlsSetupMode.value = mode
+  if (mode === 'verify-full' && !instanceForm.tlsServerName.trim()) {
+    instanceForm.tlsServerName = inferTLSHostName(instanceForm.address)
+    lastAutoTLSHostName.value = instanceForm.tlsServerName
   }
-  previousTLSMode.value = mode
+  await runTLSPreflight(mode)
+}
+
+function buildTLSPreflightPayload(mode: api.EnabledDatabaseTLSMode): api.DBTLSPreflightPayload | null {
+  const address = instanceForm.address.trim()
+  if (!address || !Number.isInteger(instanceForm.port) || instanceForm.port < 1 || instanceForm.port > 65535) {
+    return null
+  }
+  const payload: api.DBTLSPreflightPayload = {
+    protocol: instanceForm.protocol,
+    address,
+    port: instanceForm.port,
+    tls_mode: mode,
+  }
+  if (editingInstance.value?.id) payload.instance_id = editingInstance.value.id
+  if (mode === 'verify-full' && instanceForm.tlsServerName.trim()) {
+    payload.tls_server_name = instanceForm.tlsServerName.trim()
+  }
+  if (instanceForm.tlsCaPem.trim()) payload.tls_ca_pem = instanceForm.tlsCaPem.trim()
+  if (instanceForm.clearTlsCa) payload.clear_tls_ca = true
+  return payload
+}
+
+async function runTLSPreflight(mode: api.EnabledDatabaseTLSMode, announce = true): Promise<boolean> {
+  const payload = buildTLSPreflightPayload(mode)
+  if (!payload) {
+    if (announce) ElMessage.warning('请先填写有效的上游地址和端口')
+    return false
+  }
+  const response = await verifyTLSPreflight(payload)
+  if (response.code === 'cancelled') return false
+  if (!response.ok) {
+    if (announce) ElMessage.error(response.error || response.message || 'TLS 检测失败，TLS 尚未开启')
+    return false
+  }
+  instanceForm.tlsMode = mode
+  tlsSetupMode.value = null
+  if (announce) ElMessage.success('TLS 检测通过，已允许开启')
+  return true
+}
+
+async function retryTLSPreflight() {
+  if (tlsSetupMode.value) await runTLSPreflight(tlsSetupMode.value)
+}
+
+function cancelTLSSetup() {
+  resetTLSPreflight()
+  tlsSetupMode.value = null
+  if (instanceForm.tlsMode !== 'disable') {
+    const payload = buildTLSPreflightPayload(instanceForm.tlsMode)
+    if (payload && databaseTLSPreflightFingerprint(payload) === tlsBaselineFingerprint.value) {
+      acceptTLSPreflight(payload)
+    }
+  }
+}
+
+function invalidateTLSPreflightConfiguration() {
+  const mode = displayedTLSMode.value
+  if (mode !== 'disable') {
+    tlsSetupMode.value = mode
+  }
+  invalidateTLSPreflight()
 }
 
 function chooseTLSCAFile() {
@@ -657,6 +796,7 @@ async function handleTLSCAFileChange(event: Event) {
     instanceForm.tlsCaPem = pem
     instanceForm.hasTlsCa = true
     instanceForm.clearTlsCa = false
+    invalidateTLSPreflightConfiguration()
   } catch {
     ElMessage.error('读取 PEM 文件失败')
   }
@@ -667,21 +807,40 @@ function onTLSCAPEMInput() {
     instanceForm.hasTlsCa = true
     instanceForm.clearTlsCa = false
   }
+  invalidateTLSPreflightConfiguration()
 }
 
 function clearTLSCA() {
   instanceForm.tlsCaPem = ''
   instanceForm.hasTlsCa = false
   instanceForm.clearTlsCa = Boolean(editingInstance.value && originalHasTLSCA.value)
+  invalidateTLSPreflightConfiguration()
 }
 
 async function submitInstance() {
+  if (submitting.value || tlsPreflightChecking.value) return
   if (!instanceForm.address.trim()) {
     ElMessage.warning('请填写上游地址')
     return
   }
   submitting.value = true
   try {
+    const desiredTLSMode = displayedTLSMode.value
+    if (desiredTLSMode !== 'disable') {
+      const preflightPayload = buildTLSPreflightPayload(desiredTLSMode)
+      if (!preflightPayload) {
+        ElMessage.warning('请先填写有效的上游地址和端口')
+        return
+      }
+      if (!isTLSPreflightVerified(preflightPayload)) {
+        const passed = await runTLSPreflight(desiredTLSMode, false)
+        if (!passed) {
+          const failure = tlsPreflightResult.value
+          ElMessage.error(failure?.error || failure?.message || 'TLS 检测失败，无法保存')
+          return
+        }
+      }
+    }
     const payload: api.DBInstancePayload = {
       ...buildDatabaseUpstreamTLSPayload(
         instanceForm.tlsMode,
@@ -959,6 +1118,9 @@ watch([accountPage, accountPageSize], () => {
 
 watch(showInstanceDialog, visible => {
   if (!visible) {
+    resetTLSPreflight()
+    tlsSetupMode.value = null
+    tlsBaselineFingerprint.value = ''
     instanceForm.tlsCaPem = ''
     tlsCAFileInput.value = null
   }
@@ -1008,6 +1170,22 @@ function handleProvisionedAccountCreated() {
 .database-resource-form :deep(.el-input-number),
 .database-resource-form :deep(.el-date-editor) {
   width: 100%;
+}
+
+.tls-preflight-status {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 18px;
+}
+
+.tls-preflight-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.tls-preflight-actions :deep(.el-button) {
+  margin: 0;
 }
 
 .connect-section + .connect-section {

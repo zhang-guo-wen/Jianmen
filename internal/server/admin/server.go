@@ -29,6 +29,7 @@ type Server struct {
 	hostManagement         *service.HostManagementService
 	databases              adminDatabaseRepository
 	databaseManagement     *service.DatabaseManagementService
+	databaseTLSPreflight   *service.DatabaseTLSPreflightService
 	applicationService     *service.ApplicationService
 	containerManagement    *service.ContainerManagementService
 	platformAccountService *service.PlatformAccountService
@@ -178,7 +179,15 @@ func New(
 	if err != nil {
 		return nil, fmt.Errorf("initialize user preference service: %w", err)
 	}
-	databaseManagement, err := service.NewDatabaseManagementService(databaseManagementRepositoryAdapter{repository: dependencies.databases}, authorization, databaseProvisioning)
+	databaseTLSPreflight, err := service.NewDatabaseTLSPreflightService(
+		databaseManagementRepositoryAdapter{repository: dependencies.databases},
+		authorization,
+		databaseTLSPreflightProber{},
+	)
+	if err != nil {
+		return nil, fmt.Errorf("initialize database TLS preflight service: %w", err)
+	}
+	databaseManagement, err := service.NewDatabaseManagementService(databaseManagementRepositoryAdapter{repository: dependencies.databases}, authorization, databaseProvisioning, databaseTLSPreflight)
 	if err != nil {
 		return nil, fmt.Errorf("initialize database management service: %w", err)
 	}
@@ -219,7 +228,7 @@ func New(
 		cfg: cfg, db: db, logger: logger,
 		adminAuth: adminAuth, aiAccessTokens: aiAccessTokens, aiResources: aiResources,
 		hostTargets: dependencies.hostTargets, hostManagement: hostManagement, databases: dependencies.databases,
-		databaseManagement: databaseManagement, applicationService: applicationService,
+		databaseManagement: databaseManagement, databaseTLSPreflight: databaseTLSPreflight, applicationService: applicationService,
 		containerManagement: containerManagement, platformAccountService: platformAccountService,
 		userSessionCreation: userSessionCreation, audit: dependencies.audit, auditQuery: auditQuery, connectionPassword: connectionPassword,
 		preferences: userPreferences, temporaryRepository: dependencies.temporaryAccess,

@@ -25,6 +25,7 @@ type DatabaseManagementRepository interface {
 	DatabaseInstance(context.Context, string) (DatabaseInstance, error)
 	CreateDatabaseInstanceWithCreatorGrant(context.Context, DatabaseInstanceInput, string) (DatabaseInstance, error)
 	UpdateDatabaseInstance(context.Context, string, DatabaseInstanceInput) (DatabaseInstance, error)
+	UpdateDatabaseInstanceWithTLSProof(context.Context, string, DatabaseInstanceInput, DatabaseInstanceTLSState) (DatabaseInstance, error)
 	DeleteDatabaseInstance(context.Context, string) error
 	DatabaseAccounts(context.Context) ([]DatabaseAccount, error)
 	DatabaseAccount(context.Context, string) (DatabaseAccount, error)
@@ -60,6 +61,10 @@ type DatabaseInstanceRecord struct {
 	ID, Name, Protocol, Address, TLSMode, TLSServerName, TLSCAPEM, GroupName, Remark, Status string
 	Port                                                                                     int
 }
+type DatabaseInstanceTLSState struct {
+	Protocol, Address, TLSMode, TLSServerName, TLSCAPEM string
+	Port                                                int
+}
 type DatabaseAccountProbeMetadata struct {
 	ID, InstanceID, Username, Status string
 	ExpiresAt                        *time.Time
@@ -79,10 +84,11 @@ type DatabaseManagementService struct {
 	repository    DatabaseManagementRepository
 	authorizer    DatabaseManagementAuthorizer
 	deprovisioner DatabaseAccountDeprovisioner
+	tlsPreflight  *DatabaseTLSPreflightService
 	now           func() time.Time
 }
 
-func NewDatabaseManagementService(repository DatabaseManagementRepository, authorizer DatabaseManagementAuthorizer, deprovisioner DatabaseAccountDeprovisioner) (*DatabaseManagementService, error) {
+func NewDatabaseManagementService(repository DatabaseManagementRepository, authorizer DatabaseManagementAuthorizer, deprovisioner DatabaseAccountDeprovisioner, tlsPreflight *DatabaseTLSPreflightService) (*DatabaseManagementService, error) {
 	if repository == nil {
 		return nil, errors.New("database management repository is required")
 	}
@@ -92,7 +98,10 @@ func NewDatabaseManagementService(repository DatabaseManagementRepository, autho
 	if deprovisioner == nil {
 		return nil, errors.New("database account deprovisioner is required")
 	}
-	return &DatabaseManagementService{repository: repository, authorizer: authorizer, deprovisioner: deprovisioner, now: time.Now}, nil
+	if tlsPreflight == nil {
+		return nil, errors.New("database TLS preflight service is required")
+	}
+	return &DatabaseManagementService{repository: repository, authorizer: authorizer, deprovisioner: deprovisioner, tlsPreflight: tlsPreflight, now: time.Now}, nil
 }
 
 func (s *DatabaseManagementService) ListInstances(ctx context.Context, actorID string, connectable bool) ([]DatabaseInstance, error) {
@@ -227,6 +236,11 @@ func (s *DatabaseManagementService) CreateInstance(ctx context.Context, actorID 
 	if err := s.authorize(ctx, actorID, []string{rbac.ActionDBProxyCreate}, "", ""); err != nil {
 		return DatabaseInstance{}, err
 	}
+	if databaseTLSModeEnabled(input.TLSMode) {
+		if err := s.tlsPreflight.Probe(ctx, actorID, databaseTLSPreflightInput("", input)); err != nil {
+			return DatabaseInstance{}, err
+		}
+	}
 	creatorID := ""
 	if !superAdmin {
 		creatorID = actorID
@@ -242,7 +256,17 @@ func (s *DatabaseManagementService) UpdateInstance(ctx context.Context, actorID,
 	if err := s.authorize(ctx, actorID, []string{rbac.ActionDBProxyUpdate}, model.ResourceTypeDatabaseInstance, id); err != nil {
 		return DatabaseInstance{}, err
 	}
-	view, err := s.repository.UpdateDatabaseInstance(ctx, id, input)
+	resolvedInput, proof, requireProof, err := s.preflightInstanceUpdate(ctx, id, input)
+	if err != nil {
+		return DatabaseInstance{}, err
+	}
+	input = resolvedInput
+	var view DatabaseInstance
+	if requireProof {
+		view, err = s.repository.UpdateDatabaseInstanceWithTLSProof(ctx, id, input, proof)
+	} else {
+		view, err = s.repository.UpdateDatabaseInstance(ctx, id, input)
+	}
 	if err != nil {
 		return DatabaseInstance{}, fmt.Errorf("update database instance: %w", err)
 	}

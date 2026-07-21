@@ -177,6 +177,7 @@ func TestAdminRepositoryBoundaryStaysStaticallyComposedAndDomainSplit(t *testing
 		"hostManagement":         reflect.TypeOf((*service.HostManagementService)(nil)),
 		"databases":              reflect.TypeOf((*adminDatabaseRepository)(nil)).Elem(),
 		"databaseManagement":     reflect.TypeOf((*service.DatabaseManagementService)(nil)),
+		"databaseTLSPreflight":   reflect.TypeOf((*service.DatabaseTLSPreflightService)(nil)),
 		"applicationService":     reflect.TypeOf((*service.ApplicationService)(nil)),
 		"containerManagement":    reflect.TypeOf((*service.ContainerManagementService)(nil)),
 		"platformAccountService": reflect.TypeOf((*service.PlatformAccountService)(nil)),

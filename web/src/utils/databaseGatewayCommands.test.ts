@@ -562,6 +562,8 @@ test('database and quick-connect loaders keep request snapshots isolated', () =>
 test('database TLS mode preserves hidden inputs and clears persisted CA only on submit', () => {
   const source = readFileSync(new URL('../views/DatabaseView.vue', import.meta.url), 'utf8');
   assert.match(source, /验证证书和主机名（远程需启用 TLS，推荐）/);
+  assert.match(source, /:model-value="displayedTLSMode"[\s\S]*@change="onTLSModeChange"/);
+  assert.match(source, /重新检测并开启/);
   assert.match(source, /要求远程数据库已启用 SSL\/TLS。Jianmen 将加密连接并验证 CA，但不校验主机名/);
   assert.match(source, /要求远程数据库已启用 SSL\/TLS。Jianmen 将加密连接并验证 CA 与主机名[\s\S]*远程未启用 TLS 时连接将失败/);
   const changeStart = source.indexOf('async function onTLSModeChange');
@@ -571,12 +573,28 @@ test('database TLS mode preserves hidden inputs and clears persisted CA only on 
   assert.doesNotMatch(changeSource, /客户端到 Jianmen 的 TLS 不受影响/);
   assert.doesNotMatch(changeSource, /instanceForm\.(?:tlsCaPem|tlsServerName)\s*=\s*''/);
   assert.doesNotMatch(changeSource, /instanceForm\.hasTlsCa\s*=\s*false/);
+  assert.match(changeSource, /tlsSetupMode\.value && mode === instanceForm\.tlsMode[\s\S]*cancelTLSSetup\(\)/);
+  assert.match(changeSource, /tlsSetupMode\.value = mode[\s\S]*await runTLSPreflight\(mode\)/);
+  assert.match(changeSource, /const response = await verifyTLSPreflight\(payload\)[\s\S]*if \(!response\.ok\)[\s\S]*instanceForm\.tlsMode = mode/);
 
   const submitStart = source.indexOf('async function submitInstance');
   const submitEnd = source.indexOf('async function toggleInstance', submitStart);
   const submitSource = source.slice(submitStart, submitEnd);
   assert.match(submitSource, /instanceForm\.tlsMode === 'disable' && originalHasTLSCA\.value/);
   assert.match(submitSource, /if \(clearStoredTLSCA\) payload\.clear_tls_ca = true/);
+  assert.match(submitSource, /if \(!isTLSPreflightVerified\(preflightPayload\)\)[\s\S]*await runTLSPreflight\(desiredTLSMode, false\)/);
+});
+
+test('database TLS preflight is instance-scoped and carries no account credentials', () => {
+  const source = readFileSync(new URL('../api/client.ts', import.meta.url), 'utf8');
+  const payloadStart = source.indexOf('export interface DBTLSPreflightPayload');
+  const payloadEnd = source.indexOf('export interface DBTLSPreflightResult', payloadStart);
+  const payloadSource = source.slice(payloadStart, payloadEnd);
+  assert.match(payloadSource, /instance_id\?: string/);
+  assert.match(payloadSource, /protocol: string/);
+  assert.match(payloadSource, /tls_mode: EnabledDatabaseTLSMode/);
+  assert.doesNotMatch(payloadSource, /username|password|account_id/);
+  assert.match(source, /preflightDBInstanceTLS[\s\S]*'\/api\/db\/instances\/tls-preflight'/);
 });
 
 test('database account status switch has an account-specific accessible label', () => {

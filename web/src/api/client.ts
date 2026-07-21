@@ -527,6 +527,7 @@ export interface DatabaseInstanceView {
 }
 
 export type DatabaseTLSMode = 'disable' | 'verify-ca' | 'verify-full';
+export type EnabledDatabaseTLSMode = Exclude<DatabaseTLSMode, 'disable'>;
 
 export interface DBAccountRecord {
   id?: string;
@@ -578,6 +579,26 @@ export interface DBInstancePayload {
   clear_tls_ca?: boolean;
   group?: string;
   remark?: string;
+}
+
+export interface DBTLSPreflightPayload {
+  instance_id?: string;
+  protocol: string;
+  address: string;
+  port: number;
+  tls_mode: EnabledDatabaseTLSMode;
+  tls_server_name?: string;
+  tls_ca_pem?: string;
+  clear_tls_ca?: boolean;
+}
+
+export interface DBTLSPreflightResult {
+  ok: boolean;
+  stage?: string;
+  code?: string;
+  message?: string;
+  error?: string;
+  latency_ms: number;
 }
 
 export interface DBAccountPayload {
@@ -1294,6 +1315,12 @@ export const apiClient = {
   deleteDBInstance: (id: string) =>
     request<void>(`/api/db/instances/${encodeURIComponent(id)}`, {
       method: 'DELETE'
+    }),
+  preflightDBInstanceTLS: (payload: DBTLSPreflightPayload, signal?: AbortSignal) =>
+    request<DBTLSPreflightResult>('/api/db/instances/tls-preflight', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+      signal,
     }),
 
   // database accounts

@@ -165,6 +165,15 @@ type DatabaseInstanceInput struct {
 	Status        string
 }
 
+type DatabaseInstanceTLSState struct {
+	Protocol      string
+	Address       string
+	Port          int
+	TLSMode       string
+	TLSServerName string
+	TLSCAPEM      string
+}
+
 type DatabaseAccountView struct {
 	ID          string     `json:"id"`
 	InstanceID  string     `json:"instance_id"`
@@ -311,6 +320,7 @@ var (
 	ErrDBProxyNotFound                       = errSentinel("database proxy not found")
 	ErrDBAccountNotFound                     = errSentinel("database account not found")
 	ErrDBInstanceNotFound                    = errSentinel("database instance not found")
+	ErrDBInstanceTLSStateChanged             = errSentinel("database instance TLS state changed")
 	ErrDatabaseProvisioningOperationNotFound = errSentinel("database provisioning operation not found")
 	ErrApplicationNotFound                   = errSentinel("application not found")
 	ErrContainerEndpointNotFound             = errSentinel("container endpoint not found")

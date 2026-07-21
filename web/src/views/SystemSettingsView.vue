@@ -7,13 +7,14 @@
             <div class="header-title">
               <span>系统运行策略</span>
               <el-tag v-if="state" :type="state.pending_restart ? 'warning' : 'success'" effect="light">
-                {{ state.pending_restart ? '等待重启' : '运行中' }}
+                {{ state.pending_restart ? '待重启生效' : '运行中' }}
               </el-tag>
             </div>
             <p>管理连接、安全与审计策略。保存后重启生效。</p>
           </div>
           <div class="header-actions">
             <el-button :loading="loading" @click="loadAll">刷新</el-button>
+            <el-button disabled>重启系统</el-button>
             <el-button
               type="primary"
               :loading="saving"
@@ -39,47 +40,6 @@
       </el-alert>
 
       <template v-if="state">
-        <div class="status-strip" :class="{ 'is-pending': state.pending_restart }">
-          <div class="status-strip__main">
-            <span class="status-strip__badge" :class="state.pending_restart ? 'is-warning' : 'is-success'">
-              {{ state.pending_restart ? '待重启' : '已同步' }}
-            </span>
-            <span v-if="state.pending_restart">
-              已保存 #{{ state.revision }} → 运行中 #{{ state.effective_revision }}
-            </span>
-            <span v-else>
-              版本 #{{ state.effective_revision }}
-            </span>
-          </div>
-          <div class="status-strip__meta">
-            {{ state.updated_by_username || 'system' }} 更新于 {{ formatTime(state.updated_at) }}
-          </div>
-          <el-button
-            v-if="state.pending_restart && pendingDifferences.length"
-            link size="small" type="primary"
-            @click="showDiff = !showDiff"
-          >
-            {{ showDiff ? '收起变更' : '变更明细' }}
-          </el-button>
-        </div>
-
-        <div v-if="state.pending_restart && showDiff && pendingDifferences.length" class="pending-differences">
-          <div class="pending-difference pending-difference--header">
-            <span>配置项</span>
-            <span>当前运行</span>
-            <span>重启后</span>
-          </div>
-          <div
-            v-for="difference in pendingDifferences"
-            :key="difference.field"
-            class="pending-difference"
-          >
-            <strong>{{ difference.label }}</strong>
-            <span>{{ difference.effective }}</span>
-            <span>{{ difference.desired }}</span>
-          </div>
-        </div>
-
         <el-tabs v-model="activeTab" class="settings-tabs">
           <el-tab-pane label="代理与审计" name="policy">
             <div class="policy-grid">
@@ -468,11 +428,9 @@ import {
   DATABASE_MAX_CLIENT_MESSAGE_BYTES_DEFAULT,
   DATABASE_MAX_CLIENT_MESSAGE_BYTES_MAX,
   DATABASE_MAX_CLIENT_MESSAGE_BYTES_MIN,
-  SYSTEM_SETTINGS_FIELDS,
   changedSystemSettingsFields,
   clientMessageBytesToMiB,
   clientMessageMiBToBytes,
-  formatClientMessageBytes,
   replayBytesToGiB,
   replayGiBToBytes,
   weakerProtectionReasons,
@@ -507,7 +465,6 @@ const saving = ref(false);
 const loadError = ref('');
 const historyLoading = ref(false);
 const historyError = ref('');
-const showDiff = ref(false);
 const diagnosticLoading = ref<DiagnosticKind | ''>('');
 const state = ref<SystemSettingsState | null>(null);
 const revisions = ref<SystemSettingsRevision[]>([]);
@@ -542,18 +499,6 @@ const hasUnsavedChanges = computed(() => {
   return desired
     ? changedSystemSettingsFields(desired, form).length > 0
     : false;
-});
-const pendingDifferences = computed(() => {
-  const current = state.value;
-  if (!current) return [];
-  return SYSTEM_SETTINGS_FIELDS
-    .filter(field => current.desired[field] !== current.effective[field])
-    .map(field => ({
-      field,
-      label: FIELD_LABELS[field],
-      effective: formatSettingValue(field, current.effective[field]),
-      desired: formatSettingValue(field, current.desired[field]),
-    }));
 });
 
 onMounted(() => {
@@ -798,25 +743,6 @@ function configuredText(value: boolean): string {
   return value ? '已配置' : '未配置';
 }
 
-function formatSettingValue(
-  field: keyof SystemSettingsValues,
-  value: SystemSettingsValues[keyof SystemSettingsValues],
-): string {
-  if (field === 'database_gateway_mode') return value === 'independent' ? '独立端口' : '统一入口';
-  if (field === 'database_gateway_client_tls_mode') return value === 'required' ? '强制 TLS' : '非强制';
-  if (field === 'web_rdp_connect_timeout_seconds') return `${value} 秒`;
-  if (field === 'recording_retention_days') return `${value} 天`;
-  if (field === 'recording_cleanup_batch_size') return `${value} 条`;
-  if (field === 'database_max_client_message_bytes') {
-    return formatClientMessageBytes(Number(value));
-  }
-  if (field === 'recording_max_replay_bytes') {
-    return Number(value) === 0 ? '不限制' : `${replayBytesToGiB(Number(value))} GiB`;
-  }
-  if (field === 'web_rdp_allow_unrecorded') return value ? '允许' : '拒绝';
-  return value ? '已开启' : '已关闭';
-}
-
 function formatTime(value?: string): string {
   if (!value) return '-';
   const date = new Date(value);
@@ -916,77 +842,6 @@ function errorMessage(error: unknown, fallback: string): string {
 
 .load-error {
   margin: 18px 22px 0;
-}
-
-.status-strip {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin: 10px 20px 0;
-  padding: 8px 12px;
-  border-radius: 8px;
-  border: 1px solid var(--color-border);
-  background: var(--color-surface-muted);
-  flex-wrap: wrap;
-}
-
-.status-strip.is-pending {
-  border-color: color-mix(in srgb, var(--el-color-warning) 35%, var(--color-border));
-  background: color-mix(in srgb, var(--el-color-warning) 8%, var(--color-surface-muted));
-}
-
-.status-strip__main {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.status-strip__badge {
-  font-size: 11px;
-  font-weight: 600;
-  padding: 2px 8px;
-  border-radius: 10px;
-  line-height: 1.5;
-}
-
-.status-strip__badge.is-success {
-  color: var(--el-color-success);
-  background: color-mix(in srgb, var(--el-color-success) 15%, transparent);
-}
-
-.status-strip__badge.is-warning {
-  color: var(--el-color-warning);
-  background: color-mix(in srgb, var(--el-color-warning) 15%, transparent);
-}
-
-.status-strip__meta {
-  margin-left: auto;
-  color: var(--color-text-secondary);
-  font-size: 12px;
-}
-
-.pending-differences {
-  display: grid;
-  gap: 1px;
-  margin-top: 12px;
-  overflow-x: auto;
-  border: 1px solid color-mix(in srgb, var(--el-color-warning) 35%, var(--color-border));
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--el-color-warning) 22%, var(--color-border));
-}
-
-.pending-difference {
-  display: grid;
-  grid-template-columns: minmax(150px, 1.4fr) minmax(100px, 1fr) minmax(100px, 1fr);
-  gap: 12px;
-  min-width: 420px;
-  padding: 8px 10px;
-  background: var(--color-card);
-}
-
-.pending-difference--header {
-  color: var(--color-text-secondary);
-  font-size: 12px;
 }
 
 .settings-tabs {

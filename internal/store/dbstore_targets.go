@@ -58,7 +58,6 @@ func (s *DBStore) targetView(ctx context.Context, tx *gorm.DB, a model.HostAccou
 		RDPSecurity:           normalizedRDPSecurity(a.RDPSecurity),
 		RDPIgnoreCertificate:  a.RDPIgnoreCertificate,
 		RDPCertFingerprints:   a.RDPCertFingerprints,
-		RDPApprovalRequired:   a.RDPApprovalRequired,
 		RDPClipboardRead:      a.RDPClipboardRead,
 		RDPClipboardWrite:     a.RDPClipboardWrite,
 		RDPFileUpload:         a.RDPFileUpload,
@@ -117,7 +116,6 @@ func (s *DBStore) targetConfig(ctx context.Context, tx *gorm.DB, a model.HostAcc
 		RDPSecurity:           normalizedRDPSecurity(a.RDPSecurity),
 		RDPIgnoreCertificate:  a.RDPIgnoreCertificate,
 		RDPCertFingerprints:   a.RDPCertFingerprints,
-		RDPApprovalRequired:   a.RDPApprovalRequired,
 		RDPClipboardRead:      a.RDPClipboardRead,
 		RDPClipboardWrite:     a.RDPClipboardWrite,
 		RDPFileUpload:         a.RDPFileUpload,
@@ -218,7 +216,6 @@ func (s *DBStore) AddTarget(ctx context.Context, target config.Target) (TargetVi
 		RDPSecurity:           normalizedRDPSecurity(target.RDPSecurity),
 		RDPIgnoreCertificate:  target.RDPIgnoreCertificate,
 		RDPCertFingerprints:   target.RDPCertFingerprints,
-		RDPApprovalRequired:   target.RDPApprovalRequired,
 		RDPClipboardRead:      target.RDPClipboardRead,
 		RDPClipboardWrite:     target.RDPClipboardWrite,
 		RDPFileUpload:         target.RDPFileUpload,
@@ -332,7 +329,6 @@ func (s *DBStore) UpdateTarget(ctx context.Context, id string, target config.Tar
 		a.RDPSecurity = normalizedRDPSecurity(target.RDPSecurity)
 		a.RDPIgnoreCertificate = target.RDPIgnoreCertificate
 		a.RDPCertFingerprints = target.RDPCertFingerprints
-		a.RDPApprovalRequired = target.RDPApprovalRequired
 		a.RDPClipboardRead = target.RDPClipboardRead
 		a.RDPClipboardWrite = target.RDPClipboardWrite
 		a.RDPFileUpload = target.RDPFileUpload

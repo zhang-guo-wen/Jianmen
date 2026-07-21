@@ -10,7 +10,7 @@ func TestPermissionCatalogContainsEveryAction(t *testing.T) {
 		ActionDBConnect, ActionDBQuery, ActionDBExecute, ActionSessionConnect, ActionSFTPConnect,
 		ActionRDPConnect, ActionRDPClipboardRead, ActionRDPClipboardWrite,
 		ActionRDPFileUpload, ActionRDPFileDownload, ActionRDPDriveMap,
-		ActionRDPRecordingView, ActionRDPApprovalManage,
+		ActionRDPRecordingView,
 		ActionAuditView, ActionDBAuditView,
 		ActionHostCreate, ActionHostUpdate, ActionHostDelete, ActionHostView,
 		ActionTargetCreate, ActionTargetUpdate, ActionTargetDelete, ActionTargetView,
@@ -136,7 +136,6 @@ func TestRDPActionsAreScopedAndDiscoverable(t *testing.T) {
 		ActionRDPFileDownload,
 		ActionRDPDriveMap,
 		ActionRDPRecordingView,
-		ActionRDPApprovalManage,
 	}
 	for _, actionKey := range actions {
 		item, ok := FindPermissionDefinition(actionKey)
@@ -157,7 +156,7 @@ func TestRDPActionsAreScopedAndDiscoverable(t *testing.T) {
 		t.Fatalf("RDP connect pages = %#v, want %#v", pages, wantConnectPages)
 	}
 	wantAudit := []PageAccess{{Key: "audit", Path: "/audit", Order: 60}}
-	for _, actionKey := range []string{ActionRDPRecordingView, ActionRDPApprovalManage} {
+	for _, actionKey := range []string{ActionRDPRecordingView} {
 		if pages := AccessiblePages([]string{actionKey}); !reflect.DeepEqual(pages, wantAudit) {
 			t.Fatalf("%s pages = %#v, want %#v", actionKey, pages, wantAudit)
 		}

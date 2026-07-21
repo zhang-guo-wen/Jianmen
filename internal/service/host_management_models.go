@@ -20,20 +20,20 @@ type HostManagementHostView struct {
 }
 
 type HostManagementTargetView struct {
-	ID, HostID, ResourceType, ResourceID, HostResourceID, Name, Group, Remark, ExpiresAt, Status, HostStatus, Host, Protocol, Username, Domain                        string
-	ResourceSeq                                                                                                                                                       int
-	Port                                                                                                                                                              int
-	AuthMethods                                                                                                                                                       []string
-	InsecureIgnoreHostKey, RDPIgnoreCertificate, RDPApprovalRequired, RDPClipboardRead, RDPClipboardWrite, RDPFileUpload, RDPFileDownload, RDPDriveMapping, CanManage bool
-	HostKeyFingerprint, KnownHostsPath, RDPSecurity, RDPCertFingerprints                                                                                              string
+	ID, HostID, ResourceType, ResourceID, HostResourceID, Name, Group, Remark, ExpiresAt, Status, HostStatus, Host, Protocol, Username, Domain   string
+	ResourceSeq                                                                                                                                  int
+	Port                                                                                                                                         int
+	AuthMethods                                                                                                                                  []string
+	InsecureIgnoreHostKey, RDPIgnoreCertificate, RDPClipboardRead, RDPClipboardWrite, RDPFileUpload, RDPFileDownload, RDPDriveMapping, CanManage bool
+	HostKeyFingerprint, KnownHostsPath, RDPSecurity, RDPCertFingerprints                                                                         string
 }
 
 type HostManagementTargetConfig struct {
-	ID, Name, HostName, Host, Protocol, Username, Domain, Password, PrivateKeyPath, PrivateKeyPEM, Passphrase                                                        string
-	Port                                                                                                                                                             int
-	InsecureIgnoreHostKey, RDPIgnoreCertificate, RDPApprovalRequired, RDPClipboardRead, RDPClipboardWrite, RDPFileUpload, RDPFileDownload, RDPDriveMapping, Disabled bool
-	HostKeyFingerprint, KnownHosts, KnownHostsPath, RDPSecurity, RDPCertFingerprints, ExpiresAt, HostID                                                              string
-	HostKeyChangeHandler                                                                                                                                             func(hostID, oldFingerprint, newFingerprint string) (hostDisabled bool, err error)
+	ID, Name, HostName, Host, Protocol, Username, Domain, Password, PrivateKeyPath, PrivateKeyPEM, Passphrase                                   string
+	Port                                                                                                                                        int
+	InsecureIgnoreHostKey, RDPIgnoreCertificate, RDPClipboardRead, RDPClipboardWrite, RDPFileUpload, RDPFileDownload, RDPDriveMapping, Disabled bool
+	HostKeyFingerprint, KnownHosts, KnownHostsPath, RDPSecurity, RDPCertFingerprints, ExpiresAt, HostID                                         string
+	HostKeyChangeHandler                                                                                                                        func(hostID, oldFingerprint, newFingerprint string) (hostDisabled bool, err error)
 }
 
 func (t HostManagementTargetConfig) Addr() string {

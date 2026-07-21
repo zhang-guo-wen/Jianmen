@@ -197,7 +197,7 @@ func TestAuditListFiltersEverySessionByResourcePermission(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	request := httptest.NewRequest(
 		http.MethodGet,
-		"/api/audit/rdp?user_id=user-1&account_id=account-a&result=succeeded"+
+		"/api/audit/rdp?q=windows&page=1&page_size=20&user_id=user-1&account_id=account-a&result=succeeded"+
 			"&from=2026-07-01T00:00:00Z&to=2026-07-20T00:00:00Z",
 		nil,
 	)
@@ -239,6 +239,7 @@ func TestAuditListFiltersEverySessionByResourcePermission(t *testing.T) {
 	}
 	params := audit.listParams[0]
 	if params.Protocol != "rdp" ||
+		params.Search != "windows" ||
 		params.UserID != "user-1" ||
 		params.AccountID != "account-a" ||
 		params.Outcome != "succeeded" ||

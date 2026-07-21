@@ -79,6 +79,44 @@ type webSocketTicketWebRDPSchema struct {
 
 func (webSocketTicketWebRDPSchema) TableName() string { return "websocket_tickets" }
 
+type hostAccountWebRDPSchema struct {
+	ID                   string `gorm:"primaryKey;size:64"`
+	Domain               string `gorm:"size:255"`
+	RDPSecurity          string `gorm:"size:32;not null;default:any"`
+	RDPIgnoreCertificate bool   `gorm:"not null;default:false"`
+	RDPCertFingerprints  string `gorm:"type:text"`
+	RDPApprovalRequired  bool   `gorm:"not null;default:false"`
+	RDPClipboardRead     bool   `gorm:"not null;default:false"`
+	RDPClipboardWrite    bool   `gorm:"not null;default:false"`
+	RDPFileUpload        bool   `gorm:"not null;default:false"`
+	RDPFileDownload      bool   `gorm:"not null;default:false"`
+	RDPDriveMapping      bool   `gorm:"not null;default:false"`
+}
+
+func (hostAccountWebRDPSchema) TableName() string { return "host_accounts" }
+
+type accessRequestWebRDPSchema struct {
+	ID              string     `gorm:"primaryKey;size:64"`
+	RequesterID     string     `gorm:"index;size:64;not null"`
+	ResourceType    string     `gorm:"index:idx_access_requests_resource,priority:1;size:64;not null"`
+	ResourceID      string     `gorm:"index:idx_access_requests_resource,priority:2;size:64;not null"`
+	Protocol        string     `gorm:"index;size:32;not null"`
+	ActionsJSON     string     `gorm:"type:text;not null"`
+	Reason          string     `gorm:"type:text;not null"`
+	Status          string     `gorm:"index;size:32;not null"`
+	RequestedAt     time.Time  `gorm:"index;not null"`
+	AccessStartsAt  *time.Time `gorm:"index"`
+	AccessExpiresAt *time.Time `gorm:"index"`
+	DecidedBy       string     `gorm:"index;size:64"`
+	DecidedAt       *time.Time
+	DecisionRemark  string `gorm:"type:text"`
+	CancelledAt     *time.Time
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
+}
+
+func (accessRequestWebRDPSchema) TableName() string { return "access_requests" }
+
 type auditSessionBeforeWebRDP struct {
 	ID              string    `gorm:"primaryKey;size:64"`
 	UserSessionID   string    `gorm:"index;size:64"`
@@ -180,7 +218,7 @@ func metadataModelsBeforeWebRDP() []any {
 }
 
 func migrateWebRDPAuditSchema(tx *gorm.DB) error {
-	if err := tx.AutoMigrate(&model.Host{}, &model.HostAccount{}); err != nil {
+	if err := tx.AutoMigrate(&model.Host{}, &hostAccountWebRDPSchema{}); err != nil {
 		return fmt.Errorf("migrate RDP host account fields: %w", err)
 	}
 	if err := tx.AutoMigrate(&webSocketTicketWebRDPSchema{}); err != nil {
@@ -195,9 +233,9 @@ func migrateWebRDPAuditSchema(tx *gorm.DB) error {
 		&auditSessionWebRDPSchema{},
 		&model.AuditArtifact{},
 		&model.AuditRDPChannelEvent{},
-		&model.AccessRequest{},
+		&accessRequestWebRDPSchema{},
 	); err != nil {
-		return fmt.Errorf("migrate RDP audit and approval schema: %w", err)
+		return fmt.Errorf("migrate RDP audit schema: %w", err)
 	}
 	return nil
 }

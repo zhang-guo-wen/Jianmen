@@ -70,67 +70,6 @@ func (a *webRDPAuthorizerStub) count(action string) int {
 	return count
 }
 
-type webRDPApprovalRepositoryStub struct {
-	request model.AccessRequest
-	found   bool
-	err     error
-	calls   int
-}
-
-func (*webRDPApprovalRepositoryStub) CreateAccessRequest(
-	context.Context,
-	*model.AccessRequest,
-) error {
-	return errors.New("unexpected CreateAccessRequest call")
-}
-
-func (*webRDPApprovalRepositoryStub) AccessRequest(
-	context.Context,
-	string,
-) (model.AccessRequest, error) {
-	return model.AccessRequest{}, errors.New("unexpected AccessRequest call")
-}
-
-func (*webRDPApprovalRepositoryStub) ListAccessRequests(
-	context.Context,
-	AccessRequestListParams,
-) ([]model.AccessRequest, int64, error) {
-	return nil, 0, errors.New("unexpected ListAccessRequests call")
-}
-
-func (*webRDPApprovalRepositoryStub) DecideAccessRequest(
-	context.Context,
-	string,
-	string,
-	string,
-	string,
-	time.Time,
-) (model.AccessRequest, error) {
-	return model.AccessRequest{}, errors.New("unexpected DecideAccessRequest call")
-}
-
-func (*webRDPApprovalRepositoryStub) CancelAccessRequest(
-	context.Context,
-	string,
-	string,
-	time.Time,
-) (model.AccessRequest, error) {
-	return model.AccessRequest{}, errors.New("unexpected CancelAccessRequest call")
-}
-
-func (r *webRDPApprovalRepositoryStub) FindActiveAccessRequest(
-	_ context.Context,
-	_ string,
-	_ string,
-	_ string,
-	_ string,
-	_ time.Time,
-	_ []string,
-) (model.AccessRequest, bool, error) {
-	r.calls++
-	return r.request, r.found, r.err
-}
-
 func baseWebRDPTarget() WebRDPTarget {
 	return WebRDPTarget{
 		ID: "account-1", HostID: "host-1", HostName: "windows-prod",
@@ -143,20 +82,11 @@ func newWebRDPServiceForTest(
 	t *testing.T,
 	target WebRDPTarget,
 	authorizer *webRDPAuthorizerStub,
-	approvalRepository *webRDPApprovalRepositoryStub,
 ) *WebRDPService {
 	t.Helper()
-	if approvalRepository == nil {
-		approvalRepository = &webRDPApprovalRepositoryStub{}
-	}
-	approvals, err := NewAccessRequestService(approvalRepository)
-	if err != nil {
-		t.Fatalf("NewAccessRequestService() error = %v", err)
-	}
 	service, err := NewWebRDPService(
 		&webRDPTargetRepositoryStub{target: target},
 		authorizer,
-		approvals,
 	)
 	if err != nil {
 		t.Fatalf("NewWebRDPService() error = %v", err)
@@ -191,7 +121,7 @@ func TestWebRDPServiceRejectsInvalidTargetState(t *testing.T) {
 				allowed: map[string]bool{rbac.ActionRDPConnect: true},
 				errs:    map[string]error{},
 			}
-			service := newWebRDPServiceForTest(t, target, authorizer, nil)
+			service := newWebRDPServiceForTest(t, target, authorizer)
 			service.now = func() time.Time { return now }
 
 			_, err := service.Plan(context.Background(), "user-1", "account-1")
@@ -215,7 +145,7 @@ func TestWebRDPServiceRequiresConnectPermission(t *testing.T) {
 		},
 		errs: map[string]error{},
 	}
-	service := newWebRDPServiceForTest(t, target, authorizer, nil)
+	service := newWebRDPServiceForTest(t, target, authorizer)
 
 	_, err := service.Plan(context.Background(), "user-1", target.ID)
 	if !errors.Is(err, ErrWebRDPNotAuthorized) {
@@ -296,7 +226,7 @@ func TestWebRDPServiceChannelPolicyIsAccountSwitchIntersectedWithRBAC(t *testing
 					if test.requiresDrive {
 						authorizer.allowed[rbac.ActionRDPDriveMap] = true
 					}
-					service := newWebRDPServiceForTest(t, target, authorizer, nil)
+					service := newWebRDPServiceForTest(t, target, authorizer)
 
 					plan, err := service.Plan(context.Background(), "user-1", target.ID)
 					if err != nil {
@@ -336,7 +266,7 @@ func TestWebRDPServiceFileTransferAlsoRequiresDriveAuthorization(t *testing.T) {
 		},
 		errs: map[string]error{},
 	}
-	service := newWebRDPServiceForTest(t, target, authorizer, nil)
+	service := newWebRDPServiceForTest(t, target, authorizer)
 
 	plan, err := service.Plan(context.Background(), "user-1", target.ID)
 	if err != nil {
@@ -386,7 +316,7 @@ func TestWebRDPServiceAuthorizationErrorsFailClosed(t *testing.T) {
 			if action == rbac.ActionRDPFileUpload || action == rbac.ActionRDPFileDownload {
 				authorizer.allowed[rbac.ActionRDPDriveMap] = true
 			}
-			service := newWebRDPServiceForTest(t, target, authorizer, nil)
+			service := newWebRDPServiceForTest(t, target, authorizer)
 
 			plan, err := service.Plan(context.Background(), "user-1", target.ID)
 			if !errors.Is(err, sentinel) {

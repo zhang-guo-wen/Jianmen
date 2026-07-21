@@ -433,6 +433,10 @@ export function useWebRDP({ targetId }: UseWebRDPOptions) {
         downloadBytes.value = blob.size;
         downloadStatus.value = 'saved';
       };
+
+      // guacd waits for this initial acknowledgement before sending the first
+      // blob. BlobReader acknowledges subsequent blobs as they arrive.
+      stream.sendAck('Ready', Guacamole.Status.Code.SUCCESS);
     };
   }
 

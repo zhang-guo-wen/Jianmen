@@ -3,7 +3,7 @@
 
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "$0")" && pwd)"
+ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 FRONTEND_DIST="$ROOT/web/dist"
 EMBED_DIR="$ROOT/internal/frontend/dist"
 OUTPUT_DIR="$ROOT/dist"
@@ -36,13 +36,13 @@ echo -e "${CYAN}[3/6] 编译 Windows amd64...${NC}"
 cd "$ROOT"
 mkdir -p "$OUTPUT_DIR"
 GOOS=windows GOARCH=amd64 go build \
-  -o "$OUTPUT_DIR/bastion-core-windows-amd64.exe" ./cmd/bastion-core/
-win_size=$(du -h "$OUTPUT_DIR/bastion-core-windows-amd64.exe" | cut -f1)
-echo -e "${GREEN}  ✓ bastion-core-windows-amd64.exe  (${win_size})${NC}"
+  -o "$OUTPUT_DIR/jianmen-windows-amd64.exe" ./cmd/jianmen/
+win_size=$(du -h "$OUTPUT_DIR/jianmen-windows-amd64.exe" | cut -f1)
+echo -e "${GREEN}  ✓ jianmen-windows-amd64.exe  (${win_size})${NC}"
 
 echo -e "${CYAN}[4/6] 编译 Linux amd64 Lite...${NC}"
 GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build \
-  -o "$OUTPUT_DIR/jianmen-linux-amd64-lite" ./cmd/bastion-core/
+  -o "$OUTPUT_DIR/jianmen-linux-amd64-lite" ./cmd/jianmen/
 lite_size=$(du -h "$OUTPUT_DIR/jianmen-linux-amd64-lite" | cut -f1)
 echo -e "${GREEN}  ✓ jianmen-linux-amd64-lite  (${lite_size})${NC}"
 
@@ -51,7 +51,7 @@ echo -e "${CYAN}[5/6] 准备 Linux amd64 guacd 运行时...${NC}"
 
 echo -e "${CYAN}[6/6] 编译 Linux amd64 RDP...${NC}"
 GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -tags embedded_guacd \
-  -o "$OUTPUT_DIR/jianmen-linux-amd64-rdp" ./cmd/bastion-core/
+  -o "$OUTPUT_DIR/jianmen-linux-amd64-rdp" ./cmd/jianmen/
 rdp_size=$(du -h "$OUTPUT_DIR/jianmen-linux-amd64-rdp" | cut -f1)
 echo -e "${GREEN}  ✓ jianmen-linux-amd64-rdp  (${rdp_size})${NC}"
 

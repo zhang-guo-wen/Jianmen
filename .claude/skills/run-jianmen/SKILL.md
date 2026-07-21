@@ -24,7 +24,7 @@ The backend creates `data/` at runtime (database, host keys, replays). No manual
 ### One-Click (Recommended)
 
 ```powershell
-.\start.ps1
+.\scripts\start.ps1
 ```
 
 Handles cleanup, config, build, npm install (first time), process startup, and readiness checks. It exits non-zero and prints recent logs when any service fails. Output shows URLs, log paths, PID files, and access token.
@@ -34,7 +34,7 @@ Handles cleanup, config, build, npm install (first time), process startup, and r
 #### 0. Clean Up Old Instances
 
 ```powershell
-Get-Process -Name "bastion-core" -ErrorAction SilentlyContinue | Stop-Process -Force
+Get-Process -Name "jianmen" -ErrorAction SilentlyContinue | Stop-Process -Force
 Get-Process -Name "node" -ErrorAction SilentlyContinue | Stop-Process -Force
 Start-Sleep -Seconds 1
 ```
@@ -47,8 +47,8 @@ if (-not (Test-Path config.local.json)) { Copy-Item configs/config.example.json 
 
 # Build and run
 New-Item -ItemType Directory -Force -Path logs,bin | Out-Null
-go build -o bin\bastion-core.exe .\cmd\bastion-core
-$backend = Start-Process -FilePath ".\bin\bastion-core.exe" -ArgumentList "-config", "config.local.json" -RedirectStandardOutput "logs\backend.log" -RedirectStandardError "logs\backend.err.log" -PassThru
+go build -o bin\jianmen.exe .\cmd\jianmen
+$backend = Start-Process -FilePath ".\bin\jianmen.exe" -ArgumentList "-config", "config.local.json" -RedirectStandardOutput "logs\backend.log" -RedirectStandardError "logs\backend.err.log" -PassThru
 Set-Content logs\backend.pid $backend.Id
 ```
 
@@ -88,7 +88,7 @@ The Vue dev server proxies `/api` requests to the Admin API (default `http://loc
 | Symptom | Cause | Fix |
 |---------|-------|-----|
 | `config.local.json` not found | First run, config not copied | Copy `configs/config.example.json` → `config.local.json` |
-| Port 47100/47101/47102/33060 in use | Previous instance still running | Run `./start.ps1`; it cleans PID files and fixed ports before restart |
+| Port 47100/47101/47102/33060 in use | Previous instance still running | Run `./scripts/start.ps1`; it cleans PID files and fixed ports before restart |
 | Script exits with `Startup failed` | A readiness check failed | Read the log tail printed by the script, then inspect `logs/backend.err.log`, `logs/backend.log`, `logs/frontend.err.log`, `logs/frontend.log` |
 | Backend starts but curl returns empty/502 | System `http_proxy` env var routing localhost through external proxy | Use `--noproxy '*'` with curl, or PowerShell `Invoke-WebRequest` |
 

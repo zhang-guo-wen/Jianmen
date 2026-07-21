@@ -1,15 +1,15 @@
-# Container and release publishing
+# 容器与版本发布
 
-## Container images
+## 容器镜像
 
-Normal branch pushes and pull requests run CI checks only. They never publish a container image or
-GitHub release. A semantic version tag such as `v1.2.3` or `v1.2.3-rc.1` publishes the
-multi-architecture container image and release archives. The image supports `linux/amd64` and
-`linux/arm64`. Only a stable tag updates `latest`; a prerelease tag does not.
+普通分支推送和拉取请求只执行 CI 检查，不会发布容器镜像或 GitHub Release。推送
+`v1.2.3`、`v1.2.3-rc.1` 这类语义化版本 Tag 后，发布流程会生成多架构容器镜像和
+版本压缩包。镜像支持 `linux/amd64` 和 `linux/arm64`。只有正式版本 Tag 会更新
+`latest`，预发布版本不会更新该标签。
 
-The image fails closed unless `/app/certs/admin.crt` and
-`/app/certs/admin.key` are mounted. Create a short-lived self-signed
-certificate volume for local evaluation:
+镜像采用安全失败关闭策略：如果没有挂载 `/app/certs/admin.crt` 和
+`/app/certs/admin.key`，服务将拒绝启动。本地评估时，可以创建一个使用短期自签名
+证书的 Docker 卷：
 
 ```bash
 docker volume create jianmen-certs
@@ -43,8 +43,7 @@ docker run --rm --user 0 \
    chmod 644 /certs/admin.crt /certs/database.crt /certs/database-ca.crt'
 ```
 
-Run the latest released image with the Admin HTTPS port bound only to the host
-loopback interface:
+运行最新发布镜像时，只将管理端 HTTPS 端口绑定到宿主机回环地址：
 
 ```bash
 docker run -d \
@@ -59,67 +58,63 @@ docker run -d \
   ghcr.io/zhang-guo-wen/jianmen:latest
 ```
 
-The default container endpoints are:
+容器默认入口如下：
 
-- Web administration (local evaluation only): `https://127.0.0.1:47100`
-- SSH gateway: `HOST:47102`
-- Unified database gateway (default, MySQL/PostgreSQL/Redis): `HOST:33060`
-- Independent MySQL gateway: `HOST:33061`
-- Independent PostgreSQL gateway: `HOST:33062`
-- Independent Redis gateway: `HOST:33063`
-- Application gateways: `HOST:47110-47199`
+- Web 管理端（仅限本地评估）：`https://127.0.0.1:47100`
+- SSH 网关：`主机地址:47102`
+- 统一数据库网关（默认，MySQL/PostgreSQL/Redis）：`主机地址:33060`
+- 独立 MySQL 网关：`主机地址:33061`
+- 独立 PostgreSQL 网关：`主机地址:33062`
+- 独立 Redis 网关：`主机地址:33063`
+- 应用代理入口：`主机地址:47110-47199`
 
-Mount a custom configuration file at `/app/config.json` when the defaults in
-`configs/config.docker.json` are not suitable. The default image never enables
-plaintext Admin HTTP. For a reverse-proxy deployment, use
-`configs/config.docker.proxy.example.json`, keep the Jianmen container and proxy on an
-isolated Docker network, and do not publish Jianmen's port `47100`. The complete
-Caddy command sequence and the Nginx Stream database-gateway precautions are
-documented in `README.md`.
+如果 `configs/config.docker.json` 的默认设置不适用，请将自定义配置文件挂载到
+`/app/config.json`。默认镜像不会启用明文管理端 HTTP。使用反向代理部署时，应采用
+`configs/config.docker.proxy.example.json`，将 Jianmen 容器和代理置于隔离的 Docker
+网络中，并且不要发布 Jianmen 的 `47100` 端口。完整的 Caddy 命令和 Nginx Stream
+数据库网关注意事项见 `README.md`。
 
-The default `unified` mode lets native MySQL, PostgreSQL, and Redis clients share port `33060`.
-MySQL connections wait for the 200 ms protocol-detection window; established-session throughput
-is unaffected. The alternative `independent` mode uses ports `33061`, `33062`, and `33063`.
-Only the selected mode binds its listeners. The default container command publishes only `33060`;
-when selecting `independent`, also publish `33061:33061`, `33062:33062`, and `33063:33063`
-(or add those mappings to Compose) before restarting the container.
+默认 `unified` 模式允许 MySQL、PostgreSQL 和 Redis 原生客户端共用 `33060` 端口。
+MySQL 新连接需要等待 200 毫秒的协议探测窗口，但已建立会话的吞吐量不受影响。
+`independent` 模式分别使用 `33061`、`33062` 和 `33063`，系统只监听当前选定模式的
+端口。默认容器命令只发布 `33060`；切换到 `independent` 模式时，必须增加
+`33061:33061`、`33062:33062` 和 `33063:33063` 端口映射，再重启容器。
 
-Client-facing TLS has two policies: `optional` (the default) accepts both plaintext and TLS for
-MySQL, PostgreSQL, and Redis, while `required` rejects plaintext authentication and database
-traffic. PostgreSQL plaintext `CancelRequest` control packets remain compatible because they
-carry no login credentials or database data and must match the per-session cancellation secret.
-The default Docker configuration uses `database.crt`, `database.key`, and `database-ca.crt` as a
-local custom-CA example. For a publicly trusted certificate, configure a leaf-first full-chain
-`cert_file`, its matching `key_file`, and a `server_name` covered by the certificate SAN, and omit
-`ca_file`. Jianmen validates that chain against the runtime system certificate pool during startup
-and fails closed if the chain, validity period, key usage, or hostname is invalid. The certificate
-file must contain every required intermediate certificate.
+面向客户端的 TLS 支持两种策略：默认的 `optional` 同时接受 MySQL、PostgreSQL 和
+Redis 明文连接及 TLS 连接；`required` 会拒绝明文认证和数据库流量。PostgreSQL 的
+明文 `CancelRequest` 控制包仍保持兼容，因为它不携带登录凭据或数据库数据，并且必须
+匹配对应会话的取消密钥。
 
-The gateway API reports whether the validated identity uses `custom` or `system` trust and never
-exposes private-key material. DBeaver uses its Java default trust store for system-trusted
-certificates. `psql` system trust requires libpq 16 or newer; older clients and the native MySQL CLI
-still require an explicit CA file. No client path silently falls back to encryption without
-identity verification.
+默认 Docker 配置使用 `database.crt`、`database.key` 和 `database-ca.crt` 作为本地
+自定义 CA 示例。使用公共 CA 签发的证书时，应配置叶证书在前的完整证书链
+`cert_file`、匹配的 `key_file`，以及被证书 SAN 覆盖的 `server_name`，同时省略
+`ca_file`。Jianmen 启动时会使用运行环境的系统证书池验证证书链；如果证书链、有效期、
+密钥用途或主机名无效，服务将安全失败关闭。证书文件必须包含验证所需的全部中间证书。
 
-## GitHub releases
+网关 API 会报告已验证身份使用的是 `custom` 还是 `system` 信任模式，但绝不会暴露
+私钥材料。DBeaver 使用 Java 默认信任库验证系统信任证书。`psql` 使用系统信任需要
+libpq 16 或更高版本；旧版客户端和 MySQL 原生命令行仍需要显式指定 CA 文件。任何
+客户端连接路径都不会静默降级为“只加密但不验证身份”。
 
-Create and push a semantic version tag to build and publish release archives:
+## GitHub Release
+
+创建并推送语义化版本 Tag，即可构建和发布版本压缩包：
 
 ```bash
 git tag v0.1.0
 git push origin v0.1.0
 ```
 
-The release workflow builds these archives with the Vue frontend embedded in the Go binary:
+发布工作流会将 Vue 前端嵌入 Go 二进制文件，并生成以下压缩包：
 
 - Windows amd64
 - Windows arm64
-- Linux amd64 Lite (no embedded guacd runtime)
-- Linux amd64 RDP (self-extracting embedded guacd runtime)
-- Linux arm64 Lite (no embedded guacd runtime)
-- Linux arm64 RDP (self-extracting embedded guacd runtime)
+- Linux amd64 Lite（不内嵌 guacd 运行时）
+- Linux amd64 RDP（内嵌可自解压的 guacd 运行时）
+- Linux arm64 Lite（不内嵌 guacd 运行时）
+- Linux arm64 RDP（内嵌可自解压的 guacd 运行时）
 
-Each archive includes the executable, `config.example.json`, `README.md`, and `LICENSE`. RDP
-archives also include `THIRD_PARTY_NOTICES.md`. The release contains `checksums.txt` with SHA-256
-checksums. RDP archives are built from the pinned official guacd image; the target host does not
-need Docker or a preinstalled guacd.
+每个压缩包都包含可执行文件、`config.example.json`、`README.md` 和 `LICENSE`。RDP
+压缩包还包含 `THIRD_PARTY_NOTICES.md`。Release 中的 `checksums.txt` 保存所有文件的
+SHA-256 校验值。RDP 压缩包基于锁定版本的 guacd 官方镜像构建，目标主机无需安装
+Docker，也无需预先安装 guacd。

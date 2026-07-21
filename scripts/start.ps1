@@ -1,8 +1,8 @@
 # Jianmen container startup / restart
 # Usage:
-#   .\start.ps1             Build artifacts and image, then recreate with local HTTP
-#   .\start.ps1 -SkipBuild  Recreate the container from the existing image
-#   .\start.ps1 -EnableTLS  Use the certificate-backed HTTPS configuration
+#   .\scripts\start.ps1             Build artifacts and image, then recreate with local HTTP
+#   .\scripts\start.ps1 -SkipBuild  Recreate the container from the existing image
+#   .\scripts\start.ps1 -EnableTLS  Use the certificate-backed HTTPS configuration
 
 param(
     [switch]$SkipBuild,
@@ -62,7 +62,7 @@ function Resolve-DockerCommand {
         }
     }
 
-    throw "Docker CLI not found. Install Docker Desktop or Docker Engine in WSL, then run .\start.ps1 again"
+    throw "Docker CLI not found. Install Docker Desktop or Docker Engine in WSL, then run .\scripts\start.ps1 again"
 }
 
 function Convert-ToDockerPath($Path) {
@@ -99,7 +99,7 @@ function Test-JianmenLocalProcess($ProcessId, $Root) {
     if (-not $process) {
         return $false
     }
-    if ($process.ProcessName -eq "bastion-core") {
+    if ($process.ProcessName -like "jianmen*") {
         return [string]$process.Path -like "$Root*"
     }
     if ($process.ProcessName -notin @("node", "cmd")) {
@@ -173,7 +173,7 @@ function Show-ContainerDiagnostics($Docker, $ContainerName) {
     }
 }
 
-$root = Split-Path -Parent $MyInvocation.MyCommand.Path
+$root = Split-Path -Parent $PSScriptRoot
 $containerName = "jianmen"
 $imageName = "jianmen:guacd-1.6.0"
 $docker = $null
@@ -207,7 +207,7 @@ try {
         Write-Ok "artifact and image build skipped"
     } else {
         Write-Step "[3/5] Building Jianmen artifacts..."
-        & (Join-Path $root "build.ps1")
+        & (Join-Path $root "scripts\build\build.ps1")
         if ($LASTEXITCODE -ne 0) {
             throw "Jianmen artifact build failed"
         }
@@ -279,9 +279,9 @@ try {
     Write-Host "  App proxies  : 127.0.0.1:47110-47199" -ForegroundColor White
     Write-Host ""
     Write-Host "The local development backend and Vite server are no longer used." -ForegroundColor Gray
-    Write-Host "Future starts: .\start.ps1" -ForegroundColor Gray
-    Write-Host "Quick container restart: .\start.ps1 -SkipBuild" -ForegroundColor Gray
-    Write-Host "HTTPS container start: .\start.ps1 -EnableTLS" -ForegroundColor Gray
+    Write-Host "Future starts: .\scripts\start.ps1" -ForegroundColor Gray
+    Write-Host "Quick container restart: .\scripts\start.ps1 -SkipBuild" -ForegroundColor Gray
+    Write-Host "HTTPS container start: .\scripts\start.ps1 -EnableTLS" -ForegroundColor Gray
     Write-Host "Container logs: docker logs -f $containerName" -ForegroundColor Gray
 } catch {
     Write-Host ""

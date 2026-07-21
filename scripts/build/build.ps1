@@ -34,7 +34,7 @@ function Get-FileSizeMB($Path) {
     return [math]::Round((Get-Item $Path).Length / 1MB, 1)
 }
 
-$root = Split-Path -Parent $MyInvocation.MyCommand.Path
+$root = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $frontendDist = Join-Path $root "web\dist"
 $embedDir = Join-Path $root "internal\frontend\dist"
 $outputDir = Join-Path $root "dist"
@@ -75,10 +75,10 @@ New-Item -ItemType Directory -Force $outputDir | Out-Null
 Push-Location $root
 try {
     Write-Host "[3/6] Building Windows amd64..." -ForegroundColor Cyan
-    $windowsOutput = Join-Path $outputDir "bastion-core-windows-amd64.exe"
-    go build -o $windowsOutput ./cmd/bastion-core/
+    $windowsOutput = Join-Path $outputDir "jianmen-windows-amd64.exe"
+    go build -o $windowsOutput ./cmd/jianmen/
     if ($LASTEXITCODE -ne 0) { throw "Windows build failed" }
-    Write-Host "  OK bastion-core-windows-amd64.exe ($(Get-FileSizeMB $windowsOutput)MB)" -ForegroundColor Green
+    Write-Host "  OK jianmen-windows-amd64.exe ($(Get-FileSizeMB $windowsOutput)MB)" -ForegroundColor Green
 
     $previousGOOS = $env:GOOS
     $previousGOARCH = $env:GOARCH
@@ -90,7 +90,7 @@ try {
 
         Write-Host "[4/6] Building Linux amd64 Lite..." -ForegroundColor Cyan
         $liteOutput = Join-Path $outputDir "jianmen-linux-amd64-lite"
-        go build -o $liteOutput ./cmd/bastion-core/
+        go build -o $liteOutput ./cmd/jianmen/
         if ($LASTEXITCODE -ne 0) { throw "Linux Lite build failed" }
         Write-Host "  OK jianmen-linux-amd64-lite ($(Get-FileSizeMB $liteOutput)MB)" -ForegroundColor Green
 
@@ -103,7 +103,7 @@ try {
 
         Write-Host "[6/6] Building Linux amd64 RDP..." -ForegroundColor Cyan
         $rdpOutput = Join-Path $outputDir "jianmen-linux-amd64-rdp"
-        go build -tags embedded_guacd -o $rdpOutput ./cmd/bastion-core/
+        go build -tags embedded_guacd -o $rdpOutput ./cmd/jianmen/
         if ($LASTEXITCODE -ne 0) { throw "Linux RDP build failed" }
         Write-Host "  OK jianmen-linux-amd64-rdp ($(Get-FileSizeMB $rdpOutput)MB)" -ForegroundColor Green
     } finally {

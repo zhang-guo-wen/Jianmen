@@ -33,7 +33,7 @@ build_archive() {
 
   CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" \
     go build "${build_tags[@]}" -trimpath -ldflags="-s -w" \
-    -o "$package_dir/$executable" ./cmd/bastion-core
+    -o "$package_dir/$executable" ./cmd/jianmen
 
   cp "$ROOT/configs/config.example.json" "$package_dir/config.example.json"
   cp "$ROOT/LICENSE" "$package_dir/LICENSE"

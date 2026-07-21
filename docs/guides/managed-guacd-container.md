@@ -9,7 +9,7 @@ Jianmen 的容器镜像同时包含 Go 服务和 Apache Guacamole `guacd`。Go
 Go 程序在 Windows 中交叉编译，WSL 只负责装配和运行 Linux 容器：
 
 ```text
-Windows build.ps1
+Windows `scripts/build/build.ps1`
     -> dist/jianmen-linux-amd64-lite
     -> 固定版 guacd Linux 运行层
     -> jianmen:guacd-1.6.0
@@ -18,7 +18,7 @@ Windows build.ps1
 先在 Windows PowerShell 中执行：
 
 ```powershell
-.\build.ps1
+.\scripts\build\build.ps1
 ```
 
 Dockerfile 只复制上述 Linux 二进制，不会在 WSL 或 Docker 构建阶段重新下载
@@ -29,7 +29,7 @@ Go/npm 依赖，也不会重复编译前端和后端。
 Docker。容器镜像继续使用 Lite 版，避免重复携带 guacd。
 
 `dist` 不进入版本库，因此每次从干净工作区
-构建镜像前都必须先执行 `build.ps1`；缺少 Linux 产物时 Docker 构建会直接失败，
+构建镜像前都必须先执行 `scripts/build/build.ps1`；缺少 Linux 产物时 Docker 构建会直接失败，
 避免误用旧二进制。
 
 ## 固定版本
@@ -73,7 +73,7 @@ Dockerfile 使用摘要而不是可变标签作为最终运行时基础。Jianme
 回环绑定、监听端口和日志级别参数，避免进程后台化或意外暴露 4822。
 
 两个进程直接共享 `/app/data`，不需要额外录像共享卷。4822 只监听容器
-回环地址，Compose 不会将其发布到宿主机。
+回环地址，容器不会将其发布到宿主机。
 
 ## 生命周期
 
@@ -85,25 +85,19 @@ Dockerfile 使用摘要而不是可变标签作为最终运行时基础。Jianme
 4. `guacd` 意外退出时，将其作为运行时故障处理。
 5. Jianmen 收到停止信号时，停止并回收 `guacd`。
 
-## WSL 装配并启动
+## Windows 本机启动
 
-首次启动前，需要按项目 `README.md` 的容器证书步骤创建外部卷
-`jianmen-certs`。证书文件归属必须为 `10001:10001`，`admin.key` 和
-`database.key` 权限为 `0600`。完成证书准备和 `build.ps1` 后，在 Windows
-PowerShell 中执行：
+Windows 本机统一在仓库根目录执行：
 
 ```powershell
-wsl.exe -d Debian -u root --exec docker compose `
-  -f /mnt/c/02-codespace/Jianmen/deploy/docker/docker-compose.web-rdp.yml `
-  up -d --build
+.\scripts\start.ps1
 ```
 
-检查状态：
+脚本会自动发现 Windows 或 WSL 中的 Docker Engine，构建产物和镜像，准备数据与
+证书目录，并等待 `jianmen` 容器进入 healthy 状态。复用已有镜像重启时执行：
 
 ```powershell
-wsl.exe -d Debian -u root --exec docker compose `
-  -f /mnt/c/02-codespace/Jianmen/deploy/docker/docker-compose.web-rdp.yml `
-  ps
+.\scripts\start.ps1 -SkipBuild
 ```
 
 固定的官方 guacd 1.6.0 镜像使用其上游发布时的 Alpine 运行层。正式发布前

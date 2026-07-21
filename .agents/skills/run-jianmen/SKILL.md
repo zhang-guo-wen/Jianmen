@@ -1,112 +1,83 @@
 ---
 name: run-jianmen
-description: Use when asked to run, launch, start, test, or smoke-test the Jianmen bastion application (backend or frontend)
+description: Use when asked to run, launch, start, restart, test, or smoke-test the Jianmen bastion application
 ---
 
 # Run Jianmen
 
-## Overview
+## Mandatory runtime policy
 
-Jianmen is a bastion/jump server — Go backend (SSH/SFTP gateway, Admin API, DB proxy) + Vue 3 frontend (management UI). This skill covers the full build-and-launch pipeline for local development.
+Jianmen local runtime is container-only. Always run it from the repository root with `start.ps1`.
 
-## Prerequisites
+Never start any of these local processes:
 
-| Tool | Version | Check |
-|------|---------|-------|
-| Go | 1.23+ | `go version` |
-| Node.js | 18+ | `node --version` |
-| npm | 9+ | `npm --version` |
+- `bin/bastion-core.exe`
+- `go run ./cmd/bastion-core`
+- `npm run dev`
+- a standalone Vite process
 
-The backend creates `data/` at runtime (database, host keys, replays). No manual setup needed.
+Do not fall back to native Go/Vite when Docker is unavailable. Report the Docker error instead.
+Windows without `docker.exe` is not sufficient evidence that Docker is unavailable: `start.ps1`
+automatically discovers a Docker Engine inside WSL.
 
-## Quick Start
+If working in a git worktree, do not start the service there. Merge the verified change back to
+the main workspace, then run the main workspace script.
 
-### One-Click (Recommended)
+## Start and restart
+
+Full artifact build, image build, container recreation, and health verification:
 
 ```powershell
 .\start.ps1
 ```
 
-Handles cleanup, config, build, npm install (first time), process startup, and readiness checks. It exits non-zero and prints recent logs when any service fails. Output shows URLs, log paths, PID files, and access token.
-
-### Manual Steps
-
-#### 0. Clean Up Old Instances
+Reuse the existing image and recreate the container:
 
 ```powershell
-Get-Process -Name "bastion-core" -ErrorAction SilentlyContinue | Stop-Process -Force
-Get-Process -Name "node" -ErrorAction SilentlyContinue | Stop-Process -Force
-Start-Sleep -Seconds 1
+.\start.ps1 -SkipBuild
 ```
 
-#### 1. Backend
+Use the certificate-backed HTTPS configuration:
 
 ```powershell
-# Copy config template (first time only)
-if (-not (Test-Path config.local.json)) { Copy-Item config.example.json config.local.json }
-
-# Build and run
-New-Item -ItemType Directory -Force -Path logs,bin | Out-Null
-go build -o bin\bastion-core.exe .\cmd\bastion-core
-$backend = Start-Process -FilePath ".\bin\bastion-core.exe" -ArgumentList "-config", "config.local.json" -RedirectStandardOutput "logs\backend.log" -RedirectStandardError "logs\backend.err.log" -PassThru
-Set-Content logs\backend.pid $backend.Id
+.\start.ps1 -EnableTLS
 ```
 
-#### 2. Frontend
-
-```powershell
-cd web
-if (-not (Test-Path node_modules)) { npm install }
-$frontend = Start-Process -FilePath "npm.cmd" -ArgumentList "run", "dev", "--", "--host", "127.0.0.1", "--strictPort" -RedirectStandardOutput "..\logs\frontend.log" -RedirectStandardError "..\logs\frontend.err.log" -PassThru
-Set-Content ..\logs\frontend.pid $frontend.Id
-```
+The script must exit with an error if neither Windows Docker nor WSL Docker is available. It must
+not start native services. The expected persistent service container name is `jianmen`; local
+startup uses one `docker run` service container and does not use Docker Compose.
 
 ## Verification
 
-| Check | Command |
-|-------|---------|
-| Admin API (curl) | `curl -s --noproxy '*' http://127.0.0.1:47100/api/health` |
-| Admin API with auth | `curl -s --noproxy '*' -H "Authorization: Bearer dev-admin-token" http://127.0.0.1:47100/api/hosts` |
-| Web UI (PowerShell) | `(Invoke-WebRequest 'http://127.0.0.1:47101/' -UseBasicParsing).StatusCode` |
-| Frontend proxy to backend | `(Invoke-WebRequest 'http://127.0.0.1:47101/api/hosts' -UseBasicParsing -Headers @{'Authorization'='Bearer dev-admin-token'}).Content` |
-| SSH gateway | `ssh -p 47102 admin@127.0.0.1` (password: `admin`) |
-
-**Proxy note:** If a system-wide `http_proxy` is set (e.g. `127.0.0.1:7890`), curl routes localhost traffic through it and gets 502. Use `--noproxy '*'` or PowerShell `Invoke-WebRequest` as fallback.
-
-## Port Reference
-
-| Service | Bind Address | Config Key |
-|---------|-------------|-------------|
-| Admin API | `127.0.0.1:47100` (IPv4) | `admin.listen_addr` |
-| Vue dev server | `127.0.0.1:47101` (IPv4) | Vite config `server.host` + `server.port` |
-| SSH/SFTP gateway | `0.0.0.0:47102` | `listen_addr` |
-
-The Vue dev server proxies `/api` requests to the Admin API (default `http://localhost:47100`), configured in `web/vite.config.ts`.
-
-## Common Issues
-
-| Symptom | Cause | Fix |
-|---------|-------|-----|
-| `config.local.json` not found | First run, config not copied | Copy `config.example.json` → `config.local.json` |
-| Port 47100/47101/47102/33060 in use | Previous instance still running | Run `./start.ps1`; it cleans PID files and fixed ports before restart |
-| Script exits with `Startup failed` | A readiness check failed | Read the log tail printed by the script, then inspect `logs/backend.err.log`, `logs/backend.log`, `logs/frontend.err.log`, `logs/frontend.log` |
-| Backend starts but curl returns empty/502 | System `http_proxy` env var routing localhost through external proxy | Use `--noproxy '*'` with curl, or PowerShell `Invoke-WebRequest` |
-
-| Frontend API calls fail | Backend not running | Start backend before frontend |
-| `go build` fails | Missing Go dependencies | Run `go mod download` |
-| `npm run dev` fails | `node_modules` missing or stale | `cd web` then run `npm install` |
-
-## Driving the App
-
-After launch, drive it to confirm it works:
+Run these checks after startup:
 
 ```powershell
-# Smoke test: Admin API with auth token
-(Invoke-WebRequest 'http://127.0.0.1:47100/api/hosts' -UseBasicParsing -Headers @{Authorization='Bearer dev-admin-token'}).Content
-
-# Verify frontend serves HTML
-(Invoke-WebRequest 'http://127.0.0.1:47101/' -UseBasicParsing).StatusCode
-
-# Verify frontend proxies /api to backend
-(Invoke-WebRequest 'http://127.0.0.1:47101/api/hosts' -UseBasicParsing -Headers @{Authorization='Bearer dev-admin-token'}).Content
+wsl.exe -d Debian -e docker ps --filter 'name=^/jianmen$'
+(Invoke-WebRequest 'http://127.0.0.1:47100/api/init/status' -UseBasicParsing).StatusCode
+Get-CimInstance Win32_Process |
+  Where-Object {
+    $_.Name -in @('bastion-core.exe', 'node.exe') -and
+    $_.CommandLine -like '*Jianmen*'
+  }
 ```
+
+Expected results:
+
+- container `jianmen` is `healthy`;
+- the init-status request returns HTTP 200;
+- no Jianmen native backend or Vite process is present;
+- port `47101` is unused because the frontend is embedded in the Go binary.
+
+If localhost access fails while the container is healthy, check whether a native process had
+occupied the ports when WSL started. Stop that process, restart WSL if its localhost forwarding
+did not recover, then rerun `.\start.ps1 -SkipBuild`.
+
+## Diagnostics
+
+```powershell
+wsl.exe -d Debian -e docker logs --tail 120 jianmen
+wsl.exe -d Debian -e docker inspect jianmen --format '{{json .State.Health}}'
+```
+
+When a system-wide HTTP proxy interferes with localhost checks, use PowerShell
+`Invoke-WebRequest`, or use `curl --noproxy '*'`.

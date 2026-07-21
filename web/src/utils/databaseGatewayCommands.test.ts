@@ -515,8 +515,28 @@ test('quick database cards copy temporary connection credentials with an in-flig
   assert.doesNotMatch(source, /Redis 暂不支持复制临时连接凭据/);
   assert.match(
     source,
+    /dbConnectionStates\[key\]\s*=\s*\{[\s\S]*?loading:\s*true[\s\S]*?\};\s*const state = dbConnectionStates\[key\];/,
+  );
+  assert.match(source, /finally\s*\{[\s\S]*?state\.loading\s*=\s*false/);
+  assert.match(
+    source,
     /\.database-card__actions\s*\{[\s\S]*grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\)/,
   );
+});
+
+test('quick database Web action opens the SQL console without invoking the local client flow', () => {
+  const source = readFileSync(new URL('../views/QuickConnectView.vue', import.meta.url), 'utf8');
+  assert.match(source, /@click="openDatabaseWeb\(account\)"/);
+  const start = source.indexOf('function openDatabaseWeb');
+  const end = source.indexOf('async function openDatabaseClient', start);
+  const webActionSource = source.slice(start, end);
+
+  assert.ok(start >= 0 && end > start);
+  assert.match(webActionSource, /path:\s*'\/sql-console'/);
+  assert.match(webActionSource, /database_account_id:\s*String\(account\.id\)/);
+  assert.doesNotMatch(webActionSource, /ensureDatabaseConnectionInfo|buildDatabaseProtocolURL|window\.location/);
+  assert.match(source, /Redis 暂不支持 Web SQL 控制台/);
+  assert.match(source, /当前账号没有在线 SQL 执行权限/);
 });
 
 test('quick-connect client buttons redirect to settings only when local configuration is missing', () => {

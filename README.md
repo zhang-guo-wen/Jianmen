@@ -87,8 +87,8 @@ Web RDP 的默认容器部署把 Jianmen Go 程序和固定版本的 `guacd` 放
 ### Docker 部署
 
 Windows 本地开发和重启统一通过容器启动脚本完成。脚本会停止旧的本机 Go/Vite
-进程，构建前端与 Linux 二进制，准备本地证书卷，随后重建并验证 Compose 容器。
-本地启动覆盖文件会把现有 `data/` 挂载到容器，切换运行方式时不会创建一套空数据：
+进程，构建前端与 Linux 二进制和镜像，随后用一个 `docker run` 命令重建并验证
+`jianmen` 容器。现有 `data/` 直接挂载到容器，切换运行方式时不会创建一套空数据：
 
 ```powershell
 .\start.ps1
@@ -99,8 +99,8 @@ Windows 本地开发和重启统一通过容器启动脚本完成。脚本会停
 `.\start.ps1 -SkipBuild`，需要使用证书版 HTTPS 配置时执行
 `.\start.ps1 -EnableTLS`。容器模式不再启动 `47101` 端口的 Vite 开发服务。
 
-默认 Docker 流程由 Windows 交叉编译 Linux amd64 程序，再由 WSL Docker
-装配单镜像。必须先在仓库根目录的 Windows PowerShell 中执行：
+默认 Docker 流程由 Windows 交叉编译 Linux amd64 程序，再由 Docker 装配单镜像。
+`start.ps1` 会自动完成完整流程；如需手工构建产物，可在仓库根目录执行：
 
 ```powershell
 .\build.ps1
@@ -112,53 +112,27 @@ Windows 本地开发和重启统一通过容器启动脚本完成。脚本会停
 `guacamole/guacd:1.6.0@sha256:8974eaa9ba32f713daf311e7cc8cd7e4cdfba1edea39eed75524e78ef4b08f4f`
 运行层中。
 
-默认容器配置要求管理端使用 TLS；缺少 `/app/certs/admin.crt` 或
-`/app/certs/admin.key` 时会安全退出，不会自动降级为明文 HTTP。首次本机评估可先在
-WSL Docker 数据卷中生成一套临时自签名证书。`jianmen-certs` 是 Compose 的
-外部卷，因此必须在启动前准备：
+启动脚本实际使用的服务启动命令等价于：
 
 ```bash
-docker volume create jianmen-certs
-docker run --rm --user 0 \
-  -v jianmen-certs:/certs \
-  alpine:3.23 sh -c \
-  'apk add --no-cache openssl &&
-   openssl req -x509 -newkey rsa:3072 -nodes -days 30 \
-     -keyout /certs/admin.key -out /certs/admin.crt \
-     -subj "/CN=localhost" \
-     -addext "subjectAltName=DNS:localhost,IP:127.0.0.1" &&
-   openssl req -x509 -newkey rsa:3072 -nodes -days 30 \
-     -keyout /tmp/database-ca.key -out /certs/database-ca.crt \
-     -subj "/CN=Jianmen local database CA" \
-     -addext "basicConstraints=critical,CA:TRUE" \
-     -addext "keyUsage=critical,keyCertSign,cRLSign" &&
-   openssl req -new -newkey rsa:3072 -nodes \
-     -keyout /certs/database.key -out /tmp/database.csr \
-     -subj "/CN=localhost" &&
-   printf "%s\n" \
-     "basicConstraints=critical,CA:FALSE" \
-     "keyUsage=critical,digitalSignature,keyEncipherment" \
-     "extendedKeyUsage=serverAuth" \
-     "subjectAltName=DNS:localhost,IP:127.0.0.1" >/tmp/database.ext &&
-   openssl x509 -req -in /tmp/database.csr \
-     -CA /certs/database-ca.crt -CAkey /tmp/database-ca.key -CAcreateserial \
-     -out /certs/database.crt -days 30 -sha256 -extfile /tmp/database.ext &&
-   rm -f /certs/database-ca.srl /tmp/database-ca.key /tmp/database.csr /tmp/database.ext &&
-   chown 10001:10001 /certs/admin.key /certs/admin.crt /certs/database.key /certs/database.crt /certs/database-ca.crt &&
-   chmod 600 /certs/admin.key /certs/database.key &&
-   chmod 644 /certs/admin.crt /certs/database.crt /certs/database-ca.crt'
+docker run -d \
+  --name jianmen \
+  --restart unless-stopped \
+  --platform linux/amd64 \
+  -p 127.0.0.1:47100:47100 \
+  -p 47102:47102 \
+  -p 33060:33060 \
+  -p 47110-47199:47110-47199 \
+  -v "$PWD/data:/app/data" \
+  -v "$PWD/data/certs:/app/certs" \
+  -v "$PWD/config.docker.local.json:/app/config.json:ro" \
+  jianmen:guacd-1.6.0
 ```
 
-完成交叉编译和证书准备后，在 WSL 的仓库根目录启动 Compose：
-
-```bash
-docker compose -f docker-compose.web-rdp.yml up -d --build
-```
-
-Compose 运行时只有一个 `jianmen` 服务容器；一次性的 `volume-init` 只负责初始化
-数据卷权限，完成后退出。Jianmen 和 `guacd` 在 `jianmen` 容器中以 UID/GID
-`10001` 运行，共享 `/app/data/rdp-spool` 和 `/app/data/rdp-drive`。管理端仍只
-映射到宿主机回环地址，`guacd` 的 4822 端口不发布到宿主机。
+镜像入口会在同一个服务容器内初始化数据目录和本地证书，不再创建一次性的
+`volume-init` 容器。默认管理页面仍使用 HTTP；证书只供数据库入口的可选 TLS 和
+显式启用 `-EnableTLS` 时使用。管理端只映射到宿主机回环地址，`guacd` 的 4822
+端口不发布到宿主机。
 
 默认端口：
 

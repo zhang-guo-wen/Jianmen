@@ -9,17 +9,17 @@ LABEL org.opencontainers.image.licenses="MIT"
 
 USER root
 
-RUN addgroup -S -g 10001 jianmen \
+RUN apk add --no-cache openssl su-exec \
+    && addgroup -S -g 10001 jianmen \
     && adduser -S -D -H -u 10001 -G jianmen jianmen \
-    && mkdir -p /app/data /app/data/rdp-spool /app/data/rdp-drive \
+    && mkdir -p /app/data /app/data/rdp-spool /app/data/rdp-drive /app/certs \
     && chown -R jianmen:jianmen /app
 
 WORKDIR /app
 
 COPY --chown=jianmen:jianmen --chmod=0555 dist/bastion-core-linux-amd64 /app/jianmen
 COPY --chown=jianmen:jianmen --chmod=0444 config.docker.web-rdp.example.json /app/config.json
-
-USER jianmen
+COPY --chmod=0555 docker-entrypoint.sh /usr/local/bin/jianmen-entrypoint
 
 VOLUME ["/app/data"]
 
@@ -32,5 +32,5 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
 
 STOPSIGNAL SIGTERM
 
-ENTRYPOINT ["/app/jianmen"]
-CMD ["-config", "/app/config.json"]
+ENTRYPOINT ["/usr/local/bin/jianmen-entrypoint"]
+CMD ["/app/jianmen", "-config", "/app/config.json"]

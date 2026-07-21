@@ -118,7 +118,7 @@
             <el-form-item label="启用 TLS">
               <el-select v-model="instanceForm.tlsMode" @change="onTLSModeChange">
                 <el-option label="不启用（默认）" value="disable" />
-                <el-option label="验证证书和主机名（最安全）" value="verify-full" />
+                <el-option label="验证证书和主机名（远程需启用 TLS，推荐）" value="verify-full" />
                 <el-option label="仅验证证书" value="verify-ca" />
               </el-select>
               <div class="tls-mode-help">{{ tlsModeDescription(instanceForm.tlsMode) }}</div>
@@ -471,8 +471,8 @@ function normalizeTLSMode(value: unknown): api.DatabaseTLSMode {
 function tlsModeDescription(value: api.DatabaseTLSMode): string {
   switch (value) {
     case 'disable': return 'Jianmen 到实际数据库不加密；适用于未启用 TLS 的数据库或可信内网。'
-    case 'verify-ca': return '加密并验证 CA，但不校验主机名；安全性低于 verify-full。'
-    default: return '加密并验证 CA 与主机名，可防止中间人攻击，推荐使用。'
+    case 'verify-ca': return '要求远程数据库已启用 SSL/TLS。Jianmen 将加密连接并验证 CA，但不校验主机名；安全性低于验证证书和主机名。'
+    default: return '要求远程数据库已启用 SSL/TLS。Jianmen 将加密连接并验证 CA 与主机名，可防止中间人攻击；远程未启用 TLS 时连接将失败。'
   }
 }
 

@@ -561,6 +561,9 @@ test('database and quick-connect loaders keep request snapshots isolated', () =>
 
 test('database TLS mode preserves hidden inputs and clears persisted CA only on submit', () => {
   const source = readFileSync(new URL('../views/DatabaseView.vue', import.meta.url), 'utf8');
+  assert.match(source, /验证证书和主机名（远程需启用 TLS，推荐）/);
+  assert.match(source, /要求远程数据库已启用 SSL\/TLS。Jianmen 将加密连接并验证 CA，但不校验主机名/);
+  assert.match(source, /要求远程数据库已启用 SSL\/TLS。Jianmen 将加密连接并验证 CA 与主机名[\s\S]*远程未启用 TLS 时连接将失败/);
   const changeStart = source.indexOf('async function onTLSModeChange');
   const changeEnd = source.indexOf('function chooseTLSCAFile', changeStart);
   const changeSource = source.slice(changeStart, changeEnd);

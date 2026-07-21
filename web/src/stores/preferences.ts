@@ -5,15 +5,16 @@ import { apiClient, type UserPreferences, type UserPreferencesUpdate } from '@/a
 import { isAbsoluteExecutablePath } from '@/config/sshClients';
 import { isValidDatabaseClientCAFilePath, isValidDatabaseClientExecutablePath } from '@/config/databaseClients';
 
-/** 浏览器本地缓存 key，统一存储外观和客户端配置 */
+/** 浏览器本地缓存 key，保存用户确认后加载的完整配置。 */
 const CLIENT_CACHE_KEY = 'jianmen_client_config';
+const SSH_PROTOCOL_REGISTRATION_KEY = 'jianmen_ssh_protocol_registered';
 
 const defaults: UserPreferences = {
   theme: 'light',
   ssh_client: '',
   ssh_client_path: '',
   ssh_client_platform: 'windows',
-  db_client: '',
+  db_client: 'dbeaver',
   db_client_platform: 'windows',
   db_client_path: '',
   db_client_ca_file_path: '',
@@ -36,6 +37,10 @@ function cachedAppearance(): Partial<UserPreferences> {
   } catch {
     return {};
   }
+}
+
+function readSSHProtocolRegistered(): boolean {
+  return localStorage.getItem(SSH_PROTOCOL_REGISTRATION_KEY) === 'true';
 }
 
 function cachedClientConfig(): Partial<UserPreferences> {
@@ -62,6 +67,7 @@ export const usePreferencesStore = defineStore('preferences', () => {
   const loading = ref(false);
   const saving = ref(false);
   const error = ref('');
+  const sshProtocolRegistered = ref(readSSHProtocolRegistered());
   let mediaQuery: MediaQueryList | null = null;
 
   const hasSSHClient = computed(() => value.value.ssh_client === 'default' || Boolean(value.value.ssh_client && isAbsoluteExecutablePath(value.value.ssh_client_path)));
@@ -82,7 +88,7 @@ export const usePreferencesStore = defineStore('preferences', () => {
     return theme === 'dark' || (theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
   }
 
-  /** 将全部配置写入浏览器缓存 */
+  /** 将数据库中的完整配置写入当前浏览器缓存。 */
   function persistClientConfig() {
     localStorage.setItem(CLIENT_CACHE_KEY, JSON.stringify(value.value));
   }
@@ -115,9 +121,12 @@ export const usePreferencesStore = defineStore('preferences', () => {
     loading.value = true;
     error.value = '';
     try {
-      const server = { ...defaults, ...(await apiClient.getMyPreferences()) };
-      // 外观优先本地缓存，客户端配置以后端为准
-      value.value = { ...server, ...cachedAppearance() };
+      const response = await apiClient.getMyPreferences();
+      const server = { ...defaults, ...response, db_client: response.db_client || defaults.db_client };
+      value.value = {
+        ...server,
+        ...cachedAppearance(),
+      };
       loaded.value = true;
       persistAppearance();
       apply();
@@ -135,9 +144,9 @@ export const usePreferencesStore = defineStore('preferences', () => {
     saving.value = true;
     error.value = '';
     try {
-      value.value = { ...defaults, ...(await apiClient.updateMyPreferences(patch)) };
+      const server = await apiClient.updateMyPreferences(patch);
+      value.value = { ...defaults, ...server, db_client: server.db_client || defaults.db_client };
       loaded.value = true;
-      persistClientConfig();
       apply();
       return value.value;
     } catch (err) {
@@ -148,13 +157,18 @@ export const usePreferencesStore = defineStore('preferences', () => {
     }
   }
 
-  /** 从后端加载配置并写入浏览器缓存（换新浏览器时使用） */
+  /** 用户确认已执行协议注册命令后，才将数据库配置加载到浏览器。 */
   async function loadToBrowser() {
     loading.value = true;
     error.value = '';
     try {
-      const server = await apiClient.getMyPreferences();
-      value.value = { ...defaults, ...server, ...cachedAppearance() };
+      const response = await apiClient.getMyPreferences();
+      value.value = {
+        ...defaults,
+        ...response,
+        db_client: response.db_client || defaults.db_client,
+        ...cachedAppearance(),
+      };
       loaded.value = true;
       persistClientConfig();
       apply();
@@ -167,8 +181,14 @@ export const usePreferencesStore = defineStore('preferences', () => {
     }
   }
 
+  function markSSHProtocolRegistered(registered: boolean) {
+    sshProtocolRegistered.value = registered;
+    localStorage.setItem(SSH_PROTOCOL_REGISTRATION_KEY, String(registered));
+  }
+
   function reset() {
     localStorage.removeItem(CLIENT_CACHE_KEY);
+    localStorage.removeItem(SSH_PROTOCOL_REGISTRATION_KEY);
     value.value = { ...defaults };
     loaded.value = false;
     loading.value = false;
@@ -177,5 +197,5 @@ export const usePreferencesStore = defineStore('preferences', () => {
     apply();
   }
 
-  return { value, loaded, loading, saving, error, hasSSHClient, hasDBClient, fetch, update, loadToBrowser, apply, reset };
+  return { value, loaded, loading, saving, error, sshProtocolRegistered, hasSSHClient, hasDBClient, fetch, update, loadToBrowser, markSSHProtocolRegistered, apply, reset };
 });

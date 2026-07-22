@@ -317,6 +317,7 @@ export interface SessionRecord {
   failure_message?: string;
   recording_status?: string;
   log_count?: number;
+  session_id?: string;
   [key: string]: unknown;
 }
 

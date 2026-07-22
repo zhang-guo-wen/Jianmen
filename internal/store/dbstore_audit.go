@@ -175,6 +175,7 @@ func (s *DBStore) ListAuditSessions(
 	if err != nil {
 		return nil, 0, err
 	}
+	sessionIDs := s.auditSessionIDs(ctx, sessions)
 	views := make([]AuditSessionView, len(sessions))
 	for i, sess := range sessions {
 		views[i] = AuditSessionView{
@@ -198,6 +199,7 @@ func (s *DBStore) ListAuditSessions(
 			FailureCode:     sess.FailureCode,
 			FailureMessage:  sess.FailureMessage,
 			RecordingStatus: sess.RecordingStatus,
+			SessionID:       sessionIDs[sess.ID],
 			HasReplay:       sess.ReplayDir != "" || sess.RecordingStatus == model.RecordingStatusReady,
 			LogCount:        logCounts[sess.ID],
 		}
@@ -312,6 +314,37 @@ func (s *DBStore) CreateAuditRDPChannelEvent(ctx context.Context, event *model.A
 type auditLogCountRow struct {
 	AuditSessionID string `gorm:"column:audit_session_id"`
 	Count          int64  `gorm:"column:count"`
+}
+
+// auditSessionIDs 批量查询 user_sessions，获取短 session_id 用于界面展示。
+func (s *DBStore) auditSessionIDs(ctx context.Context, sessions []model.AuditSession) map[string]string {
+	ids := make([]string, 0, len(sessions))
+	for _, sess := range sessions {
+		if sess.UserSessionID != "" {
+			ids = append(ids, sess.UserSessionID)
+		}
+	}
+	if len(ids) == 0 {
+		return map[string]string{}
+	}
+	type row struct {
+		ID        string
+		SessionID string
+	}
+	var rows []row
+	_ = s.db.WithContext(ctx).Model(&model.UserSession{}).
+		Select("id, session_id").Where("id IN ?", ids).Find(&rows)
+	lookup := map[string]string{}
+	for _, r := range rows {
+		lookup[r.ID] = r.SessionID
+	}
+	result := map[string]string{}
+	for _, sess := range sessions {
+		if sid, ok := lookup[sess.UserSessionID]; ok {
+			result[sess.ID] = sid
+		}
+	}
+	return result
 }
 
 func (s *DBStore) auditLogCounts(

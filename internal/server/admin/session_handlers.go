@@ -324,3 +324,10 @@ const (
 	ctxKeyBrowserSession contextKey = "admin_browser_session"
 	ctxKeyAITokenID      contextKey = "ai_token_id"
 )
+
+func aiTokenIDFromRequest(r *http.Request) string {
+	if id, ok := r.Context().Value(ctxKeyAITokenID).(string); ok {
+		return id
+	}
+	return ""
+}

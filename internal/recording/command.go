@@ -112,6 +112,40 @@ func (r *CommandRecorder) ObserveOutput(data []byte) {
 	r.current.Preview += text
 }
 
+// RecordDirect 直接记录一条完整命令，不依赖键盘输入检测。
+// 用于 SSH exec 通道场景，命令通过 exec 请求载荷传递而非终端输入。
+func (r *CommandRecorder) RecordDirect(command string) error {
+	if r == nil {
+		return nil
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	command = strings.TrimSpace(command)
+	if command == "" {
+		return nil
+	}
+	command = r.redactor.Redact("command", command)
+
+	if err := r.flushCurrentLocked(); err != nil {
+		if r.onFatal != nil {
+			r.onFatal(fmt.Errorf("flush pending before direct: %w", err))
+		}
+		return err
+	}
+
+	r.seq++
+	now := time.Now().UTC()
+	r.current = &commandEvent{
+		Seq:        r.seq,
+		OffsetMs:   int64(now.Sub(r.startedAt) / time.Millisecond),
+		Command:    command,
+		Confidence: "exact",
+		StartedAt:  now.UnixMilli(),
+	}
+	return r.flushCurrentLocked()
+}
+
 func (r *CommandRecorder) Close() error {
 	if r == nil {
 		return nil

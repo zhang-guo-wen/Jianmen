@@ -115,6 +115,11 @@ func (s *Session) handleRequest(ctx context.Context, req *ssh.Request) bool {
 		if ok {
 			s.startCopy()
 		}
+		if req.Type == "exec" {
+			if execReq, parsed := parseExecRequest(req.Payload); parsed && s.recorder != nil {
+				s.recorder.RecordCommand(execReq.Command)
+			}
+		}
 		return true
 	case "subsystem":
 		name := parseSubsystemName(req.Payload)

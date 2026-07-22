@@ -27,7 +27,7 @@ func (r adminAuditQueryRepository) ListAuditSessions(ctx context.Context, params
 			ResourceType: item.ResourceType, ResourceID: item.ResourceID, HostID: item.HostID, AccountID: item.AccountID,
 			TargetName: item.TargetName, TargetAddress: item.TargetAddress, AccountName: item.AccountName, AccountUsername: item.AccountUsername,
 			ClientIP: item.ClientIP, StartedAt: item.StartedAt, EndedAt: item.EndedAt, State: item.State, Outcome: item.Outcome,
-			FailureCode: item.FailureCode, FailureMessage: item.FailureMessage, RecordingStatus: item.RecordingStatus, HasReplay: item.HasReplay, LogCount: item.LogCount,
+			FailureCode: item.FailureCode, FailureMessage: item.FailureMessage, RecordingStatus: item.RecordingStatus, HasReplay: item.HasReplay, LogCount: item.LogCount, SessionID: item.SessionID,
 		}
 	}
 	return result, total, nil

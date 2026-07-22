@@ -14,6 +14,9 @@ import (
 	"time"
 
 	"golang.org/x/crypto/ssh"
+
+	"jianmen/internal/model"
+	"jianmen/internal/recording"
 )
 
 type testExecRequest struct {
@@ -154,6 +157,130 @@ func TestSessionForwardsExitSignalAndEOW(t *testing.T) {
 		}
 	}
 }
+
+func TestSessionRecordsExecCommandToRecorder(t *testing.T) {
+	root := t.TempDir()
+
+	// 记录 exec 命令的测试审计 sink
+	type recordedCommand struct {
+		sessionID string
+		command   string
+	}
+	var commands []recordedCommand
+	var mu sync.Mutex
+	sink := &testRecorderAuditSink{onCommand: func(sessionID, command string) {
+		mu.Lock()
+		defer mu.Unlock()
+		commands = append(commands, recordedCommand{sessionID, command})
+	}}
+
+	target := newTargetClient(t, func(t *testing.T, ch ssh.Channel, command string) {
+		t.Helper()
+		if _, err := ch.Write([]byte("output\n")); err != nil {
+			t.Errorf("write stdout: %v", err)
+		}
+		if _, err := ch.SendRequest("exit-status", false, ssh.Marshal(&testExitStatusMsg{Status: 0})); err != nil {
+			t.Errorf("send exit-status: %v", err)
+		}
+	})
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	proxy := newTestSSHClient(t, func(newChannel ssh.NewChannel) {
+		if newChannel.ChannelType() != "session" {
+			_ = newChannel.Reject(ssh.UnknownChannelType, "unsupported channel type")
+			return
+		}
+		ch, reqs, err := newChannel.Accept()
+		if err != nil {
+			t.Errorf("accept proxy channel: %v", err)
+			return
+		}
+		sessionModel := model.Session{
+			ID:              "sess-exec-test",
+			User:            model.User{Username: "test-user"},
+			Target:          "root@127.0.0.1:22",
+			AccountUsername: "root",
+			ClientIP:        "127.0.0.1",
+			Protocol:        "ssh",
+			StartedAt:       time.Now().UTC(),
+		}
+		recorder, err := recording.NewSessionRecorder(
+			root, sessionModel, false, true,
+			&testPassthroughRedactor{}, func(error) {}, nil, sink,
+		)
+		if err != nil {
+			t.Fatalf("new session recorder: %v", err)
+		}
+		defer recorder.Close()
+
+		NewSession(target, ch, reqs, recorder, Access{SSH: true, SFTP: true}, logger).Serve(context.Background())
+	})
+
+	ch, reqs, err := proxy.OpenChannel("session", nil)
+	if err != nil {
+		t.Fatalf("open session channel: %v", err)
+	}
+	defer ch.Close()
+
+	ok, err := ch.SendRequest("exec", true, ssh.Marshal(&testExecRequest{Command: "df -h"}))
+	if err != nil {
+		t.Fatalf("send exec: %v", err)
+	}
+	if !ok {
+		t.Fatal("exec request was rejected")
+	}
+
+	// 读取 exec 输出并等待 channel 关闭
+	var buf bytes.Buffer
+	for {
+		data := make([]byte, 1024)
+		n, readErr := ch.Read(data)
+		if n > 0 {
+			buf.Write(data[:n])
+		}
+		if readErr != nil {
+			break
+		}
+	}
+	// 等待并消费来自 target 的扩展请求
+	for req := range reqs {
+		if req.WantReply {
+			_ = req.Reply(false, nil)
+		}
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(commands) == 0 {
+		t.Fatal("exec command was not recorded to audit sink")
+	}
+	if commands[0].command != "df -h" {
+		t.Fatalf("recorded command = %q, want %q", commands[0].command, "df -h")
+	}
+}
+
+// testRecorderAuditSink 是 recording.AuditSink 的测试桩
+type testRecorderAuditSink struct {
+	onCommand func(sessionID, command string)
+}
+
+func (s *testRecorderAuditSink) WriteCommand(sessionID string, _ time.Time, command string) error {
+	if s.onCommand != nil {
+		s.onCommand(sessionID, command)
+	}
+	return nil
+}
+
+func (s *testRecorderAuditSink) WriteFileEvent(_ string, _ time.Time, _, _ string, _ int64, _ string) error {
+	return nil
+}
+
+func (s *testRecorderAuditSink) UpdateProtocol(_ string, _ string) error { return nil }
+
+// testPassthroughRedactor 是 recording.AuditRedactor 的测试桩
+type testPassthroughRedactor struct{}
+
+func (testPassthroughRedactor) Redact(_ string, value string) string { return value }
 
 func newTargetClient(t *testing.T, run func(*testing.T, ssh.Channel, string)) *ssh.Client {
 	t.Helper()

@@ -281,6 +281,21 @@ func (r *SessionRecorder) RecordInput(data []byte) {
 	}
 }
 
+// RecordCommand 直接记录一条完整命令，用于 SSH exec 通道等场景。
+func (r *SessionRecorder) RecordCommand(command string) {
+	if r == nil || !r.recordCommands || command == "" {
+		return
+	}
+	r.streamMu.Lock()
+	defer r.streamMu.Unlock()
+	if r.isClosed() {
+		return
+	}
+	if err := r.commands.RecordDirect(command); err != nil {
+		r.reportFatal(fmt.Errorf("record exec command: %w", err))
+	}
+}
+
 func (r *SessionRecorder) RecordResize(channelID string, width, height int) {
 	if r == nil {
 		return

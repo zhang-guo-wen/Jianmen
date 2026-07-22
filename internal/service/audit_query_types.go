@@ -62,6 +62,7 @@ type AuditSessionListItem struct {
 	RecordingStatus string `json:"recording_status,omitempty"`
 	HasReplay       bool   `json:"has_replay"`
 	LogCount        int64  `json:"log_count"`
+	SessionID       string `json:"session_id,omitempty"`
 }
 
 type AuditSession struct {

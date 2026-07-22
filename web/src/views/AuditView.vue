@@ -27,9 +27,10 @@
                 {{ sessionAccount(row) }}
               </template>
             </el-table-column>
-            <el-table-column :label="t('audit.column.operator')" min-width="120">
+            <el-table-column :label="t('audit.column.operator')" min-width="150">
               <template #default="{ row }">
                 {{ sessionUser(row) }}
+                <span v-if="row.session_id" style="color: #909399; margin-left:2px">({{ row.session_id }})</span>
               </template>
             </el-table-column>
             <el-table-column :label="t('audit.column.protocol')" width="90">

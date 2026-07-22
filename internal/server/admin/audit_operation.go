@@ -80,14 +80,19 @@ func (s *Server) withOperationAudit(next http.HandlerFunc) http.HandlerFunc {
 func (s *Server) recordOperationIntent(r *http.Request) (string, error) {
 	event := s.newOperationAuditEvent(r)
 	event.ID = model.NewID()
-	detail, err := json.Marshal(map[string]any{
+	aiTokenID := aiTokenIDFromRequest(r)
+	detailMap := map[string]any{
 		"method":     r.Method,
 		"path":       r.URL.Path,
 		"phase":      "intent",
 		"result":     "pending",
 		"request_id": apiresp.RequestID(r.Context()),
 		"user_agent": r.UserAgent(),
-	})
+	}
+	if aiTokenID != "" {
+		detailMap["ai_token_id"] = aiTokenID
+	}
+	detail, err := json.Marshal(detailMap)
 	if err != nil {
 		return "", err
 	}
@@ -104,7 +109,8 @@ func (s *Server) recordOperation(r *http.Request, status int) {
 
 func (s *Server) recordOperationResult(r *http.Request, status int, intentID string) {
 	event := s.newOperationAuditEvent(r)
-	detail, err := json.Marshal(map[string]any{
+	aiTokenID := aiTokenIDFromRequest(r)
+	detailMap := map[string]any{
 		"method":     r.Method,
 		"path":       r.URL.Path,
 		"phase":      "result",
@@ -113,7 +119,11 @@ func (s *Server) recordOperationResult(r *http.Request, status int, intentID str
 		"intent_id":  intentID,
 		"request_id": apiresp.RequestID(r.Context()),
 		"user_agent": r.UserAgent(),
-	})
+	}
+	if aiTokenID != "" {
+		detailMap["ai_token_id"] = aiTokenID
+	}
+	detail, err := json.Marshal(detailMap)
 	if err == nil {
 		event.Detail = string(detail)
 	}

@@ -22,6 +22,10 @@ type subsystemRequest struct {
 	Name string
 }
 
+type execRequest struct {
+	Command string
+}
+
 func parsePtyRequest(payload []byte) (ptyRequest, bool) {
 	var req ptyRequest
 	if err := ssh.Unmarshal(payload, &req); err != nil {
@@ -44,4 +48,12 @@ func parseSubsystemName(payload []byte) string {
 		return ""
 	}
 	return req.Name
+}
+
+func parseExecRequest(payload []byte) (execRequest, bool) {
+	var req execRequest
+	if err := ssh.Unmarshal(payload, &req); err != nil {
+		return execRequest{}, false
+	}
+	return req, true
 }

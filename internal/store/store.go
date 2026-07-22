@@ -382,6 +382,7 @@ type AuditSessionView struct {
 	RecordingStatus string `json:"recording_status,omitempty"`
 	HasReplay       bool   `json:"has_replay"`
 	LogCount        int64  `json:"log_count"`
+	SessionID       string `json:"session_id,omitempty"`
 }
 
 // AuditEventListParams controls operation audit log filtering and pagination.

@@ -23,6 +23,13 @@
           {{ filtersExpanded ? '收起' : '更多' }}
         </el-button>
       </div>
+      <div class="quick-filter-bar quick-status-bar">
+        <div class="quick-filter-options">
+          <el-button size="small" :type="statusFilter === 'running' ? 'primary' : undefined" @click="setStatusFilter('running')">运行中</el-button>
+          <el-button size="small" :type="statusFilter === 'stopped' ? 'primary' : undefined" @click="setStatusFilter('stopped')">已停止</el-button>
+          <el-button size="small" :type="statusFilter === 'all' ? 'primary' : undefined" @click="setStatusFilter('all')">全部</el-button>
+        </div>
+      </div>
       <div class="page-card__spacer"></div>
       <div class="page-card__actions container-toolbar__actions">
         <el-button :icon="Sort" @click="toggleSort">容器名称 {{ sortDirection === 'asc' ? 'A-Z' : 'Z-A' }}</el-button>
@@ -137,6 +144,7 @@ const { t } = useI18n();
 const searchInput = ref('');
 const keyword = ref('');
 const groupFilter = ref('all');
+const statusFilter = ref('running');
 const filtersExpanded = ref(false);
 const sortDirection = ref<'asc' | 'desc'>('asc');
 const page = ref(1);
@@ -211,6 +219,8 @@ const filteredCards = computed(() => {
   const query = keyword.value.trim().toLowerCase();
   let items = containerCards.value.filter(card => {
     if (groupFilter.value !== 'all' && hostGroup(card) !== groupFilter.value) return false;
+    if (statusFilter.value === 'running' && card.container.state !== 'running') return false;
+    if (statusFilter.value === 'stopped' && !['exited', 'stopped', 'dead', 'removing', 'paused', 'created'].includes(card.container.state ?? '')) return false;
     if (!query) return true;
     return [containerName(card), hostName(card), hostAddress(card), hostGroup(card), hostRemark(card), card.container.image, card.container.state, card.container.status]
       .some(value => String(value || '').toLowerCase().includes(query));
@@ -236,6 +246,11 @@ const filteredLogs = computed(() => {
 
 function setGroupFilter(value: string) {
   groupFilter.value = value;
+  page.value = 1;
+}
+
+function setStatusFilter(value: string) {
+  statusFilter.value = value;
   page.value = 1;
 }
 
@@ -454,7 +469,7 @@ watch(searchInput, value => {
   }, 180);
 });
 
-watch([groupFilter, sortDirection, pageSize], () => { page.value = 1; });
+watch([groupFilter, statusFilter, sortDirection, pageSize], () => { page.value = 1; });
 watch(() => filteredCards.value.length, total => {
   const maxPage = Math.max(1, Math.ceil(total / pageSize.value));
   if (page.value > maxPage) page.value = maxPage;

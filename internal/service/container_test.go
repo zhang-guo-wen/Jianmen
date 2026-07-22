@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/binary"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -30,7 +31,12 @@ func TestContainerServiceDockerAPI(t *testing.T) {
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`[{"Id":"abc123","Names":["/api"],"Image":"nginx:latest","State":"running","Status":"Up 1 minute","Ports":[]}]`))
 		case "/containers/abc123/logs":
-			_, _ = w.Write([]byte("2026-07-17T00:00:00Z ready"))
+			logLine := []byte("2026-07-17T00:00:00Z ready")
+			frame := make([]byte, 8+len(logLine))
+			frame[0] = 1 // stdout
+			binary.BigEndian.PutUint32(frame[4:8], uint32(len(logLine)))
+			copy(frame[8:], logLine)
+			_, _ = w.Write(frame)
 		default:
 			http.NotFound(w, r)
 		}

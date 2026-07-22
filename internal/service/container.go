@@ -138,7 +138,10 @@ func (s *ContainerService) Logs(ctx context.Context, endpoint ContainerEndpointC
 	if endpoint.ConnectionMode == model.ContainerConnectionDockerAPI {
 		path := "/containers/" + url.PathEscape(id) + "/logs?stdout=1&stderr=1&timestamps=1&tail=" + strconv.Itoa(tail)
 		body, err := s.dockerRequest(ctx, endpoint, "GET", path, nil)
-		return string(body), err
+		if err != nil {
+			return "", err
+		}
+		return demuxDockerLogs(body), nil
 	}
 	command := "docker logs --tail " + strconv.Itoa(tail) + " " + shellQuote(id)
 	if endpoint.Runtime == model.ContainerRuntimeContainerd {

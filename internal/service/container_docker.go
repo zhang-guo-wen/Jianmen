@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -217,4 +218,31 @@ func safeContainerID(value string) bool {
 
 func shellQuote(value string) string {
 	return "'" + strings.ReplaceAll(value, "'", "'\\''") + "'"
+}
+
+// demuxDockerLogs 解析 Docker 多路复用日志流格式，移除二进制帧头，提取纯文本日志。
+//
+// Docker Engine API 的 /containers/{id}/logs 端点返回二进制流格式，每帧结构：
+//
+//	header: [stream_type:1byte][0x00 0x00 0x00][frame_size:4bytes 大端序]
+//	payload: [size 字节的日志文本]
+//
+// 该函数逐帧读取头部、剥离控制字节，仅保留日志正文。
+func demuxDockerLogs(data []byte) string {
+	if len(data) < 8 {
+		return ""
+	}
+	var out strings.Builder
+	out.Grow(len(data))
+	for len(data) >= 8 {
+		size := binary.BigEndian.Uint32(data[4:8])
+		data = data[8:]
+		if int(size) > len(data) {
+			out.Write(data)
+			break
+		}
+		out.Write(data[:size])
+		data = data[size:]
+	}
+	return out.String()
 }

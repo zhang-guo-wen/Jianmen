@@ -2265,14 +2265,14 @@ onBeforeUnmount(() => {
   position: relative;
   flex: 1;
   min-height: 200px;
-  overflow: hidden;
+  overflow: auto;
   background: #0b1220;
   border-radius: 8px;
 }
 
 .replay-terminal {
-  position: absolute;
-  inset: 0;
+  min-width: 100%;
+  height: 100%;
 }
 
 /* let xterm control its own dimensions based on cols/rows */
@@ -2296,9 +2296,7 @@ onBeforeUnmount(() => {
   border-radius: 3px;
 }
 
-.replay-terminal :deep(.xterm-screen) {
-  max-width: 100%;
-}
+/* 不限制 xterm-screen 宽度，让它按 cols 自然渲染，终端壳层处理横向滚动 */
 
 .replay-terminal-empty {
   position: absolute;

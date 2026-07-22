@@ -99,7 +99,19 @@ func (s *DBStore) ManagedContainerEndpoint(ctx context.Context, id string) (serv
 }
 
 func (s *DBStore) CreateManagedContainerEndpoint(ctx context.Context, input service.ContainerEndpointRequest, creatorID string) (service.ContainerEndpoint, error) {
-	normalized, err := normalizeContainerEndpointInput(containerInputFromManaged(input))
+	storeInput := containerInputFromManaged(input)
+	// 当用户未指定名称且非 Docker API 模式时，根据主机信息生成默认名称
+	if strings.TrimSpace(storeInput.Name) == "" && strings.TrimSpace(storeInput.Address) == "" && storeInput.HostID != "" {
+		var host model.Host
+		if err := s.db.WithContext(ctx).First(&host, "id = ?", storeInput.HostID).Error; err == nil {
+			if host.Name != "" {
+				storeInput.Name = host.Name
+			} else if host.Address != "" {
+				storeInput.Name = fmt.Sprintf("%s:%d", host.Address, host.Port)
+			}
+		}
+	}
+	normalized, err := normalizeContainerEndpointInput(storeInput)
 	if err != nil {
 		return service.ContainerEndpoint{}, err
 	}
@@ -390,7 +402,8 @@ func normalizeContainerEndpointInput(input ContainerEndpointInput) (ContainerEnd
 	if input.Name == "" {
 		input.Name = input.Address
 		if input.Name == "" {
-			input.Name = "SSH container"
+			// SSH/containerd 模式且未关联主机时的兜底名称
+			input.Name = "容器连接"
 		}
 	}
 	if input.ID == "" {

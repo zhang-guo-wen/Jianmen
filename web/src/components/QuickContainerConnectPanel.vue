@@ -97,7 +97,7 @@
     class="container-log-drawer"
     title="容器日志"
     direction="rtl"
-    size="min(760px, 94vw)"
+    size="70%"
     append-to-body
     :modal="true"
     :with-header="false"

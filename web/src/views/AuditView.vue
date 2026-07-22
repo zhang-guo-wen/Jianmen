@@ -589,6 +589,7 @@
 
 <script setup lang="ts">
 import { Terminal } from '@xterm/xterm';
+import { FitAddon } from '@xterm/addon-fit';
 import '@xterm/xterm/css/xterm.css';
 import Guacamole from 'guacamole-common-js';
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
@@ -792,6 +793,8 @@ const replayCurrentTime = ref(0);
 const replayRenderedOutput = ref(false);
 const replayTerminalHostRef = ref<HTMLElement>();
 let replayTerminal: Terminal | undefined;
+let replayFitAddon: FitAddon | undefined;
+let replayResizeObserver: ResizeObserver | undefined;
 let replayTimer: number | undefined;
 let replayStartedAt = 0;
 let replayStartOffset = 0;
@@ -901,8 +904,6 @@ const replayOutputFrames = computed(() => replayFrames.value.filter((frame) => f
 const replayDuration = computed(() => replayFrames.value.at(-1)?.time ?? 0);
 const replayRawBytes = computed(() => utf8ByteLength(replayData.value.raw));
 const replayFirstOutputTime = computed(() => replayOutputFrames.value[0]?.time ?? 0);
-const replayTerminalCols = computed(() => replayHeaderNumber('width', 120, 20, 240));
-const replayTerminalRows = computed(() => replayHeaderNumber('height', 24, 8, 60));
 const replayTerminalMessage = computed(() => {
   if (!isReplay.value) {
     return '';
@@ -1828,11 +1829,7 @@ function ensureReplayTerminal(): Terminal | undefined {
   }
 
   if (!replayTerminal) {
-    // Match original session cols/rows so vim/TUI escape sequences align
-    // and content doesn't leave stale lines in rows outside the session height.
     replayTerminal = new Terminal({
-      cols: replayTerminalCols.value,
-      rows: replayTerminalRows.value,
       convertEol: false,
       cursorBlink: false,
       disableStdin: true,
@@ -1847,7 +1844,20 @@ function ensureReplayTerminal(): Terminal | undefined {
         selectionBackground: '#344054'
       }
     });
+    replayFitAddon = new FitAddon();
+    replayTerminal.loadAddon(replayFitAddon);
     replayTerminal.open(host);
+
+    // 自适应容器宽度，让终端内容不截断
+    replayFitAddon.fit();
+
+    // 容器大小变化时重新适配
+    replayResizeObserver = new ResizeObserver(() => {
+      if (replayFitAddon && replayTerminal) {
+        replayFitAddon.fit();
+      }
+    });
+    replayResizeObserver.observe(host);
   }
 
   return replayTerminal;
@@ -1858,16 +1868,12 @@ function resetReplayTerminal() {
 }
 
 function destroyReplayTerminal() {
+  replayResizeObserver?.disconnect();
+  replayResizeObserver = undefined;
+  replayFitAddon?.dispose();
+  replayFitAddon = undefined;
   replayTerminal?.dispose();
   replayTerminal = undefined;
-}
-
-function replayHeaderNumber(key: string, fallback: number, min: number, max: number): number {
-  const value = Number(replayData.value.header[key]);
-  if (!Number.isFinite(value)) {
-    return fallback;
-  }
-  return Math.min(max, Math.max(min, Math.round(value)));
 }
 
 function utf8ByteLength(value: string): number {
@@ -2262,7 +2268,8 @@ onBeforeUnmount(() => {
 }
 
 .replay-terminal-shell {
-  position: relative;
+  display: flex;
+  flex-direction: column;
   flex: 1;
   min-height: 200px;
   overflow: auto;
@@ -2271,8 +2278,9 @@ onBeforeUnmount(() => {
 }
 
 .replay-terminal {
-  min-width: 100%;
-  height: 100%;
+  flex: 1;
+  min-width: fit-content;
+  /* 使用 flex 布局让终端自然填充高度，min-width:fit-content 允许 xterm 超宽时触发父级横向滚动 */
 }
 
 /* let xterm control its own dimensions based on cols/rows */

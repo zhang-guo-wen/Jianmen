@@ -3,6 +3,7 @@ package storage
 import (
 	"errors"
 	"fmt"
+	"io"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -188,4 +189,54 @@ func normalizeDriver(driver Driver) Driver {
 func isMemoryDSN(dsn string) bool {
 	dsn = strings.ToLower(strings.TrimSpace(dsn))
 	return dsn == ":memory:" || strings.Contains(dsn, "mode=memory") || strings.Contains(dsn, "file::memory:")
+}
+
+// IsSQLiteDriver 判断驱动是否为 SQLite（包括空字符串，即默认驱动）。
+func IsSQLiteDriver(driver string) bool {
+	driver = strings.ToLower(strings.TrimSpace(driver))
+	return driver == "" || driver == "sqlite" || driver == "sqlite3"
+}
+
+// BackupSQLite 将 SQLite 数据库文件复制一份 .bak 备份。
+// 如果文件不存在（首次启动）或是内存数据库，则跳过。
+func BackupSQLite(dsn string) error {
+	dsn = strings.TrimSpace(dsn)
+	if dsn == "" {
+		dsn = "data/bastion.db"
+	}
+	if isMemoryDSN(dsn) || strings.HasPrefix(strings.ToLower(dsn), "file:") {
+		return nil // 内存/URI 模式数据库无需文件级备份
+	}
+
+	srcPath := filepath.Clean(dsn)
+	if _, err := os.Stat(srcPath); os.IsNotExist(err) {
+		return nil // 首次启动，数据库文件尚不存在，无需备份
+	}
+
+	src, err := os.Open(srcPath)
+	if err != nil {
+		return fmt.Errorf("备份：打开数据库文件 %q 失败：%w", srcPath, err)
+	}
+	defer src.Close()
+
+	bakPath := srcPath + ".bak"
+	dst, err := os.Create(bakPath)
+	if err != nil {
+		return fmt.Errorf("备份：创建备份文件 %q 失败：%w", bakPath, err)
+	}
+	defer dst.Close()
+
+	if _, err := io.Copy(dst, src); err != nil {
+		return fmt.Errorf("备份：复制到 %q 失败：%w", bakPath, err)
+	}
+	return nil
+}
+
+// BackupPath 返回 SQLite 数据库的 .bak 备份文件路径。
+func BackupPath(dsn string) string {
+	dsn = strings.TrimSpace(dsn)
+	if dsn == "" {
+		dsn = "data/bastion.db"
+	}
+	return filepath.Clean(dsn) + ".bak"
 }

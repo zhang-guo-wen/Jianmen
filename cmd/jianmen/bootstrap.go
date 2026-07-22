@@ -56,6 +56,15 @@ func initializeMetadata(cfg *config.Config, logger *slog.Logger) (*gorm.DB, stri
 		}
 	}
 
+	// SQLite 迁移前自动备份，每次覆盖上一次的 .bak 文件。
+	if storage.IsSQLiteDriver(cfg.Database.Driver) {
+		if err := storage.BackupSQLite(cfg.Database.DSN); err != nil {
+			logger.Warn("数据库迁移前备份失败", "error", err)
+		} else {
+			logger.Info("数据库迁移前已备份", "path", storage.BackupPath(cfg.Database.DSN))
+		}
+	}
+
 	err = storage.Migrate(db)
 	if err != nil {
 		cleanup()

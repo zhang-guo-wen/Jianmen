@@ -158,6 +158,14 @@ func migrateDatabaseProvisioningSaga(tx *gorm.DB) error {
 	if err := tx.AutoMigrate(&databaseProvisioningOperationSchema{}); err != nil {
 		return fmt.Errorf("migrate provisioning operation table: %w", err)
 	}
+	// 在 SQLite 上，AutoMigrate 添加 CHECK 约束时会触发 CreateConstraint →
+	// recreateTable（整表重建）。glebarez/sqlite 的 CreateConstraint 没有包裹
+	// RunWithoutForeignKey，导致 foreign_keys=ON 时 DROP TABLE 可能出问题。
+	// 这里临时关闭外键检查，AutoMigrate 完成后再恢复。
+	pragmaOff := tx.Exec("PRAGMA foreign_keys = OFF").Error == nil
+	if pragmaOff {
+		defer tx.Exec("PRAGMA foreign_keys = ON")
+	}
 	if err := tx.AutoMigrate(&databaseAccountProvisioningSchema{}); err != nil {
 		return fmt.Errorf("migrate managed database account fields: %w", err)
 	}

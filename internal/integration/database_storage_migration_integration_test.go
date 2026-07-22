@@ -25,16 +25,20 @@ import (
 )
 
 const (
-	databaseInstanceTLSMigrationVersion       = "202607180006"
-	databaseAccountUniquenessMigrationVersion = "202607180008"
-	databaseProvisioningSagaMigrationVersion  = "202607180009"
-	auditRetentionCleanupMigrationVersion     = "202607190002"
-	webRDPAuditMigrationVersion               = "202607190003"
-	auditSessionLeaseMigrationVersion         = "202607190004"
-	systemSettingMigrationVersion             = "202607190005"
-	auditDBQueryLargePayloadMigrationVersion  = "202607190006"
-	databaseGatewayModeMigrationVersion       = "202607190007"
-	databaseTLSDefaultMigrationVersion        = "202607190008"
+	databaseInstanceTLSMigrationVersion          = "202607180006"
+	databaseAccountUniquenessMigrationVersion    = "202607180008"
+	databaseProvisioningSagaMigrationVersion     = "202607180009"
+	auditRetentionCleanupMigrationVersion        = "202607190002"
+	webRDPAuditMigrationVersion                  = "202607190003"
+	auditSessionLeaseMigrationVersion            = "202607190004"
+	systemSettingMigrationVersion                = "202607190005"
+	auditDBQueryLargePayloadMigrationVersion     = "202607190006"
+	databaseGatewayModeMigrationVersion          = "202607190007"
+	databaseTLSDefaultMigrationVersion           = "202607190008"
+	sshHostIdentityMigrationVersion              = "202607200001"
+	databaseGatewayClientTLSModeMigrationVersion = "202607200002"
+	userPreferenceClientsMigrationVersion        = "202607210001"
+	removeRDPApprovalMigrationVersion            = "202607210002"
 )
 
 var currentStorageMigrationVersions = []string{
@@ -53,18 +57,22 @@ var currentStorageMigrationVersions = []string{
 	"202607180003",
 	"202607180004",
 	"202607180005",
-	"202607180006",
+	databaseInstanceTLSMigrationVersion,
 	"202607180007",
-	"202607180008",
-	"202607180009",
+	databaseAccountUniquenessMigrationVersion,
+	databaseProvisioningSagaMigrationVersion,
 	"202607190001",
-	"202607190002",
-	"202607190003",
-	"202607190004",
+	auditRetentionCleanupMigrationVersion,
+	webRDPAuditMigrationVersion,
+	auditSessionLeaseMigrationVersion,
 	systemSettingMigrationVersion,
 	auditDBQueryLargePayloadMigrationVersion,
 	databaseGatewayModeMigrationVersion,
 	databaseTLSDefaultMigrationVersion,
+	sshHostIdentityMigrationVersion,
+	databaseGatewayClientTLSModeMigrationVersion,
+	userPreferenceClientsMigrationVersion,
+	removeRDPApprovalMigrationVersion,
 }
 
 type metadataDatabaseCase struct {
@@ -512,26 +520,8 @@ func TestStorageMigrationExpandsDatabaseAuditQueryPayload(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			db := openMetadataDatabase(t, tt)
 
-			// Build the legacy schema by executing historical migrations through
-			// 202607190005. Pre-recording 006/007/008 skips all future
-			// migrations, then manually downgrading 006 keeps only 006 pending.
-			seedAppliedMigrations(
-				t,
-				db,
-				auditDBQueryLargePayloadMigrationVersion,
-				databaseGatewayModeMigrationVersion,
-				databaseTLSDefaultMigrationVersion,
-			)
-			if err := storage.Migrate(db); err != nil {
-				t.Fatalf("build schema from historical migrations through 005: %v", err)
-			}
-			if err := db.Delete(
-				&storage.SchemaMigration{},
-				"version = ?",
-				auditDBQueryLargePayloadMigrationVersion,
-			).Error; err != nil {
-				t.Fatalf("make database audit query payload migration pending: %v", err)
-			}
+			createCurrentSchemaWithOnlyMigrationPending(t, db, auditDBQueryLargePayloadMigrationVersion)
+			seedAllCurrentMigrationsExcept(t, db, auditDBQueryLargePayloadMigrationVersion)
 			assertOtherDatabaseMigrationsApplied(
 				t,
 				db,
@@ -1031,6 +1021,17 @@ func createCurrentSchemaWithOnlyMigrationPending(t *testing.T, db *gorm.DB, pend
 		); err != nil {
 			t.Fatalf("remove migration %s tables from fixture: %v", pendingVersion, err)
 		}
+	case auditDBQueryLargePayloadMigrationVersion:
+		for _, column := range []string{"DatabaseMaxClientMessageBytes"} {
+			if err := db.Migrator().DropColumn(&model.SystemSetting{}, column); err != nil {
+				t.Fatalf("remove migration %s column %s from fixture: %v", pendingVersion, column, err)
+			}
+		}
+		for _, column := range []string{"OriginalSQLBytes", "SQLTruncated"} {
+			if err := db.Migrator().DropColumn(&model.AuditDBQuery{}, column); err != nil {
+				t.Fatalf("remove migration %s column %s from fixture: %v", pendingVersion, column, err)
+			}
+		}
 	default:
 		t.Fatalf("unsupported isolated migration version %s", pendingVersion)
 	}
@@ -1098,16 +1099,20 @@ func seedAppliedMigrations(t *testing.T, db *gorm.DB, versions ...string) {
 		"202607180005":                           "remove reversible AI token secrets",
 		"202607180006":                           "database instance upstream TLS policy",
 		"202607180007":                           "permission logical uniqueness",
-		"202607180008":                           "database account instance username uniqueness",
-		"202607180009":                           "database provisioning saga recovery state",
+		databaseAccountUniquenessMigrationVersion: "database account instance username uniqueness",
+		databaseProvisioningSagaMigrationVersion:  "database provisioning saga recovery state",
 		"202607190001":                           "resource grant logical uniqueness",
-		"202607190002":                           "audit retention cleanup state",
-		"202607190003":                           "web RDP access control and audit schema",
-		"202607190004":                           "audit session lease recovery",
-		systemSettingMigrationVersion:            "system configuration management",
-		auditDBQueryLargePayloadMigrationVersion: "large database proxy client message support",
-		databaseGatewayModeMigrationVersion:      "database gateway mode system setting",
-		databaseTLSDefaultMigrationVersion:       "database instance upstream TLS default",
+		auditRetentionCleanupMigrationVersion:     "audit retention cleanup state",
+		webRDPAuditMigrationVersion:               "web RDP access control and audit schema",
+		auditSessionLeaseMigrationVersion:         "audit session lease recovery",
+		systemSettingMigrationVersion:             "system configuration management",
+		auditDBQueryLargePayloadMigrationVersion:  "large database proxy client message support",
+		databaseGatewayModeMigrationVersion:       "database gateway mode system setting",
+		databaseTLSDefaultMigrationVersion:        "database instance upstream TLS default",
+		sshHostIdentityMigrationVersion:           "SSH host identity",
+		databaseGatewayClientTLSModeMigrationVersion: "database gateway client TLS mode",
+		userPreferenceClientsMigrationVersion:        "user preference local client fields",
+		removeRDPApprovalMigrationVersion:            "remove RDP access approval",
 	}
 	for _, version := range versions {
 		name, ok := names[version]

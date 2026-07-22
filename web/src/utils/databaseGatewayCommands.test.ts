@@ -633,7 +633,8 @@ test('database account status switch has an account-specific accessible label', 
 test('RDP quick connect is click-initiated and never hydrates SSH credentials', () => {
   const source = readFileSync(new URL('../views/QuickConnectView.vue', import.meta.url), 'utf8');
   assert.match(source, /path: isRDPTarget\(target\) \? '\/web-rdp' : '\/web-terminal'/);
-  assert.match(source, /const queue = items\.filter\(target => !isRDPTarget\(target\)\)/);
+  // 连接信息不再预加载，loadTargets() 中不应有 hydrateConnectionInfo 调用
+  assert.doesNotMatch(source, /hydrateConnectionInfo/);
 
   const ensureStart = source.indexOf('function ensureConnectionInfo');
   const ensureEnd = source.indexOf('async function retryConnectionInfo', ensureStart);

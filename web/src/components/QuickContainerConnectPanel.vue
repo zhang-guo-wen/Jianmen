@@ -121,7 +121,7 @@
           <el-button class="container-log-close" circle text :icon="Close" aria-label="关闭日志" @click="logDrawerVisible = false" />
         </div>
       </header>
-      <pre ref="logViewer" v-loading="logsLoading" class="container-log-viewer">{{ filteredLogs || (logSearch ? '没有匹配的日志' : '暂无日志输出') }}</pre>
+      <pre ref="logViewer" class="container-log-viewer">{{ filteredLogs || (logSearch ? '没有匹配的日志' : '暂无日志输出') }}</pre>
     </section>
   </el-drawer>
 </template>

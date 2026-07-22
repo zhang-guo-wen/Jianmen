@@ -104,19 +104,19 @@ func (c *DatabaseGatewayConfig) applyDefaults() {
 		c.ClientTLSMode = DatabaseGatewayClientTLSModeOptional
 	}
 	if strings.TrimSpace(c.Unified.Address) == "" {
-		c.Unified.Address = "127.0.0.1:33060"
+		c.Unified.Address = "0.0.0.0:33060"
 	}
 	if c.Unified.DetectionTimeoutMS == 0 {
 		c.Unified.DetectionTimeoutMS = defaultDatabaseUnifiedDetectionTimeoutMS
 	}
 	if strings.TrimSpace(c.MySQL.Address) == "" {
-		c.MySQL.Address = "127.0.0.1:33061"
+		c.MySQL.Address = "0.0.0.0:33061"
 	}
 	if strings.TrimSpace(c.PostgreSQL.Address) == "" {
-		c.PostgreSQL.Address = "127.0.0.1:33062"
+		c.PostgreSQL.Address = "0.0.0.0:33062"
 	}
 	if strings.TrimSpace(c.Redis.Address) == "" {
-		c.Redis.Address = "127.0.0.1:33063"
+		c.Redis.Address = "0.0.0.0:33063"
 	}
 	if c.MaxClientMessageBytes == 0 {
 		c.MaxClientMessageBytes = DefaultDatabaseGatewayMaxClientMessageBytes

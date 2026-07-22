@@ -431,7 +431,7 @@ func TestDefaultDatabaseGatewayUsesUnifiedLoopbackEntry(t *testing.T) {
 	if !cfg.DatabaseGateway.Unified.Enabled {
 		t.Fatal("default unified database gateway listener is disabled")
 	}
-	if cfg.DatabaseGateway.Unified.Address != "127.0.0.1:33060" ||
+	if cfg.DatabaseGateway.Unified.Address != "0.0.0.0:33060" ||
 		cfg.DatabaseGateway.Unified.DetectionTimeoutMS != 200 {
 		t.Fatalf("default unified listener = %#v", cfg.DatabaseGateway.Unified)
 	}
@@ -449,9 +449,9 @@ func TestDefaultDatabaseGatewayUsesUnifiedLoopbackEntry(t *testing.T) {
 	if !cfg.DatabaseGateway.MySQL.Enabled {
 		t.Fatal("default database gateway must keep the certificate-optional MySQL listener enabled")
 	}
-	if cfg.DatabaseGateway.MySQL.Address != "127.0.0.1:33061" ||
-		cfg.DatabaseGateway.PostgreSQL.Address != "127.0.0.1:33062" ||
-		cfg.DatabaseGateway.Redis.Address != "127.0.0.1:33063" {
+	if cfg.DatabaseGateway.MySQL.Address != "0.0.0.0:33061" ||
+		cfg.DatabaseGateway.PostgreSQL.Address != "0.0.0.0:33062" ||
+		cfg.DatabaseGateway.Redis.Address != "0.0.0.0:33063" {
 		t.Fatalf("default independent listeners = %#v", cfg.DatabaseGateway)
 	}
 	if cfg.DatabaseGateway.PostgreSQL.Enabled || cfg.DatabaseGateway.Redis.Enabled {
@@ -508,7 +508,7 @@ func TestLoadDatabaseGatewayEnabledDefaultsRespectFieldPresence(t *testing.T) {
 			configJSON:    `{}`,
 			wantEnabled:   true,
 			wantMySQL:     true,
-			wantMySQLAddr: "127.0.0.1:33061",
+			wantMySQLAddr: "0.0.0.0:33061",
 			wantUnified:   true,
 		},
 		{
@@ -523,7 +523,7 @@ func TestLoadDatabaseGatewayEnabledDefaultsRespectFieldPresence(t *testing.T) {
 			name:          "explicit false disables gateway and every listener",
 			configJSON:    `{"database_gateway":{"enabled":false}}`,
 			wantEnabled:   false,
-			wantMySQLAddr: "127.0.0.1:33061",
+			wantMySQLAddr: "0.0.0.0:33061",
 		},
 	}
 

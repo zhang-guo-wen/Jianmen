@@ -30,7 +30,7 @@
     "client_tls_mode": "optional",
     "unified": {
       "enabled": true,
-      "listen_addr": "127.0.0.1:33060",
+      "listen_addr": "0.0.0.0:33060",
       "cert_file": "",
       "key_file": "",
       "ca_file": "",
@@ -39,7 +39,7 @@
     },
     "mysql": {
       "enabled": true,
-      "listen_addr": "127.0.0.1:33061",
+      "listen_addr": "0.0.0.0:33061",
       "cert_file": "",
       "key_file": "",
       "ca_file": "",
@@ -47,7 +47,7 @@
     },
     "postgresql": {
       "enabled": true,
-      "listen_addr": "127.0.0.1:33062",
+      "listen_addr": "0.0.0.0:33062",
       "cert_file": "",
       "key_file": "",
       "ca_file": "",
@@ -55,7 +55,7 @@
     },
     "redis": {
       "enabled": true,
-      "listen_addr": "127.0.0.1:33063",
+      "listen_addr": "0.0.0.0:33063",
       "cert_file": "",
       "key_file": "",
       "ca_file": "",

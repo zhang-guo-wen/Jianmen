@@ -457,7 +457,9 @@ function handleLogDrawerClosed() {
 function scrollLogsToBottom() {
   if (logSearch.value) return;
   void nextTick(() => {
-    if (logViewer.value) logViewer.value.scrollTop = logViewer.value.scrollHeight;
+    requestAnimationFrame(() => {
+      if (logViewer.value) logViewer.value.scrollTop = logViewer.value.scrollHeight;
+    });
   });
 }
 

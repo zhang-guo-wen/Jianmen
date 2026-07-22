@@ -590,7 +590,6 @@ async function loadTargets() {
     result.items.filter(target => !isRDPTarget(target)).forEach(initializeConnectionState);
     targets.value = result.items;
     sshUsageCounts.value = result.usageCounts;
-    void hydrateConnectionInfo(displayedTargets.value);
   } catch (error) {
     if (!sshRequests.isCurrent(request.token, keyword)) return;
     sshError.value = error instanceof Error ? error.message : '无法加载主机账号';
@@ -615,17 +614,6 @@ async function loadHostMeta(): Promise<Record<string, HostMeta>> {
   } catch {
     return {};
   }
-}
-
-async function hydrateConnectionInfo(items: TargetRecord[]) {
-  const queue = items.filter(target => !isRDPTarget(target));
-  const workers = Array.from({ length: Math.min(6, queue.length) }, async () => {
-    while (queue.length) {
-      const target = queue.shift();
-      if (target) await ensureConnectionInfo(target);
-    }
-  });
-  await Promise.all(workers);
 }
 
 function ensureConnectionInfo(target: TargetRecord, force = false): Promise<SSHConnectionState> {
@@ -1153,9 +1141,6 @@ async function preflightSSHConnection(target: TargetRecord): Promise<boolean> {
   }
 }
 
-watch([targetPage, targetPageSize, sshFilter], () => {
-  void hydrateConnectionInfo(displayedTargets.value);
-});
 
 watch(activeTab, tab => {
   if (tab === 'db' && permission.canDo('db:connect') && dbAccounts.value.length === 0) {

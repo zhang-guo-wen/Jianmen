@@ -10,10 +10,10 @@ type WebSocketTicket struct {
 	Purpose      string     `gorm:"index;size:32;not null"`
 	TargetID     string     `gorm:"index;size:64;not null"`
 	ConnectionID string     `gorm:"index;size:64"`
-	SecretHash   string     `gorm:"uniqueIndex;size:64;not null"`
+	SecretHash   string     `gorm:"uniqueIndex:idx_websocket_tickets_secret_hash_deleted,priority:1;size:64;not null"`
 	ExpiresAt    time.Time  `gorm:"index;not null"`
 	ConsumedAt   *time.Time `gorm:"index"`
-	CreatedAt    time.Time
+	FullAudit
 }
 
 func (WebSocketTicket) TableName() string { return "websocket_tickets" }

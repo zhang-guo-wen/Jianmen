@@ -35,7 +35,7 @@ func (s *DBStore) CreateTemporaryAccess(ctx context.Context, input service.Creat
 			if err := verifyTemporaryAccessResource(tx, input.ResourceType, input.ResourceID); err != nil {
 				return err
 			}
-			session := model.UserSession{UserID: input.AuthorizedUserID, SessionSeq: sessionSeq, SessionID: sessionID, Type: "temporary", Status: "active", ExpiresAt: &input.ExpiresAt, CreatedBy: input.CreatedBy}
+			session := model.UserSession{UserID: input.AuthorizedUserID, SessionSeq: sessionSeq, SessionID: sessionID, Type: "temporary", Status: "active", ExpiresAt: &input.ExpiresAt, FullAudit: model.FullAudit{CreatedBy: input.CreatedBy}}
 			if err := tx.Create(&session).Error; err != nil {
 				return fmt.Errorf("create temporary user session: %w", err)
 			}
@@ -51,7 +51,7 @@ func (s *DBStore) CreateTemporaryAccess(ctx context.Context, input service.Creat
 			if err := tx.Create(&account).Error; err != nil {
 				return fmt.Errorf("create temporary account: %w", err)
 			}
-			grant := model.TemporaryAccountGrant{TemporaryAccountID: account.ID, UserID: input.AuthorizedUserID, Action: "session:connect", ResourceType: input.ResourceType, ResourceID: input.ResourceID, StartsAt: &input.Now, ExpiresAt: &input.ExpiresAt, CreatedBy: input.CreatedBy}
+			grant := model.TemporaryAccountGrant{TemporaryAccountID: account.ID, UserID: input.AuthorizedUserID, Action: "session:connect", ResourceType: input.ResourceType, ResourceID: input.ResourceID, StartsAt: &input.Now, ExpiresAt: &input.ExpiresAt, FullAudit: model.FullAudit{CreatedBy: input.CreatedBy}}
 			if err := tx.Create(&grant).Error; err != nil {
 				return fmt.Errorf("create temporary account grant: %w", err)
 			}
@@ -80,7 +80,7 @@ func (s *DBStore) CreateTemporaryAIAccess(ctx context.Context, input service.Cre
 				return err
 			}
 			// 创建 UserSession 记录，使 FindUserSessionBySessionID 可以查到 AI 临时会话
-			session := model.UserSession{UserID: input.UserID, SessionSeq: sessionSeq, SessionID: sessionID, Type: "temporary", Status: "active", ExpiresAt: input.ExpiresAt, CreatedBy: input.CreatedBy}
+			session := model.UserSession{UserID: input.UserID, SessionSeq: sessionSeq, SessionID: sessionID, Type: "temporary", Status: "active", ExpiresAt: input.ExpiresAt, FullAudit: model.FullAudit{CreatedBy: input.CreatedBy}}
 			if err := tx.Create(&session).Error; err != nil {
 				return fmt.Errorf("create temporary AI user session: %w", err)
 			}
@@ -369,7 +369,7 @@ func temporaryAccountFromValues(accountType, authorizedUserID string, expiresAt 
 	return model.TemporaryAccount{
 		ID: model.NewID(), SessionID: sessionID, Type: accountType, Username: "tmp_" + usernameSuffix,
 		AuthorizedUserID: authorizedUserID, Status: "active", StartsAt: now.UTC(), ExpiresAt: expiresAt,
-		Remark: strings.TrimSpace(remark), CreatedBy: createdBy,
+		Remark: strings.TrimSpace(remark), FullAudit: model.FullAudit{CreatedBy: createdBy},
 	}
 }
 

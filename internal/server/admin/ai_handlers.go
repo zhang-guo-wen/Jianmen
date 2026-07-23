@@ -203,7 +203,7 @@ func (s *Server) handleAITokens(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		result, err := temporaryAccess.CreateAI(r.Context(), service.CreateTemporaryAIAccessInput{
-			UserID: userID, Name: name, Remark: request.Remark, CreatedBy: userID,
+			UserID: userID, Name: name, Remark: request.Remark, 
 			ExpiresAt: temporaryExpiresAt, Now: now, AccessTTL: accessTTL, RefreshTTL: refreshTTL,
 		})
 		if err != nil {

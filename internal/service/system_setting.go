@@ -76,20 +76,18 @@ type SystemSettingsState struct {
 	Revision          int64
 	EffectiveRevision int64
 	PendingRestart    bool
-	UpdatedByID       string
-	UpdatedByUsername string
+	UpdatedBy         string
 	UpdatedAt         time.Time
 	AppliedAt         *time.Time
 }
 
 type SystemSettingsRevision struct {
-	ID                string
-	Revision          int64
-	Snapshot          SystemSettings
-	ChangedFields     []string
-	UpdatedByID       string
-	UpdatedByUsername string
-	CreatedAt         time.Time
+	ID            string
+	Revision      int64
+	Snapshot      SystemSettings
+	ChangedFields []string
+	UpdatedBy     string
+	CreatedAt     time.Time
 }
 
 type SystemSettingsRepository interface {
@@ -206,9 +204,7 @@ func (s *SystemSettingsService) Update(ctx context.Context, update SystemSetting
 		model.SystemSettingRevision{
 			SnapshotJSON:      snapshotJSON,
 			ChangedFieldsJSON: string(changedFieldsJSON),
-			UpdatedByID:       strings.TrimSpace(update.Actor.ID),
-			UpdatedByUsername: strings.TrimSpace(update.Actor.Username),
-			CreatedAt:         now,
+			FullAudit: model.FullAudit{UpdatedBy: strings.TrimSpace(update.Actor.ID)},
 		},
 	)
 	if err != nil {
@@ -250,8 +246,7 @@ func (s *SystemSettingsService) ListRevisions(ctx context.Context, limit int) ([
 			Revision:          row.Revision,
 			Snapshot:          snapshot,
 			ChangedFields:     changedFields,
-			UpdatedByID:       row.UpdatedByID,
-			UpdatedByUsername: row.UpdatedByUsername,
+			UpdatedBy:         row.UpdatedBy,
 			CreatedAt:         row.CreatedAt,
 		})
 	}
@@ -279,8 +274,7 @@ func (s *SystemSettingsService) stateFromModel(persisted model.SystemSetting) (S
 		Revision:          persisted.Revision,
 		EffectiveRevision: s.effectiveRevision,
 		PendingRestart:    persisted.Revision != s.effectiveRevision,
-		UpdatedByID:       persisted.UpdatedByID,
-		UpdatedByUsername: persisted.UpdatedByUsername,
+		UpdatedBy:         persisted.UpdatedBy,
 		UpdatedAt:         persisted.UpdatedAt,
 		AppliedAt:         persisted.AppliedAt,
 	}, nil
@@ -435,8 +429,7 @@ func systemSettingModel(settings SystemSettings, actor SystemSettingsActor) mode
 		RecordingMaxReplayBytes:       settings.RecordingMaxReplayBytes,
 		RecordingCleanupBatchSize:     settings.RecordingCleanupBatchSize,
 		DatabaseMaxClientMessageBytes: settings.DatabaseMaxClientMessageBytes,
-		UpdatedByID:                   strings.TrimSpace(actor.ID),
-		UpdatedByUsername:             strings.TrimSpace(actor.Username),
+		FullAudit: model.FullAudit{UpdatedBy: strings.TrimSpace(actor.ID)},
 	}
 }
 

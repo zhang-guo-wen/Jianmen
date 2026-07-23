@@ -132,7 +132,7 @@ func (s *DBStore) SetupInitialAdmin(
 			Transaction(func(tx *gorm.DB) error {
 				guard := model.SystemInitialization{
 					Key:       model.SystemInitializationSetup,
-					CreatedAt: record.CreatedAt,
+					FullAudit: model.FullAudit{CreatedAt: record.CreatedAt},
 				}
 				if err := tx.Create(&guard).Error; err != nil {
 					if isUniqueConstraintError(err) {
@@ -160,7 +160,7 @@ func (s *DBStore) SetupInitialAdmin(
 					Email:           record.Email,
 					Status:          record.Status,
 					IsSuperAdmin:    record.SuperAdmin,
-					CreatedAt:       record.CreatedAt,
+					FullAudit: model.FullAudit{CreatedAt: record.CreatedAt},
 				}
 				if err := tx.Create(&user).Error; err != nil {
 					return fmt.Errorf("create initial admin user: %w", err)
@@ -171,7 +171,7 @@ func (s *DBStore) SetupInitialAdmin(
 					SecretHash: session.SecretHash,
 					CSRFHash:   session.CSRFHash,
 					ExpiresAt:  session.ExpiresAt,
-					CreatedAt:  session.CreatedAt,
+					FullAudit: model.FullAudit{CreatedAt: session.CreatedAt},
 				}
 				if err := tx.Create(&adminSession).Error; err != nil {
 					return fmt.Errorf("%w: %w", service.ErrAdminSessionCreate, err)
@@ -229,7 +229,7 @@ func (s *DBStore) ClaimAdminEncryptionKey(
 
 				claim := model.SystemInitialization{
 					Key:       adminEncryptionKeyClaim,
-					CreatedAt: claimedAt,
+					FullAudit: model.FullAudit{CreatedAt: claimedAt},
 				}
 				if err := tx.Create(&claim).Error; err != nil {
 					return mapAdminEncryptionKeyClaimInsertError(err)

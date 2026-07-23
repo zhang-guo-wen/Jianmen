@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"gorm.io/gorm"
-	"gorm.io/gorm/clause"
 
 	"jianmen/internal/model"
 )
@@ -150,16 +149,13 @@ func (s *DBStore) createApplication(
 			ResourceID:    app.ID,
 			Effect:        model.PermissionEffectAllow,
 		}
-		if err := tx.Clauses(clause.OnConflict{
-			Columns: []clause.Column{
-				{Name: "principal_type"},
-				{Name: "principal_id"},
-				{Name: "resource_type"},
-				{Name: "resource_id"},
-				{Name: "effect"},
-			},
-			DoNothing: true,
-		}).Create(&grant).Error; err != nil {
+		if err := tx.Where(&model.ResourceGrant{
+			PrincipalType: grant.PrincipalType,
+			PrincipalID:   grant.PrincipalID,
+			ResourceType:  grant.ResourceType,
+			ResourceID:    grant.ResourceID,
+			Effect:        grant.Effect,
+		}).FirstOrCreate(&grant).Error; err != nil {
 			return fmt.Errorf("create application creator grant: %w", err)
 		}
 		return nil

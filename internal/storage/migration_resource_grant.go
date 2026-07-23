@@ -22,7 +22,9 @@ func migrateResourceGrantLogicalUniqueness(tx *gorm.DB) error {
 	}
 
 	var grants []model.ResourceGrant
-	if err := tx.Order("created_at, id").Find(&grants).Error; err != nil {
+	// 使用 Unscoped 绕过 GORM 的 deleted_at IS NULL 自动过滤，
+	// 因为旧表可能还没有 deleted_at 列
+	if err := tx.Unscoped().Order("created_at, id").Find(&grants).Error; err != nil {
 		return fmt.Errorf("load resource grants for deduplication: %w", err)
 	}
 	winners := make(map[resourceGrantLogicalKey]model.ResourceGrant, len(grants))
@@ -48,14 +50,14 @@ func migrateResourceGrantLogicalUniqueness(tx *gorm.DB) error {
 		duplicates = append(duplicates, grant.ID)
 	}
 	for _, winner := range winners {
-		if err := tx.Model(&model.ResourceGrant{}).
+		if err := tx.Unscoped().Model(&model.ResourceGrant{}).
 			Where("id = ?", winner.ID).
 			Update("expires_at", winner.ExpiresAt).Error; err != nil {
 			return fmt.Errorf("preserve resource grant expiry %s: %w", winner.ID, err)
 		}
 	}
 	if len(duplicates) > 0 {
-		if err := tx.Delete(&model.ResourceGrant{}, "id IN ?", duplicates).Error; err != nil {
+		if err := tx.Unscoped().Delete(&model.ResourceGrant{}, "id IN ?", duplicates).Error; err != nil {
 			return fmt.Errorf("delete duplicate resource grants: %w", err)
 		}
 	}

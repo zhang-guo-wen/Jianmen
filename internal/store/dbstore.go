@@ -20,6 +20,7 @@ type DBStore struct {
 
 	auditLeaseMu      sync.RWMutex
 	activeAuditLeases map[string]struct{}
+	ensureGrantMu     sync.Mutex
 }
 
 func NewDBStore(db *gorm.DB) *DBStore {

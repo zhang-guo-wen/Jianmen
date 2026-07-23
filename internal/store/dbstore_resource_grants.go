@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"gorm.io/gorm"
-	"gorm.io/gorm/clause"
 
 	"jianmen/internal/model"
 )
@@ -71,16 +70,24 @@ func (s *DBStore) CreateResourceGrant(ctx context.Context, grant model.ResourceG
 }
 
 func (s *DBStore) EnsureResourceGrant(ctx context.Context, grant model.ResourceGrant) error {
-	if err := s.db.WithContext(ctx).Clauses(clause.OnConflict{
-		Columns: []clause.Column{
-			{Name: "principal_type"},
-			{Name: "principal_id"},
-			{Name: "resource_type"},
-			{Name: "resource_id"},
-			{Name: "effect"},
-		},
-		DoNothing: true,
-	}).Create(&grant).Error; err != nil {
+	// 使用互斥锁确保并发安全的检查-创建操作，避免重复创建。
+	// 在 PostgreSQL 中，唯一索引包含 deleted_at 列（NULLS NOT DISTINCT）可防止重复；
+	// 在 SQLite 中 NULL 视为互异，无法依赖索引，故使用应用层锁。
+	s.ensureGrantMu.Lock()
+	defer s.ensureGrantMu.Unlock()
+
+	var existing model.ResourceGrant
+	result := s.db.WithContext(ctx).
+		Where("principal_type = ? AND principal_id = ? AND resource_type = ? AND resource_id = ? AND effect = ?",
+			grant.PrincipalType, grant.PrincipalID, grant.ResourceType, grant.ResourceID, grant.Effect).
+		Limit(1).Find(&existing)
+	if result.Error != nil {
+		return fmt.Errorf("ensure resource grant: %w", result.Error)
+	}
+	if result.RowsAffected > 0 {
+		return nil
+	}
+	if err := s.db.WithContext(ctx).Create(&grant).Error; err != nil {
 		return fmt.Errorf("ensure resource grant: %w", err)
 	}
 	return nil

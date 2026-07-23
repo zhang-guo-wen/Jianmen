@@ -107,6 +107,7 @@ func (s *Server) routes() http.Handler {
 	s.muxHandle(mux, "/api/temporary-accounts", s.withAuthAndUser(s.handleTemporaryAccounts))
 	s.muxHandle(mux, "/api/temporary-accounts/", s.withAuthAndUser(s.handleTemporaryAccount))
 	s.muxHandle(mux, "/api/resource-grants", s.withAuthAndUser(s.handleResourceGrants))
+	s.muxHandle(mux, "/api/resource-grants/batch", s.withAuthAndUser(s.handleBatchResourceGrants))
 	s.muxHandle(mux, "/api/resource-grants/check", s.withAuthAndUser(s.handleResourceGrantCheck))
 	s.muxHandle(mux, "/api/resource-grants/", s.withAuthAndUser(s.handleResourceGrant))
 

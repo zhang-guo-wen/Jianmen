@@ -151,6 +151,18 @@ func (s *ResourceGrantService) Create(ctx context.Context, actorID string, bypas
 	return created, nil
 }
 
+// ListByPrincipal 按主体类型和ID查询授权列表
+func (s *ResourceGrantService) ListByPrincipal(ctx context.Context, actorID string, bypass bool, principalType, principalID string) ([]model.ResourceGrant, error) {
+	if !bypass && strings.TrimSpace(actorID) == "" {
+		return nil, ErrResourceGrantForbidden
+	}
+	grants, err := s.repository.FindGrantsByPrincipal(ctx, principalType, principalID)
+	if err != nil {
+		return nil, fmt.Errorf("查询主体授权: %w", err)
+	}
+	return grants, nil
+}
+
 // BatchCreate 批量创建资源授权，对已有授权执行软删+重新插入
 func (s *ResourceGrantService) BatchCreate(ctx context.Context, actorID string, bypass bool, grants []model.ResourceGrant) (BatchResult, error) {
 	if len(grants) == 0 {

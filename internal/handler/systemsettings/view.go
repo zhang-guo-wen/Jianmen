@@ -49,8 +49,7 @@ type stateResponse struct {
 	Revision          int64          `json:"revision"`
 	EffectiveRevision int64          `json:"effective_revision"`
 	PendingRestart    bool           `json:"pending_restart"`
-	UpdatedByID       string         `json:"updated_by_id,omitempty"`
-	UpdatedByUsername string         `json:"updated_by_username,omitempty"`
+	UpdatedBy         string         `json:"updated_by,omitempty"`
 	UpdatedAt         *time.Time     `json:"updated_at,omitempty"`
 	AppliedAt         *time.Time     `json:"applied_at,omitempty"`
 	Infrastructure    infrastructure `json:"infrastructure"`
@@ -101,7 +100,7 @@ type revisionResponse struct {
 	Revision      int64          `json:"revision"`
 	Snapshot      settingsValues `json:"snapshot"`
 	ChangedFields []string       `json:"changed_fields"`
-	UpdatedByID   string         `json:"updated_by_id,omitempty"`
+	UpdatedBy     string         `json:"updated_by,omitempty"`
 	ActorUsername string         `json:"actor_username,omitempty"`
 	CreatedAt     time.Time      `json:"created_at"`
 }
@@ -158,7 +157,7 @@ func mapRevision(revision service.SystemSettingsRevision) revisionResponse {
 	return revisionResponse{
 		ID: revision.ID, Revision: revision.Revision,
 		Snapshot: mapValues(revision.Snapshot), ChangedFields: revision.ChangedFields,
-		UpdatedByID: revision.UpdatedByID, ActorUsername: revision.UpdatedByUsername,
+		UpdatedBy: revision.UpdatedBy,
 		CreatedAt: revision.CreatedAt,
 	}
 }

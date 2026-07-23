@@ -237,7 +237,6 @@ func TestRevisionsUsesValidatedLimit(t *testing.T) {
 	settings := &fakeSettingsService{revisions: []service.SystemSettingsRevision{{
 		ID: "revision-4", Revision: 4, Snapshot: testSystemSettingsState().Desired,
 		ChangedFields:     []string{"recording_retention_days"},
-		UpdatedByUsername: "alice", CreatedAt: time.Now().UTC(),
 	}}}
 	handler := newTestHandler(t, settings, fakeDiagnosticsService{})
 	recorder := httptest.NewRecorder()

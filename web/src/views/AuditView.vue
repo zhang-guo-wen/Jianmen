@@ -164,8 +164,11 @@
             <el-table-column :label="t('audit.column.account')" min-width="120" show-overflow-tooltip>
               <template #default="{ row }">{{ row.account_name || '-' }}</template>
             </el-table-column>
-            <el-table-column :label="t('audit.column.operator')" min-width="120" show-overflow-tooltip>
-              <template #default="{ row }">{{ row.username || row.name || '-' }}</template>
+            <el-table-column :label="t('audit.column.operator')" min-width="150">
+              <template #default="{ row }">
+                {{ row.username || row.name || '-' }}
+                <span v-if="row.session_id" style="color: #909399; margin-left:2px">({{ row.session_id }})</span>
+              </template>
             </el-table-column>
             <el-table-column :label="t('audit.column.protocol')" width="110">
               <template #default="{ row }">

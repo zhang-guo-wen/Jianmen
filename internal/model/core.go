@@ -170,7 +170,12 @@ func (m *ContainerEndpoint) BeforeCreate(tx *gorm.DB) error {
 	}
 	return ensureID(&m.ID)
 }
-func (m *UserSession) BeforeCreate(_ *gorm.DB) error { return ensureID(&m.ID) }
+func (m *UserSession) BeforeCreate(tx *gorm.DB) error {
+	if err := m.FullAudit.BeforeCreate(tx); err != nil {
+		return err
+	}
+	return ensureID(&m.ID)
+}
 func (m *PlatformAccount) BeforeCreate(tx *gorm.DB) error {
 	if err := m.FullAudit.BeforeCreate(tx); err != nil {
 		return err

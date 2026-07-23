@@ -17,7 +17,12 @@ type ConnectionPassword struct {
 	MySQLNativeHash    string     `gorm:"size:40"`
 	ExpiresAt          time.Time  `gorm:"index:idx_connection_passwords_lookup,priority:4;not null"`
 	RevokedAt          *time.Time `gorm:"index"`
-	CreatedAt          time.Time
+	FullAudit
 }
 
-func (m *ConnectionPassword) BeforeCreate(_ *gorm.DB) error { return ensureID(&m.ID) }
+func (m *ConnectionPassword) BeforeCreate(tx *gorm.DB) error {
+	if err := m.FullAudit.BeforeCreate(tx); err != nil {
+		return err
+	}
+	return ensureID(&m.ID)
+}

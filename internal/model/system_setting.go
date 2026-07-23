@@ -22,8 +22,5 @@ type SystemSetting struct {
 	Revision                      int64  `gorm:"not null"`
 	AppliedRevision               int64  `gorm:"not null;default:0"`
 	AppliedAt                     *time.Time
-	UpdatedByID                   string `gorm:"size:64"`
-	UpdatedByUsername             string `gorm:"size:128"`
-	CreatedAt                     time.Time
-	UpdatedAt                     time.Time
+	FullAudit
 }

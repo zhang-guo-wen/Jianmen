@@ -4,13 +4,13 @@ import "time"
 
 type DatabaseProvisioningOperation struct {
 	ID                   string            `gorm:"primaryKey;size:64" json:"-"`
-	Kind                 string            `gorm:"uniqueIndex:uidx_database_provisioning_actor_kind_idempotency,priority:2;index:idx_database_provisioning_kind_stage,priority:1;size:32;not null;default:create;check:chk_database_provisioning_kind,kind IN ('create','deprovision')" json:"-"`
+	Kind                 string            `gorm:"uniqueIndex:idx_dpo_actor_kind_idem_deleted,priority:2;index:idx_database_provisioning_kind_stage,priority:1;size:32;not null;default:create;check:chk_database_provisioning_kind,kind IN ('create','deprovision')" json:"-"`
 	InstanceID           string            `gorm:"index:idx_database_provisioning_instance;size:64;not null" json:"-"`
-	ActorID              string            `gorm:"uniqueIndex:uidx_database_provisioning_actor_kind_idempotency,priority:1;size:64;not null;default:''" json:"-"`
-	IdempotencyKey       *string           `gorm:"uniqueIndex:uidx_database_provisioning_actor_kind_idempotency,priority:3;size:128;check:chk_database_provisioning_idempotency_key,idempotency_key IS NULL OR length(trim(idempotency_key)) > 0" json:"-"`
+	ActorID              string            `gorm:"uniqueIndex:idx_dpo_actor_kind_idem_deleted,priority:1;size:64;not null;default:''" json:"-"`
+	IdempotencyKey       *string           `gorm:"uniqueIndex:idx_dpo_actor_kind_idem_deleted,priority:3;size:128;check:chk_database_provisioning_idempotency_key,idempotency_key IS NULL OR length(trim(idempotency_key)) > 0" json:"-"`
 	CanonicalRequestHash string            `gorm:"size:64;not null;default:''" json:"-"`
 	AdminAccountID       string            `gorm:"index;size:64;not null" json:"-"`
-	UpstreamUsername     string            `gorm:"uniqueIndex:uidx_database_provisioning_username;size:32;not null" json:"-"`
+	UpstreamUsername     string            `gorm:"uniqueIndex:idx_dpo_upstream_username_deleted,priority:1;size:32;not null" json:"-"`
 	Password             EncryptedField    `gorm:"type:text;not null" json:"-"`
 	Host                 string            `gorm:"size:255;not null" json:"-"`
 	GrantsJSON           string            `gorm:"type:text;not null" json:"-"`
@@ -28,7 +28,6 @@ type DatabaseProvisioningOperation struct {
 	LeaseOwner           string            `gorm:"size:64;not null;default:''" json:"-"`
 	LeaseToken           string            `gorm:"size:64;not null;default:''" json:"-"`
 	LeaseExpiresAt       *time.Time        `gorm:"index:idx_database_provisioning_work,priority:3" json:"-"`
-	CreatedAt            time.Time         `gorm:"index" json:"-"`
-	UpdatedAt            time.Time         `json:"-"`
+	FullAudit
 	Instance             *DatabaseInstance `gorm:"foreignKey:InstanceID;references:ID;constraint:OnUpdate:CASCADE,OnDelete:RESTRICT;" json:"-"`
 }

@@ -255,17 +255,32 @@ func (s *DBStore) GetUserSessionAuthDetail(ctx context.Context, sessionID string
 		return model.UserSessionAuthDetail{}, fmt.Errorf("find user session %q: %w", sessionID, err)
 	}
 
+	// 解析创建人用户名（CreatedBy 存储的是用户 ID）
+	authorizedBy := ""
+	if sess.CreatedBy != "" {
+		var creator model.User
+		if err := s.db.WithContext(ctx).Where("id = ?", sess.CreatedBy).First(&creator).Error; err == nil {
+			authorizedBy = creator.DisplayName
+			if authorizedBy == "" {
+				authorizedBy = creator.Username
+			}
+		}
+	}
+
 	detail := model.UserSessionAuthDetail{
 		ID:            sess.ID,
 		SessionID:     sess.SessionID,
 		SessionType:   sess.Type,
 		UserID:        sess.UserID,
 		Username:      sess.User.Username,
-		AuthorizedBy:  sess.CreatedBy,
-		StartsAt:      sess.CreatedAt,
-		ExpiresAt:     sess.ExpiresAt,
+		AuthorizedBy:  authorizedBy,
+		StartsAt:      model.ToAuditTime(sess.CreatedAt),
+		ExpiresAt:     model.ToAuditTimePtr(sess.ExpiresAt),
 		Status:        sess.Status,
 	}
+
+	// 计算有效状态（在时间转字符串之前用原始 time.Time 计算）
+	detail.EffectiveStatus = computeEffectiveStatus(detail.Status, sess.ExpiresAt)
 
 	// 计算授权类型
 	detail.AuthorizationType = authorizationTypeFromUserSession(sess)
@@ -283,9 +298,6 @@ func (s *DBStore) GetUserSessionAuthDetail(ctx context.Context, sessionID string
 		}
 		// TemporaryAccount 不存在时，保持基础信息，类型由 authorizationTypeFromUserSession 决定
 	}
-
-	// 计算有效状态
-	detail.EffectiveStatus = computeEffectiveStatus(detail.Status, detail.ExpiresAt)
 
 	return detail, nil
 }

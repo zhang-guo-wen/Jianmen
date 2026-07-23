@@ -23,6 +23,11 @@ type fakeResourceGrantRepository struct {
 	deleteErr    error
 	principalErr error
 	resourceErr  error
+	principalGrants    []model.ResourceGrant
+	principalGrantsErr error
+	batchCreated       int
+	batchRefreshed     int
+	batchErr           error
 }
 
 func (f *fakeResourceGrantRepository) SearchResourceGrants(context.Context, string) ([]model.ResourceGrant, error) {
@@ -71,6 +76,14 @@ func (f *fakeResourceGrantRepository) ResourceGrantPrincipalExists(_ context.Con
 
 func (f *fakeResourceGrantRepository) ResourceGrantResourceExists(_ context.Context, resourceType, resourceID string) (bool, error) {
 	return f.resources[resourceType+":"+resourceID], f.resourceErr
+}
+
+func (f *fakeResourceGrantRepository) FindGrantsByPrincipal(_ context.Context, principalType, principalID string) ([]model.ResourceGrant, error) {
+	return append([]model.ResourceGrant(nil), f.principalGrants...), f.principalGrantsErr
+}
+
+func (f *fakeResourceGrantRepository) BatchUpsertGrants(_ context.Context, grants []model.ResourceGrant, actorID string) (int, int, error) {
+	return f.batchCreated, f.batchRefreshed, f.batchErr
 }
 
 type fakeResourceGrantChecker struct {

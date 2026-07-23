@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"gorm.io/gorm"
 
@@ -207,4 +208,70 @@ func uniqueStrings(values []string) []string {
 		result = append(result, value)
 	}
 	return result
+}
+
+// FindGrantsByPrincipal 查询某主体所有未删除的授权
+func (s *DBStore) FindGrantsByPrincipal(ctx context.Context, principalType, principalID string) ([]model.ResourceGrant, error) {
+	principalType = strings.ToLower(strings.TrimSpace(principalType))
+	principalID = strings.TrimSpace(principalID)
+	if principalType == "" || principalID == "" {
+		return nil, fmt.Errorf("principal_type and principal_id are required")
+	}
+	var grants []model.ResourceGrant
+	if err := s.db.WithContext(ctx).
+		Where("principal_type = ? AND principal_id = ?", principalType, principalID).
+		Order("created_at DESC").
+		Find(&grants).Error; err != nil {
+		return nil, fmt.Errorf("find grants by principal: %w", err)
+	}
+	return grants, nil
+}
+
+// BatchUpsertGrants 批量处理授权：存在则软删旧记录+插入新记录，不存在则直接插入
+func (s *DBStore) BatchUpsertGrants(ctx context.Context, grants []model.ResourceGrant, actorID string) (created int, refreshed int, err error) {
+	if len(grants) == 0 {
+		return 0, 0, nil
+	}
+	// 在事务中逐条处理
+	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		for _, grant := range grants {
+			// 查找是否已有未删除的相同授权
+			var existing model.ResourceGrant
+			result := tx.Where(
+				"principal_type = ? AND principal_id = ? AND resource_type = ? AND resource_id = ? AND effect = ?",
+				grant.PrincipalType, grant.PrincipalID, grant.ResourceType, grant.ResourceID, grant.Effect,
+			).First(&existing)
+
+			if result.Error == nil {
+				// 已存在：软删除旧记录
+				if err := tx.Model(&existing).Updates(map[string]interface{}{
+					"deleted_at": time.Now(),
+					"updated_by": actorID,
+				}).Error; err != nil {
+					return fmt.Errorf("soft delete existing grant %s: %w", existing.ID, err)
+				}
+				refreshed++
+			} else if !errors.Is(result.Error, gorm.ErrRecordNotFound) {
+				return fmt.Errorf("find existing grant: %w", result.Error)
+			} else {
+				created++
+			}
+
+			// 插入新记录
+			grant.ID = "" // 使用 BeforeCreate 生成的 ID
+			grant.DeletedAt = gorm.DeletedAt{} // 零值 = NULL
+			grant.CreatedBy = actorID
+			grant.UpdatedBy = actorID
+			grant.CreatedAt = time.Now()
+			grant.UpdatedAt = time.Now()
+			if err := tx.Create(&grant).Error; err != nil {
+				return fmt.Errorf("create resource grant: %w", err)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return 0, 0, err
+	}
+	return created, refreshed, nil
 }

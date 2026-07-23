@@ -23,6 +23,9 @@ type ResourceGrantRepository interface {
 	DeleteResourceGrant(ctx context.Context, id string) error
 	ResourceGrantPrincipalExists(ctx context.Context, principalType, principalID string) (bool, error)
 	ResourceGrantResourceExists(ctx context.Context, resourceType, resourceID string) (bool, error)
+	// 新增方法
+	FindGrantsByPrincipal(ctx context.Context, principalType, principalID string) ([]model.ResourceGrant, error)
+	BatchUpsertGrants(ctx context.Context, grants []model.ResourceGrant, actorID string) (int, int, error)
 }
 
 type ResourceGrantChecker interface {

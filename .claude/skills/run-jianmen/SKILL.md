@@ -33,8 +33,18 @@ The backend creates `data/` at runtime (database, host keys, replays). No manual
 ### Step 1: 停止旧进程
 
 ```bash
+# 用 taskkill 按进程名杀（可能会遗漏，因为 Windows 下 image name 可能不同）
 taskkill //F //IM jianmen.exe 2>/dev/null
 taskkill //F //IM node.exe 2>/dev/null
+sleep 1
+
+# 兜底：按端口杀掉占用 47100 和 47101 的进程（更可靠）
+for port in 47100 47101; do
+  pid=$(netstat -ano 2>/dev/null | grep ":$port " | grep LISTENING | awk '{print $NF}' | head -1)
+  if [ -n "$pid" ] && [ "$pid" != "0" ]; then
+    taskkill //F //PID "$pid" 2>/dev/null && echo "已停止端口 $port (PID $pid)"
+  fi
+done
 sleep 1
 ```
 

@@ -332,7 +332,7 @@ func (s *DBStore) auditSessionIDs(ctx context.Context, sessions []model.AuditSes
 		SessionID string
 	}
 	var rows []row
-	_ = s.db.WithContext(ctx).Model(&model.UserSession{}).
+	_ = s.db.WithContext(ctx).Model(&model.UserSession{}).Scopes(ActiveScope).
 		Select("id, session_id").Where("id IN ?", ids).Find(&rows)
 	lookup := map[string]string{}
 	for _, r := range rows {

@@ -58,7 +58,7 @@ func (s *DBStore) ensureHostAccountUsernameAvailable(tx *gorm.DB, hostID, userna
 		return errors.New("check host account duplicate: nil database")
 	}
 	var count int64
-	q := tx.Model(&model.HostAccount{}).
+	q := tx.Model(&model.HostAccount{}).Scopes(ActiveScope).
 		Where("host_id = ? AND username = ?", hostID, username)
 	if exceptID != "" {
 		q = q.Where("id <> ?", exceptID)

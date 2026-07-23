@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"time"
 
 	"gorm.io/gorm"
 
@@ -55,7 +56,7 @@ func (s *DBStore) BeginDatabaseDeprovision(
 		if !managedAccountMatchesProvisioningOperation(account, current) {
 			return errors.New("begin database deprovision: managed account identity mismatch")
 		}
-		result := tx.Model(&model.DatabaseProvisioningOperation{}).
+		result := tx.Model(&model.DatabaseProvisioningOperation{}).Scopes(ActiveScope).
 			Where(provisioningFenceCondition(), provisioningFenceArguments(databaseProvisioningOperationFromModel(current).Fence())...).
 			Where(clock.expiredOrUnsetLeaseCondition()).
 			Updates(map[string]any{
@@ -119,11 +120,11 @@ func (s *DBStore) CompleteDatabaseDeprovision(
 		if err := s.deleteResourceTx(tx, model.ResourceTypeDatabaseAccount, account.ID); err != nil {
 			return err
 		}
-		if err := tx.Delete(&account).Error; err != nil {
+		if err := SoftDelete(ctx, tx, "database_accounts", account.ID); err != nil {
 			return err
 		}
 		result := tx.Where(provisioningFenceCondition(), provisioningFenceArguments(expected)...).
-			Where(clock.validLeaseCondition()).Delete(&model.DatabaseProvisioningOperation{})
+			Where(clock.validLeaseCondition()).Where("deleted_at = ?", model.SentinelDeletedAt).Updates(map[string]interface{}{"deleted_at": time.Now().UTC(), "updated_at": time.Now().UTC()})
 		if result.Error != nil {
 			return result.Error
 		}

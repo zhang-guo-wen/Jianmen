@@ -27,7 +27,7 @@ func (s *DBStore) AdminInitialized(ctx context.Context) (bool, error) {
 		return false, err
 	}
 	var count int64
-	if err := s.db.WithContext(ctx).Model(&model.User{}).Limit(1).Count(&count).Error; err != nil {
+	if err := s.db.WithContext(ctx).Model(&model.User{}).Scopes(ActiveScope).Limit(1).Count(&count).Error; err != nil {
 		return false, fmt.Errorf("count admin users: %w", err)
 	}
 	return count > 0, nil
@@ -99,7 +99,7 @@ func (s *DBStore) PersistAdminLoginState(
 	}
 	result := s.db.WithContext(ctx).
 		Session(&gorm.Session{Logger: gormlogger.Discard}).
-		Model(&model.User{}).
+		Model(&model.User{}).Scopes(ActiveScope).
 		Where(
 			"id = ? AND status = ? AND (expires_at IS NULL OR expires_at > ?) AND password_hash = ?",
 			strings.TrimSpace(userID), "active", loggedInAt, expectedPasswordHash,
@@ -143,7 +143,7 @@ func (s *DBStore) SetupInitialAdmin(
 				}
 
 				var count int64
-				if err := tx.Model(&model.User{}).Limit(1).Count(&count).Error; err != nil {
+				if err := tx.Model(&model.User{}).Scopes(ActiveScope).Limit(1).Count(&count).Error; err != nil {
 					return err
 				}
 				if count > 0 {

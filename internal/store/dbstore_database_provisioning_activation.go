@@ -118,7 +118,7 @@ func activateDatabaseProvisioningOperation(
 	expected service.DatabaseProvisioningFence,
 	clock databaseProvisioningStatementClock,
 ) error {
-	updated := tx.Model(&model.DatabaseProvisioningOperation{}).
+	updated := tx.Model(&model.DatabaseProvisioningOperation{}).Scopes(ActiveScope).
 		Where(provisioningFenceCondition(), provisioningFenceArguments(expected)...).
 		Where(clock.validLeaseCondition()).
 		Updates(map[string]any{
@@ -144,7 +144,7 @@ func generateProvisioningUniqueName(db *gorm.DB) (string, error) {
 	for attempt := 0; attempt < 10; attempt++ {
 		name := "db-" + model.NewID()[:12]
 		var count int64
-		if err := db.Model(&model.DatabaseAccount{}).
+		if err := db.Model(&model.DatabaseAccount{}).Scopes(ActiveScope).
 			Where("unique_name = ?", name).
 			Count(&count).Error; err != nil {
 			return "", errors.New("check database account name")
@@ -158,7 +158,7 @@ func generateProvisioningUniqueName(db *gorm.DB) (string, error) {
 
 func nextProvisioningResourceSequence(db *gorm.DB) (int, error) {
 	var maxSequence int
-	if err := db.Model(&model.DatabaseAccount{}).
+	if err := db.Model(&model.DatabaseAccount{}).Scopes(ActiveScope).
 		Select("COALESCE(MAX(resource_seq), 0)").
 		Scan(&maxSequence).Error; err != nil {
 		return 0, errors.New("database resource sequence floor")

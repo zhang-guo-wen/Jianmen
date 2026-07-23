@@ -19,7 +19,7 @@ func (s *DBStore) SearchResourceGroups(
 	pageSize int,
 ) ([]model.ResourceGroup, int64, error) {
 	buildQuery := func() *gorm.DB {
-		tx := s.db.WithContext(ctx).Model(&model.ResourceGroup{})
+		tx := s.db.WithContext(ctx).Model(&model.ResourceGroup{}).Scopes(ActiveScope)
 		if groupType != "" {
 			tx = tx.Where("group_type = ?", groupType)
 		}
@@ -58,7 +58,7 @@ func (s *DBStore) FindResourceGroup(ctx context.Context, id string) (model.Resou
 }
 
 func (s *DBStore) ResourceGroupNameExists(ctx context.Context, name, groupType, excludeID string) (bool, error) {
-	tx := s.db.WithContext(ctx).Model(&model.ResourceGroup{}).
+	tx := s.db.WithContext(ctx).Model(&model.ResourceGroup{}).Scopes(ActiveScope).
 		Where("name = ? AND group_type = ?", strings.TrimSpace(name), groupType)
 	if excludeID != "" {
 		tx = tx.Where("id <> ?", excludeID)
@@ -160,7 +160,7 @@ func (s *DBStore) DeleteResourceGroup(ctx context.Context, group model.ResourceG
 			Delete(&model.ResourceGrant{}).Error; err != nil {
 			return fmt.Errorf("delete resource group grants: %w", err)
 		}
-		if err := tx.Delete(&group).Error; err != nil {
+		if err := SoftDelete(ctx, tx, "resource_groups", group.ID); err != nil {
 			return fmt.Errorf("delete resource group: %w", err)
 		}
 		return nil

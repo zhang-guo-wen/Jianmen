@@ -195,7 +195,7 @@ func (s *DBStore) databaseAccountCount(db *gorm.DB, instanceID string) (int, err
 		return 0, fmt.Errorf("database handle required")
 	}
 	var count int64
-	if err := db.Model(&model.DatabaseAccount{}).Where("instance_id = ?", instanceID).Count(&count).Error; err != nil {
+	if err := db.Model(&model.DatabaseAccount{}).Scopes(ActiveScope).Where("instance_id = ?", instanceID).Count(&count).Error; err != nil {
 		return 0, err
 	}
 	return int(count), nil
@@ -213,7 +213,7 @@ func (s *DBStore) databaseAccountCounts(db *gorm.DB, ids []string) (map[string]i
 		InstanceID string
 		Count      int64
 	}
-	if err := db.Model(&model.DatabaseAccount{}).
+	if err := db.Model(&model.DatabaseAccount{}).Scopes(ActiveScope).
 		Select("instance_id, COUNT(*) AS count").
 		Where("instance_id IN ?", ids).
 		Group("instance_id").
@@ -376,7 +376,7 @@ func (s *DBStore) ensureDatabaseAccountUsernameAvailable(db *gorm.DB, instanceID
 		return fmt.Errorf("database handle required")
 	}
 	var count int64
-	q := db.Model(&model.DatabaseAccount{}).
+	q := db.Model(&model.DatabaseAccount{}).Scopes(ActiveScope).
 		Where("instance_id = ? AND username = ?", instanceID, username)
 	if exceptID != "" {
 		q = q.Where("id <> ?", exceptID)
@@ -419,7 +419,7 @@ func (s *DBStore) DeleteDatabaseAccount(ctx context.Context, id string) error {
 		if err := s.deleteResourceTx(tx, model.ResourceTypeDatabaseAccount, account.ID); err != nil {
 			return err
 		}
-		return tx.Delete(&account).Error
+		return SoftDelete(ctx, tx, "database_accounts", id)
 	})
 }
 
@@ -459,7 +459,7 @@ func (s *DBStore) generateUniqueName(db *gorm.DB) (string, error) {
 	for i := 0; i < 10; i++ {
 		name := "db-" + model.NewID()[:12]
 		var count int64
-		if err := db.Model(&model.DatabaseAccount{}).Where("unique_name = ?", name).Count(&count).Error; err != nil {
+		if err := db.Model(&model.DatabaseAccount{}).Scopes(ActiveScope).Where("unique_name = ?", name).Count(&count).Error; err != nil {
 			return "", fmt.Errorf("check database account unique name: %w", err)
 		}
 		if count == 0 {

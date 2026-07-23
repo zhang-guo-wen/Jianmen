@@ -36,7 +36,7 @@ func (s *DBStore) platformAccountView(a model.PlatformAccount) PlatformAccountVi
 }
 
 func (s *DBStore) PlatformAccounts(ctx context.Context, params PlatformAccountListParams) ([]PlatformAccountView, int64, error) {
-	q := s.db.WithContext(ctx).Model(&model.PlatformAccount{})
+	q := s.db.WithContext(ctx).Model(&model.PlatformAccount{}).Scopes(ActiveScope)
 	if params.Platform != "" {
 		q = q.Where("platform_name = ?", params.Platform)
 	}
@@ -154,7 +154,7 @@ func (s *DBStore) createPlatformAccount(ctx context.Context, acc model.PlatformA
 		creatorID = strings.TrimSpace(creatorID)
 		if creatorID != "" {
 			var creatorCount int64
-			if err := tx.Model(&model.User{}).Where("id = ?", creatorID).Count(&creatorCount).Error; err != nil {
+			if err := tx.Model(&model.User{}).Scopes(ActiveScope).Where("id = ?", creatorID).Count(&creatorCount).Error; err != nil {
 				return fmt.Errorf("check platform account creator: %w", err)
 			}
 			if creatorCount == 0 {
@@ -196,7 +196,7 @@ func (s *DBStore) updatePlatformAccount(ctx context.Context, id string, acc mode
 			}
 			return fmt.Errorf("lock platform account for update: %w", err)
 		}
-		result := tx.Model(&model.PlatformAccount{}).
+		result := tx.Model(&model.PlatformAccount{}).Scopes(ActiveScope).
 			Where("id = ?", id).
 			Updates(platformAccountUpdateFields(acc))
 		if result.Error != nil {
@@ -238,7 +238,8 @@ func (s *DBStore) DeletePlatformAccount(ctx context.Context, id string) error {
 		if err := s.deleteResourceTx(tx, model.ResourceTypePlatformAccount, acc.ID); err != nil {
 			return err
 		}
-		result := tx.Where("id = ?", id).Delete(&model.PlatformAccount{})
+				now := time.Now().UTC()
+		result := tx.Model(&model.PlatformAccount{}).Scopes(ActiveScope).Where("id = ?", id).Where("deleted_at = ?", model.SentinelDeletedAt).Updates(map[string]interface{}{"deleted_at": now, "updated_at": now})
 		if result.Error != nil {
 			return result.Error
 		}
@@ -263,7 +264,7 @@ func (s *DBStore) GetPlatformAccountPassword(ctx context.Context, id string) (st
 
 func (s *DBStore) platformAccountMetadataQuery(ctx context.Context) *gorm.DB {
 	return s.db.WithContext(ctx).
-		Model(&model.PlatformAccount{}).
+		Model(&model.PlatformAccount{}).Scopes(ActiveScope).
 		Select(`platform_accounts.id, platform_accounts.name, platform_accounts.platform_name, platform_accounts.url,
 			platform_accounts.group_name, platform_accounts.username, platform_accounts.remark, platform_accounts.owner_id,
 			platform_accounts.status, platform_accounts.expires_at, platform_accounts.created_at, platform_accounts.updated_at,
@@ -272,7 +273,7 @@ func (s *DBStore) platformAccountMetadataQuery(ctx context.Context) *gorm.DB {
 }
 
 func (s *DBStore) loadPlatformAccountMetadataTx(tx *gorm.DB, id string, destination *model.PlatformAccount) error {
-	return tx.Model(&model.PlatformAccount{}).
+	return tx.Model(&model.PlatformAccount{}).Scopes(ActiveScope).
 		Select(`platform_accounts.id, platform_accounts.name, platform_accounts.platform_name, platform_accounts.url,
 			platform_accounts.group_name, platform_accounts.username, platform_accounts.remark, platform_accounts.owner_id,
 			platform_accounts.status, platform_accounts.expires_at, platform_accounts.created_at, platform_accounts.updated_at,

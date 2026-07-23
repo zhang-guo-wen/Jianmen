@@ -40,7 +40,7 @@ func (s *DBStore) FindActiveAdminSessionBySecretHash(ctx context.Context, secret
 
 func (s *DBStore) RevokeAdminSession(ctx context.Context, sessionID string, now time.Time) error {
 	return s.withBrowserSessionWrite(ctx, func() error {
-		return s.db.WithContext(ctx).Model(&model.AdminSession{}).
+		return s.db.WithContext(ctx).Model(&model.AdminSession{}).Scopes(ActiveScope).
 			Where("id = ? AND revoked_at IS NULL", strings.TrimSpace(sessionID)).
 			Update("revoked_at", now).Error
 	})
@@ -93,10 +93,10 @@ func (s *DBStore) consumeWebSocketTicketOnce(ctx context.Context, secretHash, pu
 		if err := sessionQuery.First(&session).Error; err != nil {
 			return err
 		}
-		activeSession := tx.Model(&model.AdminSession{}).
+		activeSession := tx.Model(&model.AdminSession{}).Scopes(ActiveScope).
 			Select("1").
 			Where("id = ? AND revoked_at IS NULL AND expires_at > ?", ticket.SessionID, now)
-		result := tx.Model(&model.WebSocketTicket{}).
+		result := tx.Model(&model.WebSocketTicket{}).Scopes(ActiveScope).
 			Where("id = ? AND consumed_at IS NULL", ticket.ID).
 			Where("EXISTS (?)", activeSession).
 			Update("consumed_at", now)

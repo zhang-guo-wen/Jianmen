@@ -33,7 +33,7 @@ func roleUniqueConstraint(err error) bool {
 
 func (s *DBStore) SearchRoles(ctx context.Context, query string, page, pageSize int) ([]model.Role, int64, error) {
 	build := func() *gorm.DB {
-		tx := s.db.WithContext(ctx).Model(&model.Role{})
+		tx := s.db.WithContext(ctx).Model(&model.Role{}).Scopes(ActiveScope)
 		if query != "" {
 			like := "%" + query + "%"
 			tx = tx.Where("name LIKE ? OR description LIKE ?", like, like)
@@ -63,7 +63,7 @@ func (s *DBStore) FindRole(ctx context.Context, id string) (model.Role, bool, er
 	return role, true, nil
 }
 func (s *DBStore) RoleNameExists(ctx context.Context, name, excludeID string) (bool, error) {
-	tx := s.db.WithContext(ctx).Model(&model.Role{}).Where("name = ?", strings.TrimSpace(name))
+	tx := s.db.WithContext(ctx).Model(&model.Role{}).Scopes(ActiveScope).Where("name = ?", strings.TrimSpace(name))
 	if strings.TrimSpace(excludeID) != "" {
 		tx = tx.Where("id <> ?", strings.TrimSpace(excludeID))
 	}
@@ -99,7 +99,7 @@ func (s *DBStore) DeleteRole(ctx context.Context, role model.Role) error {
 		if err := tx.Where("role_id = ?", role.ID).Delete(&model.UserRole{}).Error; err != nil {
 			return fmt.Errorf("delete user roles: %w", err)
 		}
-		if err := tx.Delete(&role).Error; err != nil {
+		if err := SoftDelete(ctx, tx, "roles", role.ID); err != nil {
 			return fmt.Errorf("delete role: %w", err)
 		}
 		return nil
@@ -108,7 +108,7 @@ func (s *DBStore) DeleteRole(ctx context.Context, role model.Role) error {
 
 func (s *DBStore) SearchPermissions(ctx context.Context, query string, page, pageSize int) ([]model.Permission, int64, error) {
 	build := func() *gorm.DB {
-		tx := s.db.WithContext(ctx).Model(&model.Permission{})
+		tx := s.db.WithContext(ctx).Model(&model.Permission{}).Scopes(ActiveScope)
 		if query != "" {
 			like := "%" + query + "%"
 			tx = tx.Where("name LIKE ? OR action LIKE ? OR description LIKE ?", like, like, like)
@@ -159,7 +159,7 @@ func (s *DBStore) DeletePermission(ctx context.Context, permission model.Permiss
 		if err := tx.Where("permission_id = ?", permission.ID).Delete(&model.RolePermission{}).Error; err != nil {
 			return fmt.Errorf("delete permission bindings: %w", err)
 		}
-		if err := tx.Delete(&permission).Error; err != nil {
+		if err := SoftDelete(ctx, tx, "permissions", permission.ID); err != nil {
 			return fmt.Errorf("delete permission: %w", err)
 		}
 		return nil
@@ -260,7 +260,7 @@ func (s *DBStore) DeleteRolePermission(ctx context.Context, binding model.RolePe
 
 func (s *DBStore) RoleActions(ctx context.Context, roleID string) ([]string, error) {
 	var actions []string
-	err := s.db.WithContext(ctx).Model(&model.Permission{}).Distinct("permissions.action").Joins("JOIN role_permissions ON role_permissions.permission_id = permissions.id").Where("role_permissions.role_id = ?", strings.TrimSpace(roleID)).Where("permissions.action <> '' AND permissions.resource_type = '' AND permissions.resource_id = ''").Where("permissions.effect = '' OR permissions.effect = ?", model.PermissionEffectAllow).Order("permissions.action").Pluck("permissions.action", &actions).Error
+	err := s.db.WithContext(ctx).Model(&model.Permission{}).Scopes(ActiveScope).Distinct("permissions.action").Joins("JOIN role_permissions ON role_permissions.permission_id = permissions.id").Where("role_permissions.role_id = ?", strings.TrimSpace(roleID)).Where("permissions.action <> '' AND permissions.resource_type = '' AND permissions.resource_id = ''").Where("permissions.effect = '' OR permissions.effect = ?", model.PermissionEffectAllow).Order("permissions.action").Pluck("permissions.action", &actions).Error
 	if err != nil {
 		return nil, fmt.Errorf("list role actions: %w", err)
 	}
@@ -290,7 +290,7 @@ func (s *DBStore) replaceRoleActions(ctx context.Context, roleID string, request
 			Select("id").First(&role, "id = ?", strings.TrimSpace(roleID)).Error; err != nil {
 			return fmt.Errorf("find role: %w", err)
 		}
-		actionPermissionIDs := tx.Model(&model.Permission{}).Select("id").Where("action <> '' AND resource_type = '' AND resource_id = ''").Where("effect = '' OR effect = ?", model.PermissionEffectAllow)
+		actionPermissionIDs := tx.Model(&model.Permission{}).Scopes(ActiveScope).Select("id").Where("action <> '' AND resource_type = '' AND resource_id = ''").Where("effect = '' OR effect = ?", model.PermissionEffectAllow)
 		if err := tx.Where("role_id = ? AND permission_id IN (?)", roleID, actionPermissionIDs).Delete(&model.RolePermission{}).Error; err != nil {
 			return fmt.Errorf("remove action bindings: %w", err)
 		}

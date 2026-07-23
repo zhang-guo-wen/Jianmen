@@ -14,7 +14,7 @@ import (
 
 func (s *DBStore) SearchUserGroups(ctx context.Context, query string, page, pageSize int) ([]model.UserGroup, int64, error) {
 	buildQuery := func() *gorm.DB {
-		tx := s.db.WithContext(ctx).Model(&model.UserGroup{})
+		tx := s.db.WithContext(ctx).Model(&model.UserGroup{}).Scopes(ActiveScope)
 		if query != "" {
 			like := "%" + query + "%"
 			tx = tx.Where("name LIKE ? OR description LIKE ?", like, like)
@@ -45,7 +45,7 @@ func (s *DBStore) FindUserGroup(ctx context.Context, id string) (model.UserGroup
 }
 
 func (s *DBStore) UserGroupNameExists(ctx context.Context, name, excludeID string) (bool, error) {
-	tx := s.db.WithContext(ctx).Model(&model.UserGroup{}).Where("name = ?", strings.TrimSpace(name))
+	tx := s.db.WithContext(ctx).Model(&model.UserGroup{}).Scopes(ActiveScope).Where("name = ?", strings.TrimSpace(name))
 	if strings.TrimSpace(excludeID) != "" {
 		tx = tx.Where("id <> ?", strings.TrimSpace(excludeID))
 	}
@@ -81,7 +81,7 @@ func (s *DBStore) DeleteUserGroup(ctx context.Context, group model.UserGroup) er
 		if err := tx.Where("group_id = ?", group.ID).Delete(&model.UserGroupMember{}).Error; err != nil {
 			return fmt.Errorf("delete user group members: %w", err)
 		}
-		if err := tx.Delete(&group).Error; err != nil {
+		if err := SoftDelete(ctx, tx, "user_groups", group.ID); err != nil {
 			return fmt.Errorf("delete user group: %w", err)
 		}
 		return nil

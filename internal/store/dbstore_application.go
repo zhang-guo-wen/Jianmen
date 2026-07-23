@@ -137,7 +137,7 @@ func (s *DBStore) createApplication(
 			return nil
 		}
 		var creatorCount int64
-		if err := tx.Model(&model.User{}).Where("id = ?", creatorID).Count(&creatorCount).Error; err != nil {
+		if err := tx.Model(&model.User{}).Scopes(ActiveScope).Where("id = ?", creatorID).Count(&creatorCount).Error; err != nil {
 			return fmt.Errorf("check application creator: %w", err)
 		}
 		if creatorCount == 0 {
@@ -273,7 +273,7 @@ func (s *DBStore) DeleteApplication(ctx context.Context, id string) error {
 		if err := s.deleteResourceTx(tx, model.ResourceTypeApplication, app.ID); err != nil {
 			return err
 		}
-		return tx.Delete(&app).Error
+		return SoftDelete(ctx, tx, "applications", id)
 	})
 }
 

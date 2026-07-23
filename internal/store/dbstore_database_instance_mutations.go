@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"gorm.io/gorm"
 
@@ -109,12 +110,13 @@ func (s *DBStore) DeleteDatabaseInstance(ctx context.Context, id string) error {
 				return err
 			}
 		}
-		if err := tx.Where("instance_id = ?", id).Delete(&model.DatabaseAccount{}).Error; err != nil {
+		now := time.Now().UTC()
+		if err := tx.Model(&model.DatabaseAccount{}).Where("instance_id = ?", id).Where("deleted_at = ?", model.SentinelDeletedAt).Updates(map[string]interface{}{"deleted_at": now, "updated_at": now}).Error; err != nil {
 			return err
 		}
 		if err := s.deleteResourceTx(tx, model.ResourceTypeDatabaseInstance, inst.ID); err != nil {
 			return err
 		}
-		return tx.Delete(&inst).Error
+		return SoftDelete(ctx, tx, "database_instances", id)
 	})
 }

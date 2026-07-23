@@ -43,7 +43,7 @@ func lockProvisioningAdministrator(tx *gorm.DB, instanceID, accountID string) (m
 
 func hasProvisioningOperationForAdministrator(tx *gorm.DB, accountID string) (bool, error) {
 	var count int64
-	if err := tx.Model(&model.DatabaseProvisioningOperation{}).
+	if err := tx.Model(&model.DatabaseProvisioningOperation{}).Scopes(ActiveScope).
 		Where("admin_account_id = ?", strings.TrimSpace(accountID)).Count(&count).Error; err != nil {
 		return false, fmt.Errorf("check provisioning administrator references: %w", err)
 	}
@@ -52,7 +52,7 @@ func hasProvisioningOperationForAdministrator(tx *gorm.DB, accountID string) (bo
 
 func hasProvisioningOperationForInstance(tx *gorm.DB, instanceID string) (bool, error) {
 	var count int64
-	if err := tx.Model(&model.DatabaseProvisioningOperation{}).
+	if err := tx.Model(&model.DatabaseProvisioningOperation{}).Scopes(ActiveScope).
 		Where("instance_id = ?", strings.TrimSpace(instanceID)).Count(&count).Error; err != nil {
 		return false, fmt.Errorf("check provisioning instance references: %w", err)
 	}

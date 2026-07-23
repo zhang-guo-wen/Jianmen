@@ -63,7 +63,7 @@ func (s *DBStore) AuthenticateAIAccessToken(ctx context.Context, accessHash stri
 		return model.AIAccessToken{}, ErrAIAccessTokenInvalid
 	}
 	usedAt := now.UTC()
-	if err := s.db.WithContext(ctx).Model(&model.AIAccessToken{}).Where("id = ?", token.ID).Update("last_used_at", usedAt).Error; err != nil {
+	if err := s.db.WithContext(ctx).Model(&model.AIAccessToken{}).Scopes(ActiveScope).Where("id = ?", token.ID).Update("last_used_at", usedAt).Error; err != nil {
 		return model.AIAccessToken{}, fmt.Errorf("touch AI access token: %w", err)
 	}
 	token.LastUsedAt = &usedAt
@@ -92,7 +92,7 @@ func (s *DBStore) RotateAIAccessToken(ctx context.Context, refreshHash string, r
 			"refresh_expires_at": replacement.RefreshExpiresAt,
 			"last_used_at":       now.UTC(),
 		}
-		result := tx.Model(&model.AIAccessToken{}).
+		result := tx.Model(&model.AIAccessToken{}).Scopes(ActiveScope).
 			Where("id = ? AND refresh_token_hash = ? AND revoked_at IS NULL", current.ID, refreshHash).
 			Updates(updates)
 		if result.Error != nil {
@@ -120,7 +120,7 @@ func (s *DBStore) RotateAIAccessToken(ctx context.Context, refreshHash string, r
 }
 
 func (s *DBStore) RevokeAIAccessToken(ctx context.Context, userID, tokenID string, now time.Time) error {
-	result := s.db.WithContext(ctx).Model(&model.AIAccessToken{}).
+	result := s.db.WithContext(ctx).Model(&model.AIAccessToken{}).Scopes(ActiveScope).
 		Where("id = ? AND user_id = ? AND revoked_at IS NULL", tokenID, userID).
 		Update("revoked_at", now.UTC())
 	if result.Error != nil {

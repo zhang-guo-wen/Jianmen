@@ -74,10 +74,15 @@ func (s *DBStore) CreateTemporaryAccess(ctx context.Context, input service.Creat
 
 func (s *DBStore) CreateTemporaryAIAccess(ctx context.Context, input service.CreateTemporaryAIAccessInput) (service.TemporaryAIAccessResult, error) {
 	var result service.TemporaryAIAccessResult
-	err := s.withTemporarySessionIdentity(ctx, func(_ int, sessionID string) error {
+	err := s.withTemporarySessionIdentity(ctx, func(sessionSeq int, sessionID string) error {
 		return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 			if err := verifyTemporaryAccessUser(tx, input.UserID, input.Now); err != nil {
 				return err
+			}
+			// 创建 UserSession 记录，使 FindUserSessionBySessionID 可以查到 AI 临时会话
+			session := model.UserSession{UserID: input.UserID, SessionSeq: sessionSeq, SessionID: sessionID, Type: "temporary", Status: "active", ExpiresAt: input.ExpiresAt, CreatedBy: input.CreatedBy}
+			if err := tx.Create(&session).Error; err != nil {
+				return fmt.Errorf("create temporary AI user session: %w", err)
 			}
 			account := temporaryAccountFromValues(
 				model.TemporaryAccountTypeAI,
@@ -170,6 +175,11 @@ func (s *DBStore) DisableTemporaryAccess(ctx context.Context, id string, now tim
 			updated = tx.Model(&model.AIAccessToken{}).Where("temporary_account_id = ?", account.ID).Update("revoked_at", now)
 			if updated.Error != nil {
 				return fmt.Errorf("revoke temporary AI token: %w", updated.Error)
+			}
+			// 同时禁用对应的 UserSession，防止会话被继续使用
+			updated = tx.Model(&model.UserSession{}).Where("session_id = ?", account.SessionID).Update("status", "disabled")
+			if updated.Error != nil {
+				return fmt.Errorf("disable temporary AI user session: %w", updated.Error)
 			}
 		}
 		return nil

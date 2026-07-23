@@ -89,7 +89,7 @@ func (s *DBStore) EnsureResourceGrant(ctx context.Context, grant model.ResourceG
 
 func (s *DBStore) DeleteResourceGrant(ctx context.Context, id string) error {
 	now := time.Now().UTC()
-	result := s.db.WithContext(ctx).Model(&model.ResourceGrant{}).Scopes(ActiveScope).Where("id = ?", strings.TrimSpace(id)).Where("deleted_at = ?", model.SentinelDeletedAt).Updates(map[string]interface{}{"deleted_at": now, "updated_at": now})
+	result := s.db.WithContext(ctx).Model(&model.ResourceGrant{}).Scopes(ActiveScope).Where("id = ?", strings.TrimSpace(id)).Where("deleted_at = ?", SentinelDeletedAtStr).Updates(map[string]interface{}{"deleted_at": now, "updated_at": now})
 	if result.Error != nil {
 		return fmt.Errorf("delete resource grant: %w", result.Error)
 	}

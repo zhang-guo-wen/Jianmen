@@ -111,7 +111,7 @@ func (s *DBStore) DeleteDatabaseInstance(ctx context.Context, id string) error {
 			}
 		}
 		now := time.Now().UTC()
-		if err := tx.Model(&model.DatabaseAccount{}).Where("instance_id = ?", id).Where("deleted_at = ?", model.SentinelDeletedAt).Updates(map[string]interface{}{"deleted_at": now, "updated_at": now}).Error; err != nil {
+		if err := tx.Model(&model.DatabaseAccount{}).Where("instance_id = ?", id).Where("deleted_at = ?", SentinelDeletedAtStr).Updates(map[string]interface{}{"deleted_at": now, "updated_at": now}).Error; err != nil {
 			return err
 		}
 		if err := s.deleteResourceTx(tx, model.ResourceTypeDatabaseInstance, inst.ID); err != nil {

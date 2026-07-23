@@ -242,7 +242,7 @@ func (s *DBStore) DeleteHost(ctx context.Context, id string) error {
 				return err
 			}
 		}
-		if err := tx.Where("host_id = ?", id).Where("deleted_at = ?", model.SentinelDeletedAt).Updates(map[string]interface{}{"deleted_at": time.Now().UTC(), "updated_at": time.Now().UTC()}).Error; err != nil {
+		if err := tx.Where("host_id = ?", id).Where("deleted_at = ?", SentinelDeletedAtStr).Updates(map[string]interface{}{"deleted_at": time.Now().UTC(), "updated_at": time.Now().UTC()}).Error; err != nil {
 			return err
 		}
 		if err := s.deleteResourceTx(tx, model.ResourceTypeHost, host.ID); err != nil {

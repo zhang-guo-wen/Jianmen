@@ -25,8 +25,16 @@ type DBStore struct {
 
 // ActiveScope 返回 GORM Scope，过滤软删除行（仅保留 deleted_at = sentinel 的记录）。
 // 仅用于嵌入了 FullAudit 的业务表。
+// ActiveScope 返回 GORM Scope，过滤软删除行（仅保留 deleted_at = sentinel 的记录）。
+// 使用字符串常量比较而非 time.Time，避免 SQLite/MySQL 时区序列化差异。
+// SentinelDeletedAtStr 未删除记录的 deleted_at 值，用于 SQL 字符串比较。
+// 不用 time.Time 避免 SQLite 时区序列化导致匹配失败。
+// SentinelDeletedAtStr 未删除记录的 deleted_at 值。
+// GORM 在 SQLite 中序列化 time.Time 会带时区后缀 (+00:00)，用 LIKE 前缀匹配避免时区差异。
+const SentinelDeletedAtStr = "0001-01-01%"
+
 func ActiveScope(db *gorm.DB) *gorm.DB {
-	return db.Where("deleted_at = ?", model.SentinelDeletedAt)
+	return db.Where("deleted_at LIKE ?", SentinelDeletedAtStr)
 }
 
 // SoftDeleteRecord 对嵌入 FullAudit 的业务模型执行软删除。
@@ -43,7 +51,7 @@ func SoftDelete(ctx context.Context, db *gorm.DB, table string, id string) error
 	return db.WithContext(ctx).
 		Table(table).
 		Where("id = ?", id).
-		Where("deleted_at = ?", model.SentinelDeletedAt).
+		Where("deleted_at = ?", SentinelDeletedAtStr).
 		Updates(map[string]interface{}{
 			"deleted_at": time.Now().UTC(),
 			"updated_at": time.Now().UTC(),

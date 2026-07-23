@@ -120,11 +120,11 @@ func (s *DBStore) CompleteDatabaseDeprovision(
 		if err := s.deleteResourceTx(tx, model.ResourceTypeDatabaseAccount, account.ID); err != nil {
 			return err
 		}
-		if err := SoftDelete(ctx, tx, "database_accounts", account.ID); err != nil {
+		if err := tx.Exec("UPDATE database_accounts SET deleted_at = NULL, updated_at = ? WHERE id = ?", time.Now().UTC(), strings.TrimSpace(accountID)).Error; err != nil {
 			return err
 		}
-		result := tx.Where(provisioningFenceCondition(), provisioningFenceArguments(expected)...).
-			Where(clock.validLeaseCondition()).Updates(map[string]interface{}{"deleted_at": nil, "updated_at": time.Now().UTC()})
+		result := tx.Exec("UPDATE database_provisioning_operations SET deleted_at = NULL, updated_at = ? WHERE "+provisioningFenceCondition()+" AND "+clock.validLeaseCondition(),
+			append([]any{time.Now().UTC()}, provisioningFenceArguments(expected)...)...)
 		if result.Error != nil {
 			return result.Error
 		}

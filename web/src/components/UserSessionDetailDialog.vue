@@ -60,7 +60,7 @@ watch(
     try {
       detail.value = await apiClient.getUserSessionBySessionID(props.sessionId);
     } catch (e: unknown) {
-      error.value = e instanceof Error ? e.message : '加载授权详情失败';
+      error.value = e instanceof Error ? e.message : t('audit.error.loadDetail');
     } finally {
       loading.value = false;
     }
@@ -118,5 +118,9 @@ watch(
         </el-tag>
       </el-descriptions-item>
     </el-descriptions>
+
+    <div v-else style="text-align: center; padding: 40px 0; color: var(--el-text-color-secondary)">
+      {{ t('audit.noData') }}
+    </div>
   </el-dialog>
 </template>

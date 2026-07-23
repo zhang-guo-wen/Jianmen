@@ -3,6 +3,7 @@ package admin
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -98,11 +99,13 @@ func (s *Server) enrichOnlineSessionsWithUserSession(ctx context.Context, sessio
 		UserSessionID string `gorm:"column:user_session_id"`
 	}
 	var auditRows []auditRow
-	_ = s.db.WithContext(ctx).
+	if err := s.db.WithContext(ctx).
 		Table("audit_sessions").
 		Select("id, user_session_id").
 		Where("id IN ?", auditIDs).
-		Find(&auditRows)
+		Find(&auditRows).Error; err != nil {
+		s.logger.Warn("批量查询 audit_sessions 失败", slog.String("error", err.Error()))
+	}
 
 	auditToUserSession := map[string]string{}
 	userSessionIDs := make([]string, 0, len(auditRows))
@@ -121,11 +124,13 @@ func (s *Server) enrichOnlineSessionsWithUserSession(ctx context.Context, sessio
 		SessionID string `gorm:"column:session_id"`
 	}
 	var usRows []userSessionRow
-	_ = s.db.WithContext(ctx).
+	if err := s.db.WithContext(ctx).
 		Table("user_sessions").
 		Select("id, session_id").
 		Where("id IN ?", userSessionIDs).
-		Find(&usRows)
+		Find(&usRows).Error; err != nil {
+		s.logger.Warn("批量查询 user_sessions 失败", slog.String("error", err.Error()))
+	}
 
 	userSessionIDToShort := map[string]string{}
 	for _, r := range usRows {

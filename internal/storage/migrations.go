@@ -247,6 +247,16 @@ var migrations = []Migration{
 		Name:    "remove RDP access approval",
 		Run:     migrateRemoveRDPApproval,
 	},
+	{
+		Version: "202607230001",
+		Name:    "审计字段：created_by, updated_by, deleted_at 及复合唯一索引",
+		Run: func(tx *gorm.DB) error {
+			if err := tx.AutoMigrate(model.AllModels()...); err != nil {
+				return err
+			}
+			return MigrateAuditUniqueIndexes(tx)
+		},
+	},
 }
 
 func rejectDuplicateDatabaseAccounts(tx *gorm.DB) error {

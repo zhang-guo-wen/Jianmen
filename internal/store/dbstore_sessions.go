@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
+	"time"
 
 	"jianmen/internal/model"
 	"jianmen/internal/storage"
@@ -235,4 +236,87 @@ func (s *DBStore) UserSessionByID(sessionID string, userID string) (*model.UserS
 		return nil, err
 	}
 	return &sess, nil
+}
+
+// GetUserSessionAuthDetail 通过 5 位 session_id 查询用户会话授权详情。
+// 对于临时会话，同时查询 TemporaryAccount 获取授权类型和备注。
+func (s *DBStore) GetUserSessionAuthDetail(ctx context.Context, sessionID string) (model.UserSessionAuthDetail, error) {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" || len(sessionID) > 5 {
+		return model.UserSessionAuthDetail{}, fmt.Errorf("invalid session_id: %q", sessionID)
+	}
+
+	var sess model.UserSession
+	if err := s.db.WithContext(ctx).Preload("User").
+		Where("session_id = ?", sessionID).First(&sess).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return model.UserSessionAuthDetail{}, fmt.Errorf("user session %q: %w", sessionID, ErrNotFound)
+		}
+		return model.UserSessionAuthDetail{}, fmt.Errorf("find user session %q: %w", sessionID, err)
+	}
+
+	detail := model.UserSessionAuthDetail{
+		ID:            sess.ID,
+		SessionID:     sess.SessionID,
+		SessionType:   sess.Type,
+		UserID:        sess.UserID,
+		Username:      sess.User.Username,
+		AuthorizedBy:  sess.CreatedBy,
+		StartsAt:      sess.CreatedAt,
+		ExpiresAt:     sess.ExpiresAt,
+		Status:        sess.Status,
+	}
+
+	// 计算授权类型
+	detail.AuthorizationType = authorizationTypeFromUserSession(sess)
+
+	// 对于临时会话，查询 TemporaryAccount 获取备注和更精确的授权类型
+	if sess.Type == "temporary" {
+		var ta model.TemporaryAccount
+		// TemporaryAccount.SessionID 存储的是 UserSession.SessionID（5位短ID）
+		err := s.db.WithContext(ctx).Where("session_id = ?", sess.SessionID).First(&ta).Error
+		if err == nil {
+			detail.Remark = ta.Remark
+			detail.AuthorizationType = authorizationTypeFromTemporaryAccount(ta)
+		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return model.UserSessionAuthDetail{}, fmt.Errorf("find temporary account: %w", err)
+		}
+		// TemporaryAccount 不存在时，保持基础信息，类型由 authorizationTypeFromUserSession 决定
+	}
+
+	// 计算有效状态
+	detail.EffectiveStatus = computeEffectiveStatus(detail.Status, detail.ExpiresAt)
+
+	return detail, nil
+}
+
+// authorizationTypeFromUserSession 根据 UserSession 类型返回基础授权类型。
+func authorizationTypeFromUserSession(sess model.UserSession) string {
+	if sess.Type == "permanent" {
+		return "normal"
+	}
+	return "unknown" // 临时会话但未找到 TemporaryAccount 时使用
+}
+
+// authorizationTypeFromTemporaryAccount 根据 TemporaryAccount 类型返回授权类型。
+func authorizationTypeFromTemporaryAccount(ta model.TemporaryAccount) string {
+	switch ta.Type {
+	case model.TemporaryAccountTypeAI:
+		return "ai"
+	case model.TemporaryAccountTypeUser:
+		return "temporary"
+	default:
+		return "unknown"
+	}
+}
+
+// computeEffectiveStatus 综合原始状态和有效期计算有效状态。
+func computeEffectiveStatus(status string, expiresAt *time.Time) string {
+	if status != "active" {
+		return "disabled"
+	}
+	if expiresAt != nil && !expiresAt.After(time.Now()) {
+		return "expired"
+	}
+	return "active"
 }

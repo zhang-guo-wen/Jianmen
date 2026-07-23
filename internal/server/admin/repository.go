@@ -241,6 +241,7 @@ type adminContainerRepository interface {
 
 type adminUserSessionCreationRepository interface {
 	service.UserSessionCreationRepository
+	FindAITokenSessionID(ctx context.Context, userID string) string
 }
 
 type adminAuditRepository interface {

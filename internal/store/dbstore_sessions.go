@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"sync"
 
@@ -164,6 +165,38 @@ func (s *DBStore) GetOrCreateActivePermanentUserSession(ctx context.Context, use
 		return model.UserSession{}, err
 	}
 	return session, nil
+}
+
+// FindUserSessionBySessionID 通过短 session_id（如 "00001"）查找用户会话。
+func (s *DBStore) FindUserSessionBySessionID(ctx context.Context, sessionID string) (model.UserSession, error) {
+	var session model.UserSession
+	if err := s.db.WithContext(ctx).Where("session_id = ?", sessionID).First(&session).Error; err != nil {
+		return model.UserSession{}, fmt.Errorf("find user session %q: %w", sessionID, err)
+	}
+	return session, nil
+}
+
+// FindAITokenSessionID 查找用户的 AI 令牌关联的临时会话短 ID，用于 SSH 认证。
+func (s *DBStore) FindAITokenSessionID(ctx context.Context, userID string) string {
+	type result struct {
+		SessionID string
+	}
+	var r result
+	// 查找最新的活跃 AI 令牌对应的临时账号会话
+	if err := s.db.WithContext(ctx).
+		Table("ai_access_tokens").
+		Select("ta.session_id").
+		Joins("JOIN temporary_accounts ta ON ta.id = ai_access_tokens.temporary_account_id").
+		Where("ai_access_tokens.user_id = ? AND ai_access_tokens.revoked_at IS NULL", userID).
+		Where("ta.status = ?", "active").
+		Order("ai_access_tokens.created_at DESC").
+		Limit(1).
+		Scan(&r).Error; err != nil || r.SessionID == "" {
+		slog.Default().Info("FindAITokenSessionID", "user_id", userID, "session_id", r.SessionID, "err", err)
+		return ""
+	}
+	slog.Default().Info("FindAITokenSessionID found", "user_id", userID, "session_id", r.SessionID)
+	return r.SessionID
 }
 
 func (s *DBStore) ensureUserSessionSequenceFloor(ctx context.Context) error {

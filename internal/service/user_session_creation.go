@@ -29,6 +29,7 @@ type UserSessionCreationRepository interface {
 	FindActiveHost(context.Context, string) (model.Host, bool, error)
 	FindActiveDatabaseAccount(context.Context, string) (model.DatabaseAccount, bool, error)
 	GetOrCreateActivePermanentUserSession(context.Context, string) (model.UserSession, error)
+	FindUserSessionBySessionID(context.Context, string) (model.UserSession, error)
 }
 
 // UserSessionConnectionAuthorizer is the narrow authorization dependency for
@@ -99,6 +100,18 @@ func (s *UserSessionCreationService) Create(ctx context.Context, request CreateU
 		ResourceType:    resourceType,
 		CompactUsername: prefix + resourceID + session.SessionID,
 	}, nil
+}
+
+// ActiveUserSession 查找指定 session_id 的用户会话，验证其属于该用户且状态为 active。
+func (s *UserSessionCreationService) ActiveUserSession(ctx context.Context, userID, sessionID string) (model.UserSession, error) {
+	session, err := s.repository.FindUserSessionBySessionID(ctx, sessionID)
+	if err != nil {
+		return model.UserSession{}, fmt.Errorf("find user session: %w", err)
+	}
+	if session.UserID != userID {
+		return model.UserSession{}, fmt.Errorf("user session does not belong to user")
+	}
+	return session, nil
 }
 
 // GetOrCreateActivePermanentUserSession is the shared allocation boundary for

@@ -152,7 +152,7 @@ func New(
 	aiResources, err := service.NewAIResourceService(
 		dependencies.aiResources,
 		aiResourceAuthorizerAdapter{authorization: authorization},
-		aiResourceSessionCreatorAdapter{sessions: userSessionCreation},
+		aiResourceSessionCreatorAdapter{sessions: userSessionCreation, aiTokens: dependencies.userSessionCreation},
 	)
 	if err != nil {
 		return nil, fmt.Errorf("initialize AI resource service: %w", err)

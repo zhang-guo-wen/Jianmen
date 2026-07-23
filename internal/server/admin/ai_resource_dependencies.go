@@ -141,12 +141,28 @@ func (a aiResourceAuthorizerAdapter) AuthorizeAIResources(
 
 type aiResourceSessionCreatorAdapter struct {
 	sessions *service.UserSessionCreationService
+	aiTokens aiTokenSessionLookup
+}
+
+// aiTokenSessionLookup 查找 AI 令牌关联的临时会话 ID。
+type aiTokenSessionLookup interface {
+	FindAITokenSessionID(ctx context.Context, userID string) string
 }
 
 func (a aiResourceSessionCreatorAdapter) GetOrCreateAIResourceSession(
 	ctx context.Context,
 	actorID string,
 ) (service.AIResourceSession, error) {
+	// 优先使用 AI 令牌关联的临时会话（如 "0000a"）
+	if a.aiTokens != nil {
+		if aiSessID := a.aiTokens.FindAITokenSessionID(ctx, actorID); aiSessID != "" {
+			session, err := a.sessions.ActiveUserSession(ctx, actorID, aiSessID)
+			if err == nil && session.Status == "active" {
+				return service.AIResourceSession{ID: session.SessionID, Seq: session.SessionSeq}, nil
+			}
+		}
+	}
+	// 回退到永久会话
 	session, err := a.sessions.GetOrCreateActivePermanentUserSession(ctx, actorID)
 	if err != nil {
 		return service.AIResourceSession{}, err

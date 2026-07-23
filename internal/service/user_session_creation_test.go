@@ -49,6 +49,10 @@ func (s *userSessionCreationRepositoryStub) GetOrCreateActivePermanentUserSessio
 	return s.session, s.err
 }
 
+func (s *userSessionCreationRepositoryStub) FindUserSessionBySessionID(_ context.Context, _ string) (model.UserSession, error) {
+	return model.UserSession{}, nil
+}
+
 type userSessionCreationAuthorizerStub struct {
 	allowed      bool
 	err          error

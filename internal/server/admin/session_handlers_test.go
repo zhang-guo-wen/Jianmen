@@ -27,6 +27,10 @@ func (userSessionHandlerRepository) GetOrCreateActivePermanentUserSession(contex
 	return model.UserSession{ID: "session-1", SessionID: "00001", SessionSeq: 1, Type: "permanent", Status: "active"}, nil
 }
 
+func (userSessionHandlerRepository) FindUserSessionBySessionID(context.Context, string) (model.UserSession, error) {
+	return model.UserSession{}, nil
+}
+
 type userSessionHandlerAuthorizer struct{ allowed bool }
 
 func (a userSessionHandlerAuthorizer) AuthorizeConnection(context.Context, string, []string, string, string) (bool, error) {

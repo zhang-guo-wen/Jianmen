@@ -257,6 +257,11 @@ var migrations = []Migration{
 			return MigrateAuditUniqueIndexes(tx)
 		},
 	},
+		{
+			Version: "202607230003",
+			Name:    "逻辑删除标记从时间哨兵改为整型哨兵：deleted_at=1 活跃，NULL 已删除",
+			Run:     migrateDeletedAtToInt,
+		},
 }
 
 func rejectDuplicateDatabaseAccounts(tx *gorm.DB) error {
@@ -486,4 +491,45 @@ func displayAddress(address string, port int) string {
 		return address
 	}
 	return fmt.Sprintf("%s:%d", address, port)
+}
+
+// tablesWithDeletedAt 列出所有包含 deleted_at 列的业务表。
+func tablesWithDeletedAt() []string {
+	return []string{
+		"users", "roles", "permissions", "role_permissions", "user_roles",
+		"user_groups", "user_group_members",
+		"hosts", "host_accounts",
+		"database_instances", "database_accounts",
+		"applications", "container_endpoints",
+		"resource_grants", "resources", "resource_groups",
+		"user_sessions", "temporary_accounts", "temporary_account_grants",
+		"connection_passwords", "ai_access_tokens",
+		"admin_sessions", "websocket_tickets",
+		"platform_accounts",
+		"system_setting_revisions", "system_settings",
+		"database_provisioning_operations",
+		"user_preferences",
+	}
+}
+
+// migrateDeletedAtToInt 将 deleted_at 列从时间哨兵格式迁移到整型哨兵格式。
+// 活跃行：时间哨兵 "0001-01-01..." → 1
+// 已删除行：时间戳 → NULL
+func migrateDeletedAtToInt(tx *gorm.DB) error {
+	for _, table := range tablesWithDeletedAt() {
+		// 检查表是否存在
+		if !tx.Migrator().HasTable(table) {
+			continue
+		}
+		// 活跃行：时间哨兵 → 1
+		if err := tx.Table(table).Where("deleted_at LIKE ?", "0001-01-01%").Update("deleted_at", model.DeletedMarkerActive).Error; err != nil {
+			return fmt.Errorf("migrate %s active rows: %w", table, err)
+		}
+		// 已删除行：时间戳 → NULL
+		if err := tx.Table(table).Where("deleted_at NOT LIKE ? AND deleted_at IS NOT NULL", "0001-01-01%").Update("deleted_at", nil).Error; err != nil {
+			return fmt.Errorf("migrate %s deleted rows: %w", table, err)
+		}
+	}
+	// AutoMigrate 更新列类型（GORM 会根据 model tag 重建 schema）
+	return tx.AutoMigrate(model.AllModels()...)
 }

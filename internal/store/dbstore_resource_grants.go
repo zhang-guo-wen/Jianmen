@@ -78,7 +78,7 @@ func (s *DBStore) EnsureResourceGrant(ctx context.Context, grant model.ResourceG
 	var existing model.ResourceGrant
 	result := s.db.WithContext(ctx).
 		Where("principal_type = ? AND principal_id = ? AND resource_type = ? AND resource_id = ? AND effect = ? AND deleted_at = ?",
-			grant.PrincipalType, grant.PrincipalID, grant.ResourceType, grant.ResourceID, grant.Effect, model.SentinelDeletedAt).
+			grant.PrincipalType, grant.PrincipalID, grant.ResourceType, grant.ResourceID, grant.Effect, model.DeletedMarkerActive).
 		Limit(1).Find(&existing)
 	if result.Error != nil {
 		return fmt.Errorf("ensure resource grant: %w", result.Error)
@@ -94,7 +94,7 @@ func (s *DBStore) EnsureResourceGrant(ctx context.Context, grant model.ResourceG
 
 func (s *DBStore) DeleteResourceGrant(ctx context.Context, id string) error {
 	now := time.Now().UTC()
-	result := s.db.WithContext(ctx).Model(&model.ResourceGrant{}).Scopes(ActiveScope).Where("id = ?", strings.TrimSpace(id)).Where("deleted_at = ?", SentinelDeletedAtStr).Updates(map[string]interface{}{"deleted_at": now, "updated_at": now})
+	result := s.db.WithContext(ctx).Model(&model.ResourceGrant{}).Scopes(ActiveScope).Where("id = ?", strings.TrimSpace(id)).Updates(map[string]interface{}{"deleted_at": nil, "updated_at": now})
 	if result.Error != nil {
 		return fmt.Errorf("delete resource grant: %w", result.Error)
 	}
@@ -176,9 +176,9 @@ func (s *DBStore) searchResourceGrantResourceIDs(ctx context.Context, like strin
 		column string
 	}{
 		{name: "hosts", query: s.db.WithContext(ctx).Model(&model.Host{}).Scopes(ActiveScope).Where("LOWER(name) LIKE ? OR LOWER(address) LIKE ?", like, like), column: "id"},
-		{name: "host accounts", query: s.db.WithContext(ctx).Model(&model.HostAccount{}).Where("host_accounts.deleted_at LIKE ?", SentinelDeletedAtStr).Joins("JOIN hosts ON hosts.id = host_accounts.host_id").Where("LOWER(host_accounts.name) LIKE ? OR LOWER(host_accounts.username) LIKE ? OR LOWER(hosts.name) LIKE ? OR LOWER(hosts.address) LIKE ?", like, like, like, like), column: "host_accounts.id"},
+		{name: "host accounts", query: s.db.WithContext(ctx).Model(&model.HostAccount{}).Where("host_accounts.deleted_at = ?", model.DeletedMarkerActive).Joins("JOIN hosts ON hosts.id = host_accounts.host_id").Where("LOWER(host_accounts.name) LIKE ? OR LOWER(host_accounts.username) LIKE ? OR LOWER(hosts.name) LIKE ? OR LOWER(hosts.address) LIKE ?", like, like, like, like), column: "host_accounts.id"},
 		{name: "database instances", query: s.db.WithContext(ctx).Model(&model.DatabaseInstance{}).Scopes(ActiveScope).Where("LOWER(name) LIKE ? OR LOWER(address) LIKE ?", like, like), column: "id"},
-		{name: "database accounts", query: s.db.WithContext(ctx).Model(&model.DatabaseAccount{}).Where("database_accounts.deleted_at LIKE ?", SentinelDeletedAtStr).Joins("JOIN database_instances ON database_instances.id = database_accounts.instance_id").Where("LOWER(database_accounts.unique_name) LIKE ? OR LOWER(database_accounts.username) LIKE ? OR LOWER(database_instances.name) LIKE ? OR LOWER(database_instances.address) LIKE ?", like, like, like, like), column: "database_accounts.id"},
+		{name: "database accounts", query: s.db.WithContext(ctx).Model(&model.DatabaseAccount{}).Where("database_accounts.deleted_at = ?", model.DeletedMarkerActive).Joins("JOIN database_instances ON database_instances.id = database_accounts.instance_id").Where("LOWER(database_accounts.unique_name) LIKE ? OR LOWER(database_accounts.username) LIKE ? OR LOWER(database_instances.name) LIKE ? OR LOWER(database_instances.address) LIKE ?", like, like, like, like), column: "database_accounts.id"},
 		{name: "applications", query: s.db.WithContext(ctx).Model(&model.Application{}).Scopes(ActiveScope).Where("LOWER(name) LIKE ? OR LOWER(address) LIKE ? OR LOWER(internal_host) LIKE ?", like, like, like), column: "id"},
 		{name: "container endpoints", query: s.db.WithContext(ctx).Model(&model.ContainerEndpoint{}).Scopes(ActiveScope).Where("LOWER(name) LIKE ? OR LOWER(address) LIKE ? OR LOWER(group_name) LIKE ?", like, like, like), column: "id"},
 		{name: "platform accounts", query: s.db.WithContext(ctx).Model(&model.PlatformAccount{}).Scopes(ActiveScope).Where("LOWER(name) LIKE ? OR LOWER(platform_name) LIKE ? OR LOWER(username) LIKE ? OR LOWER(url) LIKE ?", like, like, like, like), column: "id"},
@@ -243,13 +243,13 @@ func (s *DBStore) BatchUpsertGrants(ctx context.Context, grants []model.Resource
 			var existing model.ResourceGrant
 			result := tx.Where(
 				"principal_type = ? AND principal_id = ? AND resource_type = ? AND resource_id = ? AND effect = ? AND deleted_at = ?",
-				grant.PrincipalType, grant.PrincipalID, grant.ResourceType, grant.ResourceID, grant.Effect, model.SentinelDeletedAt,
+				grant.PrincipalType, grant.PrincipalID, grant.ResourceType, grant.ResourceID, grant.Effect, model.DeletedMarkerActive,
 			).First(&existing)
 
 			if result.Error == nil {
 				// 已存在：软删除旧记录
 				if err := tx.Model(&existing).Updates(map[string]interface{}{
-					"deleted_at": time.Now(),
+					"deleted_at": nil,
 					"updated_by": actorID,
 				}).Error; err != nil {
 					return fmt.Errorf("soft delete existing grant %s: %w", existing.ID, err)

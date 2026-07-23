@@ -7,15 +7,10 @@ import (
 	"gorm.io/gorm"
 )
 
-// SentinelDeletedAt 未删除（活跃）行的标记时间。
-// 使用非 NULL 值以便与业务键组合成有效的复合唯一索引（MySQL 唯一索引中 NULL 值不参与等值比较）。
-var SentinelDeletedAt = time.Date(1, 1, 1, 0, 0, 0, 0, time.UTC)
-
-// SentinelDeletedAtPtr 返回 SentinelDeletedAt 的指针。
-func SentinelDeletedAtPtr() *time.Time {
-	t := SentinelDeletedAt
-	return &t
-}
+// DeletedMarkerActive 逻辑删除标记：1 = 活跃（未删除），NULL = 已删除。
+// 使用非 NULL 值 1 作为哨兵，保证 (business_key, deleted_at) 复合唯一索引
+// 在所有数据库（MySQL/SQLite/PostgreSQL）中正确生效。
+const DeletedMarkerActive = 1
 
 // contextKey 用于在 context 中存储/提取审计相关值。
 type contextKey string
@@ -49,18 +44,19 @@ func (a *CreationAudit) BeforeCreate(tx *gorm.DB) error {
 
 // FullAudit 业务表嵌入：完整的五个审计字段。
 type FullAudit struct {
-	CreatedBy string     `gorm:"index;size:64;not null;default:''" json:"created_by"`
-	UpdatedBy string     `gorm:"index;size:64;not null;default:''" json:"updated_by"`
-	CreatedAt time.Time  `json:"created_at"`
-	UpdatedAt time.Time  `json:"updated_at"`
-	DeletedAt *time.Time `gorm:"index;not null;default:'0001-01-01 00:00:00'" json:"-"`
+	CreatedBy string    `gorm:"index;size:64;not null;default:''" json:"created_by"`
+	UpdatedBy string    `gorm:"index;size:64;not null;default:''" json:"updated_by"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+	DeletedAt *int      `gorm:"index;default:1" json:"-"`
 }
 
 // BeforeCreate 自动从 context 获取当前用户 ID 填充 CreatedBy 和 UpdatedBy，
-// 并将 DeletedAt 初始化为 SentinelDeletedAt。
+// 并将 DeletedAt 初始化为 DeletedMarkerActive。
 func (a *FullAudit) BeforeCreate(tx *gorm.DB) error {
 	if a.DeletedAt == nil {
-		a.DeletedAt = SentinelDeletedAtPtr()
+		v := DeletedMarkerActive
+		a.DeletedAt = &v
 	}
 	userID := userIDFromContext(tx.Statement.Context)
 	a.CreatedBy = userID

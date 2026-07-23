@@ -124,7 +124,7 @@ func (s *DBStore) CompleteDatabaseDeprovision(
 			return err
 		}
 		result := tx.Where(provisioningFenceCondition(), provisioningFenceArguments(expected)...).
-			Where(clock.validLeaseCondition()).Where("deleted_at = ?", SentinelDeletedAtStr).Updates(map[string]interface{}{"deleted_at": time.Now().UTC(), "updated_at": time.Now().UTC()})
+			Where(clock.validLeaseCondition()).Updates(map[string]interface{}{"deleted_at": nil, "updated_at": time.Now().UTC()})
 		if result.Error != nil {
 			return result.Error
 		}

@@ -239,7 +239,7 @@ func (s *DBStore) DeletePlatformAccount(ctx context.Context, id string) error {
 			return err
 		}
 				now := time.Now().UTC()
-		result := tx.Model(&model.PlatformAccount{}).Scopes(ActiveScope).Where("id = ?", id).Where("deleted_at = ?", SentinelDeletedAtStr).Updates(map[string]interface{}{"deleted_at": now, "updated_at": now})
+		result := tx.Model(&model.PlatformAccount{}).Scopes(ActiveScope).Where("id = ?", id).Updates(map[string]interface{}{"deleted_at": nil, "updated_at": now})
 		if result.Error != nil {
 			return result.Error
 		}

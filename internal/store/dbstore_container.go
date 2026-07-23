@@ -28,7 +28,7 @@ func (s *DBStore) ListContainerEndpoints(ctx context.Context, params ContainerEn
 
 	buildQuery := func() *gorm.DB {
 		query := s.db.WithContext(ctx).Model(&model.ContainerEndpoint{}).
-				Where("container_endpoints.deleted_at LIKE ?", SentinelDeletedAtStr).
+				Where("container_endpoints.deleted_at = ?", model.DeletedMarkerActive).
 			Joins("LEFT JOIN hosts ON hosts.id = container_endpoints.host_id")
 		if status := strings.TrimSpace(params.Status); status != "" {
 			query = query.Where("container_endpoints.status = ?", status)

@@ -18,7 +18,7 @@ type ResourceGrant struct {
 	ExpiresAt     *time.Time `gorm:"index" json:"expires_at,omitempty"`
 	FullAudit
 	// 覆盖 FullAudit.DeletedAt，将其纳入唯一索引，使软删后可以重建相同业务键的记录
-	DeletedAt *time.Time `gorm:"index;not null;default:'0001-01-01 00:00:00';uniqueIndex:idx_rg_logic_deleted,priority:6" json:"-"`
+	DeletedAt *int `gorm:"index;default:1;uniqueIndex:idx_rg_logic_deleted,priority:6" json:"-"`
 }
 
 func (m *ResourceGrant) BeforeCreate(tx *gorm.DB) error {

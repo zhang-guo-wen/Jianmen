@@ -13,6 +13,8 @@ bin
 dist/*
 !dist/jianmen-linux-amd64-lite
 !dist/jianmen-linux-arm64-lite
+!dist/jianmen-linux-amd64-rdp
+!dist/jianmen-linux-arm64-rdp
 data
 logs
 

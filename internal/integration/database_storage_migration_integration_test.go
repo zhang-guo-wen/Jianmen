@@ -1032,6 +1032,16 @@ func createCurrentSchemaWithOnlyMigrationPending(t *testing.T, db *gorm.DB, pend
 				t.Fatalf("remove migration %s column %s from fixture: %v", pendingVersion, column, err)
 			}
 		}
+		// The current MySQL schema already uses LONGTEXT. Restore the exact
+		// pre-migration type so this fixture exercises the TEXT-to-LONGTEXT
+		// transition instead of only replaying the migration record.
+		if db.Dialector.Name() == "mysql" {
+			if err := db.Exec(
+				"ALTER TABLE audit_db_queries MODIFY COLUMN sql_text TEXT",
+			).Error; err != nil {
+				t.Fatalf("restore legacy audit query text type: %v", err)
+			}
+		}
 	default:
 		t.Fatalf("unsupported isolated migration version %s", pendingVersion)
 	}

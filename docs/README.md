@@ -2,6 +2,10 @@
 
 项目文档按用途分类，新增文档应放入对应目录，避免继续堆放在仓库根目录。
 
+## 架构与工程规范
+
+- [全局架构、分层、测试、构建与部署](architecture.md)
+
 ## 使用与部署指南
 
 - [数据库协议兼容性](guides/database-protocol-compatibility.md)

@@ -162,9 +162,11 @@ func migrateDatabaseProvisioningSaga(tx *gorm.DB) error {
 	// recreateTable（整表重建）。glebarez/sqlite 的 CreateConstraint 没有包裹
 	// RunWithoutForeignKey，导致 foreign_keys=ON 时 DROP TABLE 可能出问题。
 	// 这里临时关闭外键检查，AutoMigrate 完成后再恢复。
-	pragmaOff := tx.Exec("PRAGMA foreign_keys = OFF").Error == nil
-	if pragmaOff {
-		defer tx.Exec("PRAGMA foreign_keys = ON")
+	if tx.Dialector.Name() == "sqlite" {
+		pragmaOff := tx.Exec("PRAGMA foreign_keys = OFF").Error == nil
+		if pragmaOff {
+			defer tx.Exec("PRAGMA foreign_keys = ON")
+		}
 	}
 	if err := tx.AutoMigrate(&databaseAccountProvisioningSchema{}); err != nil {
 		return fmt.Errorf("migrate managed database account fields: %w", err)

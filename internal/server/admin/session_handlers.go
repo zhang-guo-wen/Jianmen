@@ -105,7 +105,7 @@ func (s *Server) handleSessionArtifact(w http.ResponseWriter, r *http.Request) {
 	}
 	dir, ok := safeReplayDir(filepath.Join(s.cfg.ReplayDir, "ssh"), id)
 	if !ok {
-		s.writeErrorText(w, r, http.StatusBadRequest, "invalid session id")
+		s.writeErrorText(w, r, http.StatusBadRequest, "无效的会话ID")
 		return
 	}
 	switch artifact {
@@ -351,8 +351,8 @@ func (s *Server) handleUserSessionBySessionID(w http.ResponseWriter, r *http.Req
 	// 解析路径中的 sessionID
 	sessionID := strings.TrimPrefix(r.URL.Path, "/api/user-sessions/by-session-id/")
 	sessionID = strings.Trim(sessionID, "/")
-	if sessionID == "" || strings.Contains(sessionID, "/") {
-		s.writeErrorText(w, r, http.StatusBadRequest, "invalid session id")
+	if sessionID == "" || strings.Contains(sessionID, "/") || len(sessionID) > 5 {
+		s.writeErrorText(w, r, http.StatusBadRequest, "无效的会话ID")
 		return
 	}
 

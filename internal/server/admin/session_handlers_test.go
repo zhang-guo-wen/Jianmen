@@ -141,3 +141,28 @@ func TestHandleUserSessionBySessionID_InvalidFormat(t *testing.T) {
 
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }
+
+func TestHandleUserSessionBySessionID_SessionIDTooLong(t *testing.T) {
+	srv, db := newAdminDBTestServer(t)
+	seedTestSuperAdmin(t, db, "u-admin")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/user-sessions/by-session-id/123456", nil)
+	req = asTestSuperAdmin(req)
+	rec := httptest.NewRecorder()
+	srv.handleUserSessionBySessionID(rec, req)
+
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+}
+
+func TestHandleUserSessionBySessionID_Forbidden(t *testing.T) {
+	srv, db := newAdminDBTestServer(t)
+	user := model.User{ID: "regular-user", Username: "regular", Status: "active"}
+	require.NoError(t, db.Create(&user).Error)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/user-sessions/by-session-id/00001", nil)
+	req = asTestUser(req, "regular-user", "regular")
+	rec := httptest.NewRecorder()
+	srv.handleUserSessionBySessionID(rec, req)
+
+	assert.Equal(t, http.StatusForbidden, rec.Code)
+}

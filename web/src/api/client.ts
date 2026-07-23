@@ -882,6 +882,7 @@ export interface ResourceGrantRecord {
   resource_id: string;
   effect: 'allow' | 'deny';
   expires_at?: string;
+  created_by?: string;
   created_at: string;
   updated_at: string;
 }

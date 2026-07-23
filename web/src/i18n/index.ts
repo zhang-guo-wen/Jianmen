@@ -82,6 +82,7 @@ const zhCN = {
   'common.close': '关闭',
   'common.create': '创建',
   'common.createdAt': '创建时间',
+  'common.createdBy': '创建人',
   'common.created': '已创建',
   'common.delete': '删除',
   'common.deleted': '已删除',

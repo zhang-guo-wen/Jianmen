@@ -16,6 +16,7 @@ type ResourceGrant struct {
 	ResourceID    string     `gorm:"index;index:idx_resource_grants_resource,priority:2;uniqueIndex:uidx_resource_grants_logic,priority:4;size:64;not null" json:"resource_id"`     // 资源ID 或 资源组ID
 	Effect        string     `gorm:"index;uniqueIndex:uidx_resource_grants_logic,priority:5;size:16;not null;default:allow" json:"effect"`                                          // "allow" 或 "deny"
 	ExpiresAt     *time.Time `gorm:"index" json:"expires_at,omitempty"`
+	CreatedBy     string     `gorm:"index;size:64" json:"created_by,omitempty"` // 创建人ID
 	CreatedAt     time.Time  `json:"created_at"`
 	UpdatedAt     time.Time  `json:"updated_at"`
 }

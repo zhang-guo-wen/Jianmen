@@ -51,6 +51,16 @@
             {{ row.expires_at ? formatTime(row.expires_at) : t('resourceGrant.never') }}
           </template>
         </el-table-column>
+        <el-table-column :label="t('common.createdBy')" min-width="120">
+          <template #default="{ row }">
+            {{ getCreatorName(row) }}
+          </template>
+        </el-table-column>
+        <el-table-column :label="t('common.createdAt')" width="180">
+          <template #default="{ row }">
+            {{ formatTime(row.created_at) }}
+          </template>
+        </el-table-column>
         <el-table-column :label="t('common.actions')" width="80" fixed="right">
           <template #default="{ row }">
             <el-button type="danger" link size="small" @click="deleteGrant(row)">
@@ -389,6 +399,12 @@ const getResourceName = (grant: ResourceGrantRecord) => {
   const accGroup = accountGroups.value.find(g => g.id === grant.resource_id)
   if (accGroup) return accGroup.name
   return grant.resource_id
+}
+
+const getCreatorName = (grant: ResourceGrantRecord) => {
+  if (!grant.created_by) return '-'
+  const user = allUsers.value.find(u => u.id === grant.created_by)
+  return user?.username || grant.created_by
 }
 
 const loadGrants = async () => {

@@ -151,6 +151,7 @@ func TestResourceGrantServiceGrantCreatedResourceEnsuresCreatorGrant(t *testing.
 		ResourceType:  model.ResourceTypeHost,
 		ResourceID:    "host-1",
 		Effect:        model.PermissionEffectAllow,
+		CreatedBy:     "u1",
 	}
 	if !reflect.DeepEqual(repository.ensured, want) {
 		t.Fatalf("ensured grant = %#v, want %#v", repository.ensured, want)

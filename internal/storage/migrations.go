@@ -181,6 +181,13 @@ var migrations = []Migration{
 		Run:     migrateDatabaseProvisioningSaga,
 	},
 	{
+		Version: "202607230001",
+		Name:    "resource grant created_by tracking",
+		Run: func(tx *gorm.DB) error {
+			return tx.AutoMigrate(&model.ResourceGrant{})
+		},
+	},
+	{
 		Version: "202607190001",
 		Name:    "resource grant logical uniqueness",
 		Run:     migrateResourceGrantLogicalUniqueness,

@@ -50,6 +50,7 @@ type AuditSession struct {
 	CleanupStatus   string     `gorm:"index:idx_audit_sessions_cleanup,priority:1;size:16;not null;default:ready" json:"-"`
 	CleanupAt       *time.Time `gorm:"index" json:"-"`
 	CleanupError    string     `gorm:"type:text" json:"-"`
+	CreatedBy       string     `gorm:"index;size:64;not null;default:''" json:"created_by"`
 	CreatedAt       time.Time  `json:"created_at"`
 	UpdatedAt       time.Time  `json:"updated_at"`
 }

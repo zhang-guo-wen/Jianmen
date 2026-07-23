@@ -14,4 +14,5 @@ type AuditRDPChannelEvent struct {
 	Bytes          int64     `json:"bytes,omitempty"`
 	Outcome        string    `gorm:"size:32;not null" json:"outcome"`
 	Reason         string    `gorm:"size:255" json:"reason,omitempty"`
+	CreationAudit
 }

@@ -182,13 +182,43 @@ func (m *PlatformAccount) BeforeCreate(tx *gorm.DB) error {
 	}
 	return ensureID(&m.ID)
 }
-func (m *AuditEvent) BeforeCreate(_ *gorm.DB) error        { return ensureID(&m.ID) }
-func (m *LoginAuditLog) BeforeCreate(_ *gorm.DB) error     { return ensureID(&m.ID) }
-func (m *AuditSession) BeforeCreate(_ *gorm.DB) error      { return ensureID(&m.ID) }
-func (m *AuditArtifact) BeforeCreate(_ *gorm.DB) error     { return ensureID(&m.ID) }
-func (m *AuditRDPChannelEvent) BeforeCreate(_ *gorm.DB) error {
+func (m *AuditEvent) BeforeCreate(tx *gorm.DB) error {
+	m.CreatedBy = userIDFromContext(tx.Statement.Context)
 	return ensureID(&m.ID)
 }
-func (m *AuditSSHCommand) BeforeCreate(_ *gorm.DB) error { return ensureID(&m.ID) }
-func (m *AuditDBQuery) BeforeCreate(_ *gorm.DB) error    { return ensureID(&m.ID) }
-func (m *AuditSFTPEvent) BeforeCreate(_ *gorm.DB) error  { return ensureID(&m.ID) }
+func (m *LoginAuditLog) BeforeCreate(tx *gorm.DB) error {
+	m.CreatedBy = userIDFromContext(tx.Statement.Context)
+	return ensureID(&m.ID)
+}
+func (m *AuditSession) BeforeCreate(tx *gorm.DB) error {
+	m.CreatedBy = userIDFromContext(tx.Statement.Context)
+	return ensureID(&m.ID)
+}
+func (m *AuditArtifact) BeforeCreate(tx *gorm.DB) error {
+	m.CreatedBy = userIDFromContext(tx.Statement.Context)
+	return ensureID(&m.ID)
+}
+func (m *AuditRDPChannelEvent) BeforeCreate(tx *gorm.DB) error {
+	if err := m.CreationAudit.BeforeCreate(tx); err != nil {
+		return err
+	}
+	return ensureID(&m.ID)
+}
+func (m *AuditSSHCommand) BeforeCreate(tx *gorm.DB) error {
+	if err := m.CreationAudit.BeforeCreate(tx); err != nil {
+		return err
+	}
+	return ensureID(&m.ID)
+}
+func (m *AuditDBQuery) BeforeCreate(tx *gorm.DB) error {
+	if err := m.CreationAudit.BeforeCreate(tx); err != nil {
+		return err
+	}
+	return ensureID(&m.ID)
+}
+func (m *AuditSFTPEvent) BeforeCreate(tx *gorm.DB) error {
+	if err := m.CreationAudit.BeforeCreate(tx); err != nil {
+		return err
+	}
+	return ensureID(&m.ID)
+}

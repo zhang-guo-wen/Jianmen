@@ -11,6 +11,7 @@ type AuditSFTPEvent struct {
 	Path           string    `gorm:"size:1024" json:"path"`
 	Size           int64     `json:"size,omitempty"`
 	Result         string    `gorm:"size:32" json:"result"`
+	CreationAudit
 }
 
 func (AuditSFTPEvent) TableName() string { return "audit_sftp_events" }

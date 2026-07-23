@@ -13,6 +13,7 @@ type AuditEvent struct {
 	ResourceName  string    `gorm:"size:255" json:"resource_name,omitempty"`
 	Detail        string    `gorm:"type:text" json:"detail,omitempty"`
 	ClientIP      string    `gorm:"size:64" json:"client_ip,omitempty"`
+	CreatedBy     string    `gorm:"index;size:64;not null;default:''" json:"created_by"`
 	CreatedAt     time.Time `gorm:"index" json:"created_at"`
 }
 

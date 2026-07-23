@@ -22,6 +22,7 @@ type AuditArtifact struct {
 	Status         string     `gorm:"index;size:32;not null" json:"status"`
 	ErrorMessage   string     `gorm:"type:text" json:"-"`
 	CompletedAt    *time.Time `json:"completed_at,omitempty"`
+	CreatedBy      string     `gorm:"index;size:64;not null;default:''" json:"created_by"`
 	CreatedAt      time.Time  `json:"created_at"`
 	UpdatedAt      time.Time  `json:"updated_at"`
 }

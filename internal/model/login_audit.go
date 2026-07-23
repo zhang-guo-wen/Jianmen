@@ -11,6 +11,7 @@ type LoginAuditLog struct {
 	Reason    string    `gorm:"size:128" json:"reason,omitempty"`
 	ClientIP  string    `gorm:"index;size:128" json:"client_ip"`
 	UserAgent string    `gorm:"size:512" json:"user_agent,omitempty"`
+	CreatedBy string    `gorm:"index;size:64;not null;default:''" json:"created_by"`
 	CreatedAt time.Time `gorm:"index" json:"created_at"`
 }
 

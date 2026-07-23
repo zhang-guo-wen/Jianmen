@@ -12,6 +12,8 @@ var ErrSessionNotFound = errors.New("online session not found")
 type Session struct {
 	ID              string    `json:"id"`
 	AuditSessionID  string    `json:"audit_session_id"`
+	UserSessionID   string    `json:"user_session_id,omitempty"`
+	SessionID       string    `json:"session_id,omitempty"`
 	ResourceType    string    `json:"resource_type"`
 	ResourceID      string    `json:"resource_id"`
 	AccountID       string    `json:"account_id,omitempty"`

@@ -164,9 +164,19 @@ func (m *Application) BeforeCreate(tx *gorm.DB) error {
 	}
 	return ensureID(&m.ID)
 }
-func (m *ContainerEndpoint) BeforeCreate(_ *gorm.DB) error { return ensureID(&m.ID) }
-func (m *UserSession) BeforeCreate(_ *gorm.DB) error       { return ensureID(&m.ID) }
-func (m *PlatformAccount) BeforeCreate(_ *gorm.DB) error   { return ensureID(&m.ID) }
+func (m *ContainerEndpoint) BeforeCreate(tx *gorm.DB) error {
+	if err := m.FullAudit.BeforeCreate(tx); err != nil {
+		return err
+	}
+	return ensureID(&m.ID)
+}
+func (m *UserSession) BeforeCreate(_ *gorm.DB) error { return ensureID(&m.ID) }
+func (m *PlatformAccount) BeforeCreate(tx *gorm.DB) error {
+	if err := m.FullAudit.BeforeCreate(tx); err != nil {
+		return err
+	}
+	return ensureID(&m.ID)
+}
 func (m *AuditEvent) BeforeCreate(_ *gorm.DB) error        { return ensureID(&m.ID) }
 func (m *LoginAuditLog) BeforeCreate(_ *gorm.DB) error     { return ensureID(&m.ID) }
 func (m *AuditSession) BeforeCreate(_ *gorm.DB) error      { return ensureID(&m.ID) }

@@ -228,10 +228,15 @@ func (s *DBStore) FindGrantsByPrincipal(ctx context.Context, principalType, prin
 }
 
 // BatchUpsertGrants 批量处理授权：存在则软删旧记录+插入新记录，不存在则直接插入
+// 使用互斥锁确保并发安全的检查-创建操作，避免在 SQLite 中因 NULL 比较语义导致的重复记录。
 func (s *DBStore) BatchUpsertGrants(ctx context.Context, grants []model.ResourceGrant, actorID string) (created int, refreshed int, err error) {
 	if len(grants) == 0 {
 		return 0, 0, nil
 	}
+	// 在事务外加锁，避免事务内长时间持锁阻塞其他操作
+	s.ensureGrantMu.Lock()
+	defer s.ensureGrantMu.Unlock()
+
 	// 在事务中逐条处理
 	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		for _, grant := range grants {

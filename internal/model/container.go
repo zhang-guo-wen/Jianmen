@@ -1,7 +1,5 @@
 package model
 
-import "time"
-
 const (
 	ContainerRuntimeDocker     = "docker"
 	ContainerRuntimeContainerd = "containerd"
@@ -24,6 +22,5 @@ type ContainerEndpoint struct {
 	HostAccountID  string    `gorm:"index;size:64" json:"host_account_id,omitempty"`
 	Remark         string    `gorm:"type:text" json:"remark,omitempty"`
 	Status         string    `gorm:"index;size:32;not null;default:active" json:"status"`
-	CreatedAt      time.Time `json:"created_at"`
-	UpdatedAt      time.Time `json:"updated_at"`
+	FullAudit
 }

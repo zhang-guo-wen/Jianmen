@@ -78,7 +78,7 @@ func (s *DBStore) hostAccountCounts(ctx context.Context, ids []string) (map[stri
 		HostID string
 		Count  int64
 	}
-	if err := s.db.WithContext(ctx).Model(&model.HostAccount{}).
+	if err := s.db.WithContext(ctx).Model(&model.HostAccount{}).Scopes(ActiveScope).
 		Select("host_id, COUNT(*) AS count").
 		Where("host_id IN ?", ids).
 		Group("host_id").
@@ -144,7 +144,7 @@ func (s *DBStore) createHost(ctx context.Context, host HostRecord, creatorID str
 			return nil
 		}
 		var creatorCount int64
-		if err := tx.Model(&model.User{}).Where("id = ?", creatorID).Count(&creatorCount).Error; err != nil {
+		if err := tx.Model(&model.User{}).Scopes(ActiveScope).Where("id = ?", creatorID).Count(&creatorCount).Error; err != nil {
 			return fmt.Errorf("check host creator: %w", err)
 		}
 		if creatorCount == 0 {
@@ -191,7 +191,7 @@ func (s *DBStore) UpdateHost(ctx context.Context, id string, host HostRecord) (H
 		}
 		if normalizedHostProtocol(m.Protocol) != normalized.Protocol {
 			var accountCount int64
-			if err := tx.Model(&model.HostAccount{}).Where("host_id = ?", m.ID).Count(&accountCount).Error; err != nil {
+			if err := tx.Model(&model.HostAccount{}).Scopes(ActiveScope).Where("host_id = ?", m.ID).Count(&accountCount).Error; err != nil {
 				return fmt.Errorf("count host accounts: %w", err)
 			}
 			if accountCount != 0 {
@@ -242,13 +242,13 @@ func (s *DBStore) DeleteHost(ctx context.Context, id string) error {
 				return err
 			}
 		}
-		if err := tx.Where("host_id = ?", id).Delete(&model.HostAccount{}).Error; err != nil {
+		if err := tx.Where("host_id = ?", id).Where("deleted_at = ?", model.SentinelDeletedAt).Updates(map[string]interface{}{"deleted_at": time.Now().UTC(), "updated_at": time.Now().UTC()}).Error; err != nil {
 			return err
 		}
 		if err := s.deleteResourceTx(tx, model.ResourceTypeHost, host.ID); err != nil {
 			return err
 		}
-		return tx.Delete(&host).Error
+		return SoftDelete(ctx, tx, "hosts", id)
 	})
 }
 

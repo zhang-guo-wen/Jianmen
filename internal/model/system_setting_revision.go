@@ -1,22 +1,21 @@
 package model
 
 import (
-	"time"
-
 	"gorm.io/gorm"
 )
 
 // SystemSettingRevision is an immutable, non-secret configuration snapshot.
 type SystemSettingRevision struct {
 	ID                string    `gorm:"primaryKey;size:64"`
-	Revision          int64     `gorm:"uniqueIndex;not null"`
+	Revision          int64     `gorm:"uniqueIndex:idx_ss_rev_revision_deleted,priority:1;not null"`
 	SnapshotJSON      string    `gorm:"type:text;not null"`
 	ChangedFieldsJSON string    `gorm:"type:text;not null"`
-	UpdatedByID       string    `gorm:"size:64"`
-	UpdatedByUsername string    `gorm:"size:128"`
-	CreatedAt         time.Time `gorm:"index;not null"`
+	FullAudit
 }
 
-func (m *SystemSettingRevision) BeforeCreate(_ *gorm.DB) error {
+func (m *SystemSettingRevision) BeforeCreate(tx *gorm.DB) error {
+	if err := m.FullAudit.BeforeCreate(tx); err != nil {
+		return err
+	}
 	return ensureID(&m.ID)
 }

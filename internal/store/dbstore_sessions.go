@@ -202,7 +202,7 @@ func (s *DBStore) FindAITokenSessionID(ctx context.Context, userID string) strin
 
 func (s *DBStore) ensureUserSessionSequenceFloor(ctx context.Context) error {
 	var maxSeq int
-	if err := s.db.WithContext(ctx).Model(&model.UserSession{}).
+	if err := s.db.WithContext(ctx).Model(&model.UserSession{}).Scopes(ActiveScope).
 		Select("COALESCE(MAX(session_seq), 0)").
 		Scan(&maxSeq).Error; err != nil {
 		return fmt.Errorf("user session sequence floor: %w", err)
@@ -212,18 +212,18 @@ func (s *DBStore) ensureUserSessionSequenceFloor(ctx context.Context) error {
 
 func (s *DBStore) ensureUserSessionSequenceFloorTx(tx *gorm.DB) error {
 	var maxSeq int
-	if err := tx.Model(&model.UserSession{}).Select("COALESCE(MAX(session_seq), 0)").Scan(&maxSeq).Error; err != nil {
+	if err := tx.Model(&model.UserSession{}).Scopes(ActiveScope).Select("COALESCE(MAX(session_seq), 0)").Scan(&maxSeq).Error; err != nil {
 		return fmt.Errorf("user session sequence floor: %w", err)
 	}
 	return storage.EnsureSequenceNextValueInTransaction(tx, storage.SequenceUserSession, maxSeq+1)
 }
 
 func (s *DBStore) DisableUserSession(id string) error {
-	return s.db.Model(&model.UserSession{}).Where("id = ?", id).Update("status", "disabled").Error
+	return s.db.Model(&model.UserSession{}).Scopes(ActiveScope).Where("id = ?", id).Update("status", "disabled").Error
 }
 
 func (s *DBStore) EnableUserSession(id string) error {
-	return s.db.Model(&model.UserSession{}).Where("id = ?", id).Update("status", "active").Error
+	return s.db.Model(&model.UserSession{}).Scopes(ActiveScope).Where("id = ?", id).Update("status", "active").Error
 }
 
 func (s *DBStore) UserSessionByID(sessionID string, userID string) (*model.UserSession, error) {

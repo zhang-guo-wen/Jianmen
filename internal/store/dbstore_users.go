@@ -21,7 +21,7 @@ func (e *repositoryConflictError) Conflict() bool { return true }
 
 func (s *DBStore) SearchUsers(ctx context.Context, query string, page, pageSize int) ([]model.User, int64, error) {
 	buildQuery := func() *gorm.DB {
-		tx := s.db.WithContext(ctx).Model(&model.User{})
+		tx := s.db.WithContext(ctx).Model(&model.User{}).Scopes(ActiveScope)
 		if query != "" {
 			like := "%" + query + "%"
 			tx = tx.Where("username LIKE ? OR display_name LIKE ? OR email LIKE ?", like, like, like)
@@ -52,7 +52,7 @@ func (s *DBStore) FindUser(ctx context.Context, id string) (model.User, bool, er
 }
 
 func (s *DBStore) UsernameExists(ctx context.Context, username, excludeID string) (bool, error) {
-	tx := s.db.WithContext(ctx).Model(&model.User{}).Where("username = ?", strings.TrimSpace(username))
+	tx := s.db.WithContext(ctx).Model(&model.User{}).Scopes(ActiveScope).Where("username = ?", strings.TrimSpace(username))
 	if strings.TrimSpace(excludeID) != "" {
 		tx = tx.Where("id <> ?", strings.TrimSpace(excludeID))
 	}
@@ -125,7 +125,7 @@ func (s *DBStore) DeleteUser(ctx context.Context, user model.User) error {
 		if err := tx.Where("user_id = ?", user.ID).Delete(&model.UserRole{}).Error; err != nil {
 			return fmt.Errorf("delete user roles: %w", err)
 		}
-		if err := tx.Delete(&user).Error; err != nil {
+		if err := SoftDelete(ctx, tx, "users", user.ID); err != nil {
 			return fmt.Errorf("delete user: %w", err)
 		}
 		return nil

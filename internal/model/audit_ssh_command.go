@@ -8,6 +8,7 @@ type AuditSSHCommand struct {
 	AuditSessionID string    `gorm:"index;size:64;not null" json:"audit_session_id"`
 	Timestamp      time.Time `gorm:"index" json:"timestamp"`
 	Command        string    `gorm:"type:text" json:"command"`
+	CreationAudit
 }
 
 func (AuditSSHCommand) TableName() string { return "audit_ssh_commands" }

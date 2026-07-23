@@ -14,17 +14,15 @@ const (
 // TemporaryAccount is a non-login principal used for bounded grants and AI access.
 type TemporaryAccount struct {
 	ID               string     `gorm:"primaryKey;size:64" json:"id"`
-	SessionID        string     `gorm:"uniqueIndex;size:128;not null" json:"session_id"`
+	SessionID        string     `gorm:"uniqueIndex:idx_temp_accounts_session_id_deleted,priority:1;size:128;not null" json:"session_id"`
 	Type             string     `gorm:"index;size:32;not null" json:"type"`
-	Username         string     `gorm:"uniqueIndex;size:128;not null" json:"username"`
+	Username         string     `gorm:"uniqueIndex:idx_temp_accounts_username_deleted,priority:1;size:128;not null" json:"username"`
 	AuthorizedUserID string     `gorm:"index;size:64" json:"authorized_user_id,omitempty"`
 	Status           string     `gorm:"index;size:32;not null;default:active" json:"status"`
 	StartsAt         time.Time  `gorm:"index" json:"starts_at"`
 	ExpiresAt        *time.Time `gorm:"index" json:"expires_at,omitempty"`
 	Remark           string     `gorm:"type:text" json:"remark,omitempty"`
-	CreatedBy        string     `gorm:"index;size:64" json:"created_by,omitempty"`
-	CreatedAt        time.Time  `json:"created_at"`
-	UpdatedAt        time.Time  `json:"updated_at"`
+	FullAudit
 }
 
 type TemporaryCredential struct {
@@ -36,8 +34,7 @@ type TemporaryCredential struct {
 	Fingerprint        string           `gorm:"index;size:128" json:"fingerprint,omitempty"`
 	ExpiresAt          *time.Time       `gorm:"index;index:idx_temporary_credentials_validity,priority:2" json:"expires_at,omitempty"`
 	RevokedAt          *time.Time       `gorm:"index;index:idx_temporary_credentials_validity,priority:1" json:"revoked_at,omitempty"`
-	CreatedAt          time.Time        `json:"created_at"`
-	UpdatedAt          time.Time        `json:"updated_at"`
+	FullAudit
 	TemporaryAccount   TemporaryAccount `gorm:"constraint:OnUpdate:CASCADE,OnDelete:CASCADE;" json:"-"`
 }
 
@@ -50,13 +47,26 @@ type TemporaryAccountGrant struct {
 	ResourceID         string           `gorm:"index;index:idx_temporary_grants_match,priority:4;size:64" json:"resource_id,omitempty"`
 	StartsAt           *time.Time       `gorm:"index" json:"starts_at,omitempty"`
 	ExpiresAt          *time.Time       `gorm:"index;index:idx_temporary_grants_match,priority:5" json:"expires_at,omitempty"`
-	CreatedBy          string           `gorm:"index;size:64" json:"created_by,omitempty"`
 	RevokedAt          *time.Time       `gorm:"index;index:idx_temporary_grants_match,priority:6" json:"revoked_at,omitempty"`
-	CreatedAt          time.Time        `json:"created_at"`
-	UpdatedAt          time.Time        `json:"updated_at"`
+	FullAudit
 	TemporaryAccount   TemporaryAccount `gorm:"constraint:OnUpdate:CASCADE,OnDelete:CASCADE;" json:"-"`
 }
 
-func (m *TemporaryAccount) BeforeCreate(_ *gorm.DB) error      { return ensureID(&m.ID) }
-func (m *TemporaryCredential) BeforeCreate(_ *gorm.DB) error   { return ensureID(&m.ID) }
-func (m *TemporaryAccountGrant) BeforeCreate(_ *gorm.DB) error { return ensureID(&m.ID) }
+func (m *TemporaryAccount) BeforeCreate(tx *gorm.DB) error {
+	if err := m.FullAudit.BeforeCreate(tx); err != nil {
+		return err
+	}
+	return ensureID(&m.ID)
+}
+func (m *TemporaryCredential) BeforeCreate(tx *gorm.DB) error {
+	if err := m.FullAudit.BeforeCreate(tx); err != nil {
+		return err
+	}
+	return ensureID(&m.ID)
+}
+func (m *TemporaryAccountGrant) BeforeCreate(tx *gorm.DB) error {
+	if err := m.FullAudit.BeforeCreate(tx); err != nil {
+		return err
+	}
+	return ensureID(&m.ID)
+}

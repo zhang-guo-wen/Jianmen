@@ -134,7 +134,7 @@ func (s *ResourceGrantService) Create(ctx context.Context, actorID string, bypas
 	if err := s.authorize(actorID, bypass, grant.ResourceType, grant.ResourceID); err != nil {
 		return model.ResourceGrant{}, err
 	}
-	grant.CreatedBy = actorID // 记录创建人
+	grant.FullAudit.CreatedBy = actorID // 记录创建人
 	created, err := s.repository.CreateResourceGrant(ctx, grant)
 	if err != nil {
 		return model.ResourceGrant{}, fmt.Errorf("create resource grant: %w", err)
@@ -162,7 +162,7 @@ func (s *ResourceGrantService) GrantCreatedResource(
 		ResourceType:  resourceType,
 		ResourceID:    resourceID,
 		Effect:        model.PermissionEffectAllow,
-		CreatedBy:     actorID, // 记录创建人
+		FullAudit: model.FullAudit{CreatedBy: actorID}, // 记录创建人
 	})
 	if err := validateResourceGrant(grant); err != nil {
 		return err
@@ -239,7 +239,7 @@ func normalizeResourceGrant(grant model.ResourceGrant) model.ResourceGrant {
 	grant.PrincipalID = strings.TrimSpace(grant.PrincipalID)
 	grant.ResourceType = strings.ToLower(strings.TrimSpace(grant.ResourceType))
 	grant.ResourceID = strings.TrimSpace(grant.ResourceID)
-	grant.CreatedBy = strings.TrimSpace(grant.CreatedBy)
+	grant.FullAudit.CreatedBy = strings.TrimSpace(grant.FullAudit.CreatedBy)
 	grant.Effect = strings.ToLower(strings.TrimSpace(grant.Effect))
 	if grant.Effect == "" {
 		grant.Effect = model.PermissionEffectAllow

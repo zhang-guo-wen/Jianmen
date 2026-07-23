@@ -14,7 +14,7 @@ func (s *DBStore) nextHostResourceSeq(tx *gorm.DB) (int, error) {
 		return 0, fmt.Errorf("host resource sequence: nil database")
 	}
 	var maxSeq int
-	if err := tx.Model(&model.HostAccount{}).
+	if err := tx.Model(&model.HostAccount{}).Scopes(ActiveScope).
 		Select("COALESCE(MAX(resource_seq), 0)").
 		Scan(&maxSeq).Error; err != nil {
 		return 0, fmt.Errorf("host resource sequence floor: %w", err)
@@ -30,7 +30,7 @@ func (s *DBStore) nextDBResourceSeq(db *gorm.DB) (int, error) {
 		return 0, fmt.Errorf("database handle required")
 	}
 	var maxSeq int
-	if err := db.Model(&model.DatabaseAccount{}).
+	if err := db.Model(&model.DatabaseAccount{}).Scopes(ActiveScope).
 		Select("COALESCE(MAX(resource_seq), 0)").
 		Scan(&maxSeq).Error; err != nil {
 		return 0, fmt.Errorf("database resource sequence floor: %w", err)

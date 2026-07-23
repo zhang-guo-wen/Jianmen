@@ -14,11 +14,10 @@ type Host struct {
 	Protocol           string    `gorm:"index;size:16;not null;default:ssh" json:"protocol"`
 	GroupName          string    `gorm:"size:128" json:"group"`
 	Remark             string    `gorm:"type:text" json:"remark,omitempty"`
-	Status             string    `gorm:"index;size:32;not null;default:active" json:"status"`
-	HostKeyFingerprint string    `gorm:"size:128"`
-	KnownHosts         string    `gorm:"type:text"`
-	CreatedAt          time.Time `json:"created_at"`
-	UpdatedAt          time.Time `json:"updated_at"`
+	Status             string `gorm:"index;size:32;not null;default:active" json:"status"`
+	HostKeyFingerprint string `gorm:"size:128"`
+	KnownHosts         string `gorm:"type:text"`
+	FullAudit
 }
 
 type HostAccount struct {
@@ -44,14 +43,23 @@ type HostAccount struct {
 	RDPDriveMapping       bool           `gorm:"not null;default:false" json:"rdp_drive_mapping"`
 	Status                string         `gorm:"index;index:idx_host_accounts_host_status,priority:2;index:idx_host_accounts_status_expires,priority:1;size:32;not null;default:active" json:"status"`
 	ResourceSeq           int            `gorm:"index;not null;default:0" json:"resource_seq"`
-	ResourceID            string         `gorm:"uniqueIndex;size:4" json:"resource_id"`
+	ResourceID            string         `gorm:"uniqueIndex:idx_host_accounts_resource_id_deleted,priority:1;size:4" json:"resource_id"`
 	GroupName             string         `gorm:"size:128" json:"group"`
 	Remark                string         `gorm:"type:text" json:"remark,omitempty"`
 	ExpiresAt             *time.Time     `gorm:"index;index:idx_host_accounts_status_expires,priority:2" json:"expires_at"`
-	CreatedAt             time.Time      `json:"created_at"`
-	UpdatedAt             time.Time      `json:"updated_at"`
+	FullAudit
 	Host                  Host           `gorm:"constraint:OnUpdate:CASCADE,OnDelete:CASCADE;" json:"-"`
 }
 
-func (m *Host) BeforeCreate(_ *gorm.DB) error        { return ensureID(&m.ID) }
-func (m *HostAccount) BeforeCreate(_ *gorm.DB) error { return ensureID(&m.ID) }
+func (m *Host) BeforeCreate(tx *gorm.DB) error {
+	if err := m.FullAudit.BeforeCreate(tx); err != nil {
+		return err
+	}
+	return ensureID(&m.ID)
+}
+func (m *HostAccount) BeforeCreate(tx *gorm.DB) error {
+	if err := m.FullAudit.BeforeCreate(tx); err != nil {
+		return err
+	}
+	return ensureID(&m.ID)
+}

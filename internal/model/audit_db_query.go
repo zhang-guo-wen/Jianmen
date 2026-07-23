@@ -15,6 +15,7 @@ type AuditDBQuery struct {
 	SQLTruncated     bool   `gorm:"column:sql_truncated;not null;default:false" json:"sql_audit_truncated"`
 	QueryKind        string `gorm:"size:32" json:"query_kind,omitempty"`
 	DurationMs       int64  `json:"duration_ms,omitempty"`
+	CreationAudit
 }
 
 func (AuditDBQuery) TableName() string { return "audit_db_queries" }

@@ -88,7 +88,7 @@ func (s *DBStore) CreateDatabaseProvisioningOperation(
 			return errors.New("database provisioning administrator unavailable")
 		}
 		var accountCount int64
-		if err := tx.Model(&model.DatabaseAccount{}).
+		if err := tx.Model(&model.DatabaseAccount{}).Scopes(ActiveScope).
 			Where("instance_id = ? AND username = ?", input.InstanceID, input.Username).
 			Count(&accountCount).Error; err != nil {
 			return err
@@ -99,7 +99,7 @@ func (s *DBStore) CreateDatabaseProvisioningOperation(
 		if err := tx.Omit("LeaseExpiresAt").Create(&record).Error; err != nil {
 			return err
 		}
-		updated := tx.Model(&model.DatabaseProvisioningOperation{}).
+		updated := tx.Model(&model.DatabaseProvisioningOperation{}).Scopes(ActiveScope).
 			Where("id = ?", record.ID).
 			Update("lease_expires_at", expiresAt)
 		if updated.Error != nil || updated.RowsAffected != 1 {

@@ -12,16 +12,20 @@ type AIAccessToken struct {
 	UserID             string           `gorm:"index;size:64;not null" json:"user_id"`
 	TemporaryAccountID string           `gorm:"index;size:64" json:"temporary_account_id,omitempty"`
 	Name               string           `gorm:"size:128;not null" json:"name"`
-	AccessTokenHash    string           `gorm:"uniqueIndex;size:64;not null" json:"-"`
-	RefreshTokenHash   string           `gorm:"uniqueIndex;size:64;not null" json:"-"`
+	AccessTokenHash    string           `gorm:"uniqueIndex:idx_ai_tokens_access_hash_deleted,priority:1;size:64;not null" json:"-"`
+	RefreshTokenHash   string           `gorm:"uniqueIndex:idx_ai_tokens_refresh_hash_deleted,priority:1;size:64;not null" json:"-"`
 	AccessExpiresAt    time.Time        `gorm:"index;not null" json:"access_expires_at"`
 	RefreshExpiresAt   time.Time        `gorm:"index;not null" json:"refresh_expires_at"`
 	LastUsedAt         *time.Time       `json:"last_used_at,omitempty"`
 	RevokedAt          *time.Time       `gorm:"index" json:"revoked_at,omitempty"`
-	CreatedAt          time.Time        `json:"created_at"`
-	UpdatedAt          time.Time        `json:"updated_at"`
+	FullAudit
 	User               User             `gorm:"constraint:OnUpdate:CASCADE,OnDelete:CASCADE;" json:"-"`
 	TemporaryAccount   TemporaryAccount `gorm:"foreignKey:TemporaryAccountID;constraint:OnUpdate:CASCADE,OnDelete:SET NULL;" json:"-"`
 }
 
-func (m *AIAccessToken) BeforeCreate(_ *gorm.DB) error { return ensureID(&m.ID) }
+func (m *AIAccessToken) BeforeCreate(tx *gorm.DB) error {
+	if err := m.FullAudit.BeforeCreate(tx); err != nil {
+		return err
+	}
+	return ensureID(&m.ID)
+}

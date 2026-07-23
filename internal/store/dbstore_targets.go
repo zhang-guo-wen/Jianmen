@@ -394,7 +394,7 @@ func (s *DBStore) DeleteTarget(ctx context.Context, id string) error {
 		if err := s.deleteResourceTx(tx, model.ResourceTypeHostAccount, account.ID); err != nil {
 			return err
 		}
-		return tx.Delete(&account).Error
+		return SoftDelete(ctx, tx, "host_accounts", account.ID)
 	})
 }
 

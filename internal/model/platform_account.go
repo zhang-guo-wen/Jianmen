@@ -19,7 +19,6 @@ type PlatformAccount struct {
 	OwnerID     string     `gorm:"index;size:64;not null" json:"owner_id"`
 	Status      string     `gorm:"index;size:32;not null;default:active" json:"status"`
 	ExpiresAt   *time.Time `gorm:"index" json:"expires_at,omitempty"`
-	CreatedAt   time.Time  `json:"created_at"`
-	UpdatedAt   time.Time  `json:"updated_at"`
+	FullAudit
 	Owner       User       `gorm:"constraint:OnUpdate:CASCADE,OnDelete:CASCADE;" json:"-"`
 }

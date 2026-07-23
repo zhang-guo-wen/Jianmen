@@ -60,8 +60,7 @@ func (s *SystemSettingsService) PrepareBootstrap(
 		initial,
 		model.SystemSettingRevision{
 			SnapshotJSON: snapshotJSON, ChangedFieldsJSON: string(changedFieldsJSON),
-			UpdatedByID: initial.UpdatedByID, UpdatedByUsername: initial.UpdatedByUsername,
-			CreatedAt: now,
+			FullAudit: model.FullAudit{UpdatedBy: initial.UpdatedBy},
 		},
 	)
 	if err != nil {

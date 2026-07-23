@@ -119,7 +119,7 @@ func (s *DBStore) UpdateSystemSetting(
 	var persisted model.SystemSetting
 	updated := false
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		result := tx.Model(&model.SystemSetting{}).
+		result := tx.Model(&model.SystemSetting{}).Scopes(ActiveScope).
 			Where("id = ? AND revision = ?", model.SystemSettingSingletonID, expectedRevision).
 			UpdateColumns(systemSettingUpdateColumns(setting))
 		if result.Error != nil {
@@ -164,7 +164,7 @@ func (s *DBStore) MarkSystemSettingApplied(
 	var persisted model.SystemSetting
 	marked := false
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		result := tx.Model(&model.SystemSetting{}).
+		result := tx.Model(&model.SystemSetting{}).Scopes(ActiveScope).
 			Where("id = ? AND revision = ?", model.SystemSettingSingletonID, revision).
 			UpdateColumns(map[string]any{
 				"applied_revision": revision,
@@ -241,8 +241,7 @@ func systemSettingUpdateColumns(setting model.SystemSetting) map[string]any {
 		"recording_cleanup_batch_size":      setting.RecordingCleanupBatchSize,
 		"database_max_client_message_bytes": setting.DatabaseMaxClientMessageBytes,
 		"revision":                          setting.Revision,
-		"updated_by_id":                     strings.TrimSpace(setting.UpdatedByID),
-		"updated_by_username":               strings.TrimSpace(setting.UpdatedByUsername),
+		"updated_by_id":                     strings.TrimSpace(setting.UpdatedBy),
 		"updated_at":                        setting.UpdatedAt,
 	}
 }

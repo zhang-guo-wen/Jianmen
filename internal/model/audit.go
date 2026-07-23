@@ -41,6 +41,7 @@ type CreationAudit struct {
 	CreatedAt time.Time `gorm:"index" json:"created_at"`
 }
 
+// BeforeCreate 自动从 context 获取当前用户 ID 填充 CreatedBy。
 func (a *CreationAudit) BeforeCreate(tx *gorm.DB) error {
 	a.CreatedBy = userIDFromContext(tx.Statement.Context)
 	return nil
@@ -55,6 +56,8 @@ type FullAudit struct {
 	DeletedAt *time.Time `gorm:"index;not null;default:'0001-01-01 00:00:00'" json:"-"`
 }
 
+// BeforeCreate 自动从 context 获取当前用户 ID 填充 CreatedBy 和 UpdatedBy，
+// 并将 DeletedAt 初始化为 SentinelDeletedAt。
 func (a *FullAudit) BeforeCreate(tx *gorm.DB) error {
 	if a.DeletedAt == nil {
 		a.DeletedAt = SentinelDeletedAtPtr()
@@ -65,6 +68,7 @@ func (a *FullAudit) BeforeCreate(tx *gorm.DB) error {
 	return nil
 }
 
+// BeforeUpdate 自动从 context 获取当前用户 ID 填充 UpdatedBy。
 func (a *FullAudit) BeforeUpdate(tx *gorm.DB) error {
 	a.UpdatedBy = userIDFromContext(tx.Statement.Context)
 	return nil

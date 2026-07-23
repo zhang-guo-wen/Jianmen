@@ -144,7 +144,7 @@ func (s *Server) createTemporaryAuthorization(w http.ResponseWriter, r *http.Req
 	}
 	result, err := temporaryAccess.Create(r.Context(), service.CreateTemporaryAccessInput{
 		AuthorizedUserID: req.AuthorizedUserID, ResourceType: req.ResourceType, ResourceID: req.ResourceID,
-		ExpiresAt: expiresAt, Remark: req.Remark, CreatedBy: userIDFromRequest(r), Now: now,
+		ExpiresAt: expiresAt, Remark: req.Remark, Now: now,
 	})
 	if err != nil {
 		s.writeTemporaryAccessError(w, r, err, http.StatusBadRequest)

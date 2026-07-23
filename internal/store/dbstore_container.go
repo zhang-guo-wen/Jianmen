@@ -27,7 +27,7 @@ func (s *DBStore) ListContainerEndpoints(ctx context.Context, params ContainerEn
 	}
 
 	buildQuery := func() *gorm.DB {
-		query := s.db.WithContext(ctx).Model(&model.ContainerEndpoint{}).
+		query := s.db.WithContext(ctx).Model(&model.ContainerEndpoint{}).Scopes(ActiveScope).
 			Joins("LEFT JOIN hosts ON hosts.id = container_endpoints.host_id")
 		if status := strings.TrimSpace(params.Status); status != "" {
 			query = query.Where("container_endpoints.status = ?", status)
@@ -175,7 +175,7 @@ func (s *DBStore) createContainerCreatorGrant(tx *gorm.DB, creatorID, endpointID
 		return nil
 	}
 	var count int64
-	if err := tx.Model(&model.User{}).Where("id = ?", creatorID).Count(&count).Error; err != nil {
+	if err := tx.Model(&model.User{}).Scopes(ActiveScope).Where("id = ?", creatorID).Count(&count).Error; err != nil {
 		return fmt.Errorf("check container endpoint creator: %w", err)
 	}
 	if count == 0 {
@@ -324,7 +324,7 @@ func (s *DBStore) DeleteContainerEndpoint(ctx context.Context, id string) error 
 		if err := s.deleteResourceTx(tx, model.ResourceTypeContainerEndpoint, endpoint.ID); err != nil {
 			return err
 		}
-		return tx.Delete(&endpoint).Error
+		return SoftDelete(ctx, tx, "container_endpoints", id)
 	})
 }
 

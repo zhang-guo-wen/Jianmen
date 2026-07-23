@@ -27,7 +27,7 @@ func (s *DBStore) AdminInitialized(ctx context.Context) (bool, error) {
 		return false, err
 	}
 	var count int64
-	if err := s.db.WithContext(ctx).Model(&model.User{}).Limit(1).Count(&count).Error; err != nil {
+	if err := s.db.WithContext(ctx).Model(&model.User{}).Scopes(ActiveScope).Limit(1).Count(&count).Error; err != nil {
 		return false, fmt.Errorf("count admin users: %w", err)
 	}
 	return count > 0, nil
@@ -99,7 +99,7 @@ func (s *DBStore) PersistAdminLoginState(
 	}
 	result := s.db.WithContext(ctx).
 		Session(&gorm.Session{Logger: gormlogger.Discard}).
-		Model(&model.User{}).
+		Model(&model.User{}).Scopes(ActiveScope).
 		Where(
 			"id = ? AND status = ? AND (expires_at IS NULL OR expires_at > ?) AND password_hash = ?",
 			strings.TrimSpace(userID), "active", loggedInAt, expectedPasswordHash,
@@ -132,7 +132,7 @@ func (s *DBStore) SetupInitialAdmin(
 			Transaction(func(tx *gorm.DB) error {
 				guard := model.SystemInitialization{
 					Key:       model.SystemInitializationSetup,
-					CreatedAt: record.CreatedAt,
+					FullAudit: model.FullAudit{CreatedAt: record.CreatedAt},
 				}
 				if err := tx.Create(&guard).Error; err != nil {
 					if isUniqueConstraintError(err) {
@@ -143,7 +143,7 @@ func (s *DBStore) SetupInitialAdmin(
 				}
 
 				var count int64
-				if err := tx.Model(&model.User{}).Limit(1).Count(&count).Error; err != nil {
+				if err := tx.Model(&model.User{}).Scopes(ActiveScope).Limit(1).Count(&count).Error; err != nil {
 					return err
 				}
 				if count > 0 {
@@ -160,7 +160,7 @@ func (s *DBStore) SetupInitialAdmin(
 					Email:           record.Email,
 					Status:          record.Status,
 					IsSuperAdmin:    record.SuperAdmin,
-					CreatedAt:       record.CreatedAt,
+					FullAudit: model.FullAudit{CreatedAt: record.CreatedAt},
 				}
 				if err := tx.Create(&user).Error; err != nil {
 					return fmt.Errorf("create initial admin user: %w", err)
@@ -171,7 +171,7 @@ func (s *DBStore) SetupInitialAdmin(
 					SecretHash: session.SecretHash,
 					CSRFHash:   session.CSRFHash,
 					ExpiresAt:  session.ExpiresAt,
-					CreatedAt:  session.CreatedAt,
+					FullAudit: model.FullAudit{CreatedAt: session.CreatedAt},
 				}
 				if err := tx.Create(&adminSession).Error; err != nil {
 					return fmt.Errorf("%w: %w", service.ErrAdminSessionCreate, err)
@@ -229,7 +229,7 @@ func (s *DBStore) ClaimAdminEncryptionKey(
 
 				claim := model.SystemInitialization{
 					Key:       adminEncryptionKeyClaim,
-					CreatedAt: claimedAt,
+					FullAudit: model.FullAudit{CreatedAt: claimedAt},
 				}
 				if err := tx.Create(&claim).Error; err != nil {
 					return mapAdminEncryptionKeyClaimInsertError(err)

@@ -10,7 +10,7 @@ import (
 
 type User struct {
 	ID              string     `gorm:"primaryKey;size:64" json:"id"`
-	Username        string     `gorm:"uniqueIndex;index:idx_users_status_username,priority:2;size:128;not null" json:"username"`
+	Username        string     `gorm:"uniqueIndex:idx_users_username_deleted,priority:1;index:idx_users_status_username,priority:2;size:128;not null" json:"username"`
 	PasswordHash    string     `gorm:"size:255" json:"-"`
 	MySQLNativeHash string     `gorm:"size:40" json:"-"`
 	TokenHash       string     `gorm:"index;size:255" json:"-"`
@@ -20,8 +20,7 @@ type User struct {
 	IsSuperAdmin    bool       `gorm:"index;not null;default:false" json:"is_super_admin"`
 	ExpiresAt       *time.Time `gorm:"index" json:"expires_at,omitempty"`
 	LastLoginAt     *time.Time `json:"last_login_at,omitempty"`
-	CreatedAt       time.Time  `json:"created_at"`
-	UpdatedAt       time.Time  `json:"updated_at"`
+	FullAudit
 
 	RequestedTargetID string `gorm:"-" json:"-"`
 }
@@ -48,8 +47,7 @@ type Session struct {
 	StartedAt       time.Time   `gorm:"index;index:idx_sessions_user_started,priority:2;index:idx_sessions_account_started,priority:2;index:idx_sessions_target_started,priority:2;index:idx_sessions_protocol_started,priority:2;index:idx_sessions_state_started,priority:2" json:"started_at"`
 	EndedAt         *time.Time  `gorm:"index" json:"ended_at,omitempty"`
 	State           string      `gorm:"index;index:idx_sessions_state_started,priority:1;size:32" json:"state,omitempty"`
-	CreatedAt       time.Time   `json:"created_at"`
-	UpdatedAt       time.Time   `json:"updated_at"`
+	FullAudit
 }
 
 func NewSession(user User, targetID, target, clientIP string) Session {
@@ -70,11 +68,17 @@ func (u User) IsExpired(now time.Time) bool {
 	return u.ExpiresAt != nil && !u.ExpiresAt.After(now)
 }
 
-func (u *User) BeforeCreate(_ *gorm.DB) error {
+func (u *User) BeforeCreate(tx *gorm.DB) error {
+	if err := u.FullAudit.BeforeCreate(tx); err != nil {
+		return err
+	}
 	return ensureID(&u.ID)
 }
 
-func (s *Session) BeforeCreate(_ *gorm.DB) error {
+func (s *Session) BeforeCreate(tx *gorm.DB) error {
+	if err := s.FullAudit.BeforeCreate(tx); err != nil {
+		return err
+	}
 	return ensureID(&s.ID)
 }
 

@@ -35,7 +35,7 @@ func (s *DBStore) CreateTemporaryAccess(ctx context.Context, input service.Creat
 			if err := verifyTemporaryAccessResource(tx, input.ResourceType, input.ResourceID); err != nil {
 				return err
 			}
-			session := model.UserSession{UserID: input.AuthorizedUserID, SessionSeq: sessionSeq, SessionID: sessionID, Type: "temporary", Status: "active", ExpiresAt: &input.ExpiresAt, CreatedBy: input.CreatedBy}
+			session := model.UserSession{UserID: input.AuthorizedUserID, SessionSeq: sessionSeq, SessionID: sessionID, Type: "temporary", Status: "active", ExpiresAt: &input.ExpiresAt, FullAudit: model.FullAudit{CreatedBy: input.CreatedBy}}
 			if err := tx.Create(&session).Error; err != nil {
 				return fmt.Errorf("create temporary user session: %w", err)
 			}
@@ -51,7 +51,7 @@ func (s *DBStore) CreateTemporaryAccess(ctx context.Context, input service.Creat
 			if err := tx.Create(&account).Error; err != nil {
 				return fmt.Errorf("create temporary account: %w", err)
 			}
-			grant := model.TemporaryAccountGrant{TemporaryAccountID: account.ID, UserID: input.AuthorizedUserID, Action: "session:connect", ResourceType: input.ResourceType, ResourceID: input.ResourceID, StartsAt: &input.Now, ExpiresAt: &input.ExpiresAt, CreatedBy: input.CreatedBy}
+			grant := model.TemporaryAccountGrant{TemporaryAccountID: account.ID, UserID: input.AuthorizedUserID, Action: "session:connect", ResourceType: input.ResourceType, ResourceID: input.ResourceID, StartsAt: &input.Now, ExpiresAt: &input.ExpiresAt, FullAudit: model.FullAudit{CreatedBy: input.CreatedBy}}
 			if err := tx.Create(&grant).Error; err != nil {
 				return fmt.Errorf("create temporary account grant: %w", err)
 			}
@@ -80,7 +80,7 @@ func (s *DBStore) CreateTemporaryAIAccess(ctx context.Context, input service.Cre
 				return err
 			}
 			// 创建 UserSession 记录，使 FindUserSessionBySessionID 可以查到 AI 临时会话
-			session := model.UserSession{UserID: input.UserID, SessionSeq: sessionSeq, SessionID: sessionID, Type: "temporary", Status: "active", ExpiresAt: input.ExpiresAt, CreatedBy: input.CreatedBy}
+			session := model.UserSession{UserID: input.UserID, SessionSeq: sessionSeq, SessionID: sessionID, Type: "temporary", Status: "active", ExpiresAt: input.ExpiresAt, FullAudit: model.FullAudit{CreatedBy: input.CreatedBy}}
 			if err := tx.Create(&session).Error; err != nil {
 				return fmt.Errorf("create temporary AI user session: %w", err)
 			}
@@ -119,22 +119,22 @@ func (s *DBStore) ExtendTemporaryAccess(ctx context.Context, id string, expiresA
 		if account.Status != "active" || (account.ExpiresAt != nil && !account.ExpiresAt.After(now)) {
 			return service.ErrTemporaryAccessInactive
 		}
-		updated := tx.Model(&model.TemporaryAccount{}).
+		updated := tx.Model(&model.TemporaryAccount{}).Scopes(ActiveScope).
 			Where("id = ? AND status = ? AND (expires_at IS NULL OR expires_at > ?)", account.ID, "active", now).
 			Update("expires_at", expiresAt)
 		if err := requireTemporaryAccessActiveUpdate(updated, "extend temporary account"); err != nil {
 			return err
 		}
 		if account.Type == model.TemporaryAccountTypeUser {
-			updated = tx.Model(&model.TemporaryAccountGrant{}).Where("temporary_account_id = ? AND revoked_at IS NULL", account.ID).Update("expires_at", expiresAt)
+			updated = tx.Model(&model.TemporaryAccountGrant{}).Scopes(ActiveScope).Where("temporary_account_id = ? AND revoked_at IS NULL", account.ID).Update("expires_at", expiresAt)
 			if err := requireTemporaryAccessUpdate(updated, "extend temporary account grant"); err != nil {
 				return err
 			}
-			updated = tx.Model(&model.UserSession{}).Where("session_id = ? AND status = ?", account.SessionID, "active").Update("expires_at", expiresAt)
+			updated = tx.Model(&model.UserSession{}).Scopes(ActiveScope).Where("session_id = ? AND status = ?", account.SessionID, "active").Update("expires_at", expiresAt)
 			if err := requireTemporaryAccessUpdate(updated, "extend temporary user session"); err != nil {
 				return err
 			}
-			updated = tx.Model(&model.ConnectionPassword{}).
+			updated = tx.Model(&model.ConnectionPassword{}).Scopes(ActiveScope).
 				Where("temporary_account_id = ? AND revoked_at IS NULL", account.ID).
 				Update("expires_at", expiresAt)
 			if err := requireTemporaryAccessUpdate(updated, "extend temporary connection password"); err != nil {
@@ -151,20 +151,20 @@ func (s *DBStore) DisableTemporaryAccess(ctx context.Context, id string, now tim
 		if err != nil {
 			return err
 		}
-		updated := tx.Model(&model.TemporaryAccount{}).Where("id = ?", account.ID).Update("status", "disabled")
+		updated := tx.Model(&model.TemporaryAccount{}).Scopes(ActiveScope).Where("id = ?", account.ID).Update("status", "disabled")
 		if err := requireTemporaryAccessUpdate(updated, "disable temporary account"); err != nil {
 			return err
 		}
 		if account.Type == model.TemporaryAccountTypeUser {
-			updated = tx.Model(&model.TemporaryAccountGrant{}).Where("temporary_account_id = ?", account.ID).Update("revoked_at", now)
+			updated = tx.Model(&model.TemporaryAccountGrant{}).Scopes(ActiveScope).Where("temporary_account_id = ?", account.ID).Update("revoked_at", now)
 			if err := requireTemporaryAccessUpdate(updated, "revoke temporary account grant"); err != nil {
 				return err
 			}
-			updated = tx.Model(&model.UserSession{}).Where("session_id = ?", account.SessionID).Update("status", "disabled")
+			updated = tx.Model(&model.UserSession{}).Scopes(ActiveScope).Where("session_id = ?", account.SessionID).Update("status", "disabled")
 			if err := requireTemporaryAccessUpdate(updated, "disable temporary user session"); err != nil {
 				return err
 			}
-			updated = tx.Model(&model.ConnectionPassword{}).
+			updated = tx.Model(&model.ConnectionPassword{}).Scopes(ActiveScope).
 				Where("temporary_account_id = ? AND revoked_at IS NULL", account.ID).
 				Update("revoked_at", now)
 			if err := requireTemporaryAccessUpdate(updated, "revoke temporary connection password"); err != nil {
@@ -172,12 +172,12 @@ func (s *DBStore) DisableTemporaryAccess(ctx context.Context, id string, now tim
 			}
 		}
 		if account.Type == model.TemporaryAccountTypeAI {
-			updated = tx.Model(&model.AIAccessToken{}).Where("temporary_account_id = ?", account.ID).Update("revoked_at", now)
+			updated = tx.Model(&model.AIAccessToken{}).Scopes(ActiveScope).Where("temporary_account_id = ?", account.ID).Update("revoked_at", now)
 			if updated.Error != nil {
 				return fmt.Errorf("revoke temporary AI token: %w", updated.Error)
 			}
 			// 同时禁用对应的 UserSession，防止会话被继续使用
-			updated = tx.Model(&model.UserSession{}).Where("session_id = ?", account.SessionID).Update("status", "disabled")
+			updated = tx.Model(&model.UserSession{}).Scopes(ActiveScope).Where("session_id = ?", account.SessionID).Update("status", "disabled")
 			if updated.Error != nil {
 				return fmt.Errorf("disable temporary AI user session: %w", updated.Error)
 			}
@@ -187,7 +187,7 @@ func (s *DBStore) DisableTemporaryAccess(ctx context.Context, id string, now tim
 }
 
 func (s *DBStore) ListTemporaryAccess(ctx context.Context, params service.TemporaryAccessListParams) (service.TemporaryAccessPage, error) {
-	query := s.db.WithContext(ctx).Model(&model.TemporaryAccount{})
+	query := s.db.WithContext(ctx).Model(&model.TemporaryAccount{}).Scopes(ActiveScope)
 	if params.Query != "" {
 		like := "%" + params.Query + "%"
 		query = query.Where("session_id LIKE ? OR username LIKE ? OR remark LIKE ?", like, like, like)
@@ -272,9 +272,9 @@ func verifyTemporaryAccessResource(tx *gorm.DB, resourceType, resourceID string)
 	var err error
 	switch resourceType {
 	case model.ResourceTypeHostAccount:
-		err = tx.Model(&model.HostAccount{}).Where("id = ?", resourceID).Count(&count).Error
+		err = tx.Model(&model.HostAccount{}).Scopes(ActiveScope).Where("id = ?", resourceID).Count(&count).Error
 	case model.ResourceTypeDatabaseAccount:
-		err = tx.Model(&model.DatabaseAccount{}).Where("id = ?", resourceID).Count(&count).Error
+		err = tx.Model(&model.DatabaseAccount{}).Scopes(ActiveScope).Where("id = ?", resourceID).Count(&count).Error
 	default:
 		return fmt.Errorf("%w: unsupported resource type", service.ErrInvalidTemporaryAccess)
 	}
@@ -329,7 +329,7 @@ func (s *DBStore) withTemporarySessionIdentity(ctx context.Context, operation fu
 func (s *DBStore) allocateTemporarySessionIdentity(ctx context.Context) (int, string, error) {
 	var maxSequence int
 	db := s.db.WithContext(ctx)
-	if err := db.Model(&model.UserSession{}).Select("COALESCE(MAX(session_seq), 0)").Scan(&maxSequence).Error; err != nil {
+	if err := db.Model(&model.UserSession{}).Scopes(ActiveScope).Select("COALESCE(MAX(session_seq), 0)").Scan(&maxSequence).Error; err != nil {
 		return 0, "", fmt.Errorf("read temporary session sequence floor: %w", err)
 	}
 	if err := storage.EnsureSequenceNextValue(db, storage.SequenceUserSession, maxSequence+1); err != nil {
@@ -369,7 +369,7 @@ func temporaryAccountFromValues(accountType, authorizedUserID string, expiresAt 
 	return model.TemporaryAccount{
 		ID: model.NewID(), SessionID: sessionID, Type: accountType, Username: "tmp_" + usernameSuffix,
 		AuthorizedUserID: authorizedUserID, Status: "active", StartsAt: now.UTC(), ExpiresAt: expiresAt,
-		Remark: strings.TrimSpace(remark), CreatedBy: createdBy,
+		Remark: strings.TrimSpace(remark), FullAudit: model.FullAudit{CreatedBy: createdBy},
 	}
 }
 

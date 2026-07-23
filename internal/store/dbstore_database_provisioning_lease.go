@@ -47,7 +47,7 @@ func (s *DBStore) TransitionDatabaseProvisioningOperation(
 	if transition.Stage == service.ProvisioningStageNotCreated {
 		updates["terminal_at"] = clock.currentTimestampExpression()
 	}
-	result := s.db.WithContext(ctx).Model(&model.DatabaseProvisioningOperation{}).
+	result := s.db.WithContext(ctx).Model(&model.DatabaseProvisioningOperation{}).Scopes(ActiveScope).
 		Where(provisioningFenceCondition(), provisioningFenceArguments(expected)...).
 		Where(clock.validLeaseCondition()).
 		Updates(updates)
@@ -131,7 +131,7 @@ func (s *DBStore) updateProvisioningLease(
 	var window service.DatabaseProvisioningLeaseWindow
 	updated := false
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		query := tx.Model(&model.DatabaseProvisioningOperation{}).
+		query := tx.Model(&model.DatabaseProvisioningOperation{}).Scopes(ActiveScope).
 			Where(provisioningFenceCondition(), provisioningFenceArguments(expected)...)
 		if claim {
 			query = query.Where(clock.expiredOrUnsetLeaseCondition())

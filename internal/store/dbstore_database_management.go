@@ -58,7 +58,7 @@ func (s *DBStore) CreateDatabaseInstanceWithCreatorGrant(ctx context.Context, in
 			return nil
 		}
 		var count int64
-		if err := tx.Model(&model.User{}).Where("id = ?", creatorID).Count(&count).Error; err != nil {
+		if err := tx.Model(&model.User{}).Scopes(ActiveScope).Where("id = ?", creatorID).Count(&count).Error; err != nil {
 			return fmt.Errorf("check database instance creator: %w", err)
 		}
 		if count == 0 {

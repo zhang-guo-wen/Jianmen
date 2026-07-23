@@ -72,7 +72,7 @@ func (s *DBStore) hostKeyChangeHandler(snapshot sshHostIdentitySnapshot) sshhost
 // the SSH verifier. Endpoint, identity, lifecycle, or timestamp changes make a
 // stale callback harmless.
 func (s *DBStore) disableHostForKeyChange(ctx context.Context, snapshot sshHostIdentitySnapshot) (bool, error) {
-	result := s.db.WithContext(ctx).Model(&model.Host{}).
+	result := s.db.WithContext(ctx).Model(&model.Host{}).Scopes(ActiveScope).
 		Where(
 			"id = ? AND address = ? AND port = ? AND protocol = ? AND status = ?",
 			snapshot.ID, snapshot.Address, snapshot.Port, snapshot.Protocol, snapshot.Status,

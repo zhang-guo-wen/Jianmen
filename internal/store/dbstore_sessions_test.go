@@ -43,9 +43,13 @@ func TestGetUserSessionAuthDetail_Temporary(t *testing.T) {
 	user := model.User{ID: "u1", Username: "tempuser", Status: "active"}
 	require.NoError(t, db.Create(&user).Error)
 
+	// 创建授权人用户（CreatedBy 是用户 ID，需查 User 表获取显示名）
+	creator := model.User{ID: "admin-id", Username: "admin-operator", DisplayName: "管理员", Status: "active"}
+	require.NoError(t, db.Create(&creator).Error)
+
 	sess := model.UserSession{
 		ID: "us2", UserID: "u1", SessionSeq: 2, SessionID: "00002",
-		Type: "temporary", Status: "active", CreatedBy: "admin",
+		Type: "temporary", Status: "active", CreatedBy: "admin-id",
 		ExpiresAt: timePtr(time.Now().Add(1 * time.Hour)),
 	}
 	require.NoError(t, db.Create(&sess).Error)
@@ -62,7 +66,7 @@ func TestGetUserSessionAuthDetail_Temporary(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "temporary", detail.AuthorizationType)
 	assert.Equal(t, "临时排查", detail.Remark)
-	assert.Equal(t, "admin", detail.AuthorizedBy)
+	assert.Equal(t, "管理员", detail.AuthorizedBy) // 优先 DisplayName
 }
 
 func TestGetUserSessionAuthDetail_AI(t *testing.T) {

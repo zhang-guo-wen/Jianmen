@@ -8,6 +8,9 @@ import (
 
 	"jianmen/internal/model"
 	"jianmen/internal/online"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestHandleOnlineSessionsFiltersAndDisconnects(t *testing.T) {
@@ -67,4 +70,56 @@ func TestHandleOnlineSessionsFiltersAndDisconnects(t *testing.T) {
 	if got := server.onlineSessions.List(); len(got) != 1 || got[0].ID != "db-live" {
 		t.Fatalf("online sessions after disconnect: %#v", got)
 	}
+}
+
+func TestHandleOnlineSessions_IncludesUserSessionID(t *testing.T) {
+	srv, db := newAdminDBTestServer(t)
+	seedTestSuperAdmin(t, db, "u-admin")
+
+	// 创建 UserSession
+	us := model.UserSession{
+		ID: "us-online-1", UserID: "u-admin", SessionSeq: 10,
+		SessionID: "0000A", Type: "permanent", Status: "active",
+	}
+	require.NoError(t, db.Create(&us).Error)
+
+	// 创建 AuditSession
+	as := model.AuditSession{
+		ID: "audit-online-1", UserSessionID: "us-online-1",
+		UserID: "u-admin", Username: "operator1", Protocol: "ssh",
+		State: "started", Outcome: "active",
+	}
+	require.NoError(t, db.Create(&as).Error)
+
+	// 注册在线会话
+	srv.onlineSessions = online.NewRegistry()
+	srv.onlineSessions.Register(online.Session{
+		ID: "online-1", AuditSessionID: "audit-online-1",
+		ResourceType: "host", Instance: "web01", Protocol: "ssh",
+		Operator: "operator1", Account: "root", StartedAt: time.Now(),
+	}, func() {})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/online-sessions", nil)
+	req = asTestSuperAdmin(req)
+	rec := httptest.NewRecorder()
+	srv.handleOnlineSessions(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	var resp struct {
+		Items []online.Session `json:"items"`
+		Total int              `json:"total"`
+	}
+	require.NoError(t, decodeTestData(t, rec.Body.Bytes(), &resp))
+	require.Greater(t, len(resp.Items), 0)
+
+	var found bool
+	for _, sess := range resp.Items {
+		if sess.ID == "online-1" {
+			found = true
+			assert.Equal(t, "us-online-1", sess.UserSessionID)
+			assert.Equal(t, "0000A", sess.SessionID)
+			break
+		}
+	}
+	assert.True(t, found, "expected to find session online-1 in response")
 }

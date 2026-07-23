@@ -941,6 +941,7 @@ func newAdminDBTestServer(t *testing.T) (*Server, *gorm.DB) {
 		cfg:             cfg,
 		adminAuth:       adminAuth,
 		db:              db,
+		dbstore:         storeInst,
 		logger:          slog.New(slog.NewTextHandler(io.Discard, nil)),
 		dataDir:         dataDir,
 		loginCaptcha:    testLoginCaptcha{},

@@ -313,6 +313,7 @@ type SessionView struct {
 }
 
 var (
+	ErrNotFound                              = errSentinel("record not found")
 	ErrTargetNotFound                        = errSentinel("target not found")
 	ErrHostNotFound                          = errSentinel("host not found")
 	ErrDBProxyNotFound                       = errSentinel("database proxy not found")

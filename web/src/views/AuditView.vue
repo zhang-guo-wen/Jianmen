@@ -30,7 +30,14 @@
             <el-table-column :label="t('audit.column.operator')" min-width="150">
               <template #default="{ row }">
                 {{ sessionUser(row) }}
-                <span v-if="row.session_id" style="color: #909399; margin-left:2px">({{ row.session_id }})</span>
+              </template>
+            </el-table-column>
+            <el-table-column :label="t('audit.column.sessionId')" width="110">
+              <template #default="{ row }">
+                <el-link v-if="row.session_id" type="primary" @click.stop="showUserSessionDetail(row.session_id)">
+                  {{ row.session_id }}
+                </el-link>
+                <span v-else>-</span>
               </template>
             </el-table-column>
             <el-table-column :label="t('audit.column.protocol')" width="90">
@@ -167,7 +174,14 @@
             <el-table-column :label="t('audit.column.operator')" min-width="150">
               <template #default="{ row }">
                 {{ row.username || row.name || '-' }}
-                <span v-if="row.session_id" style="color: #909399; margin-left:2px">({{ row.session_id }})</span>
+              </template>
+            </el-table-column>
+            <el-table-column :label="t('audit.column.sessionId')" width="110">
+              <template #default="{ row }">
+                <el-link v-if="row.session_id" type="primary" @click.stop="showUserSessionDetail(row.session_id)">
+                  {{ row.session_id }}
+                </el-link>
+                <span v-else>-</span>
               </template>
             </el-table-column>
             <el-table-column :label="t('audit.column.protocol')" width="110">
@@ -231,6 +245,14 @@
             </el-table-column>
             <el-table-column :label="t('audit.column.operator')" min-width="120" show-overflow-tooltip>
               <template #default="{ row }">{{ row.operator || '-' }}</template>
+            </el-table-column>
+            <el-table-column :label="t('audit.column.sessionId')" width="110">
+              <template #default="{ row }">
+                <el-link v-if="row.session_id" type="primary" @click.stop="showUserSessionDetail(row.session_id)">
+                  {{ row.session_id }}
+                </el-link>
+                <span v-else>-</span>
+              </template>
             </el-table-column>
             <el-table-column :label="t('sessions.column.started')" width="170" show-overflow-tooltip class-name="col-time">
               <template #default="{ row }">{{ formatTime(row.started_at) }}</template>
@@ -588,6 +610,8 @@
         </div>
       </div>
     </el-dialog>
+
+    <UserSessionDetailDialog v-model="sessionDetailVisible" :session-id="sessionDetailId" />
   </div>
 </template>
 
@@ -602,6 +626,7 @@ import { ElMessage, ElMessageBox } from 'element-plus';
 import { useRoute } from 'vue-router';
 
 import DataTableCard from '@/components/DataTableCard.vue';
+import UserSessionDetailDialog from '@/components/UserSessionDetailDialog.vue';
 import {
   apiClient,
   type DBConnectionMetaRecord,
@@ -770,6 +795,8 @@ const onlineResourceID = ref(initialOnlineResourceID);
 const onlineLoading = ref(false);
 const onlineError = ref('');
 const disconnectingSessionID = ref('');
+const sessionDetailVisible = ref(false);
+const sessionDetailId = ref('');
 let onlineRefreshTimer: number | undefined;
 
 // ── Drawer state ──
@@ -1957,6 +1984,11 @@ async function disconnectOnlineSession(row: OnlineSessionRecord) {
   } finally {
     disconnectingSessionID.value = '';
   }
+}
+
+function showUserSessionDetail(sessionID: string) {
+  sessionDetailId.value = sessionID;
+  sessionDetailVisible.value = true;
 }
 
 async function loadDBArtifact(connection: DBConnectionRecord, kind: 'meta' | 'queries') {

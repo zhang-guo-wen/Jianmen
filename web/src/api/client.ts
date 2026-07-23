@@ -360,6 +360,8 @@ export interface OnlineSessionRecord {
   operator: string;
   started_at: string;
   has_replay: boolean;
+  user_session_id?: string;  // 新增：关联的用户授权会话 ID
+  session_id?: string;        // 新增：5 位短 session id（显示用）
 }
 
 export interface LoginAuditRecord {
@@ -403,6 +405,22 @@ export interface UserSessionRecord {
   resource_type?: string;
   compact_username?: string;
   [key: string]: unknown;
+}
+
+/** UserSession 授权详情（点击 SessionID 弹窗展示） */
+export interface UserSessionDetail {
+  id: string;
+  session_id: string;
+  session_type: string;
+  authorization_type: 'normal' | 'temporary' | 'ai' | 'unknown';
+  user_id: string;
+  username: string;
+  authorized_by?: string;
+  starts_at: string;
+  expires_at?: string | null;
+  remark?: string;
+  status: string;
+  effective_status: 'active' | 'expired' | 'disabled' | string;
 }
 
 export interface SessionMetaRecord {
@@ -1190,6 +1208,9 @@ export const apiClient = {
       method: 'POST',
       body: JSON.stringify({ target_id: targetId })
     }),
+  /** 通过 5 位 session_id 查询用户会话授权详情 */
+  getUserSessionBySessionID: (sessionID: string) =>
+    request<UserSessionDetail>(`/api/user-sessions/by-session-id/${encodeURIComponent(sessionID)}`),
   createConnectionPassword: (targetId: string) =>
     request<ConnectionPasswordRecord>('/api/connection-passwords', {
       method: 'POST',

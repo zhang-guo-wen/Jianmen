@@ -61,6 +61,7 @@ type Server struct {
 	webRDP                 *webrdp.Handler
 	systemSettings         *systemsettings.Handler
 	sqlConsole             *sqlconsole.Handler
+	dbstore                *store.DBStore
 }
 
 func New(
@@ -239,6 +240,7 @@ func New(
 		webRDP:          webRDP,
 		systemSettings:  systemSettings,
 		sqlConsole:      sqlConsole,
+		dbstore:         store.NewDBStore(db),
 	}, nil
 }
 

@@ -19,3 +19,19 @@ type UserSession struct {
 func (UserSession) TableName() string {
 	return "user_sessions"
 }
+
+// UserSessionAuthDetail 用户会话授权详情，用于审计弹窗展示。
+type UserSessionAuthDetail struct {
+	ID                string     `json:"id"`
+	SessionID         string     `json:"session_id"`
+	SessionType       string     `json:"session_type"`
+	AuthorizationType string     `json:"authorization_type"`
+	UserID            string     `json:"user_id"`
+	Username          string     `json:"username"`
+	AuthorizedBy      string     `json:"authorized_by,omitempty"`
+	StartsAt          time.Time  `json:"starts_at"`
+	ExpiresAt         *time.Time `json:"expires_at,omitempty"`
+	Remark            string     `json:"remark,omitempty"`
+	Status            string     `json:"status"`
+	EffectiveStatus   string     `json:"effective_status"`
+}

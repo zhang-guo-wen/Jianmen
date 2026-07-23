@@ -100,7 +100,7 @@ func TestDBStoreDeleteUserRollsBackRolesWhenUserDeleteFails(t *testing.T) {
 	if err := db.Create(&model.UserRole{ID: "ur1", UserID: user.ID, RoleID: "role-1"}).Error; err != nil {
 		t.Fatalf("create user role: %v", err)
 	}
-	if err := db.Exec(`CREATE TRIGGER reject_user_delete BEFORE DELETE ON users BEGIN SELECT RAISE(ABORT, 'reject delete'); END`).Error; err != nil {
+	if err := db.Exec(`CREATE TRIGGER reject_user_delete BEFORE UPDATE ON users BEGIN SELECT RAISE(ABORT, 'reject update'); END`).Error; err != nil {
 		t.Fatalf("create trigger: %v", err)
 	}
 	if err := store.DeleteUser(ctx, user); err == nil {

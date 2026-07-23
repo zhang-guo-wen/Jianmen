@@ -241,7 +241,7 @@ func systemSettingUpdateColumns(setting model.SystemSetting) map[string]any {
 		"recording_cleanup_batch_size":      setting.RecordingCleanupBatchSize,
 		"database_max_client_message_bytes": setting.DatabaseMaxClientMessageBytes,
 		"revision":                          setting.Revision,
-		"updated_by_id":                     strings.TrimSpace(setting.UpdatedBy),
+		"updated_by":                        strings.TrimSpace(setting.UpdatedBy),
 		"updated_at":                        setting.UpdatedAt,
 	}
 }

@@ -56,7 +56,7 @@ func TestDBStoreDeleteUserGroupRollsBackMembersWhenGroupDeleteFails(t *testing.T
 	if err := db.Create(&model.UserGroupMember{ID: "m1", GroupID: group.ID, UserID: "u1"}).Error; err != nil {
 		t.Fatalf("create member: %v", err)
 	}
-	if err := db.Exec(`CREATE TRIGGER reject_group_delete BEFORE DELETE ON user_groups BEGIN SELECT RAISE(ABORT, 'reject delete'); END`).Error; err != nil {
+	if err := db.Exec(`CREATE TRIGGER reject_group_delete BEFORE UPDATE ON user_groups BEGIN SELECT RAISE(ABORT, 'reject update'); END`).Error; err != nil {
 		t.Fatalf("create trigger: %v", err)
 	}
 	if err := store.DeleteUserGroup(ctx, group); err == nil {

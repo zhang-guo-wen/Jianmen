@@ -59,8 +59,12 @@ func (a *FullAudit) BeforeCreate(tx *gorm.DB) error {
 		a.DeletedAt = &v
 	}
 	userID := userIDFromContext(tx.Statement.Context)
-	a.CreatedBy = userID
-	a.UpdatedBy = userID
+	if a.CreatedBy == "" {
+		a.CreatedBy = userID
+	}
+	if a.UpdatedBy == "" {
+		a.UpdatedBy = userID
+	}
 	return nil
 }
 

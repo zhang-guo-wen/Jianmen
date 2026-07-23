@@ -259,7 +259,7 @@ func (s *DBStore) GetUserSessionAuthDetail(ctx context.Context, sessionID string
 	authorizedBy := ""
 	if sess.CreatedBy != "" {
 		var creator model.User
-		if err := s.db.WithContext(ctx).Where("id = ?", sess.CreatedBy).First(&creator).Error; err == nil {
+		if err := s.db.WithContext(ctx).Scopes(ActiveScope).Where("id = ?", sess.CreatedBy).First(&creator).Error; err == nil {
 			authorizedBy = creator.DisplayName
 			if authorizedBy == "" {
 				authorizedBy = creator.Username

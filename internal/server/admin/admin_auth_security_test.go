@@ -414,7 +414,7 @@ func TestCompleteLoginRejectsPasswordHashRotationBeforeStateWrite(t *testing.T) 
 func seedAdminSetupGuard(t *testing.T, db *gorm.DB) {
 	t.Helper()
 	if err := db.Create(&model.SystemInitialization{
-		Key: model.SystemInitializationSetup, CreatedAt: time.Now().UTC(),
+		Key: model.SystemInitializationSetup, FullAudit: model.FullAudit{CreatedAt: time.Now().UTC()},
 	}).Error; err != nil {
 		t.Fatalf("seed admin setup guard: %v", err)
 	}

@@ -18,13 +18,21 @@ func TestDatabaseProvisioningLifecycleModelFields(t *testing.T) {
 	assertModelField(t, accountType, "ProvisioningOperation", reflect.TypeFor[*DatabaseProvisioningOperation](), "json:-")
 
 	operationType := reflect.TypeFor[DatabaseProvisioningOperation]()
+	// FullAudit 嵌入的字段（CreatedAt/UpdatedAt 有 json tag），不在此测试中校验
+	fullAuditFields := map[string]bool{
+		"CreatedBy": true, "UpdatedBy": true,
+		"CreatedAt": true, "UpdatedAt": true, "DeletedAt": true,
+	}
 	for _, name := range []string{
 		"Kind", "InstanceID", "ActorID", "IdempotencyKey", "CanonicalRequestHash",
 		"AdminAccountID", "UpstreamUsername", "Password", "Host", "GrantsJSON", "GroupName",
 		"Remark", "ExpiresAt", "Stage", "CleanupStatus", "TerminalAt", "ActiveRetainedAt",
 		"LastError", "AttemptCount", "LastAttemptAt", "Revision", "LeaseOwner", "LeaseToken",
-		"LeaseExpiresAt", "CreatedAt", "UpdatedAt", "Instance",
+		"LeaseExpiresAt", "Instance",
 	} {
+		if fullAuditFields[name] {
+			continue
+		}
 		assertModelJSONTag(t, operationType, name, "-")
 	}
 	if _, ok := operationType.FieldByName("ManagedAccountID"); ok {

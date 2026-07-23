@@ -183,7 +183,13 @@ func (s *DBStore) createContainerCreatorGrant(tx *gorm.DB, creatorID, endpointID
 		return fmt.Errorf("container endpoint creator not found: %q", creatorID)
 	}
 	grant := model.ResourceGrant{PrincipalType: "user", PrincipalID: creatorID, ResourceType: model.ResourceTypeContainerEndpoint, ResourceID: endpointID, Effect: model.PermissionEffectAllow}
-	if err := tx.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "principal_type"}, {Name: "principal_id"}, {Name: "resource_type"}, {Name: "resource_id"}, {Name: "effect"}}, DoNothing: true}).Create(&grant).Error; err != nil {
+	if err := tx.Where(&model.ResourceGrant{
+		PrincipalType: grant.PrincipalType,
+		PrincipalID:   grant.PrincipalID,
+		ResourceType:  grant.ResourceType,
+		ResourceID:    grant.ResourceID,
+		Effect:        grant.Effect,
+	}).FirstOrCreate(&grant).Error; err != nil {
 		return fmt.Errorf("create container endpoint creator grant: %w", err)
 	}
 	return nil

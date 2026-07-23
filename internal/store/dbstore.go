@@ -21,6 +21,7 @@ type DBStore struct {
 
 	auditLeaseMu      sync.RWMutex
 	activeAuditLeases map[string]struct{}
+	ensureGrantMu     sync.Mutex
 }
 
 // ActiveScope 返回 GORM Scope，过滤软删除行（仅保留 deleted_at = sentinel 的记录）。

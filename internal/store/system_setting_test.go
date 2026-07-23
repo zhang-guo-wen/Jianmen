@@ -51,8 +51,7 @@ func TestSystemSettingStoreLifecycle(t *testing.T) {
 	replacement.WebRDPConnectTimeoutSeconds = 30
 	replacement.DatabaseGatewayClientTLSMode = "required"
 	replacement.DatabaseMaxClientMessageBytes = 12 * 1024 * 1024
-	replacement.UpdatedByID = "user-1"
-	replacement.UpdatedByUsername = "admin"
+	replacement.UpdatedBy = "user-1"
 	persisted, updated, err := repository.UpdateSystemSetting(
 		ctx,
 		1,
@@ -67,8 +66,8 @@ func TestSystemSettingStoreLifecycle(t *testing.T) {
 		persisted.DatabaseMaxClientMessageBytes != 12*1024*1024 {
 		t.Fatalf("updated setting = %#v, updated = %v", persisted, updated)
 	}
-	if persisted.UpdatedByID != "user-1" || persisted.UpdatedByUsername != "admin" {
-		t.Fatalf("updated actor = %q/%q", persisted.UpdatedByID, persisted.UpdatedByUsername)
+	if persisted.UpdatedBy != "user-1" {
+		t.Fatalf("updated actor = %q", persisted.UpdatedBy)
 	}
 
 	stale := replacement
@@ -128,7 +127,7 @@ func TestSystemSettingStoreRollsBackWhenRevisionInsertFails(t *testing.T) {
 		Revision:          2,
 		SnapshotJSON:      `{}`,
 		ChangedFieldsJSON: `[]`,
-		CreatedAt:         time.Now().UTC(),
+		FullAudit:         model.FullAudit{CreatedAt: time.Now().UTC()},
 	}).Error; err != nil {
 		t.Fatalf("seed conflicting revision: %v", err)
 	}
@@ -202,6 +201,6 @@ func systemSettingRevisionFixture(
 	return model.SystemSettingRevision{
 		SnapshotJSON:      snapshot,
 		ChangedFieldsJSON: changedFields,
-		CreatedAt:         createdAt,
+		FullAudit:         model.FullAudit{CreatedAt: createdAt},
 	}
 }

@@ -23,7 +23,7 @@ func TestGetUserSessionAuthDetail_Permanent(t *testing.T) {
 
 	sess := model.UserSession{
 		ID: "us1", UserID: "u1", SessionSeq: 1, SessionID: "00001",
-		Type: "permanent", Status: "active", CreatedBy: "",
+		Type: "permanent", Status: "active", FullAudit: model.FullAudit{CreatedBy: ""},
 	}
 	require.NoError(t, db.Create(&sess).Error)
 
@@ -49,7 +49,7 @@ func TestGetUserSessionAuthDetail_Temporary(t *testing.T) {
 
 	sess := model.UserSession{
 		ID: "us2", UserID: "u1", SessionSeq: 2, SessionID: "00002",
-		Type: "temporary", Status: "active", CreatedBy: "admin-id",
+		Type: "temporary", Status: "active", FullAudit: model.FullAudit{CreatedBy: "admin-id"},
 		ExpiresAt: timePtr(time.Now().Add(1 * time.Hour)),
 	}
 	require.NoError(t, db.Create(&sess).Error)
@@ -79,7 +79,7 @@ func TestGetUserSessionAuthDetail_AI(t *testing.T) {
 
 	sess := model.UserSession{
 		ID: "us3", UserID: "u1", SessionSeq: 3, SessionID: "00003",
-		Type: "temporary", Status: "active", CreatedBy: "system",
+		Type: "temporary", Status: "active", FullAudit: model.FullAudit{CreatedBy: "system"},
 	}
 	require.NoError(t, db.Create(&sess).Error)
 

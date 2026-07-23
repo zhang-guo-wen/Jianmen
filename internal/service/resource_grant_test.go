@@ -23,6 +23,11 @@ type fakeResourceGrantRepository struct {
 	deleteErr    error
 	principalErr error
 	resourceErr  error
+	principalGrants    []model.ResourceGrant
+	principalGrantsErr error
+	batchCreated       int
+	batchRefreshed     int
+	batchErr           error
 }
 
 func (f *fakeResourceGrantRepository) SearchResourceGrants(context.Context, string) ([]model.ResourceGrant, error) {
@@ -71,6 +76,14 @@ func (f *fakeResourceGrantRepository) ResourceGrantPrincipalExists(_ context.Con
 
 func (f *fakeResourceGrantRepository) ResourceGrantResourceExists(_ context.Context, resourceType, resourceID string) (bool, error) {
 	return f.resources[resourceType+":"+resourceID], f.resourceErr
+}
+
+func (f *fakeResourceGrantRepository) FindGrantsByPrincipal(_ context.Context, principalType, principalID string) ([]model.ResourceGrant, error) {
+	return append([]model.ResourceGrant(nil), f.principalGrants...), f.principalGrantsErr
+}
+
+func (f *fakeResourceGrantRepository) BatchUpsertGrants(_ context.Context, grants []model.ResourceGrant, actorID string) (int, int, error) {
+	return f.batchCreated, f.batchRefreshed, f.batchErr
 }
 
 type fakeResourceGrantChecker struct {
@@ -151,7 +164,7 @@ func TestResourceGrantServiceGrantCreatedResourceEnsuresCreatorGrant(t *testing.
 		ResourceType:  model.ResourceTypeHost,
 		ResourceID:    "host-1",
 		Effect:        model.PermissionEffectAllow,
-		CreatedBy:     "u1",
+		FullAudit:     model.FullAudit{CreatedBy: "u1"},
 	}
 	if !reflect.DeepEqual(repository.ensured, want) {
 		t.Fatalf("ensured grant = %#v, want %#v", repository.ensured, want)
@@ -228,6 +241,88 @@ func TestResourceGrantServiceDeleteRequiresResourceAccess(t *testing.T) {
 	}
 	if repository.deletedID != "" {
 		t.Fatalf("deleted id = %q", repository.deletedID)
+	}
+}
+
+func TestResourceGrantServiceBatchCreateAllNew(t *testing.T) {
+	repository := &fakeResourceGrantRepository{
+		principals:     map[string]bool{"user:u1": true},
+		resources:      map[string]bool{model.ResourceTypeHost + ":h1": true, model.ResourceTypeHost + ":h2": true},
+		batchCreated:   2,
+		batchRefreshed: 0,
+	}
+	service, err := NewResourceGrantService(repository, &fakeResourceGrantChecker{})
+	if err != nil {
+		t.Fatalf("new service: %v", err)
+	}
+
+	result, err := service.BatchCreate(context.Background(), "admin", true, []model.ResourceGrant{
+		{PrincipalType: "user", PrincipalID: "u1", ResourceType: model.ResourceTypeHost, ResourceID: "h1", Effect: model.PermissionEffectAllow},
+		{PrincipalType: "user", PrincipalID: "u1", ResourceType: model.ResourceTypeHost, ResourceID: "h2", Effect: model.PermissionEffectAllow},
+	})
+	if err != nil {
+		t.Fatalf("batch create: %v", err)
+	}
+	if result.Created != 2 || result.Refreshed != 0 {
+		t.Fatalf("result = %#v, want created=2 refreshed=0", result)
+	}
+}
+
+func TestResourceGrantServiceBatchCreatePartialRefresh(t *testing.T) {
+	repository := &fakeResourceGrantRepository{
+		principals:     map[string]bool{"user:u1": true},
+		resources:      map[string]bool{model.ResourceTypeHost + ":h1": true, model.ResourceTypeHost + ":h2": true},
+		batchCreated:   1,
+		batchRefreshed: 1,
+	}
+	service, err := NewResourceGrantService(repository, &fakeResourceGrantChecker{})
+	if err != nil {
+		t.Fatalf("new service: %v", err)
+	}
+
+	result, err := service.BatchCreate(context.Background(), "admin", true, []model.ResourceGrant{
+		{PrincipalType: "user", PrincipalID: "u1", ResourceType: model.ResourceTypeHost, ResourceID: "h1", Effect: model.PermissionEffectAllow},
+		{PrincipalType: "user", PrincipalID: "u1", ResourceType: model.ResourceTypeHost, ResourceID: "h2", Effect: model.PermissionEffectAllow},
+	})
+	if err != nil {
+		t.Fatalf("batch create: %v", err)
+	}
+	if result.Created != 1 || result.Refreshed != 1 {
+		t.Fatalf("result = %#v, want created=1 refreshed=1", result)
+	}
+}
+
+func TestResourceGrantServiceBatchCreateRejectsMissingPrincipal(t *testing.T) {
+	repository := &fakeResourceGrantRepository{
+		principals: map[string]bool{},
+		resources:  map[string]bool{model.ResourceTypeHost + ":h1": true},
+	}
+	service, err := NewResourceGrantService(repository, &fakeResourceGrantChecker{})
+	if err != nil {
+		t.Fatalf("new service: %v", err)
+	}
+
+	_, err = service.BatchCreate(context.Background(), "admin", true, []model.ResourceGrant{
+		{PrincipalType: "user", PrincipalID: "missing", ResourceType: model.ResourceTypeHost, ResourceID: "h1", Effect: model.PermissionEffectAllow},
+	})
+	if !errors.Is(err, ErrInvalidResourceGrant) {
+		t.Fatalf("batch create error = %v, want invalid grant", err)
+	}
+}
+
+func TestResourceGrantServiceBatchCreateEmptyGrants(t *testing.T) {
+	repository := &fakeResourceGrantRepository{}
+	service, err := NewResourceGrantService(repository, &fakeResourceGrantChecker{})
+	if err != nil {
+		t.Fatalf("new service: %v", err)
+	}
+
+	result, err := service.BatchCreate(context.Background(), "admin", true, nil)
+	if err != nil {
+		t.Fatalf("batch create empty: %v", err)
+	}
+	if result.Created != 0 || result.Refreshed != 0 {
+		t.Fatalf("result = %#v, want zeros", result)
 	}
 }
 

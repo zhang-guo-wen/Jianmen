@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"gorm.io/gorm"
-	"gorm.io/gorm/clause"
 
 	"jianmen/internal/model"
 )
@@ -65,7 +64,13 @@ func (s *DBStore) CreateDatabaseInstanceWithCreatorGrant(ctx context.Context, in
 			return errors.New("database instance creator not found")
 		}
 		grant := model.ResourceGrant{PrincipalType: "user", PrincipalID: creatorID, ResourceType: model.ResourceTypeDatabaseInstance, ResourceID: instance.ID, Effect: model.PermissionEffectAllow}
-		return tx.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "principal_type"}, {Name: "principal_id"}, {Name: "resource_type"}, {Name: "resource_id"}, {Name: "effect"}}, DoNothing: true}).Create(&grant).Error
+		return tx.Where(&model.ResourceGrant{
+			PrincipalType: grant.PrincipalType,
+			PrincipalID:   grant.PrincipalID,
+			ResourceType:  grant.ResourceType,
+			ResourceID:    grant.ResourceID,
+			Effect:        grant.Effect,
+		}).FirstOrCreate(&grant).Error
 	}); err != nil {
 		return DatabaseInstanceView{}, err
 	}

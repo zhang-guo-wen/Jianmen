@@ -23,10 +23,19 @@ type ResourceGrantRepository interface {
 	DeleteResourceGrant(ctx context.Context, id string) error
 	ResourceGrantPrincipalExists(ctx context.Context, principalType, principalID string) (bool, error)
 	ResourceGrantResourceExists(ctx context.Context, resourceType, resourceID string) (bool, error)
+	// 新增方法
+	FindGrantsByPrincipal(ctx context.Context, principalType, principalID string) ([]model.ResourceGrant, error)
+	BatchUpsertGrants(ctx context.Context, grants []model.ResourceGrant, actorID string) (int, int, error)
 }
 
 type ResourceGrantChecker interface {
 	HasGrant(userID, resourceType, resourceID string) (bool, error)
+}
+
+// BatchResult 批量创建授权的结果
+type BatchResult struct {
+	Created   int
+	Refreshed int
 }
 
 type ResourceGrantPage struct {
@@ -140,6 +149,61 @@ func (s *ResourceGrantService) Create(ctx context.Context, actorID string, bypas
 		return model.ResourceGrant{}, fmt.Errorf("create resource grant: %w", err)
 	}
 	return created, nil
+}
+
+// ListByPrincipal 按主体类型和ID查询授权列表
+func (s *ResourceGrantService) ListByPrincipal(ctx context.Context, actorID string, bypass bool, principalType, principalID string) ([]model.ResourceGrant, error) {
+	if !bypass && strings.TrimSpace(actorID) == "" {
+		return nil, ErrResourceGrantForbidden
+	}
+	grants, err := s.repository.FindGrantsByPrincipal(ctx, principalType, principalID)
+	if err != nil {
+		return nil, fmt.Errorf("查询主体授权: %w", err)
+	}
+	return grants, nil
+}
+
+// BatchCreate 批量创建资源授权，对已有授权执行软删+重新插入
+func (s *ResourceGrantService) BatchCreate(ctx context.Context, actorID string, bypass bool, grants []model.ResourceGrant) (BatchResult, error) {
+	if len(grants) == 0 {
+		return BatchResult{}, nil
+	}
+
+	// 规范化并验证每条授权
+	normalized := make([]model.ResourceGrant, 0, len(grants))
+	for _, grant := range grants {
+		grant = normalizeResourceGrant(grant)
+		if err := validateResourceGrant(grant); err != nil {
+			return BatchResult{}, fmt.Errorf("验证授权失败: %w", err)
+		}
+		// 验证主体存在
+		principalExists, err := s.repository.ResourceGrantPrincipalExists(ctx, grant.PrincipalType, grant.PrincipalID)
+		if err != nil {
+			return BatchResult{}, fmt.Errorf("检查授权主体: %w", err)
+		}
+		if !principalExists {
+			return BatchResult{}, fmt.Errorf("%w: 主体不存在", ErrInvalidResourceGrant)
+		}
+		// 验证资源存在
+		resourceExists, err := s.repository.ResourceGrantResourceExists(ctx, grant.ResourceType, grant.ResourceID)
+		if err != nil {
+			return BatchResult{}, fmt.Errorf("检查授权资源: %w", err)
+		}
+		if !resourceExists {
+			return BatchResult{}, fmt.Errorf("%w: 资源不存在或资源类型不匹配", ErrInvalidResourceGrant)
+		}
+		// 授权检查
+		if err := s.authorize(actorID, bypass, grant.ResourceType, grant.ResourceID); err != nil {
+			return BatchResult{}, err
+		}
+		normalized = append(normalized, grant)
+	}
+
+	created, refreshed, err := s.repository.BatchUpsertGrants(ctx, normalized, actorID)
+	if err != nil {
+		return BatchResult{}, fmt.Errorf("批量创建授权失败: %w", err)
+	}
+	return BatchResult{Created: created, Refreshed: refreshed}, nil
 }
 
 // GrantCreatedResource ensures that a non-super-administrator can manage a

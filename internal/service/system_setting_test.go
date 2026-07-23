@@ -54,8 +54,8 @@ func TestSystemSettingsBootstrapUpdateAndRestart(t *testing.T) {
 	if !reflect.DeepEqual(state.Desired, desired) || !reflect.DeepEqual(state.Effective, baseline) {
 		t.Fatalf("updated settings = %#v", state)
 	}
-	if state.UpdatedByID != "user-1" || state.UpdatedByUsername != "admin" {
-		t.Fatalf("updated actor = %q/%q", state.UpdatedByID, state.UpdatedByUsername)
+	if state.UpdatedBy != "user-1" {
+		t.Fatalf("updated actor = %q", state.UpdatedBy)
 	}
 
 	revisions, err := svc.ListRevisions(ctx, 20)

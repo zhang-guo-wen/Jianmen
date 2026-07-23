@@ -132,9 +132,10 @@
                 stripe
                 @select="handleResourceSelect"
                 @select-all="handleResourceSelectAll"
+                :row-class-name="({ row }: { row: ResourceRow }) => authorizedResourceIds.has(row.id) ? 'row-authorized' : ''"
                 class="resource-table"
               >
-                <el-table-column type="selection" width="50" />
+                <el-table-column type="selection" width="50" :selectable="(row: ResourceRow) => !authorizedResourceIds.has(row.id)" />
                 <template v-if="resourceTabType === 'resource_group' || resourceTabType === 'account_group'">
                   <el-table-column :label="t('resourceGrant.groupName')" min-width="160">
                     <template #default="{ row }">
@@ -319,6 +320,8 @@ const resourceGroups = ref<Array<{ id: string; name: string; description: string
 const accountGroups = ref<Array<{ id: string; name: string; description: string; member_count: number }>>([])
 const selectedResources = ref<SelectedResource[]>([])
 const selectedResourceMap = new Map<string, SelectedResource>()
+// 已授权资源ID集合（当前主体已授权的资源，用于禁用表格中的已授权行）
+const authorizedResourceIds = ref<Set<string>>(new Set())
 const resourceTableRef = ref<any>()
 let resourceRequestSequence = 0
 let resourceSearchTimer: ReturnType<typeof setTimeout> | undefined
@@ -690,6 +693,26 @@ const loadResources = async (reset = false) => {
   }
 }
 
+// 拉取当前主体的已有授权，用于禁用资源列表中的已授权行
+const fetchPrincipalGrants = async () => {
+  const principalId = grantForm.principal_id
+  if (!principalId || !grantDialogVisible.value) {
+    authorizedResourceIds.value = new Set()
+    return
+  }
+  try {
+    const resp = await apiClient.getPrincipalGrants(grantForm.principal_type, principalId)
+    // 仅标记当前资源类型下的已授权资源
+    authorizedResourceIds.value = new Set(
+      (resp.items || [])
+        .filter(g => g.resource_type === resourceTabType.value)
+        .map(g => g.resource_id)
+    )
+  } catch {
+    authorizedResourceIds.value = new Set()
+  }
+}
+
 const handleResourceScroll = (event: Event) => {
   const target = event.currentTarget as HTMLElement
   if (target.scrollHeight - target.scrollTop - target.clientHeight <= 32) {
@@ -768,21 +791,21 @@ const saveGrant = async () => {
 
   saving.value = true
   try {
-    for (const rid of resourceIds) {
-      await apiClient.createResourceGrant({
+    const result = await apiClient.batchCreateResourceGrants({
+      grants: resourceIds.map(rid => ({
         principal_type: grantForm.principal_type,
         principal_id: grantForm.principal_id,
         resource_type: grantForm.resource_type,
         resource_id: rid,
         effect: grantForm.effect,
         expires_at: expiresAt
-      })
-    }
-    ElMessage.success(t('common.created'))
+      }))
+    })
+    ElMessage.success(result.message || t('common.created'))
     grantDialogVisible.value = false
     await loadGrants()
   } catch (e: any) {
-    ElMessage.error(e.message || 'Failed to create grant')
+    ElMessage.error(e.message || t('common.error'))
   } finally {
     saving.value = false
   }
@@ -831,6 +854,32 @@ watch(resourceSearchQuery, () => {
 
 watch(() => grantForm.principal_type, () => {
   grantForm.principal_id = ''
+  authorizedResourceIds.value = new Set()
+})
+
+// 主体变更时，重新拉取已有授权并刷新资源列表
+watch(() => grantForm.principal_id, async (newId) => {
+  if (!newId || !grantDialogVisible.value) {
+    authorizedResourceIds.value = new Set()
+    return
+  }
+  await fetchPrincipalGrants()
+  await loadResources(true)
+})
+
+// 资源Tab切换时，重新拉取已有授权
+watch(resourceTabType, async () => {
+  if (grantForm.principal_id) {
+    await fetchPrincipalGrants()
+  }
+})
+
+// effect 变更时更新已有授权过滤
+watch(() => grantForm.effect, async () => {
+  if (grantForm.principal_id) {
+    await fetchPrincipalGrants()
+    await loadResources(true)
+  }
 })
 
 onBeforeUnmount(() => {
@@ -900,4 +949,9 @@ onMounted(async () => {
   padding-top: 12px;
 }
 
+/* 已授权行灰显 */
+:deep(.row-authorized .el-table__cell) {
+  opacity: 0.4;
+  background-color: var(--el-fill-color-light);
+}
 </style>

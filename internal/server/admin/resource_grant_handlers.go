@@ -3,6 +3,7 @@ package admin
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -19,6 +20,11 @@ type resourceGrantRequest struct {
 	ResourceID    string     `json:"resource_id"`
 	Effect        string     `json:"effect"`
 	ExpiresAt     *time.Time `json:"expires_at,omitempty"`
+}
+
+// 批量授权请求
+type batchResourceGrantRequest struct {
+	Grants []resourceGrantRequest `json:"grants"`
 }
 
 func (s *Server) handleResourceGrants(w http.ResponseWriter, r *http.Request) {
@@ -91,6 +97,13 @@ func (s *Server) listResourceGrants(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	// 检查是否按主体过滤
+	principalType := r.URL.Query().Get("principal_type")
+	principalID := r.URL.Query().Get("principal_id")
+	if principalType != "" && principalID != "" {
+		s.listResourceGrantsByPrincipal(w, r, resourceGrants, principalType, principalID)
+		return
+	}
 	page, err := resourceGrants.List(
 		r.Context(),
 		userIDFromRequest(r),
@@ -105,6 +118,18 @@ func (s *Server) listResourceGrants(w http.ResponseWriter, r *http.Request) {
 	}
 	s.writeJSON(w, r, http.StatusOK, pageResponse{
 		Items: page.Items, Total: page.Total, Page: page.Page, PageSize: page.PageSize,
+	})
+}
+
+// listResourceGrantsByPrincipal 按主体类型和ID查询授权
+func (s *Server) listResourceGrantsByPrincipal(w http.ResponseWriter, r *http.Request, svc *service.ResourceGrantService, principalType, principalID string) {
+	grants, err := svc.ListByPrincipal(r.Context(), userIDFromRequest(r), isSuperAdminRequest(r), principalType, principalID)
+	if err != nil {
+		s.writeResourceGrantError(w, r, err)
+		return
+	}
+	s.writeJSON(w, r, http.StatusOK, pageResponse{
+		Items: grants, Total: len(grants), Page: 1, PageSize: len(grants),
 	})
 }
 
@@ -161,6 +186,62 @@ func (s *Server) deleteResourceGrant(w http.ResponseWriter, r *http.Request, id 
 	s.writeJSON(w, r, http.StatusOK, map[string]string{"message": "resource grant deleted"})
 }
 
+// 批量创建资源授权
+func (s *Server) handleBatchResourceGrants(w http.ResponseWriter, r *http.Request) {
+	if !s.requirePermission(r, rbac.ActionRBACManage) {
+		s.forbidden(w, r)
+		return
+	}
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", "POST")
+		s.writeErrorText(w, r, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	resourceGrants, ok := s.requireResourceGrantService(w, r)
+	if !ok {
+		return
+	}
+
+	var req batchResourceGrantRequest
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&req); err != nil {
+		s.writeErrorText(w, r, http.StatusBadRequest, "无效的JSON: "+err.Error())
+		return
+	}
+	if len(req.Grants) == 0 {
+		s.writeErrorText(w, r, http.StatusBadRequest, "grants 不能为空")
+		return
+	}
+
+	grants := make([]model.ResourceGrant, 0, len(req.Grants))
+	for _, g := range req.Grants {
+		grants = append(grants, model.ResourceGrant{
+			PrincipalType: g.PrincipalType,
+			PrincipalID:   g.PrincipalID,
+			ResourceType:  g.ResourceType,
+			ResourceID:    g.ResourceID,
+			Effect:        g.Effect,
+			ExpiresAt:     g.ExpiresAt,
+		})
+	}
+
+	result, err := resourceGrants.BatchCreate(r.Context(), userIDFromRequest(r), isSuperAdminRequest(r), grants)
+	if err != nil {
+		s.writeResourceGrantError(w, r, err)
+		return
+	}
+
+	message := buildBatchGrantMessage(result.Created, result.Refreshed)
+	s.writeJSON(w, r, http.StatusCreated, map[string]interface{}{
+		"created":   result.Created,
+		"refreshed": result.Refreshed,
+		"message":   message,
+	})
+}
+
 func (s *Server) requireResourceGrantService(w http.ResponseWriter, r *http.Request) (*service.ResourceGrantService, bool) {
 	if s.resourceGrants == nil {
 		s.writeErrorText(w, r, http.StatusServiceUnavailable, "resource grant service unavailable")
@@ -179,5 +260,19 @@ func (s *Server) writeResourceGrantError(w http.ResponseWriter, r *http.Request,
 		s.forbidden(w, r)
 	default:
 		s.writeErrorText(w, r, http.StatusInternalServerError, err.Error())
+	}
+}
+
+// buildBatchGrantMessage 构建批量授权结果的中文提示
+func buildBatchGrantMessage(created, refreshed int) string {
+	switch {
+	case created == 0 && refreshed > 0:
+		return fmt.Sprintf("全部资源已授权，刷新%d项授权", refreshed)
+	case created > 0 && refreshed == 0:
+		return fmt.Sprintf("新增%d项授权", created)
+	case created > 0 && refreshed > 0:
+		return fmt.Sprintf("新增%d项授权，刷新%d项授权", created, refreshed)
+	default:
+		return "未创建任何授权"
 	}
 }

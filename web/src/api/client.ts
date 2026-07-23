@@ -1562,6 +1562,19 @@ export const apiClient = {
   checkResourceGrant: (userId: string, resourceType: string, resourceId: string) =>
     request<{ allowed: boolean }>(`/api/resource-grants/check?user_id=${encodeURIComponent(userId)}&resource_type=${encodeURIComponent(resourceType)}&resource_id=${encodeURIComponent(resourceId)}`),
 
+  // 批量创建资源授权
+  batchCreateResourceGrants: (payload: { grants: ResourceGrantPayload[] }) =>
+    request<{ created: number; refreshed: number; message: string }>('/api/resource-grants/batch', {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    }),
+
+  // 按主体查询已有授权
+  getPrincipalGrants: (principalType: string, principalId: string) =>
+    request<PageResponse<ResourceGrantRecord>>(
+      `/api/resource-grants?principal_type=${encodeURIComponent(principalType)}&principal_id=${encodeURIComponent(principalId)}`
+    ),
+
   // ?? Temporary authorizations ???????????????????????????????????????
   getTemporaryAccounts: (params?: { q?: string; page?: number; page_size?: number }) =>
     request<PageResponse<TemporaryAccountRecord>>(`/api/temporary-accounts${buildQS(params as Record<string, string | number | undefined>)}`),

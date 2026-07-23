@@ -1,14 +1,13 @@
 package store
 
 import (
-	"time"
 	"context"
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"gorm.io/gorm"
-	"gorm.io/gorm/clause"
 
 	"jianmen/internal/model"
 )
@@ -72,16 +71,22 @@ func (s *DBStore) CreateResourceGrant(ctx context.Context, grant model.ResourceG
 }
 
 func (s *DBStore) EnsureResourceGrant(ctx context.Context, grant model.ResourceGrant) error {
-	if err := s.db.WithContext(ctx).Clauses(clause.OnConflict{
-		Columns: []clause.Column{
-			{Name: "principal_type"},
-			{Name: "principal_id"},
-			{Name: "resource_type"},
-			{Name: "resource_id"},
-			{Name: "effect"},
-		},
-		DoNothing: true,
-	}).Create(&grant).Error; err != nil {
+	// 使用互斥锁确保并发安全的检查-创建操作，避免重复创建。
+	s.ensureGrantMu.Lock()
+	defer s.ensureGrantMu.Unlock()
+
+	var existing model.ResourceGrant
+	result := s.db.WithContext(ctx).
+		Where("principal_type = ? AND principal_id = ? AND resource_type = ? AND resource_id = ? AND effect = ? AND deleted_at = ?",
+			grant.PrincipalType, grant.PrincipalID, grant.ResourceType, grant.ResourceID, grant.Effect, model.SentinelDeletedAt).
+		Limit(1).Find(&existing)
+	if result.Error != nil {
+		return fmt.Errorf("ensure resource grant: %w", result.Error)
+	}
+	if result.RowsAffected > 0 {
+		return nil
+	}
+	if err := s.db.WithContext(ctx).Create(&grant).Error; err != nil {
 		return fmt.Errorf("ensure resource grant: %w", err)
 	}
 	return nil
@@ -202,4 +207,70 @@ func uniqueStrings(values []string) []string {
 		result = append(result, value)
 	}
 	return result
+}
+
+// FindGrantsByPrincipal 查询某主体所有未删除的授权
+func (s *DBStore) FindGrantsByPrincipal(ctx context.Context, principalType, principalID string) ([]model.ResourceGrant, error) {
+	principalType = strings.ToLower(strings.TrimSpace(principalType))
+	principalID = strings.TrimSpace(principalID)
+	if principalType == "" || principalID == "" {
+		return nil, fmt.Errorf("principal_type and principal_id are required")
+	}
+	var grants []model.ResourceGrant
+	if err := s.db.WithContext(ctx).
+		Where("principal_type = ? AND principal_id = ?", principalType, principalID).
+		Order("created_at DESC").
+		Find(&grants).Error; err != nil {
+		return nil, fmt.Errorf("find grants by principal: %w", err)
+	}
+	return grants, nil
+}
+
+// BatchUpsertGrants 批量处理授权：存在则软删旧记录+插入新记录，不存在则直接插入
+// 使用互斥锁确保并发安全的检查-创建操作，避免在 SQLite 中因 NULL 比较语义导致的重复记录。
+func (s *DBStore) BatchUpsertGrants(ctx context.Context, grants []model.ResourceGrant, actorID string) (created int, refreshed int, err error) {
+	if len(grants) == 0 {
+		return 0, 0, nil
+	}
+	// 在事务外加锁，避免事务内长时间持锁阻塞其他操作
+	s.ensureGrantMu.Lock()
+	defer s.ensureGrantMu.Unlock()
+
+	// 在事务中逐条处理
+	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		for _, grant := range grants {
+			// 查找是否已有未删除（活跃）的相同授权
+			var existing model.ResourceGrant
+			result := tx.Where(
+				"principal_type = ? AND principal_id = ? AND resource_type = ? AND resource_id = ? AND effect = ? AND deleted_at = ?",
+				grant.PrincipalType, grant.PrincipalID, grant.ResourceType, grant.ResourceID, grant.Effect, model.SentinelDeletedAt,
+			).First(&existing)
+
+			if result.Error == nil {
+				// 已存在：软删除旧记录
+				if err := tx.Model(&existing).Updates(map[string]interface{}{
+					"deleted_at": time.Now(),
+					"updated_by": actorID,
+				}).Error; err != nil {
+					return fmt.Errorf("soft delete existing grant %s: %w", existing.ID, err)
+				}
+				refreshed++
+			} else if !errors.Is(result.Error, gorm.ErrRecordNotFound) {
+				return fmt.Errorf("find existing grant: %w", result.Error)
+			} else {
+				created++
+			}
+
+			// 插入新记录（审计字段由 FullAudit.BeforeCreate 从 context 自动填充）
+			grant.ID = "" // 使用 BeforeCreate 生成的 ID
+			if err := tx.Create(&grant).Error; err != nil {
+				return fmt.Errorf("create resource grant: %w", err)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return 0, 0, err
+	}
+	return created, refreshed, nil
 }

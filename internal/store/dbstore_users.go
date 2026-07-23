@@ -125,7 +125,7 @@ func (s *DBStore) DeleteUser(ctx context.Context, user model.User) error {
 		if err := tx.Where("user_id = ?", user.ID).Delete(&model.UserRole{}).Error; err != nil {
 			return fmt.Errorf("delete user roles: %w", err)
 		}
-		if err := tx.Delete(&user).Error; err != nil {
+		if err := SoftDelete(ctx, tx, "users", user.ID).Error; err != nil {
 			return fmt.Errorf("delete user: %w", err)
 		}
 		return nil

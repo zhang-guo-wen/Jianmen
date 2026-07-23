@@ -10,6 +10,9 @@ import (
 
 	"jianmen/internal/model"
 	"jianmen/internal/service"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 type userSessionHandlerRepository struct{}
@@ -89,4 +92,52 @@ func TestHandleUserSessionsFailsClosedWhenConnectionIsDenied(t *testing.T) {
 	if recorder.Code != http.StatusForbidden {
 		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusForbidden)
 	}
+}
+
+func TestHandleUserSessionBySessionID_Success(t *testing.T) {
+	srv, db := newAdminDBTestServer(t)
+	seedTestSuperAdmin(t, db, "u-admin")
+
+	user := model.User{ID: "u1", Username: "testuser", Status: "active"}
+	require.NoError(t, db.Create(&user).Error)
+	sess := model.UserSession{
+		ID: "us1", UserID: "u1", SessionSeq: 1, SessionID: "00001",
+		Type: "permanent", Status: "active",
+	}
+	require.NoError(t, db.Create(&sess).Error)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/user-sessions/by-session-id/00001", nil)
+	req = asTestSuperAdmin(req)
+	rec := httptest.NewRecorder()
+	srv.handleUserSessionBySessionID(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	var detail model.UserSessionAuthDetail
+	require.NoError(t, decodeTestData(t, rec.Body.Bytes(), &detail))
+	assert.Equal(t, "00001", detail.SessionID)
+	assert.Equal(t, "normal", detail.AuthorizationType)
+}
+
+func TestHandleUserSessionBySessionID_NotFound(t *testing.T) {
+	srv, db := newAdminDBTestServer(t)
+	seedTestSuperAdmin(t, db, "u-admin")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/user-sessions/by-session-id/99999", nil)
+	req = asTestSuperAdmin(req)
+	rec := httptest.NewRecorder()
+	srv.handleUserSessionBySessionID(rec, req)
+
+	assert.Equal(t, http.StatusNotFound, rec.Code)
+}
+
+func TestHandleUserSessionBySessionID_InvalidFormat(t *testing.T) {
+	srv, db := newAdminDBTestServer(t)
+	seedTestSuperAdmin(t, db, "u-admin")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/user-sessions/by-session-id/too/long/path", nil)
+	req = asTestSuperAdmin(req)
+	rec := httptest.NewRecorder()
+	srv.handleUserSessionBySessionID(rec, req)
+
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }

@@ -13,6 +13,7 @@ import (
 
 	"jianmen/internal/rbac"
 	"jianmen/internal/service"
+	"jianmen/internal/store"
 )
 
 func (s *Server) handleUserSessions(w http.ResponseWriter, r *http.Request) {
@@ -330,4 +331,41 @@ func aiTokenIDFromRequest(r *http.Request) string {
 		return id
 	}
 	return ""
+}
+
+// handleUserSessionBySessionID 通过 5 位 session_id 查询用户会话授权详情。
+// 用于审计页面 SessionID 点击后弹窗展示。
+func (s *Server) handleUserSessionBySessionID(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", http.MethodGet)
+		s.writeErrorText(w, r, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	// 权限检查：需要具备 SSH 审计、DB 审计或在线会话查看任一权限
+	if !s.requireAnyPermission(r, rbac.ActionAuditView, rbac.ActionDBAuditView, rbac.ActionSessionView) {
+		s.forbidden(w, r)
+		return
+	}
+
+	// 解析路径中的 sessionID
+	sessionID := strings.TrimPrefix(r.URL.Path, "/api/user-sessions/by-session-id/")
+	sessionID = strings.Trim(sessionID, "/")
+	if sessionID == "" || strings.Contains(sessionID, "/") {
+		s.writeErrorText(w, r, http.StatusBadRequest, "invalid session id")
+		return
+	}
+
+	detail, err := s.dbstore.GetUserSessionAuthDetail(r.Context(), sessionID)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			s.writeErrorText(w, r, http.StatusNotFound, "授权会话信息不存在")
+			return
+		}
+		s.logger.Warn("查询用户会话授权详情失败", "session_id", sessionID, "error", err)
+		s.writeErrorText(w, r, http.StatusInternalServerError, "查询授权详情失败")
+		return
+	}
+
+	s.writeJSON(w, r, http.StatusOK, detail)
 }

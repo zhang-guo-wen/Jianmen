@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"unicode"
 
 	"jianmen/internal/config"
 	"jianmen/internal/model"
@@ -79,6 +80,92 @@ func (s *HostManagementService) UpdateHost(ctx context.Context, actor HostManage
 		return HostManagementHostView{}, fmt.Errorf("update host: %w", err)
 	}
 	return view, nil
+}
+
+// ConfirmHostIdentity refreshes a host's SSH verification material after an
+// operator has explicitly accepted the identity warning. Refreshing and
+// enabling are persisted by one repository operation bound to the endpoint
+// that was scanned.
+func (s *HostManagementService) ConfirmHostIdentity(
+	ctx context.Context,
+	actor HostManagementActor,
+	hostID string,
+	confirmed bool,
+	expectedFingerprint string,
+) (HostIdentityRefreshResult, error) {
+	hostID = strings.TrimSpace(hostID)
+	if err := s.require(ctx, actor, []string{rbac.ActionHostUpdate}, model.ResourceTypeHost, hostID); err != nil {
+		return HostIdentityRefreshResult{}, err
+	}
+	if !confirmed {
+		return HostIdentityRefreshResult{}, ErrHostIdentityConfirmationRequired
+	}
+	if expectedFingerprint == "" || expectedFingerprint != strings.TrimSpace(expectedFingerprint) ||
+		len(expectedFingerprint) > 256 ||
+		strings.IndexFunc(expectedFingerprint, func(r rune) bool {
+			return unicode.IsControl(r) || unicode.IsSpace(r)
+		}) >= 0 {
+		return HostIdentityRefreshResult{}, fmt.Errorf("%w: expected_fingerprint is invalid", ErrHostTargetInvalidInput)
+	}
+	current, err := s.repository.Host(ctx, hostID)
+	if err != nil {
+		return HostIdentityRefreshResult{}, fmt.Errorf("load host before identity refresh: %w", err)
+	}
+	if !strings.EqualFold(strings.TrimSpace(current.Protocol), "ssh") ||
+		strings.TrimSpace(current.Address) == "" || current.Port <= 0 {
+		return HostIdentityRefreshResult{}, fmt.Errorf("%w: ssh host endpoint is required", ErrHostTargetInvalidInput)
+	}
+	persistedStatus := current.PersistedStatus
+	if persistedStatus == "" {
+		persistedStatus = current.Status
+	}
+	persistedFingerprint := current.PersistedFingerprint
+	if persistedFingerprint == "" {
+		persistedFingerprint = current.HostKeyFingerprint
+	}
+	persistedKnownHosts := current.PersistedKnownHosts
+	if persistedKnownHosts == "" {
+		persistedKnownHosts = current.KnownHosts
+	}
+	oldFingerprint := strings.TrimSpace(persistedFingerprint)
+	identity, err := s.identityCollector.Collect(ctx, current.Address, current.Port)
+	if err == nil {
+		err = validateHostIdentity(identity)
+	}
+	if err != nil {
+		return HostIdentityRefreshResult{}, &HostIdentityRefreshError{
+			HostID: hostID, HostStatus: current.Status,
+			IdentityStatus: current.IdentityStatus,
+			OldFingerprint: oldFingerprint, ExpectedFingerprint: expectedFingerprint,
+			Cause: err,
+		}
+	}
+	actualFingerprint := strings.TrimSpace(identity.Fingerprint)
+	if actualFingerprint != expectedFingerprint {
+		return HostIdentityRefreshResult{}, &HostIdentityConfirmationMismatchError{
+			HostID: hostID, OldFingerprint: oldFingerprint,
+			ExpectedFingerprint: expectedFingerprint, ActualFingerprint: actualFingerprint,
+			HostDisabled: strings.EqualFold(strings.TrimSpace(current.Status), "disabled"),
+		}
+	}
+	view, err := s.repository.RefreshHostIdentity(ctx, hostID, HostManagementIdentityRefresh{
+		Address: current.Address, Port: current.Port, Protocol: current.Protocol, Status: persistedStatus,
+		PreviousFingerprint: persistedFingerprint, PreviousKnownHosts: persistedKnownHosts,
+		UpdatedAt:   current.Revision,
+		Fingerprint: identity.Fingerprint, KnownHosts: identity.KnownHosts,
+	})
+	if err != nil {
+		return HostIdentityRefreshResult{}, &HostIdentityRefreshError{
+			HostID: hostID, HostStatus: current.Status,
+			IdentityStatus: current.IdentityStatus,
+			OldFingerprint: oldFingerprint, ExpectedFingerprint: expectedFingerprint,
+			ActualFingerprint: actualFingerprint, Cause: err,
+		}
+	}
+	return HostIdentityRefreshResult{
+		Host: view, OldFingerprint: oldFingerprint,
+		ExpectedFingerprint: expectedFingerprint, ActualFingerprint: actualFingerprint,
+	}, nil
 }
 
 func (s *HostManagementService) DeleteHost(ctx context.Context, actor HostManagementActor, hostID string) error {

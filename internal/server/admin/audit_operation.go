@@ -1,17 +1,58 @@
 package admin
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
 	"strings"
+	"sync"
 
 	"jianmen/internal/model"
 	"jianmen/internal/pkg/apiresp"
 )
 
 var errOperationAuditUnavailable = errors.New("operation audit unavailable")
+
+type operationAuditMetadataKey struct{}
+
+type operationAuditMetadata struct {
+	mu     sync.Mutex
+	values map[string]string
+}
+
+func withOperationAuditMetadata(ctx context.Context) context.Context {
+	return context.WithValue(ctx, operationAuditMetadataKey{}, &operationAuditMetadata{
+		values: make(map[string]string),
+	})
+}
+
+func setOperationAuditMetadata(r *http.Request, values map[string]string) {
+	metadata, _ := r.Context().Value(operationAuditMetadataKey{}).(*operationAuditMetadata)
+	if metadata == nil {
+		return
+	}
+	metadata.mu.Lock()
+	defer metadata.mu.Unlock()
+	for key, value := range values {
+		metadata.values[key] = value
+	}
+}
+
+func operationAuditMetadataValues(r *http.Request) map[string]string {
+	metadata, _ := r.Context().Value(operationAuditMetadataKey{}).(*operationAuditMetadata)
+	if metadata == nil {
+		return nil
+	}
+	metadata.mu.Lock()
+	defer metadata.mu.Unlock()
+	result := make(map[string]string, len(metadata.values))
+	for key, value := range metadata.values {
+		result[key] = value
+	}
+	return result
+}
 
 // auditResponseWriter captures the final status without changing the response API.
 type auditResponseWriter struct {
@@ -60,6 +101,7 @@ func (s *Server) withOperationAudit(next http.HandlerFunc) http.HandlerFunc {
 			next(w, r)
 			return
 		}
+		r = r.WithContext(withOperationAuditMetadata(r.Context()))
 		intentID, err := s.recordOperationIntent(r)
 		if err != nil {
 			logger := s.logger
@@ -122,6 +164,9 @@ func (s *Server) recordOperationResult(r *http.Request, status int, intentID str
 	}
 	if aiTokenID != "" {
 		detailMap["ai_token_id"] = aiTokenID
+	}
+	for key, value := range operationAuditMetadataValues(r) {
+		detailMap[key] = value
 	}
 	detail, err := json.Marshal(detailMap)
 	if err == nil {

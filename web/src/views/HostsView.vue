@@ -555,6 +555,7 @@
         :allow-ssh="permission.canDo('session:connect')"
         :allow-sftp="permission.canDo('sftp:connect')"
         @host-identity-changed="handleHostIdentityChanged"
+        @host-identity-invalidated="refreshDisabledHostState"
       />
     </div>
   </div>
@@ -564,6 +565,7 @@
 import {
   computed,
   nextTick,
+  onBeforeUnmount,
   onMounted,
   reactive,
   ref,
@@ -583,6 +585,7 @@ import ResourceFilterBar from "@/components/ResourceFilterBar.vue";
 import FormDialog from "@/components/FormDialog.vue";
 import ConnectionConfigDialog from "@/components/ConnectionConfigDialog.vue";
 import StatusSwitch from "@/components/StatusSwitch.vue";
+import { useSSHHostIdentityRecovery } from "@/composables/useSSHHostIdentityRecovery";
 import {
   apiClient,
   type HostPayload,
@@ -593,10 +596,6 @@ import {
 } from "@/api/client";
 import { useI18n } from "@/i18n";
 import { usePermissionStore } from "@/stores/permission";
-import {
-  parseSSHHostIdentityIssue,
-  sshHostIdentityNotice,
-} from "@/utils/sshHostIdentity";
 
 type AuthMethod = "password" | "private_key";
 type HostProtocol = "ssh" | "rdp";
@@ -686,12 +685,18 @@ const hostMorePanels = ref<string[]>([]);
 const accountMorePanels = ref<string[]>([]);
 const accountDetailLoading = ref(false);
 let accountDetailRequestSequence = 0;
+let accountConnectionTestSequence = 0;
+let hostsViewActive = true;
 
 // ── Connection state ──
 const selectedConnectionTarget = ref<TargetRecord | null>(null);
 const connectionResourceName = computed(() => selectedHost.value ? hostName(selectedHost.value) : accountDisplayName(selectedConnectionTarget.value ?? {}));
 const connectionSourceAddress = computed(() => selectedHost.value ? hostEndpoint(selectedHost.value) : targetHostString(selectedConnectionTarget.value ?? {}));
 const connectionSourceAccount = computed(() => stringFrom(selectedConnectionTarget.value?.username));
+const { runWithSSHHostIdentityRecovery } = useSSHHostIdentityRecovery({
+  onConfirmed: handleHostIdentityChanged,
+  onCancelledAfterDisable: issue => refreshDisabledHostState(issue.hostId),
+});
 
 const hostFormRef = ref<FormInstance>();
 const accountFormRef = ref<FormInstance>();
@@ -1551,9 +1556,7 @@ async function toggleHostStatus(host: HostView, active: boolean) {
     ElMessage.success(active ? "主机已启用" : "主机已禁用");
     await fetchHosts();
   } catch (err) {
-    if (!(await showSSHHostIdentityIssue(err))) {
-      ElMessage.error(err instanceof Error ? err.message : t("hosts.error.save"));
-    }
+    ElMessage.error(err instanceof Error ? err.message : t("hosts.error.save"));
   } finally {
     statusUpdatingId.value = "";
   }
@@ -1681,6 +1684,7 @@ async function submitAccount() {
 }
 
 async function testConnection() {
+  if (testingConnection.value) return;
   if (!selectedHost.value) {
     ElMessage.error("请先选择主机");
     return;
@@ -1701,52 +1705,73 @@ async function testConnection() {
     ElMessage.warning("请提供私钥内容");
     return;
   }
+  const requestSequence = ++accountConnectionTestSequence;
+  const requestedHostID = hostId(selectedHost.value);
+  const payload = buildAccountPayload();
+  const isCurrentRequest = () => (
+    hostsViewActive
+    && requestSequence === accountConnectionTestSequence
+    && accountFormVisible.value
+    && (selectedHost.value ? hostId(selectedHost.value) : "") === requestedHostID
+  );
   testingConnection.value = true;
   accountTestResult.value = null;
   try {
-    const result = await apiClient.testTargetConnection(buildAccountPayload());
+    const recovery = await runWithSSHHostIdentityRecovery(
+      () => apiClient.testTargetConnection(payload),
+      {
+        key: `host-account-test:${requestedHostID}`,
+        isCurrent: isCurrentRequest,
+      },
+    );
+    if (!isCurrentRequest()) return;
+    if (recovery.status !== "success") {
+      if (recovery.status !== "cancelled") return;
+      accountTestResult.value = { ok: false, error: "已取消连接" };
+      return;
+    }
+    const result = recovery.value;
     accountTestResult.value = {
       ok: result.ok,
       latency_ms: result.latency_ms,
       error: result.ok ? undefined : (result.error || result.message || "连接失败"),
     };
   } catch (err) {
-    const identityIssueHandled = await showSSHHostIdentityIssue(err);
+    if (!isCurrentRequest()) return;
     accountTestResult.value = {
       ok: false,
-      error: identityIssueHandled
-        ? "SSH 主机身份校验未通过"
-        : err instanceof Error
-          ? err.message
-          : "连接测试失败",
+      error: err instanceof Error ? err.message : "连接测试失败",
     };
   } finally {
-    testingConnection.value = false;
+    if (requestSequence === accountConnectionTestSequence) {
+      testingConnection.value = false;
+    }
   }
 }
 
-async function showSSHHostIdentityIssue(error: unknown): Promise<boolean> {
-  const issue = parseSSHHostIdentityIssue(error);
-  if (!issue) return false;
-  const notice = sshHostIdentityNotice(issue);
-  await ElMessageBox.alert(notice.message, notice.title, {
-    type: "warning",
-    confirmButtonText: "知道了",
-  }).catch(() => undefined);
-  await fetchHosts();
-  const selectedID = selectedHost.value ? hostId(selectedHost.value) : "";
-  if (selectedID) {
-    const refreshed = hosts.value.find((host) => hostId(host) === selectedID);
-    if (refreshed) selectedHost.value = refreshed;
+function handleHostIdentityChanged(host: HostView) {
+  const confirmedHostID = hostId(host);
+  if (!confirmedHostID) return;
+  hosts.value = hosts.value.map(item => (
+    hostId(item) === confirmedHostID ? host : item
+  ));
+  if (
+    selectedHost.value
+    && hostId(selectedHost.value) === confirmedHostID
+  ) {
+    selectedHost.value = host;
   }
-  return true;
 }
 
-async function handleHostIdentityChanged() {
+async function refreshDisabledHostState(disabledHostID: string) {
   await fetchHosts();
-  const selectedID = selectedHost.value ? hostId(selectedHost.value) : "";
-  if (!selectedID) return;
-  const refreshed = hosts.value.find((host) => hostId(host) === selectedID);
+  if (
+    !selectedHost.value
+    || hostId(selectedHost.value) !== disabledHostID
+  ) {
+    return;
+  }
+  const refreshed = hosts.value.find(host => hostId(host) === disabledHostID);
   if (refreshed) selectedHost.value = refreshed;
 }
 
@@ -1935,12 +1960,19 @@ watch(accountsDialogVisible, (visible) => {
 watch(accountFormVisible, (visible) => {
   if (visible) return;
   accountDetailRequestSequence += 1;
+  accountConnectionTestSequence += 1;
   accountDetailLoading.value = false;
+  testingConnection.value = false;
 });
 
 onMounted(() => {
   void fetchHosts();
   void loadGroupOptions();
+});
+
+onBeforeUnmount(() => {
+  hostsViewActive = false;
+  accountConnectionTestSequence += 1;
 });
 </script>
 

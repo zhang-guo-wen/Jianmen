@@ -162,13 +162,47 @@ func TestHandleTestConnectionReturnsStructuredHostKeyChangeAndDisablesHost(t *te
 		t.Fatalf("changed host status = %q, want disabled", persisted.Status)
 	}
 
-	enableReq := httptest.NewRequest(http.MethodPut, "/api/hosts/changed-host", bytes.NewBufferString(`{
-		"name": "changed-host",
-		"address": "`+host+`",
-		"port": `+strconv.Itoa(port)+`,
-		"protocol": "ssh",
-		"status": "active"
-	}`))
+	staleConfirmReq := httptest.NewRequest(
+		http.MethodPost,
+		"/api/hosts/changed-host/refresh-identity",
+		bytes.NewBufferString(`{"confirmed":true,"expected_fingerprint":"SHA256:stale-warning"}`),
+	)
+	staleConfirmReq = asTestSuperAdmin(staleConfirmReq)
+	staleConfirmRec := httptest.NewRecorder()
+	server.handleHost(staleConfirmRec, staleConfirmReq)
+	if staleConfirmRec.Code != http.StatusConflict {
+		t.Fatalf("stale confirmation status = %d, want %d; body=%s",
+			staleConfirmRec.Code, http.StatusConflict, staleConfirmRec.Body.String())
+	}
+	var staleConfirmation struct {
+		Error struct {
+			Code    string `json:"code"`
+			Details struct {
+				ExpectedFingerprint string `json:"expected_fingerprint"`
+				NewFingerprint      string `json:"new_fingerprint"`
+			} `json:"details"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(staleConfirmRec.Body.Bytes(), &staleConfirmation); err != nil {
+		t.Fatalf("decode stale confirmation: %v", err)
+	}
+	if staleConfirmation.Error.Code != codeSSHHostKeyChanged ||
+		staleConfirmation.Error.Details.ExpectedFingerprint != "SHA256:stale-warning" ||
+		staleConfirmation.Error.Details.NewFingerprint != response.Error.Details.NewFingerprint {
+		t.Fatalf("unexpected stale confirmation: %#v", staleConfirmation)
+	}
+	if err := server.db.First(&persisted, "id = ?", "changed-host").Error; err != nil {
+		t.Fatalf("reload changed host: %v", err)
+	}
+	if persisted.Status != "disabled" || persisted.HostKeyFingerprint != oldFingerprint {
+		t.Fatalf("stale confirmation changed host: %#v", persisted)
+	}
+
+	enableReq := httptest.NewRequest(
+		http.MethodPost,
+		"/api/hosts/changed-host/refresh-identity",
+		bytes.NewBufferString(`{"confirmed":true,"expected_fingerprint":"`+response.Error.Details.NewFingerprint+`"}`),
+	)
 	enableReq = asTestSuperAdmin(enableReq)
 	enableRec := httptest.NewRecorder()
 	server.handleHost(enableRec, enableReq)
@@ -194,6 +228,115 @@ func TestHandleTestConnectionReturnsStructuredHostKeyChangeAndDisablesHost(t *te
 	server.handleTestConnection(retryRec, retryReq)
 	if retryRec.Code != http.StatusOK {
 		t.Fatalf("retry status = %d, want %d; body=%s", retryRec.Code, http.StatusOK, retryRec.Body.String())
+	}
+}
+
+func TestUnavailableHostIdentityCanBeConfirmedRefreshedAndRetried(t *testing.T) {
+	server := newTargetTestServer(t)
+	sshAddress := startTestPasswordSSHServer(t, "root", "secret")
+	host, portText, err := net.SplitHostPort(sshAddress)
+	if err != nil {
+		t.Fatalf("split SSH address: %v", err)
+	}
+	port, err := strconv.Atoi(portText)
+	if err != nil {
+		t.Fatalf("parse SSH port: %v", err)
+	}
+	if _, err := server.hostTargets.AddHost(context.Background(), store.HostRecord{
+		ID: "identity-missing-host", Name: "identity-missing-host",
+		Address: host, Port: port, Protocol: "ssh", Status: "active",
+	}); err != nil {
+		t.Fatalf("create identity-missing host: %v", err)
+	}
+	createReq := asTestSuperAdmin(httptest.NewRequest(
+		http.MethodPost,
+		"/api/targets",
+		bytes.NewBufferString(`{
+			"id":"identity-missing-account",
+			"host_id":"identity-missing-host",
+			"username":"root",
+			"password":"secret"
+		}`),
+	))
+	createRec := httptest.NewRecorder()
+	server.handleTargets(createRec, createReq)
+	if createRec.Code != http.StatusCreated {
+		t.Fatalf("create account status = %d, want %d; body=%s",
+			createRec.Code, http.StatusCreated, createRec.Body.String())
+	}
+
+	testReq := asTestSuperAdmin(httptest.NewRequest(
+		http.MethodPost,
+		"/api/targets/test-connection",
+		bytes.NewBufferString(`{"id":"identity-missing-account"}`),
+	))
+	testRec := httptest.NewRecorder()
+	server.handleTestConnection(testRec, testReq)
+	if testRec.Code != http.StatusPreconditionFailed {
+		t.Fatalf("missing identity status = %d, want %d; body=%s",
+			testRec.Code, http.StatusPreconditionFailed, testRec.Body.String())
+	}
+	var unavailable struct {
+		Error struct {
+			Code    string `json:"code"`
+			Details struct {
+				HostID         string `json:"host_id"`
+				NewFingerprint string `json:"new_fingerprint"`
+			} `json:"details"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(testRec.Body.Bytes(), &unavailable); err != nil {
+		t.Fatalf("decode unavailable identity: %v", err)
+	}
+	if unavailable.Error.Code != codeSSHHostIdentityUnavailable ||
+		unavailable.Error.Details.HostID != "identity-missing-host" ||
+		unavailable.Error.Details.NewFingerprint == "" {
+		t.Fatalf("unexpected unavailable identity: %#v", unavailable)
+	}
+	var beforeConfirm model.Host
+	if err := server.db.First(&beforeConfirm, "id = ?", "identity-missing-host").Error; err != nil {
+		t.Fatalf("load identity-missing host: %v", err)
+	}
+	if beforeConfirm.HostKeyFingerprint != "" || beforeConfirm.KnownHosts != "" ||
+		beforeConfirm.Status != "active" {
+		t.Fatalf("identity probe mutated host before confirmation: %#v", beforeConfirm)
+	}
+
+	confirmReq := asTestSuperAdmin(httptest.NewRequest(
+		http.MethodPost,
+		"/api/hosts/identity-missing-host/refresh-identity",
+		bytes.NewBufferString(`{"confirmed":true,"expected_fingerprint":"`+
+			unavailable.Error.Details.NewFingerprint+`"}`),
+	))
+	confirmRec := httptest.NewRecorder()
+	server.handleHost(confirmRec, confirmReq)
+	if confirmRec.Code != http.StatusOK {
+		t.Fatalf("identity confirmation status = %d, want %d; body=%s",
+			confirmRec.Code, http.StatusOK, confirmRec.Body.String())
+	}
+	var confirmed struct {
+		Status             string `json:"status"`
+		IdentityStatus     string `json:"identity_status"`
+		HostKeyFingerprint string `json:"host_key_fingerprint"`
+	}
+	if err := decodeTestData(t, confirmRec.Body.Bytes(), &confirmed); err != nil {
+		t.Fatalf("decode confirmed host: %v", err)
+	}
+	if confirmed.Status != "active" || confirmed.IdentityStatus != "available" ||
+		confirmed.HostKeyFingerprint != unavailable.Error.Details.NewFingerprint {
+		t.Fatalf("confirmed host = %#v", confirmed)
+	}
+
+	retryReq := asTestSuperAdmin(httptest.NewRequest(
+		http.MethodPost,
+		"/api/targets/test-connection",
+		bytes.NewBufferString(`{"id":"identity-missing-account"}`),
+	))
+	retryRec := httptest.NewRecorder()
+	server.handleTestConnection(retryRec, retryReq)
+	if retryRec.Code != http.StatusOK {
+		t.Fatalf("retry status = %d, want %d; body=%s",
+			retryRec.Code, http.StatusOK, retryRec.Body.String())
 	}
 }
 
@@ -246,6 +389,22 @@ func TestHandleTestConnectionAllowsConnectOnlyStoredAccount(t *testing.T) {
 	}
 	if !result.OK {
 		t.Fatalf("connect-only connection test failed: %s", testRec.Body.String())
+	}
+
+	refreshReq := withTestUser(
+		httptest.NewRequest(
+			http.MethodPost,
+			"/api/hosts/connect-only-host/refresh-identity",
+			bytes.NewBufferString(`{"confirmed":true,"expected_fingerprint":"SHA256:not-authorized"}`),
+		),
+		"connection-test-only-user",
+		"connection-test-only-user",
+	)
+	refreshRec := httptest.NewRecorder()
+	server.handleHost(refreshRec, refreshReq)
+	if refreshRec.Code != http.StatusForbidden {
+		t.Fatalf("connect-only identity refresh status = %d, want %d; body=%s",
+			refreshRec.Code, http.StatusForbidden, refreshRec.Body.String())
 	}
 }
 

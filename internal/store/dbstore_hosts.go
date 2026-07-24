@@ -31,10 +31,14 @@ func (s *DBStore) hostView(ctx context.Context, m model.Host, accountCount ...in
 		HostKeyFingerprint:   strings.TrimSpace(m.HostKeyFingerprint),
 		KnownHosts:           strings.TrimSpace(m.KnownHosts),
 		IdentityStatus:       hostIdentityStatus(m),
-		HostKeyChangeHandler: s.hostKeyChangeHandler(newSSHHostIdentitySnapshot(m)),
+		HostKeyChangeHandler: s.hostKeyChangeHandler(newSSHHostIdentitySnapshot(ctx, m)),
 		AccountCount:         count,
 		CreatedAt:            m.CreatedAt.Format(time.RFC3339),
 		UpdatedAt:            m.UpdatedAt.Format(time.RFC3339),
+		Revision:             m.UpdatedAt,
+		PersistedStatus:      m.Status,
+		PersistedFingerprint: m.HostKeyFingerprint,
+		PersistedKnownHosts:  m.KnownHosts,
 	}
 }
 

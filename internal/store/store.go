@@ -48,7 +48,17 @@ type HostView struct {
 	AccountCount         int                                                        `json:"account_count"`
 	CreatedAt            string                                                     `json:"created_at"`
 	UpdatedAt            string                                                     `json:"updated_at"`
+	Revision             time.Time                                                  `json:"-"`
+	PersistedStatus      string                                                     `json:"-"`
+	PersistedFingerprint string                                                     `json:"-"`
+	PersistedKnownHosts  string                                                     `json:"-"`
 	CanManage            bool                                                       `json:"can_manage"`
+}
+
+type HostIdentityRefresh struct {
+	Address, Protocol, Status, PreviousFingerprint, PreviousKnownHosts, Fingerprint, KnownHosts string
+	Port                                                                                        int
+	UpdatedAt                                                                                   time.Time
 }
 
 type TargetView struct {
@@ -316,6 +326,7 @@ var (
 	ErrNotFound                              = errSentinel("record not found")
 	ErrTargetNotFound                        = errSentinel("target not found")
 	ErrHostNotFound                          = errSentinel("host not found")
+	ErrHostIdentityStateChanged              = errSentinel("host identity state changed")
 	ErrDBProxyNotFound                       = errSentinel("database proxy not found")
 	ErrDBAccountNotFound                     = errSentinel("database account not found")
 	ErrDBInstanceNotFound                    = errSentinel("database instance not found")

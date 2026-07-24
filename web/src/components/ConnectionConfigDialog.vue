@@ -97,8 +97,8 @@
     </div>
 
     <template #footer>
-      <el-button data-testid="ssh-local-client" v-if="resourceType === 'host' && allowSsh" type="primary" :disabled="!connectionTestResult?.ok || sshIdentityBlocked" :loading="preferences.loading" @click="openPreferredSSHClient">本地 SSH 客户端打开</el-button>
-      <el-button data-testid="ssh-browser" v-if="resourceType === 'host' && allowSsh" type="primary" :disabled="!connectionTestResult?.ok || sshIdentityBlocked" @click="openInBrowser">在浏览器中打开</el-button>
+      <el-button data-testid="ssh-local-client" v-if="resourceType === 'host' && allowSsh" type="primary" :disabled="!connectionTestResult?.ok" :loading="preferences.loading" @click="openPreferredSSHClient">本地 SSH 客户端打开</el-button>
+      <el-button data-testid="ssh-browser" v-if="resourceType === 'host' && allowSsh" type="primary" :disabled="!connectionTestResult?.ok" @click="openInBrowser">在浏览器中打开</el-button>
       <el-button
         v-if="resourceType === 'database' && !isRedis && allowWebSql"
         data-testid="database-web-sql"
@@ -159,16 +159,17 @@
 </template>
 
 <script setup lang="ts">
-import { computed, defineComponent, h, reactive, ref, watch, type PropType } from 'vue';
+import { computed, defineComponent, h, onBeforeUnmount, reactive, ref, watch, type PropType } from 'vue';
 import { useRouter } from 'vue-router';
 import { Loading } from '@element-plus/icons-vue';
-import { ElButton, ElInput, ElMessage, ElMessageBox, ElSwitch } from 'element-plus';
+import { ElButton, ElInput, ElMessage, ElSwitch } from 'element-plus';
 
 import {
   apiClient,
   type DatabaseGatewayTLSTrustMode,
   type DBAccountRecord,
   type DBGatewayConfig,
+  type HostView,
   type TargetRecord,
 } from '@/api/client';
 import { buildDatabaseProtocolURL } from '@/config/databaseClients';
@@ -180,6 +181,7 @@ import { databaseGatewayConnectionError } from '@/utils/databaseGatewayAvailabil
 import {
   loadDatabaseConnectionResources,
 } from '@/utils/databaseConnectionOrchestration';
+import { useSSHHostIdentityRecovery } from '@/composables/useSSHHostIdentityRecovery';
 import {
   buildDatabaseGatewayConnection,
   databaseGatewayRequiresCustomCA,
@@ -193,13 +195,10 @@ import {
   endInFlight,
   isInFlight,
   type InFlightCounters,
+  type KeyedRequestToken,
 } from '@/utils/connectionRequestState';
 import { buildSSHDeepLink } from '@/utils/connectionLinks';
 import { buildConnectionCommands, type ConnectionCommandInput } from '@/utils/connectionConfigCommands';
-import {
-  parseSSHHostIdentityIssue,
-  sshHostIdentityNotice,
-} from '@/utils/sshHostIdentity';
 
 interface CommandItem {
   label: string;
@@ -290,8 +289,13 @@ const props = withDefaults(defineProps<{
 
 const emit = defineEmits<{
   (event: 'update:modelValue', value: boolean): void
-  (event: 'hostIdentityChanged', hostId: string): void
+  (event: 'hostIdentityChanged', host: HostView): void
+  (event: 'hostIdentityInvalidated', hostId: string): void
 }>();
+const { runWithSSHHostIdentityRecovery } = useSSHHostIdentityRecovery({
+  onConfirmed: host => emit('hostIdentityChanged', host),
+  onCancelledAfterDisable: issue => emit('hostIdentityInvalidated', issue.hostId),
+});
 const router = useRouter();
 const preferences = usePreferencesStore();
 const databaseClient = useDatabaseClientStore();
@@ -303,7 +307,6 @@ const creatingSession = ref(false);
 const connectionError = ref('');
 const connectionTesting = ref(false);
 const connectionTestResult = ref<{ ok: boolean; error?: string; latency_ms?: number } | null>(null);
-const sshIdentityBlocked = ref(false);
 const connectionInfo = ref<{
   host: string;
   port: number;
@@ -321,6 +324,7 @@ const databaseUseTLS = ref(false);
 const initializeRequest = createLatestKeyedRequest<ConnectionResourceBundle>();
 const testRequest = createLatestKeyedRequest<{ ok: boolean; error?: string; latency_ms?: number }>();
 const operationCounters = reactive<InFlightCounters>({});
+let connectionDialogActive = true;
 
 const databaseConnectionHost = computed(() => {
   const info = connectionInfo.value;
@@ -486,7 +490,6 @@ watch(
 function clearConnectionState() {
   connectionError.value = '';
   connectionTestResult.value = null;
-  sshIdentityBlocked.value = false;
   connectionInfo.value = null;
   temporaryPassword.value = '';
   temporaryPasswordExpiresAt.value = '';
@@ -562,6 +565,7 @@ async function initializeConnection(snapshot: ConnectionTargetSnapshot) {
 }
 
 async function testConnection(snapshot: ConnectionTargetSnapshot) {
+  let token: KeyedRequestToken | null = null;
   const request = testRequest.begin(snapshot.key, async () => {
     if (snapshot.resourceType === 'database') {
       const targetID = String(snapshot.target.id || snapshot.target.resource_id || '');
@@ -571,12 +575,27 @@ async function testConnection(snapshot: ConnectionTargetSnapshot) {
     const target = snapshot.target as TargetRecord;
     const targetID = String(target.id || target.resource_id || '');
     if (!targetID) throw new Error('无法获取目标资源ID');
-    const result = await apiClient.testTargetConnection({
-      id: targetID,
-    });
+    const recovery = await runWithSSHHostIdentityRecovery(
+      () => apiClient.testTargetConnection({ id: targetID }),
+      {
+        key: snapshot.key,
+        isCurrent: () => (
+          connectionDialogActive
+          && token !== null
+          && testRequest.isCurrent(token, currentTargetSnapshotKey())
+        ),
+      },
+    );
+    if (recovery.status !== 'success') {
+      return {
+        ok: false,
+        error: recovery.status === 'cancelled' ? '已取消连接' : '连接状态已变化，请重试',
+      };
+    }
+    const result = recovery.value;
     return { ok: result.ok, latency_ms: result.latency_ms, error: result.ok ? undefined : result.error || result.message || '连接失败' };
   });
-  const token = request.token;
+  token = request.token;
   connectionTesting.value = true;
   try {
     const result = await request.promise;
@@ -584,25 +603,19 @@ async function testConnection(snapshot: ConnectionTargetSnapshot) {
     connectionTestResult.value = result;
   } catch (error) {
     if (!testRequest.isCurrent(token, currentTargetSnapshotKey())) return;
-    const identityIssue = parseSSHHostIdentityIssue(error);
-    if (identityIssue) {
-      sshIdentityBlocked.value = true;
-      connectionTestResult.value = { ok: false, error: 'SSH 主机身份校验未通过' };
-      emit('hostIdentityChanged', identityIssue.hostId);
-      const notice = sshHostIdentityNotice(identityIssue);
-      await ElMessageBox.alert(notice.message, notice.title, {
-        type: 'warning',
-        confirmButtonText: '知道了',
-      }).catch(() => undefined);
-    } else {
-      connectionTestResult.value = { ok: false, error: error instanceof Error ? error.message : '连接失败' };
-    }
+    connectionTestResult.value = { ok: false, error: error instanceof Error ? error.message : '连接失败' };
   } finally {
     if (testRequest.isCurrent(token, currentTargetSnapshotKey())) {
       connectionTesting.value = false;
     }
   }
 }
+
+onBeforeUnmount(() => {
+  connectionDialogActive = false;
+  initializeRequest.invalidate();
+  testRequest.invalidate();
+});
 
 async function copyValue(value: string, operation = 'value') {
   if (!value) return;

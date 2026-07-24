@@ -69,6 +69,7 @@ type adminHostTargetRepository interface {
 	AddHost(context.Context, store.HostRecord) (store.HostView, error)
 	CreateManagedHost(context.Context, store.HostRecord, string) (store.HostView, error)
 	UpdateHost(context.Context, string, store.HostRecord) (store.HostView, error)
+	RefreshHostIdentity(context.Context, string, store.HostIdentityRefresh) (store.HostView, error)
 	DeleteHost(context.Context, string) error
 	Targets(context.Context) ([]store.TargetView, error)
 	ListHostAccounts(context.Context, string) ([]store.TargetView, error)
@@ -123,6 +124,16 @@ func (a hostManagementRepositoryAdapter) CreateManagedHost(ctx context.Context, 
 
 func (a hostManagementRepositoryAdapter) UpdateHost(ctx context.Context, id string, record service.HostManagementHostRecord) (service.HostManagementHostView, error) {
 	view, err := a.repository.UpdateHost(ctx, id, store.HostRecord{ID: record.ID, Name: record.Name, Group: record.Group, Address: record.Address, Port: record.Port, Protocol: record.Protocol, Remark: record.Remark, Status: record.Status, HostKeyFingerprint: record.HostKeyFingerprint, KnownHosts: record.KnownHosts})
+	return hostManagementHostView(view), err
+}
+
+func (a hostManagementRepositoryAdapter) RefreshHostIdentity(ctx context.Context, id string, refresh service.HostManagementIdentityRefresh) (service.HostManagementHostView, error) {
+	view, err := a.repository.RefreshHostIdentity(ctx, id, store.HostIdentityRefresh{
+		Address: refresh.Address, Port: refresh.Port, Protocol: refresh.Protocol, Status: refresh.Status,
+		PreviousFingerprint: refresh.PreviousFingerprint, PreviousKnownHosts: refresh.PreviousKnownHosts,
+		UpdatedAt:   refresh.UpdatedAt,
+		Fingerprint: refresh.Fingerprint, KnownHosts: refresh.KnownHosts,
+	})
 	return hostManagementHostView(view), err
 }
 
@@ -185,7 +196,7 @@ func hostManagementHostView(view store.HostView) service.HostManagementHostView 
 			return view.HostKeyChangeHandler(sshhost.Change{HostID: hostID, OldFingerprint: oldFingerprint, NewFingerprint: newFingerprint})
 		}
 	}
-	return service.HostManagementHostView{ID: view.ID, Name: view.Name, Group: view.Group, Address: view.Address, Port: view.Port, Protocol: view.Protocol, Remark: view.Remark, Status: view.Status, HostKeyFingerprint: view.HostKeyFingerprint, KnownHosts: view.KnownHosts, IdentityStatus: view.IdentityStatus, HostKeyChangeHandler: changeHandler, AccountCount: view.AccountCount, CreatedAt: view.CreatedAt, UpdatedAt: view.UpdatedAt, CanManage: view.CanManage}
+	return service.HostManagementHostView{ID: view.ID, Name: view.Name, Group: view.Group, Address: view.Address, Port: view.Port, Protocol: view.Protocol, Remark: view.Remark, Status: view.Status, HostKeyFingerprint: view.HostKeyFingerprint, KnownHosts: view.KnownHosts, IdentityStatus: view.IdentityStatus, HostKeyChangeHandler: changeHandler, AccountCount: view.AccountCount, CreatedAt: view.CreatedAt, UpdatedAt: view.UpdatedAt, Revision: view.Revision, PersistedStatus: view.PersistedStatus, PersistedFingerprint: view.PersistedFingerprint, PersistedKnownHosts: view.PersistedKnownHosts, CanManage: view.CanManage}
 }
 
 func hostManagementTargetView(view store.TargetView) service.HostManagementTargetView {

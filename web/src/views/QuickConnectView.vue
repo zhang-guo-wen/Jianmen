@@ -284,9 +284,9 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import { Refresh, Search } from '@element-plus/icons-vue';
-import { ElMessage, ElMessageBox } from 'element-plus';
+import { ElMessage } from 'element-plus';
 import { useRoute, useRouter } from 'vue-router';
 
 import {
@@ -300,6 +300,7 @@ import {
 } from '@/api/client';
 import QuickContainerConnectPanel from '@/components/QuickContainerConnectPanel.vue';
 import ResourceFilterBar from '@/components/ResourceFilterBar.vue';
+import { useSSHHostIdentityRecovery } from '@/composables/useSSHHostIdentityRecovery';
 import { buildDatabaseProtocolURL } from '@/config/databaseClients';
 import { useI18n } from '@/i18n';
 import { useDatabaseClientStore } from '@/stores/databaseClient';
@@ -322,10 +323,6 @@ import {
   createLatestKeyedRequest,
 } from '@/utils/connectionRequestState';
 import { buildSSHDeepLink } from '@/utils/connectionLinks';
-import {
-  parseSSHHostIdentityIssue,
-  sshHostIdentityNotice,
-} from '@/utils/sshHostIdentity';
 
 interface HostMeta {
   name: string;
@@ -374,6 +371,7 @@ const preferences = usePreferencesStore();
 const databaseClient = useDatabaseClientStore();
 const route = useRoute();
 const router = useRouter();
+let quickConnectViewActive = true;
 const canConnectHost = computed(() =>
   permission.canDo('session:connect')
   || permission.canDo('sftp:connect')
@@ -412,6 +410,10 @@ const sshRequests = createLatestKeyedRequest<{
   usageCounts: Record<string, number>;
 }>();
 const sshFilter = ref('all');
+const { runWithSSHHostIdentityRecovery } = useSSHHostIdentityRecovery({
+  onConfirmed: () => loadTargets(),
+  onCancelledAfterDisable: () => loadTargets(),
+});
 
 // DB state
 const dbSearchInput = ref('');
@@ -445,6 +447,14 @@ function targetProtocol(target: TargetRecord): 'ssh' | 'rdp' {
 
 function isRDPTarget(target: TargetRecord): boolean {
   return targetProtocol(target) === 'rdp';
+}
+
+function isCurrentSSHQuickTarget(targetID: string): boolean {
+  return quickConnectViewActive
+    && activeTab.value === 'ssh'
+    && displayedTargets.value.some(
+      item => String(item.id || item.resource_id || '') === targetID,
+    );
 }
 
 function targetProtocolLabel(target: TargetRecord): string {
@@ -738,6 +748,8 @@ async function openClientConnection(target: TargetRecord) {
     return;
   }
   const state = await ensureConnectionInfo(target);
+  const targetID = String(target.id || target.resource_id || '');
+  if (!isCurrentSSHQuickTarget(targetID)) return;
   if (state.error || !state.compactUser || !state.password) {
     ElMessage.error(state.error || '连接信息尚未生成');
     return;
@@ -1120,23 +1132,22 @@ async function preflightSSHConnection(target: TargetRecord): Promise<boolean> {
     ElMessage.error('无法获取目标资源 ID');
     return false;
   }
+  const isCurrentRequest = () => isCurrentSSHQuickTarget(targetID);
   try {
-    const result = await apiClient.testTargetConnection({ id: targetID });
+    const recovery = await runWithSSHHostIdentityRecovery(
+      () => apiClient.testTargetConnection({ id: targetID }),
+      {
+        key: `quick-connect:${targetID}`,
+        isCurrent: isCurrentRequest,
+      },
+    );
+    if (recovery.status !== 'success') return false;
+    const result = recovery.value;
     if (result.ok) return true;
     ElMessage.error(result.error || result.message || '主机连接测试失败');
     return false;
   } catch (error) {
-    const issue = parseSSHHostIdentityIssue(error);
-    if (!issue) {
-      ElMessage.error(error instanceof Error ? error.message : '主机连接测试失败');
-      return false;
-    }
-    const notice = sshHostIdentityNotice(issue);
-    await ElMessageBox.alert(notice.message, notice.title, {
-      type: 'warning',
-      confirmButtonText: '知道了',
-    }).catch(() => undefined);
-    await loadTargets();
+    ElMessage.error(error instanceof Error ? error.message : '主机连接测试失败');
     return false;
   }
 }
@@ -1166,6 +1177,10 @@ onMounted(() => {
   if (activeTab.value === 'db') loadDBAccounts();
   else if (activeTab.value === 'container') return;
   else if (canConnectHost.value) loadTargets();
+});
+
+onBeforeUnmount(() => {
+  quickConnectViewActive = false;
 });
 </script>
 

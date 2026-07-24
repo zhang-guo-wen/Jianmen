@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -79,6 +80,186 @@ func TestReenableSSHHostRequiresSuccessfulIdentityRefresh(t *testing.T) {
 		repository.updatedRecord.HostKeyFingerprint != "SHA256:new" ||
 		repository.updatedRecord.KnownHosts != "new known hosts" {
 		t.Fatalf("unexpected refreshed update: calls=%d record=%#v", repository.updateCalls, repository.updatedRecord)
+	}
+}
+
+func TestConfirmHostIdentityRequiresExplicitConfirmationAndUpdatePermission(t *testing.T) {
+	repository := &hostManagementTestRepository{host: HostManagementHostView{
+		ID: "host-1", Address: "192.0.2.10", Port: 22, Protocol: "ssh", Status: "disabled",
+	}}
+	collector := &hostManagementRecordingIdentityCollector{
+		identity: HostIdentity{Fingerprint: "SHA256:new", KnownHosts: "new known hosts"},
+	}
+	svc := newHostManagementTestServiceWithCollector(t, repository, collector)
+
+	if _, err := svc.ConfirmHostIdentity(
+		context.Background(), HostManagementActor{ID: "operator"}, "host-1", false, "SHA256:new",
+	); !errors.Is(err, ErrHostIdentityConfirmationRequired) {
+		t.Fatalf("ConfirmHostIdentity error = %v, want explicit confirmation", err)
+	}
+	if repository.hostCalls != 0 || repository.refreshCalls != 0 || collector.calls != 0 {
+		t.Fatalf("unconfirmed refresh performed work: host=%d refresh=%d collect=%d",
+			repository.hostCalls, repository.refreshCalls, collector.calls)
+	}
+	if _, err := svc.ConfirmHostIdentity(
+		context.Background(), HostManagementActor{ID: "operator"}, "host-1", true, "",
+	); !errors.Is(err, ErrHostTargetInvalidInput) {
+		t.Fatalf("empty fingerprint error = %v, want invalid input", err)
+	}
+	if _, err := svc.ConfirmHostIdentity(
+		context.Background(), HostManagementActor{ID: "operator"}, "host-1", true, strings.Repeat("x", 257),
+	); !errors.Is(err, ErrHostTargetInvalidInput) {
+		t.Fatalf("oversized fingerprint error = %v, want invalid input", err)
+	}
+
+	deniedAuthorizer := &hostManagementSelectiveAuthorizer{allowedAction: rbac.ActionSessionConnect}
+	deniedService, err := NewHostManagementService(repository, deniedAuthorizer, collector)
+	if err != nil {
+		t.Fatalf("NewHostManagementService: %v", err)
+	}
+	if _, err := deniedService.ConfirmHostIdentity(
+		context.Background(), HostManagementActor{ID: "connect-only"}, "host-1", true, "SHA256:new",
+	); !errors.Is(err, ErrHostAccessDenied) {
+		t.Fatalf("connect-only confirmation error = %v, want access denied", err)
+	}
+	if repository.hostCalls != 0 || repository.refreshCalls != 0 || collector.calls != 0 {
+		t.Fatalf("unauthorized refresh performed work: host=%d refresh=%d collect=%d",
+			repository.hostCalls, repository.refreshCalls, collector.calls)
+	}
+}
+
+func TestConfirmHostIdentityRejectsFingerprintThatChangedAfterWarning(t *testing.T) {
+	revision := time.Now().UTC()
+	repository := &hostManagementTestRepository{host: HostManagementHostView{
+		ID: "host-1", Address: "192.0.2.10", Port: 22, Protocol: "ssh", Status: "disabled",
+		IdentityStatus: "available", Revision: revision,
+		PersistedStatus: "disabled", PersistedFingerprint: "SHA256:old",
+		PersistedKnownHosts: "old known hosts\n",
+	}}
+	collector := &hostManagementRecordingIdentityCollector{
+		identity: HostIdentity{Fingerprint: "SHA256:third", KnownHosts: "third known hosts"},
+	}
+	svc := newHostManagementTestServiceWithCollector(t, repository, collector)
+
+	_, err := svc.ConfirmHostIdentity(
+		context.Background(), HostManagementActor{ID: "operator"}, "host-1", true, "SHA256:second",
+	)
+	var mismatch *HostIdentityConfirmationMismatchError
+	if !errors.As(err, &mismatch) {
+		t.Fatalf("ConfirmHostIdentity error = %v, want confirmation mismatch", err)
+	}
+	if mismatch.OldFingerprint != "SHA256:old" ||
+		mismatch.ExpectedFingerprint != "SHA256:second" ||
+		mismatch.ActualFingerprint != "SHA256:third" {
+		t.Fatalf("confirmation mismatch = %#v", mismatch)
+	}
+	if repository.refreshCalls != 0 {
+		t.Fatalf("mismatched identity persisted %d times", repository.refreshCalls)
+	}
+}
+
+func TestConfirmHostIdentityRefreshesVerificationMaterialAndActivatesHost(t *testing.T) {
+	revision := time.Now().UTC()
+	repository := &hostManagementTestRepository{host: HostManagementHostView{
+		ID: "host-1", Address: "192.0.2.10", Port: 22, Protocol: "ssh", Status: "disabled",
+		IdentityStatus: "unavailable", Revision: revision, PersistedStatus: "disabled",
+	}}
+	collector := &hostManagementRecordingIdentityCollector{
+		identity: HostIdentity{Fingerprint: "SHA256:new", KnownHosts: "new known hosts"},
+	}
+	svc := newHostManagementTestServiceWithCollector(t, repository, collector)
+
+	result, err := svc.ConfirmHostIdentity(
+		context.Background(), HostManagementActor{ID: "operator"}, "host-1", true, "SHA256:new",
+	)
+	if err != nil {
+		t.Fatalf("ConfirmHostIdentity: %v", err)
+	}
+	if collector.calls != 1 || repository.refreshCalls != 1 {
+		t.Fatalf("refresh calls: collect=%d repository=%d, want 1/1", collector.calls, repository.refreshCalls)
+	}
+	if repository.refreshedIdentity != (HostManagementIdentityRefresh{
+		Address: "192.0.2.10", Port: 22, Protocol: "ssh", Status: "disabled", UpdatedAt: revision,
+		Fingerprint: "SHA256:new", KnownHosts: "new known hosts",
+	}) {
+		t.Fatalf("identity refresh = %#v", repository.refreshedIdentity)
+	}
+	if result.Host.Status != "active" || result.Host.IdentityStatus != "available" ||
+		result.Host.HostKeyFingerprint != "SHA256:new" || result.Host.KnownHosts != "new known hosts" {
+		t.Fatalf("refreshed host = %#v", result.Host)
+	}
+}
+
+func TestResolveConnectionTestProbesActivePartialIdentityWithoutPersisting(t *testing.T) {
+	repository := &hostManagementTestRepository{
+		targetConfig: HostManagementTargetConfig{
+			ID: "account-1", HostID: "host-1", Protocol: "ssh", Username: "root",
+		},
+		host: HostManagementHostView{
+			ID: "host-1", Address: "192.0.2.10", Port: 22, Protocol: "ssh",
+			Status: "active", IdentityStatus: "unavailable",
+			HostKeyFingerprint: "SHA256:partial", PersistedFingerprint: "SHA256:partial",
+		},
+	}
+	collector := &hostManagementRecordingIdentityCollector{
+		identity: HostIdentity{Fingerprint: "SHA256:candidate", KnownHosts: "candidate known hosts"},
+	}
+	svc := newHostManagementTestServiceWithCollector(t, repository, collector)
+
+	_, err := svc.ResolveConnectionTest(
+		context.Background(), HostManagementActor{ID: "operator"}, config.Target{ID: "account-1"},
+	)
+	var unavailable *HostIdentityUnavailableError
+	if !errors.As(err, &unavailable) || unavailable.NewFingerprint != "SHA256:candidate" {
+		t.Fatalf("ResolveConnectionTest error = %#v, want candidate identity", err)
+	}
+	if collector.calls != 1 || repository.refreshCalls != 0 {
+		t.Fatalf("probe calls: collect=%d persist=%d, want 1/0", collector.calls, repository.refreshCalls)
+	}
+}
+
+func TestResolveConnectionTestDoesNotProbeDisabledUnavailableHost(t *testing.T) {
+	repository := &hostManagementTestRepository{
+		targetConfig: HostManagementTargetConfig{
+			ID: "account-1", HostID: "host-1", Protocol: "ssh", Username: "root",
+		},
+		host: HostManagementHostView{
+			ID: "host-1", Address: "192.0.2.10", Port: 22, Protocol: "ssh",
+			Status: "disabled", IdentityStatus: "unavailable",
+		},
+	}
+	collector := &hostManagementRecordingIdentityCollector{
+		identity: HostIdentity{Fingerprint: "SHA256:candidate", KnownHosts: "candidate known hosts"},
+	}
+	svc := newHostManagementTestServiceWithCollector(t, repository, collector)
+
+	_, err := svc.ResolveConnectionTest(
+		context.Background(), HostManagementActor{ID: "operator"}, config.Target{ID: "account-1"},
+	)
+	if !errors.Is(err, ErrHostTargetUnavailable) {
+		t.Fatalf("ResolveConnectionTest error = %v, want unavailable lifecycle", err)
+	}
+	if collector.calls != 0 {
+		t.Fatalf("disabled host identity probed %d times", collector.calls)
+	}
+}
+
+func TestConfirmHostIdentityCollectionFailureLeavesHostUnchanged(t *testing.T) {
+	repository := &hostManagementTestRepository{host: HostManagementHostView{
+		ID: "host-1", Address: "192.0.2.10", Port: 22, Protocol: "ssh", Status: "disabled",
+		IdentityStatus: "unavailable", Revision: time.Now().UTC(), PersistedStatus: "disabled",
+	}}
+	collector := &hostManagementRecordingIdentityCollector{err: errors.New("unreachable")}
+	svc := newHostManagementTestServiceWithCollector(t, repository, collector)
+
+	_, err := svc.ConfirmHostIdentity(
+		context.Background(), HostManagementActor{ID: "operator"}, "host-1", true, "SHA256:candidate",
+	)
+	if !errors.Is(err, ErrHostIdentityRefreshFailed) {
+		t.Fatalf("ConfirmHostIdentity error = %v, want refresh failure", err)
+	}
+	if repository.refreshCalls != 0 {
+		t.Fatalf("repository refresh calls = %d, want 0", repository.refreshCalls)
 	}
 }
 
@@ -317,6 +498,9 @@ type hostManagementTestRepository struct {
 	managedRecord     HostManagementHostRecord
 	updatedRecord     HostManagementHostRecord
 	updateCalls       int
+	refreshedIdentity HostManagementIdentityRefresh
+	refreshCalls      int
+	refreshErr        error
 	targetConfig      HostManagementTargetConfig
 	target            HostManagementTargetView
 	host              HostManagementHostView
@@ -339,6 +523,19 @@ func (r *hostManagementTestRepository) UpdateHost(_ context.Context, _ string, r
 		ID: record.ID, Name: record.Name, Address: record.Address, Port: record.Port,
 		Protocol: record.Protocol, Status: record.Status,
 		HostKeyFingerprint: record.HostKeyFingerprint, KnownHosts: record.KnownHosts,
+	}, nil
+}
+
+func (r *hostManagementTestRepository) RefreshHostIdentity(_ context.Context, id string, refresh HostManagementIdentityRefresh) (HostManagementHostView, error) {
+	r.refreshCalls++
+	r.refreshedIdentity = refresh
+	if r.refreshErr != nil {
+		return HostManagementHostView{}, r.refreshErr
+	}
+	return HostManagementHostView{
+		ID: id, Address: refresh.Address, Port: refresh.Port, Protocol: refresh.Protocol,
+		Status: "active", IdentityStatus: "available",
+		HostKeyFingerprint: refresh.Fingerprint, KnownHosts: refresh.KnownHosts,
 	}, nil
 }
 

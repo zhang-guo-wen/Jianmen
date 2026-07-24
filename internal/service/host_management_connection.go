@@ -52,11 +52,11 @@ func (s *HostManagementService) ResolveConnectionTest(ctx context.Context, actor
 		if err := validatePersistedEndpoint(input, host, stored.HostID); err != nil {
 			return HostManagementTargetConfig{}, err
 		}
-		if strings.EqualFold(host.Protocol, "ssh") && strings.EqualFold(host.IdentityStatus, "unavailable") {
-			return HostManagementTargetConfig{}, &HostIdentityUnavailableError{HostID: stored.HostID}
-		}
 		if stored.Disabled || stored.Expired(time.Now().UTC()) || strings.EqualFold(host.Status, "disabled") {
 			return HostManagementTargetConfig{}, ErrHostTargetUnavailable
+		}
+		if strings.EqualFold(host.Protocol, "ssh") && strings.EqualFold(host.IdentityStatus, "unavailable") {
+			return HostManagementTargetConfig{}, s.observeUnavailableHostIdentity(ctx, host)
 		}
 		resolved = mergeStoredConnectionCredentials(stored, input)
 		applyPersistedEndpoint(&resolved, host, stored.HostID)
@@ -75,11 +75,11 @@ func (s *HostManagementService) ResolveConnectionTest(ctx context.Context, actor
 		if err := validatePersistedEndpoint(input, host, input.HostID); err != nil {
 			return HostManagementTargetConfig{}, err
 		}
-		if strings.EqualFold(host.Protocol, "ssh") && strings.EqualFold(host.IdentityStatus, "unavailable") {
-			return HostManagementTargetConfig{}, &HostIdentityUnavailableError{HostID: input.HostID}
-		}
 		if strings.EqualFold(host.Status, "disabled") {
 			return HostManagementTargetConfig{}, ErrHostTargetUnavailable
+		}
+		if strings.EqualFold(host.Protocol, "ssh") && strings.EqualFold(host.IdentityStatus, "unavailable") {
+			return HostManagementTargetConfig{}, s.observeUnavailableHostIdentity(ctx, host)
 		}
 		resolved = targetConfigFromInput(input)
 		resolved.Disabled = false
@@ -97,6 +97,25 @@ func (s *HostManagementService) ResolveConnectionTest(ctx context.Context, actor
 		return HostManagementTargetConfig{}, fmt.Errorf("%w: host, port, and username are required", ErrHostTargetInvalidInput)
 	}
 	return resolved, nil
+}
+
+func (s *HostManagementService) observeUnavailableHostIdentity(
+	ctx context.Context,
+	host HostManagementHostView,
+) error {
+	identity, err := s.identityCollector.Collect(ctx, host.Address, host.Port)
+	if err == nil {
+		err = validateHostIdentity(identity)
+	}
+	if err != nil {
+		return &HostIdentityRefreshError{
+			HostID: host.ID, HostStatus: host.Status, IdentityStatus: host.IdentityStatus,
+			OldFingerprint: strings.TrimSpace(host.HostKeyFingerprint), Cause: err,
+		}
+	}
+	return &HostIdentityUnavailableError{
+		HostID: host.ID, NewFingerprint: strings.TrimSpace(identity.Fingerprint),
+	}
 }
 
 func connectionTestUsesStoredAccountOnly(input config.Target) bool {

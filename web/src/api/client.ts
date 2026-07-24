@@ -1168,6 +1168,14 @@ export const apiClient = {
       method: 'PUT',
       body: JSON.stringify(payload)
     }),
+  refreshSSHHostIdentity: (id: string | number, expectedFingerprint: string) =>
+    request<HostView>(`/api/hosts/${encodeURIComponent(String(id))}/refresh-identity`, {
+      method: 'POST',
+      body: JSON.stringify({
+        confirmed: true,
+        expected_fingerprint: expectedFingerprint
+      })
+    }),
   deleteHost: (id: string | number) =>
     request<void>(`/api/hosts/${encodeURIComponent(String(id))}`, {
       method: 'DELETE'

@@ -15,8 +15,23 @@ type HostManagementHostView struct {
 	ID, Name, Group, Address, Protocol, Remark, Status, HostKeyFingerprint, KnownHosts, IdentityStatus string
 	Port, AccountCount                                                                                 int
 	CreatedAt, UpdatedAt                                                                               string
+	Revision                                                                                           time.Time
+	PersistedStatus, PersistedFingerprint, PersistedKnownHosts                                         string
 	CanManage                                                                                          bool
 	HostKeyChangeHandler                                                                               func(hostID, oldFingerprint, newFingerprint string) (hostDisabled bool, err error)
+}
+
+type HostManagementIdentityRefresh struct {
+	Address, Protocol, Status, PreviousFingerprint, PreviousKnownHosts, Fingerprint, KnownHosts string
+	Port                                                                                        int
+	UpdatedAt                                                                                   time.Time
+}
+
+type HostIdentityRefreshResult struct {
+	Host                HostManagementHostView
+	OldFingerprint      string
+	ExpectedFingerprint string
+	ActualFingerprint   string
 }
 
 type HostManagementTargetView struct {

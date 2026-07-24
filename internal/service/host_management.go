@@ -26,6 +26,7 @@ type HostManagementRepository interface {
 	AddHost(context.Context, HostManagementHostRecord) (HostManagementHostView, error)
 	CreateManagedHost(context.Context, HostManagementHostRecord, string) (HostManagementHostView, error)
 	UpdateHost(context.Context, string, HostManagementHostRecord) (HostManagementHostView, error)
+	RefreshHostIdentity(context.Context, string, HostManagementIdentityRefresh) (HostManagementHostView, error)
 	DeleteHost(context.Context, string) error
 	Targets(context.Context) ([]HostManagementTargetView, error)
 	ListHostAccounts(context.Context, string) ([]HostManagementTargetView, error)

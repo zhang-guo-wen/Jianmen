@@ -7,7 +7,10 @@ import (
 	"strings"
 )
 
-var ErrHostIdentityRefreshFailed = errors.New("ssh host identity refresh failed")
+var (
+	ErrHostIdentityRefreshFailed        = errors.New("ssh host identity refresh failed")
+	ErrHostIdentityConfirmationRequired = errors.New("explicit ssh host identity confirmation is required")
+)
 
 type HostIdentity struct {
 	Fingerprint string
@@ -19,14 +22,26 @@ type HostIdentityCollector interface {
 }
 
 type HostIdentityRefreshError struct {
-	HostID         string
-	HostStatus     string
-	IdentityStatus string
-	Cause          error
+	HostID              string
+	HostStatus          string
+	IdentityStatus      string
+	OldFingerprint      string
+	ExpectedFingerprint string
+	ActualFingerprint   string
+	Cause               error
 }
 
 type HostIdentityUnavailableError struct {
-	HostID string
+	HostID         string
+	NewFingerprint string
+}
+
+type HostIdentityConfirmationMismatchError struct {
+	HostID              string
+	OldFingerprint      string
+	ExpectedFingerprint string
+	ActualFingerprint   string
+	HostDisabled        bool
 }
 
 func (e *HostIdentityUnavailableError) Error() string {
@@ -34,6 +49,13 @@ func (e *HostIdentityUnavailableError) Error() string {
 		return "ssh host identity is unavailable"
 	}
 	return fmt.Sprintf("ssh host identity is unavailable for host %q", e.HostID)
+}
+
+func (e *HostIdentityConfirmationMismatchError) Error() string {
+	if e == nil || strings.TrimSpace(e.HostID) == "" {
+		return "ssh host identity changed before confirmation"
+	}
+	return fmt.Sprintf("ssh host identity changed before confirmation for host %q", e.HostID)
 }
 
 func (e *HostIdentityRefreshError) Error() string {

@@ -112,7 +112,7 @@ func (s *DBStore) targetConfig(ctx context.Context, tx *gorm.DB, a model.HostAcc
 		HostKeyFingerprint:    hostKeyFingerprint,
 		KnownHosts:            knownHosts,
 		KnownHostsPath:        "",
-		HostKeyChangeHandler:  s.hostKeyChangeHandler(newSSHHostIdentitySnapshot(a.Host)),
+		HostKeyChangeHandler:  s.hostKeyChangeHandler(newSSHHostIdentitySnapshot(ctx, a.Host)),
 		RDPSecurity:           normalizedRDPSecurity(a.RDPSecurity),
 		RDPIgnoreCertificate:  a.RDPIgnoreCertificate,
 		RDPCertFingerprints:   a.RDPCertFingerprints,

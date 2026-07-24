@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 	"time"
+	"unicode"
 
 	"golang.org/x/crypto/ssh"
 
@@ -70,6 +71,10 @@ func (s *Server) handleHost(w http.ResponseWriter, r *http.Request) {
 		s.writeJSON(w, r, http.StatusOK, resp)
 		return
 	}
+	if child == "refresh-identity" {
+		s.handleRefreshHostIdentity(w, r, id)
+		return
+	}
 	if child != "" {
 		s.writeErrorText(w, r, http.StatusNotFound, "not found")
 		return
@@ -95,6 +100,64 @@ func (s *Server) handleHost(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Allow", "GET, PUT, DELETE")
 		s.writeErrorText(w, r, http.StatusMethodNotAllowed, "method not allowed")
 	}
+}
+
+type confirmHostIdentityRequest struct {
+	Confirmed           bool   `json:"confirmed"`
+	ExpectedFingerprint string `json:"expected_fingerprint"`
+}
+
+func (s *Server) handleRefreshHostIdentity(w http.ResponseWriter, r *http.Request, id string) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", http.MethodPost)
+		s.writeErrorText(w, r, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	defer r.Body.Close()
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+	var input confirmHostIdentityRequest
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		s.writeErrorText(w, r, http.StatusBadRequest, err.Error())
+		return
+	}
+	result, err := s.hostManagement.ConfirmHostIdentity(
+		r.Context(), hostManagementActor(r), id, input.Confirmed, input.ExpectedFingerprint,
+	)
+	auditMetadata := map[string]string{
+		"old_fingerprint":      result.OldFingerprint,
+		"expected_fingerprint": safeAuditFingerprint(input.ExpectedFingerprint),
+		"actual_fingerprint":   result.ActualFingerprint,
+	}
+	var refreshErr *service.HostIdentityRefreshError
+	if errors.As(err, &refreshErr) {
+		auditMetadata["old_fingerprint"] = refreshErr.OldFingerprint
+		auditMetadata["expected_fingerprint"] = refreshErr.ExpectedFingerprint
+		auditMetadata["actual_fingerprint"] = refreshErr.ActualFingerprint
+	}
+	var mismatchErr *service.HostIdentityConfirmationMismatchError
+	if errors.As(err, &mismatchErr) {
+		auditMetadata["old_fingerprint"] = mismatchErr.OldFingerprint
+		auditMetadata["expected_fingerprint"] = mismatchErr.ExpectedFingerprint
+		auditMetadata["actual_fingerprint"] = mismatchErr.ActualFingerprint
+	}
+	setOperationAuditMetadata(r, auditMetadata)
+	if err != nil {
+		s.writeHostManagementError(w, r, err)
+		return
+	}
+	s.writeJSON(w, r, http.StatusOK, storeHostView(result.Host))
+}
+
+func safeAuditFingerprint(value string) string {
+	if len(value) > 256 {
+		return "[invalid]"
+	}
+	for _, character := range value {
+		if unicode.IsControl(character) || unicode.IsSpace(character) {
+			return "[invalid]"
+		}
+	}
+	return value
 }
 
 func (s *Server) handleUpdateHost(w http.ResponseWriter, r *http.Request, id string) {
@@ -261,6 +324,8 @@ func (s *Server) writeHostManagementError(w http.ResponseWriter, r *http.Request
 	switch {
 	case errors.Is(err, service.ErrHostAccessDenied):
 		s.forbidden(w, r)
+	case errors.Is(err, service.ErrHostIdentityConfirmationRequired):
+		s.writeErrorText(w, r, http.StatusBadRequest, service.ErrHostIdentityConfirmationRequired.Error())
 	case errors.Is(err, service.ErrHostTargetUnavailable):
 		s.writeErrorText(w, r, http.StatusForbidden, "target is disabled, expired, or unavailable")
 	case errors.Is(err, service.ErrHostTargetInvalidInput):

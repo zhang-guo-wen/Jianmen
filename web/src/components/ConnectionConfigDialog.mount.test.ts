@@ -5,7 +5,7 @@ import { beforeEach, describe, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   routerPush: vi.fn(),
-  messageAlert: vi.fn(),
+  messageConfirm: vi.fn(),
   buildDatabaseProtocolURL: vi.fn((_input: unknown) => 'jianmen-db://connect/test-payload'),
   preferences: {
     loading: false,
@@ -31,6 +31,7 @@ const mocks = vi.hoisted(() => ({
     createUserSession: vi.fn(),
     createConnectionPassword: vi.fn(),
     testTargetConnection: vi.fn(),
+    refreshSSHHostIdentity: vi.fn(),
     testDBConnection: vi.fn(),
     getDBGateway: vi.fn(),
   },
@@ -122,7 +123,7 @@ vi.mock('element-plus', async () => {
     ElInput,
     ElSwitch,
     ElMessage: { success: vi.fn(), warning: vi.fn(), error: vi.fn() },
-    ElMessageBox: { alert: mocks.messageAlert },
+    ElMessageBox: { confirm: mocks.messageConfirm },
   };
 });
 
@@ -156,10 +157,18 @@ beforeEach(() => {
     caFilePath: '',
     protocolRegistered: false,
   });
-  mocks.messageAlert.mockResolvedValue(undefined);
+  mocks.messageConfirm.mockResolvedValue('confirm');
   mocks.apiClient.createUserSession.mockResolvedValue({ compact_username: 'admin@host-1' });
   mocks.apiClient.createConnectionPassword.mockResolvedValue({ password: 'temporary-password', expires_at: '' });
   mocks.apiClient.testTargetConnection.mockResolvedValue({ ok: true, latency_ms: 1 });
+  mocks.apiClient.refreshSSHHostIdentity.mockResolvedValue({
+    id: 'host-1',
+    name: 'test-host',
+    address: '10.0.0.1',
+    port: 22,
+    status: 'active',
+    identity_status: 'available',
+  });
   mocks.apiClient.testDBConnection.mockResolvedValue({ ok: true, latency_ms: 1 });
   mocks.apiClient.getDBGateway.mockResolvedValue({
     enabled: true,
@@ -264,8 +273,66 @@ describe('ConnectionConfigDialog permission controls', () => {
     wrapper.unmount();
   });
 
-  it('blocks SSH launch controls and emits refresh when the host key changes', async () => {
-    mocks.apiClient.testTargetConnection.mockRejectedValue(Object.assign(
+  it('confirms, refreshes, and retests when the host key changes', async () => {
+    mocks.apiClient.testTargetConnection
+      .mockRejectedValueOnce(Object.assign(
+        new Error('host key changed'),
+        {
+          code: 'SSH_HOST_KEY_CHANGED',
+          details: {
+            host_id: 'host-1',
+            old_fingerprint: 'SHA256:old',
+            new_fingerprint: 'SHA256:new',
+            host_disabled: true,
+          },
+        },
+      ))
+      .mockResolvedValueOnce({ ok: true, latency_ms: 2 });
+
+    const wrapper = await mountDialog(true, true);
+
+    assert.equal(wrapper.get('[data-testid="ssh-local-client"]').attributes('disabled'), undefined);
+    assert.equal(wrapper.get('[data-testid="ssh-browser"]').attributes('disabled'), undefined);
+    assert.deepEqual(mocks.apiClient.refreshSSHHostIdentity.mock.calls, [['host-1', 'SHA256:new']]);
+    assert.equal(mocks.apiClient.testTargetConnection.mock.calls.length, 2);
+    assert.equal(wrapper.emitted('hostIdentityChanged')?.[0]?.[0]?.status, 'active');
+    assert.equal(mocks.messageConfirm.mock.calls.length, 1);
+    assert.equal(mocks.messageConfirm.mock.calls[0]?.[1], '连接确认');
+    assert.equal(mocks.messageConfirm.mock.calls[0]?.[2]?.type, 'warning');
+    wrapper.unmount();
+  });
+
+  it('does not confirm or refresh an identity result after the component unmounts', async () => {
+    let rejectConnectionTest: (error: unknown) => void = () => undefined;
+    mocks.apiClient.testTargetConnection.mockImplementationOnce(
+      () => new Promise((_resolve, reject) => {
+        rejectConnectionTest = reject;
+      }),
+    );
+    const wrapper = await mountDialog(true, true);
+
+    wrapper.unmount();
+    rejectConnectionTest(Object.assign(
+      new Error('host key changed'),
+      {
+        code: 'SSH_HOST_KEY_CHANGED',
+        details: {
+          host_id: 'host-1',
+          old_fingerprint: 'SHA256:old',
+          new_fingerprint: 'SHA256:new',
+          host_disabled: true,
+        },
+      },
+    ));
+    await flushPromises();
+
+    assert.equal(mocks.messageConfirm.mock.calls.length, 0);
+    assert.equal(mocks.apiClient.refreshSSHHostIdentity.mock.calls.length, 0);
+  });
+
+  it('invalidates the visible host state without trusting a key when confirmation is cancelled', async () => {
+    mocks.messageConfirm.mockRejectedValueOnce('cancel');
+    mocks.apiClient.testTargetConnection.mockRejectedValueOnce(Object.assign(
       new Error('host key changed'),
       {
         code: 'SSH_HOST_KEY_CHANGED',
@@ -280,10 +347,9 @@ describe('ConnectionConfigDialog permission controls', () => {
 
     const wrapper = await mountDialog(true, true);
 
-    assert.equal(wrapper.get('[data-testid="ssh-local-client"]').attributes('disabled'), '');
-    assert.equal(wrapper.get('[data-testid="ssh-browser"]').attributes('disabled'), '');
-    assert.deepEqual(wrapper.emitted('hostIdentityChanged'), [['host-1']]);
-    assert.equal(mocks.messageAlert.mock.calls.length, 1);
+    assert.deepEqual(wrapper.emitted('hostIdentityInvalidated'), [['host-1']]);
+    assert.equal(mocks.apiClient.refreshSSHHostIdentity.mock.calls.length, 0);
+    assert.equal(mocks.apiClient.testTargetConnection.mock.calls.length, 1);
     wrapper.unmount();
   });
 });

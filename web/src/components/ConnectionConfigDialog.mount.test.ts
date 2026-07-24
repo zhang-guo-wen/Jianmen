@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
     loading: false,
     loaded: true,
     hasSSHClient: true,
+    sshProtocolRegistered: true,
     value: { ssh_client: 'default', ssh_client_path: '' },
     error: '',
     fetch: vi.fn(),
@@ -148,6 +149,13 @@ const target = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.preferences.loaded = true;
+  mocks.preferences.hasSSHClient = true;
+  mocks.preferences.sshProtocolRegistered = true;
+  Object.assign(mocks.preferences.value, {
+    ssh_client: 'default',
+    ssh_client_path: '',
+  });
   mocks.databaseClient.configured = false;
   mocks.databaseClient.directLaunchReady = false;
   Object.assign(mocks.databaseClient.value, {
@@ -295,10 +303,29 @@ describe('ConnectionConfigDialog permission controls', () => {
     assert.equal(wrapper.get('[data-testid="ssh-browser"]').attributes('disabled'), undefined);
     assert.deepEqual(mocks.apiClient.refreshSSHHostIdentity.mock.calls, [['host-1', 'SHA256:new']]);
     assert.equal(mocks.apiClient.testTargetConnection.mock.calls.length, 2);
-    assert.equal(wrapper.emitted('hostIdentityChanged')?.[0]?.[0]?.status, 'active');
+    const changedHost = wrapper.emitted('hostIdentityChanged')?.[0]?.[0] as { status?: string } | undefined;
+    assert.equal(changedHost?.status, 'active');
     assert.equal(mocks.messageConfirm.mock.calls.length, 1);
     assert.equal(mocks.messageConfirm.mock.calls[0]?.[1], '连接确认');
     assert.equal(mocks.messageConfirm.mock.calls[0]?.[2]?.type, 'warning');
+    wrapper.unmount();
+  });
+
+  it.each([
+    { label: '客户端未配置', hasSSHClient: false, sshProtocolRegistered: false },
+    { label: '客户端协议未注册', hasSSHClient: true, sshProtocolRegistered: false },
+  ])('$label时跳转到 SSH 客户端设置页', async ({ hasSSHClient, sshProtocolRegistered }) => {
+    mocks.preferences.hasSSHClient = hasSSHClient;
+    mocks.preferences.sshProtocolRegistered = sshProtocolRegistered;
+    const wrapper = await mountDialog(true, true);
+
+    await wrapper.get('[data-testid="ssh-local-client"]').trigger('click');
+
+    assert.deepEqual(mocks.routerPush.mock.calls.at(-1)?.[0], {
+      path: '/settings',
+      query: { tab: 'ssh', return_to: '/databases' },
+    });
+    assert.deepEqual(wrapper.emitted('update:modelValue')?.at(-1), [false]);
     wrapper.unmount();
   });
 

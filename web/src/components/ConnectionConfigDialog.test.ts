@@ -130,7 +130,7 @@ test('database connection dialog hides TLS metadata and setup controls while kee
   assert.match(componentSource, /data-testid="database-local-client"/);
   assert.match(componentSource, /useDatabaseClientStore/);
   assert.match(componentSource, /buildDatabaseProtocolURL/);
-  assert.match(componentSource, /function openDatabaseClientSettings\(\)/);
+  assert.match(componentSource, /function openClientSettings\(tab: 'ssh' \| 'database'\)/);
 
   const planStart = componentSource.indexOf('const databaseConnectionPlan');
   const planEnd = componentSource.indexOf('const databaseCommandUnavailableReason', planStart);
@@ -140,6 +140,25 @@ test('database connection dialog hides TLS metadata and setup controls while kee
   assert.match(planSource, /tls_ca_pem:\s*tlsCAPEM/);
   assert.match(planSource, /tls_cert_sha256:\s*tlsCertSHA256/);
   assert.doesNotMatch(planSource, /databaseName/);
+});
+
+test('SSH client registration is handled by personal settings instead of the connection dialog', () => {
+  const componentPath = new URL('../components/ConnectionConfigDialog.vue', import.meta.url);
+  const componentSource = readFileSync(componentPath, 'utf8');
+
+  assert.match(
+    componentSource,
+    /if \(!preferences\.hasSSHClient \|\| !preferences\.sshProtocolRegistered\)[\s\S]*openClientSettings\('ssh'\)/,
+  );
+  assert.match(componentSource, /path:\s*'\/settings'/);
+  for (const removedSymbol of [
+    'initClientVisible',
+    'buildSSHProtocolRegistrationCommand',
+    'saveClientAndCopyCommand',
+    'local-client-dialog',
+  ]) {
+    assert.equal(componentSource.includes(removedSymbol), false, `unexpected embedded registration symbol: ${removedSymbol}`);
+  }
 });
 
 test('ConnectionConfigDialog call sites keep kebab-case attrs', () => {

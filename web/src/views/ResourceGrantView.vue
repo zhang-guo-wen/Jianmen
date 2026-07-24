@@ -132,10 +132,10 @@
                 stripe
                 @select="handleResourceSelect"
                 @select-all="handleResourceSelectAll"
-                :row-class-name="({ row }: { row: ResourceRow }) => authorizedResourceIds.has(row.id) ? 'row-authorized' : ''"
+                :row-class-name="resourceRowClassName"
                 class="resource-table"
               >
-                <el-table-column type="selection" width="50" :selectable="(row: ResourceRow) => !authorizedResourceIds.has(row.id)" />
+                <el-table-column type="selection" width="50" :selectable="isResourceSelectable" />
                 <template v-if="resourceTabType === 'resource_group' || resourceTabType === 'account_group'">
                   <el-table-column :label="t('resourceGrant.groupName')" min-width="160">
                     <template #default="{ row }">
@@ -353,6 +353,14 @@ const principalOptions = computed(() => {
 
 // Resource search is executed by the backend.
 const filteredResources = computed(() => resourceRows.value)
+
+function resourceRowClassName({ row }: { row: ResourceRow }): string {
+  return authorizedResourceIds.value.has(row.id) ? 'row-authorized' : ''
+}
+
+function isResourceSelectable(row: ResourceRow): boolean {
+  return !authorizedResourceIds.value.has(row.id)
+}
 
 // Methods
 const formatTime = (time: string) => {
@@ -805,7 +813,7 @@ const saveGrant = async () => {
     grantDialogVisible.value = false
     await loadGrants()
   } catch (e: any) {
-    ElMessage.error(e.message || t('common.error'))
+    ElMessage.error(e.message || '创建授权失败')
   } finally {
     saving.value = false
   }

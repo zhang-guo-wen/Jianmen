@@ -507,7 +507,7 @@ test('database connection dialog opens the configured local client instead of co
   assert.match(source, /buildDatabaseProtocolURL\(\{/);
   assert.match(source, /password:\s*temporaryPassword\.value/);
   assert.match(source, /window\.location\.href = launchURL/);
-  assert.match(source, /if \(!databaseClient\.configured\)[\s\S]*openDatabaseClientSettings\(\)/);
+  assert.match(source, /if \(!databaseClient\.configured\)[\s\S]*openClientSettings\('database'\)/);
   assert.doesNotMatch(source, /复制 DBeaver 配置命令|copyDBeaverConfigurationCommand/);
 });
 
@@ -547,10 +547,13 @@ test('quick database Web action opens the SQL console without invoking the local
   assert.match(source, /当前账号没有在线 SQL 执行权限/);
 });
 
-test('quick-connect client buttons redirect to settings only when local configuration is missing', () => {
+test('quick-connect client buttons redirect to settings when local setup is incomplete', () => {
   const source = readFileSync(new URL('../views/QuickConnectView.vue', import.meta.url), 'utf8');
   assert.doesNotMatch(source, /<el-button @click="openDatabaseClientSettings">/);
-  assert.match(source, /if \(!preferences\.hasSSHClient\)[\s\S]*openClientSettings\('ssh'\)/);
+  assert.match(
+    source,
+    /if \(!preferences\.hasSSHClient \|\| !preferences\.sshProtocolRegistered\)[\s\S]*openClientSettings\('ssh'\)/,
+  );
   assert.match(source, /if \(!databaseClient\.configured\)[\s\S]*openClientSettings\('database'\)/);
   assert.match(source, /query:\s*\{\s*tab,\s*return_to:\s*router\.currentRoute\.value\.fullPath\s*\}/);
   assert.match(

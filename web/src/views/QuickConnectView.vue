@@ -739,8 +739,7 @@ async function openClientConnection(target: TargetRecord) {
       return;
     }
   }
-  if (!preferences.hasSSHClient) {
-    ElMessage.warning('请先配置本地 SSH 客户端');
+  if (!preferences.hasSSHClient || !preferences.sshProtocolRegistered) {
     openClientSettings('ssh');
     return;
   }

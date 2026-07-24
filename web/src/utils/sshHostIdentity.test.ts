@@ -91,8 +91,9 @@ test('quick-connect web and local client actions use guarded identity recovery',
   assert.match(source.slice(webStart, clientStart), /await preflightSSHConnection\(target\)/)
   assert.match(clientSource, /await preflightSSHConnection\(target\)/)
   assert.ok(
-    clientSource.indexOf('!preferences.hasSSHClient') < clientSource.indexOf('preflightSSHConnection(target)'),
-    'SSH client settings should be checked before connection preflight',
+    clientSource.indexOf('!preferences.hasSSHClient || !preferences.sshProtocolRegistered')
+      < clientSource.indexOf('preflightSSHConnection(target)'),
+    'SSH client configuration and registration should be checked before connection preflight',
   )
   assert.match(clientSource, /openClientSettings\('ssh'\)/)
   assert.match(clientSource, /isCurrentSSHQuickTarget\(targetID\)/)

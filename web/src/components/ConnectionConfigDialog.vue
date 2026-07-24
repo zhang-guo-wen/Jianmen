@@ -120,42 +120,6 @@
     </template>
   </el-dialog>
 
-  <el-dialog
-    v-model="initClientVisible"
-    title="初始化本地 SSH 客户端"
-    width="min(560px, calc(100vw - 24px))"
-    class="local-client-dialog"
-    destroy-on-close
-  >
-    <el-form label-position="top">
-      <el-form-item label="客户端" required>
-        <el-select v-model="initClientType" style="width: 100%">
-          <el-option v-for="item in configurableClients" :key="item.command" :label="item.label" :value="item.command" />
-        </el-select>
-      </el-form-item>
-      <el-form-item label="程序路径" required :error="initClientPathError">
-        <div class="path-field">
-          <el-input
-            v-model="initClientPath"
-            name="ssh_client_path"
-            autocomplete="off"
-            placeholder="例如 C:\Program Files\PuTTY\putty.exe"
-          />
-          <el-button @click="pickClientFile">浏览…</el-button>
-        </div>
-        <div class="path-help">程序路径必填，不提供默认值，且必须是包含盘符的完整绝对路径。</div>
-      </el-form-item>
-    </el-form>
-    <div v-if="initRegCommand" class="registration-command">
-      <div>复制以下命令，以<strong>管理员身份</strong>在 CMD 中执行：</div>
-      <el-input :model-value="initRegCommand" readonly type="textarea" :rows="3" />
-    </div>
-    <template #footer>
-      <el-button type="primary" :disabled="!canSaveClient" @click="saveClientAndCopyCommand">保存并复制注册命令</el-button>
-      <el-button @click="initClientVisible = false">关闭</el-button>
-    </template>
-  </el-dialog>
-
 </template>
 
 <script setup lang="ts">
@@ -173,7 +137,6 @@ import {
   type TargetRecord,
 } from '@/api/client';
 import { buildDatabaseProtocolURL } from '@/config/databaseClients';
-import { buildSSHProtocolRegistrationCommand, isAbsoluteExecutablePath, SSH_CLIENT_OPTIONS } from '@/config/sshClients';
 import { useDatabaseClientStore } from '@/stores/databaseClient';
 import { usePreferencesStore } from '@/stores/preferences';
 import { writeClipboardText } from '@/utils/clipboard';
@@ -430,18 +393,6 @@ const databaseClientLaunchBlocked = computed(() => (
     || !temporaryPassword.value
   )
 ));
-const initClientVisible = ref(false);
-const initClientType = ref('xshell');
-const initClientPath = ref('');
-const configurableClients = SSH_CLIENT_OPTIONS.filter(item => item.command !== 'default');
-const initClientPathError = computed(() => {
-  if (!initClientPath.value.trim()) return '请输入本地 SSH 客户端的程序路径';
-  if (!isAbsoluteExecutablePath(initClientPath.value)) return '请输入完整的 Windows 绝对路径，例如 C:\\Program Files\\PuTTY\\putty.exe';
-  return '';
-});
-const initRegCommand = computed(() => buildSSHProtocolRegistrationCommand(initClientType.value, initClientPath.value));
-const canSaveClient = computed(() => Boolean(initClientType.value && !initClientPathError.value && initRegCommand.value));
-
 function captureTargetSnapshot(): ConnectionTargetSnapshot | null {
   if (!props.modelValue || !props.target) return null;
   const targetID = String(props.target.id || props.target.resource_id || '');
@@ -633,11 +584,16 @@ async function copyValue(value: string, operation = 'value') {
 
 async function openPreferredSSHClient() {
   if (!connectionInfo.value) return;
-  if (!preferences.loaded) { try { await preferences.fetch(); } catch { /* initialization remains available */ } }
-  if (!preferences.hasSSHClient) {
-    initClientType.value = preferences.value.ssh_client && preferences.value.ssh_client !== 'default' ? preferences.value.ssh_client : 'xshell';
-    initClientPath.value = preferences.value.ssh_client_path || '';
-    initClientVisible.value = true;
+  if (!preferences.loaded) {
+    try {
+      await preferences.fetch();
+    } catch {
+      openClientSettings('ssh');
+      return;
+    }
+  }
+  if (!preferences.hasSSHClient || !preferences.sshProtocolRegistered) {
+    openClientSettings('ssh');
     return;
   }
   window.location.href = sshClientUrl.value;
@@ -663,26 +619,26 @@ function openSQLConsole() {
   });
 }
 
-function openDatabaseClientSettings() {
+function openClientSettings(tab: 'ssh' | 'database') {
   const returnTo = router.currentRoute.value.fullPath;
   visible.value = false;
-  void router.push({ path: '/settings', query: { tab: 'database', return_to: returnTo } });
+  void router.push({ path: '/settings', query: { tab, return_to: returnTo } });
 }
 
 function openDatabaseClient() {
   if (!databaseClient.configured) {
     ElMessage.warning('请先配置本地 DBeaver 客户端');
-    openDatabaseClientSettings();
+    openClientSettings('database');
     return;
   }
   if (databaseClient.value.platform !== 'windows') {
     ElMessage.warning('当前仅 Windows 支持从浏览器直接打开 DBeaver');
-    openDatabaseClientSettings();
+    openClientSettings('database');
     return;
   }
   if (!databaseClient.directLaunchReady) {
     ElMessage.warning('请先执行本地协议注册命令，并在设置中确认已完成');
-    openDatabaseClientSettings();
+    openClientSettings('database');
     return;
   }
   if (
@@ -695,7 +651,7 @@ function openDatabaseClient() {
     && !databaseClient.value.caFilePath.trim()
   ) {
     ElMessage.warning('使用 TLS 打开 DBeaver 前，请先在个人设置中配置网关 CA 文件');
-    openDatabaseClientSettings();
+    openClientSettings('database');
     return;
   }
   if (
@@ -725,34 +681,6 @@ function openDatabaseClient() {
   }
   ElMessage.success('正在打开 DBeaver 并使用临时密码建立连接');
   window.location.href = launchURL;
-}
-
-function pickClientFile() {
-  const input = document.createElement('input');
-  input.type = 'file'; input.accept = '.exe';
-  input.onchange = event => {
-    const file = (event.target as HTMLInputElement).files?.[0] as (File & { path?: string }) | undefined;
-    if (file) initClientPath.value = file.path || file.name;
-  };
-  input.click();
-}
-
-async function saveClientAndCopyCommand() {
-  if (!canSaveClient.value) { ElMessage.warning(initClientPathError.value || '请完善客户端配置'); return; }
-  try {
-    await preferences.update({ ssh_client: initClientType.value, ssh_client_path: initClientPath.value.trim() });
-  } catch {
-    ElMessage.error(preferences.error || '客户端配置保存失败');
-    return;
-  }
-
-  try {
-    await writeClipboardText(initRegCommand.value);
-    ElMessage.success('配置已保存，注册命令已复制，请在管理员 CMD 中执行一次');
-    initClientVisible.value = false;
-  } catch {
-    ElMessage.warning('配置已保存，但注册命令复制失败，请手动复制');
-  }
 }
 
 function formatExpiresAt(value: string): string {
@@ -802,9 +730,6 @@ function formatExpiresAt(value: string): string {
 .command-row { display: grid; min-width: 0; gap: 5px; }
 .command-row__heading { color: var(--el-text-color-secondary); font-size: 12px; }
 :deep(.command-input .el-input__inner) { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 12px; }
-.path-field { display: flex; gap: 8px; width: 100%; }
-.path-help { margin-top: 5px; color: var(--el-text-color-secondary); font-size: 12px; }
-.registration-command { display: flex; flex-direction: column; gap: 6px; color: var(--el-text-color-secondary); font-size: 12px; }
 @media (max-width: 680px) {
   .resource-summary { grid-template-columns: auto minmax(0, 1fr); }
   .source-meta { grid-column: 1 / -1; }
@@ -813,10 +738,7 @@ function formatExpiresAt(value: string): string {
   .detail-item { grid-template-columns: minmax(0, 1fr) auto; }
   .detail-item > span { grid-column: 1 / -1; }
   .password-hint { grid-column: 1 / -1; }
-  .path-field { align-items: stretch; flex-direction: column; }
-  :deep(.connection-config-dialog .el-dialog__footer),
-  :deep(.local-client-dialog .el-dialog__footer) { display: flex; flex-wrap: wrap; gap: 8px; }
-  :deep(.connection-config-dialog .el-dialog__footer .el-button),
-  :deep(.local-client-dialog .el-dialog__footer .el-button) { flex: 1 1 180px; margin: 0; }
+  :deep(.connection-config-dialog .el-dialog__footer) { display: flex; flex-wrap: wrap; gap: 8px; }
+  :deep(.connection-config-dialog .el-dialog__footer .el-button) { flex: 1 1 180px; margin: 0; }
 }
 </style>

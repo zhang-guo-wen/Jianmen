@@ -34,7 +34,15 @@
             </el-table-column>
             <el-table-column :label="t('audit.column.sessionId')" width="110">
               <template #default="{ row }">
-                <el-link v-if="row.session_id" type="primary" @click.stop="showUserSessionDetail(row.session_id)">
+                <el-link
+                  v-if="row.session_id"
+                  class="session-id-link"
+                  type="primary"
+                  role="button"
+                  tabindex="0"
+                  @click.stop="showUserSessionDetail(row.session_id)"
+                  @keydown.enter.space.prevent.stop="showUserSessionDetail(row.session_id)"
+                >
                   {{ row.session_id }}
                 </el-link>
                 <span v-else>-</span>
@@ -178,7 +186,15 @@
             </el-table-column>
             <el-table-column :label="t('audit.column.sessionId')" width="110">
               <template #default="{ row }">
-                <el-link v-if="row.session_id" type="primary" @click.stop="showUserSessionDetail(row.session_id)">
+                <el-link
+                  v-if="row.session_id"
+                  class="session-id-link"
+                  type="primary"
+                  role="button"
+                  tabindex="0"
+                  @click.stop="showUserSessionDetail(row.session_id)"
+                  @keydown.enter.space.prevent.stop="showUserSessionDetail(row.session_id)"
+                >
                   {{ row.session_id }}
                 </el-link>
                 <span v-else>-</span>
@@ -248,7 +264,15 @@
             </el-table-column>
             <el-table-column :label="t('audit.column.sessionId')" width="110">
               <template #default="{ row }">
-                <el-link v-if="row.session_id" type="primary" @click.stop="showUserSessionDetail(row.session_id)">
+                <el-link
+                  v-if="row.session_id"
+                  class="session-id-link"
+                  type="primary"
+                  role="button"
+                  tabindex="0"
+                  @click.stop="showUserSessionDetail(row.session_id)"
+                  @keydown.enter.space.prevent.stop="showUserSessionDetail(row.session_id)"
+                >
                   {{ row.session_id }}
                 </el-link>
                 <span v-else>-</span>
@@ -2186,6 +2210,12 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   height: 100%;
+}
+
+.session-id-link.el-link:focus-visible {
+  border-radius: 4px;
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
 }
 
 .placeholder-panel :deep(.el-segmented) {

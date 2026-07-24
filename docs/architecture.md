@@ -348,10 +348,22 @@ web/src/
 
 - 列表页优先复用 `DataTableCard`，表单弹窗优先复用 `FormDialog`，状态切换复用 `StatusSwitch`。
 - 新文案先进入类型化 i18n 字典；当前只有 zh-CN，不把它描述成已完成多语言。
-- Element Plus 采用选择性全局注册；新增组件必须在 `main.ts` 注册或在 SFC 局部导入。
+- Element Plus 采用选择性全局注册；所有模板使用的 Element Plus 组件必须先完成注册，禁止直接新增未注册的 `<el-*>` 标签。
 - 菜单页必须同步更新导航项、懒加载路由、标题/说明翻译键和服务端权限 key。
 - 交互元素有可见 focus，图标按钮有可访问名称，动态错误使用适当的 `role` / `aria-live`。
 - 每个页面至少验证桌面、`<=780px`、浅色、暗色和 `prefers-reduced-motion`。
+
+#### Element Plus 组件注册约束
+
+项目不使用 `app.use(ElementPlus)` 全量安装。`web/src/main.ts` 中的 `elementComponents` 是 UI 组件全局注册清单；新增任何 Element Plus UI 组件时，必须同时完成：
+
+1. 在 `web/src/main.ts` 的 `element-plus` import 列表中导入对应的 PascalCase 组件，例如 `ElLink`。
+2. 将该组件加入 `elementComponents`，由统一的 `app.use(component)` 循环完成全局注册。
+3. 运行前端类型检查和构建，并确认浏览器控制台没有 `Failed to resolve component: el-*` 告警。
+
+未注册的 `<el-*>` 会被 Vue 当作未知自定义标签渲染：页面可能仍显示文字，但 Element Plus 的属性、事件、交互语义、主题颜色和组件样式均不会生效。这类现象必须先检查注册清单，不能优先通过额外 CSS、DOM 事件补丁或替代组件掩盖。
+
+仅使用函数式 API、指令或服务型插件时，按 Element Plus 对应导出方式接入；如果需要 `app.use()`，也必须在 `web/src/main.ts` 集中注册，不在业务页面分散安装。
 
 ## 9. 测试架构
 

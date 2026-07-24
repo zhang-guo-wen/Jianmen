@@ -673,6 +673,20 @@ test('RDP audit uses the shared search and pagination list without access approv
   }
 });
 
+test('audit session IDs use registered primary links without duplicate underline styling', () => {
+  const source = readFileSync(new URL('../views/AuditView.vue', import.meta.url), 'utf8');
+  const mainSource = readFileSync(new URL('../main.ts', import.meta.url), 'utf8');
+  const sessionLinks = source.match(
+    /<el-link(?=[^>]*v-if="row\.session_id")(?=[^>]*class="session-id-link")(?=[^>]*type="primary")[^>]*>/g,
+  ) ?? [];
+  const componentsStart = mainSource.indexOf('const elementComponents = [');
+  const componentsEnd = mainSource.indexOf('];', componentsStart);
+
+  assert.equal(sessionLinks.length, 3);
+  assert.match(mainSource.slice(componentsStart, componentsEnd), /\bElLink,/);
+  assert.doesNotMatch(source, /--el-link-font-weight|text-decoration:\s*underline/);
+});
+
 test('temporary password copy button exposes its in-flight state', () => {
   const dialogSource = readFileSync(new URL('../components/ConnectionConfigDialog.vue', import.meta.url), 'utf8');
   assert.match(

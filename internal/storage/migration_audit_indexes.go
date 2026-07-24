@@ -93,6 +93,17 @@ func MigrateAuditUniqueIndexes(db *gorm.DB) error {
 				return fmt.Errorf("drop malformed index %s on %s: %w", m.indexName, m.table, err)
 			}
 		}
+		if !indexIsCurrent {
+			// Build the replacement first. MySQL may use the legacy unique index
+			// to enforce a foreign key and refuses to drop it until another
+			// index with the foreign-key columns as its prefix is available.
+			colList := strings.Join(m.columns, ", ")
+			sql := fmt.Sprintf("CREATE UNIQUE INDEX %s ON %s (%s)", m.indexName, m.table, colList)
+			if err := db.Exec(sql).Error; err != nil {
+				return fmt.Errorf("create index %s on %s: %w", m.indexName, m.table, err)
+			}
+		}
+
 		// 找到与新索引业务列匹配的旧唯一索引并删除
 		bizCols := m.columns[:len(m.columns)-1] // 去掉 active_marker 得到业务列
 		for _, idx := range indexes {
@@ -107,16 +118,6 @@ func MigrateAuditUniqueIndexes(db *gorm.DB) error {
 					return fmt.Errorf("drop old index %s on %s: %w", idx.Name(), m.table, err)
 				}
 			}
-		}
-		if indexIsCurrent {
-			continue
-		}
-
-		// 创建新的复合唯一索引
-		colList := strings.Join(m.columns, ", ")
-		sql := fmt.Sprintf("CREATE UNIQUE INDEX %s ON %s (%s)", m.indexName, m.table, colList)
-		if err := db.Exec(sql).Error; err != nil {
-			return fmt.Errorf("create index %s on %s: %w", m.indexName, m.table, err)
 		}
 	}
 

@@ -15,7 +15,7 @@ type DatabaseProvisioningOperation struct {
 	Host                 string         `gorm:"size:255;not null" json:"-"`
 	GrantsJSON           string         `gorm:"type:text;not null" json:"-"`
 	GroupName            string         `gorm:"size:128;not null;default:''" json:"-"`
-	Remark               string         `gorm:"type:text;not null;default:''" json:"-"`
+	Remark               string         `gorm:"type:text;not null" json:"-"`
 	ExpiresAt            *time.Time     `gorm:"index" json:"-"`
 	Stage                string         `gorm:"index:idx_database_provisioning_work,priority:1;index:idx_database_provisioning_kind_stage,priority:2;size:32;not null;default:reserved;check:chk_database_provisioning_stage,stage IN ('reserved','create_started','create_uncertain','upstream_created','grant_started','activation_pending','cleanup_required','cleanup_in_progress','not_created','active_managed','deprovision_requested','drop_started','drop_uncertain','dropped')" json:"-"`
 	CleanupStatus        string         `gorm:"index:idx_database_provisioning_work,priority:2;size:32;not null;default:none;check:chk_database_provisioning_cleanup,cleanup_status IN ('none','required','in_progress','failed')" json:"-"`

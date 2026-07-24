@@ -309,6 +309,7 @@ func writeMySQLIntegrationTLSFiles(t *testing.T) (string, string) {
 	if err := os.WriteFile(keyFile, pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: keyPEM}), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	makeDockerBindReadable(t, directory, caFile, certFile, keyFile)
 	return directory, caFile
 }
 

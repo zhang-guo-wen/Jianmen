@@ -95,6 +95,21 @@ func dockerBindPath(t *testing.T, path string) string {
 	return strings.TrimSpace(string(output))
 }
 
+// makeDockerBindReadable allows an unprivileged container user to traverse a
+// bind-mounted test directory and read its files. The files are ephemeral and
+// callers mount the directory read-only.
+func makeDockerBindReadable(t *testing.T, directory string, files ...string) {
+	t.Helper()
+	if err := os.Chmod(directory, 0o755); err != nil {
+		t.Fatalf("make Docker bind directory readable %q: %v", directory, err)
+	}
+	for _, file := range files {
+		if err := os.Chmod(file, 0o644); err != nil {
+			t.Fatalf("make Docker bind file readable %q: %v", file, err)
+		}
+	}
+}
+
 func dockerBindHost(t *testing.T) string {
 	t.Helper()
 	cli, err := findDockerCLI()

@@ -164,12 +164,12 @@ func assertProvisioningSagaSchema(t *testing.T, db *gorm.DB, driver storage.Driv
 		model any
 		name  string
 	}{
-		{model: &model.DatabaseAccount{}, name: "uidx_database_accounts_provisioning_operation"},
+		{model: &model.DatabaseAccount{}, name: "idx_dba_prov_op_active"},
 		{model: &model.DatabaseAccount{}, name: "idx_database_accounts_managed_status"},
 		{model: &model.DatabaseProvisioningOperation{}, name: "idx_database_provisioning_instance"},
 		{model: &model.DatabaseProvisioningOperation{}, name: "idx_database_provisioning_work"},
-		{model: &model.DatabaseProvisioningOperation{}, name: "uidx_database_provisioning_actor_kind_idempotency"},
-		{model: &model.DatabaseProvisioningOperation{}, name: "uidx_database_provisioning_username"},
+		{model: &model.DatabaseProvisioningOperation{}, name: "idx_dpo_actor_kind_idem_active"},
+		{model: &model.DatabaseProvisioningOperation{}, name: "idx_dpo_upstream_username_active"},
 	} {
 		if !db.Migrator().HasIndex(index.model, index.name) {
 			t.Fatalf("provisioning schema is missing index %s", index.name)

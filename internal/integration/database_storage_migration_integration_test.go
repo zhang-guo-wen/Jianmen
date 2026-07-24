@@ -39,6 +39,7 @@ const (
 	databaseGatewayClientTLSModeMigrationVersion = "202607200002"
 	userPreferenceClientsMigrationVersion        = "202607210001"
 	removeRDPApprovalMigrationVersion            = "202607210002"
+	auditFieldsMigrationVersion                  = "202607240001"
 )
 
 var currentStorageMigrationVersions = []string{
@@ -73,6 +74,7 @@ var currentStorageMigrationVersions = []string{
 	databaseGatewayClientTLSModeMigrationVersion,
 	userPreferenceClientsMigrationVersion,
 	removeRDPApprovalMigrationVersion,
+	auditFieldsMigrationVersion,
 }
 
 type metadataDatabaseCase struct {
@@ -324,7 +326,14 @@ func TestStorageMigrationUpgradesLegacyDatabaseAccounts(t *testing.T) {
 				t.Fatal("database account instance/username unique index is missing after migration")
 			}
 			assertDatabaseAccountUniqueIndexColumns(t, db, tt.driver)
-			assertDatabaseAccountInstanceUsernameUniqueness(t, db, tt.driver, "upgrade", "u")
+			assertDatabaseAccountInstanceUsernameUniqueness(
+				t,
+				db,
+				tt.driver,
+				"uidx_database_accounts_instance_username",
+				"upgrade",
+				"u",
+			)
 			assertMigrationRecord(t, db, databaseAccountUniquenessMigrationVersion, "database account instance username uniqueness")
 			beforeSecondMigration := loadMigrationVersionSet(t, db)
 			if err := storage.Migrate(db); err != nil {
@@ -999,7 +1008,7 @@ func createCurrentSchemaWithOnlyMigrationPending(t *testing.T, db *gorm.DB, pend
 			}
 		}
 	case databaseAccountUniquenessMigrationVersion:
-		if err := db.Migrator().DropIndex(&model.DatabaseAccount{}, "uidx_database_accounts_instance_username"); err != nil {
+		if err := db.Migrator().DropIndex(&model.DatabaseAccount{}, "idx_dba_instance_username_active"); err != nil {
 			t.Fatalf("remove migration %s unique index from fixture: %v", pendingVersion, err)
 		}
 	case auditRetentionCleanupMigrationVersion:
@@ -1056,12 +1065,12 @@ func assertOtherDatabaseMigrationsApplied(t *testing.T, db *gorm.DB, pendingVers
 			}
 		}
 	}
-	if !db.Migrator().HasIndex(&model.Permission{}, "idx_permissions_logic") {
-		t.Fatalf("fixture for pending migration %s is missing applied 007 permission unique index", pendingVersion)
+	if !db.Migrator().HasIndex(&model.Permission{}, "idx_permissions_logic_active") {
+		t.Fatalf("fixture for pending migration %s is missing final permission active unique index", pendingVersion)
 	}
 	if pendingVersion != databaseAccountUniquenessMigrationVersion &&
-		!db.Migrator().HasIndex(&model.DatabaseAccount{}, "uidx_database_accounts_instance_username") {
-		t.Fatalf("fixture for pending migration %s is missing applied 008 account unique index", pendingVersion)
+		!db.Migrator().HasIndex(&model.DatabaseAccount{}, "idx_dba_instance_username_active") {
+		t.Fatalf("fixture for pending migration %s is missing final account active unique index", pendingVersion)
 	}
 	if pendingVersion != auditRetentionCleanupMigrationVersion {
 		for _, column := range []string{"cleanup_status", "cleanup_at", "cleanup_error"} {
@@ -1092,37 +1101,38 @@ func assertOtherDatabaseMigrationsApplied(t *testing.T, db *gorm.DB, pendingVers
 func seedAppliedMigrations(t *testing.T, db *gorm.DB, versions ...string) {
 	t.Helper()
 	names := map[string]string{
-		"202606290001":                           "prepare metadata sequences",
-		"202606290002":                           "core metadata schema",
-		"202606290003":                           "reconcile metadata resources",
-		"202606290004":                           "global compact session identity",
-		"202606290005":                           "metadata query indexes",
-		"202607130001":                           "user groups and resource grants",
-		"202607160001":                           "AI access tokens",
-		"202607160002":                           "encrypted AI token values",
-		"202607170001":                           "container management endpoints",
-		"202607170002":                           "user expiry and temporary authorization metadata",
-		"202607180001":                           "database backed super administrator identity",
-		"202607180002":                           "temporary access connection password lifecycle",
-		"202607180003":                           "atomic system initialization guard",
-		"202607180004":                           "browser sessions and websocket tickets",
-		"202607180005":                           "remove reversible AI token secrets",
-		"202607180006":                           "database instance upstream TLS policy",
-		"202607180007":                           "permission logical uniqueness",
-		databaseAccountUniquenessMigrationVersion: "database account instance username uniqueness",
-		databaseProvisioningSagaMigrationVersion:  "database provisioning saga recovery state",
-		"202607190001":                           "resource grant logical uniqueness",
-		auditRetentionCleanupMigrationVersion:     "audit retention cleanup state",
-		webRDPAuditMigrationVersion:               "web RDP access control and audit schema",
-		auditSessionLeaseMigrationVersion:         "audit session lease recovery",
-		systemSettingMigrationVersion:             "system configuration management",
-		auditDBQueryLargePayloadMigrationVersion:  "large database proxy client message support",
-		databaseGatewayModeMigrationVersion:       "database gateway mode system setting",
-		databaseTLSDefaultMigrationVersion:        "database instance upstream TLS default",
-		sshHostIdentityMigrationVersion:           "SSH host identity",
+		"202606290001": "prepare metadata sequences",
+		"202606290002": "core metadata schema",
+		"202606290003": "reconcile metadata resources",
+		"202606290004": "global compact session identity",
+		"202606290005": "metadata query indexes",
+		"202607130001": "user groups and resource grants",
+		"202607160001": "AI access tokens",
+		"202607160002": "encrypted AI token values",
+		"202607170001": "container management endpoints",
+		"202607170002": "user expiry and temporary authorization metadata",
+		"202607180001": "database backed super administrator identity",
+		"202607180002": "temporary access connection password lifecycle",
+		"202607180003": "atomic system initialization guard",
+		"202607180004": "browser sessions and websocket tickets",
+		"202607180005": "remove reversible AI token secrets",
+		"202607180006": "database instance upstream TLS policy",
+		"202607180007": "permission logical uniqueness",
+		databaseAccountUniquenessMigrationVersion:    "database account instance username uniqueness",
+		databaseProvisioningSagaMigrationVersion:     "database provisioning saga recovery state",
+		"202607190001":                               "resource grant logical uniqueness",
+		auditRetentionCleanupMigrationVersion:        "audit retention cleanup state",
+		webRDPAuditMigrationVersion:                  "web RDP access control and audit schema",
+		auditSessionLeaseMigrationVersion:            "audit session lease recovery",
+		systemSettingMigrationVersion:                "system configuration management",
+		auditDBQueryLargePayloadMigrationVersion:     "large database proxy client message support",
+		databaseGatewayModeMigrationVersion:          "database gateway mode system setting",
+		databaseTLSDefaultMigrationVersion:           "database instance upstream TLS default",
+		sshHostIdentityMigrationVersion:              "SSH host identity",
 		databaseGatewayClientTLSModeMigrationVersion: "database gateway client TLS mode",
 		userPreferenceClientsMigrationVersion:        "user preference local client fields",
 		removeRDPApprovalMigrationVersion:            "remove RDP access approval",
+		auditFieldsMigrationVersion:                  "统一审计字段和 active_marker 活跃标记",
 	}
 	for _, version := range versions {
 		name, ok := names[version]
@@ -1479,11 +1489,25 @@ func TestDatabaseAccountUniquenessMigrationAgainstMetadataDatabases(t *testing.T
 			if err := storage.Migrate(db); err != nil {
 				t.Fatalf("run versioned metadata migrations: %v", err)
 			}
-			assertDatabaseAccountInstanceUsernameUniqueness(t, db, tt.driver, "first", "a")
+			assertDatabaseAccountInstanceUsernameUniqueness(
+				t,
+				db,
+				tt.driver,
+				"idx_dba_instance_username_active",
+				"first",
+				"a",
+			)
 			if err := storage.Migrate(db); err != nil {
 				t.Fatalf("run versioned metadata migrations a second time: %v", err)
 			}
-			assertDatabaseAccountInstanceUsernameUniqueness(t, db, tt.driver, "second", "b")
+			assertDatabaseAccountInstanceUsernameUniqueness(
+				t,
+				db,
+				tt.driver,
+				"idx_dba_instance_username_active",
+				"second",
+				"b",
+			)
 		})
 	}
 }
@@ -1492,6 +1516,7 @@ func assertDatabaseAccountInstanceUsernameUniqueness(
 	t *testing.T,
 	db *gorm.DB,
 	driver storage.Driver,
+	indexName string,
 	prefix string,
 	resourcePrefix string,
 ) {
@@ -1533,7 +1558,7 @@ func assertDatabaseAccountInstanceUsernameUniqueness(
 	if err == nil {
 		t.Fatal("same-instance duplicate database account was accepted")
 	}
-	assertDatabaseAccountUniqueViolation(t, driver, err)
+	assertDatabaseAccountUniqueViolation(t, driver, indexName, err)
 	differentInstance := model.DatabaseAccount{
 		ID: prefix + "-account-three", InstanceID: secondInstance.ID, UniqueName: prefix + "-account-three",
 		Username: "reader", Status: "active", ResourceID: resourcePrefix + "004",
@@ -1584,7 +1609,12 @@ func assertDatabaseAccountUniqueIndexColumns(t *testing.T, db *gorm.DB, driver s
 	}
 }
 
-func assertDatabaseAccountUniqueViolation(t *testing.T, driver storage.Driver, err error) {
+func assertDatabaseAccountUniqueViolation(
+	t *testing.T,
+	driver storage.Driver,
+	indexName string,
+	err error,
+) {
 	t.Helper()
 	switch driver {
 	case storage.DriverMySQL:
@@ -1595,7 +1625,7 @@ func assertDatabaseAccountUniqueViolation(t *testing.T, driver storage.Driver, e
 		if mysqlErr.Number != 1062 {
 			t.Fatalf("same-instance duplicate MySQL error number = %d, want 1062: %v", mysqlErr.Number, err)
 		}
-		if !strings.Contains(mysqlErr.Message, "uidx_database_accounts_instance_username") {
+		if !strings.Contains(mysqlErr.Message, indexName) {
 			t.Fatalf("same-instance duplicate violated unexpected MySQL index: %v", err)
 		}
 	case storage.DriverPostgres:
@@ -1606,8 +1636,13 @@ func assertDatabaseAccountUniqueViolation(t *testing.T, driver storage.Driver, e
 		if postgresErr.Code != "23505" {
 			t.Fatalf("same-instance duplicate PostgreSQL error code = %q, want %q: %v", postgresErr.Code, "23505", err)
 		}
-		if postgresErr.ConstraintName != "uidx_database_accounts_instance_username" {
-			t.Fatalf("same-instance duplicate violated PostgreSQL constraint %q, want uidx_database_accounts_instance_username: %v", postgresErr.ConstraintName, err)
+		if postgresErr.ConstraintName != indexName {
+			t.Fatalf(
+				"same-instance duplicate violated PostgreSQL constraint %q, want %s: %v",
+				postgresErr.ConstraintName,
+				indexName,
+				err,
+			)
 		}
 	default:
 		t.Fatalf("unsupported metadata database driver %q", driver)

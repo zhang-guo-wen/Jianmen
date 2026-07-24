@@ -18,7 +18,7 @@ type ResourceGrant struct {
 	ExpiresAt     *time.Time `gorm:"index" json:"expires_at,omitempty"`
 	FullAudit
 	// 覆盖 FullAudit.ActiveMarker，将其纳入唯一索引，使停用后可以重建相同业务键的记录。
-	ActiveMarker *int `gorm:"column:active_marker;index;default:1;uniqueIndex:idx_rg_logic_active,priority:6" json:"-"`
+	ActiveMarker *int `gorm:"column:active_marker;default:1;uniqueIndex:idx_rg_logic_active,priority:6" json:"-"`
 }
 
 func (m *ResourceGrant) BeforeCreate(tx *gorm.DB) error {

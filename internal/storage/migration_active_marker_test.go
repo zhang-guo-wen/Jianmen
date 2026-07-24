@@ -216,8 +216,8 @@ func TestMigrateAuditFieldsConvertsRegisteredProvisioningOperations(t *testing.T
 	} {
 		if err := db.Exec(
 			`INSERT INTO database_provisioning_operations
-				(id, instance_id, admin_account_id, upstream_username, password, host, grants_json)
-			 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+				(id, instance_id, admin_account_id, upstream_username, password, host, grants_json, remark)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 			operation.id,
 			instance.ID,
 			"admin-1",
@@ -225,6 +225,7 @@ func TestMigrateAuditFieldsConvertsRegisteredProvisioningOperations(t *testing.T
 			"encrypted-placeholder",
 			"127.0.0.1",
 			"[]",
+			"",
 		).Error; err != nil {
 			t.Fatalf("create operation %s: %v", operation.id, err)
 		}

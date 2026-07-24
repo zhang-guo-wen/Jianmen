@@ -16,8 +16,30 @@ func TestDatabaseProvisioningLifecycleModelFields(t *testing.T) {
 	assertModelField(t, accountType, "UpstreamHost", reflect.TypeFor[string](), "json:-")
 	assertModelField(t, accountType, "ProvisioningOperationID", reflect.TypeFor[*string](), "json:-")
 	assertModelField(t, accountType, "ProvisioningOperation", reflect.TypeFor[*DatabaseProvisioningOperation](), "json:-")
+	provisioningOperationField, exists := accountType.FieldByName("ProvisioningOperation")
+	if !exists {
+		t.Fatal("DatabaseAccount.ProvisioningOperation is missing")
+	}
+	provisioningConstraint := strings.ToLower(provisioningOperationField.Tag.Get("gorm"))
+	if !strings.Contains(provisioningConstraint, "onupdate:restrict") ||
+		strings.Contains(provisioningConstraint, "onupdate:cascade") {
+		t.Fatalf(
+			"DatabaseAccount.ProvisioningOperation must restrict key updates: %q",
+			provisioningOperationField.Tag.Get("gorm"),
+		)
+	}
 
 	operationType := reflect.TypeFor[DatabaseProvisioningOperation]()
+	remarkField, exists := operationType.FieldByName("Remark")
+	if !exists {
+		t.Fatal("DatabaseProvisioningOperation.Remark is missing")
+	}
+	if strings.Contains(strings.ToLower(remarkField.Tag.Get("gorm")), "default") {
+		t.Fatalf(
+			"DatabaseProvisioningOperation.Remark must not declare a database default: %q",
+			remarkField.Tag.Get("gorm"),
+		)
+	}
 	// FullAudit 嵌入的字段（CreatedAt/UpdatedAt 有 json tag），不在此测试中校验
 	fullAuditFields := map[string]bool{
 		"CreatedBy": true, "UpdatedBy": true,

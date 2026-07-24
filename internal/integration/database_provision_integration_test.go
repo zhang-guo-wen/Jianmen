@@ -235,13 +235,17 @@ func writeMySQLIntegrationServerIdentity(t *testing.T) (string, string) {
 		Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(leafKey),
 	})
 	directory := t.TempDir()
+	files := make([]string, 0, 3)
 	for name, contents := range map[string][]byte{
 		"ca.pem": caPEM, "server-cert.pem": leafPEM, "server-key.pem": keyPEM,
 	} {
-		if err := os.WriteFile(filepath.Join(directory, name), contents, 0o600); err != nil {
+		path := filepath.Join(directory, name)
+		if err := os.WriteFile(path, contents, 0o600); err != nil {
 			t.Fatalf("write integration certificate %s: %v", name, err)
 		}
+		files = append(files, path)
 	}
+	makeDockerBindReadable(t, directory, files...)
 	return directory, string(caPEM)
 }
 

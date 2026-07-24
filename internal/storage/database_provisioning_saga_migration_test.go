@@ -125,14 +125,15 @@ func TestDatabaseProvisioningSagaMigrationCreatesConstrainedOperationTable(t *te
 	}
 	if err := db.Exec(
 		`INSERT INTO database_provisioning_operations
-			(id, instance_id, admin_account_id, upstream_username, password, grants_json)
-		 VALUES (?, ?, ?, ?, ?, ?)`,
+			(id, instance_id, admin_account_id, upstream_username, password, grants_json, remark)
+		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
 		"jmo_missinghost000001",
 		instance.ID,
 		"admin-1",
 		"jm_missinghost000001",
 		"encrypted-placeholder",
 		`[{"database":"orders","privilege":"read"}]`,
+		"",
 	).Error; err == nil {
 		t.Fatal("missing required host bypassed NOT NULL constraint")
 	}

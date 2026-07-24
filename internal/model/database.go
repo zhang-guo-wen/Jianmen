@@ -39,7 +39,7 @@ type DatabaseAccount struct {
 	ProvisioningOperationID *string        `gorm:"uniqueIndex:idx_dba_prov_op_active,priority:1;size:64" json:"-"`
 	FullAudit
 	Instance              DatabaseInstance               `gorm:"constraint:OnUpdate:CASCADE,OnDelete:CASCADE;" json:"-"`
-	ProvisioningOperation *DatabaseProvisioningOperation `gorm:"foreignKey:ProvisioningOperationID;references:ID;constraint:OnUpdate:CASCADE,OnDelete:RESTRICT;" json:"-"`
+	ProvisioningOperation *DatabaseProvisioningOperation `gorm:"foreignKey:ProvisioningOperationID;references:ID;constraint:OnUpdate:RESTRICT,OnDelete:RESTRICT;" json:"-"`
 }
 
 func (m *DatabaseInstance) BeforeCreate(tx *gorm.DB) error {

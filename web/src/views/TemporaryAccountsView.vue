@@ -28,25 +28,27 @@
         <el-table-column label="&#x6388;&#x6743;&#x7528;&#x6237;" min-width="120" show-overflow-tooltip>
           <template #default="{ row }">{{ row.authorized_user || '-' }}</template>
         </el-table-column>
-        <el-table-column label="&#x6388;&#x6743;&#x6709;&#x6548;&#x671F;" width="170">
+        <el-table-column v-bind="TABLE_COLUMNS.time" label="&#x6388;&#x6743;&#x6709;&#x6548;&#x671F;">
           <template #default="{ row }">
             <span :class="{ expired: isExpired(row.expires_at) }">{{ row.expires_at ? formatTime(row.expires_at) : '&#x6C38;&#x4E45;' }}</span>
           </template>
         </el-table-column>
         <el-table-column prop="resource_name" label="&#x8D44;&#x6E90;&#x540D;&#x79F0;" min-width="130" show-overflow-tooltip />
         <el-table-column prop="account_name" label="&#x8D26;&#x6237;&#x540D;&#x79F0;" min-width="130" show-overflow-tooltip />
-        <el-table-column label="&#x5F00;&#x59CB;&#x65F6;&#x95F4;" width="170">
+        <el-table-column v-bind="TABLE_COLUMNS.time" label="&#x5F00;&#x59CB;&#x65F6;&#x95F4;">
           <template #default="{ row }">{{ formatTime(row.starts_at) }}</template>
         </el-table-column>
-        <el-table-column prop="remark" label="&#x5907;&#x6CE8;" min-width="150" show-overflow-tooltip />
-        <el-table-column label="&#x72B6;&#x6001;" width="90">
+        <el-table-column v-bind="TABLE_COLUMNS.status" label="&#x72B6;&#x6001;">
           <template #default="{ row }">
             <el-tag :type="row.status === 'active' && !isExpired(row.expires_at) ? 'success' : 'info'" size="small">
               {{ row.status === 'active' && !isExpired(row.expires_at) ? '有效' : '已停用' }}
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="&#x64CD;&#x4F5C;" width="220" align="right" fixed="right">
+        <el-table-column v-bind="TABLE_COLUMNS.note" label="&#x5907;&#x6CE8;">
+          <template #default="{ row }">{{ row.remark || '-' }}</template>
+        </el-table-column>
+        <el-table-column v-bind="TABLE_COLUMNS.actionsWide" label="&#x64CD;&#x4F5C;">
           <template #default="{ row }">
             <div class="table-actions">
               <el-button link type="primary" size="small" @click="openExtendDialog(row)">&#x5EF6;&#x957F;&#x6709;&#x6548;&#x671F;</el-button>
@@ -195,6 +197,7 @@ import { ArrowDown } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import DataTableCard from '@/components/DataTableCard.vue'
 import { apiClient, type IssuedAIAccessToken, type TemporaryAccountRecord } from '@/api/client'
+import { TABLE_COLUMNS } from '@/config/tableColumns'
 import { writeClipboardText } from '@/utils/clipboard'
 
 const router = useRouter()

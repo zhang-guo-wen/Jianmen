@@ -30,10 +30,11 @@ const (
 )
 
 type SQLConsoleExecution struct {
-	Columns      []string
-	Rows         [][]any
-	RowsAffected int64
-	Truncated    bool
+	Columns           []string
+	Rows              [][]any
+	RowsAffected      int64
+	RowsAffectedKnown bool
+	Truncated         bool
 }
 
 type SQLConsoleExecutor interface {
@@ -132,9 +133,9 @@ func (c *databaseSQLConsoleConnection) Execute(
 	}
 	affected, err := result.RowsAffected()
 	if err != nil {
-		affected = 0
+		return SQLConsoleExecution{}, nil
 	}
-	return SQLConsoleExecution{RowsAffected: affected}, nil
+	return SQLConsoleExecution{RowsAffected: affected, RowsAffectedKnown: true}, nil
 }
 
 func (c *databaseSQLConsoleConnection) databasePool(ctx context.Context, database string) (*sql.DB, error) {

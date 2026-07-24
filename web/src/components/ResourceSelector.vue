@@ -31,7 +31,7 @@
               <el-table-column type="selection" width="50" />
               <el-table-column :label="t('resourceGrant.accountName')" prop="username" min-width="120" />
               <el-table-column :label="t('resourceGrant.hostName')" prop="host_name" min-width="150" />
-              <el-table-column :label="t('resourceGrant.hostAddress')" prop="host_address" min-width="150" />
+              <el-table-column v-bind="TABLE_COLUMNS.address" :label="t('resourceGrant.hostAddress')" prop="host_address" />
             </el-table>
           </div>
         </el-tab-pane>
@@ -83,7 +83,11 @@
             >
               <el-table-column type="selection" width="50" />
               <el-table-column :label="t('resourceGrant.groupName')" prop="name" min-width="150" />
-              <el-table-column :label="t('resourceGrant.description')" prop="description" min-width="200" />
+              <el-table-column v-bind="TABLE_COLUMNS.note" :label="t('common.remark')">
+                <template #default="{ row }">
+                  {{ row.description || '-' }}
+                </template>
+              </el-table-column>
             </el-table>
           </div>
         </el-tab-pane>
@@ -125,6 +129,7 @@ import { ref, computed, watch, onMounted } from 'vue'
 import { useI18n } from '@/i18n'
 import { Search } from '@element-plus/icons-vue'
 import { apiClient } from '@/api/client'
+import { TABLE_COLUMNS } from '@/config/tableColumns'
 
 interface ResourceItem {
   id: string

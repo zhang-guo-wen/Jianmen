@@ -45,6 +45,9 @@ func TestRecordOperationPersistsMutationMetadata(t *testing.T) {
 	if event.ClientIP != "192.0.2.10" || event.Detail == "" {
 		t.Fatalf("event metadata = %+v", event)
 	}
+	if event.Phase != "result" || event.Result != "success" || event.StatusCode != http.StatusOK {
+		t.Fatalf("structured audit result = %+v", event)
+	}
 }
 
 func TestOperationActionClassifiesDiagnosticsAsTest(t *testing.T) {
@@ -100,6 +103,11 @@ func TestHostIdentityRefreshAuditRecordsOnlyFingerprintEvidence(t *testing.T) {
 	result := events[1]
 	if result.Action != "refresh" || result.ResourceType != "hosts" || result.ResourceID != "host-1" {
 		t.Fatalf("refresh audit identity = %#v", result)
+	}
+	if events[0].Phase != "intent" || events[0].Result != "pending" ||
+		result.Phase != "result" || result.Result != "failure" ||
+		result.IntentID != events[0].ID || result.StatusCode != http.StatusConflict {
+		t.Fatalf("refresh structured audit pair = %#v", events)
 	}
 	var detail map[string]any
 	if err := json.Unmarshal([]byte(result.Detail), &detail); err != nil {

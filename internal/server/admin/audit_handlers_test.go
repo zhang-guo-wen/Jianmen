@@ -184,9 +184,14 @@ func TestHandleAuditDBQueriesUsesBoundedServerPagination(t *testing.T) {
 	if err := db.Create(&session).Error; err != nil {
 		t.Fatalf("create audit session: %v", err)
 	}
+	rowsAffected := int64(0)
 	queries := []model.AuditDBQuery{
 		{ID: "query-1", AuditSessionID: session.ID, Timestamp: now, SQLText: "SELECT 1"},
-		{ID: "query-2", AuditSessionID: session.ID, Timestamp: now.Add(time.Second), SQLText: "SELECT 2"},
+		{
+			ID: "query-2", AuditSessionID: session.ID, Timestamp: now.Add(time.Second), SQLText: "SELECT 2",
+			Status: model.AuditDBQueryStatusError, ErrorCode: "1064", ErrorMessage: "mysql upstream error",
+			RowsAffected: &rowsAffected,
+		},
 		{ID: "query-3", AuditSessionID: session.ID, Timestamp: now.Add(2 * time.Second), SQLText: "SELECT 3"},
 	}
 	if err := db.Create(&queries).Error; err != nil {
@@ -222,6 +227,13 @@ func TestHandleAuditDBQueriesUsesBoundedServerPagination(t *testing.T) {
 	}
 	if finished.Type != "query_finished" || finished.Seq != 1 || finished.SQL != "" {
 		t.Fatalf("query finished event duplicated SQL: %#v", finished)
+	}
+	if finished.Status != model.AuditDBQueryStatusError ||
+		finished.ErrorCode != "1064" ||
+		finished.ErrorMessage != "mysql upstream error" ||
+		finished.RowsAffected == nil ||
+		*finished.RowsAffected != 0 {
+		t.Fatalf("query finished result was not preserved: %#v", finished)
 	}
 }
 

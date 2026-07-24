@@ -17,10 +17,10 @@
         </template>
 
         <el-table-column prop="name" :label="t('application.column.name')" min-width="130" show-overflow-tooltip />
-        <el-table-column :label="t('application.column.target')" min-width="220" show-overflow-tooltip>
+        <el-table-column :label="t('application.column.target')" v-bind="TABLE_COLUMNS.address">
           <template #default="{ row }">{{ row.address }}</template>
         </el-table-column>
-        <el-table-column :label="t('application.column.accessAddress')" min-width="240">
+        <el-table-column :label="t('application.column.accessAddress')" v-bind="TABLE_COLUMNS.url">
           <template #default="{ row }">
             <el-tooltip :content="t('application.action.clickToCopy')" placement="top">
               <el-link class="access-address" type="primary" :underline="false" @click="copyAccessAddress(row)">
@@ -29,8 +29,8 @@
             </el-tooltip>
           </template>
         </el-table-column>
-        <el-table-column prop="group" :label="t('application.column.group')" width="100" show-overflow-tooltip />
-        <el-table-column :label="t('application.column.status')" width="80" align="center">
+        <el-table-column prop="group" :label="t('application.column.group')" v-bind="TABLE_COLUMNS.group" />
+        <el-table-column :label="t('application.column.status')" v-bind="TABLE_COLUMNS.status">
           <template #default="{ row }">
             <StatusSwitch
               v-if="row.can_manage && permission.canDo('application:update')"
@@ -40,10 +40,10 @@
             />
           </template>
         </el-table-column>
-        <el-table-column :label="t('application.column.remark')" min-width="160" show-overflow-tooltip>
+        <el-table-column :label="t('application.column.remark')" v-bind="TABLE_COLUMNS.note">
           <template #default="{ row }">{{ row.remark || '-' }}</template>
         </el-table-column>
-        <el-table-column :label="t('application.column.actions')" width="160" fixed="right">
+        <el-table-column :label="t('application.column.actions')" v-bind="TABLE_COLUMNS.actionsWide">
           <template #default="{ row }">
             <el-button v-if="permission.canDo('app:connect')" link type="success" size="small" @click="visitApp(row)">
               {{ t('application.action.visit') }}
@@ -111,6 +111,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import DataTableCard from '@/components/DataTableCard.vue'
 import FormDialog from '@/components/FormDialog.vue'
 import StatusSwitch from '@/components/StatusSwitch.vue'
+import { TABLE_COLUMNS } from '@/config/tableColumns'
 import { apiClient, type ApplicationView, type ApplicationPayload } from '@/api/client'
 import { useI18n } from '@/i18n'
 import { usePermissionStore } from '@/stores/permission'

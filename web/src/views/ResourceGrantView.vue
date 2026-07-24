@@ -46,7 +46,7 @@
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column :label="t('resourceGrant.expiresAt')" width="180">
+        <el-table-column v-bind="TABLE_COLUMNS.time" :label="t('resourceGrant.expiresAt')">
           <template #default="{ row }">
             {{ row.expires_at ? formatTime(row.expires_at) : t('resourceGrant.never') }}
           </template>
@@ -56,12 +56,12 @@
             {{ getCreatorName(row) }}
           </template>
         </el-table-column>
-        <el-table-column :label="t('common.createdAt')" width="180">
+        <el-table-column v-bind="TABLE_COLUMNS.time" :label="t('common.createdAt')">
           <template #default="{ row }">
             {{ formatTime(row.created_at) }}
           </template>
         </el-table-column>
-        <el-table-column :label="t('common.actions')" width="80" fixed="right">
+        <el-table-column v-bind="TABLE_COLUMNS.actionsCompact" :label="t('common.actions')">
           <template #default="{ row }">
             <el-button type="danger" link size="small" @click="deleteGrant(row)">
               {{ t('common.delete') }}
@@ -142,28 +142,28 @@
                       {{ row.name }}
                     </template>
                   </el-table-column>
-                  <el-table-column :label="t('resourceGrant.memberCountLabel')" width="100">
+                  <el-table-column v-bind="TABLE_COLUMNS.number" :label="t('resourceGrant.memberCountLabel')">
                     <template #default="{ row }">
                       {{ row.member_count || 0 }}
                     </template>
                   </el-table-column>
-                  <el-table-column :label="t('resourceGrant.description')" min-width="150" show-overflow-tooltip>
+                  <el-table-column v-bind="TABLE_COLUMNS.note" :label="t('common.remark')">
                     <template #default="{ row }">
-                      {{ row.description || '' }}
+                      {{ row.description || '-' }}
                     </template>
                   </el-table-column>
                 </template>
                 <template v-else-if="resourceTabType === 'host'">
                   <el-table-column label="主机名称" min-width="150" show-overflow-tooltip prop="name" />
-                  <el-table-column :label="t('resourceGrant.hostAddress')" min-width="150" show-overflow-tooltip>
+                  <el-table-column v-bind="TABLE_COLUMNS.address" :label="t('resourceGrant.hostAddress')">
                     <template #default="{ row }">{{ `${row.address || ''}:${row.port || 22}` }}</template>
                   </el-table-column>
-                  <el-table-column label="账号数量" width="100" prop="account_count" />
+                  <el-table-column v-bind="TABLE_COLUMNS.number" label="账号数量" prop="account_count" />
                 </template>
                 <template v-else-if="resourceTabType === 'database_instance'">
                   <el-table-column :label="t('resourceGrant.instanceName')" min-width="150" show-overflow-tooltip prop="name" />
                   <el-table-column label="协议" width="90" prop="protocol" />
-                  <el-table-column :label="t('resourceGrant.hostAddress')" min-width="150" show-overflow-tooltip>
+                  <el-table-column v-bind="TABLE_COLUMNS.address" :label="t('resourceGrant.hostAddress')">
                     <template #default="{ row }">{{ `${row.address || ''}:${row.port || ''}` }}</template>
                   </el-table-column>
                 </template>
@@ -178,7 +178,7 @@
                     {{ row.host_name || '' }}
                   </template>
                 </el-table-column>
-                <el-table-column :label="t('resourceGrant.hostAddress')" min-width="130" show-overflow-tooltip>
+                <el-table-column v-bind="TABLE_COLUMNS.address" :label="t('resourceGrant.hostAddress')">
                   <template #default="{ row }">
                     {{ row.host_address || '' }}
                   </template>
@@ -195,7 +195,7 @@
                     {{ row.instance_name || '' }}
                   </template>
                 </el-table-column>
-                <el-table-column :label="t('resourceGrant.hostAddress')" min-width="130" show-overflow-tooltip>
+                <el-table-column v-bind="TABLE_COLUMNS.address" :label="t('resourceGrant.hostAddress')">
                   <template #default="{ row }">
                     {{ row.instance_address || '' }}
                   </template>
@@ -205,10 +205,10 @@
                 <el-table-column label="应用名称" min-width="160" show-overflow-tooltip>
                   <template #default="{ row }">{{ row.name }}</template>
                 </el-table-column>
-                <el-table-column label="分组" min-width="120" show-overflow-tooltip>
+                <el-table-column v-bind="TABLE_COLUMNS.group" label="分组">
                   <template #default="{ row }">{{ row.group || '' }}</template>
                 </el-table-column>
-                <el-table-column label="代理端口" width="100">
+                <el-table-column v-bind="TABLE_COLUMNS.number" label="代理端口">
                   <template #default="{ row }">{{ row.listen_port }}</template>
                 </el-table-column>
               </template>
@@ -274,6 +274,7 @@ import { useI18n } from '@/i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Search } from '@element-plus/icons-vue'
 import DataTableCard from '@/components/DataTableCard.vue'
+import { TABLE_COLUMNS } from '@/config/tableColumns'
 import {
   apiClient,
   type ResourceGrantRecord,

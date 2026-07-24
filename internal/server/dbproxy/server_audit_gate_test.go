@@ -83,24 +83,26 @@ func TestFinishProtocolConnectionThreadsListenerContextAndBoundsAuditEnd(t *test
 	defer clientPeer.Close()
 	defer upstreamPeer.Close()
 
+	onlineSessions := online.NewRegistry()
 	gateway := &Gateway{
 		replayDir:         t.TempDir(),
 		logger:            slog.New(slog.NewTextHandler(io.Discard, nil)),
 		audit:             audit,
 		auditRequired:     true,
-		onlineSessions:    online.NewRegistry(),
+		onlineSessions:    onlineSessions,
 		pendingHandshakes: limiter,
 	}
 	connection := &gatewayConn{
-		protocol:     "redis",
-		accountID:    "account-1",
-		instanceID:   "instance-1",
-		accountName:  "account-name",
-		accountUser:  "upstream-user",
-		instanceName: "redis-instance",
-		userID:       "user-1",
-		upstream:     upstream,
-		upstreamAddr: "127.0.0.1:6379",
+		protocol:      "redis",
+		accountID:     "account-1",
+		instanceID:    "instance-1",
+		accountName:   "account-name",
+		accountUser:   "upstream-user",
+		instanceName:  "redis-instance",
+		userID:        "user-1",
+		userSessionID: "user-session-1",
+		upstream:      upstream,
+		upstreamAddr:  "127.0.0.1:6379",
 	}
 	listenerCtx, cancelListener := context.WithCancel(
 		context.WithValue(context.Background(), auditContextKey{}, "listener-value"),
@@ -122,6 +124,18 @@ func TestFinishProtocolConnectionThreadsListenerContextAndBoundsAuditEnd(t *test
 	create := waitAuditContextObservation(t, audit.createObserved, "CreateAuditSession")
 	if create.err != nil || create.value != "listener-value" {
 		t.Fatalf("CreateAuditSession context = %#v, want active listener context", create)
+	}
+	var onlineItems []online.Session
+	onlineDeadline := time.Now().Add(time.Second)
+	for time.Now().Before(onlineDeadline) {
+		onlineItems = onlineSessions.List()
+		if len(onlineItems) == 1 {
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if len(onlineItems) != 1 || onlineItems[0].UserSessionID != "user-session-1" {
+		t.Fatalf("online sessions = %#v, want linked user session", onlineItems)
 	}
 
 	cancelListener()
@@ -147,6 +161,20 @@ func TestFinishProtocolConnectionThreadsListenerContextAndBoundsAuditEnd(t *test
 	case <-done:
 	case <-time.After(time.Second):
 		t.Fatal("gateway connection did not finish")
+	}
+}
+
+func TestDatabaseGatewayClientIPUsesRemoteAddressHost(t *testing.T) {
+	server, peer := net.Pipe()
+	defer server.Close()
+	defer peer.Close()
+
+	connection := &remoteAddrConn{Conn: server, remote: "203.0.113.27:43210"}
+	if got := databaseGatewayClientIP(connection); got != "203.0.113.27" {
+		t.Fatalf("databaseGatewayClientIP() = %q, want 203.0.113.27", got)
+	}
+	if got := databaseGatewayClientIP(newAuditGateConn()); got != "" {
+		t.Fatalf("databaseGatewayClientIP() for non-IP address = %q, want empty", got)
 	}
 }
 

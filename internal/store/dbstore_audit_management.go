@@ -38,10 +38,15 @@ func (s *DBStore) ListAuditEvents(
 	if ctx == nil {
 		return nil, 0, errors.New("list audit events: nil context")
 	}
-	q := s.db.WithContext(ctx).Model(&model.AuditEvent{})
+	q := s.db.WithContext(ctx).
+		Model(&model.AuditEvent{}).
+		Where(logicalAuditEventRowsCondition(s.db.Dialector.Name()))
 	if params.Search != "" {
 		like := "%" + strings.ToLower(strings.TrimSpace(params.Search)) + "%"
-		q = q.Where("LOWER(actor_username) LIKE ? OR LOWER(action) LIKE ? OR LOWER(resource_type) LIKE ? OR LOWER(resource_name) LIKE ? OR LOWER(detail) LIKE ? OR LOWER(client_ip) LIKE ?", like, like, like, like, like, like)
+		q = q.Where(
+			"LOWER(actor_username) LIKE ? OR LOWER(action) LIKE ? OR LOWER(resource_type) LIKE ? OR LOWER(resource_name) LIKE ? OR LOWER(result) LIKE ? OR LOWER(request_id) LIKE ? OR LOWER(intent_id) LIKE ? OR LOWER(detail) LIKE ? OR LOWER(client_ip) LIKE ?",
+			like, like, like, like, like, like, like, like, like,
+		)
 	}
 	if params.Action != "" {
 		q = q.Where("action = ?", params.Action)
@@ -58,7 +63,7 @@ func (s *DBStore) ListAuditEvents(
 	}
 	page, size := normalizeAuditPage(params.Page, params.Size)
 	var items []model.AuditEvent
-	if err := q.Order("created_at DESC").Offset((page - 1) * size).Limit(size).Find(&items).Error; err != nil {
+	if err := q.Order("created_at DESC, id DESC").Offset((page - 1) * size).Limit(size).Find(&items).Error; err != nil {
 		return nil, 0, fmt.Errorf("list audit events: %w", err)
 	}
 	return items, total, nil
@@ -81,10 +86,15 @@ func (s *DBStore) ListLoginAuditLogs(
 	if ctx == nil {
 		return nil, 0, errors.New("list login audit logs: nil context")
 	}
-	q := s.db.WithContext(ctx).Model(&model.LoginAuditLog{})
+	q := s.db.WithContext(ctx).
+		Model(&model.LoginAuditLog{}).
+		Where(logicalLoginAuditRowsCondition(s.db.Dialector.Name()))
 	if params.Search != "" {
 		like := "%" + strings.ToLower(strings.TrimSpace(params.Search)) + "%"
-		q = q.Where("LOWER(username) LIKE ? OR LOWER(client_ip) LIKE ? OR LOWER(reason) LIKE ? OR LOWER(user_agent) LIKE ?", like, like, like, like)
+		q = q.Where(
+			"LOWER(username) LIKE ? OR LOWER(client_ip) LIKE ? OR LOWER(result) LIKE ? OR LOWER(request_id) LIKE ? OR LOWER(intent_id) LIKE ? OR LOWER(reason) LIKE ? OR LOWER(user_agent) LIKE ?",
+			like, like, like, like, like, like, like,
+		)
 	}
 	if params.Outcome != "" {
 		q = q.Where("outcome = ?", params.Outcome)
@@ -98,10 +108,83 @@ func (s *DBStore) ListLoginAuditLogs(
 	}
 	page, size := normalizeAuditPage(params.Page, params.Size)
 	var items []model.LoginAuditLog
-	if err := q.Order("created_at DESC").Offset((page - 1) * size).Limit(size).Find(&items).Error; err != nil {
+	if err := q.Order("created_at DESC, id DESC").Offset((page - 1) * size).Limit(size).Find(&items).Error; err != nil {
 		return nil, 0, fmt.Errorf("list login audit logs: %w", err)
 	}
 	return items, total, nil
+}
+
+// logicalAuditEventRowsCondition keeps the durable result row for a completed
+// two-phase operation and keeps the intent only when no linked result exists.
+// The legacy JSON predicate preserves the same semantics for pre-structure rows.
+func logicalAuditEventRowsCondition(dialect string) string {
+	legacyIntentPattern := sqlAuditConcat(
+		dialect,
+		`'%"intent_id":"'`,
+		"audit_events.id",
+		`'"%'`,
+	)
+	return fmt.Sprintf(`NOT (
+		(
+			COALESCE(audit_events.phase, '') = 'intent'
+			OR (
+				COALESCE(audit_events.phase, '') = ''
+				AND audit_events.detail LIKE '%%"phase":"intent"%%'
+			)
+		)
+		AND EXISTS (
+			SELECT 1
+			FROM audit_events AS audit_event_results
+			WHERE (
+				audit_event_results.phase = 'result'
+				AND audit_event_results.intent_id = audit_events.id
+			) OR (
+				COALESCE(audit_event_results.phase, '') = ''
+				AND audit_event_results.detail LIKE '%%"phase":"result"%%'
+				AND audit_event_results.detail LIKE %s
+			)
+		)
+	)`, legacyIntentPattern)
+}
+
+// logicalLoginAuditRowsCondition applies the same completed-pair collapsing to
+// login logs. Legacy rows encoded their linkage at the start of Reason.
+func logicalLoginAuditRowsCondition(dialect string) string {
+	legacyIntentPattern := sqlAuditConcat(
+		dialect,
+		"'intent_id='",
+		"audit_login_logs.id",
+		"'%'",
+	)
+	return fmt.Sprintf(`NOT (
+		(
+			COALESCE(audit_login_logs.phase, '') = 'intent'
+			OR (
+				COALESCE(audit_login_logs.phase, '') = ''
+				AND audit_login_logs.outcome = 'pending'
+				AND audit_login_logs.reason = 'intent'
+			)
+		)
+		AND EXISTS (
+			SELECT 1
+			FROM audit_login_logs AS login_audit_results
+			WHERE (
+				login_audit_results.phase = 'result'
+				AND login_audit_results.intent_id = audit_login_logs.id
+			) OR (
+				COALESCE(login_audit_results.phase, '') = ''
+				AND login_audit_results.outcome <> 'pending'
+				AND login_audit_results.reason LIKE %s
+			)
+		)
+	)`, legacyIntentPattern)
+}
+
+func sqlAuditConcat(dialect string, expressions ...string) string {
+	if dialect == "mysql" {
+		return "CONCAT(" + strings.Join(expressions, ", ") + ")"
+	}
+	return strings.Join(expressions, " || ")
 }
 
 func normalizeAuditPage(page, size int) (int, int) {

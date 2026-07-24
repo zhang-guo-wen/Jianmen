@@ -17,56 +17,57 @@
             <template #toolbar-extra>
               <el-button :loading="sessionsLoading" :icon="Refresh" @click="loadSessions">{{ t('common.refresh') }}</el-button>
             </template>
-            <el-table-column :label="t('audit.column.instance')" min-width="150" show-overflow-tooltip>
+            <el-table-column v-bind="TABLE_COLUMNS.time" :label="t('audit.column.startedAt')" class-name="col-time">
               <template #default="{ row }">
-                {{ sessionInstance(row) }}
+                {{ formatTime(row.started_at) }}
               </template>
             </el-table-column>
-            <el-table-column :label="t('audit.column.account')" min-width="120" show-overflow-tooltip>
-              <template #default="{ row }">
-                {{ sessionAccount(row) }}
-              </template>
-            </el-table-column>
-            <el-table-column :label="t('audit.column.operator')" min-width="150">
+            <el-table-column :label="t('audit.column.operator')" min-width="130" show-overflow-tooltip>
               <template #default="{ row }">
                 {{ sessionUser(row) }}
               </template>
             </el-table-column>
-            <el-table-column :label="t('audit.column.sessionId')" width="110">
+            <el-table-column v-bind="TABLE_COLUMNS.identifier" :label="t('audit.column.authSessionId')">
               <template #default="{ row }">
-                <el-link
-                  v-if="row.session_id"
-                  class="session-id-link"
-                  type="primary"
-                  role="button"
-                  tabindex="0"
-                  @click.stop="showUserSessionDetail(row.session_id)"
-                  @keydown.enter.space.prevent.stop="showUserSessionDetail(row.session_id)"
-                >
-                  {{ row.session_id }}
-                </el-link>
-                <span v-else>-</span>
+                <AuditSessionLink :session-id="row.session_id" @open="showUserSessionDetail" />
               </template>
+            </el-table-column>
+            <el-table-column v-bind="TABLE_COLUMNS.address" :label="t('audit.column.targetHost')">
+              <template #default="{ row }">
+                {{ sessionInstance(row) }}
+              </template>
+            </el-table-column>
+            <el-table-column :label="t('audit.column.hostAccount')" min-width="130" show-overflow-tooltip>
+              <template #default="{ row }">
+                {{ sessionAccount(row) }}
+              </template>
+            </el-table-column>
+            <el-table-column v-bind="TABLE_COLUMNS.address" :label="t('audit.column.sourceIp')">
+              <template #default="{ row }">{{ row.client_ip || '-' }}</template>
             </el-table-column>
             <el-table-column :label="t('audit.column.protocol')" width="90">
               <template #default="{ row }">
                 <el-tag :type="sessionProtocolTag(row)" size="small" effect="plain">{{ sessionProtocol(row) }}</el-tag>
               </template>
             </el-table-column>
-            <el-table-column :label="t('sessions.column.started')" width="170" show-overflow-tooltip class-name="col-time">
+            <el-table-column v-bind="TABLE_COLUMNS.status" :label="t('audit.column.result')">
               <template #default="{ row }">
-                {{ formatTime(row.started_at ?? row.startedAt) }}
+                <AuditResultTag
+                  :label="connectionOutcomeLabel(row.outcome, row.state)"
+                  :type="connectionOutcomeTag(row.outcome, row.state)"
+                  :detail="auditFailureDetail(row.failure_code, row.failure_message)"
+                />
               </template>
             </el-table-column>
-            <el-table-column :label="t('audit.column.duration')" width="90">
+            <el-table-column v-bind="TABLE_COLUMNS.number" :label="t('audit.column.duration')">
               <template #default="{ row }">
                 {{ formatDurationSeconds(computeDuration(row.started_at, row.ended_at)) }}
               </template>
             </el-table-column>
-            <el-table-column :label="t('audit.column.logCount')" width="90" align="center">
+            <el-table-column v-bind="TABLE_COLUMNS.number" :label="t('audit.column.eventCount')">
               <template #default="{ row }">{{ row.log_count ?? 0 }}</template>
             </el-table-column>
-            <el-table-column :label="t('common.actions')" fixed="right" width="180">
+            <el-table-column v-bind="TABLE_COLUMNS.actions" :label="t('common.actions')">
               <template #default="{ row }">
                 <el-button :disabled="!hasReplay(row)" link type="success" @click="loadSessionArtifact(row, 'replay')">
                   {{ t('audit.action.replay') }}
@@ -97,52 +98,48 @@
                 {{ t('common.refresh') }}
               </el-button>
             </template>
-            <el-table-column label="Windows 主机" min-width="180" show-overflow-tooltip>
-              <template #default="{ row }">{{ rdpSessionTarget(row) }}</template>
-            </el-table-column>
-            <el-table-column label="主机账号" min-width="150" show-overflow-tooltip>
-              <template #default="{ row }">{{ rdpSessionAccount(row) }}</template>
-            </el-table-column>
-            <el-table-column label="操作用户" min-width="130" show-overflow-tooltip>
-              <template #default="{ row }">{{ row.username || row.user_id || '-' }}</template>
-            </el-table-column>
-            <el-table-column label="结果" width="100">
-              <template #default="{ row }">
-                <el-tooltip
-                  :disabled="!row.failure_message"
-                  :content="row.failure_message || ''"
-                  placement="top"
-                >
-                  <el-tag
-                    :type="rdpOutcomeTag(row.outcome)"
-                    :tabindex="row.failure_message ? 0 : -1"
-                    :aria-label="row.failure_message
-                      ? `${rdpOutcomeLabel(row.outcome)}：${row.failure_message}`
-                      : rdpOutcomeLabel(row.outcome)"
-                    size="small"
-                    effect="plain"
-                  >
-                    {{ rdpOutcomeLabel(row.outcome) }}
-                  </el-tag>
-                </el-tooltip>
-              </template>
-            </el-table-column>
-            <el-table-column label="开始时间" width="170" class-name="col-time">
+            <el-table-column v-bind="TABLE_COLUMNS.time" :label="t('audit.column.startedAt')" class-name="col-time">
               <template #default="{ row }">{{ formatTime(row.started_at) }}</template>
             </el-table-column>
-            <el-table-column label="时长" width="90">
+            <el-table-column :label="t('audit.column.operator')" min-width="130" show-overflow-tooltip>
+              <template #default="{ row }">{{ row.username || row.user_id || '-' }}</template>
+            </el-table-column>
+            <el-table-column v-bind="TABLE_COLUMNS.identifier" :label="t('audit.column.authSessionId')">
+              <template #default="{ row }">
+                <AuditSessionLink :session-id="row.session_id" @open="showUserSessionDetail" />
+              </template>
+            </el-table-column>
+            <el-table-column v-bind="TABLE_COLUMNS.address" :label="t('audit.column.targetHost')">
+              <template #default="{ row }">{{ rdpSessionTarget(row) }}</template>
+            </el-table-column>
+            <el-table-column :label="t('audit.column.hostAccount')" min-width="150" show-overflow-tooltip>
+              <template #default="{ row }">{{ rdpSessionAccount(row) }}</template>
+            </el-table-column>
+            <el-table-column v-bind="TABLE_COLUMNS.address" :label="t('audit.column.sourceIp')">
+              <template #default="{ row }">{{ row.client_ip || '-' }}</template>
+            </el-table-column>
+            <el-table-column v-bind="TABLE_COLUMNS.status" :label="t('audit.column.result')">
+              <template #default="{ row }">
+                <AuditResultTag
+                  :label="connectionOutcomeLabel(row.outcome, row.state)"
+                  :type="connectionOutcomeTag(row.outcome, row.state)"
+                  :detail="auditFailureDetail(row.failure_code, row.failure_message)"
+                />
+              </template>
+            </el-table-column>
+            <el-table-column v-bind="TABLE_COLUMNS.number" :label="t('audit.column.duration')">
               <template #default="{ row }">
                 {{ formatDurationSeconds(computeDuration(row.started_at, row.ended_at)) }}
               </template>
             </el-table-column>
-            <el-table-column label="录屏" width="100">
+            <el-table-column v-bind="TABLE_COLUMNS.status" :label="t('audit.column.recordingStatus')">
               <template #default="{ row }">
                 <el-tag :type="rdpRecordingTag(row.recording_status)" size="small" effect="plain">
                   {{ rdpRecordingLabel(row.recording_status) }}
                 </el-tag>
               </template>
             </el-table-column>
-            <el-table-column :label="t('common.actions')" fixed="right" width="90">
+            <el-table-column v-bind="TABLE_COLUMNS.actionsCompact" :label="t('common.actions')">
               <template #default="{ row }">
                 <el-button
                   :disabled="!row.has_replay"
@@ -173,32 +170,29 @@
             <template #toolbar-extra>
               <el-button :loading="dbLoading" :icon="Refresh" @click="loadDBConnections">{{ t('common.refresh') }}</el-button>
             </template>
-            <el-table-column :label="t('audit.column.instance')" min-width="150" show-overflow-tooltip>
-              <template #default="{ row }">{{ row.target_name || row.upstream_addr || '-' }}</template>
-            </el-table-column>
-            <el-table-column :label="t('audit.column.account')" min-width="120" show-overflow-tooltip>
-              <template #default="{ row }">{{ row.account_name || '-' }}</template>
-            </el-table-column>
-            <el-table-column :label="t('audit.column.operator')" min-width="150">
+            <el-table-column v-bind="TABLE_COLUMNS.time" :label="t('audit.column.startedAt')" class-name="col-time">
               <template #default="{ row }">
-                {{ row.username || row.name || '-' }}
+                {{ formatTime(row.started_at) }}
               </template>
             </el-table-column>
-            <el-table-column :label="t('audit.column.sessionId')" width="110">
+            <el-table-column :label="t('audit.column.operator')" min-width="130" show-overflow-tooltip>
               <template #default="{ row }">
-                <el-link
-                  v-if="row.session_id"
-                  class="session-id-link"
-                  type="primary"
-                  role="button"
-                  tabindex="0"
-                  @click.stop="showUserSessionDetail(row.session_id)"
-                  @keydown.enter.space.prevent.stop="showUserSessionDetail(row.session_id)"
-                >
-                  {{ row.session_id }}
-                </el-link>
-                <span v-else>-</span>
+                {{ row.username || row.user_id || '-' }}
               </template>
+            </el-table-column>
+            <el-table-column v-bind="TABLE_COLUMNS.identifier" :label="t('audit.column.authSessionId')">
+              <template #default="{ row }">
+                <AuditSessionLink :session-id="row.session_id" @open="showUserSessionDetail" />
+              </template>
+            </el-table-column>
+            <el-table-column v-bind="TABLE_COLUMNS.address" :label="t('audit.column.databaseInstance')">
+              <template #default="{ row }">{{ displayAuditIdentity(row.target_address, row.target_name) }}</template>
+            </el-table-column>
+            <el-table-column :label="t('audit.column.databaseAccount')" min-width="130" show-overflow-tooltip>
+              <template #default="{ row }">{{ displayAuditIdentity(row.account_username, row.account_name) }}</template>
+            </el-table-column>
+            <el-table-column v-bind="TABLE_COLUMNS.address" :label="t('audit.column.sourceIp')">
+              <template #default="{ row }">{{ row.client_ip || '-' }}</template>
             </el-table-column>
             <el-table-column :label="t('audit.column.protocol')" width="110">
               <template #default="{ row }">
@@ -207,20 +201,24 @@
                 </el-tag>
               </template>
             </el-table-column>
-            <el-table-column :label="t('sessions.column.started')" min-width="170" show-overflow-tooltip class-name="col-time">
+            <el-table-column v-bind="TABLE_COLUMNS.status" :label="t('audit.column.result')">
               <template #default="{ row }">
-                {{ formatTime(row.started_at) }}
+                <AuditResultTag
+                  :label="connectionOutcomeLabel(row.outcome, row.state)"
+                  :type="connectionOutcomeTag(row.outcome, row.state)"
+                  :detail="auditFailureDetail(row.failure_code, row.failure_message)"
+                />
               </template>
             </el-table-column>
-            <el-table-column :label="t('audit.column.duration')" width="100">
+            <el-table-column v-bind="TABLE_COLUMNS.number" :label="t('audit.column.duration')">
               <template #default="{ row }">
-                {{ formatDuration(row.duration_ms ?? computeDurationMs(row.started_at, row.ended_at)) }}
+                {{ formatDuration(computeDurationMs(row.started_at, row.ended_at)) }}
               </template>
             </el-table-column>
-            <el-table-column :label="t('audit.column.logCount')" width="90" align="center">
+            <el-table-column v-bind="TABLE_COLUMNS.number" :label="t('audit.column.sqlCount')">
               <template #default="{ row }">{{ row.log_count ?? 0 }}</template>
             </el-table-column>
-            <el-table-column :label="t('common.actions')" fixed="right" width="90">
+            <el-table-column v-bind="TABLE_COLUMNS.actionsCompact" :label="t('common.actions')">
               <template #default="{ row }">
                 <el-button link type="primary" @click="loadDBArtifact(row, 'queries')">
                   {{ t('audit.action.queries') }}
@@ -246,7 +244,18 @@
             <template #toolbar-extra>
               <el-button :loading="onlineLoading" :icon="Refresh" @click="loadOnlineSessions">{{ t('common.refresh') }}</el-button>
             </template>
-            <el-table-column :label="t('audit.column.instance')" min-width="180" show-overflow-tooltip>
+            <el-table-column v-bind="TABLE_COLUMNS.time" :label="t('audit.column.startedAt')" class-name="col-time">
+              <template #default="{ row }">{{ formatTime(row.started_at) }}</template>
+            </el-table-column>
+            <el-table-column :label="t('audit.column.operator')" min-width="120" show-overflow-tooltip>
+              <template #default="{ row }">{{ row.operator || '-' }}</template>
+            </el-table-column>
+            <el-table-column v-bind="TABLE_COLUMNS.identifier" :label="t('audit.column.authSessionId')">
+              <template #default="{ row }">
+                <AuditSessionLink :session-id="row.session_id" @open="showUserSessionDetail" />
+              </template>
+            </el-table-column>
+            <el-table-column v-bind="TABLE_COLUMNS.address" :label="t('audit.column.targetResource')">
               <template #default="{ row }">{{ row.instance || '-' }}</template>
             </el-table-column>
             <el-table-column :label="t('audit.column.protocol')" width="110">
@@ -256,32 +265,10 @@
                 </el-tag>
               </template>
             </el-table-column>
-            <el-table-column :label="t('audit.column.account')" min-width="140" show-overflow-tooltip>
+            <el-table-column :label="t('audit.column.loginAccount')" min-width="140" show-overflow-tooltip>
               <template #default="{ row }">{{ row.account || '-' }}</template>
             </el-table-column>
-            <el-table-column :label="t('audit.column.operator')" min-width="120" show-overflow-tooltip>
-              <template #default="{ row }">{{ row.operator || '-' }}</template>
-            </el-table-column>
-            <el-table-column :label="t('audit.column.sessionId')" width="110">
-              <template #default="{ row }">
-                <el-link
-                  v-if="row.session_id"
-                  class="session-id-link"
-                  type="primary"
-                  role="button"
-                  tabindex="0"
-                  @click.stop="showUserSessionDetail(row.session_id)"
-                  @keydown.enter.space.prevent.stop="showUserSessionDetail(row.session_id)"
-                >
-                  {{ row.session_id }}
-                </el-link>
-                <span v-else>-</span>
-              </template>
-            </el-table-column>
-            <el-table-column :label="t('sessions.column.started')" width="170" show-overflow-tooltip class-name="col-time">
-              <template #default="{ row }">{{ formatTime(row.started_at) }}</template>
-            </el-table-column>
-            <el-table-column :label="t('common.actions')" fixed="right" width="210">
+            <el-table-column v-bind="TABLE_COLUMNS.actionsWide" :label="t('common.actions')">
               <template #default="{ row }">
                 <el-button :disabled="!row.has_replay" link type="success" @click="loadOnlineReplay(row)">
                   {{ t('audit.action.replay') }}
@@ -317,7 +304,7 @@
             @search="onLoginAuditSearch"
           >
             <template #toolbar-extra>
-              <el-select v-model="loginAuditOutcome" size="small" style="width: 110px" @change="loadLoginAuditLogs">
+              <el-select v-model="loginAuditOutcome" size="small" style="width: 110px" @change="onLoginAuditOutcomeChange">
                 <el-option :label="t('audit.filter.all')" value="" />
                 <el-option :label="t('audit.result.success')" value="success" />
                 <el-option :label="t('audit.result.failure')" value="failure" />
@@ -325,20 +312,22 @@
               </el-select>
               <el-button :loading="loginAuditLoading" :icon="Refresh" @click="loadLoginAuditLogs">{{ t('common.refresh') }}</el-button>
             </template>
-            <el-table-column :label="t('audit.column.time')" width="175" show-overflow-tooltip class-name="col-time">
+            <el-table-column v-bind="TABLE_COLUMNS.time" :label="t('audit.column.loginTime')" class-name="col-time">
               <template #default="{ row }">{{ formatTime(row.created_at) }}</template>
             </el-table-column>
-            <el-table-column prop="username" :label="t('audit.column.username')" min-width="140" show-overflow-tooltip />
-            <el-table-column :label="t('audit.column.result')" width="100">
+            <el-table-column prop="username" :label="t('audit.column.loginAccount')" min-width="140" show-overflow-tooltip />
+            <el-table-column v-bind="TABLE_COLUMNS.address" prop="client_ip" :label="t('audit.column.sourceIp')" />
+            <el-table-column v-bind="TABLE_COLUMNS.status" :label="t('audit.column.loginResult')">
               <template #default="{ row }">
-                <el-tag :type="loginOutcomeTag(row.outcome)" size="small" effect="plain">{{ loginOutcomeLabel(row.outcome) }}</el-tag>
+                <el-tag :type="loginOutcomeTag(row.result || row.outcome)" size="small" effect="plain">
+                  {{ loginOutcomeLabel(row.result || row.outcome) }}
+                </el-tag>
               </template>
             </el-table-column>
-            <el-table-column prop="reason" :label="t('audit.column.reason')" min-width="150" show-overflow-tooltip>
-              <template #default="{ row }">{{ row.reason || '-' }}</template>
+            <el-table-column v-bind="TABLE_COLUMNS.note" prop="reason" :label="t('audit.column.resultDetail')">
+              <template #default="{ row }">{{ loginReasonForDisplay(row.reason) || '-' }}</template>
             </el-table-column>
-            <el-table-column prop="client_ip" :label="t('audit.column.client')" width="140" show-overflow-tooltip />
-            <el-table-column prop="user_agent" :label="t('audit.column.userAgent')" min-width="240" show-overflow-tooltip />
+            <el-table-column prop="user_agent" :label="t('audit.column.clientEnvironment')" min-width="240" show-overflow-tooltip />
           </DataTableCard>
         </div>
       </el-tab-pane>
@@ -356,33 +345,42 @@
             @search="onOperationAuditSearch"
           >
             <template #toolbar-extra>
-              <el-select v-model="operationAuditAction" size="small" style="width: 110px" @change="loadOperationAuditLogs">
+              <el-select v-model="operationAuditAction" size="small" style="width: 110px" @change="onOperationAuditActionChange">
                 <el-option :label="t('audit.filter.all')" value="" />
                 <el-option :label="t('audit.action.create')" value="create" />
                 <el-option :label="t('audit.action.update')" value="update" />
                 <el-option :label="t('audit.action.delete')" value="delete" />
                 <el-option :label="t('audit.action.revoke')" value="revoke" />
                 <el-option :label="t('audit.action.test')" value="test" />
+                <el-option :label="t('audit.action.refresh')" value="refresh" />
               </el-select>
               <el-button :loading="operationAuditLoading" :icon="Refresh" @click="loadOperationAuditLogs">{{ t('common.refresh') }}</el-button>
             </template>
-            <el-table-column :label="t('audit.column.time')" width="175" show-overflow-tooltip class-name="col-time">
+            <el-table-column v-bind="TABLE_COLUMNS.time" :label="t('audit.column.operationTime')" class-name="col-time">
               <template #default="{ row }">{{ formatTime(row.created_at) }}</template>
             </el-table-column>
             <el-table-column prop="actor_username" :label="t('audit.column.operator')" width="130" show-overflow-tooltip />
-            <el-table-column :label="t('audit.column.action')" width="100">
+            <el-table-column :label="t('audit.column.operationType')" width="100">
               <template #default="{ row }">{{ operationActionLabel(row.action) }}</template>
             </el-table-column>
-            <el-table-column prop="resource_type" :label="t('audit.column.resource')" min-width="150" show-overflow-tooltip />
-            <el-table-column :label="t('audit.column.resourceId')" min-width="170" show-overflow-tooltip>
-              <template #default="{ row }">{{ row.resource_id || row.resource_name || '-' }}</template>
+            <el-table-column prop="resource_type" :label="t('audit.column.resourceType')" min-width="150" show-overflow-tooltip />
+            <el-table-column :label="t('audit.column.operationTarget')" min-width="170" show-overflow-tooltip>
+              <template #default="{ row }">
+                {{ displayAuditIdentity(row.resource_id, row.resource_name) }}
+              </template>
             </el-table-column>
-            <el-table-column :label="t('audit.column.result')" width="100">
+            <el-table-column v-bind="TABLE_COLUMNS.address" prop="client_ip" :label="t('audit.column.sourceIp')" />
+            <el-table-column v-bind="TABLE_COLUMNS.note" :label="t('audit.column.requestId')">
+              <template #default="{ row }">{{ operationRequestID(row) }}</template>
+            </el-table-column>
+            <el-table-column v-bind="TABLE_COLUMNS.number" :label="t('audit.column.httpStatus')">
+              <template #default="{ row }">{{ operationStatusCode(row) }}</template>
+            </el-table-column>
+            <el-table-column v-bind="TABLE_COLUMNS.status" :label="t('audit.column.result')">
               <template #default="{ row }">
                 <el-tag :type="operationResultTag(row)" size="small" effect="plain">{{ operationResultLabel(row) }}</el-tag>
               </template>
             </el-table-column>
-            <el-table-column prop="client_ip" :label="t('audit.column.client')" width="140" show-overflow-tooltip />
           </DataTableCard>
         </div>
       </el-tab-pane>
@@ -404,32 +402,36 @@
       <div v-else v-loading="detailLoading" class="drawer-content">
         <el-descriptions v-if="isDBMeta" :column="2" border>
           <el-descriptions-item :label="t('common.id')">{{ dbMeta.id || t('common.none') }}</el-descriptions-item>
-          <el-descriptions-item :label="t('common.name')">{{ dbMeta.name || t('common.none') }}</el-descriptions-item>
+          <el-descriptions-item :label="t('audit.column.databaseInstance')">
+            {{ displayAuditIdentity(dbMeta.target_address, dbMeta.target_name) }}
+          </el-descriptions-item>
           <el-descriptions-item :label="t('audit.column.protocol')">
             {{ dbMeta.protocol || t('common.none') }}
           </el-descriptions-item>
-          <el-descriptions-item :label="t('audit.column.authUser')">
+          <el-descriptions-item :label="t('audit.column.operator')">
             {{ dbMeta.username || t('common.none') }}
           </el-descriptions-item>
-          <el-descriptions-item :label="t('audit.column.database')">
-            {{ dbMeta.database || t('common.none') }}
+          <el-descriptions-item :label="t('audit.column.databaseAccount')">
+            {{ displayAuditIdentity(dbMeta.account_username, dbMeta.account_name) }}
           </el-descriptions-item>
-          <el-descriptions-item :label="t('audit.column.application')">
-            {{ dbMeta.application_name || t('common.none') }}
+          <el-descriptions-item :label="t('audit.column.sourceIp')">
+            {{ dbMeta.client_ip || t('common.none') }}
           </el-descriptions-item>
-          <el-descriptions-item :label="t('audit.column.client')">
-            {{ dbMeta.client_addr || t('common.none') }}
+          <el-descriptions-item :label="t('audit.column.startedAt')">
+            {{ formatTime(dbMeta.started_at) }}
           </el-descriptions-item>
-          <el-descriptions-item :label="t('audit.column.upstream')">
-            {{ dbMeta.upstream_addr || t('common.none') }}
+          <el-descriptions-item :label="t('audit.column.result')">
+            <AuditResultTag
+              :label="connectionOutcomeLabel(dbMeta.outcome, dbMeta.state)"
+              :type="connectionOutcomeTag(dbMeta.outcome, dbMeta.state)"
+              :detail="auditFailureDetail(dbMeta.failure_code, dbMeta.failure_message)"
+            />
           </el-descriptions-item>
-          <el-descriptions-item :label="t('audit.column.allowedUsers')" :span="2">
-            <el-tag :type="dbMeta.allowed_users_enforced ? 'success' : 'info'">
-              {{ dbMeta.allowed_users_enforced ? t('common.enabled') : t('common.disabled') }}
-            </el-tag>
+          <el-descriptions-item :label="t('audit.status')">
+            {{ dbMeta.state || t('common.none') }}
           </el-descriptions-item>
-          <el-descriptions-item :label="t('audit.column.observation')" :span="2">
-            {{ dbMeta.auth_observation || t('common.none') }}
+          <el-descriptions-item :label="t('audit.column.resultDetail')" :span="2">
+            {{ dbMeta.failure_message || dbMeta.failure_code || t('common.none') }}
           </el-descriptions-item>
         </el-descriptions>
 
@@ -494,7 +496,7 @@
           v-model:page-size="logPageSize"
           @search="onLogSearch"
         >
-          <el-table-column :label="t('audit.column.time')" width="170" show-overflow-tooltip class-name="col-time">
+          <el-table-column v-bind="TABLE_COLUMNS.time" :label="t('audit.column.time')" class-name="col-time">
             <template #default="{ row }">
               {{ formatTime(row.started_at) }}
             </template>
@@ -518,16 +520,23 @@
               </div>
             </template>
           </el-table-column>
-          <el-table-column :label="t('audit.column.duration')" width="100">
+          <el-table-column v-bind="TABLE_COLUMNS.number" :label="t('audit.column.rowCount')">
+            <template #default="{ row }">
+              {{ formatQueryRowCount(row) }}
+            </template>
+          </el-table-column>
+          <el-table-column v-bind="TABLE_COLUMNS.number" :label="t('audit.column.duration')">
             <template #default="{ row }">
               {{ formatDuration(row.duration_ms) }}
             </template>
           </el-table-column>
-          <el-table-column :label="t('audit.column.result')" width="110">
+          <el-table-column v-bind="TABLE_COLUMNS.status" :label="t('audit.column.result')">
             <template #default="{ row }">
-              <el-tag :type="queryStatusType(row.status)" size="small" effect="plain">
-                {{ queryStatusLabel(row.status) }}
-              </el-tag>
+              <AuditResultTag
+                :label="queryStatusLabel(row.status)"
+                :type="queryStatusType(row.status)"
+                :detail="auditFailureDetail(row.error_code, row.error_message)"
+              />
             </template>
           </el-table-column>
         </DataTableCard>
@@ -542,7 +551,7 @@
           v-model:page-size="logPageSize"
           @search="onLogSearch"
         >
-          <el-table-column :label="t('audit.column.time')" width="175" show-overflow-tooltip class-name="col-time">
+          <el-table-column v-bind="TABLE_COLUMNS.time" :label="t('audit.column.time')" class-name="col-time">
             <template #default="{ row }">
               {{ formatTime(row.timestamp ?? row.started_at) }}
             </template>
@@ -559,7 +568,7 @@
           v-model:page="logPage"
           v-model:page-size="logPageSize"
         >
-          <el-table-column :label="t('audit.column.time')" width="175" show-overflow-tooltip class-name="col-time">
+          <el-table-column v-bind="TABLE_COLUMNS.time" :label="t('audit.column.time')" class-name="col-time">
             <template #default="{ row }">
               {{ formatTime(row.timestamp ?? row.started_at) }}
             </template>
@@ -570,14 +579,14 @@
             </template>
           </el-table-column>
           <el-table-column prop="path" :label="t('audit.column.path')" min-width="420" show-overflow-tooltip />
-          <el-table-column :label="t('audit.column.result')" width="75">
+          <el-table-column v-bind="TABLE_COLUMNS.status" :label="t('audit.column.result')">
             <template #default="{ row }">
               <el-tag :type="row.result === 'success' ? 'success' : 'danger'" size="small">
                 {{ row.result === 'success' ? t('audit.result.success') : t('audit.result.failure') }}
               </el-tag>
             </template>
           </el-table-column>
-          <el-table-column :label="t('audit.column.size')" width="75">
+          <el-table-column v-bind="TABLE_COLUMNS.number" :label="t('audit.column.size')">
             <template #default="{ row }">
               <template v-if="row.size > 0">{{ formatBytes(row.size) }}</template>
             </template>
@@ -649,8 +658,11 @@ import { Refresh } from '@element-plus/icons-vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { useRoute } from 'vue-router';
 
+import AuditResultTag from '@/components/audit/AuditResultTag.vue';
+import AuditSessionLink from '@/components/audit/AuditSessionLink.vue';
 import DataTableCard from '@/components/DataTableCard.vue';
 import UserSessionDetailDialog from '@/components/UserSessionDetailDialog.vue';
+import { TABLE_COLUMNS } from '@/config/tableColumns';
 import {
   apiClient,
   type DBConnectionMetaRecord,
@@ -666,6 +678,18 @@ import {
 } from '@/api/client';
 import { useI18n } from '@/i18n';
 import { usePermissionStore } from '@/stores/permission';
+import {
+  auditFailureDetail,
+  connectionOutcomePresentation,
+  formatAuditTimestamp,
+  loginOutcomePresentation,
+  loginReasonForDisplay,
+  operationResultPresentation,
+  parseOperationAuditMetadata,
+  queryResultPresentation,
+  type AuditResultCode,
+  type AuditTagType,
+} from '@/utils/auditDisplay';
 import { installUnicodeGuacamoleParser } from '@/utils/guacamoleProtocol';
 import {
   bindRDPReplayDisplay,
@@ -866,7 +890,9 @@ const isDBQueries = computed(() => detailKind.value === 'queries' && hasItems(de
 const isCommands = computed(() => detailKind.value === 'commands' && hasItems(detailData.value));
 const isFiles = computed(() => detailKind.value === 'files' && hasItems(detailData.value));
 const isReplay = computed(() => detailKind.value === 'replay' && isReplayData(detailData.value));
-const dbMeta = computed(() => (isRecord(detailData.value) ? (detailData.value as DBConnectionMetaRecord) : {}));
+const dbMeta = computed<Partial<DBConnectionMetaRecord>>(() => (
+  isRecord(detailData.value) ? (detailData.value as unknown as DBConnectionMetaRecord) : {}
+));
 const queryEvents = computed(() => extractItems<DBQueryEventRecord>(detailData.value));
 
 // 合并 start/finish 事件为一行
@@ -880,6 +906,8 @@ interface MergedQueryEvent {
   status: string;
   duration_ms: number;
   started_at: number;
+  rows_affected?: number | null;
+  rows?: number | null;
   error_code?: string;
   error_message?: string;
 }
@@ -917,6 +945,8 @@ const mergedQueryEvents = computed<MergedQueryEvent[]>(() => {
     } else {
       cur.status = ev.status ?? cur.status;
       cur.duration_ms = ev.duration_ms ?? cur.duration_ms;
+      cur.rows_affected = ev.rows_affected;
+      cur.rows = ev.rows;
       cur.error_code = ev.error_code;
       cur.error_message = ev.error_message;
       // 如果没有 duration_ms，用 started_at 和 completed_at 计算
@@ -928,6 +958,11 @@ const mergedQueryEvents = computed<MergedQueryEvent[]>(() => {
   }
   return Array.from(map.values()).sort((a, b) => a.seq - b.seq);
 });
+
+function formatQueryRowCount(row: MergedQueryEvent): string {
+  const count = row.rows ?? row.rows_affected;
+  return count == null ? '-' : String(count);
+}
 function extractItems<T>(data: unknown): T[] {
   if (Array.isArray(data)) return data as T[];
   if (data && typeof data === 'object' && 'items' in data && Array.isArray((data as Record<string, unknown>).items)) {
@@ -983,26 +1018,16 @@ function rdpSessionAccount(session: RDPAuditSessionRecord): string {
   return displayAuditIdentity(session.account_username || session.account_id, session.account_name);
 }
 
-function rdpOutcomeLabel(outcome: unknown): string {
-  switch (String(outcome || '').toLowerCase()) {
-    case 'succeeded': return '成功';
-    case 'failed': return '失败';
-    case 'denied': return '已拒绝';
-    case 'terminated': return '已中止';
-    case 'active': return '进行中';
-    case 'connecting': return '连接中';
-    default: return '未知';
-  }
+function auditResultLabel(code: AuditResultCode): string {
+  return t(`audit.result.${code}`);
 }
 
-function rdpOutcomeTag(outcome: unknown): 'success' | 'warning' | 'danger' | 'info' {
-  switch (String(outcome || '').toLowerCase()) {
-    case 'succeeded': return 'success';
-    case 'failed': return 'danger';
-    case 'denied':
-    case 'terminated': return 'warning';
-    default: return 'info';
-  }
+function connectionOutcomeLabel(outcome: unknown, state?: unknown): string {
+  return auditResultLabel(connectionOutcomePresentation(outcome, state).code);
+}
+
+function connectionOutcomeTag(outcome: unknown, state?: unknown): AuditTagType {
+  return connectionOutcomePresentation(outcome, state).tag;
 }
 
 function rdpRecordingLabel(status: unknown): string {
@@ -1046,7 +1071,7 @@ async function loadRDPSessions() {
   }
 }
 
-async function openRDPReplay(session: RDPAuditSessionRecord) {
+async function openRDPReplay(session: Pick<RDPAuditSessionRecord, 'id' | 'has_replay'>) {
   if (!session.id || !session.has_replay) return;
   destroyRDPReplay();
   rdpReplayVisible.value = true;
@@ -1169,7 +1194,7 @@ function isReplayData(value: unknown): value is ReplayData {
   return isRecord(value) && Array.isArray(value.frames) && typeof value.raw === 'string';
 }
 
-function sessionId(session: SessionRecord): string {
+function sessionId(session: { id: string | number }): string {
   return String(session.id ?? '');
 }
 
@@ -1182,7 +1207,7 @@ function displayAuditIdentity(actualValue: unknown, displayNameValue: unknown): 
 }
 
 function sessionInstance(session: SessionRecord): string {
-  return displayAuditIdentity(session.target_address ?? session.target_id, session.target_name);
+  return displayAuditIdentity(session.target_address, session.target_name);
 }
 
 function sessionAccount(session: SessionRecord): string {
@@ -1190,32 +1215,15 @@ function sessionAccount(session: SessionRecord): string {
 }
 
 function sessionUser(session: SessionRecord): string {
-  return String(session.username ?? session.user_username ?? session.user_id ?? t('common.none'));
+  return String(session.username || session.user_id || t('common.none'));
 }
 
 function hasReplay(session: SessionRecord): boolean {
-  return session.has_replay === true
-    || (typeof session.replay_dir === 'string' && session.replay_dir.length > 0);
+  return session.has_replay;
 }
 
 function formatTime(value: unknown): string {
-  let d: Date | null = null
-  if (typeof value === 'number' && Number.isFinite(value)) {
-    d = new Date(value)
-  } else if (typeof value === 'string' && value.trim()) {
-    const parsed = Date.parse(value)
-    if (!Number.isNaN(parsed)) d = new Date(parsed)
-  }
-  if (!d || Number.isNaN(d.getTime())) return t('common.none')
-  return new Intl.DateTimeFormat('zh-CN', {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hourCycle: 'h23',
-  }).format(d)
+  return formatAuditTimestamp(value, t('common.none'));
 }
 
 function formatDuration(value: unknown): string {
@@ -1267,20 +1275,20 @@ function toTimestamp(value: unknown): number | null {
 }
 
 function sessionProtocol(row: SessionRecord): string {
-  const subtype = row.protocol_subtype || '';
+  const subtype = row.protocol_subtype?.toLowerCase() || '';
   if (subtype === 'web-terminal') return 'Web';
   if (subtype === 'sftp') return 'SFTP';
   if (subtype === 'scp') return 'SCP';
-  if (!subtype && !hasReplay(row)) return 'SFTP';
+  if (row.protocol.toLowerCase() === 'sftp') return 'SFTP';
   return 'SSH';
 }
 
 function sessionProtocolTag(row: SessionRecord): 'success' | 'warning' | 'info' | 'danger' | '' {
-  const subtype = row.protocol_subtype || '';
+  const subtype = row.protocol_subtype?.toLowerCase() || '';
   if (subtype === 'web-terminal') return 'info';
   if (subtype === 'sftp') return 'warning';
   if (subtype === 'scp') return 'warning';
-  if (!subtype && !hasReplay(row)) return 'warning';
+  if (row.protocol.toLowerCase() === 'sftp') return 'warning';
   return 'success';
 }
 
@@ -1338,30 +1346,11 @@ function formatBytes(value: number): string {
 }
 
 function queryStatusLabel(status: unknown): string {
-  switch (String(status ?? '').toLowerCase()) {
-    case 'success':
-      return '成功';
-    case 'error':
-      return '失败';
-    case 'policy_denied':
-      return '拒绝';
-    default:
-      return '未知';
-  }
+  return auditResultLabel(queryResultPresentation(status).code);
 }
 
-function queryStatusType(status: unknown): 'success' | 'warning' | 'danger' | 'info' {
-  switch (String(status ?? '').toLowerCase()) {
-    case 'success':
-      return 'success';
-    case 'error':
-    case 'policy_denied':
-      return 'danger';
-    case 'unknown':
-      return 'warning';
-    default:
-      return 'info';
-  }
+function queryStatusType(status: unknown): AuditTagType {
+  return queryResultPresentation(status).tag;
 }
 
 function setDetail(title: string, kind: DetailKind, data: unknown) {
@@ -1425,20 +1414,12 @@ async function loadOnlineSessions() {
   }
 }
 
-function loginOutcomeTag(outcome: unknown): 'success' | 'danger' | 'warning' | 'info' {
-  switch (String(outcome ?? '').toLowerCase()) {
-    case 'success': return 'success';
-    case 'blocked': return 'warning';
-    default: return 'danger';
-  }
+function loginOutcomeTag(outcome: unknown): AuditTagType {
+  return loginOutcomePresentation(outcome).tag;
 }
 
 function loginOutcomeLabel(outcome: unknown): string {
-  switch (String(outcome ?? '').toLowerCase()) {
-    case 'success': return t('audit.result.success');
-    case 'blocked': return t('audit.result.blocked');
-    default: return t('audit.result.failure');
-  }
+  return auditResultLabel(loginOutcomePresentation(outcome).code);
 }
 
 function operationActionLabel(action: unknown): string {
@@ -1449,27 +1430,25 @@ function operationActionLabel(action: unknown): string {
     delete: t('audit.action.delete'),
     revoke: t('audit.action.revoke'),
     test: t('audit.action.test'),
+    refresh: t('audit.action.refresh'),
   };
   return labels[key] || String(action || '-');
 }
 
-function operationDetail(row: OperationAuditRecord): Record<string, unknown> {
-  if (!row.detail) return {};
-  try {
-    const value = JSON.parse(row.detail) as unknown;
-    return value && typeof value === 'object' ? value as Record<string, unknown> : {};
-  } catch {
-    return {};
-  }
-}
-
 function operationResultLabel(row: OperationAuditRecord): string {
-  const result = String(operationDetail(row).result || '');
-  return result === 'success' ? t('audit.result.success') : t('audit.result.failure');
+  return auditResultLabel(operationResultPresentation(row).code);
 }
 
-function operationResultTag(row: OperationAuditRecord): 'success' | 'danger' {
-  return String(operationDetail(row).result || '') === 'success' ? 'success' : 'danger';
+function operationResultTag(row: OperationAuditRecord): AuditTagType {
+  return operationResultPresentation(row).tag;
+}
+
+function operationRequestID(row: OperationAuditRecord): string {
+  return parseOperationAuditMetadata(row).requestId || '-';
+}
+
+function operationStatusCode(row: OperationAuditRecord): string {
+  return String(parseOperationAuditMetadata(row).statusCode ?? '-');
 }
 
 async function loadLoginAuditLogs() {
@@ -1588,8 +1567,18 @@ function onLoginAuditSearch(q: string) {
   void loadLoginAuditLogs();
 }
 
+function onLoginAuditOutcomeChange() {
+  loginAuditPage.value = 1;
+  void loadLoginAuditLogs();
+}
+
 function onOperationAuditSearch(q: string) {
   operationAuditKeyword.value = q;
+  operationAuditPage.value = 1;
+  void loadOperationAuditLogs();
+}
+
+function onOperationAuditActionChange() {
   operationAuditPage.value = 1;
   void loadOperationAuditLogs();
 }
@@ -1602,7 +1591,7 @@ function onDBSearch(q: string) {
 
 // ── Session artifacts ──
 
-async function loadSessionArtifact(session: SessionRecord, kind: Exclude<DetailKind, '' | 'queries'>) {
+async function loadSessionArtifact(session: { id: string | number }, kind: Exclude<DetailKind, '' | 'queries'>) {
   const id = sessionId(session);
 
   if (!id) {
@@ -1683,8 +1672,7 @@ function formatFileAction(action: string): string {
 
 function isSFTP(row: SessionRecord): boolean {
   if (row.protocol_subtype === 'sftp') return true;
-  if (!row.protocol_subtype && !hasReplay(row)) return true;
-  return false;
+  return row.protocol.toLowerCase() === 'sftp';
 }
 
 function loadSessionLog(session: SessionRecord) {
@@ -1957,16 +1945,11 @@ function loadOnlineReplay(row: OnlineSessionRecord) {
   if (String(row.protocol).toLowerCase() === 'rdp') {
     void openRDPReplay({
       id: row.audit_session_id,
-      protocol: 'rdp',
-      target_name: row.instance,
-      account_name: row.account,
-      username: row.operator,
-      started_at: row.started_at,
       has_replay: row.has_replay,
     });
     return;
   }
-  void loadSessionArtifact({ id: row.audit_session_id, replay_dir: row.has_replay ? 'online' : '' }, 'replay');
+  void loadSessionArtifact({ id: row.audit_session_id }, 'replay');
 }
 
 function loadOnlineLog(row: OnlineSessionRecord) {
@@ -1981,9 +1964,6 @@ function loadOnlineLog(row: OnlineSessionRecord) {
   const kind = row.protocol_subtype === 'sftp' ? 'files' : 'commands';
   void loadSessionArtifact({
     id: row.audit_session_id,
-    protocol: row.protocol,
-    protocol_subtype: row.protocol_subtype,
-    replay_dir: row.has_replay ? 'online' : '',
   }, kind);
 }
 
@@ -2015,7 +1995,7 @@ function showUserSessionDetail(sessionID: string) {
   sessionDetailVisible.value = true;
 }
 
-async function loadDBArtifact(connection: DBConnectionRecord, kind: 'meta' | 'queries') {
+async function loadDBArtifact(connection: { id: string | number }, kind: 'meta' | 'queries') {
   const id = String(connection.id ?? '');
 
   if (!id) {
@@ -2210,12 +2190,6 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   height: 100%;
-}
-
-.session-id-link.el-link:focus-visible {
-  border-radius: 4px;
-  outline: 2px solid var(--color-primary);
-  outline-offset: 2px;
 }
 
 .placeholder-panel :deep(.el-segmented) {

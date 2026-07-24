@@ -7,7 +7,7 @@
         :total="total"
         v-model:page="page"
         v-model:page-size="pageSize"
-        search-placeholder="搜索分组名称、描述..."
+        search-placeholder="搜索分组名称、备注…"
         @search="onSearch"
       >
         <template #toolbar-extra>
@@ -18,23 +18,27 @@
         </template>
 
         <el-table-column :label="t('resourceGroups.name')" prop="name" min-width="150" />
-        <el-table-column :label="t('resourceGroups.description')" prop="description" min-width="200" show-overflow-tooltip />
-        <el-table-column :label="t('resourceGroups.hostCount')" width="80">
+        <el-table-column v-bind="TABLE_COLUMNS.number" :label="t('resourceGroups.hostCount')">
           <template #default="{ row }">
             {{ row.host_count || 0 }}
           </template>
         </el-table-column>
-        <el-table-column :label="t('resourceGroups.databaseCount')" width="110">
+        <el-table-column v-bind="TABLE_COLUMNS.number" :label="t('resourceGroups.databaseCount')">
           <template #default="{ row }">
             {{ row.database_count || 0 }}
           </template>
         </el-table-column>
-        <el-table-column :label="t('resourceGroups.applicationCount')" width="90">
+        <el-table-column v-bind="TABLE_COLUMNS.number" :label="t('resourceGroups.applicationCount')">
           <template #default="{ row }">
             {{ row.application_count || 0 }}
           </template>
         </el-table-column>
-        <el-table-column :label="t('common.actions')" width="150" fixed="right">
+        <el-table-column v-bind="TABLE_COLUMNS.note" :label="t('common.remark')">
+          <template #default="{ row }">
+            {{ row.description || '-' }}
+          </template>
+        </el-table-column>
+        <el-table-column v-bind="TABLE_COLUMNS.actions" :label="t('common.actions')">
           <template #default="{ row }">
             <el-button link type="primary" size="small" @click="showEditDialog(row)">
               {{ t('common.edit') }}
@@ -56,7 +60,7 @@
           <el-form-item :label="t('resourceGroups.name')" required>
             <el-input v-model="form.name" :placeholder="t('resourceGroups.namePlaceholder')" />
           </el-form-item>
-          <el-form-item :label="t('resourceGroups.description')">
+          <el-form-item :label="t('common.remark')">
             <el-input v-model="form.description" type="textarea" :rows="3" />
           </el-form-item>
         </el-form>
@@ -76,6 +80,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
 import { apiClient, type ResourceGroupRecord } from '@/api/client'
 import DataTableCard from '@/components/DataTableCard.vue'
+import { TABLE_COLUMNS } from '@/config/tableColumns'
 
 const { t } = useI18n()
 

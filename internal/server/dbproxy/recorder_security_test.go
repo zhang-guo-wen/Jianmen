@@ -43,7 +43,11 @@ func TestRecorderThreadsConnectionContextAndReportsQueryFailureOnce(t *testing.T
 	if !decision.Allowed {
 		t.Fatalf("StartQuery() decision = %#v, want allowed", decision)
 	}
-	recorder.FinishQuery(record, queryFinish{Status: queryStatusSuccess})
+	rowsAffected := int64(2)
+	recorder.FinishQuery(record, queryFinish{
+		Status:       queryStatusSuccess,
+		RowsAffected: &rowsAffected,
+	})
 	recorder.reportFatal(errors.New("duplicate fatal signal"))
 
 	contexts := audit.contextSnapshot()
@@ -52,6 +56,14 @@ func TestRecorderThreadsConnectionContextAndReportsQueryFailureOnce(t *testing.T
 	}
 	if fatalCalls != 1 {
 		t.Fatalf("fatal callback calls = %d, want 1", fatalCalls)
+	}
+	queries := audit.snapshot()
+	if len(queries) != 1 ||
+		!queries[0].Timestamp.Equal(record.startedAt) ||
+		queries[0].Status != model.AuditDBQueryStatusSuccess ||
+		queries[0].RowsAffected == nil ||
+		*queries[0].RowsAffected != 2 {
+		t.Fatalf("persisted database audit result = %#v", queries)
 	}
 	select {
 	case <-client.closed:
@@ -67,17 +79,20 @@ func TestRecorderThreadsConnectionContextAndReportsQueryFailureOnce(t *testing.T
 
 func TestRecorderPersistsOnlyRedactedSQLAndPairsTerminalEvents(t *testing.T) {
 	tests := []struct {
-		name  string
-		close func(queryObserver)
+		name       string
+		wantStatus string
+		close      func(queryObserver)
 	}{
 		{
-			name: "normal response",
+			name:       "normal response",
+			wantStatus: model.AuditDBQueryStatusSuccess,
 			close: func(observer queryObserver) {
 				observer.ObserveServerBytes(buildMySQLPacket(1, []byte{0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00}))
 			},
 		},
 		{
-			name: "relay abort",
+			name:       "relay abort",
+			wantStatus: model.AuditDBQueryStatusError,
 			close: func(observer queryObserver) {
 				observer.(queryObserverLifecycle).Abort(observerErrorRelay)
 			},
@@ -139,6 +154,9 @@ func TestRecorderPersistsOnlyRedactedSQLAndPairsTerminalEvents(t *testing.T) {
 			if queries[0].OriginalSQLBytes != int64(len(sql)) ||
 				queries[0].SQLTruncated {
 				t.Fatalf("database audit SQL metadata = %#v, want original length without truncation", queries[0])
+			}
+			if queries[0].Status != test.wantStatus {
+				t.Fatalf("database audit status = %q, want %q", queries[0].Status, test.wantStatus)
 			}
 		})
 	}

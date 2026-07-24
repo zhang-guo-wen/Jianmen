@@ -14,6 +14,9 @@ const aiRefreshAuditActor = "ai-refresh-credential"
 func (s *Server) recordAIRefreshIntent(r *http.Request, fingerprint string) (string, error) {
 	event := newAIRefreshAuditEvent(r, fingerprint, nil)
 	event.ID = model.NewID()
+	event.Phase = "intent"
+	event.Result = "pending"
+	event.RequestID = apiresp.RequestID(r.Context())
 	detail, err := json.Marshal(map[string]any{
 		"method":            r.Method,
 		"path":              r.URL.Path,
@@ -42,6 +45,11 @@ func (s *Server) recordAIRefreshResult(
 	reason string,
 ) error {
 	event := newAIRefreshAuditEvent(r, fingerprint, token)
+	event.Phase = "result"
+	event.Result = operationResult(status)
+	event.IntentID = strings.TrimSpace(intentID)
+	event.RequestID = apiresp.RequestID(r.Context())
+	event.StatusCode = status
 	detail := map[string]any{
 		"method":            r.Method,
 		"path":              r.URL.Path,

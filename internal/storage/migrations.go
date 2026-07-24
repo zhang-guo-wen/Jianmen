@@ -278,6 +278,20 @@ func Migrate(db *gorm.DB) error {
 	if err != nil {
 		return err
 	}
+	// The 202607240001 audit refactor is intentionally a single unpublished
+	// migration. Local development databases may have applied an earlier
+	// revision of that same migration before the structured result fields were
+	// folded into it. Reconcile only those additive audit columns without
+	// creating a second migration version.
+	if applied[auditFieldsMigrationVersion] {
+		if err := repairAppliedAuditFieldsMigration(db); err != nil {
+			return fmt.Errorf(
+				"repair applied migration %s: %w",
+				auditFieldsMigrationVersion,
+				err,
+			)
+		}
+	}
 	for _, migration := range migrations {
 		if applied[migration.Version] {
 			continue
@@ -297,6 +311,59 @@ func Migrate(db *gorm.DB) error {
 		}); err != nil {
 			return fmt.Errorf("migration %s %s: %w", migration.Version, migration.Name, err)
 		}
+	}
+	return nil
+}
+
+func repairAppliedAuditFieldsMigration(db *gorm.DB) error {
+	required := []struct {
+		model   any
+		columns []string
+	}{
+		{
+			model: &model.AuditEvent{},
+			columns: []string{
+				"phase", "result", "intent_id", "request_id", "status_code",
+			},
+		},
+		{
+			model: &model.LoginAuditLog{},
+			columns: []string{
+				"phase", "result", "intent_id", "request_id", "status_code",
+			},
+		},
+		{
+			model: &model.AuditDBQuery{},
+			columns: []string{
+				"status", "error_code", "error_message", "rows_affected", "rows",
+			},
+		},
+	}
+	needsRepair := false
+	for _, item := range required {
+		if !db.Migrator().HasTable(item.model) {
+			needsRepair = true
+			break
+		}
+		for _, column := range item.columns {
+			if !db.Migrator().HasColumn(item.model, column) {
+				needsRepair = true
+				break
+			}
+		}
+		if needsRepair {
+			break
+		}
+	}
+	if !needsRepair {
+		return nil
+	}
+	if err := db.AutoMigrate(
+		&model.AuditEvent{},
+		&model.LoginAuditLog{},
+		&model.AuditDBQuery{},
+	); err != nil {
+		return fmt.Errorf("reconcile structured audit result fields: %w", err)
 	}
 	return nil
 }

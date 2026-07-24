@@ -36,6 +36,10 @@ func (s *Server) startWebTerminalAudit(
 		Username:        session.UserUsername,
 		Protocol:        "ssh",
 		ProtocolSubtype: session.ProtocolSubtype,
+		ResourceType:    model.ResourceTypeHostAccount,
+		ResourceID:      target.ID,
+		HostID:          target.HostID,
+		AccountID:       target.ID,
 		TargetName:      target.HostName,
 		TargetAddress:   target.Addr(),
 		AccountName:     target.Name,
@@ -43,6 +47,7 @@ func (s *Server) startWebTerminalAudit(
 		ClientIP:        session.ClientIP,
 		StartedAt:       session.StartedAt,
 		State:           "started",
+		Outcome:         model.AuditOutcomeActive,
 		ReplayDir:       filepath.Join(s.cfg.ReplayDir, "ssh", session.ID),
 	}
 	if err := s.audit.CreateAuditSession(ctx, auditSession); err != nil {

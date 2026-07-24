@@ -122,7 +122,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	limitKey := loginLimitKey(r, username)
 	if retryAfter := limiter.retryAfter(limitKey, now); retryAfter > 0 {
 		setRetryAfter(w, retryAfter)
-		s.logLogin(r, username, "", "blocked", "rate_limited")
+		s.logLogin(r, username, "", "blocked", "rate_limited", http.StatusTooManyRequests)
 		s.writeErrorText(w, r, http.StatusTooManyRequests, "too many failed login attempts; try again later")
 		return
 	}
@@ -132,7 +132,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if err := s.loginCaptcha.Verify(req.CaptchaPayload); err != nil {
-			s.logLogin(r, username, "", "failure", "captcha_failed")
+			s.logLogin(r, username, "", "failure", "captcha_failed", http.StatusBadRequest)
 			message := "security verification failed; please try again"
 			if errors.Is(err, service.ErrLoginCaptchaMissing) {
 				message = "security verification is required"
@@ -147,7 +147,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	login, err := s.adminAuth.VerifyLogin(r.Context(), username, req.Password)
 	if errors.Is(err, service.ErrAdminInvalidCredentials) {
 		limiter.recordFailure(limitKey, now)
-		s.logLogin(r, username, "", "failure", "invalid_credentials")
+		s.logLogin(r, username, "", "failure", "invalid_credentials", http.StatusUnauthorized)
 		s.writeErrorText(w, r, http.StatusUnauthorized, "invalid username or password")
 		return
 	}
@@ -176,11 +176,11 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 			message = "invalid username or password"
 			status = http.StatusUnauthorized
 		}
-		s.recordLoginAuditFailure(r, username, login.UserID, intentID, reason)
+		s.recordLoginAuditFailure(r, username, login.UserID, intentID, reason, status)
 		s.writeErrorText(w, r, status, message)
 		return
 	}
-	if err := s.recordLoginAuditResult(r, username, login.UserID, intentID, "success", ""); err != nil {
+	if err := s.recordLoginAuditResult(r, username, login.UserID, intentID, "success", "", http.StatusOK); err != nil {
 		s.logger.Error("admin login result audit failed", "user_id", login.UserID, "intent_id", intentID, "error", err)
 		ctx, cancel := detachedAuditWriteContext(r.Context())
 		revokeErr := s.browserSessions.Revoke(ctx, session.SessionID)
@@ -188,7 +188,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		if revokeErr != nil {
 			s.logger.Error("failed to revoke unaudited admin session", "user_id", login.UserID, "session_id", session.SessionID, "error", revokeErr)
 		}
-		s.recordLoginAuditFailure(r, username, login.UserID, intentID, "success_audit_failed")
+		s.recordLoginAuditFailure(r, username, login.UserID, intentID, "success_audit_failed", http.StatusServiceUnavailable)
 		s.writeErrorText(w, r, http.StatusServiceUnavailable, "login audit unavailable")
 		return
 	}

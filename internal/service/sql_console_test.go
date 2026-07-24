@@ -17,6 +17,7 @@ type sqlConsoleRepositoryStub struct {
 	queries        []*model.AuditDBQuery
 	finished       []string
 	duration       int64
+	queryResults   []model.AuditDBQueryResult
 	createAuditErr error
 }
 
@@ -43,8 +44,9 @@ func (s *sqlConsoleRepositoryStub) CreateAuditDBQuery(_ context.Context, query *
 	return nil
 }
 
-func (s *sqlConsoleRepositoryStub) UpdateAuditDBQueryDuration(_ context.Context, _ string, duration int64) error {
-	s.duration = duration
+func (s *sqlConsoleRepositoryStub) CompleteAuditDBQuery(_ context.Context, _ string, result model.AuditDBQueryResult) error {
+	s.duration = result.DurationMs
+	s.queryResults = append(s.queryResults, result)
 	return nil
 }
 
@@ -160,8 +162,44 @@ func TestSQLConsoleExecuteReadQueryAuditsBeforeExecution(t *testing.T) {
 	if len(repository.finished) != 1 || repository.finished[0] != model.AuditOutcomeSucceeded {
 		t.Fatalf("finished outcomes = %#v", repository.finished)
 	}
+	if len(repository.queryResults) != 1 ||
+		repository.queryResults[0].Status != model.AuditDBQueryStatusSuccess ||
+		repository.queryResults[0].Rows == nil ||
+		*repository.queryResults[0].Rows != 1 ||
+		repository.queryResults[0].RowsAffected != nil {
+		t.Fatalf("query audit result = %#v, want successful read with one returned row", repository.queryResults)
+	}
 	if result.RowCount != 1 || result.AuditSessionID != "audit-session" || result.QueryKind != "select" {
 		t.Fatalf("result = %#v", result)
+	}
+}
+
+func TestSQLConsoleExecutePersistsRealExecutionFailure(t *testing.T) {
+	sqlService, repository, _, executor := newSQLConsoleServiceFixture(t)
+	sessionID := createSQLConsoleTestSession(t, sqlService)
+	executor.connection.err = errors.New("upstream rejected statement")
+
+	_, err := sqlService.Execute(
+		context.Background(),
+		SQLConsoleActor{UserID: "user-1"},
+		SQLConsoleRequest{SessionID: sessionID, Database: "app", SQL: "SELECT missing FROM absent"},
+	)
+	if !errors.Is(err, ErrSQLConsoleExecution) {
+		t.Fatalf("Execute() error = %v, want SQL execution error", err)
+	}
+	if len(repository.queryResults) != 1 {
+		t.Fatalf("query audit result count = %d, want 1", len(repository.queryResults))
+	}
+	auditResult := repository.queryResults[0]
+	if auditResult.Status != model.AuditDBQueryStatusError ||
+		auditResult.ErrorCode != "query_failed" ||
+		auditResult.ErrorMessage != "upstream rejected statement" ||
+		auditResult.Rows != nil ||
+		auditResult.RowsAffected != nil {
+		t.Fatalf("query audit result = %#v", auditResult)
+	}
+	if len(repository.finished) != 1 || repository.finished[0] != model.AuditOutcomeFailed {
+		t.Fatalf("finished outcomes = %#v, want failed", repository.finished)
 	}
 }
 
@@ -177,11 +215,19 @@ func TestSQLConsoleExecuteWriteRequiresConfirmationAndPermission(t *testing.T) {
 	}
 
 	request.ConfirmWrite = true
+	executor.connection.result = SQLConsoleExecution{RowsAffected: 3, RowsAffectedKnown: true}
 	if _, err := sqlService.Execute(context.Background(), SQLConsoleActor{UserID: "user-1"}, request); err != nil {
 		t.Fatalf("confirmed Execute() error = %v", err)
 	}
 	if len(authorizer.actions) != 1 || authorizer.actions[0] != rbac.ActionDBExecute {
 		t.Fatalf("actions = %#v", authorizer.actions)
+	}
+	if len(repository.queryResults) != 1 ||
+		repository.queryResults[0].Status != model.AuditDBQueryStatusSuccess ||
+		repository.queryResults[0].RowsAffected == nil ||
+		*repository.queryResults[0].RowsAffected != 3 ||
+		repository.queryResults[0].Rows != nil {
+		t.Fatalf("query audit result = %#v, want successful write affecting three rows", repository.queryResults)
 	}
 }
 

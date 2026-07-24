@@ -332,7 +332,9 @@ func (s *DBStore) auditSessionIDs(ctx context.Context, sessions []model.AuditSes
 		SessionID string
 	}
 	var rows []row
-	_ = s.db.WithContext(ctx).Model(&model.UserSession{}).Scopes(ActiveScope).
+	// Historical audit rows must retain their authorization identifier even
+	// after the related user session is logically deleted.
+	_ = s.db.WithContext(ctx).Model(&model.UserSession{}).
 		Select("id, session_id").Where("id IN ?", ids).Find(&rows)
 	lookup := map[string]string{}
 	for _, r := range rows {

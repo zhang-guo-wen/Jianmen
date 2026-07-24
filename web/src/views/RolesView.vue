@@ -8,7 +8,7 @@
     :total="total"
     v-model:page="page"
     v-model:page-size="pageSize"
-    search-placeholder="搜索角色名称、描述"
+    search-placeholder="搜索角色名称、备注…"
     @search="onSearch"
   >
     <template #toolbar-extra>
@@ -20,7 +20,6 @@
         <strong>{{ row.name }}</strong>
       </template>
     </el-table-column>
-    <el-table-column prop="description" :label="t('roles.description')" min-width="200" show-overflow-tooltip />
     <el-table-column :label="t('roles.builtin')" width="80">
       <template #default="{ row }">
         <el-tag :type="row.builtin ? 'warning' : 'info'" size="small">
@@ -28,7 +27,7 @@
         </el-tag>
       </template>
     </el-table-column>
-    <el-table-column :label="t('common.status')" width="80" align="center">
+    <el-table-column v-bind="TABLE_COLUMNS.status" :label="t('common.status')">
       <template #default="{ row }">
         <StatusSwitch
           :model-value="row.status === 'active'"
@@ -37,12 +36,17 @@
         />
       </template>
     </el-table-column>
-    <el-table-column :label="t('roles.permissionCount')" width="80" align="center">
+    <el-table-column v-bind="TABLE_COLUMNS.number" :label="t('roles.permissionCount')">
       <template #default="{ row }">
         <span class="perm-count">{{ rolePermCount(row.id) }}</span>
       </template>
     </el-table-column>
-    <el-table-column :label="t('common.actions')" fixed="right" width="200">
+    <el-table-column v-bind="TABLE_COLUMNS.note" :label="t('common.remark')">
+      <template #default="{ row }">
+        {{ row.description || '-' }}
+      </template>
+    </el-table-column>
+    <el-table-column v-bind="TABLE_COLUMNS.actions" :label="t('common.actions')">
       <template #default="{ row }">
         <el-button link type="primary" size="small" @click="openPermDialog(row)">分配权限</el-button>
         <template v-if="!row.builtin">
@@ -76,8 +80,8 @@
       </el-form-item>
       <el-collapse v-model="createMorePanels" class="more-collapse">
         <el-collapse-item title="更多设置" name="more">
-          <el-form-item :label="t('roles.description')" prop="description">
-            <el-input v-model="createForm.description" type="textarea" :autosize="{ minRows: 2, maxRows: 4 }" placeholder="角色用途说明" />
+          <el-form-item :label="t('common.remark')" prop="description">
+            <el-input v-model="createForm.description" type="textarea" :autosize="{ minRows: 2, maxRows: 4 }" placeholder="填写角色用途、适用范围等备注" />
           </el-form-item>
         </el-collapse-item>
       </el-collapse>
@@ -131,6 +135,7 @@ import DataTableCard from '@/components/DataTableCard.vue';
 import FormDialog from '@/components/FormDialog.vue';
 import StatusSwitch from '@/components/StatusSwitch.vue';
 import * as api from '@/api/client';
+import { TABLE_COLUMNS } from '@/config/tableColumns';
 import { useI18n } from '@/i18n';
 
 const { t } = useI18n();

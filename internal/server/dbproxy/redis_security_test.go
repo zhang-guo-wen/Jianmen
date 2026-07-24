@@ -228,7 +228,8 @@ func TestHandleGatewayConnKeepsAuditIdentityWhenRedisReauthenticationIsRejected(
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			audit := &identityCaptureAudit{}
-			client := newChunkedObserverCopyConn(tt.command)
+			rawClient := newChunkedObserverCopyConn(tt.command)
+			client := &remoteAddrConn{Conn: rawClient, remote: "198.51.100.24:40231"}
 			upstream := newBlockingRedisUpstreamConn()
 			gateway := &Gateway{
 				replayDir: t.TempDir(),
@@ -256,8 +257,15 @@ func TestHandleGatewayConnKeepsAuditIdentityWhenRedisReauthenticationIsRejected(
 			}
 			if session.UserID != "original-user" ||
 				session.UserSessionID != "original-user-session" ||
-				session.AccountName != "original-upstream-user" ||
-				session.TargetName != "original-instance-name" {
+				session.ResourceType != model.ResourceTypeDatabaseAccount ||
+				session.ResourceID != "original-account" ||
+				session.AccountID != "original-account" ||
+				session.AccountName != "original-account-name" ||
+				session.AccountUsername != "original-upstream-user" ||
+				session.TargetName != "original-instance-name" ||
+				session.TargetAddress != "127.0.0.1:6379" ||
+				session.ClientIP != "198.51.100.24" ||
+				session.Outcome != model.AuditOutcomeActive {
 				t.Fatalf("audit identity changed after rejected reauthentication: %#v", session)
 			}
 			if queryCount != 0 {
@@ -269,7 +277,7 @@ func TestHandleGatewayConnKeepsAuditIdentityWhenRedisReauthenticationIsRejected(
 			if got := upstream.writtenBytes(); len(got) != 0 {
 				t.Fatalf("reauthentication reached upstream: %q", got)
 			}
-			if got := client.writes.String(); !strings.HasPrefix(got, "-ERR ") {
+			if got := rawClient.writes.String(); !strings.HasPrefix(got, "-ERR ") {
 				t.Fatalf("client response = %q, want protocol error", got)
 			}
 			if connection.userID != "original-user" ||

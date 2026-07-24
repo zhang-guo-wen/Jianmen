@@ -24,7 +24,7 @@
         <el-button v-if="permission.canDo('dbproxy:create')" type="primary" @click="openCreateInstance">新增实例</el-button>
       </template>
       <el-table-column prop="name" label="名称" min-width="130" show-overflow-tooltip />
-      <el-table-column label="地址" min-width="180" show-overflow-tooltip>
+      <el-table-column label="地址" v-bind="TABLE_COLUMNS.address">
         <template #default="{ row }">{{ instanceEndpoint(row) }}</template>
       </el-table-column>
       <el-table-column label="协议" width="100" align="center">
@@ -37,14 +37,14 @@
           <el-button link type="primary" size="small" class="account-mgmt-btn" @click="showAccounts(row)">账号管理({{ row.account_count ?? 0 }})</el-button>
         </template>
       </el-table-column>
-      <el-table-column prop="group" label="分组" width="100" show-overflow-tooltip />
-      <el-table-column label="状态" width="70" align="center">
+      <el-table-column prop="group" label="分组" v-bind="TABLE_COLUMNS.group" />
+      <el-table-column label="状态" v-bind="TABLE_COLUMNS.status">
         <template #default="{ row }">
           <StatusSwitch v-if="row.can_manage && permission.canDo('dbproxy:update')" :model-value="row.status === 'active'" @update:model-value="toggleInstance(row)" />
         </template>
       </el-table-column>
-      <el-table-column prop="remark" label="备注" min-width="120" show-overflow-tooltip />
-      <el-table-column label="操作" width="170" fixed="right" align="right">
+      <el-table-column prop="remark" label="备注" v-bind="TABLE_COLUMNS.note" />
+      <el-table-column label="操作" v-bind="TABLE_COLUMNS.actionsWide">
         <template #default="{ row }">
           <div class="table-actions">
             <el-button v-if="permission.canDo('db:connect')" link type="success" size="small" @click="handleDBConnect(row)">连接</el-button>
@@ -243,10 +243,10 @@
         <el-table-column label="登录账号" min-width="130">
           <template #default="{ row }">{{ row.username || '-' }}</template>
         </el-table-column>
-        <el-table-column label="分组" width="110">
+        <el-table-column label="分组" v-bind="TABLE_COLUMNS.group">
           <template #default="{ row }">{{ row.group || '-' }}</template>
         </el-table-column>
-        <el-table-column label="状态" width="80" align="center">
+        <el-table-column label="状态" v-bind="TABLE_COLUMNS.status">
           <template #default="{ row }">
             <StatusSwitch
               v-if="row.can_manage && permission.canDo('dbproxy:update')"
@@ -260,13 +260,13 @@
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="过期时间" min-width="140">
+        <el-table-column label="过期时间" v-bind="TABLE_COLUMNS.time">
           <template #default="{ row }">{{ formatTime(row.expires_at) || '永久' }}</template>
         </el-table-column>
-        <el-table-column label="备注" min-width="120" show-overflow-tooltip>
+        <el-table-column label="备注" v-bind="TABLE_COLUMNS.note">
           <template #default="{ row }">{{ row.remark || '-' }}</template>
         </el-table-column>
-        <el-table-column label="操作" width="168" fixed="right" align="right">
+        <el-table-column label="操作" v-bind="TABLE_COLUMNS.actionsWide">
           <template #default="{ row }">
             <div class="table-actions">
               <el-button v-if="permission.canDo('db:connect')" link type="success" size="small" @click="openConnectDialog(row)">连接</el-button>
@@ -328,6 +328,7 @@ import DatabaseAccountFormDialog from '@/components/database/DatabaseAccountForm
 import DatabaseAutoProvisionDialog from '@/components/database/DatabaseAutoProvisionDialog.vue'
 import ResourceFilterBar from '@/components/ResourceFilterBar.vue'
 import StatusSwitch from '@/components/StatusSwitch.vue'
+import { TABLE_COLUMNS } from '@/config/tableColumns'
 import * as api from '@/api/client'
 import { usePermissionStore } from '@/stores/permission'
 import { createLatestKeyedRequest } from '@/utils/connectionRequestState'
@@ -499,7 +500,7 @@ async function loadInstanceUsage() {
     const connections = await fetchAllPages(page => api.apiClient.getDBConnections({ page, page_size: 200 }))
     const counts: Record<string, number> = {}
     connections.forEach(connection => {
-      const name = String(connection.target_name || connection.upstream_addr || '').trim().toLowerCase()
+      const name = String(connection.target_name || connection.target_address || '').trim().toLowerCase()
       if (name) counts[name] = (counts[name] || 0) + 1
     })
     instanceUsageCounts.value = counts

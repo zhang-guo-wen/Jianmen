@@ -122,6 +122,9 @@ func (s *Server) withOperationAudit(next http.HandlerFunc) http.HandlerFunc {
 func (s *Server) recordOperationIntent(r *http.Request) (string, error) {
 	event := s.newOperationAuditEvent(r)
 	event.ID = model.NewID()
+	event.Phase = "intent"
+	event.Result = "pending"
+	event.RequestID = apiresp.RequestID(r.Context())
 	aiTokenID := aiTokenIDFromRequest(r)
 	detailMap := map[string]any{
 		"method":     r.Method,
@@ -151,6 +154,11 @@ func (s *Server) recordOperation(r *http.Request, status int) {
 
 func (s *Server) recordOperationResult(r *http.Request, status int, intentID string) {
 	event := s.newOperationAuditEvent(r)
+	event.Phase = "result"
+	event.Result = operationResult(status)
+	event.IntentID = strings.TrimSpace(intentID)
+	event.RequestID = apiresp.RequestID(r.Context())
+	event.StatusCode = status
 	aiTokenID := aiTokenIDFromRequest(r)
 	detailMap := map[string]any{
 		"method":     r.Method,

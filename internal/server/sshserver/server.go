@@ -284,6 +284,7 @@ func (s *Server) handleConn(ctx context.Context, rawConn net.Conn, serverConfig 
 	unregisterOnline := s.onlineSessions.Register(online.Session{
 		ID:             auditSession.ID,
 		AuditSessionID: auditSession.ID,
+		UserSessionID:  auditSession.UserSessionID,
 		ResourceType:   model.ResourceTypeHost,
 		ResourceID:     target.HostID,
 		AccountID:      target.ID,
@@ -373,6 +374,10 @@ func newSSHAuditSession(user model.User, target store.TargetConfig, session mode
 		UserID:          user.ID,
 		Username:        user.Username,
 		Protocol:        "ssh",
+		ResourceType:    model.ResourceTypeHostAccount,
+		ResourceID:      target.ID,
+		HostID:          target.HostID,
+		AccountID:       target.ID,
 		TargetName:      target.HostName,
 		TargetAddress:   target.Addr(),
 		AccountName:     target.Name,
@@ -380,6 +385,7 @@ func newSSHAuditSession(user model.User, target store.TargetConfig, session mode
 		ClientIP:        session.ClientIP,
 		StartedAt:       session.StartedAt,
 		State:           "started",
+		Outcome:         model.AuditOutcomeActive,
 		ReplayDir:       filepath.Join(replayRoot, "ssh", session.ID),
 	}
 }

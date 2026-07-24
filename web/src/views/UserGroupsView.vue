@@ -7,7 +7,7 @@
         :total="total"
         v-model:page="page"
         v-model:page-size="pageSize"
-        search-placeholder="搜索用户组名称、描述..."
+        search-placeholder="搜索用户组名称、备注…"
         @search="onSearch"
       >
         <template #toolbar-extra>
@@ -18,15 +18,19 @@
         </template>
 
         <el-table-column :label="t('resourceGrant.groupName')" prop="name" min-width="150" />
-        <el-table-column :label="t('resourceGrant.groupDescription')" prop="description" min-width="200" />
-        <el-table-column :label="t('resourceGrant.memberCount')" width="120">
+        <el-table-column v-bind="TABLE_COLUMNS.number" :label="t('resourceGrant.memberCount')">
           <template #default="{ row }">
             <el-button link type="primary" @click="showMembers(row)">
               {{ getMemberCount(row.id) }} {{ t('resourceGrant.members') }}
             </el-button>
           </template>
         </el-table-column>
-        <el-table-column :label="t('common.actions')" width="150" fixed="right">
+        <el-table-column v-bind="TABLE_COLUMNS.note" :label="t('common.remark')">
+          <template #default="{ row }">
+            {{ row.description || '-' }}
+          </template>
+        </el-table-column>
+        <el-table-column v-bind="TABLE_COLUMNS.actions" :label="t('common.actions')">
           <template #default="{ row }">
             <el-button type="primary" link size="small" @click="showGroupDialog(row)">
               {{ t('common.edit') }}
@@ -48,7 +52,7 @@
           <el-form-item :label="t('resourceGrant.groupName')" required>
             <el-input v-model="groupForm.name" :placeholder="t('resourceGrant.groupNamePlaceholder')" />
           </el-form-item>
-          <el-form-item :label="t('resourceGrant.groupDescription')">
+          <el-form-item :label="t('common.remark')">
             <el-input v-model="groupForm.description" type="textarea" :rows="3" :placeholder="t('resourceGrant.groupDescriptionPlaceholder')" />
           </el-form-item>
         </el-form>
@@ -91,7 +95,7 @@
               {{ getUsernameById(row.user_id) }}
             </template>
           </el-table-column>
-          <el-table-column :label="t('common.actions')" width="100" fixed="right">
+          <el-table-column v-bind="TABLE_COLUMNS.actionsCompact" :label="t('common.actions')">
             <template #default="{ row }">
               <el-button type="danger" link size="small" @click="removeMember(row)">
                 {{ t('common.remove') }}
@@ -110,6 +114,7 @@ import { useI18n } from '@/i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
 import DataTableCard from '@/components/DataTableCard.vue'
+import { TABLE_COLUMNS } from '@/config/tableColumns'
 import {
   apiClient,
   type UserGroupRecord,

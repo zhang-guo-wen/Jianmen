@@ -24,7 +24,7 @@
       </el-table-column>
       <el-table-column prop="display_name" :label="t('users.displayName')" min-width="120" show-overflow-tooltip />
       <el-table-column prop="email" :label="t('users.email')" min-width="180" show-overflow-tooltip />
-      <el-table-column label="状态" width="80" align="center">
+      <el-table-column v-bind="TABLE_COLUMNS.status" label="状态">
         <template #default="{ row }">
           <StatusSwitch
             v-if="!row.is_super_admin"
@@ -35,14 +35,14 @@
           <el-tag v-else type="warning" size="small">内置</el-tag>
         </template>
       </el-table-column>
-      <el-table-column label="&#x6709;&#x6548;&#x671F;" width="170">
+      <el-table-column v-bind="TABLE_COLUMNS.time" label="&#x6709;&#x6548;&#x671F;">
         <template #default="{ row }">
           <span v-if="row.is_super_admin" class="text-muted">&#x957F;&#x671F;</span>
           <span v-else-if="row.expires_at" :class="{ 'text-danger': new Date(row.expires_at).getTime() <= Date.now() }">{{ formatTime(row.expires_at) }}</span>
           <span v-else>&#x957F;&#x671F;</span>
         </template>
       </el-table-column>
-      <el-table-column :label="t('users.lastLogin')" width="140">
+      <el-table-column v-bind="TABLE_COLUMNS.time" :label="t('users.lastLogin')">
         <template #default="{ row }">
           <span class="text-muted">{{ formatTime(row.last_login_at) }}</span>
         </template>
@@ -64,7 +64,7 @@
           <span v-else class="text-muted">{{ t('users.noRoles') }}</span>
         </template>
       </el-table-column>
-      <el-table-column label="操作" width="280" fixed="right">
+      <el-table-column v-bind="TABLE_COLUMNS.actionsWide" label="操作">
         <template #default="{ row }">
           <el-button link type="primary" size="small" @click="openEditDialog(row)">{{ t('common.edit') }}</el-button>
           <template v-if="!row.is_super_admin">
@@ -188,6 +188,7 @@ import FormDialog from '@/components/FormDialog.vue';
 import StatusSwitch from '@/components/StatusSwitch.vue';
 import BatchCreateUsersDialog from '@/components/BatchCreateUsersDialog.vue';
 import * as api from '@/api/client';
+import { TABLE_COLUMNS } from '@/config/tableColumns';
 import { useI18n } from '@/i18n';
 
 const { t } = useI18n();

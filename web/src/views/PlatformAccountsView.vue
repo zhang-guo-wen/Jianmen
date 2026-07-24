@@ -18,7 +18,7 @@
         <el-table-column :label="t('platformAccounts.column.platform')" width="120" show-overflow-tooltip>
           <template #default="{ row }">{{ row.platform_name || '-' }}</template>
         </el-table-column>
-        <el-table-column :label="t('platformAccounts.column.url')" min-width="220" show-overflow-tooltip>
+        <el-table-column :label="t('platformAccounts.column.url')" v-bind="TABLE_COLUMNS.url">
           <template #default="{ row }">
             <el-button v-if="row.url" link type="primary" size="small" @click="copyText(row.url, t('platformAccounts.message.addressCopied'))">
               <el-icon><CopyDocument /></el-icon>{{ row.url }}
@@ -37,10 +37,10 @@
             <span v-else>-</span>
           </template>
         </el-table-column>
-        <el-table-column :label="t('platformAccounts.column.group')" width="120" show-overflow-tooltip>
+        <el-table-column :label="t('platformAccounts.column.group')" v-bind="TABLE_COLUMNS.group">
           <template #default="{ row }">{{ row.group || '-' }}</template>
         </el-table-column>
-        <el-table-column :label="t('platformAccounts.column.status')" width="70" align="center">
+        <el-table-column :label="t('platformAccounts.column.status')" v-bind="TABLE_COLUMNS.status">
           <template #default="{ row }">
             <StatusSwitch
               v-if="permission.canDo('platform_account:update')"
@@ -50,10 +50,10 @@
             />
           </template>
         </el-table-column>
-        <el-table-column :label="t('platformAccounts.column.remark')" min-width="180" show-overflow-tooltip>
+        <el-table-column :label="t('platformAccounts.column.remark')" v-bind="TABLE_COLUMNS.note">
           <template #default="{ row }">{{ row.remark || '-' }}</template>
         </el-table-column>
-        <el-table-column :label="t('platformAccounts.column.actions')" width="160" fixed="right">
+        <el-table-column :label="t('platformAccounts.column.actions')" v-bind="TABLE_COLUMNS.actions">
           <template #default="{ row }">
             <el-button v-if="permission.canDo('platform_account:update')" link type="primary" size="small" @click="openEditDialog(row)">{{ t('platformAccounts.action.edit') }}</el-button>
             <el-button v-if="permission.canDo('platform_account:delete')" link type="danger" size="small" @click="confirmDelete(row)">{{ t('platformAccounts.action.delete') }}</el-button>
@@ -111,6 +111,7 @@ import type { PlatformAccountView, PlatformAccountPayload } from '@/api/client'
 import DataTableCard from '@/components/DataTableCard.vue'
 import FormDialog from '@/components/FormDialog.vue'
 import StatusSwitch from '@/components/StatusSwitch.vue'
+import { TABLE_COLUMNS } from '@/config/tableColumns'
 import { usePermissionStore } from '@/stores/permission'
 import { writeClipboardText } from '@/utils/clipboard'
 

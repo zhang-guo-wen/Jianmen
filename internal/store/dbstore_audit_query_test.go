@@ -38,6 +38,60 @@ func TestCreateAuditDBQueryPreCanceledContextWritesNoRow(t *testing.T) {
 	}
 }
 
+func TestCompleteAuditDBQueryPersistsResultAndPreview(t *testing.T) {
+	repository, closeStore := newAuditRetentionTestStore(t)
+	defer closeStore()
+
+	query := &model.AuditDBQuery{
+		ID:             "query-result",
+		AuditSessionID: "session-result",
+		Timestamp:      time.Now().UTC(),
+		SQLText:        "UPDATE jobs SET state = 'done'",
+	}
+	if err := repository.CreateAuditDBQuery(context.Background(), query); err != nil {
+		t.Fatalf("CreateAuditDBQuery() error = %v", err)
+	}
+	if query.Status != model.AuditDBQueryStatusUnknown {
+		t.Fatalf("initial status = %q, want unknown", query.Status)
+	}
+	rowsAffected := int64(0)
+	if err := repository.CompleteAuditDBQuery(
+		context.Background(),
+		query.ID,
+		model.AuditDBQueryResult{
+			DurationMs:   17,
+			Status:       model.AuditDBQueryStatusError,
+			ErrorCode:    "23505",
+			ErrorMessage: "postgres upstream error",
+			RowsAffected: &rowsAffected,
+		},
+	); err != nil {
+		t.Fatalf("CompleteAuditDBQuery() error = %v", err)
+	}
+
+	items, total, err := repository.ListAuditDBQueryPreviews(
+		context.Background(),
+		query.AuditSessionID,
+		AuditDBQueryPreviewParams{Limit: 10},
+	)
+	if err != nil {
+		t.Fatalf("ListAuditDBQueryPreviews() error = %v", err)
+	}
+	if total != 1 || len(items) != 1 {
+		t.Fatalf("items = %#v, total = %d", items, total)
+	}
+	got := items[0]
+	if got.Status != model.AuditDBQueryStatusError ||
+		got.ErrorCode != "23505" ||
+		got.ErrorMessage != "postgres upstream error" ||
+		got.DurationMs != 17 ||
+		got.RowsAffected == nil ||
+		*got.RowsAffected != 0 ||
+		got.Rows != nil {
+		t.Fatalf("preview result = %#v", got)
+	}
+}
+
 func TestListAuditDBQueryPreviewsEnforcesStoreBounds(t *testing.T) {
 	repository, closeStore := newAuditRetentionTestStore(t)
 	defer closeStore()

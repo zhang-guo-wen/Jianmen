@@ -179,7 +179,13 @@ func TestLoginPersistsPendingThenSuccessBeforeCookie(t *testing.T) {
 	if len(audit.logs) != 2 ||
 		audit.logs[0].Outcome != loginAuditOutcomePending ||
 		audit.logs[1].Outcome != "success" ||
-		!strings.Contains(audit.logs[1].Reason, audit.logs[0].ID) {
+		audit.logs[0].Phase != "intent" ||
+		audit.logs[0].Result != loginAuditOutcomePending ||
+		audit.logs[1].Phase != "result" ||
+		audit.logs[1].Result != "success" ||
+		audit.logs[1].IntentID != audit.logs[0].ID ||
+		audit.logs[1].Reason != "" ||
+		audit.logs[1].StatusCode != http.StatusOK {
 		t.Fatalf("two-phase login audit = %#v", audit.logs)
 	}
 	if err := db.First(&user, "id = ?", user.ID).Error; err != nil {

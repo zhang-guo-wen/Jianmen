@@ -292,60 +292,36 @@ export interface HostPayload {
 
 // ── Sessions ───────────────────────────────────────────────────────────
 
-export interface SessionRecord {
-  id?: string | number;
-  username?: string;
-  user_id?: string;
-  user_username?: string;
-  target_name?: string;
-  target_address?: string;
-  target_id?: string;
-  account_name?: string;
-  account_username?: string;
-  client_ip?: string;
-  status?: string;
-  state?: string;
-  startedAt?: string;
-  started_at?: string;
-  ended_at?: string;
-  protocol?: string;
-  protocol_subtype?: string;
-  replay_dir?: string;
-  has_replay?: boolean;
-  outcome?: string;
-  failure_code?: string;
-  failure_message?: string;
-  recording_status?: string;
-  log_count?: number;
-  session_id?: string;
-  [key: string]: unknown;
-}
-
-export interface RDPAuditSessionRecord {
+export interface AuditSessionListRecord {
   id: string;
   user_id?: string;
-  username?: string;
+  username: string;
   protocol: string;
   protocol_subtype?: string;
   resource_type?: string;
   resource_id?: string;
   host_id?: string;
   account_id?: string;
-  target_name?: string;
+  target_name: string;
   target_address?: string;
   account_name?: string;
   account_username?: string;
-  client_ip?: string;
-  started_at?: string;
+  client_ip: string;
+  started_at: string;
   ended_at?: string;
-  state?: string;
+  state: string;
   outcome?: string;
   failure_code?: string;
   failure_message?: string;
   recording_status?: string;
   has_replay: boolean;
-  log_count?: number;
+  log_count: number;
+  session_id?: string;
 }
+
+export type SessionRecord = AuditSessionListRecord;
+export type RDPAuditSessionRecord = AuditSessionListRecord;
+export type DBConnectionRecord = AuditSessionListRecord;
 
 export interface OnlineSessionRecord {
   id: string;
@@ -360,8 +336,8 @@ export interface OnlineSessionRecord {
   operator: string;
   started_at: string;
   has_replay: boolean;
-  user_session_id?: string;  // 新增：关联的用户授权会话 ID
-  session_id?: string;        // 新增：5 位短 session id（显示用）
+  user_session_id?: string;
+  session_id?: string;
 }
 
 export interface LoginAuditRecord {
@@ -369,6 +345,11 @@ export interface LoginAuditRecord {
   user_id?: string;
   username: string;
   outcome: 'success' | 'failure' | 'blocked' | string;
+  phase?: 'intent' | 'result' | string;
+  result?: 'success' | 'failure' | 'blocked' | 'pending' | string;
+  intent_id?: string;
+  request_id?: string;
+  status_code?: number;
   reason?: string;
   client_ip: string;
   user_agent?: string;
@@ -384,6 +365,11 @@ export interface OperationAuditRecord {
   resource_id?: string;
   resource_name?: string;
   detail?: string;
+  phase?: 'intent' | 'result' | string;
+  result?: 'success' | 'failure' | 'pending' | string;
+  intent_id?: string;
+  request_id?: string;
+  status_code?: number;
   client_ip?: string;
   created_at: string;
 }
@@ -460,22 +446,6 @@ export interface SessionFileEventRecord {
 }
 
 // ── Database ───────────────────────────────────────────────────────────
-
-export interface DBConnectionRecord {
-  id?: string;
-  username?: string;
-  target_name?: string;
-  account_name?: string;
-  name?: string;
-  protocol?: string;
-  client_addr?: string;
-  upstream_addr?: string;
-  started_at?: string;
-  ended_at?: string;
-  duration_ms?: number;
-  log_count?: number;
-  [key: string]: unknown;
-}
 
 export interface DBGatewayConfig {
   enabled: boolean;
@@ -617,17 +587,32 @@ export interface DBAccountUpdatePayload {
   status?: string;
 }
 
-export interface DBConnectionMetaRecord extends DBConnectionRecord {
+export interface DBConnectionMetaRecord {
+  id: string;
+  user_session_id?: string;
+  user_id: string;
+  username: string;
+  protocol: string;
+  protocol_subtype?: string;
+  resource_type?: string;
+  resource_id?: string;
+  host_id?: string;
+  account_id?: string;
+  target_name: string;
+  target_address: string;
+  account_name: string;
+  account_username: string;
+  client_ip: string;
+  started_at: string;
   ended_at?: string;
-  duration_ms?: number;
-  account_name?: string;
-  instance_name?: string;
-  auth_user?: string;
-  database?: string;
-  application_name?: string;
-  mysql_connect_attrs?: Record<string, string>;
-  auth_observation?: string;
-  allowed_users_enforced?: boolean;
+  state: string;
+  outcome: string;
+  failure_code?: string;
+  failure_message?: string;
+  policy_snapshot?: string;
+  recording_status: string;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface DBQueryEventRecord {

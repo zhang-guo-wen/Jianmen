@@ -4,9 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
+
+	mysqlDriver "github.com/go-sql-driver/mysql"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"jianmen/internal/model"
 	"jianmen/internal/rbac"
@@ -25,7 +29,7 @@ type SQLConsoleRepository interface {
 	FindActiveDatabaseAccount(context.Context, string) (model.DatabaseAccount, bool, error)
 	CreateAuditSession(context.Context, *model.AuditSession) error
 	CreateAuditDBQuery(context.Context, *model.AuditDBQuery) error
-	UpdateAuditDBQueryDuration(context.Context, string, int64) error
+	CompleteAuditDBQuery(context.Context, string, model.AuditDBQueryResult) error
 	FinishAuditSession(context.Context, string, string, string, string, string, time.Time) error
 }
 
@@ -143,6 +147,7 @@ func (s *SQLConsoleService) Execute(
 		SQLText:          policy.SQL,
 		OriginalSQLBytes: int64(len(policy.SQL)),
 		QueryKind:        policy.QueryKind,
+		Status:           model.AuditDBQueryStatusUnknown,
 	}
 	if err := s.repository.CreateAuditDBQuery(ctx, query); err != nil {
 		s.finishSQLConsoleAudit(ctx, session.ID, model.AuditOutcomeFailed, "audit_query_failed", err.Error())
@@ -157,7 +162,21 @@ func (s *SQLConsoleService) Execute(
 	}
 	auditContext, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
-	if err := s.repository.UpdateAuditDBQueryDuration(auditContext, query.ID, duration); err != nil {
+	queryResult := model.AuditDBQueryResult{
+		DurationMs: duration,
+		Status:     model.AuditDBQueryStatusSuccess,
+	}
+	if executionErr != nil {
+		queryResult.Status = model.AuditDBQueryStatusError
+		queryResult.ErrorCode, queryResult.ErrorMessage = sqlConsoleAuditError(executionErr)
+	} else if policy.ReadOnly {
+		rows := int64(len(execution.Rows))
+		queryResult.Rows = &rows
+	} else if execution.RowsAffectedKnown {
+		rowsAffected := execution.RowsAffected
+		queryResult.RowsAffected = &rowsAffected
+	}
+	if err := s.repository.CompleteAuditDBQuery(auditContext, query.ID, queryResult); err != nil {
 		s.finishSQLConsoleAudit(auditContext, session.ID, model.AuditOutcomeFailed, "audit_update_failed", err.Error())
 		return SQLConsoleResult{}, fmt.Errorf("%w: update query: %v", ErrSQLConsoleAudit, err)
 	}
@@ -224,4 +243,19 @@ func boundedSQLConsoleError(err error) string {
 		return message[:1024]
 	}
 	return message
+}
+
+func sqlConsoleAuditError(err error) (string, string) {
+	if err == nil {
+		return "", ""
+	}
+	var mysqlError *mysqlDriver.MySQLError
+	if errors.As(err, &mysqlError) {
+		return strconv.FormatUint(uint64(mysqlError.Number), 10), boundedSQLConsoleError(err)
+	}
+	var postgresError *pgconn.PgError
+	if errors.As(err, &postgresError) {
+		return strings.TrimSpace(postgresError.Code), boundedSQLConsoleError(err)
+	}
+	return "query_failed", boundedSQLConsoleError(err)
 }

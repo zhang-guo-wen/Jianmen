@@ -79,25 +79,25 @@
           prop="name"
           :label="C.name"
           min-width="150"
-        /><el-table-column :label="C.access_exp" min-width="175"
+        /><el-table-column v-bind="TABLE_COLUMNS.time" :label="C.access_exp"
           ><template #default="scope">{{
             formatDate(scope.row.access_expires_at)
           }}</template></el-table-column
-        ><el-table-column :label="C.refresh_exp" min-width="175"
+        ><el-table-column v-bind="TABLE_COLUMNS.time" :label="C.refresh_exp"
           ><template #default="scope">{{
             formatDate(scope.row.refresh_expires_at)
           }}</template></el-table-column
-        ><el-table-column :label="C.last_used" min-width="160"
+        ><el-table-column v-bind="TABLE_COLUMNS.time" :label="C.last_used"
           ><template #default="scope">{{
             formatDate(scope.row.last_used_at)
           }}</template></el-table-column
-        ><el-table-column :label="C.status" width="90"
+        ><el-table-column v-bind="TABLE_COLUMNS.status" :label="C.status"
           ><template #default="scope"
             ><el-tag :type="scope.row.revoked_at ? 'danger' : 'success'">{{
               scope.row.revoked_at ? C.revoked : C.valid
             }}</el-tag></template
           ></el-table-column
-        ><el-table-column :label="C.actions" width="150" fixed="right"
+        ><el-table-column v-bind="TABLE_COLUMNS.actions" :label="C.actions"
           ><template #default="scope"
             ><el-button link type="primary" @click="openToken(scope.row.id)">{{
               C.view
@@ -208,6 +208,7 @@ import {
   type AIAccessTokenRecord,
   type IssuedAIAccessToken,
 } from "@/api/client";
+import { TABLE_COLUMNS } from "@/config/tableColumns";
 import { writeClipboardText } from "@/utils/clipboard";
 const C = {
   detail_title: "令牌详情",

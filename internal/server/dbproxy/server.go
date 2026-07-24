@@ -127,14 +127,20 @@ func (g *Gateway) handleGatewayConn(ctx context.Context, client net.Conn, conn *
 	}
 
 	auditSession := &model.AuditSession{
-		UserID:      conn.userID,
-		Username:    authUser,
-		Protocol:    conn.protocol,
-		TargetName:  conn.instanceName,
-		AccountName: conn.accountUser,
-		ClientIP:    "",
-		StartedAt:   time.Now().UTC(),
-		State:       "started",
+		UserID:          conn.userID,
+		Username:        authUser,
+		Protocol:        conn.protocol,
+		ResourceType:    model.ResourceTypeDatabaseAccount,
+		ResourceID:      conn.accountID,
+		AccountID:       conn.accountID,
+		TargetName:      conn.instanceName,
+		TargetAddress:   conn.upstreamAddr,
+		AccountName:     conn.accountName,
+		AccountUsername: conn.accountUser,
+		ClientIP:        databaseGatewayClientIP(client),
+		StartedAt:       time.Now().UTC(),
+		State:           "started",
+		Outcome:         model.AuditOutcomeActive,
 	}
 	if conn.userSessionID != "" {
 		auditSession.UserSessionID = conn.userSessionID
@@ -177,6 +183,7 @@ func (g *Gateway) handleGatewayConn(ctx context.Context, client net.Conn, conn *
 	unregisterOnline := g.onlineSessions.Register(online.Session{
 		ID:             auditSession.ID,
 		AuditSessionID: auditSession.ID,
+		UserSessionID:  conn.userSessionID,
 		ResourceType:   model.ResourceTypeDatabaseInstance,
 		ResourceID:     conn.instanceID,
 		AccountID:      conn.accountID,
@@ -193,6 +200,23 @@ func (g *Gateway) handleGatewayConn(ctx context.Context, client net.Conn, conn *
 
 	observer := newQueryObserverWithLimit(conn.protocol, recorder, g.cfg.MaxClientMessageBytes)
 	relayGatewayConnection(client, conn.upstream, observer)
+}
+
+func databaseGatewayClientIP(connection net.Conn) string {
+	if connection == nil || connection.RemoteAddr() == nil {
+		return ""
+	}
+	if tcpAddress, ok := connection.RemoteAddr().(*net.TCPAddr); ok {
+		if tcpAddress.IP == nil {
+			return ""
+		}
+		return tcpAddress.IP.String()
+	}
+	host, _, err := net.SplitHostPort(connection.RemoteAddr().String())
+	if err != nil {
+		return ""
+	}
+	return host
 }
 
 func (connection *gatewayConn) releasePostgresCancel() {

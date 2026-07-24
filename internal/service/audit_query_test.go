@@ -128,6 +128,49 @@ func TestAuditQueryServicePreservesDBPreviewEventSemantics(t *testing.T) {
 	if total != 1 || len(events) != 2 || events[0].Seq != 7 || events[0].SQL != "SELECT 1" || events[1].SQL != "" {
 		t.Fatalf("events = %#v total=%d", events, total)
 	}
+	if events[1].Status != "unknown" {
+		t.Fatalf("legacy query status = %q, want unknown", events[1].Status)
+	}
+}
+
+func TestAuditQueryServicePreservesPersistedDBQueryResult(t *testing.T) {
+	rowsAffected := int64(4)
+	repository := &auditQueryTestRepository{
+		session: AuditSession{ID: "db-1", Protocol: "postgres", State: "ended"},
+		queries: []AuditDBQueryPreview{{
+			Timestamp:    time.Unix(10, 0),
+			SQLText:      "UPDATE jobs SET state = 'done'",
+			QueryKind:    "update",
+			DurationMs:   9,
+			Status:       "error",
+			ErrorCode:    "23505",
+			ErrorMessage: "postgres upstream error",
+			RowsAffected: &rowsAffected,
+		}},
+	}
+	service, err := NewAuditQueryService(repository, &auditQueryTestAuthorizer{actions: []string{AuditQueryDBActionView}})
+	if err != nil {
+		t.Fatalf("new service: %v", err)
+	}
+	events, _, err := service.DBQueryEvents(
+		context.Background(),
+		"user-1",
+		"postgres",
+		"db-1",
+		AuditDBQueryPreviewParams{},
+	)
+	if err != nil {
+		t.Fatalf("DBQueryEvents: %v", err)
+	}
+	finished := events[1]
+	if finished.Status != "error" ||
+		finished.CompletedAt != time.Unix(10, 0).UnixMilli()+9 ||
+		finished.ErrorCode != "23505" ||
+		finished.ErrorMessage != "postgres upstream error" ||
+		finished.RowsAffected == nil ||
+		*finished.RowsAffected != 4 {
+		t.Fatalf("finished event = %#v", finished)
+	}
 }
 
 type auditQueryTestAuthorizer struct {

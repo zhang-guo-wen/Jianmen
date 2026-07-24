@@ -843,7 +843,10 @@ async function loadDBUsage() {
     const connections = await fetchAllPages(page => apiClient.getDBConnections({ page, page_size: 200 }));
     const counts: Record<string, number> = {};
     connections.forEach(connection => {
-      const key = usageKey(String(connection.target_name || connection.upstream_addr || ''), String(connection.account_name || connection.username || ''));
+      const key = usageKey(
+        String(connection.target_name || connection.target_address || ''),
+        String(connection.account_name || connection.account_username || ''),
+      );
       counts[key] = (counts[key] || 0) + 1;
     });
     dbUsageCounts.value = counts;

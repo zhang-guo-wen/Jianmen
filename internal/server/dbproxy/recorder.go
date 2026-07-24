@@ -472,12 +472,17 @@ func (r *connectionRecorder) writeFinishLocked(record queryRecord, finish queryF
 	if r.audit != nil && r.auditSessionID != "" {
 		if err := r.audit.CreateAuditDBQuery(r.ctx, &model.AuditDBQuery{
 			AuditSessionID:   r.auditSessionID,
-			Timestamp:        completedAt,
+			Timestamp:        record.startedAt,
 			SQLText:          record.sql,
 			OriginalSQLBytes: record.originalSQLBytes,
 			SQLTruncated:     record.sqlTruncated,
 			QueryKind:        record.queryKind,
 			DurationMs:       completedAt.Sub(record.startedAt).Milliseconds(),
+			Status:           model.NormalizeAuditDBQueryStatus(finish.Status),
+			ErrorCode:        finish.ErrorCode,
+			ErrorMessage:     finish.ErrorMessage,
+			RowsAffected:     finish.RowsAffected,
+			Rows:             finish.Rows,
 		}); err != nil {
 			r.reportFatal(fmt.Errorf("write database query audit record: %w", err))
 		}

@@ -7,6 +7,8 @@ import (
 	"reflect"
 	"strings"
 	"unicode/utf8"
+
+	"jianmen/internal/model"
 )
 
 const (
@@ -244,10 +246,25 @@ func (s *AuditQueryService) DBQueryEvents(ctx context.Context, userID, protocol,
 	for i, query := range items {
 		seq := int64(params.Offset + i)
 		ts := query.Timestamp.UnixMilli()
+		completedAt := ts + query.DurationMs
 		sqlPreview, detail := AuditDBQuerySQLPreview(query)
 		events = append(events,
-			AuditDBQueryEvent{Type: "query_started", ConnectionID: sessionID, Seq: seq, Protocol: queryProtocol, SQL: sqlPreview, QueryKind: query.QueryKind, Detail: detail, StartedAt: ts},
-			AuditDBQueryEvent{Type: "query_finished", ConnectionID: sessionID, Seq: seq, Protocol: queryProtocol, QueryKind: query.QueryKind, StartedAt: ts, CompletedAt: ts, DurationMs: query.DurationMs, Status: "success"},
+			AuditDBQueryEvent{Type: "query_started", ConnectionID: sessionID, Seq: seq, Protocol: queryProtocol, SQL: sqlPreview, QueryKind: query.QueryKind, Detail: detail, StartedAt: ts, Status: model.AuditDBQueryStatusUnknown},
+			AuditDBQueryEvent{
+				Type:         "query_finished",
+				ConnectionID: sessionID,
+				Seq:          seq,
+				Protocol:     queryProtocol,
+				QueryKind:    query.QueryKind,
+				StartedAt:    ts,
+				CompletedAt:  completedAt,
+				DurationMs:   query.DurationMs,
+				Status:       model.NormalizeAuditDBQueryStatus(query.Status),
+				ErrorCode:    query.ErrorCode,
+				ErrorMessage: query.ErrorMessage,
+				RowsAffected: query.RowsAffected,
+				Rows:         query.Rows,
+			},
 		)
 	}
 	return events, total, nil

@@ -270,6 +270,39 @@ func TestMigrateAppliesVersionedMigrations(t *testing.T) {
 	if count != int64(len(migrations)) {
 		t.Fatalf("migration count after rerun = %d, want %d", count, len(migrations))
 	}
+	for _, column := range []struct {
+		model any
+		name  string
+	}{
+		{model: &model.AuditEvent{}, name: "Phase"},
+		{model: &model.LoginAuditLog{}, name: "Result"},
+		{model: &model.AuditDBQuery{}, name: "Status"},
+	} {
+		if err := db.Migrator().DropColumn(column.model, column.name); err != nil {
+			t.Fatalf("drop audit compatibility column %s: %v", column.name, err)
+		}
+	}
+	if err := Migrate(db); err != nil {
+		t.Fatalf("repair previously applied audit migration: %v", err)
+	}
+	for _, column := range []struct {
+		model any
+		name  string
+	}{
+		{model: &model.AuditEvent{}, name: "Phase"},
+		{model: &model.LoginAuditLog{}, name: "Result"},
+		{model: &model.AuditDBQuery{}, name: "Status"},
+	} {
+		if !db.Migrator().HasColumn(column.model, column.name) {
+			t.Fatalf("audit compatibility column %s was not restored", column.name)
+		}
+	}
+	if err := db.Model(&SchemaMigration{}).Count(&count).Error; err != nil {
+		t.Fatalf("count migrations after compatibility repair: %v", err)
+	}
+	if count != int64(len(migrations)) {
+		t.Fatalf("migration count after compatibility repair = %d, want %d", count, len(migrations))
+	}
 	for _, tc := range []struct {
 		name  string
 		model any

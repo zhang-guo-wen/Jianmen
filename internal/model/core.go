@@ -223,6 +223,7 @@ func (m *AuditDBQuery) BeforeCreate(tx *gorm.DB) error {
 	if err := m.CreationAudit.BeforeCreate(tx); err != nil {
 		return err
 	}
+	m.Status = NormalizeAuditDBQueryStatus(m.Status)
 	return ensureID(&m.ID)
 }
 func (m *AuditSFTPEvent) BeforeCreate(tx *gorm.DB) error {

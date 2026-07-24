@@ -1,6 +1,16 @@
 package model
 
-import "time"
+import (
+	"strings"
+	"time"
+)
+
+const (
+	AuditDBQueryStatusSuccess      = "success"
+	AuditDBQueryStatusError        = "error"
+	AuditDBQueryStatusUnknown      = "unknown"
+	AuditDBQueryStatusPolicyDenied = "policy_denied"
+)
 
 // AuditDBQuery is a SQL or Redis command audit record.
 type AuditDBQuery struct {
@@ -15,7 +25,34 @@ type AuditDBQuery struct {
 	SQLTruncated     bool   `gorm:"column:sql_truncated;not null;default:false" json:"sql_audit_truncated"`
 	QueryKind        string `gorm:"size:32" json:"query_kind,omitempty"`
 	DurationMs       int64  `json:"duration_ms,omitempty"`
+	Status           string `gorm:"size:32;not null;default:unknown" json:"status"`
+	ErrorCode        string `gorm:"size:64" json:"error_code,omitempty"`
+	ErrorMessage     string `gorm:"size:1024" json:"error_message,omitempty"`
+	RowsAffected     *int64 `json:"rows_affected,omitempty"`
+	Rows             *int64 `json:"rows,omitempty"`
 	CreationAudit
 }
 
+type AuditDBQueryResult struct {
+	DurationMs   int64
+	Status       string
+	ErrorCode    string
+	ErrorMessage string
+	RowsAffected *int64
+	Rows         *int64
+}
+
 func (AuditDBQuery) TableName() string { return "audit_db_queries" }
+
+func NormalizeAuditDBQueryStatus(status string) string {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case AuditDBQueryStatusSuccess:
+		return AuditDBQueryStatusSuccess
+	case AuditDBQueryStatusError:
+		return AuditDBQueryStatusError
+	case AuditDBQueryStatusPolicyDenied:
+		return AuditDBQueryStatusPolicyDenied
+	default:
+		return AuditDBQueryStatusUnknown
+	}
+}

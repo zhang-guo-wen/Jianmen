@@ -391,7 +391,7 @@
               />
 
               <el-table v-loading="historyLoading" :data="revisions" empty-text="暂无配置变更记录">
-                <el-table-column label="版本" width="100">
+                <el-table-column v-bind="TABLE_COLUMNS.number" label="版本">
                   <template #default="{ row }">
                     <el-tag effect="plain">#{{ row.revision }}</el-tag>
                   </template>
@@ -401,12 +401,12 @@
                     {{ row.updated_by_username || row.actor_username || 'system' }}
                   </template>
                 </el-table-column>
-                <el-table-column label="变更项" min-width="320">
+                <el-table-column label="变更项" min-width="320" show-overflow-tooltip>
                   <template #default="{ row }">
                     {{ changedFieldsText(row.changed_fields) }}
                   </template>
                 </el-table-column>
-                <el-table-column label="时间" width="190">
+                <el-table-column v-bind="TABLE_COLUMNS.time" label="时间">
                   <template #default="{ row }">{{ formatTime(row.created_at) }}</template>
                 </el-table-column>
               </el-table>
@@ -423,6 +423,7 @@ import { computed, onMounted, reactive, ref } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
 
 import { ApiError, apiClient } from '@/api/client';
+import { TABLE_COLUMNS } from '@/config/tableColumns';
 import {
   BYTES_PER_MIB,
   DATABASE_MAX_CLIENT_MESSAGE_BYTES_DEFAULT,

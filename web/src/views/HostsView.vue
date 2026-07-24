@@ -30,7 +30,7 @@
         <el-table-column label="名称" min-width="130" show-overflow-tooltip>
           <template #default="{ row }">{{ hostName(row) }}</template>
         </el-table-column>
-        <el-table-column label="地址" min-width="180" show-overflow-tooltip>
+        <el-table-column label="地址" v-bind="TABLE_COLUMNS.address">
           <template #default="{ row }">{{ hostEndpoint(row) }}</template>
         </el-table-column>
         <el-table-column label="协议" width="78" align="center">
@@ -47,10 +47,10 @@
             </el-button>
           </template>
         </el-table-column>
-        <el-table-column label="分组" width="100" show-overflow-tooltip>
+        <el-table-column label="分组" v-bind="TABLE_COLUMNS.group">
           <template #default="{ row }">{{ row.group || "-" }}</template>
         </el-table-column>
-        <el-table-column label="状态" width="70" align="center">
+        <el-table-column label="状态" v-bind="TABLE_COLUMNS.status">
           <template #default="{ row }">
             <StatusSwitch
               v-if="row.can_manage && permission.canDo('host:update')"
@@ -64,10 +64,10 @@
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="备注" min-width="120" show-overflow-tooltip>
+        <el-table-column label="备注" v-bind="TABLE_COLUMNS.note">
           <template #default="{ row }">{{ row.remark || "-" }}</template>
         </el-table-column>
-        <el-table-column label="操作" width="210" align="right">
+        <el-table-column label="操作" v-bind="TABLE_COLUMNS.actionsWide">
           <template #default="{ row }">
             <div class="table-actions">
               <el-button v-if="canConnectHost(row)"
@@ -262,12 +262,11 @@
           </el-table-column>
           <el-table-column
             label="分组"
-            min-width="110"
-            show-overflow-tooltip
+            v-bind="TABLE_COLUMNS.group"
           >
             <template #default="{ row }">{{ row.group || "-" }}</template>
           </el-table-column>
-          <el-table-column label="状态" width="80" align="center">
+          <el-table-column label="状态" v-bind="TABLE_COLUMNS.status">
             <template #default="{ row }">
               <StatusSwitch
                 v-if="row.can_manage && permission.canDo('target:update')"
@@ -285,17 +284,16 @@
           </el-table-column>
           <el-table-column
             label="过期时间"
-            min-width="140"
-            show-overflow-tooltip
+            v-bind="TABLE_COLUMNS.time"
           >
             <template #default="{ row }">{{ expiresAtText(row) }}</template>
           </el-table-column>
-          <el-table-column label="备注" min-width="160" show-overflow-tooltip>
+          <el-table-column label="备注" v-bind="TABLE_COLUMNS.note">
             <template #default="{ row }">{{
               targetRemark(row) || "-"
             }}</template>
           </el-table-column>
-          <el-table-column label="操作" width="200" fixed="right" align="right">
+          <el-table-column label="操作" v-bind="TABLE_COLUMNS.actionsWide">
             <template #default="{ row }">
               <div class="table-actions">
                 <el-button v-if="canConnectTarget(row)"
@@ -586,6 +584,7 @@ import FormDialog from "@/components/FormDialog.vue";
 import ConnectionConfigDialog from "@/components/ConnectionConfigDialog.vue";
 import StatusSwitch from "@/components/StatusSwitch.vue";
 import { useSSHHostIdentityRecovery } from "@/composables/useSSHHostIdentityRecovery";
+import { TABLE_COLUMNS } from "@/config/tableColumns";
 import {
   apiClient,
   type HostPayload,

@@ -31,8 +31,7 @@
         </template>
         <el-table-column prop="id" :label="t('common.id')" min-width="150" />
         <el-table-column prop="name" :label="t('common.name')" min-width="160" />
-        <el-table-column prop="description" :label="t('common.description')" min-width="220" show-overflow-tooltip />
-        <el-table-column :label="t('common.status')" width="130">
+        <el-table-column v-bind="TABLE_COLUMNS.status" :label="t('common.status')">
           <template #default="{ row }">
             <el-tag :type="row.status === 'disabled' ? 'info' : 'success'">
               {{ row.status || 'active' }}
@@ -46,7 +45,12 @@
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column :label="t('common.actions')" fixed="right" width="200">
+        <el-table-column v-bind="TABLE_COLUMNS.note" :label="t('common.remark')">
+          <template #default="{ row }">
+            {{ row.description || '-' }}
+          </template>
+        </el-table-column>
+        <el-table-column v-bind="TABLE_COLUMNS.actions" :label="t('common.actions')">
           <template #default="{ row }">
             <el-button
               :disabled="row.builtin"
@@ -101,8 +105,8 @@
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="description" :label="t('common.description')" min-width="220" show-overflow-tooltip />
-        <el-table-column :label="t('common.actions')" fixed="right" width="120">
+        <el-table-column v-bind="TABLE_COLUMNS.note" prop="description" :label="t('common.remark')" />
+        <el-table-column v-bind="TABLE_COLUMNS.actionsCompact" :label="t('common.actions')">
           <template #default="{ row }">
             <el-button
               :loading="deleting.permissionId === recordId(row)"
@@ -187,13 +191,13 @@
             {{ roleNameForId(row.role_id) }}
           </template>
         </el-table-column>
-        <el-table-column :label="t('rbac.field.expiresAt')" min-width="180">
+        <el-table-column v-bind="TABLE_COLUMNS.time" :label="t('rbac.field.expiresAt')">
           <template #default="{ row }">{{ formatTime(row.expires_at) }}</template>
         </el-table-column>
-        <el-table-column :label="t('common.createdAt')" min-width="180">
+        <el-table-column v-bind="TABLE_COLUMNS.time" :label="t('common.createdAt')">
           <template #default="{ row }">{{ formatTime(row.created_at) }}</template>
         </el-table-column>
-        <el-table-column :label="t('common.actions')" fixed="right" width="120">
+        <el-table-column v-bind="TABLE_COLUMNS.actionsCompact" :label="t('common.actions')">
           <template #default="{ row }">
             <el-button
               :loading="deleting.userRoleId === recordId(row)"
@@ -275,10 +279,10 @@
             {{ permissionNameForId(row.permission_id) }}
           </template>
         </el-table-column>
-        <el-table-column :label="t('common.createdAt')" min-width="180">
+        <el-table-column v-bind="TABLE_COLUMNS.time" :label="t('common.createdAt')">
           <template #default="{ row }">{{ formatTime(row.created_at) }}</template>
         </el-table-column>
-        <el-table-column :label="t('common.actions')" fixed="right" width="120">
+        <el-table-column v-bind="TABLE_COLUMNS.actionsCompact" :label="t('common.actions')">
           <template #default="{ row }">
             <el-button
               :loading="deleting.rolePermissionId === recordId(row)"
@@ -399,7 +403,7 @@
             <el-form-item :label="t('common.id')" prop="id">
               <el-input v-model="roleForm.id" :placeholder="t('rbac.placeholder.optionalId')" />
             </el-form-item>
-            <el-form-item :label="t('common.description')" prop="description">
+            <el-form-item :label="t('common.remark')" prop="description">
               <el-input v-model="roleForm.description" :autosize="{ minRows: 3, maxRows: 5 }" type="textarea" />
             </el-form-item>
           </el-collapse-item>
@@ -469,7 +473,7 @@
               <el-form-item :label="t('rbac.column.resourceId')" prop="resource_id">
                 <el-input v-model="permissionForm.resource_id" :placeholder="t('rbac.placeholder.anyResource')" />
               </el-form-item>
-              <el-form-item class="form-grid-full" :label="t('common.description')" prop="description">
+              <el-form-item class="form-grid-full" :label="t('common.remark')" prop="description">
                 <el-input
                   v-model="permissionForm.description"
                   :autosize="{ minRows: 3, maxRows: 5 }"
@@ -509,6 +513,7 @@ import {
 } from '@/api/client';
 import DataTableCard from '@/components/DataTableCard.vue';
 import FormDialog from '@/components/FormDialog.vue';
+import { TABLE_COLUMNS } from '@/config/tableColumns';
 import { useI18n } from '@/i18n';
 
 type RBACTab = 'roles' | 'permissions' | 'userRoles' | 'rolePermissions' | 'effective';

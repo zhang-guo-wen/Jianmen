@@ -28,6 +28,11 @@ type AuditDBQueryPreview struct {
 	SQLTruncated     bool  `gorm:"column:sql_truncated"`
 	QueryKind        string
 	DurationMs       int64
+	Status           string
+	ErrorCode        string
+	ErrorMessage     string
+	RowsAffected     *int64
+	Rows             *int64
 }
 
 // AuditDBQueryPreviewParams controls the bounded database query audit list.
@@ -59,6 +64,42 @@ func (s *DBStore) UpdateAuditDBQueryDuration(ctx context.Context, id string, dur
 	}
 	if result.RowsAffected != 1 {
 		return fmt.Errorf("update database query audit %q: %w", id, gorm.ErrRecordNotFound)
+	}
+	return nil
+}
+
+func (s *DBStore) CompleteAuditDBQuery(
+	ctx context.Context,
+	id string,
+	result model.AuditDBQueryResult,
+) error {
+	if ctx == nil {
+		return errors.New("complete database query audit: nil context")
+	}
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return errors.New("complete database query audit: empty id")
+	}
+	if result.DurationMs < 0 {
+		result.DurationMs = 0
+	}
+	updates := map[string]any{
+		"duration_ms":   result.DurationMs,
+		"status":        model.NormalizeAuditDBQueryStatus(result.Status),
+		"error_code":    strings.TrimSpace(result.ErrorCode),
+		"error_message": result.ErrorMessage,
+		"rows_affected": result.RowsAffected,
+		"rows":          result.Rows,
+	}
+	update := s.db.WithContext(ctx).
+		Model(&model.AuditDBQuery{}).
+		Where("id = ?", id).
+		Updates(updates)
+	if update.Error != nil {
+		return fmt.Errorf("complete database query audit: %w", update.Error)
+	}
+	if update.RowsAffected != 1 {
+		return fmt.Errorf("complete database query audit %q: %w", id, gorm.ErrRecordNotFound)
 	}
 	return nil
 }
@@ -101,8 +142,11 @@ func (s *DBStore) ListAuditDBQueryPreviews(
 	}
 	selectColumns := fmt.Sprintf(
 		"id, audit_session_id, timestamp, SUBSTR(sql_text, 1, ?) AS sql_text, %s AS sql_stored_bytes, "+
-			"original_sql_bytes, sql_truncated, query_kind, duration_ms",
+			"original_sql_bytes, sql_truncated, query_kind, duration_ms, status, error_code, error_message, "+
+			"rows_affected, %s AS %s",
 		sqlStoredBytesExpression,
+		quoteAuditDBQueryColumn(s.db, "rows"),
+		quoteAuditDBQueryColumn(s.db, "rows"),
 	)
 	if err := q.
 		Select(selectColumns, auditDBQueryPreviewMaxCharacters).
@@ -113,6 +157,12 @@ func (s *DBStore) ListAuditDBQueryPreviews(
 		return nil, 0, err
 	}
 	return queries, total, nil
+}
+
+func quoteAuditDBQueryColumn(db *gorm.DB, column string) string {
+	var quoted strings.Builder
+	db.Dialector.QuoteTo(&quoted, column)
+	return quoted.String()
 }
 
 func escapeAuditDBQueryLikePattern(value string) string {

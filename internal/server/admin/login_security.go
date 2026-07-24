@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"jianmen/internal/model"
+	"jianmen/internal/pkg/apiresp"
 )
 
 const (
@@ -127,29 +128,43 @@ func setRetryAfter(w http.ResponseWriter, d time.Duration) {
 func (s *Server) beginLoginAudit(r *http.Request, username, userID string) (string, error) {
 	entry := s.newLoginAuditLog(r, username, userID, loginAuditOutcomePending, loginAuditReasonIntent)
 	entry.ID = model.NewID()
+	entry.Phase = "intent"
+	entry.Result = loginAuditOutcomePending
+	entry.StatusCode = 0
 	if err := s.createLoginAuditLog(r, entry); err != nil {
 		return "", err
 	}
 	return entry.ID, nil
 }
 
-func (s *Server) recordLoginAuditResult(r *http.Request, username, userID, intentID, outcome, reason string) error {
-	linkedReason := "intent_id=" + strings.TrimSpace(intentID)
-	if strings.TrimSpace(reason) != "" {
-		linkedReason += ";" + strings.TrimSpace(reason)
-	}
-	return s.createLoginAuditLog(r, s.newLoginAuditLog(r, username, userID, outcome, linkedReason))
+func (s *Server) recordLoginAuditResult(
+	r *http.Request,
+	username, userID, intentID, outcome, reason string,
+	statusCode int,
+) error {
+	entry := s.newLoginAuditLog(r, username, userID, outcome, reason)
+	entry.IntentID = strings.TrimSpace(intentID)
+	entry.StatusCode = statusCode
+	return s.createLoginAuditLog(r, entry)
 }
 
-func (s *Server) recordLoginAuditFailure(r *http.Request, username, userID, intentID, reason string) {
-	if err := s.recordLoginAuditResult(r, username, userID, intentID, "failure", reason); err != nil {
+func (s *Server) recordLoginAuditFailure(
+	r *http.Request,
+	username, userID, intentID, reason string,
+	statusCode int,
+) {
+	if err := s.recordLoginAuditResult(r, username, userID, intentID, "failure", reason, statusCode); err != nil {
 		logger := s.loginLogger()
 		logger.Warn("failed to write login audit result", "username", username, "outcome", "failure", "intent_id", intentID, "error", err)
 	}
 }
 
-func (s *Server) logLogin(r *http.Request, username, userID, outcome, reason string) error {
-	auditErr := s.createLoginAuditLog(r, s.newLoginAuditLog(r, username, userID, outcome, reason))
+func (s *Server) logLogin(r *http.Request, username, userID, outcome, reason string, statusCodes ...int) error {
+	entry := s.newLoginAuditLog(r, username, userID, outcome, reason)
+	if len(statusCodes) > 0 {
+		entry.StatusCode = statusCodes[0]
+	}
+	auditErr := s.createLoginAuditLog(r, entry)
 	logger := s.loginLogger()
 	if auditErr != nil {
 		logger.Warn("failed to write login audit log", "username", username, "outcome", outcome, "error", auditErr)
@@ -160,13 +175,36 @@ func (s *Server) logLogin(r *http.Request, username, userID, outcome, reason str
 
 func (s *Server) newLoginAuditLog(r *http.Request, username, userID, outcome, reason string) *model.LoginAuditLog {
 	return &model.LoginAuditLog{
-		UserID:    userID,
-		Username:  username,
-		Outcome:   outcome,
-		Reason:    reason,
-		ClientIP:  requestClientIP(r),
-		UserAgent: r.UserAgent(),
+		UserID:     userID,
+		Username:   username,
+		Phase:      "result",
+		Result:     outcome,
+		RequestID:  apiresp.RequestID(r.Context()),
+		StatusCode: loginAuditStatusCode(outcome, reason),
+		Outcome:    outcome,
+		Reason:     strings.TrimSpace(reason),
+		ClientIP:   requestClientIP(r),
+		UserAgent:  r.UserAgent(),
 	}
+}
+
+func loginAuditStatusCode(outcome, reason string) int {
+	switch strings.TrimSpace(reason) {
+	case "rate_limited":
+		return http.StatusTooManyRequests
+	case "captcha_failed":
+		return http.StatusBadRequest
+	case "invalid_credentials", "credentials_changed":
+		return http.StatusUnauthorized
+	case "login_state_persist_failed", "session_create_failed":
+		return http.StatusInternalServerError
+	case "success_audit_failed":
+		return http.StatusServiceUnavailable
+	}
+	if strings.TrimSpace(outcome) == "success" {
+		return http.StatusOK
+	}
+	return 0
 }
 
 func (s *Server) createLoginAuditLog(r *http.Request, entry *model.LoginAuditLog) error {

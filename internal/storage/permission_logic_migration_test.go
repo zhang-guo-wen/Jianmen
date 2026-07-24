@@ -57,7 +57,7 @@ func TestPermissionLogicalUniquenessMigrationUpgradesExistingSchema(t *testing.T
 		t.Fatal("permission logical unique index is missing after migration")
 	}
 
-	duplicate := model.Permission{
+	duplicate := permissionLogicalUniquenessSchema{
 		ID:           "permission-2",
 		Action:       "host:view",
 		ResourceType: "",

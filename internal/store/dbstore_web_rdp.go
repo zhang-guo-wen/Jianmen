@@ -15,8 +15,9 @@ import (
 func (s *DBStore) WebRDPTarget(ctx context.Context, targetID string) (service.WebRDPTarget, error) {
 	var account model.HostAccount
 	err := s.db.WithContext(ctx).
+		Scopes(activeHostAccountScope).
 		Preload("Host").
-		First(&account, "id = ?", strings.TrimSpace(targetID)).Error
+		First(&account, "host_accounts.id = ?", strings.TrimSpace(targetID)).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return service.WebRDPTarget{}, fmt.Errorf("%w: %q", ErrTargetNotFound, targetID)
 	}

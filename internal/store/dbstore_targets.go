@@ -71,7 +71,7 @@ func (s *DBStore) hostAddressPort(ctx context.Context, tx *gorm.DB, h model.Host
 	port = h.Port
 	if host == "" && hostID != "" {
 		var loaded model.Host
-		if err := queryWithContext(s.db, tx, ctx).First(&loaded, "id = ?", hostID).Error; err == nil {
+		if err := queryWithContext(s.db, tx, ctx).Scopes(ActiveScope).First(&loaded, "id = ?", hostID).Error; err == nil {
 			host = loaded.Address
 			port = loaded.Port
 		}
@@ -139,7 +139,10 @@ func queryWithContext(db *gorm.DB, tx *gorm.DB, ctx context.Context) *gorm.DB {
 
 func (s *DBStore) ListHostAccounts(ctx context.Context, hostID string) ([]TargetView, error) {
 	var accounts []model.HostAccount
-	if err := s.db.WithContext(ctx).Preload("Host").Where("host_id = ?", hostID).Order("username ASC").Find(&accounts).Error; err != nil {
+	if err := s.db.WithContext(ctx).Scopes(activeHostAccountScope).Preload("Host").
+		Where("host_accounts.host_id = ?", hostID).
+		Order("host_accounts.username ASC").
+		Find(&accounts).Error; err != nil {
 		return nil, fmt.Errorf("list accounts: %w", err)
 	}
 	out := make([]TargetView, len(accounts))
@@ -151,7 +154,9 @@ func (s *DBStore) ListHostAccounts(ctx context.Context, hostID string) ([]Target
 
 func (s *DBStore) Targets(ctx context.Context) ([]TargetView, error) {
 	var accounts []model.HostAccount
-	if err := s.db.WithContext(ctx).Preload("Host").Order("created_at DESC").Find(&accounts).Error; err != nil {
+	if err := s.db.WithContext(ctx).Scopes(activeHostAccountScope).Preload("Host").
+		Order("host_accounts.created_at DESC").
+		Find(&accounts).Error; err != nil {
 		return nil, err
 	}
 	out := make([]TargetView, len(accounts))
@@ -163,7 +168,8 @@ func (s *DBStore) Targets(ctx context.Context) ([]TargetView, error) {
 
 func (s *DBStore) Target(ctx context.Context, id string) (TargetView, error) {
 	var a model.HostAccount
-	if err := s.db.WithContext(ctx).Preload("Host").First(&a, "id = ?", id).Error; err != nil {
+	if err := s.db.WithContext(ctx).Scopes(activeHostAccountScope).Preload("Host").
+		First(&a, "host_accounts.id = ?", id).Error; err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			return TargetView{}, err
 		}
@@ -174,7 +180,8 @@ func (s *DBStore) Target(ctx context.Context, id string) (TargetView, error) {
 
 func (s *DBStore) TargetConfig(ctx context.Context, id string) (TargetConfig, error) {
 	var a model.HostAccount
-	if err := s.db.WithContext(ctx).Preload("Host").First(&a, "id = ?", id).Error; err != nil {
+	if err := s.db.WithContext(ctx).Scopes(activeHostAccountScope).Preload("Host").
+		First(&a, "host_accounts.id = ?", id).Error; err != nil {
 		return TargetConfig{}, fmt.Errorf("%w: %q", ErrTargetNotFound, id)
 	}
 	return s.targetConfig(ctx, nil, a), nil
@@ -283,14 +290,14 @@ func (s *DBStore) UpdateTarget(ctx context.Context, id string, target config.Tar
 	}
 	var a model.HostAccount
 	if err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.First(&a, "id = ?", id).Error; err != nil {
+		if err := tx.Scopes(activeHostAccountScope).First(&a, "host_accounts.id = ?", id).Error; err != nil {
 			return fmt.Errorf("%w: %q", ErrTargetNotFound, id)
 		}
 		if target.HostID != "" && target.HostID != a.HostID {
 			return errors.New("host_id cannot be changed through target update")
 		}
 		var targetHost model.Host
-		if err := tx.First(&targetHost, "id = ?", a.HostID).Error; err != nil {
+		if err := tx.Scopes(ActiveScope).First(&targetHost, "id = ?", a.HostID).Error; err != nil {
 			return fmt.Errorf("load target host: %w", err)
 		}
 		protocol := normalizedHostProtocol(targetHost.Protocol)
@@ -375,7 +382,8 @@ func (s *DBStore) UpdateTarget(ctx context.Context, id string, target config.Tar
 		if err := s.syncResourceTx(tx, model.ResourceTypeHostAccount, a.ID, hostAccountResourceName(a), a.HostID); err != nil {
 			return fmt.Errorf("sync target resource: %w", err)
 		}
-		if err := tx.Preload("Host").First(&a, "id = ?", id).Error; err != nil {
+		if err := tx.Scopes(activeHostAccountScope).Preload("Host").
+			First(&a, "host_accounts.id = ?", id).Error; err != nil {
 			return err
 		}
 		return nil
@@ -388,7 +396,7 @@ func (s *DBStore) UpdateTarget(ctx context.Context, id string, target config.Tar
 func (s *DBStore) DeleteTarget(ctx context.Context, id string) error {
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var account model.HostAccount
-		if err := tx.First(&account, "id = ?", id).Error; err != nil {
+		if err := tx.Scopes(ActiveScope).First(&account, "id = ?", id).Error; err != nil {
 			return fmt.Errorf("%w: %q", ErrTargetNotFound, id)
 		}
 		if err := s.deleteResourceTx(tx, model.ResourceTypeHostAccount, account.ID); err != nil {
@@ -402,9 +410,9 @@ func (s *DBStore) DefaultTarget(ctx context.Context, user model.User) (TargetCon
 	now := time.Now().UTC()
 	if user.RequestedTargetID != "" {
 		var a model.HostAccount
-		if err := s.db.WithContext(ctx).Preload("Host").
-			Where("id = ? AND status = ?", user.RequestedTargetID, "active").
-			Where("expires_at IS NULL OR expires_at > ?", now).
+		if err := s.db.WithContext(ctx).Scopes(activeHostAccountScope).Preload("Host").
+			Where("host_accounts.id = ? AND host_accounts.status = ?", user.RequestedTargetID, "active").
+			Where("host_accounts.expires_at IS NULL OR host_accounts.expires_at > ?", now).
 			First(&a).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return TargetConfig{}, fmt.Errorf("%w: target %q is not available", ErrTargetUnavailable, user.RequestedTargetID)
@@ -423,6 +431,8 @@ func (s *DBStore) DefaultTarget(ctx context.Context, user model.User) (TargetCon
 	var account model.HostAccount
 	if err := s.db.WithContext(ctx).Preload("Host").
 		Joins("JOIN hosts ON hosts.id = host_accounts.host_id").
+		Where("host_accounts.deleted_at = ?", model.DeletedMarkerActive).
+		Where("hosts.deleted_at = ?", model.DeletedMarkerActive).
 		Where("host_accounts.status = ?", "active").
 		Where("host_accounts.expires_at IS NULL OR host_accounts.expires_at > ?", now).
 		Where("hosts.status IS NULL OR hosts.status <> ?", "disabled").

@@ -60,17 +60,39 @@ func MigrateAuditUniqueIndexes(db *gorm.DB) error {
 	migrations := allIndexMigrations()
 
 	for _, m := range migrations {
-		// 新索引已存在则跳过
-		if db.Migrator().HasIndex(m.table, m.indexName) {
+		if !db.Migrator().HasTable(m.table) {
+			continue
+		}
+		hasAllColumns := true
+		for _, column := range m.columns {
+			if !db.Migrator().HasColumn(m.table, column) {
+				hasAllColumns = false
+				break
+			}
+		}
+		if !hasAllColumns {
 			continue
 		}
 
-		// 找到与新索引业务列匹配的旧唯一索引并删除
 		indexes, err := db.Migrator().GetIndexes(m.table)
 		if err != nil {
 			return fmt.Errorf("get indexes for %s: %w", m.table, err)
 		}
 
+		indexIsCurrent := false
+		for _, idx := range indexes {
+			if idx.Name() != m.indexName {
+				continue
+			}
+			if indexIsUnique(idx) && columnsMatch(idx.Columns(), m.columns) {
+				indexIsCurrent = true
+				break
+			}
+			if err := db.Migrator().DropIndex(m.table, m.indexName); err != nil {
+				return fmt.Errorf("drop malformed index %s on %s: %w", m.indexName, m.table, err)
+			}
+		}
+		// 找到与新索引业务列匹配的旧唯一索引并删除
 		bizCols := m.columns[:len(m.columns)-1] // 去掉 deleted_at 得到业务列
 		for _, idx := range indexes {
 			if idx.Name() == m.indexName {
@@ -84,6 +106,9 @@ func MigrateAuditUniqueIndexes(db *gorm.DB) error {
 					return fmt.Errorf("drop old index %s on %s: %w", idx.Name(), m.table, err)
 				}
 			}
+		}
+		if indexIsCurrent {
+			continue
 		}
 
 		// 创建新的复合唯一索引

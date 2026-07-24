@@ -236,7 +236,8 @@ func TestCollectionRejectsUnknownJSONField(t *testing.T) {
 func TestRevisionsUsesValidatedLimit(t *testing.T) {
 	settings := &fakeSettingsService{revisions: []service.SystemSettingsRevision{{
 		ID: "revision-4", Revision: 4, Snapshot: testSystemSettingsState().Desired,
-		ChangedFields:     []string{"recording_retention_days"},
+		ChangedFields: []string{"recording_retention_days"},
+		UpdatedBy:     "user-alice",
 	}}}
 	handler := newTestHandler(t, settings, fakeDiagnosticsService{})
 	recorder := httptest.NewRecorder()
@@ -249,7 +250,7 @@ func TestRevisionsUsesValidatedLimit(t *testing.T) {
 	handler.Revisions(recorder, request)
 
 	if recorder.Code != http.StatusOK || settings.revisionLimit != 10 ||
-		!bytes.Contains(recorder.Body.Bytes(), []byte(`"actor_username":"alice"`)) {
+		!bytes.Contains(recorder.Body.Bytes(), []byte(`"updated_by":"user-alice"`)) {
 		t.Fatalf("status = %d, limit = %d, body = %s",
 			recorder.Code, settings.revisionLimit, recorder.Body.String())
 	}

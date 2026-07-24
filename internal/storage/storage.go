@@ -217,21 +217,49 @@ func BackupSQLite(dsn string) error {
 		return nil // 首次启动，数据库文件尚不存在，无需备份
 	}
 
+	return backupSQLiteFile(srcPath, srcPath+".bak", sqliteBackupFileOps{
+		copy:    io.Copy,
+		replace: os.Rename,
+	})
+}
+
+type sqliteBackupFileOps struct {
+	copy    func(io.Writer, io.Reader) (int64, error)
+	replace func(string, string) error
+}
+
+func backupSQLiteFile(srcPath, bakPath string, ops sqliteBackupFileOps) error {
 	src, err := os.Open(srcPath)
 	if err != nil {
 		return fmt.Errorf("备份：打开数据库文件 %q 失败：%w", srcPath, err)
 	}
 	defer src.Close()
 
-	bakPath := srcPath + ".bak"
-	dst, err := os.Create(bakPath)
+	tmp, err := os.CreateTemp(filepath.Dir(bakPath), "."+filepath.Base(bakPath)+".tmp-*")
 	if err != nil {
-		return fmt.Errorf("备份：创建备份文件 %q 失败：%w", bakPath, err)
+		return fmt.Errorf("备份：创建 %q 的临时文件失败：%w", bakPath, err)
 	}
-	defer dst.Close()
+	tmpPath := tmp.Name()
+	tmpClosed := false
+	defer func() {
+		if !tmpClosed {
+			_ = tmp.Close()
+		}
+		_ = os.Remove(tmpPath)
+	}()
 
-	if _, err := io.Copy(dst, src); err != nil {
+	if _, err := ops.copy(tmp, src); err != nil {
 		return fmt.Errorf("备份：复制到 %q 失败：%w", bakPath, err)
+	}
+	if err := tmp.Sync(); err != nil {
+		return fmt.Errorf("备份：同步 %q 的临时文件失败：%w", bakPath, err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("备份：关闭 %q 的临时文件失败：%w", bakPath, err)
+	}
+	tmpClosed = true
+	if err := ops.replace(tmpPath, bakPath); err != nil {
+		return fmt.Errorf("备份：替换 %q 失败：%w", bakPath, err)
 	}
 	return nil
 }

@@ -2,10 +2,9 @@ package storage
 
 import (
 	"fmt"
+	"time"
 
 	"gorm.io/gorm"
-
-	"jianmen/internal/model"
 )
 
 type resourceGrantLogicalKey struct {
@@ -16,18 +15,37 @@ type resourceGrantLogicalKey struct {
 	effect        string
 }
 
+// resourceGrantLogicalUniquenessSchema freezes the schema owned by migration
+// 202607190001. The audit columns and deleted_at-aware index are installed by
+// later migrations.
+type resourceGrantLogicalUniquenessSchema struct {
+	ID            string     `gorm:"primaryKey;size:64"`
+	PrincipalType string     `gorm:"index;index:idx_resource_grants_principal,priority:1;uniqueIndex:uidx_resource_grants_logic,priority:1;size:32;not null"`
+	PrincipalID   string     `gorm:"index;index:idx_resource_grants_principal,priority:2;uniqueIndex:uidx_resource_grants_logic,priority:2;size:64;not null"`
+	ResourceType  string     `gorm:"index;index:idx_resource_grants_resource,priority:1;uniqueIndex:uidx_resource_grants_logic,priority:3;size:64;not null"`
+	ResourceID    string     `gorm:"index;index:idx_resource_grants_resource,priority:2;uniqueIndex:uidx_resource_grants_logic,priority:4;size:64;not null"`
+	Effect        string     `gorm:"index;uniqueIndex:uidx_resource_grants_logic,priority:5;size:16;not null;default:allow"`
+	ExpiresAt     *time.Time `gorm:"index"`
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+}
+
+func (resourceGrantLogicalUniquenessSchema) TableName() string {
+	return "resource_grants"
+}
+
 func migrateResourceGrantLogicalUniqueness(tx *gorm.DB) error {
-	if !tx.Migrator().HasTable(&model.ResourceGrant{}) {
-		return tx.AutoMigrate(&model.ResourceGrant{})
+	if !tx.Migrator().HasTable(&resourceGrantLogicalUniquenessSchema{}) {
+		return tx.AutoMigrate(&resourceGrantLogicalUniquenessSchema{})
 	}
 
-	var grants []model.ResourceGrant
+	var grants []resourceGrantLogicalUniquenessSchema
 	// 使用 Unscoped 绕过 GORM 的 deleted_at IS NULL 自动过滤，
 	// 因为旧表可能还没有 deleted_at 列
-	if err := tx.Unscoped().Order("created_at, id").Find(&grants).Error; err != nil {
+	if err := tx.Order("created_at, id").Find(&grants).Error; err != nil {
 		return fmt.Errorf("load resource grants for deduplication: %w", err)
 	}
-	winners := make(map[resourceGrantLogicalKey]model.ResourceGrant, len(grants))
+	winners := make(map[resourceGrantLogicalKey]resourceGrantLogicalUniquenessSchema, len(grants))
 	duplicates := make([]string, 0)
 	for _, grant := range grants {
 		key := resourceGrantLogicalKey{
@@ -50,18 +68,18 @@ func migrateResourceGrantLogicalUniqueness(tx *gorm.DB) error {
 		duplicates = append(duplicates, grant.ID)
 	}
 	for _, winner := range winners {
-		if err := tx.Unscoped().Model(&model.ResourceGrant{}).
+		if err := tx.Model(&resourceGrantLogicalUniquenessSchema{}).
 			Where("id = ?", winner.ID).
 			Update("expires_at", winner.ExpiresAt).Error; err != nil {
 			return fmt.Errorf("preserve resource grant expiry %s: %w", winner.ID, err)
 		}
 	}
 	if len(duplicates) > 0 {
-		if err := tx.Unscoped().Delete(&model.ResourceGrant{}, "id IN ?", duplicates).Error; err != nil {
+		if err := tx.Delete(&resourceGrantLogicalUniquenessSchema{}, "id IN ?", duplicates).Error; err != nil {
 			return fmt.Errorf("delete duplicate resource grants: %w", err)
 		}
 	}
-	if err := tx.AutoMigrate(&model.ResourceGrant{}); err != nil {
+	if err := tx.AutoMigrate(&resourceGrantLogicalUniquenessSchema{}); err != nil {
 		return fmt.Errorf("add resource grant logical uniqueness: %w", err)
 	}
 	return nil

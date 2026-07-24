@@ -23,9 +23,10 @@ func (SchemaMigration) TableName() string {
 }
 
 type Migration struct {
-	Version string
-	Name    string
-	Run     func(*gorm.DB) error
+	Version                  string
+	Name                     string
+	Run                      func(*gorm.DB) error
+	SQLiteDisableForeignKeys bool
 }
 
 var migrations = []Migration{
@@ -166,9 +167,7 @@ var migrations = []Migration{
 	{
 		Version: "202607180007",
 		Name:    "permission logical uniqueness",
-		Run: func(tx *gorm.DB) error {
-			return tx.AutoMigrate(&model.Permission{})
-		},
+		Run:     migratePermissionLogicalUniqueness,
 	},
 	{
 		Version: "202607180008",
@@ -257,11 +256,12 @@ var migrations = []Migration{
 			return MigrateAuditUniqueIndexes(tx)
 		},
 	},
-		{
-			Version: "202607230003",
-			Name:    "逻辑删除标记从时间哨兵改为整型哨兵：deleted_at=1 活跃，NULL 已删除",
-			Run:     migrateDeletedAtToInt,
-		},
+	{
+		Version:                  "202607230003",
+		Name:                     "逻辑删除标记从时间哨兵改为整型哨兵：deleted_at=1 活跃，NULL 已删除",
+		Run:                      migrateDeletedAtToInt,
+		SQLiteDisableForeignKeys: true,
+	},
 }
 
 func rejectDuplicateDatabaseAccounts(tx *gorm.DB) error {
@@ -300,20 +300,85 @@ func Migrate(db *gorm.DB) error {
 			continue
 		}
 		migration := migration
+		if migration.SQLiteDisableForeignKeys && db.Dialector.Name() == "sqlite" {
+			if err := runSQLiteMigrationWithForeignKeysDisabled(db, migration); err != nil {
+				return fmt.Errorf("migration %s %s: %w", migration.Version, migration.Name, err)
+			}
+			continue
+		}
 		if err := db.Transaction(func(tx *gorm.DB) error {
 			if err := migration.Run(tx); err != nil {
 				return err
 			}
-			return tx.Create(&SchemaMigration{
-				Version:   migration.Version,
-				Name:      migration.Name,
-				AppliedAt: time.Now().UTC(),
-			}).Error
+			return recordMigration(tx, migration)
 		}); err != nil {
 			return fmt.Errorf("migration %s %s: %w", migration.Version, migration.Name, err)
 		}
 	}
 	return nil
+}
+
+func runSQLiteMigrationWithForeignKeysDisabled(db *gorm.DB, migration Migration) error {
+	return db.Connection(func(conn *gorm.DB) (resultErr error) {
+		connectionDB := conn.Session(&gorm.Session{NewDB: true})
+		var foreignKeys int
+		if err := connectionDB.Raw("PRAGMA foreign_keys").Scan(&foreignKeys).Error; err != nil {
+			return fmt.Errorf("read SQLite foreign key state: %w", err)
+		}
+		if foreignKeys != 0 {
+			if err := connectionDB.Session(&gorm.Session{NewDB: true}).
+				Exec("PRAGMA foreign_keys = OFF").Error; err != nil {
+				return fmt.Errorf("disable SQLite foreign keys: %w", err)
+			}
+			defer func() {
+				restoreDB := connectionDB.Session(&gorm.Session{NewDB: true})
+				restoreErr := restoreDB.Exec("PRAGMA foreign_keys = ON").Error
+				if restoreErr == nil {
+					var restoredState int
+					restoreErr = restoreDB.Session(&gorm.Session{NewDB: true}).
+						Raw("PRAGMA foreign_keys").Scan(&restoredState).Error
+					if restoreErr == nil && restoredState != 1 {
+						restoreErr = errors.New("pragma remained disabled")
+					}
+				}
+				if restoreErr != nil {
+					resultErr = errors.Join(
+						resultErr,
+						fmt.Errorf("restore SQLite foreign keys: %w", restoreErr),
+					)
+				}
+			}()
+			var disabledState int
+			if err := connectionDB.Session(&gorm.Session{NewDB: true}).
+				Raw("PRAGMA foreign_keys").Scan(&disabledState).Error; err != nil {
+				return fmt.Errorf("verify disabled SQLite foreign keys: %w", err)
+			}
+			if disabledState != 0 {
+				return errors.New("disable SQLite foreign keys: pragma remained enabled")
+			}
+		}
+
+		return connectionDB.Session(&gorm.Session{NewDB: true}).
+			Transaction(func(migrationTx *gorm.DB) error {
+				if err := migration.Run(
+					migrationTx.Session(&gorm.Session{NewDB: true}),
+				); err != nil {
+					return err
+				}
+				return recordMigration(
+					migrationTx.Session(&gorm.Session{NewDB: true}),
+					migration,
+				)
+			})
+	})
+}
+
+func recordMigration(db *gorm.DB, migration Migration) error {
+	return db.Create(&SchemaMigration{
+		Version:   migration.Version,
+		Name:      migration.Name,
+		AppliedAt: time.Now().UTC(),
+	}).Error
 }
 
 func appliedMigrations(db *gorm.DB) (map[string]bool, error) {
@@ -373,46 +438,113 @@ func backfillResources(db *gorm.DB) error {
 	if !db.Migrator().HasTable(&model.Resource{}) {
 		return nil
 	}
+	conflictColumns, err := resourceUpsertConflictColumns(db)
+	if err != nil {
+		return err
+	}
 	if db.Migrator().HasTable(&model.Host{}) {
+		active, args, err := activeDeletedAtPredicate(db, "hosts", "hosts.deleted_at")
+		if err != nil {
+			return err
+		}
 		var hosts []model.Host
-		if err := db.Find(&hosts).Error; err != nil {
+		if err := db.Where(active, args...).Find(&hosts).Error; err != nil {
 			return err
 		}
 		for _, host := range hosts {
-			if err := upsertResource(db, model.ResourceTypeHost, host.ID, hostResourceDisplayName(host), ""); err != nil {
+			if err := upsertResource(db, conflictColumns, model.ResourceTypeHost, host.ID, hostResourceDisplayName(host), ""); err != nil {
 				return err
 			}
 		}
 	}
 	if db.Migrator().HasTable(&model.HostAccount{}) {
+		accountActive, accountArgs, err := activeDeletedAtPredicate(
+			db,
+			"host_accounts",
+			"host_accounts.deleted_at",
+		)
+		if err != nil {
+			return err
+		}
+		hostActive, hostArgs, err := activeDeletedAtPredicate(db, "hosts", "hosts.deleted_at")
+		if err != nil {
+			return err
+		}
 		var accounts []model.HostAccount
-		if err := db.Preload("Host").Find(&accounts).Error; err != nil {
+		if err := db.
+			Where(accountActive, accountArgs...).
+			Where(
+				`EXISTS (
+					SELECT 1
+					FROM hosts
+					WHERE hosts.id = host_accounts.host_id
+					  AND `+hostActive+`
+				)`,
+				hostArgs...,
+			).
+			Preload("Host").
+			Find(&accounts).Error; err != nil {
 			return err
 		}
 		for _, account := range accounts {
-			if err := upsertResource(db, model.ResourceTypeHostAccount, account.ID, hostAccountResourceDisplayName(account), account.HostID); err != nil {
+			if err := upsertResource(db, conflictColumns, model.ResourceTypeHostAccount, account.ID, hostAccountResourceDisplayName(account), account.HostID); err != nil {
 				return err
 			}
 		}
 	}
 	if db.Migrator().HasTable(&model.DatabaseInstance{}) {
+		active, args, err := activeDeletedAtPredicate(
+			db,
+			"database_instances",
+			"database_instances.deleted_at",
+		)
+		if err != nil {
+			return err
+		}
 		var instances []model.DatabaseInstance
-		if err := db.Find(&instances).Error; err != nil {
+		if err := db.Where(active, args...).Find(&instances).Error; err != nil {
 			return err
 		}
 		for _, inst := range instances {
-			if err := upsertResource(db, model.ResourceTypeDatabaseInstance, inst.ID, databaseInstanceResourceDisplayName(inst), ""); err != nil {
+			if err := upsertResource(db, conflictColumns, model.ResourceTypeDatabaseInstance, inst.ID, databaseInstanceResourceDisplayName(inst), ""); err != nil {
 				return err
 			}
 		}
 	}
 	if db.Migrator().HasTable(&model.DatabaseAccount{}) {
+		accountActive, accountArgs, err := activeDeletedAtPredicate(
+			db,
+			"database_accounts",
+			"database_accounts.deleted_at",
+		)
+		if err != nil {
+			return err
+		}
+		instanceActive, instanceArgs, err := activeDeletedAtPredicate(
+			db,
+			"database_instances",
+			"database_instances.deleted_at",
+		)
+		if err != nil {
+			return err
+		}
 		var accounts []model.DatabaseAccount
-		if err := db.Find(&accounts).Error; err != nil {
+		if err := db.
+			Where(accountActive, accountArgs...).
+			Where(
+				`EXISTS (
+					SELECT 1
+					FROM database_instances
+					WHERE database_instances.id = database_accounts.instance_id
+					  AND `+instanceActive+`
+				)`,
+				instanceArgs...,
+			).
+			Find(&accounts).Error; err != nil {
 			return err
 		}
 		for _, account := range accounts {
-			if err := upsertResource(db, model.ResourceTypeDatabaseAccount, account.ID, databaseAccountResourceDisplayName(account), account.InstanceID); err != nil {
+			if err := upsertResource(db, conflictColumns, model.ResourceTypeDatabaseAccount, account.ID, databaseAccountResourceDisplayName(account), account.InstanceID); err != nil {
 				return err
 			}
 		}
@@ -420,7 +552,69 @@ func backfillResources(db *gorm.DB) error {
 	return nil
 }
 
-func upsertResource(db *gorm.DB, resourceType, resourceID, name, parentID string) error {
+func activeDeletedAtPredicate(
+	db *gorm.DB,
+	table string,
+	qualifiedColumn string,
+) (string, []any, error) {
+	if !db.Migrator().HasColumn(table, "deleted_at") {
+		return "1 = 1", nil, nil
+	}
+	castType := "TEXT"
+	switch db.Dialector.Name() {
+	case "sqlite", "postgres":
+	case "mysql":
+		castType = "CHAR"
+	default:
+		return "", nil, fmt.Errorf(
+			"storage: unsupported database dialect %q for deleted_at filtering",
+			db.Dialector.Name(),
+		)
+	}
+	predicate := fmt.Sprintf(
+		"(CAST(%s AS %s) = ? OR CAST(%s AS %s) LIKE ?)",
+		qualifiedColumn,
+		castType,
+		qualifiedColumn,
+		castType,
+	)
+	return predicate, []any{
+		fmt.Sprint(model.DeletedMarkerActive),
+		"0001-01-01%",
+	}, nil
+}
+
+func resourceUpsertConflictColumns(db *gorm.DB) ([]clause.Column, error) {
+	indexes, err := db.Migrator().GetIndexes("resources")
+	if err != nil {
+		return nil, fmt.Errorf("get resource indexes: %w", err)
+	}
+	var legacy []clause.Column
+	for _, index := range indexes {
+		if !indexIsUnique(index) {
+			continue
+		}
+		switch {
+		case columnsMatch(index.Columns(), []string{"type", "resource_id", "deleted_at"}):
+			return []clause.Column{
+				{Name: "type"},
+				{Name: "resource_id"},
+				{Name: "deleted_at"},
+			}, nil
+		case columnsMatch(index.Columns(), []string{"type", "resource_id"}):
+			legacy = []clause.Column{
+				{Name: "type"},
+				{Name: "resource_id"},
+			}
+		}
+	}
+	if len(legacy) > 0 {
+		return legacy, nil
+	}
+	return nil, errors.New("storage: resources table has no supported unique key")
+}
+
+func upsertResource(db *gorm.DB, conflictColumns []clause.Column, resourceType, resourceID, name, parentID string) error {
 	resourceType = strings.TrimSpace(resourceType)
 	resourceID = strings.TrimSpace(resourceID)
 	if resourceType == "" || resourceID == "" {
@@ -437,7 +631,7 @@ func upsertResource(db *gorm.DB, resourceType, resourceID, name, parentID string
 		ParentID:   strings.TrimSpace(parentID),
 	}
 	return db.Clauses(clause.OnConflict{
-		Columns: []clause.Column{{Name: "type"}, {Name: "resource_id"}},
+		Columns: conflictColumns,
 		DoUpdates: clause.Assignments(map[string]any{
 			"name":      resource.Name,
 			"parent_id": resource.ParentID,
@@ -493,43 +687,160 @@ func displayAddress(address string, port int) string {
 	return fmt.Sprintf("%s:%d", address, port)
 }
 
-// tablesWithDeletedAt 列出所有包含 deleted_at 列的业务表。
-func tablesWithDeletedAt() []string {
-	return []string{
-		"users", "roles", "permissions", "role_permissions", "user_roles",
-		"user_groups", "user_group_members",
-		"hosts", "host_accounts",
-		"database_instances", "database_accounts",
-		"applications", "container_endpoints",
-		"resource_grants", "resources", "resource_groups",
-		"user_sessions", "temporary_accounts", "temporary_account_grants",
-		"connection_passwords", "ai_access_tokens",
-		"admin_sessions", "websocket_tickets",
-		"platform_accounts",
-		"system_setting_revisions", "system_settings",
-		"database_provisioning_operations",
-		"user_preferences",
+type deletedAtModel struct {
+	table string
+	value any
+}
+
+func modelsWithDeletedAt(db *gorm.DB) ([]deletedAtModel, error) {
+	models := make([]deletedAtModel, 0, len(model.AllModels()))
+	seen := make(map[string]struct{}, len(model.AllModels()))
+	for _, value := range model.AllModels() {
+		statement := &gorm.Statement{DB: db}
+		if err := statement.Parse(value); err != nil {
+			return nil, fmt.Errorf("parse deleted_at model %T: %w", value, err)
+		}
+		if statement.Schema.LookUpField("deleted_at") == nil {
+			continue
+		}
+		table := statement.Schema.Table
+		if _, ok := seen[table]; ok {
+			continue
+		}
+		seen[table] = struct{}{}
+		models = append(models, deletedAtModel{table: table, value: value})
 	}
+	return models, nil
+}
+
+// tablesWithDeletedAt derives the audited business tables from the runtime
+// model schemas. This keeps association tables without FullAudit out while
+// ensuring newly audited models are not silently missed.
+func tablesWithDeletedAt(db *gorm.DB) ([]string, error) {
+	models, err := modelsWithDeletedAt(db)
+	if err != nil {
+		return nil, err
+	}
+	tables := make([]string, 0, len(models))
+	for _, item := range models {
+		tables = append(tables, item.table)
+	}
+	return tables, nil
 }
 
 // migrateDeletedAtToInt 将 deleted_at 列从时间哨兵格式迁移到整型哨兵格式。
 // 活跃行：时间哨兵 "0001-01-01..." → 1
 // 已删除行：时间戳 → NULL
 func migrateDeletedAtToInt(tx *gorm.DB) error {
-	for _, table := range tablesWithDeletedAt() {
-		// 检查表是否存在
-		if !tx.Migrator().HasTable(table) {
+	models, err := modelsWithDeletedAt(tx)
+	if err != nil {
+		return err
+	}
+	if tx.Dialector.Name() != "sqlite" {
+		return fmt.Errorf(
+			"deleted_at integer migration is not implemented safely for %s; refusing automatic conversion",
+			tx.Dialector.Name(),
+		)
+	}
+	return migrateSQLiteDeletedAtToInt(tx, models)
+}
+
+type sqliteSchemaObject struct {
+	Type string `gorm:"column:type"`
+	Name string `gorm:"column:name"`
+	SQL  string `gorm:"column:sql"`
+}
+
+func migrateSQLiteDeletedAtToInt(tx *gorm.DB, models []deletedAtModel) error {
+	for _, item := range models {
+		migrationDB := tx.Session(&gorm.Session{NewDB: true})
+		if !migrationDB.Migrator().HasTable(item.table) ||
+			!migrationDB.Migrator().HasColumn(item.table, "deleted_at") {
 			continue
 		}
-		// 活跃行：时间哨兵 → 1
-		if err := tx.Table(table).Where("deleted_at LIKE ?", "0001-01-01%").Update("deleted_at", model.DeletedMarkerActive).Error; err != nil {
-			return fmt.Errorf("migrate %s active rows: %w", table, err)
-		}
-		// 已删除行：时间戳 → NULL
-		if err := tx.Table(table).Where("deleted_at NOT LIKE ? AND deleted_at IS NOT NULL", "0001-01-01%").Update("deleted_at", nil).Error; err != nil {
-			return fmt.Errorf("migrate %s deleted rows: %w", table, err)
+
+		if err := migrationDB.Transaction(func(tableTx *gorm.DB) error {
+			objects, err := sqliteTableSchemaObjects(tableTx, item.table)
+			if err != nil {
+				return err
+			}
+			if err := tableTx.Session(&gorm.Session{NewDB: true}).
+				Migrator().AlterColumn(item.value, "DeletedAt"); err != nil {
+				return fmt.Errorf("alter %s.deleted_at: %w", item.table, err)
+			}
+			if err := normalizeDeletedAtValues(tableTx, item.table); err != nil {
+				return err
+			}
+			for _, object := range objects {
+				if err := tableTx.Session(&gorm.Session{NewDB: true}).
+					Exec(object.SQL).Error; err != nil {
+					return fmt.Errorf(
+						"restore SQLite %s %s on %s: %w",
+						object.Type,
+						object.Name,
+						item.table,
+						err,
+					)
+				}
+			}
+			return nil
+		}); err != nil {
+			return err
 		}
 	}
-	// AutoMigrate 更新列类型（GORM 会根据 model tag 重建 schema）
-	return tx.AutoMigrate(model.AllModels()...)
+	if err := tx.Session(&gorm.Session{NewDB: true}).Transaction(func(indexTx *gorm.DB) error {
+		return MigrateAuditUniqueIndexes(indexTx)
+	}); err != nil {
+		return err
+	}
+	return validateSQLiteForeignKeys(tx.Session(&gorm.Session{NewDB: true}))
+}
+
+func sqliteTableSchemaObjects(
+	tx *gorm.DB,
+	table string,
+) ([]sqliteSchemaObject, error) {
+	var objects []sqliteSchemaObject
+	if err := tx.Session(&gorm.Session{NewDB: true}).Raw(
+		`SELECT type, name, sql
+		 FROM sqlite_master
+		 WHERE tbl_name = ?
+		   AND type IN ('index', 'trigger')
+		   AND sql IS NOT NULL
+		 ORDER BY CASE type WHEN 'index' THEN 0 ELSE 1 END, name`,
+		table,
+	).Scan(&objects).Error; err != nil {
+		return nil, fmt.Errorf("capture SQLite schema objects for %s: %w", table, err)
+	}
+	return objects, nil
+}
+
+func normalizeDeletedAtValues(tx *gorm.DB, table string) error {
+	if err := tx.Table(table).
+		Where("deleted_at LIKE ?", "0001-01-01%").
+		Update("deleted_at", model.DeletedMarkerActive).Error; err != nil {
+		return fmt.Errorf("migrate %s active rows: %w", table, err)
+	}
+	if err := tx.Table(table).
+		Where("deleted_at IS NOT NULL AND deleted_at <> ?", model.DeletedMarkerActive).
+		Update("deleted_at", nil).Error; err != nil {
+		return fmt.Errorf("migrate %s deleted rows: %w", table, err)
+	}
+	return nil
+}
+
+func validateSQLiteForeignKeys(tx *gorm.DB) error {
+	var violations []struct {
+		Table  string `gorm:"column:table"`
+		RowID  int64  `gorm:"column:rowid"`
+		Parent string `gorm:"column:parent"`
+		FKID   int    `gorm:"column:fkid"`
+	}
+	if err := tx.Raw("PRAGMA foreign_key_check").Scan(&violations).Error; err != nil {
+		return fmt.Errorf("validate SQLite foreign keys: %w", err)
+	}
+	if len(violations) != 0 {
+		return fmt.Errorf("validate SQLite foreign keys: %d violation(s)", len(violations))
+	}
+	return nil
 }

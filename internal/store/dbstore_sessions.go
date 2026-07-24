@@ -60,7 +60,9 @@ func (s *DBStore) CreateUserSession(sess model.UserSession) (*model.UserSession,
 
 func (s *DBStore) FindActiveHostAccount(ctx context.Context, id string) (model.HostAccount, bool, error) {
 	var account model.HostAccount
-	err := s.db.WithContext(ctx).Where("id = ? AND status = ?", id, "active").First(&account).Error
+	err := s.db.WithContext(ctx).Scopes(activeHostAccountScope).
+		Where("host_accounts.id = ? AND host_accounts.status = ?", id, "active").
+		First(&account).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return model.HostAccount{}, false, nil
 	}
@@ -72,7 +74,9 @@ func (s *DBStore) FindActiveHostAccount(ctx context.Context, id string) (model.H
 
 func (s *DBStore) FindActiveHost(ctx context.Context, id string) (model.Host, bool, error) {
 	var host model.Host
-	err := s.db.WithContext(ctx).Where("id = ? AND status = ?", id, "active").First(&host).Error
+	err := s.db.WithContext(ctx).Scopes(ActiveScope).
+		Where("id = ? AND status = ?", id, "active").
+		First(&host).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return model.Host{}, false, nil
 	}
@@ -268,15 +272,15 @@ func (s *DBStore) GetUserSessionAuthDetail(ctx context.Context, sessionID string
 	}
 
 	detail := model.UserSessionAuthDetail{
-		ID:            sess.ID,
-		SessionID:     sess.SessionID,
-		SessionType:   sess.Type,
-		UserID:        sess.UserID,
-		Username:      sess.User.Username,
-		AuthorizedBy:  authorizedBy,
-		StartsAt:      model.ToAuditTime(sess.CreatedAt),
-		ExpiresAt:     model.ToAuditTimePtr(sess.ExpiresAt),
-		Status:        sess.Status,
+		ID:           sess.ID,
+		SessionID:    sess.SessionID,
+		SessionType:  sess.Type,
+		UserID:       sess.UserID,
+		Username:     sess.User.Username,
+		AuthorizedBy: authorizedBy,
+		StartsAt:     model.ToAuditTime(sess.CreatedAt),
+		ExpiresAt:    model.ToAuditTimePtr(sess.ExpiresAt),
+		Status:       sess.Status,
 	}
 
 	// 计算有效状态（在时间转字符串之前用原始 time.Time 计算）

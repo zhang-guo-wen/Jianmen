@@ -32,6 +32,22 @@ func ActiveScope(db *gorm.DB) *gorm.DB {
 	return db.Where("deleted_at = ?", model.DeletedMarkerActive)
 }
 
+// activeHostAccountScope keeps host-account reads fail-closed when either the
+// account itself or its parent host has been soft-deleted.
+func activeHostAccountScope(db *gorm.DB) *gorm.DB {
+	return db.
+		Where("host_accounts.deleted_at = ?", model.DeletedMarkerActive).
+		Where(
+			`EXISTS (
+				SELECT 1
+				FROM hosts
+				WHERE hosts.id = host_accounts.host_id
+				  AND hosts.deleted_at = ?
+			)`,
+			model.DeletedMarkerActive,
+		)
+}
+
 // SoftDeleteRecord 对嵌入 FullAudit 的业务模型执行软删除（设 deleted_at = NULL）。
 func (s *DBStore) SoftDeleteRecord(ctx context.Context, dest interface{}, id string) error {
 	now := time.Now().UTC()

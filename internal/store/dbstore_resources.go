@@ -35,7 +35,11 @@ func (s *DBStore) syncResourceTx(tx *gorm.DB, resourceType, resourceID, name, pa
 		ParentID:   strings.TrimSpace(parentID),
 	}
 	return tx.Clauses(clause.OnConflict{
-		Columns: []clause.Column{{Name: "type"}, {Name: "resource_id"}},
+		Columns: []clause.Column{
+			{Name: "type"},
+			{Name: "resource_id"},
+			{Name: "deleted_at"},
+		},
 		DoUpdates: clause.Assignments(map[string]any{
 			"name":      resource.Name,
 			"parent_id": resource.ParentID,

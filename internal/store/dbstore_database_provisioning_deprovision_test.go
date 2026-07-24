@@ -5,11 +5,44 @@ import (
 	"testing"
 	"time"
 
+	"gorm.io/gorm"
+
 	"jianmen/internal/model"
 	"jianmen/internal/service"
 )
 
-func TestManagedDatabaseDeprovisionSQLiteDeletesAccountAndOperationAtomically(t *testing.T) {
+func TestManagedDatabaseDeprovisionSQLiteSoftDeletesAccountAndOperationAtomically(t *testing.T) {
+	repository, db, account, operation, started := prepareManagedDatabaseDeprovision(t)
+
+	if ok, err := repository.CompleteDatabaseDeprovision(context.Background(), started.Fence(), account.ID); err != nil || !ok {
+		t.Fatalf("complete = %t, %v", ok, err)
+	}
+	assertDatabaseDeprovisionState(t, db, account.ID, operation.ID, false)
+	assertDatabaseAccountResourceCount(t, db, account.ID, 0)
+}
+
+func TestManagedDatabaseDeprovisionSQLiteRollsBackAllTombstones(t *testing.T) {
+	repository, db, account, operation, started := prepareManagedDatabaseDeprovision(t)
+	if err := db.Exec(`
+		CREATE TRIGGER reject_deprovision_operation_tombstone
+		BEFORE UPDATE OF deleted_at ON database_provisioning_operations
+		WHEN NEW.deleted_at IS NULL
+		BEGIN
+			SELECT RAISE(ABORT, 'reject operation tombstone');
+		END;
+	`).Error; err != nil {
+		t.Fatalf("create operation tombstone trigger: %v", err)
+	}
+
+	if ok, err := repository.CompleteDatabaseDeprovision(context.Background(), started.Fence(), account.ID); err == nil || ok {
+		t.Fatalf("complete with rejected operation tombstone = %t, %v; want false, error", ok, err)
+	}
+	assertDatabaseDeprovisionState(t, db, account.ID, operation.ID, true)
+	assertDatabaseAccountResourceCount(t, db, account.ID, 1)
+}
+
+func prepareManagedDatabaseDeprovision(t *testing.T) (*DBStore, *gorm.DB, model.DatabaseAccount, model.DatabaseProvisioningOperation, service.DatabaseProvisioningOperation) {
+	t.Helper()
 	repository, db := newDatabaseProvisioningStoreTest(t)
 	migrateProvisioningOperationsForStoreTest(t, db)
 	instance, admin := seedProvisioningStoreAdministrator(t, db)
@@ -22,6 +55,9 @@ func TestManagedDatabaseDeprovisionSQLiteDeletesAccountAndOperationAtomically(t 
 	if err := db.Create(&account).Error; err != nil {
 		t.Fatalf("create managed account: %v", err)
 	}
+	if err := repository.syncResource(model.ResourceTypeDatabaseAccount, account.ID, account.UniqueName, instance.ID); err != nil {
+		t.Fatalf("create managed account resource: %v", err)
+	}
 	claimed, managed, err := repository.BeginDatabaseDeprovision(context.Background(), account.ID, service.DatabaseProvisioningLease{Owner: "worker", Token: "lease", Duration: time.Minute})
 	if err != nil || !managed {
 		t.Fatalf("begin = %#v, %t, %v", claimed, managed, err)
@@ -30,15 +66,63 @@ func TestManagedDatabaseDeprovisionSQLiteDeletesAccountAndOperationAtomically(t 
 	if err != nil || !ok {
 		t.Fatalf("start DROP = %#v, %t, %v", started, ok, err)
 	}
-	if ok, err := repository.CompleteDatabaseDeprovision(context.Background(), started.Fence(), account.ID); err != nil || !ok {
-		t.Fatalf("complete = %t, %v", ok, err)
+	return repository, db, account, op, started
+}
+
+func assertDatabaseDeprovisionState(t *testing.T, db *gorm.DB, accountID, operationID string, wantActive bool) {
+	t.Helper()
+	var account model.DatabaseAccount
+	if err := db.First(&account, "id = ?", accountID).Error; err != nil {
+		t.Fatalf("load managed account tombstone: %v", err)
 	}
+	var operation model.DatabaseProvisioningOperation
+	if err := db.First(&operation, "id = ?", operationID).Error; err != nil {
+		t.Fatalf("load provisioning operation tombstone: %v", err)
+	}
+	if !matchesDatabaseDeprovisionMarker(account.DeletedAt, wantActive) {
+		t.Fatalf("managed account deleted_at = %v, want active=%v", account.DeletedAt, wantActive)
+	}
+	if !matchesDatabaseDeprovisionMarker(operation.DeletedAt, wantActive) {
+		t.Fatalf("operation deleted_at = %v, want active=%v", operation.DeletedAt, wantActive)
+	}
+
+	wantActiveCount := int64(0)
+	if wantActive {
+		wantActiveCount = 1
+	}
+	var accountCount int64
+	if err := db.Model(&model.DatabaseAccount{}).Scopes(ActiveScope).Where("id = ?", accountID).Count(&accountCount).Error; err != nil {
+		t.Fatalf("count active managed accounts: %v", err)
+	}
+	if accountCount != wantActiveCount {
+		t.Fatalf("active managed account count = %d, want %d", accountCount, wantActiveCount)
+	}
+	var operationCount int64
+	if err := db.Model(&model.DatabaseProvisioningOperation{}).Scopes(ActiveScope).Where("id = ?", operationID).Count(&operationCount).Error; err != nil {
+		t.Fatalf("count active provisioning operations: %v", err)
+	}
+	if operationCount != wantActiveCount {
+		t.Fatalf("active operation count = %d, want %d", operationCount, wantActiveCount)
+	}
+}
+
+func matchesDatabaseDeprovisionMarker(deletedAt *int, wantActive bool) bool {
+	if !wantActive {
+		return deletedAt == nil
+	}
+	return deletedAt != nil && *deletedAt == model.DeletedMarkerActive
+}
+
+func assertDatabaseAccountResourceCount(t *testing.T, db *gorm.DB, accountID string, want int64) {
+	t.Helper()
 	var count int64
-	if err := db.Model(&model.DatabaseAccount{}).Where("id = ?", account.ID).Count(&count).Error; err != nil || count != 0 {
-		t.Fatalf("managed account count = %d, %v", count, err)
+	if err := db.Model(&model.Resource{}).
+		Where("type = ? AND resource_id = ?", model.ResourceTypeDatabaseAccount, accountID).
+		Count(&count).Error; err != nil {
+		t.Fatalf("count managed account resources: %v", err)
 	}
-	if err := db.Model(&model.DatabaseProvisioningOperation{}).Where("id = ?", op.ID).Count(&count).Error; err != nil || count != 0 {
-		t.Fatalf("operation count = %d, %v", count, err)
+	if count != want {
+		t.Fatalf("managed account resource count = %d, want %d", count, want)
 	}
 }
 

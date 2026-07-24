@@ -226,7 +226,9 @@ func (s *DBStore) TemporaryConnectionTarget(ctx context.Context, resourceType, r
 	switch resourceType {
 	case model.ResourceTypeHostAccount:
 		var account model.HostAccount
-		if err := s.db.WithContext(ctx).Where("id = ?", resourceID).First(&account).Error; err != nil {
+		if err := s.db.WithContext(ctx).Scopes(activeHostAccountScope).
+			Where("host_accounts.id = ?", resourceID).
+			First(&account).Error; err != nil {
 			return service.TemporaryConnectionTarget{}, mapTemporaryAccessReadError(err, "find host account connection target")
 		}
 		return service.TemporaryConnectionTarget{
@@ -272,7 +274,9 @@ func verifyTemporaryAccessResource(tx *gorm.DB, resourceType, resourceID string)
 	var err error
 	switch resourceType {
 	case model.ResourceTypeHostAccount:
-		err = tx.Model(&model.HostAccount{}).Scopes(ActiveScope).Where("id = ?", resourceID).Count(&count).Error
+		err = tx.Model(&model.HostAccount{}).Scopes(activeHostAccountScope).
+			Where("host_accounts.id = ?", resourceID).
+			Count(&count).Error
 	case model.ResourceTypeDatabaseAccount:
 		err = tx.Model(&model.DatabaseAccount{}).Scopes(ActiveScope).Where("id = ?", resourceID).Count(&count).Error
 	default:
@@ -416,7 +420,10 @@ func temporaryAccessResourceNames(db *gorm.DB, resourceType, resourceID string) 
 	switch resourceType {
 	case model.ResourceTypeHostAccount:
 		var account model.HostAccount
-		err := db.Preload("Host").Where("id = ?", resourceID).First(&account).Error
+		err := db.Scopes(activeHostAccountScope).
+			Preload("Host").
+			Where("host_accounts.id = ?", resourceID).
+			First(&account).Error
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return "", "", nil
 		}

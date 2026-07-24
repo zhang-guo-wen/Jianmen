@@ -15,12 +15,23 @@ func (s *DBStore) lockTargetHost(tx *gorm.DB, hostID, address, protocol string, 
 		return model.Host{}, false, errors.New("load target host: nil database")
 	}
 	var host model.Host
-	err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&host, "id = ?", hostID).Error
+	err := tx.Scopes(ActiveScope).
+		Clauses(clause.Locking{Strength: "UPDATE"}).
+		First(&host, "id = ?", hostID).Error
 	if err == nil {
 		return host, false, nil
 	}
 	if !errors.Is(err, gorm.ErrRecordNotFound) {
 		return model.Host{}, false, err
+	}
+	var tombstoneCount int64
+	if err := tx.Model(&model.Host{}).
+		Where("id = ? AND deleted_at IS NULL", hostID).
+		Count(&tombstoneCount).Error; err != nil {
+		return model.Host{}, false, err
+	}
+	if tombstoneCount != 0 {
+		return model.Host{}, false, fmt.Errorf("%w: %q", ErrHostNotFound, hostID)
 	}
 	name := address
 	if port != 0 && port != 22 {

@@ -4,8 +4,6 @@ import (
 	"time"
 
 	"gorm.io/gorm"
-
-	"jianmen/internal/model"
 )
 
 const systemSettingMigrationVersion = "202607190005"
@@ -30,6 +28,20 @@ type systemSettingBeforeDatabaseClientMessageLimit struct {
 	UpdatedAt                   time.Time
 }
 
+type systemSettingRevisionInitialSchema struct {
+	ID                string    `gorm:"primaryKey;size:64"`
+	Revision          int64     `gorm:"uniqueIndex;not null"`
+	SnapshotJSON      string    `gorm:"type:text;not null"`
+	ChangedFieldsJSON string    `gorm:"type:text;not null"`
+	UpdatedByID       string    `gorm:"size:64"`
+	UpdatedByUsername string    `gorm:"size:128"`
+	CreatedAt         time.Time `gorm:"index;not null"`
+}
+
+func (systemSettingRevisionInitialSchema) TableName() string {
+	return "system_setting_revisions"
+}
+
 func (systemSettingBeforeDatabaseClientMessageLimit) TableName() string {
 	return "system_settings"
 }
@@ -37,6 +49,6 @@ func (systemSettingBeforeDatabaseClientMessageLimit) TableName() string {
 func migrateSystemSettings(tx *gorm.DB) error {
 	return tx.AutoMigrate(
 		&systemSettingBeforeDatabaseClientMessageLimit{},
-		&model.SystemSettingRevision{},
+		&systemSettingRevisionInitialSchema{},
 	)
 }

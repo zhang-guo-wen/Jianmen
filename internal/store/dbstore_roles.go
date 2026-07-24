@@ -296,7 +296,11 @@ func (s *DBStore) replaceRoleActions(ctx context.Context, roleID string, request
 		}
 		for _, request := range requested {
 			var permission model.Permission
-			err := tx.Where("action = ? AND resource_type = '' AND resource_id = ''", request.Action).Where("effect = '' OR effect = ?", model.PermissionEffectAllow).Order("created_at, id").First(&permission).Error
+			err := tx.Scopes(ActiveScope).
+				Where("action = ? AND resource_type = '' AND resource_id = ''", request.Action).
+				Where("effect = '' OR effect = ?", model.PermissionEffectAllow).
+				Order("created_at, id").
+				First(&permission).Error
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				permission = request
 				result := tx.Clauses(clause.OnConflict{
@@ -305,6 +309,7 @@ func (s *DBStore) replaceRoleActions(ctx context.Context, roleID string, request
 						{Name: "resource_type"},
 						{Name: "resource_id"},
 						{Name: "effect"},
+						{Name: "deleted_at"},
 					},
 					DoNothing: true,
 				}).Create(&permission)
@@ -315,7 +320,7 @@ func (s *DBStore) replaceRoleActions(ctx context.Context, roleID string, request
 					if err := tx.Where(
 						"action = ? AND resource_type = ? AND resource_id = ? AND effect = ?",
 						request.Action, request.ResourceType, request.ResourceID, request.Effect,
-					).First(&permission).Error; err != nil {
+					).Scopes(ActiveScope).First(&permission).Error; err != nil {
 						return fmt.Errorf("load concurrent action permission: %w", err)
 					}
 				}

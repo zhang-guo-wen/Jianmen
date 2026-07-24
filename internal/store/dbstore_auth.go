@@ -74,7 +74,9 @@ func (s *DBStore) authenticateCompact(login LoginName, password string) (model.U
 		return user, nil
 	}
 	var account model.HostAccount
-	if err := s.db.Where("resource_id = ? AND status = ?", login.ResourceID, "active").First(&account).Error; err != nil {
+	if err := s.db.Scopes(activeHostAccountScope).
+		Where("host_accounts.resource_id = ? AND host_accounts.status = ?", login.ResourceID, "active").
+		First(&account).Error; err != nil {
 		return model.User{}, errors.New("authentication failed")
 	}
 	if err := s.AuthenticateConnectionPassword(context.Background(), user.ID, model.ResourceTypeHostAccount, account.ID, password); err != nil {
@@ -124,9 +126,12 @@ func (s *DBStore) authenticateCompactPublicKey(login LoginName, key ssh.PublicKe
 	}
 	if login.ResourceID != "" {
 		var account model.HostAccount
-		if err := s.db.Where("resource_id = ?", login.ResourceID).First(&account).Error; err == nil {
-			user.RequestedTargetID = account.ID
+		if err := s.db.Scopes(activeHostAccountScope).
+			Where("host_accounts.resource_id = ? AND host_accounts.status = ?", login.ResourceID, "active").
+			First(&account).Error; err != nil {
+			return model.User{}, errors.New("invalid username or public key")
 		}
+		user.RequestedTargetID = account.ID
 	}
 	return user, nil
 }

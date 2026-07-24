@@ -78,7 +78,7 @@ func TestDatabaseAccountUniquenessMigrationUpgradesExistingSchema(t *testing.T) 
 		t.Fatal("database account unique index is missing after migration")
 	}
 
-	first := model.DatabaseAccount{
+	first := databaseAccountBeforeProvisioning{
 		ID:         "account-1",
 		InstanceID: "instance-1",
 		UniqueName: "account-one",
@@ -89,7 +89,7 @@ func TestDatabaseAccountUniquenessMigrationUpgradesExistingSchema(t *testing.T) 
 	if err := db.Create(&first).Error; err != nil {
 		t.Fatalf("insert first account: %v", err)
 	}
-	duplicate := model.DatabaseAccount{
+	duplicate := databaseAccountBeforeProvisioning{
 		ID:         "account-2",
 		InstanceID: "instance-1",
 		UniqueName: "account-two",
@@ -100,7 +100,7 @@ func TestDatabaseAccountUniquenessMigrationUpgradesExistingSchema(t *testing.T) 
 	if err := db.Create(&duplicate).Error; err == nil {
 		t.Fatal("same-instance duplicate database account was accepted")
 	}
-	differentInstance := model.DatabaseAccount{
+	differentInstance := databaseAccountBeforeProvisioning{
 		ID:         "account-3",
 		InstanceID: "instance-2",
 		UniqueName: "account-three",
@@ -126,7 +126,7 @@ func TestDatabaseAccountUniquenessMigrationUpgradesExistingSchema(t *testing.T) 
 	if !db.Migrator().HasIndex(&model.DatabaseAccount{}, "uidx_database_accounts_instance_username") {
 		t.Fatal("database account unique index is missing after second migration")
 	}
-	duplicateAfterSecondMigration := model.DatabaseAccount{
+	duplicateAfterSecondMigration := databaseAccountBeforeProvisioning{
 		ID:         "account-4",
 		InstanceID: "instance-1",
 		UniqueName: "account-four",

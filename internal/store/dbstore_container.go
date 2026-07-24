@@ -28,7 +28,7 @@ func (s *DBStore) ListContainerEndpoints(ctx context.Context, params ContainerEn
 
 	buildQuery := func() *gorm.DB {
 		query := s.db.WithContext(ctx).Model(&model.ContainerEndpoint{}).
-				Where("container_endpoints.deleted_at = ?", model.DeletedMarkerActive).
+			Where("container_endpoints.deleted_at = ?", model.DeletedMarkerActive).
 			Joins("LEFT JOIN hosts ON hosts.id = container_endpoints.host_id")
 		if status := strings.TrimSpace(params.Status); status != "" {
 			query = query.Where("container_endpoints.status = ?", status)
@@ -104,7 +104,7 @@ func (s *DBStore) CreateManagedContainerEndpoint(ctx context.Context, input serv
 	// 当用户未指定名称且非 Docker API 模式时，根据主机信息生成默认名称
 	if strings.TrimSpace(storeInput.Name) == "" && strings.TrimSpace(storeInput.Address) == "" && storeInput.HostID != "" {
 		var host model.Host
-		if err := s.db.WithContext(ctx).First(&host, "id = ?", storeInput.HostID).Error; err == nil {
+		if err := s.db.WithContext(ctx).Scopes(ActiveScope).First(&host, "id = ?", storeInput.HostID).Error; err == nil {
 			if host.Name != "" {
 				storeInput.Name = host.Name
 			} else if host.Address != "" {
@@ -148,7 +148,8 @@ func (s *DBStore) DeleteManagedContainerEndpoint(ctx context.Context, id string)
 
 func (s *DBStore) ContainerHostAccount(ctx context.Context, id string) (service.ContainerHostAccount, error) {
 	var account model.HostAccount
-	if err := s.db.WithContext(ctx).Preload("Host").First(&account, "id = ?", strings.TrimSpace(id)).Error; err != nil {
+	if err := s.db.WithContext(ctx).Scopes(activeHostAccountScope).Preload("Host").
+		First(&account, "host_accounts.id = ?", strings.TrimSpace(id)).Error; err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			return service.ContainerHostAccount{}, err
 		}
@@ -361,7 +362,9 @@ func (s *DBStore) containerEndpointViews(ctx context.Context, endpoints []model.
 	accounts := make(map[string]model.HostAccount, len(accountIDs))
 	if len(accountIDs) > 0 {
 		var records []model.HostAccount
-		if err := s.db.WithContext(ctx).Where("id IN ?", accountIDs).Find(&records).Error; err != nil {
+		if err := s.db.WithContext(ctx).Scopes(activeHostAccountScope).
+			Where("host_accounts.id IN ?", accountIDs).
+			Find(&records).Error; err != nil {
 			return nil, fmt.Errorf("load container endpoint accounts: %w", err)
 		}
 		for _, account := range records {

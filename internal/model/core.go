@@ -191,7 +191,9 @@ func (m *LoginAuditLog) BeforeCreate(tx *gorm.DB) error {
 	return ensureID(&m.ID)
 }
 func (m *AuditSession) BeforeCreate(tx *gorm.DB) error {
-	m.CreatedBy = userIDFromContext(tx.Statement.Context)
+	if tx != nil && tx.Statement != nil {
+		m.CreatedBy = userIDFromContext(tx.Statement.Context)
+	}
 	return ensureID(&m.ID)
 }
 func (m *AuditArtifact) BeforeCreate(tx *gorm.DB) error {

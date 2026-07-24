@@ -81,7 +81,7 @@ func TestAuditDBQueryLargePayloadMigrationPreservesRowsAndStoresTenMiB(t *testin
 		t.Fatal("database audit query pagination index was not created")
 	}
 
-	var preserved model.AuditDBQuery
+	var preserved auditDBQueryLargePayloadSchema
 	if err := db.First(&preserved, "id = ?", legacy.ID).Error; err != nil {
 		t.Fatalf("load preserved database audit query: %v", err)
 	}
@@ -113,7 +113,7 @@ func TestAuditDBQueryLargePayloadMigrationPreservesRowsAndStoresTenMiB(t *testin
 	}
 
 	payload := strings.Repeat("x", tenMiB)
-	large := model.AuditDBQuery{
+	large := auditDBQueryLargePayloadSchema{
 		ID:               "large-query",
 		AuditSessionID:   "large-session",
 		Timestamp:        now.Add(time.Second),
@@ -125,7 +125,7 @@ func TestAuditDBQueryLargePayloadMigrationPreservesRowsAndStoresTenMiB(t *testin
 	if err := db.Create(&large).Error; err != nil {
 		t.Fatalf("store 10 MiB database audit query: %v", err)
 	}
-	var loaded model.AuditDBQuery
+	var loaded auditDBQueryLargePayloadSchema
 	if err := db.First(&loaded, "id = ?", large.ID).Error; err != nil {
 		t.Fatalf("load 10 MiB database audit query: %v", err)
 	}

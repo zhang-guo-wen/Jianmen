@@ -63,6 +63,82 @@ func TestDBStorePermissionBusinessKeyConflictsOnCreateAndUpdate(t *testing.T) {
 	}
 }
 
+func TestDBStoreSearchRoleBindingsQualifiesJoinedCreatedAt(t *testing.T) {
+	db, err := storage.Open(storage.Config{Driver: storage.DriverSQLite, DSN: ":memory:"})
+	if err != nil {
+		t.Fatalf("open database: %v", err)
+	}
+	if err := storage.AutoMigrate(db); err != nil {
+		t.Fatalf("migrate database: %v", err)
+	}
+	st := NewDBStore(db)
+	ctx := context.Background()
+
+	if items, total, err := st.SearchUserRoles(ctx, "", 1, 200); err != nil {
+		t.Fatalf("list empty user roles: %v", err)
+	} else if len(items) != 0 || total != 0 {
+		t.Fatalf("empty user roles = %d/%d, want 0/0", len(items), total)
+	}
+	if items, total, err := st.SearchRolePermissions(ctx, "", 1, 200); err != nil {
+		t.Fatalf("list empty role permissions: %v", err)
+	} else if len(items) != 0 || total != 0 {
+		t.Fatalf("empty role permissions = %d/%d, want 0/0", len(items), total)
+	}
+
+	user := model.User{Username: "alice", Status: "active"}
+	if err := db.Create(&user).Error; err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	role, err := st.CreateRole(ctx, model.Role{Name: "operators", Status: "active"})
+	if err != nil {
+		t.Fatalf("create role: %v", err)
+	}
+	permission, err := st.CreatePermission(ctx, model.Permission{
+		Action: "host:view",
+		Effect: model.PermissionEffectAllow,
+	})
+	if err != nil {
+		t.Fatalf("create permission: %v", err)
+	}
+	userRole, err := st.CreateUserRole(ctx, model.UserRole{UserID: user.ID, RoleID: role.ID})
+	if err != nil {
+		t.Fatalf("create user role: %v", err)
+	}
+	rolePermission, err := st.CreateRolePermission(ctx, model.RolePermission{RoleID: role.ID, PermissionID: permission.ID})
+	if err != nil {
+		t.Fatalf("create role permission: %v", err)
+	}
+
+	userRoles, total, err := st.SearchUserRoles(ctx, "", 1, 200)
+	if err != nil {
+		t.Fatalf("list user roles: %v", err)
+	}
+	if len(userRoles) != 1 || total != 1 || userRoles[0].ID != userRole.ID {
+		t.Fatalf("user roles = %#v/%d, want binding %q/1", userRoles, total, userRole.ID)
+	}
+	rolePermissions, total, err := st.SearchRolePermissions(ctx, "", 1, 200)
+	if err != nil {
+		t.Fatalf("list role permissions: %v", err)
+	}
+	if len(rolePermissions) != 1 || total != 1 || rolePermissions[0].ID != rolePermission.ID {
+		t.Fatalf("role permissions = %#v/%d, want binding %q/1", rolePermissions, total, rolePermission.ID)
+	}
+
+	if err := SoftDelete(ctx, db, "roles", role.ID); err != nil {
+		t.Fatalf("soft-delete role: %v", err)
+	}
+	if items, total, err := st.SearchUserRoles(ctx, "", 1, 200); err != nil {
+		t.Fatalf("list user roles after role deletion: %v", err)
+	} else if len(items) != 0 || total != 0 {
+		t.Fatalf("user roles after role deletion = %d/%d, want 0/0", len(items), total)
+	}
+	if items, total, err := st.SearchRolePermissions(ctx, "", 1, 200); err != nil {
+		t.Fatalf("list role permissions after role deletion: %v", err)
+	} else if len(items) != 0 || total != 0 {
+		t.Fatalf("role permissions after role deletion = %d/%d, want 0/0", len(items), total)
+	}
+}
+
 func TestDBStoreReplaceRoleActionsPreservesResourceAndDenyBindings(t *testing.T) {
 	db, err := storage.Open(storage.Config{Driver: storage.DriverSQLite, DSN: ":memory:"})
 	if err != nil {

@@ -2,6 +2,7 @@ package admin
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -14,6 +15,7 @@ import (
 	"gorm.io/gorm"
 
 	"jianmen/internal/model"
+	"jianmen/internal/pkg/apiresp"
 	"jianmen/internal/rbac"
 	"jianmen/internal/service"
 	"jianmen/internal/storage"
@@ -56,6 +58,7 @@ func TestWriteRBACServiceErrorDoesNotExposeUnknownInternalError(t *testing.T) {
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/rbac/roles", nil)
+	req = req.WithContext(context.WithValue(req.Context(), apiresp.CtxKeyRequestID, "request-rbac-test"))
 	writeRBACServiceError(rec, req, fmt.Errorf("database unavailable: %s", sensitive))
 
 	if rec.Code != http.StatusInternalServerError {
@@ -64,11 +67,14 @@ func TestWriteRBACServiceErrorDoesNotExposeUnknownInternalError(t *testing.T) {
 	if strings.Contains(rec.Body.String(), sensitive) {
 		t.Fatalf("response leaked sensitive error: %s", rec.Body.String())
 	}
-	if !strings.Contains(rec.Body.String(), "RBAC operation failed") {
+	if !strings.Contains(rec.Body.String(), "权限数据加载失败，请稍后重试；如问题持续，请联系管理员（请求编号：request-rbac-test）") {
 		t.Fatalf("response missing fixed internal message: %s", rec.Body.String())
 	}
 	if !strings.Contains(logs.String(), sensitive) {
 		t.Fatalf("server logger did not receive detailed error: %s", logs.String())
+	}
+	if !strings.Contains(logs.String(), "request-rbac-test") {
+		t.Fatalf("server logger did not receive request ID: %s", logs.String())
 	}
 }
 

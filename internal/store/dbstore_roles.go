@@ -183,7 +183,7 @@ func (s *DBStore) SearchUserRoles(ctx context.Context, query string, page, pageS
 		return nil, 0, fmt.Errorf("count user roles: %w", err)
 	}
 	var items []model.UserRole
-	if err := build().Order("created_at DESC").Offset((page - 1) * pageSize).Limit(pageSize).Find(&items).Error; err != nil {
+	if err := build().Order("user_roles.created_at DESC").Offset((page - 1) * pageSize).Limit(pageSize).Find(&items).Error; err != nil {
 		return nil, 0, fmt.Errorf("list user roles: %w", err)
 	}
 	return items, total, nil
@@ -236,7 +236,7 @@ func (s *DBStore) SearchRolePermissions(ctx context.Context, query string, page,
 		return nil, 0, fmt.Errorf("count role permissions: %w", err)
 	}
 	var items []model.RolePermission
-	if err := build().Order("created_at DESC").Offset((page - 1) * pageSize).Limit(pageSize).Find(&items).Error; err != nil {
+	if err := build().Order("role_permissions.created_at DESC").Offset((page - 1) * pageSize).Limit(pageSize).Find(&items).Error; err != nil {
 		return nil, 0, fmt.Errorf("list role permissions: %w", err)
 	}
 	return items, total, nil

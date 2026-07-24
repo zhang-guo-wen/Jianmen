@@ -256,6 +256,10 @@ web/src/
 3. 为旧结构升级、重复运行和失败重试编写迁移测试。
 4. 更新配置或 API 类型，最后更新 UI。
 
+业务表统一使用 `active_marker INT NULL DEFAULT 1` 作为逻辑删除字段：`1` 表示未删除，`NULL` 表示已逻辑删除，只允许这两种值。业务启停由 `status` 表达，手动停用不得改写 `active_marker`。查询、删除、唯一索引、迁移和三数据库类型映射的完整规则见[审计字段、逻辑删除与统一时间规范](2026-07-23-auditable-fields-design.md)。
+
+业务和审计时间统一按 UTC 语义存入无时区列，数据库保留微秒；API 序列化和页面显示统一使用 `yyyy-MM-dd HH:mm:ss`，例如 `2006-05-05 11:02:05`。API 输出已经转换到系统业务时区，前端不得再按浏览器时区二次转换。
+
 生产迁移视为前向迁移。回滚旧二进制前必须确认旧版本能读取新 schema；不能把“回退镜像”当成完整数据库回滚方案。
 
 ### 7.2 HTTP 响应
@@ -268,7 +272,7 @@ web/src/
   "data": {},
   "message": "ok",
   "request_id": "...",
-  "timestamp": "2026-07-23T00:00:00Z"
+  "timestamp": "2026-07-23 00:00:00"
 }
 ```
 
@@ -283,11 +287,13 @@ web/src/
     "details": {}
   },
   "request_id": "...",
-  "timestamp": "2026-07-23T00:00:00Z"
+  "timestamp": "2026-07-23 00:00:00"
 }
 ```
 
 新增端点必须使用 `internal/pkg/apiresp`，错误码保持稳定，`message` 面向人，`details` 只放安全、结构化的诊断信息。前端统一转为 `ApiError`，不得让页面分别猜测后端错误结构。
+
+请求、响应及 Envelope 中表示时间点的字段统一序列化为 `yyyy-MM-dd HH:mm:ss`；对应 Go layout 为 `2006-01-02 15:04:05`。不输出 `T`、`Z`、时区偏移或小数秒，也不得直接序列化 `time.Time`。外部协议强制要求的 RFC3339、Unix 时间戳等机器格式只存在于对应适配边界，进入管理 API 前必须完成转换。
 
 ### 7.3 安全基线
 
@@ -381,7 +387,7 @@ web/src/
 
 本次新增的参考测试：
 
-- `internal/pkg/apiresp/apiresp_test.go`：成功/错误 Envelope、错误详情省略、RFC3339 时间和 request ID。
+- `internal/pkg/apiresp/apiresp_test.go`：成功/错误 Envelope、错误详情省略、统一 `yyyy-MM-dd HH:mm:ss` 时间和 request ID。
 - `internal/proxy/sftpproxy/server_test.go`：SFTP Read/Write/Create/Truncate/Exclusive/Append 到 OS flag 的映射。
 - `web/src/utils/connectionRequestState.test.ts`：请求代次、操作计数、single-flight 和 latest-keyed 并发语义。
 - `scripts/build/container-workflow.test.mjs`：Lite/RDP 双架构二进制必须进入 Docker build context。

@@ -40,7 +40,7 @@ func (s *DBStore) hostView(ctx context.Context, m model.Host, accountCount ...in
 
 func (s *DBStore) Hosts(ctx context.Context) ([]HostView, error) {
 	var hosts []model.Host
-	if err := s.db.WithContext(ctx).Order("created_at DESC").Find(&hosts).Error; err != nil {
+	if err := s.db.WithContext(ctx).Scopes(ActiveScope).Order("created_at DESC").Find(&hosts).Error; err != nil {
 		return nil, err
 	}
 	counts, err := s.hostAccountCounts(ctx, hostIDs(hosts))
@@ -56,7 +56,7 @@ func (s *DBStore) Hosts(ctx context.Context) ([]HostView, error) {
 
 func (s *DBStore) Host(ctx context.Context, id string) (HostView, error) {
 	var m model.Host
-	if err := s.db.WithContext(ctx).First(&m, "id = ?", id).Error; err != nil {
+	if err := s.db.WithContext(ctx).Scopes(ActiveScope).First(&m, "id = ?", id).Error; err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			return HostView{}, err
 		}
@@ -157,7 +157,7 @@ func (s *DBStore) createHost(ctx context.Context, host HostRecord, creatorID str
 			ResourceID:    m.ID,
 			Effect:        model.PermissionEffectAllow,
 		}
-		if err := tx.Where(&model.ResourceGrant{
+		if err := tx.Scopes(ActiveScope).Where(&model.ResourceGrant{
 			PrincipalType: grant.PrincipalType,
 			PrincipalID:   grant.PrincipalID,
 			ResourceType:  grant.ResourceType,
@@ -183,7 +183,7 @@ func (s *DBStore) UpdateHost(ctx context.Context, id string, host HostRecord) (H
 		protocolChangeValidationErr error
 	)
 	if err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&m, "id = ?", id).Error; err != nil {
+		if err := tx.Scopes(ActiveScope).Clauses(clause.Locking{Strength: "UPDATE"}).First(&m, "id = ?", id).Error; err != nil {
 			return fmt.Errorf("%w: %q", ErrHostNotFound, id)
 		}
 		if normalizedHostProtocol(m.Protocol) != normalized.Protocol {
@@ -227,11 +227,11 @@ func (s *DBStore) UpdateHost(ctx context.Context, id string, host HostRecord) (H
 func (s *DBStore) DeleteHost(ctx context.Context, id string) error {
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var host model.Host
-		if err := tx.First(&host, "id = ?", id).Error; err != nil {
+		if err := tx.Scopes(ActiveScope).First(&host, "id = ?", id).Error; err != nil {
 			return fmt.Errorf("%w: %q", ErrHostNotFound, id)
 		}
 		var accounts []model.HostAccount
-		if err := tx.Where("host_id = ?", id).Find(&accounts).Error; err != nil {
+		if err := tx.Scopes(ActiveScope).Where("host_id = ?", id).Find(&accounts).Error; err != nil {
 			return err
 		}
 		for _, account := range accounts {
@@ -239,7 +239,7 @@ func (s *DBStore) DeleteHost(ctx context.Context, id string) error {
 				return err
 			}
 		}
-		if err := tx.Where("host_id = ?", id).Updates(map[string]interface{}{"deleted_at": nil, "updated_at": time.Now().UTC()}).Error; err != nil {
+		if err := softDeleteWhere(ctx, tx, "host_accounts", "host_id = ?", id).Error; err != nil {
 			return err
 		}
 		if err := s.deleteResourceTx(tx, model.ResourceTypeHost, host.ID); err != nil {

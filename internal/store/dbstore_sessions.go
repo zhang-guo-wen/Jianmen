@@ -23,7 +23,7 @@ var sqliteUserSessionCreationMu sync.Mutex
 
 func (s *DBStore) UserSessions(userID string) ([]SessionView, error) {
 	var sessions []model.UserSession
-	q := s.db.Preload("User").Order("session_seq DESC")
+	q := s.db.Scopes(ActiveScope).Preload("User", ActiveScope).Order("session_seq DESC")
 	if userID != "" {
 		q = q.Where("user_id = ?", userID)
 	}
@@ -41,7 +41,7 @@ func (s *DBStore) sessionView(sess model.UserSession) SessionView {
 	username := sess.User.Username
 	if username == "" && sess.UserID != "" {
 		var user model.User
-		if s.db.Where("id = ?", sess.UserID).First(&user).Error == nil {
+		if s.db.Scopes(ActiveScope).Where("id = ?", sess.UserID).First(&user).Error == nil {
 			username = user.Username
 		}
 	}
@@ -88,7 +88,10 @@ func (s *DBStore) FindActiveHost(ctx context.Context, id string) (model.Host, bo
 
 func (s *DBStore) FindActiveDatabaseAccount(ctx context.Context, id string) (model.DatabaseAccount, bool, error) {
 	var account model.DatabaseAccount
-	err := s.db.WithContext(ctx).Preload("Instance").Where("id = ? AND status = ?", id, "active").First(&account).Error
+	err := s.db.WithContext(ctx).Scopes(activeDatabaseAccountScope).
+		Preload("Instance", ActiveScope).
+		Where("database_accounts.id = ? AND database_accounts.status = ?", id, "active").
+		First(&account).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return model.DatabaseAccount{}, false, nil
 	}
@@ -100,7 +103,7 @@ func (s *DBStore) FindActiveDatabaseAccount(ctx context.Context, id string) (mod
 
 func (s *DBStore) FindActivePermanentUserSession(ctx context.Context, userID string) (model.UserSession, bool, error) {
 	var session model.UserSession
-	err := s.db.WithContext(ctx).Where("user_id = ? AND type = ? AND status = ?", userID, "permanent", "active").First(&session).Error
+	err := s.db.WithContext(ctx).Scopes(ActiveScope).Where("user_id = ? AND type = ? AND status = ?", userID, "permanent", "active").First(&session).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return model.UserSession{}, false, nil
 	}
@@ -114,6 +117,15 @@ func (s *DBStore) CreateUserSessionWithContext(ctx context.Context, sess model.U
 	sess.UserID = strings.TrimSpace(sess.UserID)
 	if sess.UserID == "" {
 		return nil, fmt.Errorf("user_id is required")
+	}
+	var userCount int64
+	if err := s.db.WithContext(ctx).Model(&model.User{}).Scopes(ActiveScope).
+		Where("id = ? AND status = ?", sess.UserID, "active").
+		Count(&userCount).Error; err != nil {
+		return nil, err
+	}
+	if userCount == 0 {
+		return nil, fmt.Errorf("active user %q not found", sess.UserID)
 	}
 	if err := s.ensureUserSessionSequenceFloor(ctx); err != nil {
 		return nil, err
@@ -146,10 +158,11 @@ func (s *DBStore) GetOrCreateActivePermanentUserSession(ctx context.Context, use
 	var session model.UserSession
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var user model.User
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&user, "id = ?", userID).Error; err != nil {
+		if err := tx.Scopes(ActiveScope).Clauses(clause.Locking{Strength: "UPDATE"}).
+			First(&user, "id = ? AND status = ?", userID, "active").Error; err != nil {
 			return err
 		}
-		err := tx.Where("user_id = ? AND type = ? AND status = ?", userID, "permanent", "active").First(&session).Error
+		err := tx.Scopes(ActiveScope).Where("user_id = ? AND type = ? AND status = ?", userID, "permanent", "active").First(&session).Error
 		if err == nil {
 			return nil
 		}
@@ -175,7 +188,7 @@ func (s *DBStore) GetOrCreateActivePermanentUserSession(ctx context.Context, use
 // FindUserSessionBySessionID 通过短 session_id（如 "00001"）查找用户会话。
 func (s *DBStore) FindUserSessionBySessionID(ctx context.Context, sessionID string) (model.UserSession, error) {
 	var session model.UserSession
-	if err := s.db.WithContext(ctx).Where("session_id = ?", sessionID).First(&session).Error; err != nil {
+	if err := s.db.WithContext(ctx).Scopes(ActiveScope).Where("session_id = ?", sessionID).First(&session).Error; err != nil {
 		return model.UserSession{}, fmt.Errorf("find user session %q: %w", sessionID, err)
 	}
 	return session, nil
@@ -193,6 +206,7 @@ func (s *DBStore) FindAITokenSessionID(ctx context.Context, userID string) strin
 		Select("ta.session_id").
 		Joins("JOIN temporary_accounts ta ON ta.id = ai_access_tokens.temporary_account_id").
 		Where("ai_access_tokens.user_id = ? AND ai_access_tokens.revoked_at IS NULL", userID).
+		Where("ai_access_tokens.active_marker = ? AND ta.active_marker = ?", model.ActiveMarkerValue, model.ActiveMarkerValue).
 		Where("ta.status = ?", "active").
 		Order("ai_access_tokens.created_at DESC").
 		Limit(1).
@@ -232,7 +246,7 @@ func (s *DBStore) EnableUserSession(id string) error {
 
 func (s *DBStore) UserSessionByID(sessionID string, userID string) (*model.UserSession, error) {
 	var sess model.UserSession
-	q := s.db.Where("session_id = ?", sessionID)
+	q := s.db.Scopes(ActiveScope).Where("session_id = ?", sessionID)
 	if userID != "" {
 		q = q.Where("user_id = ?", userID)
 	}
@@ -251,7 +265,7 @@ func (s *DBStore) GetUserSessionAuthDetail(ctx context.Context, sessionID string
 	}
 
 	var sess model.UserSession
-	if err := s.db.WithContext(ctx).Preload("User").
+	if err := s.db.WithContext(ctx).Scopes(ActiveScope).Preload("User", ActiveScope).
 		Where("session_id = ?", sessionID).First(&sess).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return model.UserSessionAuthDetail{}, fmt.Errorf("user session %q: %w", sessionID, ErrNotFound)
@@ -293,7 +307,7 @@ func (s *DBStore) GetUserSessionAuthDetail(ctx context.Context, sessionID string
 	if sess.Type == "temporary" {
 		var ta model.TemporaryAccount
 		// TemporaryAccount.SessionID 存储的是 UserSession.SessionID（5位短ID）
-		err := s.db.WithContext(ctx).Where("session_id = ?", sess.SessionID).First(&ta).Error
+		err := s.db.WithContext(ctx).Scopes(ActiveScope).Where("session_id = ?", sess.SessionID).First(&ta).Error
 		if err == nil {
 			detail.Remark = ta.Remark
 			detail.AuthorizationType = authorizationTypeFromTemporaryAccount(ta)

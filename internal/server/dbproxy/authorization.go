@@ -121,7 +121,17 @@ func (g *Gateway) resolveCompactAccount(ctx context.Context, username string) (*
 
 	// 查找数据库账号（按 resource_id）
 	var acct model.DatabaseAccount
-	if err := db.Preload("Instance").Where("resource_id = ? AND status = ?", resourceID, "active").First(&acct).Error; err != nil {
+	if err := db.
+		Joins("JOIN database_instances ON database_instances.id = database_accounts.instance_id").
+		Preload("Instance", "active_marker = ?", model.ActiveMarkerValue).
+		Where(
+			"database_accounts.resource_id = ? AND database_accounts.status = ? AND database_accounts.active_marker = ?",
+			resourceID,
+			"active",
+			model.ActiveMarkerValue,
+		).
+		Where("database_instances.active_marker = ?", model.ActiveMarkerValue).
+		First(&acct).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, fmt.Errorf("database account not found for resource_id %q", resourceID)
 		}
@@ -133,7 +143,7 @@ func (g *Gateway) resolveCompactAccount(ctx context.Context, username string) (*
 
 	// 查找用户会话
 	var sess model.UserSession
-	if err := db.Where("session_id = ? AND status = ?", sessionID, "active").First(&sess).Error; err != nil {
+	if err := db.Where("session_id = ? AND status = ? AND active_marker = ?", sessionID, "active", model.ActiveMarkerValue).First(&sess).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, fmt.Errorf("invalid session %q", sessionID)
 		}
@@ -142,13 +152,13 @@ func (g *Gateway) resolveCompactAccount(ctx context.Context, username string) (*
 
 	// 检查会话过期
 	if sess.ExpiresAt != nil && time.Now().UTC().After(*sess.ExpiresAt) {
-		db.Model(&sess).Update("status", "expired")
+		db.Model(&sess).Where("active_marker = ?", model.ActiveMarkerValue).Update("status", "expired")
 		return nil, fmt.Errorf("session %q expired", sessionID)
 	}
 
 	// 查找用户
 	var user model.User
-	if err := db.Where("id = ? AND status = ?", sess.UserID, "active").First(&user).Error; err != nil {
+	if err := db.Where("id = ? AND status = ? AND active_marker = ?", sess.UserID, "active", model.ActiveMarkerValue).First(&user).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, fmt.Errorf("user for session %q is disabled or not found", sessionID)
 		}

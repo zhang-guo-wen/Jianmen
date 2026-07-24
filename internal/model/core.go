@@ -29,26 +29,26 @@ type UserPublicKey struct {
 	LastUsedAt  *time.Time `json:"last_used_at,omitempty"`
 	RevokedAt   *time.Time `gorm:"index;index:idx_user_public_keys_user_revoked,priority:2" json:"revoked_at,omitempty"`
 	FullAudit
-	User        User       `gorm:"constraint:OnUpdate:CASCADE,OnDelete:CASCADE;" json:"-"`
+	User User `gorm:"constraint:OnUpdate:CASCADE,OnDelete:CASCADE;" json:"-"`
 }
 
 type Role struct {
-	ID          string    `gorm:"primaryKey;size:64" json:"id"`
-	Name        string    `gorm:"uniqueIndex:idx_roles_name_deleted,priority:1;size:128;not null" json:"name"`
-	Description string    `gorm:"type:text" json:"description,omitempty"`
-	Builtin     bool      `json:"builtin"`
-	Status      string    `gorm:"size:32;not null;default:active" json:"status"`
+	ID          string `gorm:"primaryKey;size:64" json:"id"`
+	Name        string `gorm:"uniqueIndex:idx_roles_name_active,priority:1;size:128;not null" json:"name"`
+	Description string `gorm:"type:text" json:"description,omitempty"`
+	Builtin     bool   `json:"builtin"`
+	Status      string `gorm:"size:32;not null;default:active" json:"status"`
 	FullAudit
 }
 
 type Permission struct {
-	ID           string    `gorm:"primaryKey;size:64" json:"id"`
-	Name         string    `gorm:"index;size:128" json:"name,omitempty"`
-	Action       string    `gorm:"index;index:idx_permissions_action_resource,priority:1;uniqueIndex:idx_permissions_logic_deleted,priority:1;size:128" json:"action"`
-	ResourceType string    `gorm:"index;index:idx_permissions_action_resource,priority:2;uniqueIndex:idx_permissions_logic_deleted,priority:2;size:64" json:"resource_type,omitempty"`
-	ResourceID   string    `gorm:"index;index:idx_permissions_action_resource,priority:3;uniqueIndex:idx_permissions_logic_deleted,priority:3;size:64" json:"resource_id,omitempty"`
-	Effect       string    `gorm:"index:idx_permissions_action_resource,priority:4;uniqueIndex:idx_permissions_logic_deleted,priority:4;size:16;not null;default:allow" json:"effect"`
-	Description  string    `gorm:"type:text" json:"description,omitempty"`
+	ID           string `gorm:"primaryKey;size:64" json:"id"`
+	Name         string `gorm:"index;size:128" json:"name,omitempty"`
+	Action       string `gorm:"index;index:idx_permissions_action_resource,priority:1;uniqueIndex:idx_permissions_logic_active,priority:1;size:128" json:"action"`
+	ResourceType string `gorm:"index;index:idx_permissions_action_resource,priority:2;uniqueIndex:idx_permissions_logic_active,priority:2;size:64" json:"resource_type,omitempty"`
+	ResourceID   string `gorm:"index;index:idx_permissions_action_resource,priority:3;uniqueIndex:idx_permissions_logic_active,priority:3;size:64" json:"resource_id,omitempty"`
+	Effect       string `gorm:"index:idx_permissions_action_resource,priority:4;uniqueIndex:idx_permissions_logic_active,priority:4;size:16;not null;default:allow" json:"effect"`
+	Description  string `gorm:"type:text" json:"description,omitempty"`
 	FullAudit
 }
 
@@ -72,17 +72,17 @@ type UserRole struct {
 }
 
 type Application struct {
-	ID             string    `gorm:"primaryKey;size:64" json:"id"`
-	Name           string    `gorm:"size:255;not null" json:"name"`
-	AppGroup       string    `gorm:"size:128" json:"group"`
-	ListenPort     int       `gorm:"uniqueIndex:idx_applications_listen_port_deleted,priority:1;not null" json:"listen_port"`
-	Address        string    `gorm:"size:2048;not null;default:''" json:"address"`
-	EntryPath      string    `gorm:"size:2048;not null;default:/" json:"entry_path"`
-	InternalScheme string    `gorm:"size:8;not null;default:http" json:"internal_scheme"`
-	InternalHost   string    `gorm:"size:255;not null" json:"internal_host"`
-	InternalPort   int       `gorm:"not null;default:80" json:"internal_port"`
-	Remark         string    `gorm:"type:text" json:"remark,omitempty"`
-	Status         string    `gorm:"index;size:32;not null;default:active" json:"status"`
+	ID             string `gorm:"primaryKey;size:64" json:"id"`
+	Name           string `gorm:"size:255;not null" json:"name"`
+	AppGroup       string `gorm:"size:128" json:"group"`
+	ListenPort     int    `gorm:"uniqueIndex:idx_applications_listen_port_active,priority:1;not null" json:"listen_port"`
+	Address        string `gorm:"size:2048;not null;default:''" json:"address"`
+	EntryPath      string `gorm:"size:2048;not null;default:/" json:"entry_path"`
+	InternalScheme string `gorm:"size:8;not null;default:http" json:"internal_scheme"`
+	InternalHost   string `gorm:"size:255;not null" json:"internal_host"`
+	InternalPort   int    `gorm:"not null;default:80" json:"internal_port"`
+	Remark         string `gorm:"type:text" json:"remark,omitempty"`
+	Status         string `gorm:"index;size:32;not null;default:active" json:"status"`
 	FullAudit
 }
 
@@ -112,6 +112,7 @@ func AllModels() []any {
 		&HostAccount{},
 		&DatabaseInstance{},
 		&DatabaseAccount{},
+		&DatabaseProvisioningOperation{},
 		&Application{},
 		&ContainerEndpoint{},
 		&Session{},
@@ -183,21 +184,27 @@ func (m *PlatformAccount) BeforeCreate(tx *gorm.DB) error {
 	return ensureID(&m.ID)
 }
 func (m *AuditEvent) BeforeCreate(tx *gorm.DB) error {
-	m.CreatedBy = userIDFromContext(tx.Statement.Context)
+	if m.CreatedBy == "" {
+		m.CreatedBy = AuditUserIDFromContext(tx.Statement.Context)
+	}
 	return ensureID(&m.ID)
 }
 func (m *LoginAuditLog) BeforeCreate(tx *gorm.DB) error {
-	m.CreatedBy = userIDFromContext(tx.Statement.Context)
+	if m.CreatedBy == "" {
+		m.CreatedBy = AuditUserIDFromContext(tx.Statement.Context)
+	}
 	return ensureID(&m.ID)
 }
 func (m *AuditSession) BeforeCreate(tx *gorm.DB) error {
-	if tx != nil && tx.Statement != nil {
-		m.CreatedBy = userIDFromContext(tx.Statement.Context)
+	if m.CreatedBy == "" && tx != nil && tx.Statement != nil {
+		m.CreatedBy = AuditUserIDFromContext(tx.Statement.Context)
 	}
 	return ensureID(&m.ID)
 }
 func (m *AuditArtifact) BeforeCreate(tx *gorm.DB) error {
-	m.CreatedBy = userIDFromContext(tx.Statement.Context)
+	if m.CreatedBy == "" {
+		m.CreatedBy = AuditUserIDFromContext(tx.Statement.Context)
+	}
 	return ensureID(&m.ID)
 }
 func (m *AuditRDPChannelEvent) BeforeCreate(tx *gorm.DB) error {

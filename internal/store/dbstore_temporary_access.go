@@ -238,7 +238,9 @@ func (s *DBStore) TemporaryConnectionTarget(ctx context.Context, resourceType, r
 		}, nil
 	case model.ResourceTypeDatabaseAccount:
 		var account model.DatabaseAccount
-		if err := s.db.WithContext(ctx).Preload("Instance").Where("id = ?", resourceID).First(&account).Error; err != nil {
+		if err := s.db.WithContext(ctx).Scopes(activeDatabaseAccountScope).
+			Preload("Instance", ActiveScope).
+			Where("database_accounts.id = ?", resourceID).First(&account).Error; err != nil {
 			return service.TemporaryConnectionTarget{}, mapTemporaryAccessReadError(err, "find database account connection target")
 		}
 		prefix := util.PrefixDatabase
@@ -257,7 +259,7 @@ func (s *DBStore) TemporaryConnectionTarget(ctx context.Context, resourceType, r
 
 func verifyTemporaryAccessUser(tx *gorm.DB, userID string, now time.Time) error {
 	var user model.User
-	if err := tx.Where("id = ? AND status = ?", userID, "active").First(&user).Error; err != nil {
+	if err := tx.Scopes(ActiveScope).Where("id = ? AND status = ?", userID, "active").First(&user).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return fmt.Errorf("%w: authorized user", service.ErrTemporaryAccessNotFound)
 		}
@@ -278,7 +280,8 @@ func verifyTemporaryAccessResource(tx *gorm.DB, resourceType, resourceID string)
 			Where("host_accounts.id = ?", resourceID).
 			Count(&count).Error
 	case model.ResourceTypeDatabaseAccount:
-		err = tx.Model(&model.DatabaseAccount{}).Scopes(ActiveScope).Where("id = ?", resourceID).Count(&count).Error
+		err = tx.Model(&model.DatabaseAccount{}).Scopes(activeDatabaseAccountScope).
+			Where("database_accounts.id = ?", resourceID).Count(&count).Error
 	default:
 		return fmt.Errorf("%w: unsupported resource type", service.ErrInvalidTemporaryAccess)
 	}
@@ -389,7 +392,7 @@ func loadTemporaryAccessDetails(db *gorm.DB, account model.TemporaryAccount, now
 	}
 	if account.AuthorizedUserID != "" {
 		var user model.User
-		err := db.Where("id = ?", account.AuthorizedUserID).First(&user).Error
+		err := db.Scopes(ActiveScope).Where("id = ?", account.AuthorizedUserID).First(&user).Error
 		if err == nil {
 			details.AuthorizedUser = user.DisplayName
 			if details.AuthorizedUser == "" {
@@ -400,7 +403,7 @@ func loadTemporaryAccessDetails(db *gorm.DB, account model.TemporaryAccount, now
 		}
 	}
 	var grant model.TemporaryAccountGrant
-	err := db.Where("temporary_account_id = ?", account.ID).Order("created_at DESC").First(&grant).Error
+	err := db.Scopes(ActiveScope).Where("temporary_account_id = ?", account.ID).Order("created_at DESC").First(&grant).Error
 	if err == nil {
 		details.ResourceType = grant.ResourceType
 		details.ResourceID = grant.ResourceID
@@ -421,7 +424,7 @@ func temporaryAccessResourceNames(db *gorm.DB, resourceType, resourceID string) 
 	case model.ResourceTypeHostAccount:
 		var account model.HostAccount
 		err := db.Scopes(activeHostAccountScope).
-			Preload("Host").
+			Preload("Host", ActiveScope).
 			Where("host_accounts.id = ?", resourceID).
 			First(&account).Error
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -433,7 +436,8 @@ func temporaryAccessResourceNames(db *gorm.DB, resourceType, resourceID string) 
 		return account.Host.Name, account.Name, nil
 	case model.ResourceTypeDatabaseAccount:
 		var account model.DatabaseAccount
-		err := db.Preload("Instance").Where("id = ?", resourceID).First(&account).Error
+		err := db.Scopes(activeDatabaseAccountScope).Preload("Instance", ActiveScope).
+			Where("database_accounts.id = ?", resourceID).First(&account).Error
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return "", "", nil
 		}
@@ -455,7 +459,7 @@ func mapTemporaryAccessReadError(err error, operation string) error {
 
 func findTemporaryAccount(tx *gorm.DB, id string) (model.TemporaryAccount, error) {
 	var account model.TemporaryAccount
-	if err := tx.Where("id = ?", id).First(&account).Error; err != nil {
+	if err := tx.Scopes(ActiveScope).Where("id = ?", id).First(&account).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return model.TemporaryAccount{}, service.ErrTemporaryAccessNotFound
 		}

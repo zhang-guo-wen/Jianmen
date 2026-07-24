@@ -10,7 +10,7 @@ import (
 
 type User struct {
 	ID              string     `gorm:"primaryKey;size:64" json:"id"`
-	Username        string     `gorm:"uniqueIndex:idx_users_username_deleted,priority:1;index:idx_users_status_username,priority:2;size:128;not null" json:"username"`
+	Username        string     `gorm:"uniqueIndex:idx_users_username_active,priority:1;index:idx_users_status_username,priority:2;size:128;not null" json:"username"`
 	PasswordHash    string     `gorm:"size:255" json:"-"`
 	MySQLNativeHash string     `gorm:"size:40" json:"-"`
 	TokenHash       string     `gorm:"index;size:255" json:"-"`

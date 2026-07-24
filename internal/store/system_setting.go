@@ -22,7 +22,7 @@ func (s *DBStore) LoadSystemSetting(
 		return model.SystemSetting{}, false, errors.New("load system setting: nil context")
 	}
 	var setting model.SystemSetting
-	err := s.db.WithContext(ctx).
+	err := s.db.WithContext(ctx).Scopes(ActiveScope).
 		First(&setting, "id = ?", model.SystemSettingSingletonID).
 		Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -65,7 +65,7 @@ func (s *DBStore) InitializeSystemSetting(
 			return fmt.Errorf("initialize system setting: %w", result.Error)
 		}
 		if result.RowsAffected == 0 {
-			if err := tx.First(
+			if err := tx.Scopes(ActiveScope).First(
 				&persisted,
 				"id = ?",
 				model.SystemSettingSingletonID,
@@ -131,7 +131,7 @@ func (s *DBStore) UpdateSystemSetting(
 		if err := tx.Create(&revision).Error; err != nil {
 			return fmt.Errorf("create system setting revision %d: %w", nextRevision, err)
 		}
-		if err := tx.First(&persisted, "id = ?", model.SystemSettingSingletonID).Error; err != nil {
+		if err := tx.Scopes(ActiveScope).First(&persisted, "id = ?", model.SystemSettingSingletonID).Error; err != nil {
 			return fmt.Errorf("reload system setting: %w", err)
 		}
 		updated = true
@@ -176,7 +176,7 @@ func (s *DBStore) MarkSystemSettingApplied(
 		if result.RowsAffected != 1 {
 			return nil
 		}
-		if err := tx.First(
+		if err := tx.Scopes(ActiveScope).First(
 			&persisted,
 			"id = ? AND revision = ?",
 			model.SystemSettingSingletonID,
@@ -207,7 +207,7 @@ func (s *DBStore) ListSystemSettingRevisions(
 		limit = maxSystemSettingRevisionPageSize
 	}
 	var revisions []model.SystemSettingRevision
-	if err := s.db.WithContext(ctx).
+	if err := s.db.WithContext(ctx).Scopes(ActiveScope).
 		Order("revision DESC").
 		Limit(limit).
 		Find(&revisions).Error; err != nil {

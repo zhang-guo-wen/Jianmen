@@ -42,6 +42,15 @@ func (c *Checker) HasPermissionContext(
 	if userID == "" || action == "" {
 		return false, nil
 	}
+	if resourceType != "" && resourceID != "" {
+		active, err := activeResourceExists(scoped.db, resourceType, resourceID)
+		if err != nil {
+			return false, err
+		}
+		if !active {
+			return false, nil
+		}
+	}
 
 	permissions, err := scoped.permissionsForUser(userID)
 	if err != nil {
@@ -95,6 +104,15 @@ func (c *Checker) HasDenyContext(
 	if userID == "" || action == "" {
 		return false, nil
 	}
+	if resourceType != "" && resourceID != "" {
+		active, err := activeResourceExists(scoped.db, resourceType, resourceID)
+		if err != nil {
+			return false, err
+		}
+		if !active {
+			return false, nil
+		}
+	}
 	permissions, err := scoped.permissionsForUser(userID)
 	if err != nil {
 		return false, err
@@ -116,8 +134,12 @@ func (c *Checker) permissionsForUser(userID string) ([]model.Permission, error) 
 		Joins("JOIN role_permissions ON role_permissions.permission_id = permissions.id").
 		Joins("JOIN user_roles ON user_roles.role_id = role_permissions.role_id").
 		Joins("JOIN roles ON roles.id = user_roles.role_id").
+		Joins("JOIN users ON users.id = user_roles.user_id").
 		Where("user_roles.user_id = ?", userID).
 		Where("user_roles.expires_at IS NULL OR user_roles.expires_at > ?", now).
+		Where("permissions.active_marker = ?", model.ActiveMarkerValue).
+		Where("roles.active_marker = ?", model.ActiveMarkerValue).
+		Where("users.active_marker = ?", model.ActiveMarkerValue).
 		Where("roles.status = '' OR roles.status = ?", "active").
 		Find(&permissions).Error
 	return permissions, err
@@ -147,7 +169,9 @@ func (c *Checker) resourceMatches(permission model.Permission, resourceType, res
 func (c *Checker) groupContainsResource(groupID, resourceType, resourceID string) bool {
 	// 查找资源组名称
 	var group model.ResourceGroup
-	if err := c.db.First(&group, "id = ?", groupID).Error; err != nil {
+	if err := c.db.
+		Where("id = ? AND active_marker = ?", groupID, model.ActiveMarkerValue).
+		First(&group).Error; err != nil {
 		return false
 	}
 	groupName := group.Name
@@ -158,6 +182,7 @@ func (c *Checker) groupContainsResource(groupID, resourceType, resourceID string
 		c.db.Model(&model.HostAccount{}).
 			Joins("JOIN hosts ON hosts.id = host_accounts.host_id").
 			Where("hosts.group_name = ? AND host_accounts.id = ?", groupName, resourceID).
+			Where("host_accounts.active_marker = ? AND hosts.active_marker = ?", model.ActiveMarkerValue, model.ActiveMarkerValue).
 			Count(&count)
 		return count > 0
 	case resourceType == model.ResourceTypeDatabaseAccount:
@@ -165,30 +190,31 @@ func (c *Checker) groupContainsResource(groupID, resourceType, resourceID string
 		c.db.Model(&model.DatabaseAccount{}).
 			Joins("JOIN database_instances ON database_instances.id = database_accounts.instance_id").
 			Where("database_instances.group_name = ? AND database_accounts.id = ?", groupName, resourceID).
+			Where("database_accounts.active_marker = ? AND database_instances.active_marker = ?", model.ActiveMarkerValue, model.ActiveMarkerValue).
 			Count(&count)
 		return count > 0
 	case resourceType == model.ResourceTypeHost:
 		var count int64
 		c.db.Model(&model.Host{}).
-			Where("group_name = ? AND id = ?", groupName, resourceID).
+			Where("group_name = ? AND id = ? AND active_marker = ?", groupName, resourceID, model.ActiveMarkerValue).
 			Count(&count)
 		return count > 0
 	case resourceType == model.ResourceTypeDatabaseInstance:
 		var count int64
 		c.db.Model(&model.DatabaseInstance{}).
-			Where("group_name = ? AND id = ?", groupName, resourceID).
+			Where("group_name = ? AND id = ? AND active_marker = ?", groupName, resourceID, model.ActiveMarkerValue).
 			Count(&count)
 		return count > 0
 	case resourceType == model.ResourceTypeApplication:
 		var count int64
 		c.db.Model(&model.Application{}).
-			Where("app_group = ? AND id = ?", groupName, resourceID).
+			Where("app_group = ? AND id = ? AND active_marker = ?", groupName, resourceID, model.ActiveMarkerValue).
 			Count(&count)
 		return count > 0
 	case resourceType == model.ResourceTypePlatformAccount:
 		var count int64
 		c.db.Model(&model.PlatformAccount{}).
-			Where("group_name = ? AND id = ?", groupName, resourceID).
+			Where("group_name = ? AND id = ? AND active_marker = ?", groupName, resourceID, model.ActiveMarkerValue).
 			Count(&count)
 		return count > 0
 	default:
@@ -244,6 +270,7 @@ func (c *Checker) BatchActionDecisionsContext(ctx context.Context, userID string
 	}
 	for index, request := range requests {
 		decision := result[index]
+		resourceActive := facts.resourceIsActive(request.ResourceType, request.ResourceID)
 		for _, action := range normalizedBatchActions(request.Actions) {
 			globalAllowed := false
 			globalDenied := false
@@ -273,6 +300,13 @@ func (c *Checker) BatchActionDecisionsContext(ctx context.Context, userID string
 				continue
 			}
 			decision.ActionAllowed = true
+			// Single authorization resolves the global action before checking
+			// the concrete resource. Preserve that classification here: an
+			// inactive or missing resource is resource_denied, not
+			// action_denied.
+			if !resourceActive {
+				continue
+			}
 			if !resourceDenied {
 				decision.Allowed = true
 			}

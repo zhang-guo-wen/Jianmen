@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"errors"
 	"strings"
 
@@ -38,7 +39,7 @@ func (s *DBStore) syncResourceTx(tx *gorm.DB, resourceType, resourceID, name, pa
 		Columns: []clause.Column{
 			{Name: "type"},
 			{Name: "resource_id"},
-			{Name: "deleted_at"},
+			{Name: "active_marker"},
 		},
 		DoUpdates: clause.Assignments(map[string]any{
 			"name":      resource.Name,
@@ -60,12 +61,28 @@ func (s *DBStore) deleteResourceTx(tx *gorm.DB, resourceType, resourceID string)
 	if resourceType == "" || resourceID == "" {
 		return nil
 	}
-	if err := tx.Where("resource_type = ? AND resource_id = ?", resourceType, resourceID).
-		Delete(&model.ResourceGrant{}).Error; err != nil {
+	ctx := tx.Statement.Context
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := softDeleteWhere(
+		ctx,
+		tx,
+		"resource_grants",
+		"resource_type = ? AND resource_id = ?",
+		resourceType,
+		resourceID,
+	).Error; err != nil {
 		return err
 	}
-	if err := tx.Where("type = ? AND resource_id = ?", resourceType, resourceID).
-		Delete(&model.Resource{}).Error; err != nil {
+	if err := softDeleteWhere(
+		ctx,
+		tx,
+		"resources",
+		"type = ? AND resource_id = ?",
+		resourceType,
+		resourceID,
+	).Error; err != nil {
 		return err
 	}
 	return nil

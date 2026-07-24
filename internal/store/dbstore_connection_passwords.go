@@ -27,7 +27,7 @@ func (s *DBStore) CreateConnectionPassword(ctx context.Context, credential model
 
 func (s *DBStore) AuthenticateConnectionPassword(ctx context.Context, userID, resourceType, resourceID, password string) error {
 	var user model.User
-	if err := s.db.WithContext(ctx).Where("id = ? AND status = ?", userID, "active").First(&user).Error; err != nil {
+	if err := s.db.WithContext(ctx).Scopes(ActiveScope).Where("id = ? AND status = ?", userID, "active").First(&user).Error; err != nil {
 		return errors.New("authentication failed")
 	}
 	if bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(password)) == nil {
@@ -50,7 +50,7 @@ func (s *DBStore) AuthenticateConnectionPassword(ctx context.Context, userID, re
 
 func (s *DBStore) AuthenticateMySQLConnectionPassword(ctx context.Context, userID, resourceID string, salt, response []byte) error {
 	var user model.User
-	if err := s.db.WithContext(ctx).Where("id = ? AND status = ?", userID, "active").First(&user).Error; err != nil {
+	if err := s.db.WithContext(ctx).Scopes(ActiveScope).Where("id = ? AND status = ?", userID, "active").First(&user).Error; err != nil {
 		return errors.New("authentication failed")
 	}
 	if util.VerifyMySQLNativePasswordResponse(user.MySQLNativeHash, salt, response) {
@@ -72,7 +72,7 @@ func (s *DBStore) AuthenticateMySQLConnectionPassword(ctx context.Context, userI
 
 func (s *DBStore) activeConnectionPasswords(ctx context.Context, userID, resourceType, resourceID string, now time.Time) ([]model.ConnectionPassword, error) {
 	var credentials []model.ConnectionPassword
-	if err := s.db.WithContext(ctx).
+	if err := s.db.WithContext(ctx).Scopes(ActiveScope).
 		Where("user_id = ? AND resource_type = ? AND resource_id = ?", userID, resourceType, resourceID).
 		Where("revoked_at IS NULL").
 		Where("expires_at > ?", now).
@@ -85,7 +85,11 @@ func (s *DBStore) activeConnectionPasswords(ctx context.Context, userID, resourc
 }
 
 func (s *DBStore) deleteExpiredConnectionPasswords(ctx context.Context, before time.Time) error {
-	return s.db.WithContext(ctx).
-		Where("expires_at <= ?", before.UTC()).
-		Delete(&model.ConnectionPassword{}).Error
+	return softDeleteWhere(
+		ctx,
+		s.db,
+		"connection_passwords",
+		"expires_at <= ?",
+		before.UTC(),
+	).Error
 }

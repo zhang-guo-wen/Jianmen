@@ -33,6 +33,7 @@ type batchFacts struct {
 	accountOf        map[string]string
 	hostOf           map[string]string
 	instanceOf       map[string]string
+	activeResources  map[string]bool
 }
 
 func (f batchFacts) groupMatches(groupID string, resourceType, resourceID string, account bool) bool {
@@ -49,6 +50,13 @@ func (f batchFacts) permissionGroupMatches(groupID, resourceType, resourceID str
 		return false
 	}
 	return groupName == f.permissionOf[BatchResourceKey(resourceType, resourceID)]
+}
+
+func (f batchFacts) resourceIsActive(resourceType, resourceID string) bool {
+	if !auditedResourceType(resourceType) {
+		return true
+	}
+	return f.activeResources[BatchResourceKey(resourceType, resourceID)]
 }
 
 func batchIDs(requests []BatchAuthorizationRequest, resourceType string) []string {
@@ -75,14 +83,20 @@ func (c *Checker) loadBatchFacts(ctx context.Context, requests []BatchAuthorizat
 		accountOf:        map[string]string{},
 		hostOf:           map[string]string{},
 		instanceOf:       map[string]string{},
+		activeResources:  map[string]bool{},
 	}
 	db := c.db.WithContext(ctx)
-	if len(groupIDs) > 0 {
+	allGroupIDs := append([]string(nil), groupIDs...)
+	allGroupIDs = appendUniqueBatchIDs(allGroupIDs, batchIDs(requests, model.ResourceTypeGroup)...)
+	allGroupIDs = appendUniqueBatchIDs(allGroupIDs, batchIDs(requests, model.ResourceTypeAccountGroup)...)
+	if len(allGroupIDs) > 0 {
 		var groups []model.ResourceGroup
-		if err := db.Where("id IN ?", groupIDs).Find(&groups).Error; err != nil {
+		if err := db.Where("id IN ? AND active_marker = ?", allGroupIDs, model.ActiveMarkerValue).Find(&groups).Error; err != nil {
 			return facts, err
 		}
 		for _, group := range groups {
+			facts.activeResources[BatchResourceKey(model.ResourceTypeGroup, group.ID)] = true
+			facts.activeResources[BatchResourceKey(model.ResourceTypeAccountGroup, group.ID)] = true
 			// Permission keeps the legacy Checker.groupContainsResource
 			// semantics: the referenced group ID supplies a name regardless of
 			// group_type. ResourceGrant uses the two typed maps below instead.
@@ -96,66 +110,78 @@ func (c *Checker) loadBatchFacts(ctx context.Context, requests []BatchAuthorizat
 	}
 	if ids := batchIDs(requests, model.ResourceTypeHost); len(ids) > 0 {
 		var rows []model.Host
-		if err := db.Where("id IN ?", ids).Find(&rows).Error; err != nil {
+		if err := db.Where("id IN ? AND active_marker = ?", ids, model.ActiveMarkerValue).Find(&rows).Error; err != nil {
 			return facts, err
 		}
 		for _, x := range rows {
 			key := BatchResourceKey(model.ResourceTypeHost, x.ID)
+			facts.activeResources[key] = true
 			facts.permissionOf[key] = x.GroupName
 			facts.resourceOf[key] = x.GroupName
 		}
 	}
 	if ids := batchIDs(requests, model.ResourceTypeDatabaseInstance); len(ids) > 0 {
 		var rows []model.DatabaseInstance
-		if err := db.Where("id IN ?", ids).Find(&rows).Error; err != nil {
+		if err := db.Where("id IN ? AND active_marker = ?", ids, model.ActiveMarkerValue).Find(&rows).Error; err != nil {
 			return facts, err
 		}
 		for _, x := range rows {
 			key := BatchResourceKey(model.ResourceTypeDatabaseInstance, x.ID)
+			facts.activeResources[key] = true
 			facts.permissionOf[key] = x.GroupName
 			facts.resourceOf[key] = x.GroupName
 		}
 	}
 	if ids := batchIDs(requests, model.ResourceTypeApplication); len(ids) > 0 {
 		var rows []model.Application
-		if err := db.Where("id IN ?", ids).Find(&rows).Error; err != nil {
+		if err := db.Where("id IN ? AND active_marker = ?", ids, model.ActiveMarkerValue).Find(&rows).Error; err != nil {
 			return facts, err
 		}
 		for _, x := range rows {
 			key := BatchResourceKey(model.ResourceTypeApplication, x.ID)
+			facts.activeResources[key] = true
 			facts.permissionOf[key] = x.AppGroup
 			facts.resourceOf[key] = x.AppGroup
 		}
 	}
 	if ids := batchIDs(requests, model.ResourceTypePlatformAccount); len(ids) > 0 {
 		var rows []model.PlatformAccount
-		if err := db.Where("id IN ?", ids).Find(&rows).Error; err != nil {
+		if err := db.Where("id IN ? AND active_marker = ?", ids, model.ActiveMarkerValue).Find(&rows).Error; err != nil {
 			return facts, err
 		}
 		for _, x := range rows {
 			key := BatchResourceKey(model.ResourceTypePlatformAccount, x.ID)
+			facts.activeResources[key] = true
 			facts.permissionOf[key] = x.GroupName
 			facts.accountOf[key] = x.GroupName
 		}
 	}
 	if ids := batchIDs(requests, model.ResourceTypeContainerEndpoint); len(ids) > 0 {
 		var rows []model.ContainerEndpoint
-		if err := db.Where("id IN ?", ids).Find(&rows).Error; err != nil {
+		if err := db.Where("id IN ? AND active_marker = ?", ids, model.ActiveMarkerValue).Find(&rows).Error; err != nil {
 			return facts, err
 		}
 		for _, x := range rows {
 			// Legacy Permission group matching intentionally excludes container
 			// endpoints. ResourceGrant resource groups continue to include them.
-			facts.resourceOf[BatchResourceKey(model.ResourceTypeContainerEndpoint, x.ID)] = x.GroupName
+			key := BatchResourceKey(model.ResourceTypeContainerEndpoint, x.ID)
+			facts.activeResources[key] = true
+			facts.resourceOf[key] = x.GroupName
 		}
 	}
 	if ids := batchIDs(requests, model.ResourceTypeHostAccount); len(ids) > 0 {
 		var rows []struct{ ID, HostID, GroupName, HostGroup string }
-		if err := db.Table("host_accounts").Select("host_accounts.id, host_accounts.host_id, host_accounts.group_name, hosts.group_name AS host_group").Joins("JOIN hosts ON hosts.id = host_accounts.host_id").Where("host_accounts.id IN ?", ids).Scan(&rows).Error; err != nil {
+		if err := db.Table("host_accounts").
+			Select("host_accounts.id, host_accounts.host_id, host_accounts.group_name, hosts.group_name AS host_group").
+			Joins("JOIN hosts ON hosts.id = host_accounts.host_id").
+			Where("host_accounts.id IN ?", ids).
+			Where("host_accounts.active_marker = ? AND hosts.active_marker = ?", model.ActiveMarkerValue, model.ActiveMarkerValue).
+			Scan(&rows).Error; err != nil {
 			return facts, err
 		}
 		for _, x := range rows {
 			key := BatchResourceKey(model.ResourceTypeHostAccount, x.ID)
+			facts.activeResources[key] = true
 			facts.permissionOf[key] = x.HostGroup
 			facts.resourceOf[key] = x.HostGroup
 			facts.accountOf[key] = x.GroupName
@@ -164,11 +190,17 @@ func (c *Checker) loadBatchFacts(ctx context.Context, requests []BatchAuthorizat
 	}
 	if ids := batchIDs(requests, model.ResourceTypeDatabaseAccount); len(ids) > 0 {
 		var rows []struct{ ID, InstanceID, GroupName, InstanceGroup string }
-		if err := db.Table("database_accounts").Select("database_accounts.id, database_accounts.instance_id, database_accounts.group_name, database_instances.group_name AS instance_group").Joins("JOIN database_instances ON database_instances.id = database_accounts.instance_id").Where("database_accounts.id IN ?", ids).Scan(&rows).Error; err != nil {
+		if err := db.Table("database_accounts").
+			Select("database_accounts.id, database_accounts.instance_id, database_accounts.group_name, database_instances.group_name AS instance_group").
+			Joins("JOIN database_instances ON database_instances.id = database_accounts.instance_id").
+			Where("database_accounts.id IN ?", ids).
+			Where("database_accounts.active_marker = ? AND database_instances.active_marker = ?", model.ActiveMarkerValue, model.ActiveMarkerValue).
+			Scan(&rows).Error; err != nil {
 			return facts, err
 		}
 		for _, x := range rows {
 			key := BatchResourceKey(model.ResourceTypeDatabaseAccount, x.ID)
+			facts.activeResources[key] = true
 			facts.permissionOf[key] = x.InstanceGroup
 			facts.resourceOf[key] = x.InstanceGroup
 			facts.accountOf[key] = x.GroupName
@@ -176,6 +208,21 @@ func (c *Checker) loadBatchFacts(ctx context.Context, requests []BatchAuthorizat
 		}
 	}
 	return facts, nil
+}
+
+func appendUniqueBatchIDs(ids []string, additional ...string) []string {
+	seen := make(map[string]struct{}, len(ids)+len(additional))
+	for _, id := range ids {
+		seen[id] = struct{}{}
+	}
+	for _, id := range additional {
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		ids = append(ids, id)
+	}
+	return ids
 }
 
 func groupIDsFromPermissions(permissions []model.Permission) []string {
@@ -206,6 +253,9 @@ func groupIDsFromGrants(grants []model.ResourceGrant) []string {
 }
 
 func batchPermissionResourceMatches(permission model.Permission, request BatchAuthorizationRequest, facts batchFacts) bool {
+	if !facts.resourceIsActive(request.ResourceType, request.ResourceID) {
+		return false
+	}
 	if resourceTypeMatches(permission.ResourceType, request.ResourceType) && resourceIDMatches(permission.ResourceID, request.ResourceID) {
 		return true
 	}

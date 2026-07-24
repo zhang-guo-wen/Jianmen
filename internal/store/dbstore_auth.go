@@ -17,15 +17,15 @@ import (
 
 // -- auth --
 
-func (s *DBStore) Authenticate(_ context.Context, username, password string) (model.User, error) {
+func (s *DBStore) Authenticate(ctx context.Context, username, password string) (model.User, error) {
 	// Try token-based auth first.
 	hash := sha256.Sum256([]byte(password))
 	hashStr := hex.EncodeToString(hash[:])
 
 	var user model.User
-	if err := s.db.Where("token_hash = ? AND status = ?", hashStr, "active").First(&user).Error; err == nil {
+	if err := s.db.WithContext(ctx).Scopes(ActiveScope).Where("token_hash = ? AND status = ?", hashStr, "active").First(&user).Error; err == nil {
 		if user.IsExpired(time.Now().UTC()) {
-			_ = s.db.Model(&user).Update("status", "disabled").Error
+			_ = s.db.WithContext(ctx).Model(&user).Scopes(ActiveScope).Update("status", "disabled").Error
 			return model.User{}, errors.New("user account expired")
 		}
 		return user, nil
@@ -36,35 +36,35 @@ func (s *DBStore) Authenticate(_ context.Context, username, password string) (mo
 	if err != nil {
 		return model.User{}, err
 	}
-	return s.authenticateCompact(login, password)
+	return s.authenticateCompact(ctx, login, password)
 }
 
-func (s *DBStore) AuthenticatePublicKey(_ context.Context, username string, key ssh.PublicKey) (model.User, error) {
+func (s *DBStore) AuthenticatePublicKey(ctx context.Context, username string, key ssh.PublicKey) (model.User, error) {
 	login, err := parseLoginName(username)
 	if err != nil {
 		return model.User{}, err
 	}
-	return s.authenticateCompactPublicKey(login, key)
+	return s.authenticateCompactPublicKey(ctx, login, key)
 }
 
-func (s *DBStore) authenticateCompact(login LoginName, password string) (model.User, error) {
+func (s *DBStore) authenticateCompact(ctx context.Context, login LoginName, password string) (model.User, error) {
 	var userSession model.UserSession
-	if err := s.db.Where("session_id = ? AND status = ?", login.SessionID, "active").First(&userSession).Error; err != nil {
+	if err := s.db.WithContext(ctx).Scopes(ActiveScope).Where("session_id = ? AND status = ?", login.SessionID, "active").First(&userSession).Error; err != nil {
 		return model.User{}, fmt.Errorf("invalid session: %w", err)
 	}
 	if userSession.ExpiresAt != nil && time.Now().After(*userSession.ExpiresAt) {
-		s.db.Model(&userSession).Update("status", "expired")
+		s.db.WithContext(ctx).Model(&userSession).Scopes(ActiveScope).Update("status", "expired")
 		return model.User{}, errors.New("session expired")
 	}
 	var user model.User
-	if err := s.db.Where("id = ? AND status = ?", userSession.UserID, "active").First(&user).Error; err != nil {
+	if err := s.db.WithContext(ctx).Scopes(ActiveScope).Where("id = ? AND status = ?", userSession.UserID, "active").First(&user).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return model.User{}, errors.New("user is disabled or not found")
 		}
 		return model.User{}, err
 	}
 	if user.IsExpired(time.Now().UTC()) {
-		_ = s.db.Model(&user).Update("status", "disabled").Error
+		_ = s.db.WithContext(ctx).Model(&user).Scopes(ActiveScope).Update("status", "disabled").Error
 		return model.User{}, errors.New("user account expired")
 	}
 	if login.ResourceID == "" {
@@ -79,35 +79,35 @@ func (s *DBStore) authenticateCompact(login LoginName, password string) (model.U
 		First(&account).Error; err != nil {
 		return model.User{}, errors.New("authentication failed")
 	}
-	if err := s.AuthenticateConnectionPassword(context.Background(), user.ID, model.ResourceTypeHostAccount, account.ID, password); err != nil {
+	if err := s.AuthenticateConnectionPassword(ctx, user.ID, model.ResourceTypeHostAccount, account.ID, password); err != nil {
 		return model.User{}, errors.New("authentication failed")
 	}
 	user.RequestedTargetID = account.ID
 	return user, nil
 }
 
-func (s *DBStore) authenticateCompactPublicKey(login LoginName, key ssh.PublicKey) (model.User, error) {
+func (s *DBStore) authenticateCompactPublicKey(ctx context.Context, login LoginName, key ssh.PublicKey) (model.User, error) {
 	var userSession model.UserSession
-	if err := s.db.Where("session_id = ? AND status = ?", login.SessionID, "active").First(&userSession).Error; err != nil {
+	if err := s.db.WithContext(ctx).Scopes(ActiveScope).Where("session_id = ? AND status = ?", login.SessionID, "active").First(&userSession).Error; err != nil {
 		return model.User{}, fmt.Errorf("invalid session: %w", err)
 	}
 	if userSession.ExpiresAt != nil && time.Now().After(*userSession.ExpiresAt) {
-		s.db.Model(&userSession).Update("status", "expired")
+		s.db.WithContext(ctx).Model(&userSession).Scopes(ActiveScope).Update("status", "expired")
 		return model.User{}, errors.New("session expired")
 	}
 	var user model.User
-	if err := s.db.Where("id = ? AND status = ?", userSession.UserID, "active").First(&user).Error; err != nil {
+	if err := s.db.WithContext(ctx).Scopes(ActiveScope).Where("id = ? AND status = ?", userSession.UserID, "active").First(&user).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return model.User{}, errors.New("user is disabled or not found")
 		}
 		return model.User{}, err
 	}
 	if user.IsExpired(time.Now().UTC()) {
-		_ = s.db.Model(&user).Update("status", "disabled").Error
+		_ = s.db.WithContext(ctx).Model(&user).Scopes(ActiveScope).Update("status", "disabled").Error
 		return model.User{}, errors.New("user account expired")
 	}
 	var pubKeys []model.UserPublicKey
-	if err := s.db.Where("user_id = ? AND revoked_at IS NULL", user.ID).Find(&pubKeys).Error; err != nil {
+	if err := s.db.WithContext(ctx).Scopes(ActiveScope).Where("user_id = ? AND revoked_at IS NULL", user.ID).Find(&pubKeys).Error; err != nil {
 		return model.User{}, fmt.Errorf("load public keys: %w", err)
 	}
 	keyMatched := false
@@ -138,7 +138,7 @@ func (s *DBStore) authenticateCompactPublicKey(login LoginName, key ssh.PublicKe
 
 func (s *DBStore) Users() []UserView {
 	var users []model.User
-	if err := s.db.Where("status = ?", "active").Order("username ASC").Find(&users).Error; err != nil {
+	if err := s.db.Scopes(ActiveScope).Where("status = ?", "active").Order("username ASC").Find(&users).Error; err != nil {
 		return nil
 	}
 	out := make([]UserView, len(users))
@@ -148,16 +148,16 @@ func (s *DBStore) Users() []UserView {
 	return out
 }
 
-func (s *DBStore) AuthenticateDirect(_ context.Context, username, password string) (model.User, error) {
+func (s *DBStore) AuthenticateDirect(ctx context.Context, username, password string) (model.User, error) {
 	var user model.User
-	if err := s.db.Where("username = ? AND status = ?", username, "active").First(&user).Error; err != nil {
+	if err := s.db.WithContext(ctx).Scopes(ActiveScope).Where("username = ? AND status = ?", username, "active").First(&user).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return model.User{}, errors.New("invalid username or password")
 		}
 		return model.User{}, err
 	}
 	if user.IsExpired(time.Now().UTC()) {
-		_ = s.db.Model(&user).Update("status", "disabled").Error
+		_ = s.db.WithContext(ctx).Model(&user).Scopes(ActiveScope).Update("status", "disabled").Error
 		return model.User{}, errors.New("user account expired")
 	}
 	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(password)); err != nil {

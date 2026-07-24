@@ -28,8 +28,8 @@ func (s *DBStore) ListContainerEndpoints(ctx context.Context, params ContainerEn
 
 	buildQuery := func() *gorm.DB {
 		query := s.db.WithContext(ctx).Model(&model.ContainerEndpoint{}).
-			Where("container_endpoints.deleted_at = ?", model.DeletedMarkerActive).
-			Joins("LEFT JOIN hosts ON hosts.id = container_endpoints.host_id")
+			Where("container_endpoints.active_marker = ?", model.ActiveMarkerValue).
+			Joins("LEFT JOIN hosts ON hosts.id = container_endpoints.host_id AND hosts.active_marker = ?", model.ActiveMarkerValue)
 		if status := strings.TrimSpace(params.Status); status != "" {
 			query = query.Where("container_endpoints.status = ?", status)
 		}
@@ -148,7 +148,7 @@ func (s *DBStore) DeleteManagedContainerEndpoint(ctx context.Context, id string)
 
 func (s *DBStore) ContainerHostAccount(ctx context.Context, id string) (service.ContainerHostAccount, error) {
 	var account model.HostAccount
-	if err := s.db.WithContext(ctx).Scopes(activeHostAccountScope).Preload("Host").
+	if err := s.db.WithContext(ctx).Scopes(activeHostAccountScope).Preload("Host", ActiveScope).
 		First(&account, "host_accounts.id = ?", strings.TrimSpace(id)).Error; err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			return service.ContainerHostAccount{}, err
@@ -184,7 +184,7 @@ func (s *DBStore) createContainerCreatorGrant(tx *gorm.DB, creatorID, endpointID
 		return fmt.Errorf("container endpoint creator not found: %q", creatorID)
 	}
 	grant := model.ResourceGrant{PrincipalType: "user", PrincipalID: creatorID, ResourceType: model.ResourceTypeContainerEndpoint, ResourceID: endpointID, Effect: model.PermissionEffectAllow}
-	if err := tx.Where(&model.ResourceGrant{
+	if err := tx.Scopes(ActiveScope).Where(&model.ResourceGrant{
 		PrincipalType: grant.PrincipalType,
 		PrincipalID:   grant.PrincipalID,
 		ResourceType:  grant.ResourceType,
@@ -206,7 +206,7 @@ func containerInputFromManaged(input service.ContainerEndpointRequest) Container
 
 func (s *DBStore) ContainerEndpoint(ctx context.Context, id string) (ContainerEndpointView, error) {
 	var endpoint model.ContainerEndpoint
-	if err := s.db.WithContext(ctx).First(&endpoint, "id = ?", strings.TrimSpace(id)).Error; err != nil {
+	if err := s.db.WithContext(ctx).Scopes(ActiveScope).First(&endpoint, "id = ?", strings.TrimSpace(id)).Error; err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			return ContainerEndpointView{}, err
 		}
@@ -251,7 +251,7 @@ func (s *DBStore) AddContainerEndpoint(ctx context.Context, input ContainerEndpo
 func (s *DBStore) UpdateContainerEndpoint(ctx context.Context, id string, input ContainerEndpointInput) (ContainerEndpointView, error) {
 	var endpoint model.ContainerEndpoint
 	if err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&endpoint, "id = ?", strings.TrimSpace(id)).Error; err != nil {
+		if err := tx.Scopes(ActiveScope).Clauses(clause.Locking{Strength: "UPDATE"}).First(&endpoint, "id = ?", strings.TrimSpace(id)).Error; err != nil {
 			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 				return fmt.Errorf("find container endpoint for update: %w", err)
 			}
@@ -323,7 +323,7 @@ func mergeContainerEndpointUpdate(previous model.ContainerEndpoint, update Conta
 func (s *DBStore) DeleteContainerEndpoint(ctx context.Context, id string) error {
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var endpoint model.ContainerEndpoint
-		if err := tx.First(&endpoint, "id = ?", strings.TrimSpace(id)).Error; err != nil {
+		if err := tx.Scopes(ActiveScope).First(&endpoint, "id = ?", strings.TrimSpace(id)).Error; err != nil {
 			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 				return fmt.Errorf("find container endpoint for delete: %w", err)
 			}
@@ -351,7 +351,7 @@ func (s *DBStore) containerEndpointViews(ctx context.Context, endpoints []model.
 	hosts := make(map[string]model.Host, len(hostIDs))
 	if len(hostIDs) > 0 {
 		var records []model.Host
-		if err := s.db.WithContext(ctx).Where("id IN ?", hostIDs).Find(&records).Error; err != nil {
+		if err := s.db.WithContext(ctx).Scopes(ActiveScope).Where("id IN ?", hostIDs).Find(&records).Error; err != nil {
 			return nil, fmt.Errorf("load container endpoint hosts: %w", err)
 		}
 		for _, host := range records {

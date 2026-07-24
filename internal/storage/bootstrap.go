@@ -80,6 +80,8 @@ func bootstrapConfigUsers(db *gorm.DB, users []config.User, allowSuperAdminSeed 
 			"password_hash":      user.PasswordHash,
 			"my_sql_native_hash": user.MySQLNativeHash,
 			"token_hash":         user.TokenHash,
+			"active_marker":      model.ActiveMarkerValue,
+			"updated_at":         time.Now().UTC(),
 		}
 		if allowSuperAdminSeed && cfgUser.SuperAdmin {
 			updates["is_super_admin"] = true
@@ -92,7 +94,7 @@ func bootstrapConfigUsers(db *gorm.DB, users []config.User, allowSuperAdminSeed 
 		}
 
 		var userSessionCount int64
-		if err := db.Model(&model.UserSession{}).
+		if err := activeUserSessionsQuery(db).
 			Where("user_id = ? AND type = ?", userID, "permanent").
 			Count(&userSessionCount).Error; err != nil {
 			return fmt.Errorf("count permanent sessions for %s: %w", userID, err)
@@ -146,14 +148,22 @@ func requireActiveSuperAdminForExistingUsers(db *gorm.DB, now time.Time) error {
 func countActiveSuperAdmins(db *gorm.DB, now time.Time) (int64, error) {
 	var count int64
 	err := db.Model(&model.User{}).
-		Where("is_super_admin = ? AND status = ? AND (expires_at IS NULL OR expires_at > ?)", true, "active", now).
+		Where(
+			"active_marker = ? AND is_super_admin = ? AND status = ? AND (expires_at IS NULL OR expires_at > ?)",
+			model.ActiveMarkerValue,
+			true,
+			"active",
+			now,
+		).
 		Count(&count).Error
 	return count, err
 }
 
 func repairUserSessions(db *gorm.DB) error {
 	var sessions []model.UserSession
-	if err := db.Order("user_id ASC, session_seq ASC, id ASC").Find(&sessions).Error; err != nil {
+	if err := activeUserSessionsQuery(db).
+		Order("user_id ASC, session_seq ASC, id ASC").
+		Find(&sessions).Error; err != nil {
 		return err
 	}
 
@@ -216,12 +226,23 @@ func repairUserSessions(db *gorm.DB) error {
 
 func ensureUserSessionSequenceFloor(db *gorm.DB) error {
 	var maxSeq int
-	if err := db.Model(&model.UserSession{}).
+	if err := activeUserSessionsQuery(db).
 		Select("COALESCE(MAX(session_seq), 0)").
 		Scan(&maxSeq).Error; err != nil {
 		return fmt.Errorf("user session sequence floor: %w", err)
 	}
 	return EnsureSequenceNextValue(db, SequenceUserSession, maxSeq+1)
+}
+
+// activeUserSessionsQuery keeps bootstrap and pre-index repair compatible with
+// legacy user_sessions tables while making the final active-marker schema
+// ignore historical rows.
+func activeUserSessionsQuery(db *gorm.DB) *gorm.DB {
+	query := db.Model(&model.UserSession{})
+	if db.Migrator().HasColumn(&model.UserSession{}, "active_marker") {
+		query = query.Where("active_marker = ?", model.ActiveMarkerValue)
+	}
+	return query
 }
 
 func configUserID(user config.User) string {

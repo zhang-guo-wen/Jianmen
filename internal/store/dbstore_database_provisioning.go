@@ -105,7 +105,7 @@ func (s *DBStore) CreateDatabaseProvisioningOperation(
 		if updated.Error != nil || updated.RowsAffected != 1 {
 			return errors.New("set database provisioning initial lease")
 		}
-		if err := tx.First(&record, "id = ?", record.ID).Error; err != nil {
+		if err := tx.Scopes(ActiveScope).First(&record, "id = ?", record.ID).Error; err != nil {
 			return err
 		}
 		window, err = clock.leaseWindow(ctx, tx, record.ID, input.Lease.Duration)
@@ -170,7 +170,7 @@ func (s *DBStore) DatabaseProvisioningOperationByIdempotency(
 		return service.DatabaseProvisioningOperation{}, false, errors.New("load database provisioning idempotency operation: nil context")
 	}
 	var record model.DatabaseProvisioningOperation
-	err := s.db.WithContext(ctx).Where(
+	err := s.db.WithContext(ctx).Scopes(ActiveScope).Where(
 		"actor_id = ? AND kind = ? AND idempotency_key = ?",
 		strings.TrimSpace(actorID), "create", strings.TrimSpace(key),
 	).First(&record).Error
@@ -191,7 +191,9 @@ func (s *DBStore) ProvisionedDatabaseAccountByOperation(
 		return service.ProvisionedDatabaseAccount{}, false, errors.New("load provisioned database account: nil context")
 	}
 	var account model.DatabaseAccount
-	err := s.db.WithContext(ctx).Where("provisioning_operation_id = ?", strings.TrimSpace(operationID)).First(&account).Error
+	err := s.db.WithContext(ctx).Scopes(activeDatabaseAccountScope).
+		Where("database_accounts.provisioning_operation_id = ?", strings.TrimSpace(operationID)).
+		First(&account).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return service.ProvisionedDatabaseAccount{}, false, nil
 	}
@@ -210,7 +212,7 @@ func (s *DBStore) DatabaseProvisioningOperation(
 			errors.New("load database provisioning operation: nil context")
 	}
 	var record model.DatabaseProvisioningOperation
-	err := s.db.WithContext(ctx).First(&record, "id = ?", strings.TrimSpace(id)).Error
+	err := s.db.WithContext(ctx).Scopes(ActiveScope).First(&record, "id = ?", strings.TrimSpace(id)).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return service.DatabaseProvisioningOperation{},
 			fmt.Errorf("%w: provisioning operation", ErrDatabaseProvisioningOperationNotFound)
@@ -239,7 +241,7 @@ func (s *DBStore) ListExecutableDatabaseProvisioningOperations(
 	}
 	staleBefore := now.Add(-staleAfter)
 	var records []model.DatabaseProvisioningOperation
-	err = s.db.WithContext(ctx).
+	err = s.db.WithContext(ctx).Scopes(ActiveScope).
 		Where("(lease_expires_at IS NULL OR lease_expires_at <= ?)", now).
 		Where(
 			`(stage = ? OR

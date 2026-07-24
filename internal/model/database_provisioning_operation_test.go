@@ -21,7 +21,7 @@ func TestDatabaseProvisioningLifecycleModelFields(t *testing.T) {
 	// FullAudit 嵌入的字段（CreatedAt/UpdatedAt 有 json tag），不在此测试中校验
 	fullAuditFields := map[string]bool{
 		"CreatedBy": true, "UpdatedBy": true,
-		"CreatedAt": true, "UpdatedAt": true, "DeletedAt": true,
+		"CreatedAt": true, "UpdatedAt": true, "ActiveMarker": true,
 	}
 	for _, name := range []string{
 		"Kind", "InstanceID", "ActorID", "IdempotencyKey", "CanonicalRequestHash",

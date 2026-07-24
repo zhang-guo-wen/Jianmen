@@ -277,6 +277,7 @@ func TestRBACBindingsAndEffectiveAllow(t *testing.T) {
 	if err := db.Create(&model.User{ID: "u1", Username: "u1"}).Error; err != nil {
 		t.Fatalf("create user: %v", err)
 	}
+	seedActiveHostAccount(t, db, "target-root")
 
 	role := createRBACRole(t, server, `{"name":"ops"}`)
 	permission := createRBACPermission(t, server, `{

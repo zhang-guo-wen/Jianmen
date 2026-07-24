@@ -15,7 +15,7 @@ import (
 
 func (s *DBStore) Applications(ctx context.Context) []ApplicationView {
 	var apps []model.Application
-	if err := s.db.WithContext(ctx).Order("name ASC").Find(&apps).Error; err != nil {
+	if err := s.db.WithContext(ctx).Scopes(ActiveScope).Order("name ASC").Find(&apps).Error; err != nil {
 		return nil
 	}
 	views := make([]ApplicationView, 0, len(apps))
@@ -27,7 +27,7 @@ func (s *DBStore) Applications(ctx context.Context) []ApplicationView {
 
 func (s *DBStore) ListApplications(ctx context.Context) []model.Application {
 	var applications []model.Application
-	if err := s.db.WithContext(ctx).Order("name ASC").Find(&applications).Error; err != nil {
+	if err := s.db.WithContext(ctx).Scopes(ActiveScope).Order("name ASC").Find(&applications).Error; err != nil {
 		return nil
 	}
 	return applications
@@ -36,7 +36,7 @@ func (s *DBStore) ListApplications(ctx context.Context) []model.Application {
 func (s *DBStore) Application(ctx context.Context, id string) (ApplicationView, error) {
 	id = strings.TrimSpace(id)
 	var app model.Application
-	if err := s.db.WithContext(ctx).First(&app, "id = ?", id).Error; err != nil {
+	if err := s.db.WithContext(ctx).Scopes(ActiveScope).First(&app, "id = ?", id).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return ApplicationView{}, fmt.Errorf("%w: %q", ErrApplicationNotFound, id)
 		}
@@ -48,7 +48,7 @@ func (s *DBStore) Application(ctx context.Context, id string) (ApplicationView, 
 func (s *DBStore) GetApplication(ctx context.Context, id string) (model.Application, error) {
 	id = strings.TrimSpace(id)
 	var application model.Application
-	if err := s.db.WithContext(ctx).First(&application, "id = ?", id).Error; err != nil {
+	if err := s.db.WithContext(ctx).Scopes(ActiveScope).First(&application, "id = ?", id).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return model.Application{}, fmt.Errorf("%w: %q", ErrApplicationNotFound, id)
 		}
@@ -149,7 +149,7 @@ func (s *DBStore) createApplication(
 			ResourceID:    app.ID,
 			Effect:        model.PermissionEffectAllow,
 		}
-		if err := tx.Where(&model.ResourceGrant{
+		if err := tx.Scopes(ActiveScope).Where(&model.ResourceGrant{
 			PrincipalType: grant.PrincipalType,
 			PrincipalID:   grant.PrincipalID,
 			ResourceType:  grant.ResourceType,
@@ -176,7 +176,7 @@ func (s *DBStore) UpdateApplication(ctx context.Context, id string, input Applic
 func (s *DBStore) updateApplication(ctx context.Context, id string, input ApplicationInput) (model.Application, error) {
 	id = strings.TrimSpace(id)
 	var app model.Application
-	if err := s.db.WithContext(ctx).First(&app, "id = ?", id).Error; err != nil {
+	if err := s.db.WithContext(ctx).Scopes(ActiveScope).First(&app, "id = ?", id).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return model.Application{}, fmt.Errorf("%w: %q", ErrApplicationNotFound, id)
 		}
@@ -260,7 +260,7 @@ func (s *DBStore) DeleteApplication(ctx context.Context, id string) error {
 	id = strings.TrimSpace(id)
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var app model.Application
-		if err := tx.First(&app, "id = ?", id).Error; err != nil {
+		if err := tx.Scopes(ActiveScope).First(&app, "id = ?", id).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return fmt.Errorf("%w: %q", ErrApplicationNotFound, id)
 			}

@@ -16,6 +16,7 @@ func TestHasPermissionRequiresActionAndResourceGrant(t *testing.T) {
 		{ID: "p-target-root", ResourceType: "host_account", ResourceID: "target-root", Effect: model.PermissionEffectAllow},
 		{ID: "p-sftp-target-root", Action: "sftp:connect", ResourceType: "host_account", ResourceID: "target-root", Effect: model.PermissionEffectAllow},
 	})
+	seedActiveHostAccount(t, db, "target-root")
 
 	checker := NewChecker(db)
 	assertPermission(t, checker, "u1", "session:connect", "", "", true)
@@ -106,6 +107,7 @@ func TestHasPermissionSupportsWildcardResourceScope(t *testing.T) {
 		{ID: "p-all-actions", Action: "*", Effect: model.PermissionEffectAllow},
 		{ID: "p-all-resources", Action: "*", ResourceType: "*", ResourceID: "*", Effect: model.PermissionEffectAllow},
 	})
+	seedActiveHostAccount(t, db, "target-root")
 
 	checker := NewChecker(db)
 	assertPermission(t, checker, "u1", "session:connect", "host_account", "target-root", true)
@@ -152,6 +154,18 @@ func seedRBAC(t *testing.T, db *gorm.DB, userID string, permissions []model.Perm
 		}).Error; err != nil {
 			t.Fatalf("create role permission %s: %v", permissions[i].ID, err)
 		}
+	}
+}
+
+func seedActiveHostAccount(t *testing.T, db *gorm.DB, accountID string) {
+	t.Helper()
+
+	hostID := "host-" + accountID
+	if err := db.Create(&model.Host{ID: hostID, Name: hostID, Address: hostID, Port: 22, Status: "active"}).Error; err != nil {
+		t.Fatalf("create host %s: %v", hostID, err)
+	}
+	if err := db.Create(&model.HostAccount{ID: accountID, HostID: hostID, Username: accountID, Status: "active"}).Error; err != nil {
+		t.Fatalf("create host account %s: %v", accountID, err)
 	}
 }
 

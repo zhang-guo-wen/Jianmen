@@ -50,7 +50,7 @@ func (s *DBStore) PlatformAccounts(ctx context.Context, params PlatformAccountLi
 		return nil, 0, fmt.Errorf("count platform accounts: %w", err)
 	}
 
-	query := q.Preload("Owner").Order("created_at DESC")
+	query := q.Preload("Owner", ActiveScope).Order("created_at DESC")
 	if !params.Unpaged {
 		page := params.Page
 		if page < 1 {
@@ -108,7 +108,7 @@ func (s *DBStore) GetPlatformAccountMetadata(ctx context.Context, id string) (mo
 
 func (s *DBStore) PlatformAccount(ctx context.Context, id string) (PlatformAccountView, error) {
 	var a model.PlatformAccount
-	if err := s.db.WithContext(ctx).Preload("Owner").First(&a, "id = ?", id).Error; err != nil {
+	if err := s.db.WithContext(ctx).Scopes(ActiveScope).Preload("Owner", ActiveScope).First(&a, "id = ?", id).Error; err != nil {
 		return PlatformAccountView{}, fmt.Errorf("%w: %q", ErrPlatformAccountNotFound, id)
 	}
 	return s.platformAccountView(a), nil
@@ -161,7 +161,7 @@ func (s *DBStore) createPlatformAccount(ctx context.Context, acc model.PlatformA
 				return fmt.Errorf("platform account creator not found: %q", creatorID)
 			}
 			grant := model.ResourceGrant{PrincipalType: "user", PrincipalID: creatorID, ResourceType: model.ResourceTypePlatformAccount, ResourceID: acc.ID, Effect: model.PermissionEffectAllow}
-			if err := tx.Where(&model.ResourceGrant{PrincipalType: grant.PrincipalType, PrincipalID: grant.PrincipalID, ResourceType: grant.ResourceType, ResourceID: grant.ResourceID, Effect: grant.Effect}).FirstOrCreate(&grant).Error; err != nil {
+			if err := tx.Scopes(ActiveScope).Where(&model.ResourceGrant{PrincipalType: grant.PrincipalType, PrincipalID: grant.PrincipalID, ResourceType: grant.ResourceType, ResourceID: grant.ResourceID, Effect: grant.Effect}).FirstOrCreate(&grant).Error; err != nil {
 				return fmt.Errorf("create platform account creator grant: %w", err)
 			}
 		}
@@ -190,7 +190,7 @@ func (s *DBStore) updatePlatformAccount(ctx context.Context, id string, acc mode
 	deletedBeforeUpdate := false
 	if err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var current model.PlatformAccount
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&current, "id = ?", id).Error; err != nil {
+		if err := tx.Scopes(ActiveScope).Clauses(clause.Locking{Strength: "UPDATE"}).First(&current, "id = ?", id).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return fmt.Errorf("%w: %q", ErrPlatformAccountNotFound, id)
 			}
@@ -229,7 +229,7 @@ func (s *DBStore) DeletePlatformAccount(ctx context.Context, id string) error {
 	id = strings.TrimSpace(id)
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var acc model.PlatformAccount
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&acc, "id = ?", id).Error; err != nil {
+		if err := tx.Scopes(ActiveScope).Clauses(clause.Locking{Strength: "UPDATE"}).First(&acc, "id = ?", id).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return fmt.Errorf("%w: %q", ErrPlatformAccountNotFound, id)
 			}
@@ -238,8 +238,7 @@ func (s *DBStore) DeletePlatformAccount(ctx context.Context, id string) error {
 		if err := s.deleteResourceTx(tx, model.ResourceTypePlatformAccount, acc.ID); err != nil {
 			return err
 		}
-				now := time.Now().UTC()
-		result := tx.Model(&model.PlatformAccount{}).Scopes(ActiveScope).Where("id = ?", id).Updates(map[string]interface{}{"deleted_at": nil, "updated_at": now})
+		result := softDeleteWhere(ctx, tx, "platform_accounts", "id = ?", id)
 		if result.Error != nil {
 			return result.Error
 		}
@@ -256,7 +255,7 @@ func (s *DBStore) DeleteManagedPlatformAccount(ctx context.Context, id string) e
 
 func (s *DBStore) GetPlatformAccountPassword(ctx context.Context, id string) (string, error) {
 	var acc model.PlatformAccount
-	if err := s.db.WithContext(ctx).First(&acc, "id = ?", id).Error; err != nil {
+	if err := s.db.WithContext(ctx).Scopes(ActiveScope).First(&acc, "id = ?", id).Error; err != nil {
 		return "", fmt.Errorf("%w: %q", ErrPlatformAccountNotFound, id)
 	}
 	return acc.Password.GetPlaintext(), nil
@@ -269,7 +268,7 @@ func (s *DBStore) platformAccountMetadataQuery(ctx context.Context) *gorm.DB {
 			platform_accounts.group_name, platform_accounts.username, platform_accounts.remark, platform_accounts.owner_id,
 			platform_accounts.status, platform_accounts.expires_at, platform_accounts.created_at, platform_accounts.updated_at,
 			CASE WHEN platform_accounts.password IS NULL OR platform_accounts.password = '' THEN 0 ELSE 1 END AS has_password`).
-		Preload("Owner")
+		Preload("Owner", ActiveScope)
 }
 
 func (s *DBStore) loadPlatformAccountMetadataTx(tx *gorm.DB, id string, destination *model.PlatformAccount) error {
@@ -278,7 +277,7 @@ func (s *DBStore) loadPlatformAccountMetadataTx(tx *gorm.DB, id string, destinat
 			platform_accounts.group_name, platform_accounts.username, platform_accounts.remark, platform_accounts.owner_id,
 			platform_accounts.status, platform_accounts.expires_at, platform_accounts.created_at, platform_accounts.updated_at,
 			CASE WHEN platform_accounts.password IS NULL OR platform_accounts.password = '' THEN 0 ELSE 1 END AS has_password`).
-		Preload("Owner").First(destination, "platform_accounts.id = ?", id).Error
+		Preload("Owner", ActiveScope).First(destination, "platform_accounts.id = ?", id).Error
 }
 
 func platformAccountUpdateFields(acc model.PlatformAccount) map[string]any {

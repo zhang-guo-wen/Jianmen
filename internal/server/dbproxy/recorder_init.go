@@ -29,7 +29,7 @@ func (g *Gateway) newRecorder(
 	authUser := conn.userID
 	if g.db != nil {
 		var user model.User
-		if err := g.db.WithContext(ctx).First(&user, "id = ?", conn.userID).Error; err == nil {
+		if err := g.db.WithContext(ctx).First(&user, "id = ? AND active_marker = ?", conn.userID, model.ActiveMarkerValue).Error; err == nil {
 			authUser = user.Username
 		}
 	}

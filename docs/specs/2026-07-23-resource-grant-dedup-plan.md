@@ -1,5 +1,9 @@
 # 资源授权去重与批量授权 — 实现计划
 
+> **历史计划（已归档）**：本文中的 `deleted_at` / `gorm.DeletedAt` 约束
+> 已不再适用。最终实现使用 `active_marker`，详见
+> [标准化审计字段与停用标记设计](../2026-07-23-auditable-fields-design.md)。
+
 > **For agentic workers:** 使用 superpowers:subagent-driven-development 按任务逐个实现。步骤使用 checkbox (`- [ ]`) 语法跟踪。
 
 **目标:** 前端选定主体后禁用已有授权的资源行；后端支持批量授权，对已有授权执行逻辑删除+重新插入。

@@ -28,7 +28,9 @@ func (s *DBStore) CreateAdminSession(ctx context.Context, session model.AdminSes
 
 func (s *DBStore) FindActiveAdminSessionBySecretHash(ctx context.Context, secretHash string, now time.Time) (service.BrowserSessionSubject, bool, error) {
 	var session model.AdminSession
-	err := s.db.WithContext(ctx).Where("secret_hash = ? AND revoked_at IS NULL AND expires_at > ?", strings.TrimSpace(secretHash), now).First(&session).Error
+	err := s.db.WithContext(ctx).Scopes(ActiveScope).
+		Where("secret_hash = ? AND revoked_at IS NULL AND expires_at > ?", strings.TrimSpace(secretHash), now).
+		First(&session).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return service.BrowserSessionSubject{}, false, nil
 	}
@@ -76,7 +78,7 @@ func (s *DBStore) consumeWebSocketTicketOnce(ctx context.Context, secretHash, pu
 	var ticket model.WebSocketTicket
 	var session model.AdminSession
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		ticketQuery := tx.Where(
+		ticketQuery := tx.Scopes(ActiveScope).Where(
 			"secret_hash = ? AND purpose = ? AND target_id = ? AND consumed_at IS NULL AND expires_at > ?",
 			strings.TrimSpace(secretHash), strings.TrimSpace(purpose), strings.TrimSpace(targetID), now,
 		)
@@ -86,7 +88,7 @@ func (s *DBStore) consumeWebSocketTicketOnce(ctx context.Context, secretHash, pu
 		if err := ticketQuery.First(&ticket).Error; err != nil {
 			return err
 		}
-		sessionQuery := tx.Where("id = ? AND revoked_at IS NULL AND expires_at > ?", ticket.SessionID, now)
+		sessionQuery := tx.Scopes(ActiveScope).Where("id = ? AND revoked_at IS NULL AND expires_at > ?", ticket.SessionID, now)
 		if s.db.Dialector.Name() != "sqlite" {
 			sessionQuery = sessionQuery.Clauses(clause.Locking{Strength: "UPDATE"})
 		}

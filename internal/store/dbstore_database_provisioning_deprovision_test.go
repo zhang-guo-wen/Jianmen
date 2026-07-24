@@ -25,8 +25,8 @@ func TestManagedDatabaseDeprovisionSQLiteRollsBackAllTombstones(t *testing.T) {
 	repository, db, account, operation, started := prepareManagedDatabaseDeprovision(t)
 	if err := db.Exec(`
 		CREATE TRIGGER reject_deprovision_operation_tombstone
-		BEFORE UPDATE OF deleted_at ON database_provisioning_operations
-		WHEN NEW.deleted_at IS NULL
+		BEFORE UPDATE OF active_marker ON database_provisioning_operations
+		WHEN NEW.active_marker IS NULL
 		BEGIN
 			SELECT RAISE(ABORT, 'reject operation tombstone');
 		END;
@@ -79,11 +79,11 @@ func assertDatabaseDeprovisionState(t *testing.T, db *gorm.DB, accountID, operat
 	if err := db.First(&operation, "id = ?", operationID).Error; err != nil {
 		t.Fatalf("load provisioning operation tombstone: %v", err)
 	}
-	if !matchesDatabaseDeprovisionMarker(account.DeletedAt, wantActive) {
-		t.Fatalf("managed account deleted_at = %v, want active=%v", account.DeletedAt, wantActive)
+	if !matchesDatabaseDeprovisionMarker(account.ActiveMarker, wantActive) {
+		t.Fatalf("managed account active_marker = %v, want active=%v", account.ActiveMarker, wantActive)
 	}
-	if !matchesDatabaseDeprovisionMarker(operation.DeletedAt, wantActive) {
-		t.Fatalf("operation deleted_at = %v, want active=%v", operation.DeletedAt, wantActive)
+	if !matchesDatabaseDeprovisionMarker(operation.ActiveMarker, wantActive) {
+		t.Fatalf("operation active_marker = %v, want active=%v", operation.ActiveMarker, wantActive)
 	}
 
 	wantActiveCount := int64(0)
@@ -106,17 +106,17 @@ func assertDatabaseDeprovisionState(t *testing.T, db *gorm.DB, accountID, operat
 	}
 }
 
-func matchesDatabaseDeprovisionMarker(deletedAt *int, wantActive bool) bool {
+func matchesDatabaseDeprovisionMarker(activeMarker *int, wantActive bool) bool {
 	if !wantActive {
-		return deletedAt == nil
+		return activeMarker == nil
 	}
-	return deletedAt != nil && *deletedAt == model.DeletedMarkerActive
+	return activeMarker != nil && *activeMarker == model.ActiveMarkerValue
 }
 
 func assertDatabaseAccountResourceCount(t *testing.T, db *gorm.DB, accountID string, want int64) {
 	t.Helper()
 	var count int64
-	if err := db.Model(&model.Resource{}).
+	if err := db.Model(&model.Resource{}).Scopes(ActiveScope).
 		Where("type = ? AND resource_id = ?", model.ResourceTypeDatabaseAccount, accountID).
 		Count(&count).Error; err != nil {
 		t.Fatalf("count managed account resources: %v", err)

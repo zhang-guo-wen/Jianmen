@@ -9,6 +9,7 @@ import (
 
 	"gorm.io/gorm"
 
+	"jianmen/internal/model"
 	"jianmen/internal/service"
 )
 
@@ -103,8 +104,8 @@ func (c databaseProvisioningStatementClock) leaseWindow(
 	var seconds float64
 	result := db.WithContext(ctx).Raw(
 		"SELECT "+c.remainingDuration+
-			" FROM database_provisioning_operations WHERE id = ?",
-		id,
+			" FROM database_provisioning_operations WHERE id = ? AND active_marker = ?",
+		id, model.ActiveMarkerValue,
 	).Scan(&seconds)
 	if result.Error != nil || result.RowsAffected != 1 {
 		return service.DatabaseProvisioningLeaseWindow{},

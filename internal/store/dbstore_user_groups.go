@@ -34,7 +34,7 @@ func (s *DBStore) SearchUserGroups(ctx context.Context, query string, page, page
 
 func (s *DBStore) FindUserGroup(ctx context.Context, id string) (model.UserGroup, bool, error) {
 	var group model.UserGroup
-	err := s.db.WithContext(ctx).First(&group, "id = ?", strings.TrimSpace(id)).Error
+	err := s.db.WithContext(ctx).Scopes(ActiveScope).First(&group, "id = ?", strings.TrimSpace(id)).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return model.UserGroup{}, false, nil
 	}
@@ -93,7 +93,12 @@ func (s *DBStore) DeleteUserGroup(ctx context.Context, group model.UserGroup) er
 
 func (s *DBStore) ListUserGroupMembers(ctx context.Context, groupID string) ([]model.UserGroupMember, error) {
 	var members []model.UserGroupMember
-	if err := s.db.WithContext(ctx).Where("group_id = ?", strings.TrimSpace(groupID)).Order("created_at DESC").Find(&members).Error; err != nil {
+	if err := s.db.WithContext(ctx).Model(&model.UserGroupMember{}).
+		Joins("JOIN user_groups ON user_groups.id = user_group_members.group_id").
+		Joins("JOIN users ON users.id = user_group_members.user_id").
+		Where("user_group_members.group_id = ?", strings.TrimSpace(groupID)).
+		Where("user_groups.active_marker = ? AND users.active_marker = ?", model.ActiveMarkerValue, model.ActiveMarkerValue).
+		Order("user_group_members.created_at DESC").Find(&members).Error; err != nil {
 		return nil, fmt.Errorf("list user group members: %w", err)
 	}
 	return members, nil

@@ -18,7 +18,7 @@ func (s *DBStore) UserPreference(ctx context.Context, userID string) (model.User
 		return model.UserPreference{}, errors.New("user id is required")
 	}
 	var preference model.UserPreference
-	err := s.db.WithContext(ctx).First(&preference, "user_id = ?", userID).Error
+	err := s.db.WithContext(ctx).Scopes(ActiveScope).First(&preference, "user_id = ?", userID).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return defaultUserPreference(userID), nil
 	}
@@ -37,8 +37,8 @@ func (s *DBStore) SaveUserPreference(ctx context.Context, preference model.UserP
 		Columns: []clause.Column{{Name: "user_id"}},
 		DoUpdates: clause.AssignmentColumns([]string{
 			"theme", "ssh_client", "ssh_client_path", "ssh_client_platform",
-				"db_client", "db_client_platform", "db_client_path", "db_client_ca_file_path",
-				"terminal_font_family", "terminal_font_size", "updated_at",
+			"db_client", "db_client_platform", "db_client_path", "db_client_ca_file_path",
+			"terminal_font_family", "terminal_font_size", "updated_at",
 		}),
 	}).Create(&preference).Error
 	if err != nil {

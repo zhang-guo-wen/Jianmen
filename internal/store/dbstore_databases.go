@@ -20,12 +20,12 @@ import (
 // -- db instances (DB-backed) --
 
 func (s *DBStore) DatabaseInstances(ctx context.Context) []DatabaseInstanceView {
-	query := s.db.WithContext(ctx)
+	query := s.db.WithContext(ctx).Scopes(ActiveScope)
 	var instances []model.DatabaseInstance
 	if err := query.Order("name ASC").Find(&instances).Error; err != nil {
 		return nil
 	}
-	counts, err := s.databaseAccountCounts(query, databaseInstanceIDs(instances))
+	counts, err := s.databaseAccountCounts(s.db.WithContext(ctx), databaseInstanceIDs(instances))
 	if err != nil {
 		return nil
 	}
@@ -39,14 +39,14 @@ func (s *DBStore) DatabaseInstances(ctx context.Context) []DatabaseInstanceView 
 func (s *DBStore) DatabaseInstance(ctx context.Context, id string) (DatabaseInstanceView, error) {
 	id = strings.TrimSpace(id)
 	var inst model.DatabaseInstance
-	query := s.db.WithContext(ctx)
+	query := s.db.WithContext(ctx).Scopes(ActiveScope)
 	if err := query.First(&inst, "id = ?", id).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return DatabaseInstanceView{}, fmt.Errorf("%w: %q", ErrDBInstanceNotFound, id)
 		}
 		return DatabaseInstanceView{}, err
 	}
-	count, err := s.databaseAccountCount(query, inst.ID)
+	count, err := s.databaseAccountCount(s.db.WithContext(ctx), inst.ID)
 	if err != nil {
 		return DatabaseInstanceView{}, err
 	}
@@ -89,7 +89,9 @@ func (s *DBStore) AddDatabaseInstance(ctx context.Context, input DatabaseInstanc
 
 func (s *DBStore) ListDatabaseAccountsByInstance(ctx context.Context, instanceID string) ([]DatabaseAccountView, error) {
 	var accounts []model.DatabaseAccount
-	if err := s.db.WithContext(ctx).Where("instance_id = ?", instanceID).Order("username ASC").Find(&accounts).Error; err != nil {
+	if err := s.db.WithContext(ctx).Scopes(activeDatabaseAccountScope).
+		Where("database_accounts.instance_id = ?", instanceID).
+		Order("username ASC").Find(&accounts).Error; err != nil {
 		return nil, err
 	}
 	views := make([]DatabaseAccountView, 0, len(accounts))
@@ -101,7 +103,7 @@ func (s *DBStore) ListDatabaseAccountsByInstance(ctx context.Context, instanceID
 
 func (s *DBStore) DatabaseAccounts(ctx context.Context) ([]DatabaseAccountView, error) {
 	var accounts []model.DatabaseAccount
-	if err := s.db.WithContext(ctx).Order("username ASC").Find(&accounts).Error; err != nil {
+	if err := s.db.WithContext(ctx).Scopes(activeDatabaseAccountScope).Order("username ASC").Find(&accounts).Error; err != nil {
 		return nil, err
 	}
 	views := make([]DatabaseAccountView, 0, len(accounts))
@@ -239,7 +241,7 @@ func databaseInstanceIDs(instances []model.DatabaseInstance) []string {
 func (s *DBStore) DatabaseAccount(ctx context.Context, id string) (DatabaseAccountView, error) {
 	id = strings.TrimSpace(id)
 	var acct model.DatabaseAccount
-	if err := s.db.WithContext(ctx).First(&acct, "id = ?", id).Error; err != nil {
+	if err := s.db.WithContext(ctx).Scopes(activeDatabaseAccountScope).First(&acct, "database_accounts.id = ?", id).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return DatabaseAccountView{}, fmt.Errorf("%w: %q", ErrDBAccountNotFound, id)
 		}
@@ -262,7 +264,7 @@ func (s *DBStore) AddDatabaseAccount(
 	var account model.DatabaseAccount
 	if err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var instance model.DatabaseInstance
-		if err := tx.First(&instance, "id = ?", instanceID).Error; err != nil {
+		if err := tx.Scopes(ActiveScope).First(&instance, "id = ?", instanceID).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return fmt.Errorf("%w: %q", ErrDBInstanceNotFound, instanceID)
 			}
@@ -315,7 +317,9 @@ func (s *DBStore) UpdateDatabaseAccount(
 	id = strings.TrimSpace(id)
 	username = strings.TrimSpace(username)
 	var locator model.DatabaseAccount
-	if err := s.db.WithContext(ctx).Select("id", "instance_id").First(&locator, "id = ?", id).Error; err != nil {
+	if err := s.db.WithContext(ctx).Scopes(activeDatabaseAccountScope).
+		Select("database_accounts.id", "database_accounts.instance_id").
+		First(&locator, "database_accounts.id = ?", id).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return DatabaseAccountView{}, fmt.Errorf("%w: %q", ErrDBAccountNotFound, id)
 		}
@@ -326,7 +330,8 @@ func (s *DBStore) UpdateDatabaseAccount(
 		if _, err := lockProvisioningInstance(tx, locator.InstanceID); err != nil {
 			return err
 		}
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&acct, "id = ? AND instance_id = ?", id, locator.InstanceID).Error; err != nil {
+		if err := tx.Scopes(activeDatabaseAccountScope).Clauses(clause.Locking{Strength: "UPDATE"}).
+			First(&acct, "database_accounts.id = ? AND database_accounts.instance_id = ?", id, locator.InstanceID).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return fmt.Errorf("%w: %q", ErrDBAccountNotFound, id)
 			}
@@ -393,7 +398,9 @@ func (s *DBStore) ensureDatabaseAccountUsernameAvailable(db *gorm.DB, instanceID
 func (s *DBStore) DeleteDatabaseAccount(ctx context.Context, id string) error {
 	id = strings.TrimSpace(id)
 	var locator model.DatabaseAccount
-	if err := s.db.WithContext(ctx).Select("id", "instance_id").First(&locator, "id = ?", id).Error; err != nil {
+	if err := s.db.WithContext(ctx).Scopes(activeDatabaseAccountScope).
+		Select("database_accounts.id", "database_accounts.instance_id").
+		First(&locator, "database_accounts.id = ?", id).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return fmt.Errorf("%w: %q", ErrDBAccountNotFound, id)
 		}
@@ -404,7 +411,8 @@ func (s *DBStore) DeleteDatabaseAccount(ctx context.Context, id string) error {
 		if _, err := lockProvisioningInstance(tx, locator.InstanceID); err != nil {
 			return err
 		}
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&account, "id = ? AND instance_id = ?", id, locator.InstanceID).Error; err != nil {
+		if err := tx.Scopes(activeDatabaseAccountScope).Clauses(clause.Locking{Strength: "UPDATE"}).
+			First(&account, "database_accounts.id = ? AND database_accounts.instance_id = ?", id, locator.InstanceID).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return fmt.Errorf("%w: %q", ErrDBAccountNotFound, id)
 			}
@@ -426,7 +434,8 @@ func (s *DBStore) DeleteDatabaseAccount(ctx context.Context, id string) error {
 func (s *DBStore) DatabaseAccountByUniqueName(uniqueName string) (*model.DatabaseAccount, error) {
 	uniqueName = strings.TrimSpace(uniqueName)
 	var acct model.DatabaseAccount
-	if err := s.db.Preload("Instance").First(&acct, "unique_name = ?", uniqueName).Error; err != nil {
+	if err := s.db.Scopes(activeDatabaseAccountScope).Preload("Instance", ActiveScope).
+		First(&acct, "database_accounts.unique_name = ?", uniqueName).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, fmt.Errorf("%w: %q", ErrDBAccountNotFound, uniqueName)
 		}

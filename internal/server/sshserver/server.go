@@ -203,7 +203,7 @@ func (s *Server) handleConn(ctx context.Context, rawConn net.Conn, serverConfig 
 
 	user := userFromPermissions(serverConn)
 	// 将用户 ID 注入 context，供 GORM 审计 Hook 使用
-	ctx = context.WithValue(ctx, model.CtxKeyUserID, user.ID)
+	ctx = model.WithAuditUserID(ctx, user.ID)
 	target, err := s.targetResolver.DefaultTarget(ctx, user)
 	if err != nil {
 		s.logger.Warn("failed to resolve target", "user", user.Username, "error", err)

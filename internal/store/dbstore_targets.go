@@ -431,8 +431,8 @@ func (s *DBStore) DefaultTarget(ctx context.Context, user model.User) (TargetCon
 	var account model.HostAccount
 	if err := s.db.WithContext(ctx).Preload("Host").
 		Joins("JOIN hosts ON hosts.id = host_accounts.host_id").
-		Where("host_accounts.deleted_at = ?", model.DeletedMarkerActive).
-		Where("hosts.deleted_at = ?", model.DeletedMarkerActive).
+		Where("host_accounts.active_marker = ?", model.ActiveMarkerValue).
+		Where("hosts.active_marker = ?", model.ActiveMarkerValue).
 		Where("host_accounts.status = ?", "active").
 		Where("host_accounts.expires_at IS NULL OR host_accounts.expires_at > ?", now).
 		Where("hosts.status IS NULL OR hosts.status <> ?", "disabled").

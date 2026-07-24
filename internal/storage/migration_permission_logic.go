@@ -7,7 +7,7 @@ import (
 )
 
 // permissionLogicalUniquenessSchema freezes the schema owned by migration
-// 202607180007. Audit fields and deleted_at uniqueness are installed by later
+// 202607180007. Audit fields and active_marker uniqueness are installed by a later
 // migrations.
 type permissionLogicalUniquenessSchema struct {
 	ID           string `gorm:"primaryKey;size:64"`

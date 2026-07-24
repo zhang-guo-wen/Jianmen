@@ -7,7 +7,7 @@ import "time"
 type AdminSession struct {
 	ID         string     `gorm:"primaryKey;size:64"`
 	UserID     string     `gorm:"index;size:64;not null"`
-	SecretHash string     `gorm:"uniqueIndex:idx_admin_sessions_secret_hash_deleted,priority:1;size:64;not null"`
+	SecretHash string     `gorm:"uniqueIndex:idx_admin_sessions_secret_hash_active,priority:1;size:64;not null"`
 	CSRFHash   string     `gorm:"size:64;not null"`
 	ExpiresAt  time.Time  `gorm:"index;not null"`
 	RevokedAt  *time.Time `gorm:"index"`

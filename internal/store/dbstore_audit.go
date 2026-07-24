@@ -495,7 +495,7 @@ func (s *DBStore) FindUserSessionByCompactUsername(username string) (*model.User
 		return nil, fmt.Errorf("parse compact username %q: %w", username, err)
 	}
 	var sess model.UserSession
-	if err := s.db.Where("session_id = ? AND status = ?", login.SessionID, "active").First(&sess).Error; err != nil {
+	if err := s.db.Scopes(ActiveScope).Where("session_id = ? AND status = ?", login.SessionID, "active").First(&sess).Error; err != nil {
 		return nil, fmt.Errorf("lookup user session by session_id %q: %w", login.SessionID, err)
 	}
 	return &sess, nil

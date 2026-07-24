@@ -26,7 +26,7 @@ func (s *DBStore) lockTargetHost(tx *gorm.DB, hostID, address, protocol string, 
 	}
 	var tombstoneCount int64
 	if err := tx.Model(&model.Host{}).
-		Where("id = ? AND deleted_at IS NULL", hostID).
+		Where("id = ? AND active_marker IS NULL", hostID).
 		Count(&tombstoneCount).Error; err != nil {
 		return model.Host{}, false, err
 	}

@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 
+	"jianmen/internal/model"
 	"jianmen/internal/service"
 )
 
@@ -41,7 +42,8 @@ func (s *Server) withAuthAndUser(next http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 
-		ctx := context.WithValue(r.Context(), ctxKeyUserID, subject.ID)
+		ctx := model.WithAuditUserID(r.Context(), subject.ID)
+		ctx = context.WithValue(ctx, ctxKeyUserID, subject.ID)
 		ctx = context.WithValue(ctx, ctxKeyUsername, subject.Username)
 		ctx = context.WithValue(ctx, ctxKeySuperAdmin, subject.SuperAdmin)
 		ctx = context.WithValue(ctx, ctxKeyBrowserSession, session)
@@ -71,6 +73,9 @@ func requiresCSRF(r *http.Request) bool {
 }
 
 func userIDFromRequest(r *http.Request) string {
+	if id := model.AuditUserIDFromContext(r.Context()); id != "" {
+		return id
+	}
 	if id, ok := r.Context().Value(ctxKeyUserID).(string); ok {
 		return id
 	}

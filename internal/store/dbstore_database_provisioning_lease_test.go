@@ -72,7 +72,7 @@ func TestDatabaseProvisioningOwnershipWritesUseStatementTimeAfterPause(t *testin
 	t.Run("delete", func(t *testing.T) {
 		repository, db := newPausedProvisioningStoreOperation(t)
 		operation := loadPausedProvisioningOperation(t, repository)
-		release := pauseProvisioningStatement(t, db, "delete")
+		release := pauseProvisioningStatement(t, db, "update")
 		result := make(chan struct {
 			ok  bool
 			err error

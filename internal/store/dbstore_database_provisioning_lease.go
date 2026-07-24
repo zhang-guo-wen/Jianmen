@@ -150,7 +150,7 @@ func (s *DBStore) updateProvisioningLease(
 			return nil
 		}
 		updated = true
-		if err := tx.First(&operation, "id = ?", expected.ID).Error; err != nil {
+		if err := tx.Scopes(ActiveScope).First(&operation, "id = ?", expected.ID).Error; err != nil {
 			return err
 		}
 		var err error
@@ -185,10 +185,13 @@ func (s *DBStore) DeleteDatabaseProvisioningOperation(
 	if err != nil {
 		return false, errors.New("delete database provisioning operation: database clock")
 	}
-	result := s.db.WithContext(ctx).
-		Where(provisioningFenceCondition(), provisioningFenceArguments(expected)...).
-		Where(clock.validLeaseCondition()).
-		Delete(&model.DatabaseProvisioningOperation{})
+	result := softDeleteWhere(
+		ctx,
+		s.db,
+		"database_provisioning_operations",
+		"("+provisioningFenceCondition()+") AND ("+clock.validLeaseCondition()+")",
+		provisioningFenceArguments(expected)...,
+	)
 	if result.Error != nil {
 		return false, errors.New("delete database provisioning operation")
 	}

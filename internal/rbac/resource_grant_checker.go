@@ -43,6 +43,13 @@ func (c *ResourceGrantChecker) HasGrantContext(
 	if userID == "" || resourceType == "" || resourceID == "" {
 		return false, nil
 	}
+	active, err := activeResourceExists(scoped.db, resourceType, resourceID)
+	if err != nil {
+		return false, err
+	}
+	if !active {
+		return false, nil
+	}
 
 	// 收集用户的直接授权
 	directGrants, err := scoped.directGrantsForUser(userID)
@@ -86,8 +93,13 @@ func (c *ResourceGrantChecker) directGrantsForUser(userID string) ([]model.Resou
 	now := time.Now().UTC()
 	var grants []model.ResourceGrant
 	err := c.db.
-		Where("principal_type = ? AND principal_id = ?", "user", userID).
-		Where("expires_at IS NULL OR expires_at > ?", now).
+		Table("resource_grants").
+		Select("resource_grants.*").
+		Joins("JOIN users ON users.id = resource_grants.principal_id").
+		Where("resource_grants.principal_type = ? AND resource_grants.principal_id = ?", "user", userID).
+		Where("resource_grants.active_marker = ?", model.ActiveMarkerValue).
+		Where("users.active_marker = ?", model.ActiveMarkerValue).
+		Where("resource_grants.expires_at IS NULL OR resource_grants.expires_at > ?", now).
 		Find(&grants).Error
 	return grants, err
 }
@@ -98,7 +110,11 @@ func (c *ResourceGrantChecker) temporaryGrantsForUser(userID string) ([]model.Re
 	var grants []model.TemporaryAccountGrant
 	err := c.db.
 		Joins("JOIN temporary_accounts ON temporary_accounts.id = temporary_account_grants.temporary_account_id").
+		Joins("JOIN users ON users.id = temporary_account_grants.user_id").
 		Where("temporary_account_grants.user_id = ?", userID).
+		Where("temporary_account_grants.active_marker = ?", model.ActiveMarkerValue).
+		Where("temporary_accounts.active_marker = ?", model.ActiveMarkerValue).
+		Where("users.active_marker = ?", model.ActiveMarkerValue).
 		Where("temporary_account_grants.revoked_at IS NULL").
 		Where("temporary_accounts.status = ?", "active").
 		Where("temporary_account_grants.starts_at IS NULL OR temporary_account_grants.starts_at <= ?", now).
@@ -122,8 +138,13 @@ func (c *ResourceGrantChecker) groupGrantsForUser(userID string) ([]model.Resour
 		Table("resource_grants").
 		Select("resource_grants.*").
 		Joins("JOIN user_group_members ON user_group_members.group_id = resource_grants.principal_id").
+		Joins("JOIN user_groups ON user_groups.id = user_group_members.group_id").
+		Joins("JOIN users ON users.id = user_group_members.user_id").
 		Where("resource_grants.principal_type = ?", "user_group").
 		Where("user_group_members.user_id = ?", userID).
+		Where("resource_grants.active_marker = ?", model.ActiveMarkerValue).
+		Where("user_groups.active_marker = ?", model.ActiveMarkerValue).
+		Where("users.active_marker = ?", model.ActiveMarkerValue).
 		Where("resource_grants.expires_at IS NULL OR resource_grants.expires_at > ?", now).
 		Find(&grants).Error
 	return grants, err
@@ -151,7 +172,9 @@ func (c *ResourceGrantChecker) matchesGrant(grant model.ResourceGrant, resourceT
 func (c *ResourceGrantChecker) hostContainsAccount(hostID, accountID string) bool {
 	var count int64
 	c.db.Model(&model.HostAccount{}).
-		Where("host_id = ? AND id = ?", hostID, accountID).
+		Joins("JOIN hosts ON hosts.id = host_accounts.host_id").
+		Where("host_accounts.host_id = ? AND host_accounts.id = ?", hostID, accountID).
+		Where("host_accounts.active_marker = ? AND hosts.active_marker = ?", model.ActiveMarkerValue, model.ActiveMarkerValue).
 		Count(&count)
 	return count > 0
 }
@@ -159,7 +182,9 @@ func (c *ResourceGrantChecker) hostContainsAccount(hostID, accountID string) boo
 func (c *ResourceGrantChecker) databaseContainsAccount(instanceID, accountID string) bool {
 	var count int64
 	c.db.Model(&model.DatabaseAccount{}).
-		Where("instance_id = ? AND id = ?", instanceID, accountID).
+		Joins("JOIN database_instances ON database_instances.id = database_accounts.instance_id").
+		Where("database_accounts.instance_id = ? AND database_accounts.id = ?", instanceID, accountID).
+		Where("database_accounts.active_marker = ? AND database_instances.active_marker = ?", model.ActiveMarkerValue, model.ActiveMarkerValue).
 		Count(&count)
 	return count > 0
 }
@@ -168,7 +193,9 @@ func (c *ResourceGrantChecker) databaseContainsAccount(instanceID, accountID str
 // 通过 hosts.group_name / database_instances.group_name 查找（一对多关系）
 func (c *ResourceGrantChecker) groupContainsResource(groupID, resourceType, resourceID, groupType string) bool {
 	var group model.ResourceGroup
-	if err := c.db.First(&group, "id = ? AND group_type = ?", groupID, groupType).Error; err != nil {
+	if err := c.db.
+		Where("id = ? AND group_type = ? AND active_marker = ?", groupID, groupType, model.ActiveMarkerValue).
+		First(&group).Error; err != nil {
 		return false
 	}
 	groupName := group.Name
@@ -178,19 +205,23 @@ func (c *ResourceGrantChecker) groupContainsResource(groupID, resourceType, reso
 		case model.ResourceTypeHostAccount:
 			var count int64
 			c.db.Model(&model.HostAccount{}).
-				Where("group_name = ? AND id = ?", groupName, resourceID).
+				Joins("JOIN hosts ON hosts.id = host_accounts.host_id").
+				Where("host_accounts.group_name = ? AND host_accounts.id = ?", groupName, resourceID).
+				Where("host_accounts.active_marker = ? AND hosts.active_marker = ?", model.ActiveMarkerValue, model.ActiveMarkerValue).
 				Count(&count)
 			return count > 0
 		case model.ResourceTypeDatabaseAccount:
 			var count int64
 			c.db.Model(&model.DatabaseAccount{}).
-				Where("group_name = ? AND id = ?", groupName, resourceID).
+				Joins("JOIN database_instances ON database_instances.id = database_accounts.instance_id").
+				Where("database_accounts.group_name = ? AND database_accounts.id = ?", groupName, resourceID).
+				Where("database_accounts.active_marker = ? AND database_instances.active_marker = ?", model.ActiveMarkerValue, model.ActiveMarkerValue).
 				Count(&count)
 			return count > 0
 		case model.ResourceTypePlatformAccount:
 			var count int64
 			c.db.Model(&model.PlatformAccount{}).
-				Where("group_name = ? AND id = ?", groupName, resourceID).
+				Where("group_name = ? AND id = ? AND active_marker = ?", groupName, resourceID, model.ActiveMarkerValue).
 				Count(&count)
 			return count > 0
 		default:
@@ -204,6 +235,7 @@ func (c *ResourceGrantChecker) groupContainsResource(groupID, resourceType, reso
 		c.db.Model(&model.HostAccount{}).
 			Joins("JOIN hosts ON hosts.id = host_accounts.host_id").
 			Where("hosts.group_name = ? AND host_accounts.id = ?", groupName, resourceID).
+			Where("host_accounts.active_marker = ? AND hosts.active_marker = ?", model.ActiveMarkerValue, model.ActiveMarkerValue).
 			Count(&count)
 		return count > 0
 	case resourceType == model.ResourceTypeDatabaseAccount:
@@ -211,30 +243,31 @@ func (c *ResourceGrantChecker) groupContainsResource(groupID, resourceType, reso
 		c.db.Model(&model.DatabaseAccount{}).
 			Joins("JOIN database_instances ON database_instances.id = database_accounts.instance_id").
 			Where("database_instances.group_name = ? AND database_accounts.id = ?", groupName, resourceID).
+			Where("database_accounts.active_marker = ? AND database_instances.active_marker = ?", model.ActiveMarkerValue, model.ActiveMarkerValue).
 			Count(&count)
 		return count > 0
 	case resourceType == model.ResourceTypeHost:
 		var count int64
 		c.db.Model(&model.Host{}).
-			Where("group_name = ? AND id = ?", groupName, resourceID).
+			Where("group_name = ? AND id = ? AND active_marker = ?", groupName, resourceID, model.ActiveMarkerValue).
 			Count(&count)
 		return count > 0
 	case resourceType == model.ResourceTypeDatabaseInstance:
 		var count int64
 		c.db.Model(&model.DatabaseInstance{}).
-			Where("group_name = ? AND id = ?", groupName, resourceID).
+			Where("group_name = ? AND id = ? AND active_marker = ?", groupName, resourceID, model.ActiveMarkerValue).
 			Count(&count)
 		return count > 0
 	case resourceType == model.ResourceTypeApplication:
 		var count int64
 		c.db.Model(&model.Application{}).
-			Where("app_group = ? AND id = ?", groupName, resourceID).
+			Where("app_group = ? AND id = ? AND active_marker = ?", groupName, resourceID, model.ActiveMarkerValue).
 			Count(&count)
 		return count > 0
 	case resourceType == model.ResourceTypeContainerEndpoint:
 		var count int64
 		c.db.Model(&model.ContainerEndpoint{}).
-			Where("group_name = ? AND id = ?", groupName, resourceID).
+			Where("group_name = ? AND id = ? AND active_marker = ?", groupName, resourceID, model.ActiveMarkerValue).
 			Count(&count)
 		return count > 0
 	default:
@@ -292,6 +325,9 @@ func (c *ResourceGrantChecker) BatchGrantsContext(ctx context.Context, userID st
 }
 
 func batchGrantMatches(grant model.ResourceGrant, request BatchAuthorizationRequest, facts batchFacts) bool {
+	if !facts.resourceIsActive(request.ResourceType, request.ResourceID) {
+		return false
+	}
 	if resourceTypeMatches(grant.ResourceType, request.ResourceType) && resourceIDMatches(grant.ResourceID, request.ResourceID) {
 		return true
 	}

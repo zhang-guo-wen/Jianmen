@@ -23,7 +23,7 @@ func ensureGroupByType(tx *gorm.DB, groupName, groupType string) error {
 		return nil
 	}
 	var existing model.ResourceGroup
-	err := tx.Where("name = ? AND group_type = ?", groupName, groupType).First(&existing).Error
+	err := tx.Scopes(ActiveScope).Where("name = ? AND group_type = ?", groupName, groupType).First(&existing).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return tx.Create(&model.ResourceGroup{Name: groupName, GroupType: groupType}).Error
 	}

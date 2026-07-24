@@ -31,7 +31,7 @@ func (s *DBStore) CreateAIAccessToken(ctx context.Context, token model.AIAccessT
 
 func (s *DBStore) ListAIAccessTokens(ctx context.Context, userID string) ([]model.AIAccessToken, error) {
 	var tokens []model.AIAccessToken
-	if err := s.db.WithContext(ctx).Where("user_id = ?", userID).Order("created_at DESC").Find(&tokens).Error; err != nil {
+	if err := s.db.WithContext(ctx).Scopes(ActiveScope).Where("user_id = ?", userID).Order("created_at DESC").Find(&tokens).Error; err != nil {
 		return nil, fmt.Errorf("list AI access tokens: %w", err)
 	}
 	return tokens, nil
@@ -39,7 +39,7 @@ func (s *DBStore) ListAIAccessTokens(ctx context.Context, userID string) ([]mode
 
 func (s *DBStore) AIAccessToken(ctx context.Context, userID, tokenID string) (model.AIAccessToken, error) {
 	var token model.AIAccessToken
-	if err := s.db.WithContext(ctx).Where("id = ? AND user_id = ?", tokenID, userID).First(&token).Error; err != nil {
+	if err := s.db.WithContext(ctx).Scopes(ActiveScope).Where("id = ? AND user_id = ?", tokenID, userID).First(&token).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return model.AIAccessToken{}, ErrAIAccessTokenNotFound
 		}
@@ -50,7 +50,8 @@ func (s *DBStore) AIAccessToken(ctx context.Context, userID, tokenID string) (mo
 
 func (s *DBStore) AuthenticateAIAccessToken(ctx context.Context, accessHash string, now time.Time) (model.AIAccessToken, error) {
 	var token model.AIAccessToken
-	err := s.db.WithContext(ctx).Preload("User").Preload("TemporaryAccount").
+	err := s.db.WithContext(ctx).Scopes(ActiveScope).
+		Preload("User", ActiveScope).Preload("TemporaryAccount", ActiveScope).
 		Where("access_token_hash = ? AND revoked_at IS NULL AND access_expires_at > ?", accessHash, now.UTC()).
 		First(&token).Error
 	if err != nil {
@@ -74,7 +75,8 @@ func (s *DBStore) RotateAIAccessToken(ctx context.Context, refreshHash string, r
 	var rotated model.AIAccessToken
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var current model.AIAccessToken
-		if err := tx.Preload("User").Preload("TemporaryAccount").Where(
+		if err := tx.Scopes(ActiveScope).
+			Preload("User", ActiveScope).Preload("TemporaryAccount", ActiveScope).Where(
 			"refresh_token_hash = ? AND revoked_at IS NULL AND refresh_expires_at > ?", refreshHash, now.UTC(),
 		).First(&current).Error; err != nil {
 			return ErrAIAccessTokenInvalid

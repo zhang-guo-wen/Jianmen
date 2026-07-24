@@ -47,7 +47,7 @@ func (s *DBStore) SearchResourceGroups(
 
 func (s *DBStore) FindResourceGroup(ctx context.Context, id string) (model.ResourceGroup, bool, error) {
 	var group model.ResourceGroup
-	err := s.db.WithContext(ctx).First(&group, "id = ?", strings.TrimSpace(id)).Error
+	err := s.db.WithContext(ctx).Scopes(ActiveScope).First(&group, "id = ?", strings.TrimSpace(id)).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return model.ResourceGroup{}, false, nil
 	}
@@ -93,7 +93,7 @@ func (s *DBStore) ResourceGroupUsage(ctx context.Context, groupType, name string
 		}
 		for _, item := range counts {
 			var count int64
-			if err := db.Model(item.model).Where(item.column+" = ?", name).Count(&count).Error; err != nil {
+			if err := db.Model(item.model).Scopes(ActiveScope).Where(item.column+" = ?", name).Count(&count).Error; err != nil {
 				return nil, fmt.Errorf("count %s resources in group: %w", item.key, err)
 			}
 			usage[item.key] = count
@@ -111,7 +111,7 @@ func (s *DBStore) ResourceGroupUsage(ctx context.Context, groupType, name string
 	}
 	for _, item := range counts {
 		var count int64
-		if err := db.Model(item.model).Where("group_name = ?", name).Count(&count).Error; err != nil {
+		if err := db.Model(item.model).Scopes(ActiveScope).Where("group_name = ?", name).Count(&count).Error; err != nil {
 			return nil, fmt.Errorf("count %s resources in group: %w", item.key, err)
 		}
 		if item.key == "platform" {
@@ -156,8 +156,14 @@ func (s *DBStore) DeleteResourceGroup(ctx context.Context, group model.ResourceG
 		if group.GroupType == model.ResourceGroupTypeAccount {
 			grantType = model.ResourceTypeAccountGroup
 		}
-		if err := tx.Where("resource_type = ? AND resource_id = ?", grantType, group.ID).
-			Delete(&model.ResourceGrant{}).Error; err != nil {
+		if err := softDeleteWhere(
+			ctx,
+			tx,
+			"resource_grants",
+			"resource_type = ? AND resource_id = ?",
+			grantType,
+			group.ID,
+		).Error; err != nil {
 			return fmt.Errorf("delete resource group grants: %w", err)
 		}
 		if err := SoftDelete(ctx, tx, "resource_groups", group.ID); err != nil {
@@ -188,7 +194,7 @@ func updateGroupedResourcesTx(tx *gorm.DB, groupType, oldName, newName string) e
 		}
 	}
 	for _, item := range items {
-		if err := tx.Model(item.model).
+		if err := tx.Model(item.model).Scopes(ActiveScope).
 			Where(item.column+" = ?", oldName).
 			Update(item.column, newName).Error; err != nil {
 			return fmt.Errorf("update grouped resources: %w", err)

@@ -90,6 +90,13 @@ func TestDBStoreReplaceRoleActionsPreservesResourceAndDenyBindings(t *testing.T)
 	if err := st.ReplaceRoleActions(context.Background(), role.ID, []model.Permission{{Action: "host:view", Name: "Host view", Effect: model.PermissionEffectAllow}}); err != nil {
 		t.Fatalf("replace actions: %v", err)
 	}
+	actions, err := st.RoleActions(context.Background(), role.ID)
+	if err != nil {
+		t.Fatalf("list role actions: %v", err)
+	}
+	if len(actions) != 1 || actions[0] != "host:view" {
+		t.Fatalf("role actions = %#v, want [host:view]", actions)
+	}
 	var bindings []model.RolePermission
 	if err := db.Where("role_id = ?", role.ID).Find(&bindings).Error; err != nil {
 		t.Fatalf("list bindings: %v", err)

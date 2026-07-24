@@ -25,6 +25,7 @@ import (
 func TestAuthorizeConnectionRequiresActionAndResourceGrant(t *testing.T) {
 	server, db := newAdminDBTestServer(t)
 	seedConnectionAction(t, db, "user-connect", rbac.ActionSessionConnect)
+	seedActiveHostAccount(t, db, "account-1")
 
 	allowed, err := server.authorizeConnection(context.Background(), "user-connect", rbac.ActionSessionConnect, model.ResourceTypeHostAccount, "account-1")
 	if err != nil {
@@ -56,6 +57,7 @@ func TestAuthorizeConnectionRequiresActionAndResourceGrant(t *testing.T) {
 func TestAuthorizeAnyConnectionAcceptsXFTPAction(t *testing.T) {
 	server, db := newAdminDBTestServer(t)
 	seedConnectionAction(t, db, "xftp-user", rbac.ActionSFTPConnect)
+	seedActiveHostAccount(t, db, "account-1")
 	grant := model.ResourceGrant{
 		PrincipalType: "user",
 		PrincipalID:   "xftp-user",
@@ -399,6 +401,24 @@ func seedConnectionAction(t *testing.T, db *gorm.DB, userID, action string) {
 	}
 	if err := db.Create(&model.RolePermission{ID: "rp-" + userID + "-" + action, RoleID: role.ID, PermissionID: permission.ID}).Error; err != nil {
 		t.Fatalf("create role permission: %v", err)
+	}
+}
+
+func seedActiveHostAccount(t *testing.T, db *gorm.DB, accountID string) {
+	t.Helper()
+	hostID := "host-" + accountID
+	host := model.Host{
+		ID: hostID, Name: hostID, Address: "127.0.0.1", Port: 22, Status: "active",
+	}
+	account := model.HostAccount{
+		ID: accountID, HostID: hostID, Name: accountID, Username: "root",
+		Status: "active", ResourceID: "A001",
+	}
+	if err := db.Create(&host).Error; err != nil {
+		t.Fatalf("create authorization host: %v", err)
+	}
+	if err := db.Create(&account).Error; err != nil {
+		t.Fatalf("create authorization host account: %v", err)
 	}
 }
 

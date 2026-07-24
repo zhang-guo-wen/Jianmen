@@ -67,7 +67,7 @@ func TestDBStoreResourceGroupLifecycleMaintainsContainersAndGrants(t *testing.T)
 		t.Fatalf("container group after deletion = %q, want empty", updatedContainer.GroupName)
 	}
 	var grantCount int64
-	if err := db.Model(&model.ResourceGrant{}).Where("id = ?", grant.ID).Count(&grantCount).Error; err != nil {
+	if err := db.Model(&model.ResourceGrant{}).Scopes(ActiveScope).Where("id = ?", grant.ID).Count(&grantCount).Error; err != nil {
 		t.Fatalf("count group grants: %v", err)
 	}
 	if grantCount != 0 {

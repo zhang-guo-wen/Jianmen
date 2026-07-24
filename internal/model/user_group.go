@@ -8,8 +8,8 @@ import (
 
 // UserGroup 用户组
 type UserGroup struct {
-	ID          string    `gorm:"primaryKey;size:64" json:"id"`
-	Name        string `gorm:"uniqueIndex:idx_user_groups_name_deleted,priority:1;size:128;not null" json:"name"`
+	ID          string `gorm:"primaryKey;size:64" json:"id"`
+	Name        string `gorm:"uniqueIndex:idx_user_groups_name_active,priority:1;size:128;not null" json:"name"`
 	Description string `gorm:"type:text" json:"description,omitempty"`
 	FullAudit
 }

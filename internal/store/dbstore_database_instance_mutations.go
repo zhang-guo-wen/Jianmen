@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"time"
 
 	"gorm.io/gorm"
 
@@ -55,6 +54,7 @@ func (s *DBStore) updateDatabaseInstance(ctx context.Context, id string, input D
 		}
 		inst = updated
 		inst.ID = locked.ID
+		inst.FullAudit = locked.FullAudit
 		if inst.Name == "" {
 			inst.Name = inst.Address
 		}
@@ -102,7 +102,7 @@ func (s *DBStore) DeleteDatabaseInstance(ctx context.Context, id string) error {
 			return err
 		}
 		var accounts []model.DatabaseAccount
-		if err := tx.Where("instance_id = ?", id).Find(&accounts).Error; err != nil {
+		if err := tx.Scopes(ActiveScope).Where("instance_id = ?", id).Find(&accounts).Error; err != nil {
 			return err
 		}
 		for _, account := range accounts {
@@ -110,8 +110,7 @@ func (s *DBStore) DeleteDatabaseInstance(ctx context.Context, id string) error {
 				return err
 			}
 		}
-		now := time.Now().UTC()
-		if err := tx.Model(&model.DatabaseAccount{}).Where("instance_id = ?", id).Updates(map[string]interface{}{"deleted_at": nil, "updated_at": now}).Error; err != nil {
+		if err := softDeleteWhere(ctx, tx, "database_accounts", "instance_id = ?", id).Error; err != nil {
 			return err
 		}
 		if err := s.deleteResourceTx(tx, model.ResourceTypeDatabaseInstance, inst.ID); err != nil {

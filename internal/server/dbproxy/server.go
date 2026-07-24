@@ -121,7 +121,7 @@ func (g *Gateway) handleGatewayConn(ctx context.Context, client net.Conn, conn *
 	var authUser string
 	if g.db != nil {
 		var u model.User
-		if err := g.db.WithContext(ctx).First(&u, "id = ?", conn.userID).Error; err == nil {
+		if err := g.db.WithContext(ctx).First(&u, "id = ? AND active_marker = ?", conn.userID, model.ActiveMarkerValue).Error; err == nil {
 			authUser = u.Username
 		}
 	}
@@ -139,7 +139,9 @@ func (g *Gateway) handleGatewayConn(ctx context.Context, client net.Conn, conn *
 	if conn.userSessionID != "" {
 		auditSession.UserSessionID = conn.userSessionID
 	}
-	auditSession.BeforeCreate(nil)
+	if auditSession.ID == "" {
+		auditSession.ID = model.NewID()
+	}
 	auditSession.ReplayDir = filepath.Join(g.replayDir, "db", auditSession.ID)
 	if g.auditRequired && g.audit == nil {
 		g.logger.Warn("db gateway audit writer unavailable")

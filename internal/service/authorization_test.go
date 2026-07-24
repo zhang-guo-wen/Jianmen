@@ -474,6 +474,35 @@ func TestAuthorizationServiceResourcePermissionDenyOverridesResourceGrantAllow(t
 			t.Fatalf("create %T: %v", record, err)
 		}
 	}
+	if err := db.Create(&model.Host{
+		ID:      "host-authorization",
+		Name:    "authorization",
+		Address: "authorization.example",
+		Port:    22,
+		Status:  "active",
+	}).Error; err != nil {
+		t.Fatalf("create authorization host: %v", err)
+	}
+	for _, account := range []model.HostAccount{
+		{
+			ID:         "account-denied",
+			HostID:     "host-authorization",
+			Username:   "denied",
+			ResourceID: "d001",
+			Status:     "active",
+		},
+		{
+			ID:         "account-visible",
+			HostID:     "host-authorization",
+			Username:   "visible",
+			ResourceID: "v001",
+			Status:     "active",
+		},
+	} {
+		if err := db.Create(&account).Error; err != nil {
+			t.Fatalf("create authorization account %s: %v", account.ID, err)
+		}
+	}
 	if err := db.Create(&model.UserRole{ID: "ur-denied", UserID: user.ID, RoleID: role.ID}).Error; err != nil {
 		t.Fatalf("create user role: %v", err)
 	}
@@ -671,6 +700,26 @@ func TestAuthorizationServiceBatchActionOnlyDenyMatchesSingleForAlternativeActio
 	for _, record := range []any{&user, &role, &model.UserRole{ID: "ur-batch-equivalent", UserID: user.ID, RoleID: role.ID}} {
 		if err := db.Create(record).Error; err != nil {
 			t.Fatalf("create %T: %v", record, err)
+		}
+	}
+	for _, host := range []model.Host{
+		{
+			ID:      "h1",
+			Name:    "h1",
+			Address: "h1.example",
+			Port:    22,
+			Status:  "active",
+		},
+		{
+			ID:      "h2",
+			Name:    "h2",
+			Address: "h2.example",
+			Port:    22,
+			Status:  "active",
+		},
+	} {
+		if err := db.Create(&host).Error; err != nil {
+			t.Fatalf("create authorization host %s: %v", host.ID, err)
 		}
 	}
 	permissions := []model.Permission{

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"jianmen/internal/model"
 	"jianmen/internal/service"
 )
 
@@ -270,5 +271,8 @@ func aiTokenTTLs(request aiTokenRequest) (time.Duration, time.Duration, error) {
 }
 
 func contextWithString(ctx context.Context, key contextKey, value string) context.Context {
+	if key == ctxKeyUserID {
+		ctx = model.WithAuditUserID(ctx, value)
+	}
 	return context.WithValue(ctx, key, value)
 }

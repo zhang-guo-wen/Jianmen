@@ -41,7 +41,7 @@ func (s *DBStore) FindAdminLoginCredential(
 		return service.AdminLoginCredential{}, false, err
 	}
 	var user model.User
-	result := s.db.WithContext(ctx).
+	result := s.db.WithContext(ctx).Scopes(ActiveScope).
 		Where("username = ?", strings.TrimSpace(username)).
 		Limit(1).
 		Find(&user)
@@ -62,7 +62,7 @@ func (s *DBStore) FindAdminEncryptionKeyCredential(
 		return service.AdminLoginCredential{}, false, err
 	}
 	var user model.User
-	result := s.db.WithContext(ctx).
+	result := s.db.WithContext(ctx).Scopes(ActiveScope).
 		Where("id = ?", strings.TrimSpace(userID)).
 		Limit(1).
 		Find(&user)
@@ -160,7 +160,7 @@ func (s *DBStore) SetupInitialAdmin(
 					Email:           record.Email,
 					Status:          record.Status,
 					IsSuperAdmin:    record.SuperAdmin,
-					FullAudit: model.FullAudit{CreatedAt: record.CreatedAt},
+					FullAudit:       model.FullAudit{CreatedAt: record.CreatedAt},
 				}
 				if err := tx.Create(&user).Error; err != nil {
 					return fmt.Errorf("create initial admin user: %w", err)
@@ -171,7 +171,7 @@ func (s *DBStore) SetupInitialAdmin(
 					SecretHash: session.SecretHash,
 					CSRFHash:   session.CSRFHash,
 					ExpiresAt:  session.ExpiresAt,
-					FullAudit: model.FullAudit{CreatedAt: session.CreatedAt},
+					FullAudit:  model.FullAudit{CreatedAt: session.CreatedAt},
 				}
 				if err := tx.Create(&adminSession).Error; err != nil {
 					return fmt.Errorf("%w: %w", service.ErrAdminSessionCreate, err)
@@ -217,7 +217,7 @@ func (s *DBStore) ClaimAdminEncryptionKey(
 				}
 
 				var existing []model.SystemInitialization
-				existingClaim := tx.Where("key = ?", adminEncryptionKeyClaim).
+				existingClaim := tx.Scopes(ActiveScope).Where("key = ?", adminEncryptionKeyClaim).
 					Limit(1).
 					Find(&existing)
 				if existingClaim.Error != nil {
@@ -252,7 +252,7 @@ func lockAdminSetupRow(tx *gorm.DB) error {
 }
 
 func adminSetupLockQuery(tx *gorm.DB) *gorm.DB {
-	query := tx.Where("key = ?", model.SystemInitializationSetup)
+	query := tx.Scopes(ActiveScope).Where("key = ?", model.SystemInitializationSetup)
 	if tx.Dialector.Name() == "sqlite" {
 		return query
 	}
@@ -265,7 +265,7 @@ func adminEncryptionKeyClaimerLockQuery(
 	expectedPasswordHash string,
 	claimedAt time.Time,
 ) *gorm.DB {
-	query := tx.Where(
+	query := tx.Scopes(ActiveScope).Where(
 		"id = ? AND status = ? AND is_super_admin = ? AND "+
 			"(expires_at IS NULL OR expires_at > ?) AND password_hash = ?",
 		strings.TrimSpace(userID), "active", true, claimedAt, expectedPasswordHash,

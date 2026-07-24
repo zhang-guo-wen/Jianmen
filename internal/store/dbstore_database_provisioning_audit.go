@@ -27,9 +27,9 @@ func (s *DBStore) DatabaseProvisioningAdmin(
 			errors.New("database instance and administrator account are required")
 	}
 	var account model.DatabaseAccount
-	err := s.db.WithContext(ctx).
-		Preload("Instance").
-		First(&account, "id = ? AND instance_id = ?", accountID, instanceID).
+	err := s.db.WithContext(ctx).Scopes(activeDatabaseAccountScope).
+		Preload("Instance", ActiveScope).
+		First(&account, "database_accounts.id = ? AND database_accounts.instance_id = ?", accountID, instanceID).
 		Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return model.DatabaseInstance{}, model.DatabaseAccount{},

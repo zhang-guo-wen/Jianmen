@@ -180,13 +180,6 @@ var migrations = []Migration{
 		Run:     migrateDatabaseProvisioningSaga,
 	},
 	{
-		Version: "202607230001",
-		Name:    "resource grant created_by tracking",
-		Run: func(tx *gorm.DB) error {
-			return tx.AutoMigrate(&model.ResourceGrant{})
-		},
-	},
-	{
 		Version: "202607190001",
 		Name:    "resource grant logical uniqueness",
 		Run:     migrateResourceGrantLogicalUniqueness,
@@ -247,19 +240,9 @@ var migrations = []Migration{
 		Run:     migrateRemoveRDPApproval,
 	},
 	{
-		Version: "202607230002",
-		Name:    "审计字段：created_by, updated_by, deleted_at 及复合唯一索引",
-		Run: func(tx *gorm.DB) error {
-			if err := tx.AutoMigrate(model.AllModels()...); err != nil {
-				return err
-			}
-			return MigrateAuditUniqueIndexes(tx)
-		},
-	},
-	{
-		Version:                  "202607230003",
-		Name:                     "逻辑删除标记从时间哨兵改为整型哨兵：deleted_at=1 活跃，NULL 已删除",
-		Run:                      migrateDeletedAtToInt,
+		Version:                  auditFieldsMigrationVersion,
+		Name:                     "统一审计字段和 active_marker 活跃标记",
+		Run:                      migrateAuditFields,
 		SQLiteDisableForeignKeys: true,
 	},
 }
@@ -443,7 +426,7 @@ func backfillResources(db *gorm.DB) error {
 		return err
 	}
 	if db.Migrator().HasTable(&model.Host{}) {
-		active, args, err := activeDeletedAtPredicate(db, "hosts", "hosts.deleted_at")
+		active, args, err := activeRowPredicate(db, "hosts", "hosts")
 		if err != nil {
 			return err
 		}
@@ -458,15 +441,15 @@ func backfillResources(db *gorm.DB) error {
 		}
 	}
 	if db.Migrator().HasTable(&model.HostAccount{}) {
-		accountActive, accountArgs, err := activeDeletedAtPredicate(
+		accountActive, accountArgs, err := activeRowPredicate(
 			db,
 			"host_accounts",
-			"host_accounts.deleted_at",
+			"host_accounts",
 		)
 		if err != nil {
 			return err
 		}
-		hostActive, hostArgs, err := activeDeletedAtPredicate(db, "hosts", "hosts.deleted_at")
+		hostActive, hostArgs, err := activeRowPredicate(db, "hosts", "hosts")
 		if err != nil {
 			return err
 		}
@@ -493,10 +476,10 @@ func backfillResources(db *gorm.DB) error {
 		}
 	}
 	if db.Migrator().HasTable(&model.DatabaseInstance{}) {
-		active, args, err := activeDeletedAtPredicate(
+		active, args, err := activeRowPredicate(
 			db,
 			"database_instances",
-			"database_instances.deleted_at",
+			"database_instances",
 		)
 		if err != nil {
 			return err
@@ -512,18 +495,18 @@ func backfillResources(db *gorm.DB) error {
 		}
 	}
 	if db.Migrator().HasTable(&model.DatabaseAccount{}) {
-		accountActive, accountArgs, err := activeDeletedAtPredicate(
+		accountActive, accountArgs, err := activeRowPredicate(
 			db,
 			"database_accounts",
-			"database_accounts.deleted_at",
+			"database_accounts",
 		)
 		if err != nil {
 			return err
 		}
-		instanceActive, instanceArgs, err := activeDeletedAtPredicate(
+		instanceActive, instanceArgs, err := activeRowPredicate(
 			db,
 			"database_instances",
-			"database_instances.deleted_at",
+			"database_instances",
 		)
 		if err != nil {
 			return err
@@ -552,11 +535,16 @@ func backfillResources(db *gorm.DB) error {
 	return nil
 }
 
-func activeDeletedAtPredicate(
+func activeRowPredicate(
 	db *gorm.DB,
 	table string,
-	qualifiedColumn string,
+	qualifiedTable string,
 ) (string, []any, error) {
+	if db.Migrator().HasColumn(table, "active_marker") {
+		return qualifiedTable + ".active_marker = ?",
+			[]any{model.ActiveMarkerValue},
+			nil
+	}
 	if !db.Migrator().HasColumn(table, "deleted_at") {
 		return "1 = 1", nil, nil
 	}
@@ -573,13 +561,13 @@ func activeDeletedAtPredicate(
 	}
 	predicate := fmt.Sprintf(
 		"(CAST(%s AS %s) = ? OR CAST(%s AS %s) LIKE ?)",
-		qualifiedColumn,
+		qualifiedTable+".deleted_at",
 		castType,
-		qualifiedColumn,
+		qualifiedTable+".deleted_at",
 		castType,
 	)
 	return predicate, []any{
-		fmt.Sprint(model.DeletedMarkerActive),
+		fmt.Sprint(model.ActiveMarkerValue),
 		"0001-01-01%",
 	}, nil
 }
@@ -595,6 +583,12 @@ func resourceUpsertConflictColumns(db *gorm.DB) ([]clause.Column, error) {
 			continue
 		}
 		switch {
+		case columnsMatch(index.Columns(), []string{"type", "resource_id", "active_marker"}):
+			return []clause.Column{
+				{Name: "type"},
+				{Name: "resource_id"},
+				{Name: "active_marker"},
+			}, nil
 		case columnsMatch(index.Columns(), []string{"type", "resource_id", "deleted_at"}):
 			return []clause.Column{
 				{Name: "type"},
@@ -687,20 +681,22 @@ func displayAddress(address string, port int) string {
 	return fmt.Sprintf("%s:%d", address, port)
 }
 
-type deletedAtModel struct {
+const auditFieldsMigrationVersion = "202607240001"
+
+type activeMarkerModel struct {
 	table string
 	value any
 }
 
-func modelsWithDeletedAt(db *gorm.DB) ([]deletedAtModel, error) {
-	models := make([]deletedAtModel, 0, len(model.AllModels()))
+func modelsWithActiveMarker(db *gorm.DB) ([]activeMarkerModel, error) {
+	models := make([]activeMarkerModel, 0, len(model.AllModels()))
 	seen := make(map[string]struct{}, len(model.AllModels()))
 	for _, value := range model.AllModels() {
 		statement := &gorm.Statement{DB: db}
 		if err := statement.Parse(value); err != nil {
-			return nil, fmt.Errorf("parse deleted_at model %T: %w", value, err)
+			return nil, fmt.Errorf("parse active_marker model %T: %w", value, err)
 		}
-		if statement.Schema.LookUpField("deleted_at") == nil {
+		if statement.Schema.LookUpField("active_marker") == nil {
 			continue
 		}
 		table := statement.Schema.Table
@@ -708,16 +704,16 @@ func modelsWithDeletedAt(db *gorm.DB) ([]deletedAtModel, error) {
 			continue
 		}
 		seen[table] = struct{}{}
-		models = append(models, deletedAtModel{table: table, value: value})
+		models = append(models, activeMarkerModel{table: table, value: value})
 	}
 	return models, nil
 }
 
-// tablesWithDeletedAt derives the audited business tables from the runtime
+// tablesWithActiveMarker derives the audited business tables from the runtime
 // model schemas. This keeps association tables without FullAudit out while
 // ensuring newly audited models are not silently missed.
-func tablesWithDeletedAt(db *gorm.DB) ([]string, error) {
-	models, err := modelsWithDeletedAt(db)
+func tablesWithActiveMarker(db *gorm.DB) ([]string, error) {
+	models, err := modelsWithActiveMarker(db)
 	if err != nil {
 		return nil, err
 	}
@@ -728,21 +724,57 @@ func tablesWithDeletedAt(db *gorm.DB) ([]string, error) {
 	return tables, nil
 }
 
-// migrateDeletedAtToInt 将 deleted_at 列从时间哨兵格式迁移到整型哨兵格式。
-// 活跃行：时间哨兵 "0001-01-01..." → 1
-// 已删除行：时间戳 → NULL
-func migrateDeletedAtToInt(tx *gorm.DB) error {
-	models, err := modelsWithDeletedAt(tx)
+// migrateAuditFields installs the final audit schema and folds both unpublished
+// deleted_at representations into active_marker:
+//   - deleted_at = 1 or "0001-01-01..." becomes active_marker = 1
+//   - deleted_at = NULL or a deletion timestamp becomes active_marker = NULL
+//
+// Every step is idempotent so a failed MySQL DDL migration can be retried
+// safely even though that dialect may commit DDL outside the surrounding
+// transaction.
+func migrateAuditFields(tx *gorm.DB) error {
+	models, err := modelsWithActiveMarker(tx)
 	if err != nil {
 		return err
 	}
-	if tx.Dialector.Name() != "sqlite" {
-		return fmt.Errorf(
-			"deleted_at integer migration is not implemented safely for %s; refusing automatic conversion",
-			tx.Dialector.Name(),
-		)
+	for _, item := range models {
+		if !tx.Migrator().HasTable(item.table) {
+			continue
+		}
+		if err := ensureActiveMarkerColumn(tx, item); err != nil {
+			return err
+		}
+		if tx.Migrator().HasColumn(item.table, "deleted_at") {
+			if err := migrateLegacyDeletedAtValues(tx, item.table); err != nil {
+				return err
+			}
+			if err := dropLegacyDeletedAtColumn(tx, item); err != nil {
+				return err
+			}
+		} else if err := normalizeActiveMarkerValues(tx, item.table); err != nil {
+			return err
+		}
+		if err := dropLegacyDeletedIndexes(tx, item.table); err != nil {
+			return err
+		}
 	}
-	return migrateSQLiteDeletedAtToInt(tx, models)
+
+	// Build the composite indexes before AutoMigrate. Otherwise GORM would first
+	// create the model-declared index name with only its business columns, which
+	// rejects valid active/history pairs before it can be repaired.
+	if err := MigrateAuditUniqueIndexes(tx); err != nil {
+		return err
+	}
+	if err := tx.AutoMigrate(model.AllModels()...); err != nil {
+		return fmt.Errorf("install final audit schema: %w", err)
+	}
+	if err := MigrateAuditUniqueIndexes(tx); err != nil {
+		return err
+	}
+	if tx.Dialector.Name() == "sqlite" {
+		return validateSQLiteForeignKeys(tx.Session(&gorm.Session{NewDB: true}))
+	}
+	return nil
 }
 
 type sqliteSchemaObject struct {
@@ -751,49 +783,129 @@ type sqliteSchemaObject struct {
 	SQL  string `gorm:"column:sql"`
 }
 
-func migrateSQLiteDeletedAtToInt(tx *gorm.DB, models []deletedAtModel) error {
-	for _, item := range models {
-		migrationDB := tx.Session(&gorm.Session{NewDB: true})
-		if !migrationDB.Migrator().HasTable(item.table) ||
-			!migrationDB.Migrator().HasColumn(item.table, "deleted_at") {
-			continue
-		}
+func ensureActiveMarkerColumn(tx *gorm.DB, item activeMarkerModel) error {
+	if tx.Migrator().HasColumn(item.table, "active_marker") {
+		return nil
+	}
+	if err := tx.Migrator().AddColumn(item.value, "ActiveMarker"); err != nil {
+		return fmt.Errorf("add %s.active_marker: %w", item.table, err)
+	}
+	return nil
+}
 
-		if err := migrationDB.Transaction(func(tableTx *gorm.DB) error {
-			objects, err := sqliteTableSchemaObjects(tableTx, item.table)
-			if err != nil {
-				return err
-			}
-			if err := tableTx.Session(&gorm.Session{NewDB: true}).
-				Migrator().AlterColumn(item.value, "DeletedAt"); err != nil {
-				return fmt.Errorf("alter %s.deleted_at: %w", item.table, err)
-			}
-			if err := normalizeDeletedAtValues(tableTx, item.table); err != nil {
-				return err
-			}
-			for _, object := range objects {
-				if err := tableTx.Session(&gorm.Session{NewDB: true}).
-					Exec(object.SQL).Error; err != nil {
-					return fmt.Errorf(
-						"restore SQLite %s %s on %s: %w",
-						object.Type,
-						object.Name,
-						item.table,
-						err,
-					)
-				}
-			}
-			return nil
-		}); err != nil {
+func migrateLegacyDeletedAtValues(tx *gorm.DB, table string) error {
+	expression, err := legacyDeletedAtConversionExpression(tx.Dialector.Name())
+	if err != nil {
+		return fmt.Errorf("migrate %s.deleted_at: %w", table, err)
+	}
+	if err := tx.Table(table).
+		Where("1 = 1").
+		UpdateColumn(
+			"active_marker",
+			gorm.Expr(expression, "1", "0001-01-01%", model.ActiveMarkerValue),
+		).Error; err != nil {
+		return fmt.Errorf("migrate %s.deleted_at to active_marker: %w", table, err)
+	}
+	return nil
+}
+
+func legacyDeletedAtConversionExpression(dialect string) (string, error) {
+	castType := "TEXT"
+	switch dialect {
+	case "sqlite", "postgres":
+	case "mysql":
+		castType = "CHAR"
+	default:
+		return "", fmt.Errorf("unsupported database dialect %q", dialect)
+	}
+	return fmt.Sprintf(
+		"CASE WHEN CAST(deleted_at AS %s) = ? OR CAST(deleted_at AS %s) LIKE ? THEN ? ELSE NULL END",
+		castType,
+		castType,
+	), nil
+}
+
+func normalizeActiveMarkerValues(tx *gorm.DB, table string) error {
+	if err := tx.Table(table).
+		Where("active_marker IS NOT NULL AND active_marker <> ?", model.ActiveMarkerValue).
+		UpdateColumn("active_marker", model.ActiveMarkerValue).Error; err != nil {
+		return fmt.Errorf("normalize %s.active_marker: %w", table, err)
+	}
+	return nil
+}
+
+func dropLegacyDeletedAtColumn(tx *gorm.DB, item activeMarkerModel) error {
+	var preserved []sqliteSchemaObject
+	if tx.Dialector.Name() == "sqlite" {
+		objects, err := sqliteTableSchemaObjects(tx, item.table)
+		if err != nil {
 			return err
 		}
+		for _, object := range objects {
+			if strings.HasSuffix(strings.ToLower(object.Name), "_deleted") ||
+				strings.Contains(strings.ToLower(object.SQL), "deleted_at") {
+				if object.Type == "trigger" {
+					if err := tx.Exec(
+						"DROP TRIGGER IF EXISTS " + quoteIdentifier(tx, object.Name),
+					).Error; err != nil {
+						return fmt.Errorf(
+							"drop legacy SQLite trigger %s on %s: %w",
+							object.Name,
+							item.table,
+							err,
+						)
+					}
+				}
+				continue
+			}
+			preserved = append(preserved, object)
+		}
 	}
-	if err := tx.Session(&gorm.Session{NewDB: true}).Transaction(func(indexTx *gorm.DB) error {
-		return MigrateAuditUniqueIndexes(indexTx)
-	}); err != nil {
+	if err := dropLegacyDeletedIndexes(tx, item.table); err != nil {
 		return err
 	}
-	return validateSQLiteForeignKeys(tx.Session(&gorm.Session{NewDB: true}))
+	if err := tx.Migrator().DropColumn(item.value, "deleted_at"); err != nil {
+		return fmt.Errorf("drop %s.deleted_at: %w", item.table, err)
+	}
+	if tx.Dialector.Name() == "sqlite" {
+		return restoreSQLiteSchemaObjects(tx, item.table, preserved)
+	}
+	return nil
+}
+
+func dropLegacyDeletedIndexes(tx *gorm.DB, table string) error {
+	indexes, err := tx.Migrator().GetIndexes(table)
+	if err != nil {
+		return fmt.Errorf("get indexes for %s: %w", table, err)
+	}
+	for _, index := range indexes {
+		legacy := strings.HasSuffix(strings.ToLower(index.Name()), "_deleted")
+		for _, column := range index.Columns() {
+			if strings.EqualFold(column, "deleted_at") {
+				legacy = true
+				break
+			}
+		}
+		if !legacy {
+			continue
+		}
+		if err := tx.Migrator().DropIndex(table, index.Name()); err != nil {
+			return fmt.Errorf(
+				"drop legacy index %s on %s: %w",
+				index.Name(),
+				table,
+				err,
+			)
+		}
+	}
+	return nil
+}
+
+func quoteIdentifier(db *gorm.DB, identifier string) string {
+	if db.Dialector.Name() == "mysql" {
+		return "`" + strings.ReplaceAll(identifier, "`", "``") + "`"
+	}
+	return `"` + strings.ReplaceAll(identifier, `"`, `""`) + `"`
 }
 
 func sqliteTableSchemaObjects(
@@ -815,16 +927,40 @@ func sqliteTableSchemaObjects(
 	return objects, nil
 }
 
-func normalizeDeletedAtValues(tx *gorm.DB, table string) error {
-	if err := tx.Table(table).
-		Where("deleted_at LIKE ?", "0001-01-01%").
-		Update("deleted_at", model.DeletedMarkerActive).Error; err != nil {
-		return fmt.Errorf("migrate %s active rows: %w", table, err)
-	}
-	if err := tx.Table(table).
-		Where("deleted_at IS NOT NULL AND deleted_at <> ?", model.DeletedMarkerActive).
-		Update("deleted_at", nil).Error; err != nil {
-		return fmt.Errorf("migrate %s deleted rows: %w", table, err)
+func restoreSQLiteSchemaObjects(
+	tx *gorm.DB,
+	table string,
+	objects []sqliteSchemaObject,
+) error {
+	for _, object := range objects {
+		var count int64
+		if err := tx.Raw(
+			`SELECT COUNT(*)
+			 FROM sqlite_master
+			 WHERE type = ? AND name = ?`,
+			object.Type,
+			object.Name,
+		).Scan(&count).Error; err != nil {
+			return fmt.Errorf(
+				"check SQLite %s %s on %s: %w",
+				object.Type,
+				object.Name,
+				table,
+				err,
+			)
+		}
+		if count != 0 {
+			continue
+		}
+		if err := tx.Exec(object.SQL).Error; err != nil {
+			return fmt.Errorf(
+				"restore SQLite %s %s on %s: %w",
+				object.Type,
+				object.Name,
+				table,
+				err,
+			)
+		}
 	}
 	return nil
 }

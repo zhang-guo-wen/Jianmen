@@ -109,13 +109,13 @@ func TestDeletedTargetsAreExcludedFromReadAndConnectionPaths(t *testing.T) {
 	}
 	if err := db.Model(&model.Host{}).
 		Where("id IN ?", []string{"deleted-parent-host", "deleted-parent-rdp-host"}).
-		Update("deleted_at", nil).Error; err != nil {
+		Update("active_marker", nil).Error; err != nil {
 		t.Fatalf("soft-delete parent hosts: %v", err)
 	}
 
 	var tombstoneCount int64
 	if err := db.Table("host_accounts").
-		Where("id IN ? AND deleted_at IS NULL", []string{"deleted-target", "deleted-rdp-target"}).
+		Where("id IN ? AND active_marker IS NULL", []string{"deleted-target", "deleted-rdp-target"}).
 		Count(&tombstoneCount).Error; err != nil {
 		t.Fatalf("count target tombstones: %v", err)
 	}

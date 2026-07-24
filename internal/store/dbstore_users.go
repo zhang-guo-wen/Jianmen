@@ -41,7 +41,7 @@ func (s *DBStore) SearchUsers(ctx context.Context, query string, page, pageSize 
 
 func (s *DBStore) FindUser(ctx context.Context, id string) (model.User, bool, error) {
 	var user model.User
-	err := s.db.WithContext(ctx).First(&user, "id = ?", strings.TrimSpace(id)).Error
+	err := s.db.WithContext(ctx).Scopes(ActiveScope).First(&user, "id = ?", strings.TrimSpace(id)).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return model.User{}, false, nil
 	}

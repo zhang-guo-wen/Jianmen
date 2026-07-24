@@ -1,5 +1,10 @@
 # 标准化审计字段实施计划
 
+> **历史计划（已归档）**：本文记录了重构早期的时间型 `deleted_at`
+> 方案，不再作为实现依据。最终字段语义、单一迁移策略和验收标准以
+> [标准化审计字段与停用标记设计](./2026-07-23-auditable-fields-design.md)
+> 为准。
+>
 > **For agentic workers:** 使用 superpowers:subagent-driven-development 或 superpowers:executing-plans 按任务逐个实施。步骤使用 checkbox (`- [ ]`) 语法跟踪。
 
 **目标:** 为所有数据表统一增加 created_at, created_by, updated_at, updated_by, deleted_at 标准化审计字段，实现软删除。

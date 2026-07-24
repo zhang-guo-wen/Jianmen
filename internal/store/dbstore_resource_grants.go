@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"time"
 
 	"gorm.io/gorm"
 
@@ -53,7 +52,7 @@ func (s *DBStore) SearchResourceGrants(ctx context.Context, query string) ([]mod
 
 func (s *DBStore) FindResourceGrant(ctx context.Context, id string) (model.ResourceGrant, bool, error) {
 	var grant model.ResourceGrant
-	err := s.db.WithContext(ctx).First(&grant, "id = ?", strings.TrimSpace(id)).Error
+	err := s.db.WithContext(ctx).Scopes(ActiveScope).First(&grant, "id = ?", strings.TrimSpace(id)).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return model.ResourceGrant{}, false, nil
 	}
@@ -76,9 +75,9 @@ func (s *DBStore) EnsureResourceGrant(ctx context.Context, grant model.ResourceG
 	defer s.ensureGrantMu.Unlock()
 
 	var existing model.ResourceGrant
-	result := s.db.WithContext(ctx).
-		Where("principal_type = ? AND principal_id = ? AND resource_type = ? AND resource_id = ? AND effect = ? AND deleted_at = ?",
-			grant.PrincipalType, grant.PrincipalID, grant.ResourceType, grant.ResourceID, grant.Effect, model.DeletedMarkerActive).
+	result := s.db.WithContext(ctx).Model(&model.ResourceGrant{}).Scopes(ActiveScope).
+		Where("principal_type = ? AND principal_id = ? AND resource_type = ? AND resource_id = ? AND effect = ?",
+			grant.PrincipalType, grant.PrincipalID, grant.ResourceType, grant.ResourceID, grant.Effect).
 		Limit(1).Find(&existing)
 	if result.Error != nil {
 		return fmt.Errorf("ensure resource grant: %w", result.Error)
@@ -93,8 +92,7 @@ func (s *DBStore) EnsureResourceGrant(ctx context.Context, grant model.ResourceG
 }
 
 func (s *DBStore) DeleteResourceGrant(ctx context.Context, id string) error {
-	now := time.Now().UTC()
-	result := s.db.WithContext(ctx).Model(&model.ResourceGrant{}).Scopes(ActiveScope).Where("id = ?", strings.TrimSpace(id)).Updates(map[string]interface{}{"deleted_at": nil, "updated_at": now})
+	result := softDeleteWhere(ctx, s.db, "resource_grants", "id = ?", strings.TrimSpace(id))
 	if result.Error != nil {
 		return fmt.Errorf("delete resource grant: %w", result.Error)
 	}
@@ -134,7 +132,7 @@ func (s *DBStore) ResourceGrantResourceExists(ctx context.Context, resourceType,
 	case model.ResourceTypeDatabaseInstance:
 		tx = db.Model(&model.DatabaseInstance{}).Scopes(ActiveScope).Where("id = ?", resourceID)
 	case model.ResourceTypeDatabaseAccount:
-		tx = db.Model(&model.DatabaseAccount{}).Scopes(ActiveScope).Where("id = ?", resourceID)
+		tx = db.Model(&model.DatabaseAccount{}).Scopes(activeDatabaseAccountScope).Where("database_accounts.id = ?", resourceID)
 	case model.ResourceTypeApplication:
 		tx = db.Model(&model.Application{}).Scopes(ActiveScope).Where("id = ?", resourceID)
 	case model.ResourceTypeContainerEndpoint:
@@ -177,9 +175,9 @@ func (s *DBStore) searchResourceGrantResourceIDs(ctx context.Context, like strin
 		column string
 	}{
 		{name: "hosts", query: s.db.WithContext(ctx).Model(&model.Host{}).Scopes(ActiveScope).Where("LOWER(name) LIKE ? OR LOWER(address) LIKE ?", like, like), column: "id"},
-		{name: "host accounts", query: s.db.WithContext(ctx).Model(&model.HostAccount{}).Where("host_accounts.deleted_at = ?", model.DeletedMarkerActive).Joins("JOIN hosts ON hosts.id = host_accounts.host_id").Where("hosts.deleted_at = ?", model.DeletedMarkerActive).Where("LOWER(host_accounts.name) LIKE ? OR LOWER(host_accounts.username) LIKE ? OR LOWER(hosts.name) LIKE ? OR LOWER(hosts.address) LIKE ?", like, like, like, like), column: "host_accounts.id"},
+		{name: "host accounts", query: s.db.WithContext(ctx).Model(&model.HostAccount{}).Where("host_accounts.active_marker = ?", model.ActiveMarkerValue).Joins("JOIN hosts ON hosts.id = host_accounts.host_id").Where("hosts.active_marker = ?", model.ActiveMarkerValue).Where("LOWER(host_accounts.name) LIKE ? OR LOWER(host_accounts.username) LIKE ? OR LOWER(hosts.name) LIKE ? OR LOWER(hosts.address) LIKE ?", like, like, like, like), column: "host_accounts.id"},
 		{name: "database instances", query: s.db.WithContext(ctx).Model(&model.DatabaseInstance{}).Scopes(ActiveScope).Where("LOWER(name) LIKE ? OR LOWER(address) LIKE ?", like, like), column: "id"},
-		{name: "database accounts", query: s.db.WithContext(ctx).Model(&model.DatabaseAccount{}).Where("database_accounts.deleted_at = ?", model.DeletedMarkerActive).Joins("JOIN database_instances ON database_instances.id = database_accounts.instance_id").Where("LOWER(database_accounts.unique_name) LIKE ? OR LOWER(database_accounts.username) LIKE ? OR LOWER(database_instances.name) LIKE ? OR LOWER(database_instances.address) LIKE ?", like, like, like, like), column: "database_accounts.id"},
+		{name: "database accounts", query: s.db.WithContext(ctx).Model(&model.DatabaseAccount{}).Where("database_accounts.active_marker = ?", model.ActiveMarkerValue).Joins("JOIN database_instances ON database_instances.id = database_accounts.instance_id").Where("database_instances.active_marker = ?", model.ActiveMarkerValue).Where("LOWER(database_accounts.unique_name) LIKE ? OR LOWER(database_accounts.username) LIKE ? OR LOWER(database_instances.name) LIKE ? OR LOWER(database_instances.address) LIKE ?", like, like, like, like), column: "database_accounts.id"},
 		{name: "applications", query: s.db.WithContext(ctx).Model(&model.Application{}).Scopes(ActiveScope).Where("LOWER(name) LIKE ? OR LOWER(address) LIKE ? OR LOWER(internal_host) LIKE ?", like, like, like), column: "id"},
 		{name: "container endpoints", query: s.db.WithContext(ctx).Model(&model.ContainerEndpoint{}).Scopes(ActiveScope).Where("LOWER(name) LIKE ? OR LOWER(address) LIKE ? OR LOWER(group_name) LIKE ?", like, like, like), column: "id"},
 		{name: "platform accounts", query: s.db.WithContext(ctx).Model(&model.PlatformAccount{}).Scopes(ActiveScope).Where("LOWER(name) LIKE ? OR LOWER(platform_name) LIKE ? OR LOWER(username) LIKE ? OR LOWER(url) LIKE ?", like, like, like, like), column: "id"},
@@ -219,6 +217,7 @@ func (s *DBStore) FindGrantsByPrincipal(ctx context.Context, principalType, prin
 	}
 	var grants []model.ResourceGrant
 	if err := s.db.WithContext(ctx).
+		Scopes(ActiveScope).
 		Where("principal_type = ? AND principal_id = ?", principalType, principalID).
 		Order("created_at DESC").
 		Find(&grants).Error; err != nil {
@@ -238,21 +237,21 @@ func (s *DBStore) BatchUpsertGrants(ctx context.Context, grants []model.Resource
 	defer s.ensureGrantMu.Unlock()
 
 	// 在事务中逐条处理
+	if actorID = strings.TrimSpace(actorID); actorID != "" {
+		ctx = model.WithAuditUserID(ctx, actorID)
+	}
 	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		for _, grant := range grants {
 			// 查找是否已有未删除（活跃）的相同授权
 			var existing model.ResourceGrant
-			result := tx.Where(
-				"principal_type = ? AND principal_id = ? AND resource_type = ? AND resource_id = ? AND effect = ? AND deleted_at = ?",
-				grant.PrincipalType, grant.PrincipalID, grant.ResourceType, grant.ResourceID, grant.Effect, model.DeletedMarkerActive,
+			result := tx.Model(&model.ResourceGrant{}).Scopes(ActiveScope).Where(
+				"principal_type = ? AND principal_id = ? AND resource_type = ? AND resource_id = ? AND effect = ?",
+				grant.PrincipalType, grant.PrincipalID, grant.ResourceType, grant.ResourceID, grant.Effect,
 			).First(&existing)
 
 			if result.Error == nil {
 				// 已存在：软删除旧记录
-				if err := tx.Model(&existing).Updates(map[string]interface{}{
-					"deleted_at": nil,
-					"updated_by": actorID,
-				}).Error; err != nil {
+				if err := softDeleteWhere(ctx, tx, "resource_grants", "id = ?", existing.ID).Error; err != nil {
 					return fmt.Errorf("soft delete existing grant %s: %w", existing.ID, err)
 				}
 				refreshed++

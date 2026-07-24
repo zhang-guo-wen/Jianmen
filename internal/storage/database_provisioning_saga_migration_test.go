@@ -245,7 +245,7 @@ func TestDatabaseProvisioningSagaModelDeclaresPortableSafetyConstraints(t *testi
 			"chk_database_provisioning_stage",
 			"chk_database_provisioning_cleanup",
 			"idx_database_provisioning_work",
-			"idx_dpo_upstream_username_deleted",
+			"idx_dpo_upstream_username_active",
 		} {
 			if !strings.Contains(strings.ToLower(ddl), required) {
 				t.Fatalf("%s provisioning DDL is missing %q:\n%s", dialect, required, ddl)
@@ -336,7 +336,7 @@ func databaseProvisioningSchemaContract(
 		Checks:   hasChecks,
 		Indexes: indexNames["idx_database_provisioning_instance"] &&
 			indexNames["idx_database_provisioning_work"] &&
-			indexNames["idx_dpo_actor_kind_idem_deleted"] &&
-			indexNames["idx_dpo_upstream_username_deleted"],
+			indexNames["idx_dpo_actor_kind_idem_active"] &&
+			indexNames["idx_dpo_upstream_username_active"],
 	}, nil
 }

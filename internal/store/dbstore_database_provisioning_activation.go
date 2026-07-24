@@ -35,7 +35,7 @@ func (s *DBStore) ActivateDatabaseProvisioningOperation(
 	activated := false
 	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var operation model.DatabaseProvisioningOperation
-		result := tx.Where(provisioningFenceCondition(), provisioningFenceArguments(expected)...).
+		result := tx.Scopes(ActiveScope).Where(provisioningFenceCondition(), provisioningFenceArguments(expected)...).
 			Where(clock.validLeaseCondition()).
 			First(&operation)
 		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
@@ -47,7 +47,8 @@ func (s *DBStore) ActivateDatabaseProvisioningOperation(
 		if !validProvisioningIdentity(operation.ID, operation.UpstreamUsername) {
 			return errors.New("invalid provisioning operation identity")
 		}
-		err := tx.First(&account, "provisioning_operation_id = ?", expected.ID).Error
+		err := tx.Scopes(activeDatabaseAccountScope).
+			First(&account, "database_accounts.provisioning_operation_id = ?", expected.ID).Error
 		if err == nil {
 			if account.Status != "active" || !account.Managed ||
 				account.ProvisioningOperationID == nil ||

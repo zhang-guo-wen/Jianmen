@@ -36,7 +36,7 @@ func (s *DBStore) BeginDatabaseDeprovision(
 	managed, claimed := false, false
 	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var account model.DatabaseAccount
-		if err := tx.First(&account, "id = ?", accountID).Error; err != nil {
+		if err := tx.Scopes(activeDatabaseAccountScope).First(&account, "database_accounts.id = ?", accountID).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return nil
 			}
@@ -47,7 +47,7 @@ func (s *DBStore) BeginDatabaseDeprovision(
 		}
 		managed = true
 		var current model.DatabaseProvisioningOperation
-		if err := tx.First(&current, "id = ? AND instance_id = ?", *account.ProvisioningOperationID, account.InstanceID).Error; err != nil {
+		if err := tx.Scopes(ActiveScope).First(&current, "id = ? AND instance_id = ?", *account.ProvisioningOperationID, account.InstanceID).Error; err != nil {
 			return err
 		}
 		if !validProvisioningIdentity(current.ID, current.UpstreamUsername) || current.Stage != service.ProvisioningStageActiveManaged || current.CleanupStatus != service.ProvisioningCleanupNone {
@@ -71,7 +71,7 @@ func (s *DBStore) BeginDatabaseDeprovision(
 			return nil
 		}
 		claimed = true
-		return tx.First(&operation, "id = ?", current.ID).Error
+		return tx.Scopes(ActiveScope).First(&operation, "id = ?", current.ID).Error
 	})
 	if err != nil {
 		return service.DatabaseProvisioningOperation{}, managed, errors.New("begin database deprovision")
@@ -100,7 +100,7 @@ func (s *DBStore) CompleteDatabaseDeprovision(
 	completed := false
 	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var operation model.DatabaseProvisioningOperation
-		if err := tx.Where(provisioningFenceCondition(), provisioningFenceArguments(expected)...).
+		if err := tx.Scopes(ActiveScope).Where(provisioningFenceCondition(), provisioningFenceArguments(expected)...).
 			Where(clock.validLeaseCondition()).First(&operation).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return nil
@@ -111,7 +111,7 @@ func (s *DBStore) CompleteDatabaseDeprovision(
 			return errors.New("complete database deprovision: invalid operation identity")
 		}
 		var account model.DatabaseAccount
-		if err := tx.First(&account, "id = ? AND instance_id = ?", strings.TrimSpace(accountID), operation.InstanceID).Error; err != nil {
+		if err := tx.Scopes(activeDatabaseAccountScope).First(&account, "database_accounts.id = ? AND database_accounts.instance_id = ?", strings.TrimSpace(accountID), operation.InstanceID).Error; err != nil {
 			return err
 		}
 		if !managedAccountMatchesProvisioningOperation(account, operation) {
@@ -120,11 +120,18 @@ func (s *DBStore) CompleteDatabaseDeprovision(
 		if err := s.deleteResourceTx(tx, model.ResourceTypeDatabaseAccount, account.ID); err != nil {
 			return err
 		}
-		if err := tx.Exec("UPDATE database_accounts SET deleted_at = NULL, updated_at = ? WHERE id = ?", time.Now().UTC(), strings.TrimSpace(accountID)).Error; err != nil {
+		now := time.Now().UTC()
+		actorID := model.AuditUserIDFromContext(ctx)
+		if err := tx.Exec(
+			"UPDATE database_accounts SET active_marker = NULL, status = ?, updated_at = ?, updated_by = ? WHERE id = ? AND active_marker = ?",
+			"disabled", now, actorID, strings.TrimSpace(accountID), model.ActiveMarkerValue,
+		).Error; err != nil {
 			return err
 		}
-		result := tx.Exec("UPDATE database_provisioning_operations SET deleted_at = NULL, updated_at = ? WHERE "+provisioningFenceCondition()+" AND "+clock.validLeaseCondition(),
-			append([]any{time.Now().UTC()}, provisioningFenceArguments(expected)...)...)
+		result := tx.Exec(
+			"UPDATE database_provisioning_operations SET active_marker = NULL, updated_at = ?, updated_by = ? WHERE active_marker = ? AND "+provisioningFenceCondition()+" AND "+clock.validLeaseCondition(),
+			append([]any{now, actorID, model.ActiveMarkerValue}, provisioningFenceArguments(expected)...)...,
+		)
 		if result.Error != nil {
 			return result.Error
 		}

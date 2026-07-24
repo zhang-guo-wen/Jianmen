@@ -24,7 +24,7 @@ var (
 
 func lockProvisioningInstance(tx *gorm.DB, instanceID string) (model.DatabaseInstance, error) {
 	var instance model.DatabaseInstance
-	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&instance, "id = ?", strings.TrimSpace(instanceID)).Error; err != nil {
+	if err := tx.Scopes(ActiveScope).Clauses(clause.Locking{Strength: "UPDATE"}).First(&instance, "id = ?", strings.TrimSpace(instanceID)).Error; err != nil {
 		return model.DatabaseInstance{}, err
 	}
 	return instance, nil
@@ -32,8 +32,8 @@ func lockProvisioningInstance(tx *gorm.DB, instanceID string) (model.DatabaseIns
 
 func lockProvisioningAdministrator(tx *gorm.DB, instanceID, accountID string) (model.DatabaseAccount, error) {
 	var account model.DatabaseAccount
-	err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(
-		&account, "id = ? AND instance_id = ?", strings.TrimSpace(accountID), strings.TrimSpace(instanceID),
+	err := tx.Scopes(activeDatabaseAccountScope).Clauses(clause.Locking{Strength: "UPDATE"}).First(
+		&account, "database_accounts.id = ? AND database_accounts.instance_id = ?", strings.TrimSpace(accountID), strings.TrimSpace(instanceID),
 	).Error
 	if err != nil {
 		return model.DatabaseAccount{}, err

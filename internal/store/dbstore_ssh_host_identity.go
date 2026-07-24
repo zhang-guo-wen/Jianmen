@@ -90,7 +90,7 @@ func (s *DBStore) disableHostForKeyChange(ctx context.Context, snapshot sshHostI
 		return true, nil
 	}
 	var host model.Host
-	if err := s.db.WithContext(ctx).First(&host, "id = ?", strings.TrimSpace(snapshot.ID)).Error; err != nil {
+	if err := s.db.WithContext(ctx).Scopes(ActiveScope).First(&host, "id = ?", strings.TrimSpace(snapshot.ID)).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return false, fmt.Errorf("%w: %q", ErrHostNotFound, snapshot.ID)
 		}

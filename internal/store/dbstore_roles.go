@@ -53,7 +53,7 @@ func (s *DBStore) SearchRoles(ctx context.Context, query string, page, pageSize 
 
 func (s *DBStore) FindRole(ctx context.Context, id string) (model.Role, bool, error) {
 	var role model.Role
-	err := s.db.WithContext(ctx).First(&role, "id = ?", strings.TrimSpace(id)).Error
+	err := s.db.WithContext(ctx).Scopes(ActiveScope).First(&role, "id = ?", strings.TrimSpace(id)).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return model.Role{}, false, nil
 	}
@@ -127,7 +127,7 @@ func (s *DBStore) SearchPermissions(ctx context.Context, query string, page, pag
 }
 func (s *DBStore) FindPermission(ctx context.Context, id string) (model.Permission, bool, error) {
 	var permission model.Permission
-	err := s.db.WithContext(ctx).First(&permission, "id = ?", strings.TrimSpace(id)).Error
+	err := s.db.WithContext(ctx).Scopes(ActiveScope).First(&permission, "id = ?", strings.TrimSpace(id)).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return model.Permission{}, false, nil
 	}
@@ -168,7 +168,10 @@ func (s *DBStore) DeletePermission(ctx context.Context, permission model.Permiss
 
 func (s *DBStore) SearchUserRoles(ctx context.Context, query string, page, pageSize int) ([]model.UserRole, int64, error) {
 	build := func() *gorm.DB {
-		tx := s.db.WithContext(ctx).Model(&model.UserRole{})
+		tx := s.db.WithContext(ctx).Model(&model.UserRole{}).
+			Joins("JOIN users ON users.id = user_roles.user_id").
+			Joins("JOIN roles ON roles.id = user_roles.role_id").
+			Where("users.active_marker = ? AND roles.active_marker = ?", model.ActiveMarkerValue, model.ActiveMarkerValue)
 		if query != "" {
 			like := "%" + query + "%"
 			tx = tx.Where("user_id LIKE ? OR role_id LIKE ?", like, like)
@@ -187,7 +190,11 @@ func (s *DBStore) SearchUserRoles(ctx context.Context, query string, page, pageS
 }
 func (s *DBStore) FindUserRole(ctx context.Context, id string) (model.UserRole, bool, error) {
 	var binding model.UserRole
-	err := s.db.WithContext(ctx).First(&binding, "id = ?", strings.TrimSpace(id)).Error
+	err := s.db.WithContext(ctx).Model(&model.UserRole{}).
+		Joins("JOIN users ON users.id = user_roles.user_id").
+		Joins("JOIN roles ON roles.id = user_roles.role_id").
+		Where("users.active_marker = ? AND roles.active_marker = ?", model.ActiveMarkerValue, model.ActiveMarkerValue).
+		First(&binding, "user_roles.id = ?", strings.TrimSpace(id)).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return model.UserRole{}, false, nil
 	}
@@ -214,7 +221,10 @@ func (s *DBStore) DeleteUserRole(ctx context.Context, binding model.UserRole) er
 
 func (s *DBStore) SearchRolePermissions(ctx context.Context, query string, page, pageSize int) ([]model.RolePermission, int64, error) {
 	build := func() *gorm.DB {
-		tx := s.db.WithContext(ctx).Model(&model.RolePermission{})
+		tx := s.db.WithContext(ctx).Model(&model.RolePermission{}).
+			Joins("JOIN roles ON roles.id = role_permissions.role_id").
+			Joins("JOIN permissions ON permissions.id = role_permissions.permission_id").
+			Where("roles.active_marker = ? AND permissions.active_marker = ?", model.ActiveMarkerValue, model.ActiveMarkerValue)
 		if query != "" {
 			like := "%" + query + "%"
 			tx = tx.Where("role_id LIKE ? OR permission_id LIKE ?", like, like)
@@ -233,7 +243,11 @@ func (s *DBStore) SearchRolePermissions(ctx context.Context, query string, page,
 }
 func (s *DBStore) FindRolePermission(ctx context.Context, id string) (model.RolePermission, bool, error) {
 	var binding model.RolePermission
-	err := s.db.WithContext(ctx).First(&binding, "id = ?", strings.TrimSpace(id)).Error
+	err := s.db.WithContext(ctx).Model(&model.RolePermission{}).
+		Joins("JOIN roles ON roles.id = role_permissions.role_id").
+		Joins("JOIN permissions ON permissions.id = role_permissions.permission_id").
+		Where("roles.active_marker = ? AND permissions.active_marker = ?", model.ActiveMarkerValue, model.ActiveMarkerValue).
+		First(&binding, "role_permissions.id = ?", strings.TrimSpace(id)).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return model.RolePermission{}, false, nil
 	}
@@ -260,7 +274,14 @@ func (s *DBStore) DeleteRolePermission(ctx context.Context, binding model.RolePe
 
 func (s *DBStore) RoleActions(ctx context.Context, roleID string) ([]string, error) {
 	var actions []string
-	err := s.db.WithContext(ctx).Model(&model.Permission{}).Scopes(ActiveScope).Distinct("permissions.action").Joins("JOIN role_permissions ON role_permissions.permission_id = permissions.id").Where("role_permissions.role_id = ?", strings.TrimSpace(roleID)).Where("permissions.action <> '' AND permissions.resource_type = '' AND permissions.resource_id = ''").Where("permissions.effect = '' OR permissions.effect = ?", model.PermissionEffectAllow).Order("permissions.action").Pluck("permissions.action", &actions).Error
+	err := s.db.WithContext(ctx).Model(&model.Permission{}).
+		Distinct("permissions.action").
+		Joins("JOIN role_permissions ON role_permissions.permission_id = permissions.id").
+		Joins("JOIN roles ON roles.id = role_permissions.role_id").
+		Where("role_permissions.role_id = ? AND roles.active_marker = ? AND permissions.active_marker = ?", strings.TrimSpace(roleID), model.ActiveMarkerValue, model.ActiveMarkerValue).
+		Where("permissions.action <> '' AND permissions.resource_type = '' AND permissions.resource_id = ''").
+		Where("permissions.effect = '' OR permissions.effect = ?", model.PermissionEffectAllow).
+		Order("permissions.action").Pluck("permissions.action", &actions).Error
 	if err != nil {
 		return nil, fmt.Errorf("list role actions: %w", err)
 	}
@@ -286,7 +307,7 @@ func (s *DBStore) ReplaceRoleActions(ctx context.Context, roleID string, request
 func (s *DBStore) replaceRoleActions(ctx context.Context, roleID string, requested []model.Permission) error {
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var role model.Role
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+		if err := tx.Scopes(ActiveScope).Clauses(clause.Locking{Strength: "UPDATE"}).
 			Select("id").First(&role, "id = ?", strings.TrimSpace(roleID)).Error; err != nil {
 			return fmt.Errorf("find role: %w", err)
 		}
@@ -309,7 +330,7 @@ func (s *DBStore) replaceRoleActions(ctx context.Context, roleID string, request
 						{Name: "resource_type"},
 						{Name: "resource_id"},
 						{Name: "effect"},
-						{Name: "deleted_at"},
+						{Name: "active_marker"},
 					},
 					DoNothing: true,
 				}).Create(&permission)
@@ -350,7 +371,20 @@ func (s *DBStore) EffectiveGlobalPermissions(ctx context.Context, userID string,
 	if s.db.Dialector.Name() == "sqlite" {
 		comparisonTime = now.In(time.Local)
 	}
-	err := s.db.WithContext(ctx).Table("permissions").Select("permissions.*").Joins("JOIN role_permissions ON role_permissions.permission_id = permissions.id").Joins("JOIN user_roles ON user_roles.role_id = role_permissions.role_id").Joins("JOIN roles ON roles.id = user_roles.role_id").Where("user_roles.user_id = ?", strings.TrimSpace(userID)).Where("user_roles.expires_at IS NULL OR user_roles.expires_at > ?", comparisonTime).Where("roles.status = '' OR roles.status = ?", "active").Where("permissions.resource_type = '' AND permissions.resource_id = ''").Where("permissions.action <> ''").Find(&permissions).Error
+	err := s.db.WithContext(ctx).Table("permissions").
+		Select("permissions.*").
+		Joins("JOIN role_permissions ON role_permissions.permission_id = permissions.id").
+		Joins("JOIN user_roles ON user_roles.role_id = role_permissions.role_id").
+		Joins("JOIN roles ON roles.id = user_roles.role_id").
+		Joins("JOIN users ON users.id = user_roles.user_id").
+		Where("user_roles.user_id = ?", strings.TrimSpace(userID)).
+		Where("user_roles.expires_at IS NULL OR user_roles.expires_at > ?", comparisonTime).
+		Where("users.active_marker = ? AND users.status = ?", model.ActiveMarkerValue, "active").
+		Where("roles.active_marker = ? AND (roles.status = '' OR roles.status = ?)", model.ActiveMarkerValue, "active").
+		Where("permissions.active_marker = ?", model.ActiveMarkerValue).
+		Where("permissions.resource_type = '' AND permissions.resource_id = ''").
+		Where("permissions.action <> ''").
+		Find(&permissions).Error
 	if err != nil {
 		return nil, fmt.Errorf("load effective global permissions: %w", err)
 	}

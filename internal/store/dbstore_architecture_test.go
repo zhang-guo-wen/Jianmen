@@ -85,7 +85,7 @@ func TestDBStoreSyncsResourcesAndUsesSequenceFloor(t *testing.T) {
 		t.Fatalf("delete target: %v", err)
 	}
 	var count int64
-	if err := db.Model(&model.Resource{}).
+	if err := db.Model(&model.Resource{}).Scopes(ActiveScope).
 		Where("type = ? AND resource_id = ?", model.ResourceTypeHostAccount, target.ID).
 		Count(&count).Error; err != nil {
 		t.Fatalf("count deleted target resource: %v", err)

@@ -275,7 +275,7 @@ func TestMigrateAppliesVersionedMigrations(t *testing.T) {
 		model any
 		index string
 	}{
-		{name: "global session id", model: &model.UserSession{}, index: "idx_user_sessions_session_id_deleted"},
+		{name: "global session id", model: &model.UserSession{}, index: "idx_user_sessions_session_id_active"},
 		{name: "session user timeline", model: &model.Session{}, index: "idx_sessions_user_started"},
 		{name: "host account lookup", model: &model.HostAccount{}, index: "idx_host_accounts_host_username"},
 		{name: "database account lookup", model: &model.DatabaseAccount{}, index: "idx_database_accounts_instance_username"},
@@ -355,7 +355,7 @@ func TestMigrateRepairsDuplicateUserSessionsBeforeIndexes(t *testing.T) {
 		seenSeq[sess.SessionSeq] = true
 		seenID[sess.SessionID] = true
 	}
-	if !db.Migrator().HasIndex(&model.UserSession{}, "idx_user_sessions_session_id_deleted") {
+	if !db.Migrator().HasIndex(&model.UserSession{}, "idx_user_sessions_session_id_active") {
 		t.Fatal("expected global user session id unique index")
 	}
 }

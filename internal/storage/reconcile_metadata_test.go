@@ -84,23 +84,23 @@ func TestReconcileMetadataUsesActiveResourceUniqueKey(t *testing.T) {
 			if resources[0].Name != "Renamed host" {
 				t.Fatalf("resource name = %q, want %q", resources[0].Name, "Renamed host")
 			}
-			if resources[0].DeletedAt == nil || *resources[0].DeletedAt != model.DeletedMarkerActive {
-				t.Fatalf("resource deleted marker = %v, want active", resources[0].DeletedAt)
+			if resources[0].ActiveMarker == nil || *resources[0].ActiveMarker != model.ActiveMarkerValue {
+				t.Fatalf("resource active marker = %v, want active", resources[0].ActiveMarker)
 			}
 
 			if err := db.Model(&model.Host{}).
 				Where("id = ?", host.ID).
 				Updates(map[string]any{
-					"name":       "Deleted host",
-					"deleted_at": nil,
+					"name":          "Deleted host",
+					"active_marker": nil,
 				}).Error; err != nil {
 				t.Fatalf("tombstone host: %v", err)
 			}
 			if err := db.Model(&model.Resource{}).
 				Where("type = ? AND resource_id = ?", model.ResourceTypeHost, host.ID).
 				Updates(map[string]any{
-					"name":       "Deleted resource",
-					"deleted_at": nil,
+					"name":          "Deleted resource",
+					"active_marker": nil,
 				}).Error; err != nil {
 				t.Fatalf("tombstone resource: %v", err)
 			}
@@ -125,10 +125,10 @@ func TestReconcileMetadataUsesActiveResourceUniqueKey(t *testing.T) {
 					tombstonedResources[0].Name,
 				)
 			}
-			if tombstonedResources[0].DeletedAt != nil {
+			if tombstonedResources[0].ActiveMarker != nil {
 				t.Fatalf(
 					"tombstoned resource marker = %v, want nil",
-					tombstonedResources[0].DeletedAt,
+					tombstonedResources[0].ActiveMarker,
 				)
 			}
 
@@ -144,7 +144,7 @@ func TestReconcileMetadataUsesActiveResourceUniqueKey(t *testing.T) {
 			}
 			if err := db.Model(&model.Host{}).
 				Where("id = ?", deletedWithoutResource.ID).
-				Update("deleted_at", nil).Error; err != nil {
+				Update("active_marker", nil).Error; err != nil {
 				t.Fatalf("tombstone second host: %v", err)
 			}
 			accountUnderDeletedHost := model.HostAccount{
@@ -171,7 +171,7 @@ func TestReconcileMetadataUsesActiveResourceUniqueKey(t *testing.T) {
 			}
 			if err := db.Model(&model.HostAccount{}).
 				Where("id = ?", deletedHighSequenceAccount.ID).
-				Update("deleted_at", nil).Error; err != nil {
+				Update("active_marker", nil).Error; err != nil {
 				t.Fatalf("tombstone high-sequence account: %v", err)
 			}
 			if err := db.Where("name = ?", SequenceHostAccount).
@@ -227,7 +227,7 @@ func TestReconcileMetadataUsesActiveResourceUniqueKey(t *testing.T) {
 	}
 }
 
-func TestActiveDeletedAtPredicateSupportsSQLiteMarkers(t *testing.T) {
+func TestActiveRowPredicateSupportsLegacySQLiteMarkers(t *testing.T) {
 	db, err := gorm.Open(
 		sqlite.Open(filepath.Join(t.TempDir(), "markers.db")),
 		&gorm.Config{},
@@ -257,10 +257,10 @@ func TestActiveDeletedAtPredicateSupportsSQLiteMarkers(t *testing.T) {
 		t.Fatalf("seed marker probe: %v", err)
 	}
 
-	predicate, args, err := activeDeletedAtPredicate(
+	predicate, args, err := activeRowPredicate(
 		db,
 		"marker_probe",
-		"marker_probe.deleted_at",
+		"marker_probe",
 	)
 	if err != nil {
 		t.Fatalf("build active marker predicate: %v", err)

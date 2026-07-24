@@ -7,23 +7,31 @@ import (
 	"gorm.io/gorm"
 )
 
-// DeletedMarkerActive 逻辑删除标记：1 = 活跃（未删除），NULL = 已删除。
-// 使用非 NULL 值 1 作为哨兵，保证 (business_key, deleted_at) 复合唯一索引
-// 在所有数据库（MySQL/SQLite/PostgreSQL）中正确生效。
-const DeletedMarkerActive = 1
+// ActiveMarkerValue 表示业务记录当前可用。
+// active_marker 为 1 时记录活跃，为 NULL 时记录已停用/移除。使用 NULL
+// 作为非活跃值，可让 (business_key, active_marker) 复合唯一索引在
+// MySQL、SQLite 和 PostgreSQL 中同时允许保留多条历史记录。
+const ActiveMarkerValue = 1
 
 // contextKey 用于在 context 中存储/提取审计相关值。
 type contextKey string
 
-// CtxKeyUserID 与 admin server 的 ctxKeyUserID 保持一致的值。
-const CtxKeyUserID contextKey = "admin_user_id"
+const auditUserIDKey contextKey = "admin_user_id"
 
-// userIDFromContext 从 context 中提取当前用户 ID。
-func userIDFromContext(ctx context.Context) string {
+// WithAuditUserID 返回携带审计操作者 ID 的 context。
+func WithAuditUserID(ctx context.Context, userID string) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return context.WithValue(ctx, auditUserIDKey, userID)
+}
+
+// AuditUserIDFromContext 从 context 中提取审计操作者 ID。
+func AuditUserIDFromContext(ctx context.Context) string {
 	if ctx == nil {
 		return ""
 	}
-	if id, ok := ctx.Value(CtxKeyUserID).(string); ok {
+	if id, ok := ctx.Value(auditUserIDKey).(string); ok {
 		return id
 	}
 	return ""
@@ -38,27 +46,29 @@ type CreationAudit struct {
 
 // BeforeCreate 自动从 context 获取当前用户 ID 填充 CreatedBy。
 func (a *CreationAudit) BeforeCreate(tx *gorm.DB) error {
-	a.CreatedBy = userIDFromContext(tx.Statement.Context)
+	if a.CreatedBy == "" {
+		a.CreatedBy = AuditUserIDFromContext(tx.Statement.Context)
+	}
 	return nil
 }
 
 // FullAudit 业务表嵌入：完整的五个审计字段。
 type FullAudit struct {
-	CreatedBy string    `gorm:"index;size:64;not null;default:''" json:"created_by"`
-	UpdatedBy string    `gorm:"index;size:64;not null;default:''" json:"updated_by"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
-	DeletedAt *int      `gorm:"index;default:1" json:"-"`
+	CreatedBy    string    `gorm:"index;size:64;not null;default:''" json:"created_by"`
+	UpdatedBy    string    `gorm:"index;size:64;not null;default:''" json:"updated_by"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
+	ActiveMarker *int      `gorm:"column:active_marker;index;default:1" json:"-"`
 }
 
 // BeforeCreate 自动从 context 获取当前用户 ID 填充 CreatedBy 和 UpdatedBy，
-// 并将 DeletedAt 初始化为 DeletedMarkerActive。
+// 并将 ActiveMarker 初始化为 ActiveMarkerValue。
 func (a *FullAudit) BeforeCreate(tx *gorm.DB) error {
-	if a.DeletedAt == nil {
-		v := DeletedMarkerActive
-		a.DeletedAt = &v
+	if a.ActiveMarker == nil {
+		v := ActiveMarkerValue
+		a.ActiveMarker = &v
 	}
-	userID := userIDFromContext(tx.Statement.Context)
+	userID := AuditUserIDFromContext(tx.Statement.Context)
 	if a.CreatedBy == "" {
 		a.CreatedBy = userID
 	}
@@ -70,6 +80,8 @@ func (a *FullAudit) BeforeCreate(tx *gorm.DB) error {
 
 // BeforeUpdate 自动从 context 获取当前用户 ID 填充 UpdatedBy。
 func (a *FullAudit) BeforeUpdate(tx *gorm.DB) error {
-	a.UpdatedBy = userIDFromContext(tx.Statement.Context)
+	if userID := AuditUserIDFromContext(tx.Statement.Context); userID != "" {
+		a.UpdatedBy = userID
+	}
 	return nil
 }

@@ -87,7 +87,7 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 	}
 
 	var apps []model.Application
-	if err := s.db.Where("status = ?", "active").Find(&apps).Error; err != nil {
+	if err := s.db.Where("active_marker = ? AND status = ?", model.ActiveMarkerValue, "active").Find(&apps).Error; err != nil {
 		return fmt.Errorf("load applications: %w", err)
 	}
 

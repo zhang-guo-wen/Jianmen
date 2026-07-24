@@ -16,7 +16,7 @@ type resourceGrantLogicalKey struct {
 }
 
 // resourceGrantLogicalUniquenessSchema freezes the schema owned by migration
-// 202607190001. The audit columns and deleted_at-aware index are installed by
+// 202607190001. The audit columns and active_marker-aware index are installed by
 // later migrations.
 type resourceGrantLogicalUniquenessSchema struct {
 	ID            string     `gorm:"primaryKey;size:64"`
@@ -40,8 +40,7 @@ func migrateResourceGrantLogicalUniqueness(tx *gorm.DB) error {
 	}
 
 	var grants []resourceGrantLogicalUniquenessSchema
-	// 使用 Unscoped 绕过 GORM 的 deleted_at IS NULL 自动过滤，
-	// 因为旧表可能还没有 deleted_at 列
+	// 历史表此时还没有最终的 active_marker 列，因此使用历史模型迁移。
 	if err := tx.Order("created_at, id").Find(&grants).Error; err != nil {
 		return fmt.Errorf("load resource grants for deduplication: %w", err)
 	}

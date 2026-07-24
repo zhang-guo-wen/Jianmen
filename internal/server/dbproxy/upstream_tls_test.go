@@ -54,12 +54,17 @@ func TestRedisUpstreamDefaultsToPlaintext(t *testing.T) {
 	}
 }
 
-func TestPostgresCleartextPasswordRequiresVerifiedTLS(t *testing.T) {
+func TestPostgresCleartextPasswordTransportPolicy(t *testing.T) {
 	server, client := net.Pipe()
 	defer server.Close()
 	defer client.Close()
-	if err := requireVerifiedPostgresTLS(client); err == nil {
-		t.Fatal("cleartext PostgreSQL password was allowed without verified TLS")
+	if err := validatePostgresCleartextPasswordTransport(client, dbtls.ModeDisable); err != nil {
+		t.Fatalf("disabled TLS rejected cleartext PostgreSQL password: %v", err)
+	}
+	for _, mode := range []string{dbtls.ModeVerifyCA, dbtls.ModeVerifyFull} {
+		if err := validatePostgresCleartextPasswordTransport(client, mode); !errors.Is(err, errVerifiedTLSRequired) {
+			t.Fatalf("mode %q error = %v, want errVerifiedTLSRequired", mode, err)
+		}
 	}
 }
 

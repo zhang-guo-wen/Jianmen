@@ -597,10 +597,12 @@ test('database TLS mode preserves hidden inputs and clears persisted CA only on 
   assert.match(source, /重新检测并开启/);
   assert.match(source, /要求远程数据库已启用 SSL\/TLS。Jianmen 将加密连接并验证 CA，但不校验主机名/);
   assert.match(source, /要求远程数据库已启用 SSL\/TLS。Jianmen 将加密连接并验证 CA 与主机名[\s\S]*远程未启用 TLS 时连接将失败/);
+  assert.match(source, /Jianmen 到上游数据库不加密；PostgreSQL 上游要求明文密码认证时，密码也会以明文传输/);
   const changeStart = source.indexOf('async function onTLSModeChange');
   const changeEnd = source.indexOf('function chooseTLSCAFile', changeStart);
   const changeSource = source.slice(changeStart, changeEnd);
-  assert.match(changeSource, /上游数据库链路将不再使用 TLS/);
+  assert.match(changeSource, /上游数据库链路将不再加密/);
+  assert.match(changeSource, /PostgreSQL 上游要求明文密码认证时，密码也会以明文传输/);
   assert.doesNotMatch(changeSource, /客户端到 Jianmen 的 TLS 不受影响/);
   assert.doesNotMatch(changeSource, /instanceForm\.(?:tlsCaPem|tlsServerName)\s*=\s*''/);
   assert.doesNotMatch(changeSource, /instanceForm\.hasTlsCa\s*=\s*false/);

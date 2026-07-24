@@ -93,6 +93,7 @@ func (g *Gateway) handlePG(ctx context.Context, client net.Conn, firstByte byte)
 		client,
 		account.Username,
 		account.Password.GetPlaintext(),
+		account.Instance.TLSMode,
 		func(key postgresCancelKey) func() {
 			return g.postgresCancels.register(key, account.Instance)
 		},

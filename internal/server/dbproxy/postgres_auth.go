@@ -14,7 +14,7 @@ type postgresUpstreamStartup struct {
 
 func authenticatePostgresUpstream(
 	upstream, client net.Conn,
-	username, password string,
+	username, password, tlsMode string,
 	registerCancel func(postgresCancelKey) func(),
 ) (postgresUpstreamStartup, error) {
 	var result postgresUpstreamStartup
@@ -69,7 +69,7 @@ func authenticatePostgresUpstream(
 							"malformed PostgreSQL cleartext authentication challenge",
 						)
 					}
-					if err := requireVerifiedPostgresTLS(upstream); err != nil {
+					if err := validatePostgresCleartextPasswordTransport(upstream, tlsMode); err != nil {
 						return postgresUpstreamStartup{}, err
 					}
 					if err := writePostgresMessage(upstream, 'p', append([]byte(password), 0)); err != nil {

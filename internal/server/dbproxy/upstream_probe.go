@@ -173,7 +173,7 @@ func probePostgresAuthentication(ctx context.Context, instance model.DatabaseIns
 		case 0:
 			continue
 		case 3:
-			if err := requireVerifiedPostgresTLS(conn); err != nil {
+			if err := validatePostgresCleartextPasswordTransport(conn, instance.TLSMode); err != nil {
 				return err
 			}
 			if err := writePostgresProbePassword(conn, password); err != nil {

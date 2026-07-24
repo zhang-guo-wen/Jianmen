@@ -226,6 +226,7 @@ func TestAuthenticatePostgresUpstreamCompletesSCRAMAndForwardsAuthOK(t *testing.
 			clientGateway,
 			"probe",
 			"secret",
+			"disable",
 			func(key postgresCancelKey) func() {
 				registered <- key
 				return func() {
@@ -309,6 +310,7 @@ func TestAuthenticatePostgresUpstreamCleansCancelRouteOnStartupFailure(t *testin
 		clientGateway,
 		"probe",
 		"secret",
+		"disable",
 		func(postgresCancelKey) func() {
 			return func() {
 				cleanupCalls++

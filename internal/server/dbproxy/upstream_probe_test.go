@@ -7,7 +7,6 @@ import (
 	"io"
 	"net"
 	"os"
-	"strings"
 	"testing"
 	"time"
 
@@ -15,7 +14,7 @@ import (
 	"jianmen/internal/model"
 )
 
-func TestProbePostgresRejectsCleartextPasswordWithoutVerifiedTLS(t *testing.T) {
+func TestProbePostgresAllowsCleartextPasswordWhenTLSDisabled(t *testing.T) {
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -44,11 +43,21 @@ func TestProbePostgresRejectsCleartextPasswordWithoutVerifiedTLS(t *testing.T) {
 			serverResult <- writeErr
 			return
 		}
-		_ = conn.SetReadDeadline(time.Now().Add(time.Second))
-		passwordHeader := make([]byte, 1)
-		_, readErr := conn.Read(passwordHeader)
-		if readErr == nil {
-			serverResult <- errCleartextPasswordSent
+		passwordMessage, readErr := readPostgresMessage(conn, maxPostgresAuthMessageBytes)
+		if readErr != nil {
+			serverResult <- readErr
+			return
+		}
+		if passwordMessage.kind != 'p' || string(passwordMessage.payload) != "secret\x00" {
+			serverResult <- postgresProbeTestError("unexpected PostgreSQL cleartext password response")
+			return
+		}
+		if writeErr := writePostgresTestMessage(conn, 'R', []byte{0, 0, 0, 0}); writeErr != nil {
+			serverResult <- writeErr
+			return
+		}
+		if writeErr := writePostgresTestMessage(conn, 'Z', []byte{'I'}); writeErr != nil {
+			serverResult <- writeErr
 			return
 		}
 		serverResult <- nil
@@ -58,8 +67,8 @@ func TestProbePostgresRejectsCleartextPasswordWithoutVerifiedTLS(t *testing.T) {
 	err = ProbeDatabaseAuthentication(context.Background(), model.DatabaseInstance{
 		Protocol: "postgres", Address: host, Port: port, TLSMode: "disable",
 	}, "probe", "secret")
-	if err == nil || !strings.Contains(err.Error(), "verified TLS") {
-		t.Fatalf("ProbeDatabaseAuthentication() error = %v, want verified TLS rejection", err)
+	if err != nil {
+		t.Fatalf("ProbeDatabaseAuthentication() error = %v", err)
 	}
 	if err := <-serverResult; err != nil {
 		t.Fatal(err)
@@ -182,11 +191,3 @@ var (
 type postgresProbeTestError string
 
 func (err postgresProbeTestError) Error() string { return string(err) }
-
-var errCleartextPasswordSent = cleartextPasswordSentError{}
-
-type cleartextPasswordSentError struct{}
-
-func (cleartextPasswordSentError) Error() string {
-	return "cleartext PostgreSQL password was sent without TLS"
-}

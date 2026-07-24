@@ -527,7 +527,7 @@ function normalizeTLSMode(value: unknown): api.DatabaseTLSMode {
 
 function tlsModeDescription(value: api.DatabaseTLSMode): string {
   switch (value) {
-    case 'disable': return 'Jianmen 到实际数据库不加密；适用于未启用 TLS 的数据库或可信内网。'
+    case 'disable': return 'Jianmen 到上游数据库不加密；PostgreSQL 上游要求明文密码认证时，密码也会以明文传输。仅用于可信内网。'
     case 'verify-ca': return '要求远程数据库已启用 SSL/TLS。Jianmen 将加密连接并验证 CA，但不校验主机名；安全性低于验证证书和主机名。'
     default: return '要求远程数据库已启用 SSL/TLS。Jianmen 将加密连接并验证 CA 与主机名，可防止中间人攻击；远程未启用 TLS 时连接将失败。'
   }
@@ -697,7 +697,7 @@ async function onTLSModeChange(mode: api.DatabaseTLSMode) {
     if (instanceForm.tlsMode !== 'disable') {
       try {
         await ElMessageBox.confirm(
-          '关闭后，上游数据库链路将不再使用 TLS。确定关闭吗？',
+          '关闭后，上游数据库链路将不再加密；PostgreSQL 上游要求明文密码认证时，密码也会以明文传输。确定关闭吗？',
           '关闭上游 TLS',
           { type: 'warning', confirmButtonText: '确认关闭', cancelButtonText: '取消' }
         )

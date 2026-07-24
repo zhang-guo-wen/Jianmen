@@ -245,3 +245,14 @@ func requireVerifiedPostgresTLS(connection net.Conn) error {
 	}
 	return nil
 }
+
+func validatePostgresCleartextPasswordTransport(connection net.Conn, tlsMode string) error {
+	mode, err := dbtls.NormalizeMode(tlsMode)
+	if err != nil {
+		return err
+	}
+	if mode == dbtls.ModeDisable {
+		return nil
+	}
+	return requireVerifiedPostgresTLS(connection)
+}

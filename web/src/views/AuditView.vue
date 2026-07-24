@@ -1,6 +1,6 @@
 <template>
   <div class="view-stack audit-view">
-    <el-tabs v-model="auditScope" class="page-tabs">
+    <el-tabs v-model="auditScope" class="page-tabs" @tab-change="loadAuditScope">
       <el-tab-pane v-if="permission.canDo('audit:view')" :label="t('audit.scope.ssh')" name="ssh">
         <el-alert v-if="sessionError" :title="sessionError" type="error" show-icon style="margin-bottom: 12px" />
         <div class="page-container">
@@ -655,7 +655,7 @@ import '@xterm/xterm/css/xterm.css';
 import Guacamole from 'guacamole-common-js';
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { Refresh } from '@element-plus/icons-vue';
-import { ElMessage, ElMessageBox } from 'element-plus';
+import { ElMessage, ElMessageBox, type TabPaneName } from 'element-plus';
 import { useRoute } from 'vue-router';
 
 import AuditResultTag from '@/components/audit/AuditResultTag.vue';
@@ -845,7 +845,6 @@ const onlineError = ref('');
 const disconnectingSessionID = ref('');
 const sessionDetailVisible = ref(false);
 const sessionDetailId = ref('');
-let onlineRefreshTimer: number | undefined;
 
 // ── Drawer state ──
 const detailLoading = ref(false);
@@ -2110,20 +2109,30 @@ function applyRouteAuditFilter() {
   }
 }
 
+function loadAuditScope(scope: TabPaneName): void {
+  switch (scope) {
+    case 'ssh':
+      void loadSessions();
+      return;
+    case 'rdp':
+      void loadRDPSessions();
+      return;
+    case 'db':
+      void loadDBConnections();
+      return;
+    case 'online':
+      void loadOnlineSessions();
+      return;
+    case 'logins':
+      void loadLoginAuditLogs();
+      return;
+    case 'operations':
+      void loadOperationAuditLogs();
+  }
+}
+
 onMounted(() => {
-  if (permission.canDo('audit:view')) {
-    void loadSessions();
-    void loadLoginAuditLogs();
-    void loadOperationAuditLogs();
-  }
-  if (permission.canDo('db:audit:view')) void loadDBConnections();
-  if (canViewRDPRecordings.value) void loadRDPSessions();
-  if (permission.canDo('session:view')) {
-    void loadOnlineSessions();
-    onlineRefreshTimer = window.setInterval(() => {
-      if (auditScope.value === 'online' && !onlineLoading.value) void loadOnlineSessions();
-    }, 5000);
-  }
+  loadAuditScope(auditScope.value);
 });
 
 watch(
@@ -2172,7 +2181,6 @@ watch([logPage, logPageSize], ([page, pageSize], [previousPage, previousPageSize
 });
 
 onBeforeUnmount(() => {
-  if (onlineRefreshTimer !== undefined) window.clearInterval(onlineRefreshTimer);
   stopReplay();
   destroyReplayTerminal();
   destroyRDPReplay();

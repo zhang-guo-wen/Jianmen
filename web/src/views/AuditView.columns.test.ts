@@ -111,3 +111,26 @@ test('the short user session identifier is named unambiguously', () => {
   assert.doesNotMatch(pane('db'), />SessionID</);
   assert.doesNotMatch(pane('online'), />SessionID</);
 });
+
+test('switching audit tabs refreshes only the selected scope without polling online sessions', () => {
+  assert.match(source, /<el-tabs v-model="auditScope" class="page-tabs" @tab-change="loadAuditScope">/);
+
+  const loaderStart = source.indexOf('function loadAuditScope');
+  const loaderEnd = source.indexOf('onMounted(', loaderStart);
+  assert.notEqual(loaderStart, -1);
+  assert.notEqual(loaderEnd, -1);
+  const loader = source.slice(loaderStart, loaderEnd);
+  assert.match(loader, /case 'ssh':[\s\S]*loadSessions\(\)/);
+  assert.match(loader, /case 'rdp':[\s\S]*loadRDPSessions\(\)/);
+  assert.match(loader, /case 'db':[\s\S]*loadDBConnections\(\)/);
+  assert.match(loader, /case 'online':[\s\S]*loadOnlineSessions\(\)/);
+  assert.match(loader, /case 'logins':[\s\S]*loadLoginAuditLogs\(\)/);
+  assert.match(loader, /case 'operations':[\s\S]*loadOperationAuditLogs\(\)/);
+
+  const mountedStart = source.indexOf('onMounted(');
+  const mountedEnd = source.indexOf('watch(', mountedStart);
+  const mounted = source.slice(mountedStart, mountedEnd);
+  assert.match(mounted, /loadAuditScope\(auditScope\.value\)/);
+  assert.doesNotMatch(source, /onlineRefreshTimer/);
+  assert.doesNotMatch(source, /setInterval\([\s\S]{0,240}loadOnlineSessions/);
+});

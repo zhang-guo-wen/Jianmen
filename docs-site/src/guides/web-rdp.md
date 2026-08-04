@@ -1,3 +1,7 @@
+---
+title: Web RDP
+---
+
 # Web RDP 部署与安全边界
 
 Jianmen 的 Web RDP 使用 Apache Guacamole 的浏览器协议和 `guacd` RDP

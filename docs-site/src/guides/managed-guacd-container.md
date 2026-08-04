@@ -1,3 +1,7 @@
+---
+title: 托管 guacd 容器
+---
+
 # 单容器托管 guacd
 
 Jianmen 的容器镜像同时包含 Go 服务和 Apache Guacamole `guacd`。Go

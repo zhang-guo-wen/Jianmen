@@ -4,6 +4,10 @@
 
 > 当前处于 内测阶段，尚未发布正式版本。
 
+## 文档站
+
+项目说明文档托管在 GitHub Pages:仓库 **Settings → Pages → Source** 选择 **GitHub Actions** 后,推送 `main`/`dev` 分支(或手动运行 **Deploy Docs** 工作流)即可自动构建并部署。
+
 ## 功能特性
 
 ### 资源与账号管理

@@ -312,16 +312,6 @@ func Migrate(db *gorm.DB) error {
 			return fmt.Errorf("migration %s %s: %w", migration.Version, migration.Name, err)
 		}
 	}
-	// 幂等结构迁移：host_accounts.id 从单列主键迁移为 (id, active_marker)
-	// 复合唯一索引。生产启动只走版本化迁移链，因此这里必须显式执行。
-	if err := MigrateHostAccountIDActiveIndex(db); err != nil {
-		return fmt.Errorf("migrate host account id active index: %w", err)
-	}
-	// 重建包含 active_marker 的复合唯一索引（幂等，老库可能已跳过内含
-	// 该逻辑的旧版本迁移，需在链尾补齐）。
-	if err := MigrateAuditUniqueIndexes(db); err != nil {
-		return fmt.Errorf("migrate audit unique indexes: %w", err)
-	}
 	return nil
 }
 

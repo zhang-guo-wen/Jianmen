@@ -70,6 +70,17 @@ func initializeMetadata(cfg *config.Config, logger *slog.Logger) (*gorm.DB, stri
 		cleanup()
 		return nil, "", nil, fmt.Errorf("migrate metadata database: %w", err)
 	}
+	// 幂等结构迁移：host_accounts.id 主键迁移为 (id, active_marker) 复合
+	// 唯一索引、补齐含 active_marker 的复合唯一索引。版本化迁移链不覆盖
+	// 这两类迁移（测试走 AutoMigrate，生产在此显式执行）。
+	if err := storage.MigrateHostAccountIDActiveIndex(db); err != nil {
+		cleanup()
+		return nil, "", nil, fmt.Errorf("migrate host account id active index: %w", err)
+	}
+	if err := storage.MigrateAuditUniqueIndexes(db); err != nil {
+		cleanup()
+		return nil, "", nil, fmt.Errorf("migrate audit unique indexes: %w", err)
+	}
 	if err := storage.BootstrapMetadata(db, cfg); err != nil {
 		cleanup()
 		return nil, "", nil, fmt.Errorf("bootstrap metadata database: %w", err)

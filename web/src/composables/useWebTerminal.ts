@@ -60,6 +60,31 @@ function defaultTerminalOptions(cols: number, rows: number) {
   };
 }
 
+/**
+ * 终端键盘事件处理（纯函数，供 attachCustomKeyEventHandler 使用）。
+ *
+ * - Tab / Shift+Tab：阻止默认行为，直接发送补全序列。
+ * - Ctrl+V / Cmd+V：返回 false 解除 xterm 对该按键的绑定，不发送 ^V、不阻止默认
+ *   行为，让浏览器照常派发原生 paste 事件，由 xterm 内部剪贴板处理写入输入流
+ *   （参考 xterm.js#2478）。否则 xterm 会把 Ctrl+V 当作「插入下一个字面字符」
+ *   发送 ^V 并 preventDefault，浏览器将不再派发 paste 事件，粘贴内容无法进入终端。
+ */
+export function handleTerminalKeyEvent(event: KeyboardEvent, send: (data: string) => void): boolean {
+  if (event.type !== 'keydown') return true;
+
+  if (event.key === 'Tab') {
+    event.preventDefault();
+    send(event.shiftKey ? '\u001b[Z' : '\t');
+    return false;
+  }
+
+  if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key.toLowerCase() === 'v') {
+    return false;
+  }
+
+  return true;
+}
+
 export function useWebTerminal(opts: UseWebTerminalOptions): UseWebTerminalReturn {
   const terminal = ref<Terminal | null>(null);
   const status = ref<TerminalStatus>('idle');
@@ -86,12 +111,11 @@ export function useWebTerminal(opts: UseWebTerminalOptions): UseWebTerminalRetur
 
     term.open(container);
     term.attachCustomKeyEventHandler(event => {
-      if (event.key !== 'Tab') return true;
-      event.preventDefault();
-      if (event.type === 'keydown' && ws?.readyState === WebSocket.OPEN) {
-        ws.send(event.shiftKey ? '\u001b[Z' : '\t');
-      }
-      return false;
+      return handleTerminalKeyEvent(event, (data) => {
+        if (ws?.readyState === WebSocket.OPEN) {
+          ws.send(data);
+        }
+      });
     });
     fitAddon.fit();
 	terminal.value = term;

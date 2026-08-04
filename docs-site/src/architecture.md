@@ -260,7 +260,7 @@ web/src/
 3. 为旧结构升级、重复运行和失败重试编写迁移测试。
 4. 更新配置或 API 类型，最后更新 UI。
 
-业务表统一使用 `active_marker INT NULL DEFAULT 1` 作为逻辑删除字段：`1` 表示未删除，`NULL` 表示已逻辑删除，只允许这两种值。业务启停由 `status` 表达，手动停用不得改写 `active_marker`。查询、删除、唯一索引、迁移和三数据库类型映射的完整规则见[审计字段、逻辑删除与统一时间规范](2026-07-23-auditable-fields-design.md)。
+业务表统一使用 `active_marker INT NULL DEFAULT 1` 作为逻辑删除字段：`1` 表示未删除，`NULL` 表示已逻辑删除，只允许这两种值。业务启停由 `status` 表达，手动停用不得改写 `active_marker`。查询、删除、唯一索引、迁移和三数据库类型映射的完整规则见内部文档《审计字段、逻辑删除与统一时间规范》(docs/2026-07-23-auditable-fields-design.md)。
 
 业务和审计时间统一按 UTC 语义存入无时区列，数据库保留微秒；API 序列化和页面显示统一使用 `yyyy-MM-dd HH:mm:ss`，例如 `2006-05-05 11:02:05`。API 输出已经转换到系统业务时区，前端不得再按浏览器时区二次转换。
 
@@ -649,4 +649,3 @@ docker run -d \
 - [Web RDP 部署与安全边界](guides/web-rdp.md)
 - [托管 guacd 容器说明](guides/managed-guacd-container.md)
 - [容器与版本发布](guides/release.md)
-- [当前工作项](work-items.md)

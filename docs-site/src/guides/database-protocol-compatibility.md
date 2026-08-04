@@ -40,11 +40,11 @@ DBeaver 的 MySQL 连接使用 Connector/J 默认信任库和 `VERIFY_IDENTITY`�
 
 默认矩阵由以下测试实现：
 
-- [MySQL 实库矩阵](../internal/integration/mysql_proxy_integration_test.go)
-- [PostgreSQL 实库矩阵](../internal/integration/postgres_proxy_integration_test.go)
-- [Redis 实库矩阵](../internal/integration/redis_proxy_integration_test.go)
+- MySQL 实库矩阵(internal/integration/mysql_proxy_integration_test.go)
+- PostgreSQL 实库矩阵(internal/integration/postgres_proxy_integration_test.go)
+- Redis 实库矩阵(internal/integration/redis_proxy_integration_test.go)
 
-每个镜像版本都会分别经过统一入口与独立入口；监听器的启动、关闭、部分绑定失败回收、握手超时、协议误判防护和活动连接关闭另由 [监听器测试](../internal/server/dbproxy/listeners_test.go) 覆盖。
+每个镜像版本都会分别经过统一入口与独立入口；监听器的启动、关闭、部分绑定失败回收、握手超时、协议误判防护和活动连接关闭另由 internal/server/dbproxy/listeners_test.go 的监听器测试覆盖。
 
 ## 协议能力边界
 

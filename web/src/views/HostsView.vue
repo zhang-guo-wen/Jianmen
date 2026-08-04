@@ -594,6 +594,7 @@ import {
   type TargetRecord,
 } from "@/api/client";
 import { useI18n } from "@/i18n";
+import { buildConnectionTestPayload } from "@/utils/hostsConnectionTest";
 import { usePermissionStore } from "@/stores/permission";
 
 type AuthMethod = "password" | "private_key";
@@ -1706,7 +1707,10 @@ async function testConnection() {
   }
   const requestSequence = ++accountConnectionTestSequence;
   const requestedHostID = hostId(selectedHost.value);
-  const payload = buildAccountPayload();
+  const payload = buildConnectionTestPayload(
+    buildAccountPayload(),
+    !accountForm.id.trim(),
+  );
   const isCurrentRequest = () => (
     hostsViewActive
     && requestSequence === accountConnectionTestSequence

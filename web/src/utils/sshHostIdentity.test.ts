@@ -159,7 +159,8 @@ test('host account connection test snapshots payload and guards stale form state
   const testSource = source.slice(testStart, testEnd)
 
   assert.match(testSource, /if \(testingConnection\.value\) return/)
-  assert.match(testSource, /const payload = buildAccountPayload\(\)/)
+  assert.match(testSource, /const payload = buildConnectionTestPayload\(/)
+  assert.match(testSource, /buildAccountPayload\(\)/)
   assert.match(testSource, /runWithSSHHostIdentityRecovery/)
   assert.match(testSource, /accountFormVisible\.value/)
   assert.match(testSource, /hostsViewActive/)

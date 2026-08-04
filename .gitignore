@@ -27,5 +27,5 @@ internal/guacdruntime/assets/*.tar.gz
 .vite/
 .claude/worktrees/
 /.superpowers/
-/.worktrees/v1-backend/
+/.worktrees/
 /docs/superpowers/

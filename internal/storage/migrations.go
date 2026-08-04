@@ -317,6 +317,11 @@ func Migrate(db *gorm.DB) error {
 	if err := MigrateHostAccountIDActiveIndex(db); err != nil {
 		return fmt.Errorf("migrate host account id active index: %w", err)
 	}
+	// 重建包含 active_marker 的复合唯一索引（幂等，老库可能已跳过内含
+	// 该逻辑的旧版本迁移，需在链尾补齐）。
+	if err := MigrateAuditUniqueIndexes(db); err != nil {
+		return fmt.Errorf("migrate audit unique indexes: %w", err)
+	}
 	return nil
 }
 

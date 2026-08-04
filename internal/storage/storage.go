@@ -73,6 +73,10 @@ func AutoMigrate(db *gorm.DB) error {
 	if err := db.AutoMigrate(model.AllModels()...); err != nil {
 		return fmt.Errorf("auto migrate: %w", err)
 	}
+	// host_accounts.id 从单列主键迁移为 (id, active_marker) 复合唯一索引（幂等）。
+	if err := MigrateHostAccountIDActiveIndex(db); err != nil {
+		return fmt.Errorf("migrate host account id active index: %w", err)
+	}
 	// 重建包含 active_marker 的复合唯一索引（幂等）。
 	if err := MigrateAuditUniqueIndexes(db); err != nil {
 		return fmt.Errorf("migrate audit unique indexes: %w", err)

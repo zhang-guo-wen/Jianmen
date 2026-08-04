@@ -28,6 +28,7 @@ func allIndexMigrations() []uniqueIndexMigration {
 		// 资源模型
 		{table: "resources", indexName: "idx_resources_type_resource_id_active", columns: []string{"type", "resource_id", "active_marker"}},
 		{table: "resource_groups", indexName: "idx_resource_groups_name_type_active", columns: []string{"name", "group_type", "active_marker"}},
+		{table: "host_accounts", indexName: "idx_host_accounts_id_active", columns: []string{"id", "active_marker"}},
 		{table: "host_accounts", indexName: "idx_host_accounts_resource_id_active", columns: []string{"resource_id", "active_marker"}},
 		{table: "database_instances", indexName: "idx_database_instances_name_active", columns: []string{"name", "active_marker"}},
 		{table: "database_accounts", indexName: "idx_dba_instance_username_active", columns: []string{"instance_id", "username", "active_marker"}},
@@ -108,6 +109,11 @@ func MigrateAuditUniqueIndexes(db *gorm.DB) error {
 		bizCols := m.columns[:len(m.columns)-1] // 去掉 active_marker 得到业务列
 		for _, idx := range indexes {
 			if idx.Name() == m.indexName {
+				continue
+			}
+			// 主键/唯一约束的自动索引（sqlite_autoindex_*）无法单独删除，
+			// 只能通过表重建移除（见 MigrateHostAccountIDActiveIndex）。
+			if strings.HasPrefix(idx.Name(), "sqlite_autoindex_") {
 				continue
 			}
 			if !indexIsUnique(idx) {

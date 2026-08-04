@@ -1,0 +1,13 @@
+{
+  "name": "jianmen-docs",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "docs:dev": "vitepress dev src",
+    "docs:build": "vitepress build src"
+  },
+  "devDependencies": {
+    "vitepress": "^1.6.0"
+  }
+}

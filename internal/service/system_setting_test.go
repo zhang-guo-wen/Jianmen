@@ -328,6 +328,25 @@ func TestUnmarshalLegacySystemSettingsSnapshotDefaultsGatewayMode(t *testing.T) 
 	}
 }
 
+// TestSystemSettingsSnapshotRoundTripPreservesLoginCaptcha 校验快照序列化往返后
+// 登录验证码开关仍保持 true（此前 true 值仅经修订记录集成路径间接覆盖，
+// 旧版快照缺少该键时反序列化默认 false，本测试直接锁定 true 值不被丢失）。
+func TestSystemSettingsSnapshotRoundTripPreservesLoginCaptcha(t *testing.T) {
+	original := validSystemSettings()
+	original.LoginCaptchaEnabled = true
+	encoded, err := marshalSystemSettings(original)
+	if err != nil {
+		t.Fatalf("marshalSystemSettings() error = %v", err)
+	}
+	decoded, err := unmarshalSystemSettings(encoded)
+	if err != nil {
+		t.Fatalf("unmarshalSystemSettings() error = %v", err)
+	}
+	if !decoded.LoginCaptchaEnabled {
+		t.Fatalf("login captcha = %v, want true after round trip", decoded.LoginCaptchaEnabled)
+	}
+}
+
 func TestSystemSettingsUpdateUsesOptimisticRevision(t *testing.T) {
 	ctx := context.Background()
 	repository := &systemSettingsMemoryRepository{}

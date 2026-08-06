@@ -460,7 +460,8 @@ func changedSystemSettingFields(before, after SystemSettings) []string {
 }
 
 func riskySystemSettingFields(before, after SystemSettings) []string {
-	risky := make([]string, 0, 6)
+	// 风险字段条件分支共 9 个，按最大命中数预分配容量，避免反复扩容。
+	risky := make([]string, 0, 9)
 	if before.DatabaseGatewayClientTLSMode == config.DatabaseGatewayClientTLSModeRequired &&
 		after.DatabaseGatewayClientTLSMode == config.DatabaseGatewayClientTLSModeOptional {
 		risky = append(risky, "database_gateway_client_tls_mode")

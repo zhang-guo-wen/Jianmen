@@ -623,3 +623,48 @@ body {
 :root[data-theme="dark"] body {
   background: radial-gradient(circle at 82% 12%, rgb(14 116 144 / 15%), transparent 30%), var(--color-bg);
 }
+
+/* ---- SQL 编辑器(CodeMirror 6)---- */
+
+/* 行号执行按钮 gutter */
+.sql-exec-gutter {
+  width: 28px;
+}
+
+.sql-exec-marker {
+  display: grid;
+  width: 20px;
+  height: 20px;
+  margin: 2px auto;
+  padding: 0;
+  color: var(--color-primary);
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 10px;
+  place-items: center;
+}
+
+.sql-exec-marker:hover {
+  background: var(--color-primary-bg);
+}
+
+.sql-exec-marker:disabled {
+  color: var(--color-text-secondary);
+  cursor: not-allowed;
+}
+
+/* 当前语句虚线框(statementDecorator) */
+.cm-line.sql-stmt-line {
+  background: color-mix(in srgb, var(--color-primary) 8%, transparent);
+  border-left: 2px dashed var(--color-primary);
+}
+
+.cm-line.sql-stmt-line--first {
+  border-top: 1px dashed var(--color-primary);
+}
+
+.cm-line.sql-stmt-line--last {
+  border-bottom: 1px dashed var(--color-primary);
+}

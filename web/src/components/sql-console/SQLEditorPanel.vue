@@ -79,13 +79,25 @@ const schemaExtension = (metadata: readonly SQLTableMetadata[], dialect: 'mysql'
     schema: sqlSchemaFromMetadata(metadata),
   });
 
+/* 程序性回写抑制:父级 handleExecute 会把 sql 临时写为单条语句(composable 需读 sql.value),
+   须抑制该回写,避免整个编辑器缓冲被替换成被执行的单条语句。 */
+let suppressProgrammaticSync = false;
+let lastEmittedStatement = '';
+
+/* 记录并发出执行事件(父级收到后同步写回 sql,watch 依据标志识别并忽略该回写) */
+function emitStatement(text: string): void {
+  lastEmittedStatement = text;
+  suppressProgrammaticSync = true;
+  emit('execute', text);
+}
+
 /* 执行当前语句(Ctrl+Enter / 工具栏执行按钮) */
 function executeCurrentStatement(): void {
   if (!view) return;
   const statements = parseSQLStatements(view.state.doc.toString());
   const current = statementAtPosition(statements, view.state.selection.main.head);
   if (!current) return;
-  emit('execute', current.text);
+  emitStatement(current.text);
 }
 
 /* 执行指定语句(gutter 点击) */
@@ -93,7 +105,7 @@ function executeStatement(range: { from: number }): void {
   if (!view) return;
   const statements = parseSQLStatements(view.state.doc.toString());
   const target = statements.find((s) => s.from === range.from);
-  if (target) emit('execute', target.text);
+  if (target) emitStatement(target.text);
 }
 
 function isDarkTheme(): boolean {
@@ -134,9 +146,14 @@ onMounted(() => {
       }),
     ],
   });
-  /* 外部修改 sql 时同步进编辑器 */
+  /* 外部修改 sql 时同步进编辑器(忽略执行语句引起的程序性回写,保留多语句全文) */
   stopHandles.push(watch(sql, (value) => {
     if (!view) return;
+    if (suppressProgrammaticSync && value.trim() === lastEmittedStatement.trim()) {
+      suppressProgrammaticSync = false;
+      return;
+    }
+    suppressProgrammaticSync = false;
     const current = view.state.doc.toString();
     if (value !== current) {
       view.dispatch({ changes: { from: 0, to: current.length, insert: value } });

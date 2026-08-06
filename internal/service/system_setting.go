@@ -31,6 +31,7 @@ var (
 var systemSettingFieldNames = []string{
 	"database_gateway_mode",
 	"database_gateway_client_tls_mode",
+	"login_captcha_enabled",
 	"web_rdp_enabled",
 	"web_rdp_connect_timeout_seconds",
 	"web_rdp_allow_unrecorded",
@@ -46,6 +47,7 @@ var systemSettingFieldNames = []string{
 type SystemSettings struct {
 	DatabaseGatewayMode           string
 	DatabaseGatewayClientTLSMode  string
+	LoginCaptchaEnabled           bool
 	WebRDPEnabled                 bool
 	WebRDPConnectTimeoutSeconds   int
 	WebRDPAllowUnrecorded         bool
@@ -347,6 +349,9 @@ func changedSystemSettingFields(before, after SystemSettings) []string {
 	if before.DatabaseGatewayClientTLSMode != after.DatabaseGatewayClientTLSMode {
 		changed = append(changed, "database_gateway_client_tls_mode")
 	}
+	if before.LoginCaptchaEnabled != after.LoginCaptchaEnabled {
+		changed = append(changed, "login_captcha_enabled")
+	}
 	if before.WebRDPEnabled != after.WebRDPEnabled {
 		changed = append(changed, "web_rdp_enabled")
 	}
@@ -386,6 +391,9 @@ func riskySystemSettingFields(before, after SystemSettings) []string {
 		after.DatabaseGatewayClientTLSMode == config.DatabaseGatewayClientTLSModeOptional {
 		risky = append(risky, "database_gateway_client_tls_mode")
 	}
+	if before.LoginCaptchaEnabled && !after.LoginCaptchaEnabled {
+		risky = append(risky, "login_captcha_enabled")
+	}
 	if !before.WebRDPAllowUnrecorded && after.WebRDPAllowUnrecorded {
 		risky = append(risky, "web_rdp_allow_unrecorded")
 	}
@@ -419,6 +427,7 @@ func systemSettingModel(settings SystemSettings, actor SystemSettingsActor) mode
 		ID:                            model.SystemSettingSingletonID,
 		DatabaseGatewayMode:           settings.DatabaseGatewayMode,
 		DatabaseGatewayClientTLSMode:  settings.DatabaseGatewayClientTLSMode,
+		LoginCaptchaEnabled:           settings.LoginCaptchaEnabled,
 		WebRDPEnabled:                 settings.WebRDPEnabled,
 		WebRDPConnectTimeoutSeconds:   settings.WebRDPConnectTimeoutSeconds,
 		WebRDPAllowUnrecorded:         settings.WebRDPAllowUnrecorded,
@@ -445,6 +454,7 @@ func systemSettingsFromModel(setting model.SystemSetting) SystemSettings {
 	return SystemSettings{
 		DatabaseGatewayMode:           mode,
 		DatabaseGatewayClientTLSMode:  clientTLSMode,
+		LoginCaptchaEnabled:           setting.LoginCaptchaEnabled,
 		WebRDPEnabled:                 setting.WebRDPEnabled,
 		WebRDPConnectTimeoutSeconds:   setting.WebRDPConnectTimeoutSeconds,
 		WebRDPAllowUnrecorded:         setting.WebRDPAllowUnrecorded,

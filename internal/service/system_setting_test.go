@@ -486,6 +486,40 @@ func newTestSystemSettingsServiceWithModes(
 	return svc
 }
 
+func TestSystemSettingsDisableLoginCaptchaRequiresRiskConfirmation(t *testing.T) {
+	ctx := context.Background()
+	repository := &systemSettingsMemoryRepository{}
+	svc := newTestSystemSettingsService(t, repository, time.Now())
+	baseline := validSystemSettings()
+	baseline.LoginCaptchaEnabled = true
+	if _, err := svc.Bootstrap(ctx, baseline); err != nil {
+		t.Fatalf("Bootstrap() error = %v", err)
+	}
+
+	desired := baseline
+	desired.LoginCaptchaEnabled = false
+	_, err := svc.Update(ctx, SystemSettingsUpdate{
+		Settings: desired, ExpectedRevision: 1,
+	})
+	if !errors.Is(err, ErrSystemSettingsRiskConfirmationRequired) ||
+		!strings.Contains(err.Error(), "login_captcha_enabled") {
+		t.Fatalf("Update() error = %v, want login captcha confirmation", err)
+	}
+	if repository.setting.Revision != 1 || len(repository.revisions) != 1 {
+		t.Fatalf("unconfirmed change was persisted: %#v", repository)
+	}
+
+	state, err := svc.Update(ctx, SystemSettingsUpdate{
+		Settings: desired, ExpectedRevision: 1, ConfirmRisk: true,
+	})
+	if err != nil {
+		t.Fatalf("confirmed Update() error = %v", err)
+	}
+	if state.Desired.LoginCaptchaEnabled {
+		t.Fatalf("desired captcha = %v, want false", state.Desired.LoginCaptchaEnabled)
+	}
+}
+
 func validSystemSettings() SystemSettings {
 	return SystemSettings{
 		DatabaseGatewayMode:           "unified",

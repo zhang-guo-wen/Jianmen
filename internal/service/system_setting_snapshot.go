@@ -10,6 +10,7 @@ import (
 type systemSettingsSnapshot struct {
 	DatabaseGatewayMode           string `json:"database_gateway_mode"`
 	DatabaseGatewayClientTLSMode  string `json:"database_gateway_client_tls_mode"`
+	LoginCaptchaEnabled           bool   `json:"login_captcha_enabled"`
 	WebRDPEnabled                 bool   `json:"web_rdp_enabled"`
 	WebRDPConnectTimeoutSeconds   int    `json:"web_rdp_connect_timeout_seconds"`
 	WebRDPAllowUnrecorded         bool   `json:"web_rdp_allow_unrecorded"`
@@ -48,6 +49,7 @@ func snapshotFromSystemSettings(settings SystemSettings) systemSettingsSnapshot 
 	return systemSettingsSnapshot{
 		DatabaseGatewayMode:           settings.DatabaseGatewayMode,
 		DatabaseGatewayClientTLSMode:  settings.DatabaseGatewayClientTLSMode,
+		LoginCaptchaEnabled:           settings.LoginCaptchaEnabled,
 		WebRDPEnabled:                 settings.WebRDPEnabled,
 		WebRDPConnectTimeoutSeconds:   settings.WebRDPConnectTimeoutSeconds,
 		WebRDPAllowUnrecorded:         settings.WebRDPAllowUnrecorded,
@@ -69,6 +71,7 @@ func (snapshot systemSettingsSnapshot) systemSettings() SystemSettings {
 	return SystemSettings{
 		DatabaseGatewayMode:           snapshot.DatabaseGatewayMode,
 		DatabaseGatewayClientTLSMode:  snapshot.DatabaseGatewayClientTLSMode,
+		LoginCaptchaEnabled:           snapshot.LoginCaptchaEnabled,
 		WebRDPEnabled:                 snapshot.WebRDPEnabled,
 		WebRDPConnectTimeoutSeconds:   snapshot.WebRDPConnectTimeoutSeconds,
 		WebRDPAllowUnrecorded:         snapshot.WebRDPAllowUnrecorded,

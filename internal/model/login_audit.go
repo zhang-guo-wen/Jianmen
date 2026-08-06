@@ -7,9 +7,9 @@ type LoginAuditLog struct {
 	ID         string    `gorm:"primaryKey;size:64" json:"id"`
 	UserID     string    `gorm:"index;size:64" json:"user_id,omitempty"`
 	Username   string    `gorm:"index;size:128;not null" json:"username"`
-	Phase      string    `gorm:"index;size:16;not null;default:''" json:"phase,omitempty"`
+	Phase      string    `gorm:"index;index:idx_audit_login_logs_phase_intent,priority:1;size:16;not null;default:''" json:"phase,omitempty"`
 	Result     string    `gorm:"index;size:32;not null;default:''" json:"result,omitempty"`
-	IntentID   string    `gorm:"index;size:64;not null;default:''" json:"intent_id,omitempty"`
+	IntentID   string    `gorm:"index;index:idx_audit_login_logs_phase_intent,priority:2;size:64;not null;default:''" json:"intent_id,omitempty"`
 	RequestID  string    `gorm:"index;size:64;not null;default:''" json:"request_id,omitempty"`
 	StatusCode int       `gorm:"not null;default:0" json:"status_code,omitempty"`
 	Outcome    string    `gorm:"index;size:32;not null" json:"outcome"`

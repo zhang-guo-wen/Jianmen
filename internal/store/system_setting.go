@@ -230,6 +230,7 @@ func systemSettingUpdateColumns(setting model.SystemSetting) map[string]any {
 	return map[string]any{
 		"database_gateway_mode":             strings.TrimSpace(setting.DatabaseGatewayMode),
 		"database_gateway_client_tls_mode":  strings.TrimSpace(setting.DatabaseGatewayClientTLSMode),
+		"login_captcha_enabled":             setting.LoginCaptchaEnabled,
 		"web_rdp_enabled":                   setting.WebRDPEnabled,
 		"web_rdp_connect_timeout_seconds":   setting.WebRDPConnectTimeoutSeconds,
 		"web_rdp_allow_unrecorded":          setting.WebRDPAllowUnrecorded,

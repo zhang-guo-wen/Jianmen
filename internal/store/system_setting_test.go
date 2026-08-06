@@ -111,6 +111,48 @@ func TestSystemSettingStoreLifecycle(t *testing.T) {
 	}
 }
 
+// TestSystemSettingLoginCaptchaPersistence 验证登录验证码开关经 UpdateSystemSetting
+// 更新后真正写入数据库：重新 LoadSystemSetting 应读到 true，而不是仅内存生效。
+func TestSystemSettingLoginCaptchaPersistence(t *testing.T) {
+	db := openSystemSettingStoreDatabase(t)
+	repository := NewDBStore(db)
+	ctx := context.Background()
+	createdAt := time.Now().UTC()
+	initial := systemSettingStoreFixture()
+	if _, _, err := repository.InitializeSystemSetting(
+		ctx,
+		initial,
+		systemSettingRevisionFixture(1, createdAt),
+	); err != nil {
+		t.Fatalf("InitializeSystemSetting() error = %v", err)
+	}
+
+	changed := initial
+	changed.LoginCaptchaEnabled = true
+	changedAt := createdAt.Add(time.Minute)
+	if _, updated, err := repository.UpdateSystemSetting(
+		ctx,
+		1,
+		changed,
+		systemSettingRevisionFixture(2, changedAt),
+	); err != nil {
+		t.Fatalf("UpdateSystemSetting() error = %v", err)
+	} else if !updated {
+		t.Fatal("UpdateSystemSetting() 未生效")
+	}
+
+	reloaded, found, err := repository.LoadSystemSetting(ctx)
+	if err != nil {
+		t.Fatalf("LoadSystemSetting() error = %v", err)
+	}
+	if !found {
+		t.Fatal("LoadSystemSetting() 未找到系统设置")
+	}
+	if !reloaded.LoginCaptchaEnabled {
+		t.Fatal("登录验证码开关未持久化：重新加载后 LoginCaptchaEnabled = false，期望 true")
+	}
+}
+
 func TestSystemSettingStoreRollsBackWhenRevisionInsertFails(t *testing.T) {
 	db := openSystemSettingStoreDatabase(t)
 	repository := NewDBStore(db)

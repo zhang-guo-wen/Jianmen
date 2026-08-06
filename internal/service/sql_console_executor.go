@@ -430,18 +430,18 @@ func querySQLConsole(ctx context.Context, db *sql.DB, statement string) (SQLCons
 }
 
 type SQLConsoleMetadata struct {
-	Tables []SQLConsoleTableMeta
+	Tables []SQLConsoleTableMeta `json:"tables"`
 }
 
 type SQLConsoleTableMeta struct {
-	Name    string
-	Detail  string
-	Columns []SQLConsoleColumnMeta
+	Name    string                 `json:"name"`
+	Detail  string                 `json:"detail"`
+	Columns []SQLConsoleColumnMeta `json:"columns"`
 }
 
 type SQLConsoleColumnMeta struct {
-	Name string
-	Type string
+	Name string `json:"name"`
+	Type string `json:"type"`
 }
 
 // isPostgresProtocol 判断协议是否为 PostgreSQL(兼容 postgresql 写法)。

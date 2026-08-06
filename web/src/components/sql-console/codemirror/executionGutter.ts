@@ -1,6 +1,7 @@
 import { StateEffect, StateField, RangeSetBuilder, type Extension } from '@codemirror/state';
 import { GutterMarker, gutter, type EditorView } from '@codemirror/view';
 
+import { t } from '@/i18n';
 import { parseSQLStatements, type SQLStatementRange } from '@/utils/sqlStatements';
 
 /** 设置当前执行中的语句 from 偏移(null 表示清除)。 */
@@ -50,7 +51,7 @@ class ExecuteMarker extends GutterMarker {
     const button = document.createElement('button');
     button.type = 'button';
     button.className = 'sql-exec-marker';
-    button.title = this.executing ? '执行中…' : '执行此语句';
+    button.title = this.executing ? '执行中…' : t('sqlConsole.executeStatement');
     button.textContent = this.executing ? '…' : '▶';
     button.disabled = this.executing;
     button.addEventListener('click', (event) => {

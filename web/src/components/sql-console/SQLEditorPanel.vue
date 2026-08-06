@@ -19,7 +19,7 @@ import { statementDecorator } from './codemirror/statementDecorator';
 const props = withDefaults(defineProps<{
   executing: boolean;
   disabled: boolean;
-  metadata?: SQLTableMetadata[];
+  metadata?: readonly SQLTableMetadata[];
   dialect?: 'mysql' | 'postgres';
 }>(), {
   metadata: () => [],
@@ -73,7 +73,7 @@ const themeExtensions = (dark: boolean): Extension => [
 
 /* 补全 schema 动态切换 */
 const schemaCompartment = new Compartment();
-const schemaExtension = (metadata: SQLTableMetadata[], dialect: 'mysql' | 'postgres'): Extension =>
+const schemaExtension = (metadata: readonly SQLTableMetadata[], dialect: 'mysql' | 'postgres'): Extension =>
   sqlLanguage({
     dialect: dialect === 'postgres' ? PostgreSQL : MySQL,
     schema: sqlSchemaFromMetadata(metadata),

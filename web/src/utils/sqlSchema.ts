@@ -1,8 +1,8 @@
-/** 单张表的元数据(与后端接口返回对齐)。 */
+/** 单张表的元数据(与后端接口返回对齐;字段只读,消费方仅作只读展示/补全)。 */
 export interface SQLTableMetadata {
-  name: string;
-  detail?: string;
-  columns: { name: string; type: string }[];
+  readonly name: string;
+  readonly detail?: string;
+  readonly columns: readonly { readonly name: string; readonly type: string }[];
 }
 
 interface SchemaColumn {

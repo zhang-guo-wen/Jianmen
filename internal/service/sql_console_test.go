@@ -85,6 +85,9 @@ func (s *sqlConsoleExecutorStub) Connect(context.Context, model.DatabaseAccount)
 
 func (s *sqlConsoleConnectionStub) Databases() []string     { return []string{"app", "reporting"} }
 func (s *sqlConsoleConnectionStub) DefaultDatabase() string { return "app" }
+func (s *sqlConsoleConnectionStub) Metadata(context.Context, string) (SQLConsoleMetadata, error) {
+	return SQLConsoleMetadata{}, nil
+}
 func (s *sqlConsoleConnectionStub) Close() error {
 	s.closed++
 	return nil

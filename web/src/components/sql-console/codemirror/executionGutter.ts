@@ -1,5 +1,5 @@
 import { StateEffect, StateField, RangeSetBuilder, type Extension } from '@codemirror/state';
-import { GutterMarker, gutter } from '@codemirror/view';
+import { GutterMarker, gutter, type EditorView } from '@codemirror/view';
 
 import { parseSQLStatements, type SQLStatementRange } from '@/utils/sqlStatements';
 
@@ -39,14 +39,14 @@ class ExecuteMarker extends GutterMarker {
   constructor(
     readonly from: number,
     readonly executing: boolean,
-    readonly onExecute: (from: number) => void,
+    readonly onExecute: (statement: SQLStatementRange) => void,
   ) {
     super();
   }
   override eq(other: ExecuteMarker): boolean {
     return other.from === this.from && other.executing === this.executing;
   }
-  override toDOM(): HTMLElement {
+  override toDOM(view: EditorView): HTMLElement {
     const button = document.createElement('button');
     button.type = 'button';
     button.className = 'sql-exec-marker';
@@ -55,7 +55,12 @@ class ExecuteMarker extends GutterMarker {
     button.disabled = this.executing;
     button.addEventListener('click', (event) => {
       event.stopPropagation();
-      this.onExecute(this.from);
+      // 关键:gutter 在 eq 命中时会复用既有按钮 DOM 而不再调用 toDOM,
+      // 因此这里不能使用创建时的语句快照(陈旧闭包)。必须基于当前
+      // view.state 重新解析,否则编辑文档后点击执行的是旧语句文本。
+      const statements = parseSQLStatements(view.state.doc.toString());
+      const target = statements.find((statement) => statement.from === this.from);
+      if (target) this.onExecute(target);
     });
     return button;
   }
@@ -64,25 +69,26 @@ class ExecuteMarker extends GutterMarker {
 /**
  * 行号执行按钮:每条语句起始行一个 ▶(执行中显示 … 并禁用)。
  *
+ * 返回的扩展自带 executingStatement 状态字段,消费方无需再手动挂载。
  * 注意:gutter 的 `markers` 在本版本(@codemirror/view 6.43+)要求返回
  * `RangeSet<GutterMarker>`,且 marker 的 range 起点必须恰好等于目标行的
  * 行首偏移,否则该按钮不会渲染到对应行。
  */
 export function executionGutter(options: { onExecute: (statement: SQLStatementRange) => void }): Extension {
-  return gutter({
-    class: 'sql-exec-gutter',
-    markers: (view) => {
-      const statements = parseSQLStatements(view.state.doc.toString());
-      const executingFrom = view.state.field(executingStatement, false) ?? null;
-      const builder = new RangeSetBuilder<GutterMarker>();
-      for (const spec of gutterMarkersFor(statements, executingFrom)) {
-        const line = view.state.doc.lineAt(spec.from);
-        builder.add(line.from, line.from, new ExecuteMarker(spec.from, spec.executing, (from) => {
-          const target = statements.find((statement) => statement.from === from);
-          if (target) options.onExecute(target);
-        }));
-      }
-      return builder.finish();
-    },
-  });
+  return [
+    executingStatement,
+    gutter({
+      class: 'sql-exec-gutter',
+      markers: (view) => {
+        const statements = parseSQLStatements(view.state.doc.toString());
+        const executingFrom = view.state.field(executingStatement, false) ?? null;
+        const builder = new RangeSetBuilder<GutterMarker>();
+        for (const spec of gutterMarkersFor(statements, executingFrom)) {
+          const line = view.state.doc.lineAt(spec.from);
+          builder.add(line.from, line.from, new ExecuteMarker(spec.from, spec.executing, options.onExecute));
+        }
+        return builder.finish();
+      },
+    }),
+  ];
 }

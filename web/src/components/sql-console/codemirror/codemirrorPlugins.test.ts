@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
 import { EditorState } from '@codemirror/state';
+import { EditorView } from '@codemirror/view';
 import { describe, it } from 'vitest';
 
-import { parseSQLStatements } from '@/utils/sqlStatements';
+import { parseSQLStatements, type SQLStatementRange } from '@/utils/sqlStatements';
 
 import {
   executingStatement,
@@ -138,14 +139,79 @@ describe('statementDecoField 状态层集成', () => {
 });
 
 describe('executionGutter 扩展', () => {
+  it('扩展自带 executingStatement 字段,无需手动挂载即可读取与更新', () => {
+    const state = EditorState.create({
+      doc: DOC,
+      extensions: [executionGutter({ onExecute: () => {} })],
+    });
+    assert.equal(state.field(executingStatement, false), null);
+    const next = state.update({ effects: setExecutingStatement.of(10) }).state;
+    assert.equal(next.field(executingStatement, false), 10);
+  });
+
   it('可随 EditorState 创建而不抛错(按钮 DOM 渲染依赖真实视图)', () => {
     const state = EditorState.create({
       doc: DOC,
-      extensions: [
-        executingStatement,
-        executionGutter({ onExecute: () => {} }),
-      ],
+      extensions: [executionGutter({ onExecute: () => {} })],
     });
     assert.ok(state);
+  });
+});
+
+describe('executionGutter 执行按钮(真实视图)', () => {
+  it('编辑文档后点击按钮,执行的是最新语句文本(修复陈旧闭包)', () => {
+    // 用属性持有者记录回调入参:闭包赋值的变量会被 TS 收窄为 never,
+    // 且声明字面量收窄会绕过 assert.ok 的窄化,故不直接使用 let。
+    const executed: { statement: SQLStatementRange | null } = { statement: null };
+    const view = new EditorView({
+      doc: 'SELECT 1;',
+      parent: document.body,
+      extensions: [
+        executionGutter({
+          onExecute: (statement) => {
+            executed.statement = statement;
+          },
+        }),
+      ],
+    });
+    try {
+      const button = view.dom.querySelector<HTMLButtonElement>('button.sql-exec-marker');
+      assert.ok(button, '首次渲染后应存在执行按钮');
+      // 编辑文档:语句 from 仍为 0,但文本从 SELECT 1; 变为 SELECT 11;。
+      // 语句位置与执行状态均未变,按钮 DOM 被复用,必须由点击处理器
+      // 基于当前 view.state 重新解析,否则执行的是编辑前的旧文本。
+      view.dispatch({ changes: { from: 7, to: 8, insert: '11' } });
+      button.click();
+      assert.ok(executed.statement, '点击后应触发 onExecute');
+      assert.equal(executed.statement!.from, 0);
+      assert.equal(executed.statement!.text, 'SELECT 11;');
+    } finally {
+      view.destroy();
+    }
+  });
+
+  it('按钮对应语句已不存在时,点击为安全无操作', () => {
+    let executed = 0;
+    const view = new EditorView({
+      doc: 'SELECT 1;',
+      parent: document.body,
+      extensions: [
+        executionGutter({
+          onExecute: () => {
+            executed++;
+          },
+        }),
+      ],
+    });
+    try {
+      const button = view.dom.querySelector<HTMLButtonElement>('button.sql-exec-marker');
+      assert.ok(button);
+      // 将语句整体替换为注释:原 from 0 处不再存在 Statement 节点。
+      view.dispatch({ changes: { from: 0, to: 9, insert: '-- SELECT 1;' } });
+      button.click();
+      assert.equal(executed, 0);
+    } finally {
+      view.destroy();
+    }
   });
 });

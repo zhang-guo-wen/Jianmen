@@ -40,6 +40,31 @@ func TestParseMetadataTables(t *testing.T) {
 	}
 }
 
+func TestParseMetadataTablesSkipsInvalidRows(t *testing.T) {
+	tables := [][]any{
+		{"users", "系统用户"},
+		{},           // 短行:跳过
+		{42, "数字表名"}, // 表名非字符串:跳过
+	}
+	columns := [][]any{
+		{"users", "id", "bigint"},
+		{"users", "name"},    // 短行:跳过
+		{"users", 42, "int"}, // 列名非字符串:跳过
+		{123, "x", "int"},    // 表名非字符串:跳过
+		{"orders", "id", "int"},
+	}
+	meta := parseMetadataTables("mysql", tables, columns)
+	if len(meta.Tables) != 1 {
+		t.Fatalf("期望 1 张表(短行/非字符串表名被跳过),实际 %d", len(meta.Tables))
+	}
+	if meta.Tables[0].Name != "users" || len(meta.Tables[0].Columns) != 1 {
+		t.Fatalf("users 表解析错误: %+v", meta.Tables[0])
+	}
+	if meta.Tables[0].Columns[0].Name != "id" || meta.Tables[0].Columns[0].Type != "bigint" {
+		t.Fatalf("列解析错误(短行/非字符串列被跳过): %+v", meta.Tables[0].Columns)
+	}
+}
+
 func TestParseMetadataTablesTruncated(t *testing.T) {
 	tables := make([][]any, 0, 600)
 	for i := 0; i < 600; i++ {

@@ -51,7 +51,7 @@ class ExecuteMarker extends GutterMarker {
     const button = document.createElement('button');
     button.type = 'button';
     button.className = 'sql-exec-marker';
-    button.title = this.executing ? '执行中…' : t('sqlConsole.executeStatement');
+    button.title = this.executing ? t('sqlConsole.executing') : t('sqlConsole.executeStatement');
     button.textContent = this.executing ? '…' : '▶';
     button.disabled = this.executing;
     button.addEventListener('click', (event) => {

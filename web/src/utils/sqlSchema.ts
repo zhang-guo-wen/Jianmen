@@ -20,6 +20,7 @@ interface SchemaTable {
 export function sqlSchemaFromMetadata(tables: readonly SQLTableMetadata[]): Record<string, SchemaTable> {
   const schema: Record<string, SchemaTable> = {};
   for (const table of tables) {
+    // 按表名索引,后出现的同名表覆盖前者;数据库 schema 已由后端过滤,正常无同名。
     schema[table.name] = {
       self: { label: table.name, type: 'table' },
       children: table.columns.map((column) => ({

@@ -39,8 +39,7 @@ const container = ref<HTMLElement | null>(null);
 
 /* 主题(浅/深):跟随 documentElement[data-theme],复用全局 CSS 变量 */
 const themeCompartment = new Compartment();
-const themeExtensions = (dark: boolean): Extension => [
-  EditorView.theme(
+const themeExtensions = (dark: boolean): Extension => [  EditorView.theme(
     {
       '&': { fontSize: '13px', backgroundColor: 'var(--color-surface)', color: 'var(--color-text)' },
       '.cm-gutters': { backgroundColor: 'var(--color-surface-muted)', color: 'var(--color-text-secondary)', borderRight: '1px solid var(--color-border)' },
@@ -71,6 +70,10 @@ const themeExtensions = (dark: boolean): Extension => [
   ),
 ];
 
+/* 可编辑性控制:执行期间禁用编辑(与基线 textarea :disabled="executing" 对齐),
+   避免写确认弹窗期间用户编辑文本与 composable 的 sql.value 不一致,重发语句与弹窗展示相悖 */
+const editableCompartment = new Compartment();
+
 /* 补全 schema 动态切换 */
 const schemaCompartment = new Compartment();
 const schemaExtension = (metadata: readonly SQLTableMetadata[], dialect: 'mysql' | 'postgres'): Extension =>
@@ -84,9 +87,15 @@ const schemaExtension = (metadata: readonly SQLTableMetadata[], dialect: 'mysql'
 let suppressProgrammaticSync = false;
 let lastEmittedStatement = '';
 
+/* 最近一次执行语句的 from 偏移(执行状态 → gutter loading 定位)。
+   与 emitStatement 同步记录,避免点击非光标所在语句的 ▶ 时,
+   loading 错误地显示在光标所在的语句上;执行结束(executing=false)时清除。 */
+let lastExecutedFrom: number | null = null;
+
 /* 记录并发出执行事件(父级收到后同步写回 sql,watch 依据标志识别并忽略该回写) */
-function emitStatement(text: string): void {
+function emitStatement(text: string, from: number | null): void {
   lastEmittedStatement = text;
+  lastExecutedFrom = from;
   suppressProgrammaticSync = true;
   emit('execute', text);
 }
@@ -97,7 +106,7 @@ function executeCurrentStatement(): void {
   const statements = parseSQLStatements(view.state.doc.toString());
   const current = statementAtPosition(statements, view.state.selection.main.head);
   if (!current) return;
-  emitStatement(current.text);
+  emitStatement(current.text, current.from);
 }
 
 /* 执行指定语句(gutter 点击) */
@@ -105,7 +114,7 @@ function executeStatement(range: { from: number }): void {
   if (!view) return;
   const statements = parseSQLStatements(view.state.doc.toString());
   const target = statements.find((s) => s.from === range.from);
-  if (target) emitStatement(target.text);
+  if (target) emitStatement(target.text, target.from);
 }
 
 function isDarkTheme(): boolean {
@@ -135,6 +144,7 @@ onMounted(() => {
         { key: 'Mod-Enter', run: () => { executeCurrentStatement(); return true; } },
       ]),
       themeCompartment.of(themeExtensions(initialDark)),
+      editableCompartment.of(EditorView.editable.of(!props.executing)),
       schemaCompartment.of(schemaExtension(props.metadata, props.dialect)),
       statementDecorator(),
       executionGutter({ onExecute: executeStatement }),
@@ -166,9 +176,17 @@ onMounted(() => {
   });
   observer.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
   stopHandles.push(() => observer.disconnect());
-  /* 执行状态 → gutter loading(执行中高亮光标所在语句的按钮) */
+  /* 执行状态 → 禁用编辑 + gutter loading。
+     loading 优先定位最近执行的语句(lastExecutedFrom),回退到光标所在语句;
+     执行结束清除 lastExecutedFrom,避免下次执行误用旧位置。 */
   stopHandles.push(watch(() => props.executing, (executing) => {
-    view?.dispatch({ effects: setExecutingStatement.of(executing ? executingFrom() : null) });
+    view?.dispatch({
+      effects: [
+        editableCompartment.reconfigure(EditorView.editable.of(!executing)),
+        setExecutingStatement.of(executing ? (lastExecutedFrom ?? executingFrom()) : null),
+      ],
+    });
+    if (!executing) lastExecutedFrom = null;
   }));
   /* 元数据/方言更新 → 补全重建 */
   stopHandles.push(watch(() => [props.metadata, props.dialect], () => {

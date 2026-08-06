@@ -1,6 +1,8 @@
+import { EditorView } from '@codemirror/view';
 import { mount } from '@vue/test-utils';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { executingStatement } from './codemirror/executionGutter';
 import SQLEditorPanel from './SQLEditorPanel.vue';
 
 /** 编辑器视图类型(仅测试所需的最小结构) */
@@ -68,5 +70,37 @@ describe('SQLEditorPanel (CodeMirror 6)', () => {
     expect(view!.state.doc.toString()).toBe('SELECT 1;\nSELECT 2;');
     // modelValue 变为被执行的语句文本(与父组件 handleExecute 落盘语义一致)
     expect(wrapper.props('modelValue')).toBe('SELECT 1;');
+  });
+
+  it('执行期间编辑器不可编辑,结束后恢复(基线 textarea :disabled 回归)', async () => {
+    const wrapper = mount(SQLEditorPanel, {
+      props: { modelValue: 'SELECT 1;', executing: false, disabled: false, metadata: [], dialect: 'mysql' },
+    });
+    const view = (wrapper.vm as unknown as { getView(): EditorView | null }).getView();
+    expect(view).toBeTruthy();
+    expect(view!.state.facet(EditorView.editable)).toBe(true);
+    await wrapper.setProps({ executing: true });
+    expect(view!.state.facet(EditorView.editable)).toBe(false);
+    await wrapper.setProps({ executing: false });
+    expect(view!.state.facet(EditorView.editable)).toBe(true);
+  });
+
+  it('gutter 点击非光标所在语句执行时,loading 定位到被执行的语句(而非光标语句)', async () => {
+    const wrapper = mount(SQLEditorPanel, {
+      props: { modelValue: 'SELECT 1;\nSELECT 2;', executing: false, disabled: false, metadata: [], dialect: 'mysql' },
+    });
+    // 光标默认在文档开头(语句 1),点击第二条语句的 ▶(gutter 第二个按钮)
+    const markers = wrapper.findAll('.sql-exec-gutter .sql-exec-marker');
+    expect(markers.length).toBe(2);
+    await markers[1].trigger('click');
+    await wrapper.setProps({ executing: true });
+    const view = (wrapper.vm as unknown as { getView(): EditorView | null }).getView();
+    expect(view).toBeTruthy();
+    // loading 应定位到语句 2 的 from 偏移(10),而非光标所在的语句 1(0)
+    expect(view!.state.field(executingStatement, false)).toBe(10);
+    // 仅语句 2 的按钮显示执行中(禁用)
+    expect(wrapper.findAll('.sql-exec-marker[disabled]').length).toBe(1);
+    await wrapper.setProps({ executing: false });
+    expect(view!.state.field(executingStatement, false)).toBe(null);
   });
 });

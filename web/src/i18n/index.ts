@@ -167,6 +167,7 @@ const zhCN = {
   'sqlConsole.executionFailed': 'SQL 执行失败',
   'sqlConsole.executionSucceeded': '执行完成',
   'sqlConsole.executeStatement': '执行此语句',
+  'sqlConsole.executing': '执行中…',
   'sqlConsole.keyboardHint': 'Ctrl / ⌘ + Enter 执行光标所在语句 · 行号 ▶ 执行单条语句',
   'sqlConsole.noResult': '执行 SQL 后，结果将在这里显示',
   'sqlConsole.readOnly': '只读查询',

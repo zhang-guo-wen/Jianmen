@@ -476,14 +476,30 @@ func parseMetadataTables(protocol string, tablesRows [][]any, columnsRows [][]an
 	meta := SQLConsoleMetadata{Tables: make([]SQLConsoleTableMeta, 0, len(tablesRows))}
 	index := make(map[string]int, len(tablesRows))
 	for _, row := range tablesRows {
-		name, _ := row[0].(string)
+		// 行长度守卫与类型断言 ok 检查:短行/非字符串表名直接跳过,避免越界与静默丢数据。
+		if len(row) < 2 {
+			continue
+		}
+		name, ok := row[0].(string)
+		if !ok {
+			continue
+		}
 		detail, _ := row[1].(string)
 		meta.Tables = append(meta.Tables, SQLConsoleTableMeta{Name: name, Detail: detail})
 		index[name] = len(meta.Tables) - 1
 	}
 	for _, row := range columnsRows {
-		table, _ := row[0].(string)
-		column, _ := row[1].(string)
+		if len(row) < 3 {
+			continue
+		}
+		table, ok := row[0].(string)
+		if !ok {
+			continue
+		}
+		column, ok := row[1].(string)
+		if !ok {
+			continue
+		}
 		columnType, _ := row[2].(string)
 		if tableIndex, ok := index[table]; ok {
 			meta.Tables[tableIndex].Columns = append(

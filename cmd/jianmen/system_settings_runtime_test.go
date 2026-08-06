@@ -105,6 +105,9 @@ func TestSystemSettingsBecomeEffectiveAfterRestartBootstrap(t *testing.T) {
 	if !state.PendingRestart || state.EffectiveRevision != 1 || state.Revision != 2 {
 		t.Fatalf("updated state = %#v, want revision 2 pending restart", state)
 	}
+	if !cfg.Admin.LoginCaptchaEnabled {
+		t.Fatalf("running config lost login captcha after bootstrap")
+	}
 	if cfg.DatabaseGateway.EffectiveMode() != config.DatabaseGatewayModeUnified ||
 		cfg.DatabaseGateway.EffectiveClientTLSMode() != config.DatabaseGatewayClientTLSModeOptional ||
 		cfg.WebRDP.Enabled ||
@@ -158,6 +161,7 @@ func TestSystemSettingsBecomeEffectiveAfterRestartBootstrap(t *testing.T) {
 func validManagedSettingsConfig() *config.Config {
 	return &config.Config{
 		ListenAddr: "127.0.0.1:47102",
+		Admin:      config.AdminConfig{LoginCaptchaEnabled: true},
 		DatabaseGateway: config.DatabaseGatewayConfig{
 			Enabled:       true,
 			Mode:          config.DatabaseGatewayModeUnified,

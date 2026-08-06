@@ -59,6 +59,7 @@ func systemSettingsFromConfig(cfg *config.Config) service.SystemSettings {
 	return service.SystemSettings{
 		DatabaseGatewayMode:           cfg.DatabaseGateway.EffectiveMode(),
 		DatabaseGatewayClientTLSMode:  cfg.DatabaseGateway.EffectiveClientTLSMode(),
+		LoginCaptchaEnabled:           cfg.Admin.LoginCaptchaEnabled,
 		WebRDPEnabled:                 cfg.WebRDP.Enabled,
 		WebRDPConnectTimeoutSeconds:   cfg.WebRDP.ConnectTimeoutSecs,
 		WebRDPAllowUnrecorded:         cfg.WebRDP.AllowUnrecorded,
@@ -75,6 +76,7 @@ func systemSettingsFromConfig(cfg *config.Config) service.SystemSettings {
 func applySystemSettings(cfg *config.Config, settings service.SystemSettings) {
 	cfg.DatabaseGateway.Mode = settings.DatabaseGatewayMode
 	cfg.DatabaseGateway.ClientTLSMode = settings.DatabaseGatewayClientTLSMode
+	cfg.Admin.LoginCaptchaEnabled = settings.LoginCaptchaEnabled
 	cfg.WebRDP.Enabled = settings.WebRDPEnabled
 	cfg.WebRDP.ConnectTimeoutSecs = settings.WebRDPConnectTimeoutSeconds
 	cfg.WebRDP.AllowUnrecorded = settings.WebRDPAllowUnrecorded

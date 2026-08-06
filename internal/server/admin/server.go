@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"reflect"
+	"sync/atomic"
 
 	"jianmen/internal/config"
 	"jianmen/internal/handler/sqlconsole"
@@ -46,6 +47,7 @@ type Server struct {
 	dataDir                string
 	loginLimiter           *loginLimiter
 	loginCaptcha           loginCaptchaVerifier
+	loginCaptchaEnabled    atomic.Bool
 	onlineSessions         *online.Registry
 	identity               *service.IdentityService
 	authorization          authorizationService
@@ -222,7 +224,7 @@ func New(
 	if err != nil {
 		return nil, fmt.Errorf("initialize audit query service: %w", err)
 	}
-	return &Server{
+	server := &Server{
 		cfg: cfg, db: db, logger: logger,
 		adminAuth: adminAuth, aiAccessTokens: aiAccessTokens, aiResources: aiResources,
 		hostTargets: dependencies.hostTargets, hostManagement: hostManagement, databases: dependencies.databases,
@@ -241,7 +243,14 @@ func New(
 		systemSettings:  systemSettings,
 		sqlConsole:      sqlConsole,
 		dbstore:         store.NewDBStore(db),
-	}, nil
+	}
+	server.loginCaptchaEnabled.Store(cfg.Admin.LoginCaptchaEnabled)
+	return server, nil
+}
+
+// ApplyLoginCaptchaEnabled 热加载入口：系统设置保存验证码开关后立即更新运行时开关。
+func (s *Server) ApplyLoginCaptchaEnabled(enabled bool) {
+	s.loginCaptchaEnabled.Store(enabled)
 }
 
 func isNilAdminAuthorization(authorization authorizationService) bool {

@@ -10,6 +10,7 @@ import (
 type settingsValues struct {
 	DatabaseGatewayMode           string `json:"database_gateway_mode"`
 	DatabaseGatewayClientTLSMode  string `json:"database_gateway_client_tls_mode"`
+	LoginCaptchaEnabled           bool   `json:"login_captcha_enabled"`
 	WebRDPEnabled                 bool   `json:"web_rdp_enabled"`
 	WebRDPConnectTimeoutSeconds   int    `json:"web_rdp_connect_timeout_seconds"`
 	WebRDPAllowUnrecorded         bool   `json:"web_rdp_allow_unrecorded"`
@@ -31,6 +32,7 @@ type updateRequest struct {
 type settingsValuesRequest struct {
 	DatabaseGatewayMode           *string `json:"database_gateway_mode"`
 	DatabaseGatewayClientTLSMode  *string `json:"database_gateway_client_tls_mode"`
+	LoginCaptchaEnabled           *bool   `json:"login_captcha_enabled"`
 	WebRDPEnabled                 *bool   `json:"web_rdp_enabled"`
 	WebRDPConnectTimeoutSeconds   *int    `json:"web_rdp_connect_timeout_seconds"`
 	WebRDPAllowUnrecorded         *bool   `json:"web_rdp_allow_unrecorded"`
@@ -112,7 +114,7 @@ type revisionListResponse struct {
 func (v settingsValuesRequest) toService() (service.SystemSettings, error) {
 	if v.DatabaseGatewayMode == nil ||
 		v.DatabaseGatewayClientTLSMode == nil ||
-		v.WebRDPEnabled == nil || v.WebRDPConnectTimeoutSeconds == nil ||
+		v.LoginCaptchaEnabled == nil || v.WebRDPEnabled == nil || v.WebRDPConnectTimeoutSeconds == nil ||
 		v.WebRDPAllowUnrecorded == nil || v.RecordingEnabled == nil ||
 		v.RecordingRecordInput == nil || v.RecordingRecordCommands == nil ||
 		v.RecordingRetentionDays == nil || v.RecordingMaxReplayBytes == nil ||
@@ -123,6 +125,7 @@ func (v settingsValuesRequest) toService() (service.SystemSettings, error) {
 	return service.SystemSettings{
 		DatabaseGatewayMode:           *v.DatabaseGatewayMode,
 		DatabaseGatewayClientTLSMode:  *v.DatabaseGatewayClientTLSMode,
+		LoginCaptchaEnabled:           *v.LoginCaptchaEnabled,
 		WebRDPEnabled:                 *v.WebRDPEnabled,
 		WebRDPConnectTimeoutSeconds:   *v.WebRDPConnectTimeoutSeconds,
 		WebRDPAllowUnrecorded:         *v.WebRDPAllowUnrecorded,
@@ -140,6 +143,7 @@ func mapValues(value service.SystemSettings) settingsValues {
 	return settingsValues{
 		DatabaseGatewayMode:           value.DatabaseGatewayMode,
 		DatabaseGatewayClientTLSMode:  value.DatabaseGatewayClientTLSMode,
+		LoginCaptchaEnabled:           value.LoginCaptchaEnabled,
 		WebRDPEnabled:                 value.WebRDPEnabled,
 		WebRDPConnectTimeoutSeconds:   value.WebRDPConnectTimeoutSeconds,
 		WebRDPAllowUnrecorded:         value.WebRDPAllowUnrecorded,

@@ -328,6 +328,25 @@ func TestUnmarshalLegacySystemSettingsSnapshotDefaultsGatewayMode(t *testing.T) 
 	}
 }
 
+// TestSystemSettingsSnapshotRoundTripPreservesLoginCaptcha 校验快照序列化往返后
+// 登录验证码开关仍保持 true（此前 true 值仅经修订记录集成路径间接覆盖，
+// 旧版快照缺少该键时反序列化默认 false，本测试直接锁定 true 值不被丢失）。
+func TestSystemSettingsSnapshotRoundTripPreservesLoginCaptcha(t *testing.T) {
+	original := validSystemSettings()
+	original.LoginCaptchaEnabled = true
+	encoded, err := marshalSystemSettings(original)
+	if err != nil {
+		t.Fatalf("marshalSystemSettings() error = %v", err)
+	}
+	decoded, err := unmarshalSystemSettings(encoded)
+	if err != nil {
+		t.Fatalf("unmarshalSystemSettings() error = %v", err)
+	}
+	if !decoded.LoginCaptchaEnabled {
+		t.Fatalf("login captcha = %v, want true after round trip", decoded.LoginCaptchaEnabled)
+	}
+}
+
 func TestSystemSettingsUpdateUsesOptimisticRevision(t *testing.T) {
 	ctx := context.Background()
 	repository := &systemSettingsMemoryRepository{}
@@ -486,6 +505,40 @@ func newTestSystemSettingsServiceWithModes(
 	return svc
 }
 
+func TestSystemSettingsDisableLoginCaptchaRequiresRiskConfirmation(t *testing.T) {
+	ctx := context.Background()
+	repository := &systemSettingsMemoryRepository{}
+	svc := newTestSystemSettingsService(t, repository, time.Now())
+	baseline := validSystemSettings()
+	baseline.LoginCaptchaEnabled = true
+	if _, err := svc.Bootstrap(ctx, baseline); err != nil {
+		t.Fatalf("Bootstrap() error = %v", err)
+	}
+
+	desired := baseline
+	desired.LoginCaptchaEnabled = false
+	_, err := svc.Update(ctx, SystemSettingsUpdate{
+		Settings: desired, ExpectedRevision: 1,
+	})
+	if !errors.Is(err, ErrSystemSettingsRiskConfirmationRequired) ||
+		!strings.Contains(err.Error(), "login_captcha_enabled") {
+		t.Fatalf("Update() error = %v, want login captcha confirmation", err)
+	}
+	if repository.setting.Revision != 1 || len(repository.revisions) != 1 {
+		t.Fatalf("unconfirmed change was persisted: %#v", repository)
+	}
+
+	state, err := svc.Update(ctx, SystemSettingsUpdate{
+		Settings: desired, ExpectedRevision: 1, ConfirmRisk: true,
+	})
+	if err != nil {
+		t.Fatalf("confirmed Update() error = %v", err)
+	}
+	if state.Desired.LoginCaptchaEnabled {
+		t.Fatalf("desired captcha = %v, want false", state.Desired.LoginCaptchaEnabled)
+	}
+}
+
 func validSystemSettings() SystemSettings {
 	return SystemSettings{
 		DatabaseGatewayMode:           "unified",
@@ -580,4 +633,96 @@ func (r *systemSettingsMemoryRepository) ListSystemSettingRevisions(
 		limit = len(r.revisions)
 	}
 	return append([]model.SystemSettingRevision(nil), r.revisions[:limit]...), nil
+}
+
+func TestSystemSettingsHotReloadLoginCaptcha(t *testing.T) {
+	ctx := context.Background()
+	repository := &systemSettingsMemoryRepository{}
+	svc := newTestSystemSettingsService(t, repository, time.Now())
+	baseline := validSystemSettings()
+	if _, err := svc.Bootstrap(ctx, baseline); err != nil {
+		t.Fatalf("Bootstrap() error = %v", err)
+	}
+	var applied []bool
+	svc.RegisterHotReloadApplier(func(settings SystemSettings) error {
+		applied = append(applied, settings.LoginCaptchaEnabled)
+		return nil
+	})
+
+	desired := baseline
+	desired.LoginCaptchaEnabled = true
+	state, err := svc.Update(ctx, SystemSettingsUpdate{
+		Settings: desired, ExpectedRevision: 1,
+	})
+	if err != nil {
+		t.Fatalf("Update() error = %v", err)
+	}
+	if state.PendingRestart || state.EffectiveRevision != 2 || state.Revision != 2 {
+		t.Fatalf("hot-reloaded state = %#v", state)
+	}
+	if !state.Effective.LoginCaptchaEnabled || !state.Desired.LoginCaptchaEnabled {
+		t.Fatalf("hot-reloaded settings = %#v", state)
+	}
+	if len(applied) != 1 || !applied[0] {
+		t.Fatalf("hot-reload applier calls = %v", applied)
+	}
+	if repository.setting.AppliedRevision != 2 {
+		t.Fatalf("hot-reload applied revision = %d", repository.setting.AppliedRevision)
+	}
+}
+
+func TestSystemSettingsHotReloadOnlyForHotReloadableFields(t *testing.T) {
+	ctx := context.Background()
+	repository := &systemSettingsMemoryRepository{}
+	svc := newTestSystemSettingsService(t, repository, time.Now())
+	baseline := validSystemSettings()
+	if _, err := svc.Bootstrap(ctx, baseline); err != nil {
+		t.Fatalf("Bootstrap() error = %v", err)
+	}
+	applierCalls := 0
+	svc.RegisterHotReloadApplier(func(SystemSettings) error {
+		applierCalls++
+		return nil
+	})
+
+	desired := baseline
+	desired.LoginCaptchaEnabled = true
+	desired.WebRDPEnabled = true
+	state, err := svc.Update(ctx, SystemSettingsUpdate{
+		Settings: desired, ExpectedRevision: 1,
+	})
+	if err != nil {
+		t.Fatalf("Update() error = %v", err)
+	}
+	if !state.PendingRestart || state.EffectiveRevision != 1 || state.Revision != 2 {
+		t.Fatalf("mixed-fields state = %#v", state)
+	}
+	if state.Effective.LoginCaptchaEnabled || applierCalls != 0 {
+		t.Fatalf("non-hot-reloadable update was applied: effective=%v calls=%d",
+			state.Effective.LoginCaptchaEnabled, applierCalls)
+	}
+}
+
+func TestSystemSettingsHotReloadWithoutApplierFallsBack(t *testing.T) {
+	ctx := context.Background()
+	repository := &systemSettingsMemoryRepository{}
+	svc := newTestSystemSettingsService(t, repository, time.Now())
+	baseline := validSystemSettings()
+	if _, err := svc.Bootstrap(ctx, baseline); err != nil {
+		t.Fatalf("Bootstrap() error = %v", err)
+	}
+	desired := baseline
+	desired.LoginCaptchaEnabled = true
+	state, err := svc.Update(ctx, SystemSettingsUpdate{
+		Settings: desired, ExpectedRevision: 1,
+	})
+	if err != nil {
+		t.Fatalf("Update() error = %v", err)
+	}
+	if !state.PendingRestart || state.EffectiveRevision != 1 {
+		t.Fatalf("fallback state = %#v", state)
+	}
+	if state.Effective.LoginCaptchaEnabled {
+		t.Fatalf("fallback still applied captcha: %#v", state)
+	}
 }

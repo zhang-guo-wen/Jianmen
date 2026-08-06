@@ -362,7 +362,6 @@ func (s *SystemSettingsService) applyHotReload(settings SystemSettings) error {
 ```
 
 （约束：应用器（本设计的 `ApplyLoginCaptchaEnabled`）只做原子写、不得回调本服务的加锁方法，避免死锁；如未来注册复杂应用器，需改为在锁外调用。）
-```
 
 4. `Update` 中，在 `if !updated { return SystemSettingsState{}, ErrSystemSettingsRevisionConflict }` 之后、`return s.stateFromModel(persisted)` 之前插入：
 

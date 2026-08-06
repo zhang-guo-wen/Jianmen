@@ -89,6 +89,10 @@ func startAdminRuntime(
 	if err != nil {
 		return err
 	}
+	settings.RegisterHotReloadApplier(func(settings service.SystemSettings) error {
+		adminServer.ApplyLoginCaptchaEnabled(settings.LoginCaptchaEnabled)
+		return nil
+	})
 	go func() {
 		errCh <- adminServer.ListenAndServe(ctx)
 	}()

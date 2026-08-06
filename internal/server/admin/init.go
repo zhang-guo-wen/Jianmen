@@ -55,7 +55,7 @@ func (s *Server) handleInitStatus(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store, max-age=0")
 	s.writeJSON(w, r, http.StatusOK, InitStatusResponse{
 		Initialized:         initialized,
-		LoginCaptchaEnabled: s.cfg.Admin.LoginCaptchaEnabled,
+		LoginCaptchaEnabled: s.loginCaptchaEnabled.Load(),
 	})
 }
 
@@ -65,7 +65,7 @@ func (s *Server) handleLoginCaptchaChallenge(w http.ResponseWriter, r *http.Requ
 		s.writeErrorText(w, r, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
-	if !s.cfg.Admin.LoginCaptchaEnabled {
+	if !s.loginCaptchaEnabled.Load() {
 		s.writeErrorText(w, r, http.StatusNotFound, "login captcha is disabled")
 		return
 	}
@@ -126,7 +126,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		s.writeErrorText(w, r, http.StatusTooManyRequests, "too many failed login attempts; try again later")
 		return
 	}
-	if s.cfg.Admin.LoginCaptchaEnabled {
+	if s.loginCaptchaEnabled.Load() {
 		if s.loginCaptcha == nil {
 			s.writeErrorText(w, r, http.StatusServiceUnavailable, "login captcha unavailable")
 			return

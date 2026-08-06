@@ -446,7 +446,7 @@ func TestInitStatusReturnsInitializedWithoutAdminSummary(t *testing.T) {
 
 func TestLoginRequiresCaptcha(t *testing.T) {
 	server, db := newAdminDBTestServer(t)
-	server.cfg.Admin.LoginCaptchaEnabled = true
+	server.ApplyLoginCaptchaEnabled(true)
 	passwordHash, err := hashPassword("correct-password")
 	if err != nil {
 		t.Fatalf("hash password: %v", err)
@@ -486,7 +486,7 @@ func TestLoginAllowsMissingCaptchaWhenDisabled(t *testing.T) {
 
 func TestLoginCaptchaChallengeIsNotCached(t *testing.T) {
 	server, _ := newAdminDBTestServer(t)
-	server.cfg.Admin.LoginCaptchaEnabled = true
+	server.ApplyLoginCaptchaEnabled(true)
 	captcha, err := service.NewLoginCaptcha()
 	if err != nil {
 		t.Fatalf("create captcha: %v", err)
@@ -515,6 +515,30 @@ func TestLoginCaptchaChallengeIsNotCached(t *testing.T) {
 	}
 	if _, wrapped := envelope["data"]; wrapped {
 		t.Fatalf("ALTCHA challenge must not use the API envelope: %s", rec.Body.String())
+	}
+}
+
+func TestLoginCaptchaHotReloadUpdatesInitStatus(t *testing.T) {
+	server, _ := newAdminDBTestServer(t)
+	req := httptest.NewRequest(http.MethodGet, "/api/init/status", nil)
+	rec := httptest.NewRecorder()
+	server.handleInitStatus(rec, req)
+	var got InitStatusResponse
+	if err := decodeTestData(t, rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("unmarshal response: %v; body=%s", err, rec.Body.String())
+	}
+	if got.LoginCaptchaEnabled {
+		t.Fatal("captcha enabled by default, want disabled")
+	}
+
+	server.ApplyLoginCaptchaEnabled(true)
+	rec = httptest.NewRecorder()
+	server.handleInitStatus(rec, req)
+	if err := decodeTestData(t, rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("unmarshal response: %v; body=%s", err, rec.Body.String())
+	}
+	if !got.LoginCaptchaEnabled {
+		t.Fatal("captcha disabled after hot reload, want enabled")
 	}
 }
 

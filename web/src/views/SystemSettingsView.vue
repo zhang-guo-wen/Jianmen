@@ -43,6 +43,23 @@
         <el-tabs v-model="activeTab" class="settings-tabs">
           <el-tab-pane label="代理与审计" name="policy">
             <div class="policy-grid">
+              <section class="settings-section">
+                <div class="section-heading">
+                  <div>
+                    <h2>登录安全</h2>
+                    <p>控制管理端登录页面的验证码要求，保存后立即生效。</p>
+                  </div>
+                </div>
+
+                <div class="setting-row">
+                  <div class="setting-copy">
+                    <strong>登录验证码</strong>
+                    <span>启用后登录页面要求完成 ALTCHA 安全验证，防暴力破解。</span>
+                  </div>
+                  <el-switch v-model="form.login_captcha_enabled" />
+                </div>
+              </section>
+
               <section class="settings-section settings-section--wide">
                 <div class="section-heading">
                   <div>
@@ -448,6 +465,7 @@ type DiagnosticKind = 'guacd' | 'object-storage';
 const FIELD_LABELS: Record<keyof SystemSettingsValues, string> = {
   database_gateway_mode: '数据库网关入口模式',
   database_gateway_client_tls_mode: '数据库网关客户端 TLS 策略',
+  login_captcha_enabled: '登录验证码',
   web_rdp_enabled: 'Web RDP',
   web_rdp_connect_timeout_seconds: '连接超时',
   web_rdp_allow_unrecorded: '未录制会话策略',
@@ -510,6 +528,7 @@ function emptySettings(): SystemSettingsValues {
   return {
     database_gateway_mode: 'unified',
     database_gateway_client_tls_mode: 'optional',
+    login_captcha_enabled: false,
     web_rdp_enabled: false,
     web_rdp_connect_timeout_seconds: 15,
     web_rdp_allow_unrecorded: false,

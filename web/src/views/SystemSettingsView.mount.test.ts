@@ -122,6 +122,7 @@ function buildState(pendingRestart: boolean) {
     desired: {
       database_gateway_mode: 'unified',
       database_gateway_client_tls_mode: 'optional',
+      login_captcha_enabled: false,
       web_rdp_enabled: false,
       web_rdp_connect_timeout_seconds: 15,
       web_rdp_allow_unrecorded: false,
@@ -136,6 +137,7 @@ function buildState(pendingRestart: boolean) {
     effective: {
       database_gateway_mode: 'unified',
       database_gateway_client_tls_mode: 'optional',
+      login_captcha_enabled: false,
       web_rdp_enabled: false,
       web_rdp_connect_timeout_seconds: 15,
       web_rdp_allow_unrecorded: false,
@@ -254,5 +256,46 @@ describe('SystemSettingsView header', () => {
 
     expect(wrapper.text()).toContain('数据库网关入口模式')
     expect(wrapper.text()).not.toContain('database_gateway_mode')
+  })
+})
+
+describe('SystemSettingsView login captcha setting', () => {
+  it('shows the login captcha switch under a 登录安全 section', async () => {
+    mocks.apiClient.getSystemSettings.mockResolvedValue(buildState(false))
+
+    const wrapper = mountView()
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('登录安全')
+    expect(wrapper.text()).toContain('登录验证码')
+    const captchaRow = wrapper
+      .findAll('.setting-row')
+      .find(row => row.text().includes('登录验证码'))
+    expect(captchaRow).toBeDefined()
+    expect(captchaRow!.find('input[type="checkbox"]').exists()).toBe(true)
+  })
+
+  it('saves the switch change to the server', async () => {
+    mocks.apiClient.getSystemSettings.mockResolvedValue(buildState(false))
+    mocks.apiClient.updateSystemSettings.mockResolvedValue(buildState(false))
+
+    const wrapper = mountView()
+    await flushPromises()
+
+    const captchaRow = wrapper
+      .findAll('.setting-row')
+      .find(row => row.text().includes('登录验证码'))
+    await captchaRow!.find('input[type="checkbox"]').setValue(true)
+    const saveButton = wrapper
+      .findAll('button')
+      .find(button => button.text() === '保存配置')
+    await saveButton!.trigger('click')
+    await flushPromises()
+
+    expect(mocks.apiClient.updateSystemSettings).toHaveBeenCalledWith({
+      settings: expect.objectContaining({ login_captcha_enabled: true }),
+      expected_revision: 1,
+      confirm_risk: false,
+    })
   })
 })

@@ -11,6 +11,7 @@ export type DatabaseGatewayTLSTrustMode = 'custom' | 'system';
 export interface SystemSettingsValues {
   database_gateway_mode: DatabaseGatewayMode;
   database_gateway_client_tls_mode: DatabaseGatewayClientTLSMode;
+  login_captcha_enabled: boolean;
   web_rdp_enabled: boolean;
   web_rdp_connect_timeout_seconds: number;
   web_rdp_allow_unrecorded: boolean;
@@ -26,6 +27,7 @@ export interface SystemSettingsValues {
 export const SYSTEM_SETTINGS_FIELDS = [
   'database_gateway_mode',
   'database_gateway_client_tls_mode',
+  'login_captcha_enabled',
   'web_rdp_enabled',
   'web_rdp_connect_timeout_seconds',
   'web_rdp_allow_unrecorded',
@@ -155,6 +157,9 @@ export function weakerProtectionReasons(
 ): string[] {
   const reasons: string[] = [];
 
+  if (current.login_captcha_enabled && !next.login_captcha_enabled) {
+    reasons.push('关闭登录验证码，登录不再要求完成安全验证');
+  }
   if (
     current.database_gateway_client_tls_mode === 'required'
     && next.database_gateway_client_tls_mode === 'optional'

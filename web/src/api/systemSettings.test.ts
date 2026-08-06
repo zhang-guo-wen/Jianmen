@@ -21,6 +21,7 @@ function settings(overrides: Partial<SystemSettingsValues> = {}): SystemSettings
   return {
     database_gateway_mode: 'unified',
     database_gateway_client_tls_mode: 'optional',
+    login_captcha_enabled: false,
     web_rdp_enabled: true,
     web_rdp_connect_timeout_seconds: 15,
     web_rdp_allow_unrecorded: false,
@@ -148,4 +149,15 @@ test('changing the database and Redis client message limit requires confirmation
   assert.deepEqual(weakerProtectionReasons(current, next), [
     '数据库与 Redis 客户端报文上限从 10 MiB 调整为 16 MiB',
   ]);
+});
+
+test('disabling login captcha requires confirmation', () => {
+  const current = settings({ login_captcha_enabled: true });
+  const next = settings({ login_captcha_enabled: false });
+
+  assert.equal(SYSTEM_SETTINGS_FIELDS.includes('login_captcha_enabled'), true);
+  assert.deepEqual(weakerProtectionReasons(current, next), [
+    '关闭登录验证码，登录不再要求完成安全验证',
+  ]);
+  assert.deepEqual(weakerProtectionReasons(next, current), []);
 });

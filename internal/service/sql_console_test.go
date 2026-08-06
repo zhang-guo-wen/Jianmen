@@ -76,6 +76,8 @@ type sqlConsoleConnectionStub struct {
 	readOnly bool
 	result   SQLConsoleExecution
 	err      error
+	metadata SQLConsoleMetadata
+	metaErr  error
 }
 
 func (s *sqlConsoleExecutorStub) Connect(context.Context, model.DatabaseAccount) (SQLConsoleConnection, error) {
@@ -86,7 +88,7 @@ func (s *sqlConsoleExecutorStub) Connect(context.Context, model.DatabaseAccount)
 func (s *sqlConsoleConnectionStub) Databases() []string     { return []string{"app", "reporting"} }
 func (s *sqlConsoleConnectionStub) DefaultDatabase() string { return "app" }
 func (s *sqlConsoleConnectionStub) Metadata(context.Context, string) (SQLConsoleMetadata, error) {
-	return SQLConsoleMetadata{}, nil
+	return s.metadata, s.metaErr
 }
 func (s *sqlConsoleConnectionStub) Close() error {
 	s.closed++
@@ -313,5 +315,55 @@ func TestSQLConsoleCloseSessionReleasesConnection(t *testing.T) {
 	)
 	if !errors.Is(err, ErrSQLConsoleSession) {
 		t.Fatalf("Execute() after close error = %v", err)
+	}
+}
+
+func TestSQLConsoleServiceMetadata(t *testing.T) {
+	svc, _, authorizer, executor := newSQLConsoleServiceFixture(t)
+	executor.connection.metadata = SQLConsoleMetadata{
+		Tables: []SQLConsoleTableMeta{{Name: "users", Columns: []SQLConsoleColumnMeta{{Name: "id", Type: "bigint"}}}},
+	}
+	session, err := svc.CreateSession(context.Background(), SQLConsoleActor{UserID: "user-1", Username: "alice", ClientIP: "127.0.0.1"}, "account-1")
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	meta, err := svc.Metadata(context.Background(), SQLConsoleActor{UserID: "user-1", Username: "alice", ClientIP: "127.0.0.1"}, session.ID, "app")
+	if err != nil {
+		t.Fatalf("metadata: %v", err)
+	}
+	if len(meta.Tables) != 1 || meta.Tables[0].Name != "users" {
+		t.Fatalf("unexpected metadata: %+v", meta)
+	}
+	if len(authorizer.actions) != 1 || authorizer.actions[0] != rbac.ActionDBQuery {
+		t.Fatalf("unexpected rbac actions: %v", authorizer.actions)
+	}
+	if executor.connects != 1 {
+		t.Fatalf("connects = %d, want 1(元数据复用会话连接,不重新 Connect)", executor.connects)
+	}
+}
+
+func TestSQLConsoleServiceMetadataForbidden(t *testing.T) {
+	svc, _, authorizer, _ := newSQLConsoleServiceFixture(t)
+	session, err := svc.CreateSession(context.Background(), SQLConsoleActor{UserID: "user-1", Username: "alice"}, "account-1")
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	authorizer.allowed = false
+	_, err = svc.Metadata(context.Background(), SQLConsoleActor{UserID: "user-1", Username: "alice"}, session.ID, "app")
+	if err != ErrSQLConsoleForbidden {
+		t.Fatalf("期望 ErrSQLConsoleForbidden,实际 %v", err)
+	}
+}
+
+func TestSQLConsoleServiceMetadataPropagatesConnectionError(t *testing.T) {
+	svc, _, _, executor := newSQLConsoleServiceFixture(t)
+	session, err := svc.CreateSession(context.Background(), SQLConsoleActor{UserID: "user-1"}, "account-1")
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	executor.connection.metaErr = errors.New("metadata upstream failed")
+	_, err = svc.Metadata(context.Background(), SQLConsoleActor{UserID: "user-1"}, session.ID, "app")
+	if err == nil || err.Error() != "metadata upstream failed" {
+		t.Fatalf("metadata error = %v, want upstream error", err)
 	}
 }

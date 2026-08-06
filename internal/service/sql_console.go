@@ -203,6 +203,44 @@ func (s *SQLConsoleService) Execute(
 	}, nil
 }
 
+// Metadata 返回数据库表结构元数据(供前端补全),不建审计会话。
+// 复用会话缓存的连接,与 Execute 保持一致,不重新 Connect。
+func (s *SQLConsoleService) Metadata(
+	ctx context.Context,
+	actor SQLConsoleActor,
+	sessionID, database string,
+) (SQLConsoleMetadata, error) {
+	if ctx == nil || strings.TrimSpace(actor.UserID) == "" || strings.TrimSpace(sessionID) == "" {
+		return SQLConsoleMetadata{}, ErrSQLConsoleInvalid
+	}
+	webSession, err := s.sessionForActor(strings.TrimSpace(sessionID), strings.TrimSpace(actor.UserID))
+	if err != nil {
+		return SQLConsoleMetadata{}, err
+	}
+	allowed, err := s.authorizer.AuthorizeConnection(
+		ctx,
+		strings.TrimSpace(actor.UserID),
+		[]string{rbac.ActionDBQuery},
+		model.ResourceTypeDatabaseAccount,
+		webSession.accountID,
+	)
+	if err != nil {
+		return SQLConsoleMetadata{}, fmt.Errorf("authorize SQL console: %w", err)
+	}
+	if !allowed {
+		return SQLConsoleMetadata{}, ErrSQLConsoleForbidden
+	}
+	_, _, err = s.loadSQLConsoleAccount(ctx, webSession.accountID)
+	if err != nil {
+		return SQLConsoleMetadata{}, err
+	}
+	database = strings.TrimSpace(database)
+	if database == "" || !webSession.databaseAllowed(database) {
+		return SQLConsoleMetadata{}, ErrSQLConsoleInvalid
+	}
+	return webSession.connection.Metadata(ctx, database)
+}
+
 func newSQLConsoleAuditSession(actor SQLConsoleActor, account model.DatabaseAccount, started time.Time) *model.AuditSession {
 	instance := account.Instance
 	return &model.AuditSession{

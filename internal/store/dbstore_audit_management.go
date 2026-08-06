@@ -117,6 +117,10 @@ func (s *DBStore) ListLoginAuditLogs(
 // logicalAuditEventRowsCondition keeps the durable result row for a completed
 // two-phase operation and keeps the intent only when no linked result exists.
 // The legacy JSON predicate preserves the same semantics for pre-structure rows.
+//
+// 配对 EXISTS 拆成两个独立子查询（EXISTS(A OR B) ≡ EXISTS(A) OR EXISTS(B)），
+// 使现代 result 分支能走 (phase, intent_id) 复合索引，避免外层每一行都对
+// 整个配对表做全表扫描（数据量大后操作日志查询呈 O(N²)）。
 func logicalAuditEventRowsCondition(dialect string) string {
 	legacyIntentPattern := sqlAuditConcat(
 		dialect,
@@ -132,16 +136,19 @@ func logicalAuditEventRowsCondition(dialect string) string {
 				AND audit_events.detail LIKE '%%"phase":"intent"%%'
 			)
 		)
-		AND EXISTS (
-			SELECT 1
-			FROM audit_events AS audit_event_results
-			WHERE (
-				audit_event_results.phase = 'result'
-				AND audit_event_results.intent_id = audit_events.id
-			) OR (
-				COALESCE(audit_event_results.phase, '') = ''
-				AND audit_event_results.detail LIKE '%%"phase":"result"%%'
-				AND audit_event_results.detail LIKE %s
+		AND (
+			EXISTS (
+				SELECT 1
+				FROM audit_events AS audit_event_results
+				WHERE audit_event_results.phase = 'result'
+					AND audit_event_results.intent_id = audit_events.id
+			)
+			OR EXISTS (
+				SELECT 1
+				FROM audit_events AS audit_event_results
+				WHERE COALESCE(audit_event_results.phase, '') = ''
+					AND audit_event_results.detail LIKE '%%"phase":"result"%%'
+					AND audit_event_results.detail LIKE %s
 			)
 		)
 	)`, legacyIntentPattern)
@@ -149,6 +156,9 @@ func logicalAuditEventRowsCondition(dialect string) string {
 
 // logicalLoginAuditRowsCondition applies the same completed-pair collapsing to
 // login logs. Legacy rows encoded their linkage at the start of Reason.
+//
+// 与 logicalAuditEventRowsCondition 相同：拆分配对 EXISTS，让现代 result 分支
+// 走 (phase, intent_id) 复合索引，避免每行全表扫描的 O(N²) 执行计划。
 func logicalLoginAuditRowsCondition(dialect string) string {
 	legacyIntentPattern := sqlAuditConcat(
 		dialect,
@@ -165,16 +175,19 @@ func logicalLoginAuditRowsCondition(dialect string) string {
 				AND audit_login_logs.reason = 'intent'
 			)
 		)
-		AND EXISTS (
-			SELECT 1
-			FROM audit_login_logs AS login_audit_results
-			WHERE (
-				login_audit_results.phase = 'result'
-				AND login_audit_results.intent_id = audit_login_logs.id
-			) OR (
-				COALESCE(login_audit_results.phase, '') = ''
-				AND login_audit_results.outcome <> 'pending'
-				AND login_audit_results.reason LIKE %s
+		AND (
+			EXISTS (
+				SELECT 1
+				FROM audit_login_logs AS login_audit_results
+				WHERE login_audit_results.phase = 'result'
+					AND login_audit_results.intent_id = audit_login_logs.id
+			)
+			OR EXISTS (
+				SELECT 1
+				FROM audit_login_logs AS login_audit_results
+				WHERE COALESCE(login_audit_results.phase, '') = ''
+					AND login_audit_results.outcome <> 'pending'
+					AND login_audit_results.reason LIKE %s
 			)
 		)
 	)`, legacyIntentPattern)

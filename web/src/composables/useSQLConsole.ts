@@ -16,6 +16,7 @@ import {
   type DBAccountRecord,
   type SQLConsoleResult,
 } from '@/api/client';
+import type { SQLTableMetadata } from '@/utils/sqlSchema';
 
 export interface UseSQLConsoleOptions {
   requestedAccountId?: MaybeRefOrGetter<string>;
@@ -33,8 +34,10 @@ export function useSQLConsole(options: UseSQLConsoleOptions = {}) {
   const executing = shallowRef(false);
   const error = shallowRef('');
   const result = shallowRef<SQLConsoleResult | null>(null);
+  const metadata = shallowRef<SQLTableMetadata[]>([]);
   const activeController = shallowRef<AbortController | null>(null);
   const connectionController = shallowRef<AbortController | null>(null);
+  const metadataController = shallowRef<AbortController | null>(null);
   let connectionGeneration = 0;
 
   const selectedAccount = computed(
@@ -94,6 +97,8 @@ export function useSQLConsole(options: UseSQLConsoleOptions = {}) {
     databases.value = [];
     database.value = '';
     result.value = null;
+    metadata.value = [];
+    metadataController.value?.abort();
     if (previousSessionId) {
       void apiClient.closeSQLConsoleSession(previousSessionId).catch(() => undefined);
     }
@@ -115,6 +120,7 @@ export function useSQLConsole(options: UseSQLConsoleOptions = {}) {
       sessionId.value = session.id;
       databases.value = session.databases ?? [];
       database.value = session.default_database || databases.value[0] || '';
+      void loadMetadata();
     } catch (cause) {
       if (!controller.signal.aborted && generation === connectionGeneration) {
         error.value = cause instanceof Error ? cause.message : '连接数据库失败';
@@ -166,6 +172,27 @@ export function useSQLConsole(options: UseSQLConsoleOptions = {}) {
     }
   }
 
+  async function loadMetadata(): Promise<void> {
+    const currentSessionId = sessionId.value;
+    const currentDatabase = database.value;
+    metadataController.value?.abort();
+    if (!currentSessionId || !currentDatabase) {
+      metadata.value = [];
+      return;
+    }
+    const controller = new AbortController();
+    metadataController.value = controller;
+    try {
+      const response = await apiClient.getSQLConsoleMetadata(currentSessionId, currentDatabase, controller.signal);
+      if (controller.signal.aborted) return;
+      metadata.value = response.tables ?? [];
+    } catch {
+      if (!controller.signal.aborted) metadata.value = [];
+    } finally {
+      if (metadataController.value === controller) metadataController.value = null;
+    }
+  }
+
   function cancel(): void {
     activeController.value?.abort();
   }
@@ -174,6 +201,8 @@ export function useSQLConsole(options: UseSQLConsoleOptions = {}) {
     ++connectionGeneration;
     connectionController.value?.abort();
     activeController.value?.abort();
+    metadata.value = [];
+    metadataController.value?.abort();
     const currentSessionId = sessionId.value;
     sessionId.value = '';
     databases.value = [];
@@ -189,6 +218,8 @@ export function useSQLConsole(options: UseSQLConsoleOptions = {}) {
     applyRequestedAccount();
     if (accountId.value !== previousAccountId) void connect();
   });
+
+  watch(database, () => void loadMetadata());
 
   onScopeDispose(() => {
     void disconnect();
@@ -206,9 +237,11 @@ export function useSQLConsole(options: UseSQLConsoleOptions = {}) {
     executing: readonly(executing),
     error: readonly(error),
     result: shallowReadonly(result),
+    metadata: readonly(metadata),
     selectedAccount,
     loadAccounts,
     connect,
+    loadMetadata,
     execute,
     cancel,
     disconnect,

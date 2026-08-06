@@ -30,6 +30,7 @@ describe('useSQLConsole requested account', () => {
       default_database: 'app',
     });
     vi.spyOn(apiClient, 'closeSQLConsoleSession').mockResolvedValue(undefined);
+    vi.spyOn(apiClient, 'getSQLConsoleMetadata').mockResolvedValue({ tables: [] });
     const requestedAccountId = shallowRef('account-2');
     const consoleState = useSQLConsole({ requestedAccountId });
 
@@ -85,6 +86,7 @@ describe('useSQLConsole requested account', () => {
       duration_ms: 2,
     });
     vi.spyOn(apiClient, 'closeSQLConsoleSession').mockResolvedValue(undefined);
+    vi.spyOn(apiClient, 'getSQLConsoleMetadata').mockResolvedValue({ tables: [] });
 
     const consoleState = useSQLConsole();
     await consoleState.loadAccounts();
@@ -95,5 +97,26 @@ describe('useSQLConsole requested account', () => {
     assert.equal(executeSQL.mock.calls.length, 2);
     assert.equal(executeSQL.mock.calls[0]?.[0], 'session-reused');
     assert.equal(executeSQL.mock.calls[1]?.[0], 'session-reused');
+  });
+
+  it('连接成功后自动加载元数据,失败静默降级为空', async () => {
+    vi.spyOn(apiClient, 'getAllDBAccounts').mockResolvedValue({ items: accounts.slice(0, 1), total: 1, page: 1, page_size: 200 });
+    vi.spyOn(apiClient, 'createSQLConsoleSession').mockResolvedValue({ id: 'session-1', databases: ['app'], default_database: 'app' });
+    vi.spyOn(apiClient, 'closeSQLConsoleSession').mockResolvedValue(undefined);
+    vi.spyOn(apiClient, 'getSQLConsoleMetadata').mockResolvedValue({ tables: [{ name: 'users', columns: [{ name: 'id', type: 'bigint' }] }] });
+    const consoleState = useSQLConsole();
+    await consoleState.loadAccounts();
+    assert.equal(consoleState.metadata.value.length, 1);
+    assert.equal(consoleState.metadata.value[0].name, 'users');
+  });
+
+  it('元数据加载失败时静默置空,不抛错', async () => {
+    vi.spyOn(apiClient, 'getAllDBAccounts').mockResolvedValue({ items: accounts.slice(0, 1), total: 1, page: 1, page_size: 200 });
+    vi.spyOn(apiClient, 'createSQLConsoleSession').mockResolvedValue({ id: 'session-1', databases: ['app'], default_database: 'app' });
+    vi.spyOn(apiClient, 'closeSQLConsoleSession').mockResolvedValue(undefined);
+    vi.spyOn(apiClient, 'getSQLConsoleMetadata').mockRejectedValue(new Error('boom'));
+    const consoleState = useSQLConsole();
+    await consoleState.loadAccounts();
+    assert.deepEqual(consoleState.metadata.value, []);
   });
 });

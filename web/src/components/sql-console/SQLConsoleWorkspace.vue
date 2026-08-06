@@ -29,6 +29,8 @@ const {
   executing,
   error,
   result,
+  metadata,
+  selectedAccount,
   loadAccounts,
   connect,
   execute,
@@ -37,14 +39,21 @@ const {
 const { t } = useI18n();
 
 const executionDisabled = computed(
-  () => executing.value || connecting.value || !connected.value || !database.value || !sql.value.trim(),
+  () => executing.value || connecting.value || !connected.value || !database.value,
 );
+
+/** 编辑器 SQL 方言:与 useSQLConsole 的账号协议过滤保持一致,postgresql 兼容别名按 postgres 处理。 */
+const editorDialect = computed<'mysql' | 'postgres'>(() => {
+  const protocol = selectedAccount.value?.instance_protocol?.toLowerCase();
+  return protocol === 'postgres' || protocol === 'postgresql' ? 'postgres' : 'mysql';
+});
 
 onMounted(() => {
   void loadAccounts();
 });
 
-async function handleExecute() {
+/** 执行 SQL:语句文本来自编辑器(工具栏/快捷键/Ctrl+Enter 的光标当前语句或行号按钮的单条语句)。 */
+function handleExecute(statementText?: string): void {
   if (!accountId.value) {
     ElMessage.warning(t('sqlConsole.error.missingAccount'));
     return;
@@ -53,16 +62,23 @@ async function handleExecute() {
     ElMessage.warning(t('sqlConsole.error.missingDatabase'));
     return;
   }
-  if (!sql.value.trim()) {
+  const sqlText = statementText?.trim() ?? sql.value.trim();
+  if (!sqlText) {
     ElMessage.warning(t('sqlConsole.error.missingSQL'));
     return;
   }
+  // execute(composable)仍读 sql.value,先落盘再执行,语义不变
+  sql.value = sqlText;
+  void executeSQL(sqlText, false);
+}
+
+async function executeSQL(sqlText: string, confirmWrite: boolean): Promise<void> {
   try {
-    await execute(false);
+    await execute(confirmWrite);
     ElMessage.success(t('sqlConsole.executionSucceeded'));
   } catch (cause) {
     if (cause instanceof ApiError && cause.code === 'PRECONDITION_FAILED') {
-      await confirmAndExecuteWrite();
+      await confirmAndExecuteWrite(sqlText);
       return;
     }
     if (cause instanceof DOMException && cause.name === 'AbortError') {
@@ -73,7 +89,7 @@ async function handleExecute() {
   }
 }
 
-async function confirmAndExecuteWrite() {
+async function confirmAndExecuteWrite(sqlText: string): Promise<void> {
   try {
     await ElMessageBox.confirm(
       t('sqlConsole.writeConfirmMessage'),
@@ -84,14 +100,11 @@ async function confirmAndExecuteWrite() {
         type: 'warning',
       },
     );
-    await execute(true);
-    ElMessage.success(t('sqlConsole.executionSucceeded'));
+    // 用户确认后重发被拒的那条语句(写确认);取消/关闭时静默返回
+    await executeSQL(sqlText, true);
   } catch (cause) {
     if (cause === 'cancel' || cause === 'close') return;
-    if (cause instanceof DOMException && cause.name === 'AbortError') {
-      ElMessage.info(t('sqlConsole.executionCancelled'));
-      return;
-    }
+    if (cause instanceof DOMException && cause.name === 'AbortError') return;
     ElMessage.error(cause instanceof Error ? cause.message : t('sqlConsole.executionFailed'));
   }
 }
@@ -124,6 +137,8 @@ async function confirmAndExecuteWrite() {
       v-model="sql"
       :executing="executing"
       :disabled="executionDisabled"
+      :metadata="metadata"
+      :dialect="editorDialect"
       @execute="handleExecute"
       @cancel="cancel"
     />

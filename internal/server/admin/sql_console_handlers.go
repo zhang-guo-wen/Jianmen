@@ -30,6 +30,10 @@ func (s *Server) handleSQLConsoleSession(w http.ResponseWriter, r *http.Request)
 		s.sqlConsole.HandleExecute(w, r, sqlConsoleActor(r), parts[0])
 		return
 	}
+	if len(parts) == 2 && parts[0] != "" && parts[1] == "metadata" {
+		s.sqlConsole.HandleMetadata(w, r, sqlConsoleActor(r), parts[0])
+		return
+	}
 	s.writeErrorText(w, r, http.StatusNotFound, "SQL console session endpoint not found")
 }
 

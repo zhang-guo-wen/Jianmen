@@ -86,6 +86,28 @@ func (h *Handler) HandleExecute(w http.ResponseWriter, r *http.Request, actor Ac
 	apiresp.Write(w, http.StatusOK, result, apiresp.RequestID(r.Context()))
 }
 
+// HandleMetadata 返回数据库表结构元数据(GET /sessions/{id}/metadata?database=xxx)。
+func (h *Handler) HandleMetadata(w http.ResponseWriter, r *http.Request, actor Actor, sessionID string) {
+	if r.Method != http.MethodGet {
+		apiresp.WriteError(
+			w, http.StatusMethodNotAllowed, apiresp.CodeMethodNotAllowed,
+			"method not allowed", nil, apiresp.RequestID(r.Context()),
+		)
+		return
+	}
+	meta, err := h.service.Metadata(
+		r.Context(),
+		service.SQLConsoleActor{UserID: actor.UserID, Username: actor.Username, ClientIP: actor.ClientIP},
+		sessionID,
+		r.URL.Query().Get("database"),
+	)
+	if err != nil {
+		h.writeError(w, r, err)
+		return
+	}
+	apiresp.Write(w, http.StatusOK, meta, apiresp.RequestID(r.Context()))
+}
+
 func (h *Handler) HandleCloseSession(w http.ResponseWriter, r *http.Request, actor Actor, sessionID string) {
 	if r.Method != http.MethodDelete {
 		apiresp.WriteError(

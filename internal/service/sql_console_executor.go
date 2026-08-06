@@ -22,11 +22,12 @@ import (
 )
 
 const (
-	sqlConsoleTimeout        = 30 * time.Second
-	sqlConsoleMaxRows        = 500
-	sqlConsoleMaxColumns     = 256
-	sqlConsoleMaxCellBytes   = 64 * 1024
-	sqlConsoleMaxResultBytes = 4 * 1024 * 1024
+	sqlConsoleTimeout           = 30 * time.Second
+	sqlConsoleMaxRows           = 500
+	sqlConsoleMaxColumns        = 256
+	sqlConsoleMaxCellBytes      = 64 * 1024
+	sqlConsoleMaxResultBytes    = 4 * 1024 * 1024
+	sqlConsoleMetadataMaxTables = 500
 )
 
 type SQLConsoleExecution struct {
@@ -44,6 +45,7 @@ type SQLConsoleExecutor interface {
 type SQLConsoleConnection interface {
 	Databases() []string
 	DefaultDatabase() string
+	Metadata(context.Context, string) (SQLConsoleMetadata, error)
 	Execute(context.Context, string, string, bool) (SQLConsoleExecution, error)
 	Close() error
 }
@@ -155,6 +157,72 @@ func (c *databaseSQLConsoleConnection) databasePool(ctx context.Context, databas
 	}
 	c.pools[key] = db
 	return db, nil
+}
+
+// Metadata 查询数据库表结构与列类型(只读,不建审计会话)。
+func (c *databaseSQLConsoleConnection) Metadata(ctx context.Context, database string) (SQLConsoleMetadata, error) {
+	if ctx == nil {
+		return SQLConsoleMetadata{}, errors.New("query metadata: nil context")
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.closed {
+		return SQLConsoleMetadata{}, errors.New("SQL console connection is closed")
+	}
+	metadataContext, cancel := context.WithTimeout(ctx, sqlConsoleTimeout)
+	defer cancel()
+	db, err := c.databasePool(metadataContext, strings.TrimSpace(database))
+	if err != nil {
+		return SQLConsoleMetadata{}, err
+	}
+	tablesSQL, columnsSQL := metadataStatementSQL(c.account.Instance.Protocol)
+	tablesRows, err := querySQLConsoleRows(metadataContext, db, tablesSQL)
+	if err != nil {
+		return SQLConsoleMetadata{}, fmt.Errorf("query metadata tables: %w", err)
+	}
+	columnsRows, err := querySQLConsoleRows(metadataContext, db, columnsSQL)
+	if err != nil {
+		return SQLConsoleMetadata{}, fmt.Errorf("query metadata columns: %w", err)
+	}
+	return parseMetadataTables(c.account.Instance.Protocol, tablesRows, columnsRows), nil
+}
+
+// querySQLConsoleRows 执行只读查询并返回原始行数据(复用现有查询行扫描模式)。
+func querySQLConsoleRows(ctx context.Context, db *sql.DB, statement string) ([][]any, error) {
+	transaction, err := db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return nil, fmt.Errorf("begin read-only query: %w", err)
+	}
+	defer transaction.Rollback()
+	rows, err := transaction.QueryContext(ctx, statement)
+	if err != nil {
+		return nil, fmt.Errorf("execute query: %w", err)
+	}
+	defer rows.Close()
+	columns, err := rows.Columns()
+	if err != nil {
+		return nil, fmt.Errorf("read result columns: %w", err)
+	}
+	result := make([][]any, 0)
+	for rows.Next() {
+		values := make([]any, len(columns))
+		destinations := make([]any, len(columns))
+		for index := range values {
+			destinations[index] = &values[index]
+		}
+		if err := rows.Scan(destinations...); err != nil {
+			return nil, fmt.Errorf("scan result row: %w", err)
+		}
+		for index := range values {
+			normalized, _, _ := normalizeSQLConsoleValue(values[index])
+			values[index] = normalized
+		}
+		result = append(result, values)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("read result rows: %w", err)
+	}
+	return result, nil
 }
 
 func (c *databaseSQLConsoleConnection) Close() error {
@@ -359,6 +427,88 @@ func querySQLConsole(ctx context.Context, db *sql.DB, statement string) (SQLCons
 		return SQLConsoleExecution{}, fmt.Errorf("read result rows: %w", err)
 	}
 	return result, nil
+}
+
+type SQLConsoleMetadata struct {
+	Tables []SQLConsoleTableMeta `json:"tables"`
+}
+
+type SQLConsoleTableMeta struct {
+	Name    string                 `json:"name"`
+	Detail  string                 `json:"detail"`
+	Columns []SQLConsoleColumnMeta `json:"columns"`
+}
+
+type SQLConsoleColumnMeta struct {
+	Name string `json:"name"`
+	Type string `json:"type"`
+}
+
+// isPostgresProtocol 判断协议是否为 PostgreSQL(兼容 postgresql 写法)。
+func isPostgresProtocol(protocol string) bool {
+	return strings.EqualFold(strings.TrimSpace(protocol), "postgres") ||
+		strings.EqualFold(strings.TrimSpace(protocol), "postgresql")
+}
+
+// metadataStatementSQL 返回按协议区分元数据查询语句(统一 information_schema)。
+func metadataStatementSQL(protocol string) (tablesSQL, columnsSQL string) {
+	schemaExpr := "DATABASE()"
+	tablesCatalog := "information_schema.TABLES"
+	positionExpr := "ORDINAL_POSITION"
+	if isPostgresProtocol(protocol) {
+		schemaExpr = "current_schema()"
+		tablesCatalog = "information_schema.tables"
+		positionExpr = "ordinal_position"
+	}
+	tablesSQL = "SELECT table_name, '' AS detail FROM " + tablesCatalog +
+		" WHERE table_schema = " + schemaExpr + " ORDER BY table_name"
+	columnsSQL = "SELECT table_name, column_name, data_type FROM information_schema.columns" +
+		" WHERE table_schema = " + schemaExpr + " ORDER BY table_name, " + positionExpr
+	return tablesSQL, columnsSQL
+}
+
+// parseMetadataTables 将两轮查询结果组装为元数据,表数超过上限时截断。
+func parseMetadataTables(protocol string, tablesRows [][]any, columnsRows [][]any) SQLConsoleMetadata {
+	limit := sqlConsoleMetadataMaxTables
+	if len(tablesRows) > limit {
+		tablesRows = tablesRows[:limit]
+	}
+	meta := SQLConsoleMetadata{Tables: make([]SQLConsoleTableMeta, 0, len(tablesRows))}
+	index := make(map[string]int, len(tablesRows))
+	for _, row := range tablesRows {
+		// 行长度守卫与类型断言 ok 检查:短行/非字符串表名直接跳过,避免越界与静默丢数据。
+		if len(row) < 2 {
+			continue
+		}
+		name, ok := row[0].(string)
+		if !ok {
+			continue
+		}
+		detail, _ := row[1].(string)
+		meta.Tables = append(meta.Tables, SQLConsoleTableMeta{Name: name, Detail: detail})
+		index[name] = len(meta.Tables) - 1
+	}
+	for _, row := range columnsRows {
+		if len(row) < 3 {
+			continue
+		}
+		table, ok := row[0].(string)
+		if !ok {
+			continue
+		}
+		column, ok := row[1].(string)
+		if !ok {
+			continue
+		}
+		columnType, _ := row[2].(string)
+		if tableIndex, ok := index[table]; ok {
+			meta.Tables[tableIndex].Columns = append(
+				meta.Tables[tableIndex].Columns,
+				SQLConsoleColumnMeta{Name: column, Type: columnType},
+			)
+		}
+	}
+	return meta
 }
 
 func normalizeSQLConsoleValue(value any) (any, int, bool) {

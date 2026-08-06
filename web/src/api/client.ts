@@ -531,6 +531,11 @@ export interface SQLConsoleResult {
   duration_ms: number;
 }
 
+/** SQL 控制台元数据:表结构(供编辑器补全)。 */
+export interface SQLConsoleMetadataResult {
+  tables: { name: string; detail?: string; columns: { name: string; type: string }[] }[];
+}
+
 export interface DBInstancePayload {
   name: string;
   protocol: string;
@@ -1333,6 +1338,11 @@ export const apiClient = {
       body: JSON.stringify(payload),
       signal,
     }),
+  getSQLConsoleMetadata: (sessionId: string, database: string, signal?: AbortSignal) =>
+    request<SQLConsoleMetadataResult>(
+      `/api/sql-console/sessions/${encodeURIComponent(sessionId)}/metadata?database=${encodeURIComponent(database)}`,
+      { signal },
+    ),
   closeSQLConsoleSession: (sessionId: string) =>
     request<void>(`/api/sql-console/sessions/${encodeURIComponent(sessionId)}`, {
       method: 'DELETE',

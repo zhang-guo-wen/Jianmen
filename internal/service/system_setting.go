@@ -44,6 +44,27 @@ var systemSettingFieldNames = []string{
 	"database_max_client_message_bytes",
 }
 
+// hotReloadableSystemSettingFields 保存后立即生效的字段集合；
+// 变更仅涉及这些字段且已注册应用器时，Update 会在持久化成功后同步内存生效值。
+var hotReloadableSystemSettingFields = map[string]struct{}{
+	"login_captcha_enabled": {},
+}
+
+// SystemSettingsHotReloadApplier 将新配置应用到运行时组件的回调。
+type SystemSettingsHotReloadApplier func(SystemSettings) error
+
+func systemSettingFieldsHotReloadable(fields []string) bool {
+	if len(fields) == 0 {
+		return false
+	}
+	for _, field := range fields {
+		if _, ok := hotReloadableSystemSettingFields[field]; !ok {
+			return false
+		}
+	}
+	return true
+}
+
 type SystemSettings struct {
 	DatabaseGatewayMode           string
 	DatabaseGatewayClientTLSMode  string
@@ -109,6 +130,7 @@ type SystemSettingsService struct {
 	effective         SystemSettings
 	effectiveRevision int64
 	bootstrapped      bool
+	appliers          []SystemSettingsHotReloadApplier
 }
 
 func NewSystemSettingsService(
@@ -135,6 +157,39 @@ func NewSystemSettingsService(
 		availableDatabaseGatewayModes: availableModes,
 		now:                           time.Now,
 	}, nil
+}
+
+// RegisterHotReloadApplier 注册热加载应用器：可热加载字段保存成功后，
+// 将新配置依次传给已注册应用器以更新运行时组件。
+func (s *SystemSettingsService) RegisterHotReloadApplier(
+	applier SystemSettingsHotReloadApplier,
+) {
+	if applier == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.appliers = append(s.appliers, applier)
+}
+
+func (s *SystemSettingsService) hasHotReloadAppliers() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return len(s.appliers) > 0
+}
+
+// applyHotReload 依次调用已注册应用器应用新配置。
+// 约束：应用器（本设计的 ApplyLoginCaptchaEnabled）只做原子写、不得回调本服务的
+// 加锁方法，避免死锁；如未来注册复杂应用器，需改为在锁外调用。
+func (s *SystemSettingsService) applyHotReload(settings SystemSettings) error {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, applier := range s.appliers {
+		if err := applier(settings); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (s *SystemSettingsService) GetState(ctx context.Context) (SystemSettingsState, error) {
@@ -214,6 +269,25 @@ func (s *SystemSettingsService) Update(ctx context.Context, update SystemSetting
 	}
 	if !updated {
 		return SystemSettingsState{}, ErrSystemSettingsRevisionConflict
+	}
+	if systemSettingFieldsHotReloadable(changedFields) && s.hasHotReloadAppliers() {
+		if err := s.applyHotReload(update.Settings); err != nil {
+			return SystemSettingsState{}, fmt.Errorf("apply hot-reloadable system settings: %w", err)
+		}
+		applied, marked, err := s.repository.MarkSystemSettingApplied(ctx, persisted.Revision, now)
+		if err != nil {
+			return SystemSettingsState{}, fmt.Errorf("mark hot-reloaded system settings applied: %w", err)
+		}
+		if !marked ||
+			applied.Revision != persisted.Revision ||
+			applied.AppliedRevision != persisted.Revision {
+			return SystemSettingsState{}, fmt.Errorf("%w: revision %d changed during hot reload",
+				ErrSystemSettingsRevisionConflict, persisted.Revision)
+		}
+		s.mu.Lock()
+		s.effective = update.Settings
+		s.effectiveRevision = persisted.Revision
+		s.mu.Unlock()
 	}
 	return s.stateFromModel(persisted)
 }

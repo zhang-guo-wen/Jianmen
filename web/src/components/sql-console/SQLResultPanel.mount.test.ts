@@ -140,3 +140,25 @@ describe('SQLResultPanel 折叠', () => {
     expect(wrapper.find('.result-body').isVisible()).toBe(true);
   });
 });
+
+describe('SQLResultPanel 表格样式', () => {
+  afterEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  it('表格使用紧凑尺寸', () => {
+    const wrapper = mountResultPanel(baseResult);
+    // el-table 在测试中被 stub 为普通 div,Element Plus 内部的 .el-table--small 类不会渲染,
+    // 改为断言 size="small" 属性已传递给 el-table 组件,验证意图不变
+    expect(wrapper.find('.result-table div[size="small"]').exists()).toBe(true);
+  });
+
+  it('列使用固定宽度(可拖动)', () => {
+    const wrapper = mountResultPanel(baseResult);
+    // el-table-column 同样被 stub 为 div,width 以 HTML 属性形式渲染(无 thead th);
+    // 断言每列带 width="160" 且无 min-width,保持"列有固定宽度"的验证意图
+    const columns = wrapper.findAll('.result-table div[width="160"]');
+    expect(columns.length).toBe(baseResult.columns.length);
+    expect(wrapper.find('.result-table div[min-width]').exists()).toBe(false);
+  });
+});

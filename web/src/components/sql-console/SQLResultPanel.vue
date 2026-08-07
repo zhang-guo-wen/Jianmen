@@ -94,12 +94,12 @@ function formatCell(value: unknown): string {
         />
 
         <div v-if="hasRows" class="result-table">
-          <el-table :data="result?.rows ?? []" height="100%" stripe>
+          <el-table :data="result?.rows ?? []" height="100%" stripe size="small">
             <el-table-column
               v-for="(column, index) in result?.columns ?? []"
               :key="`${index}-${column}`"
               :label="column"
-              min-width="160"
+              width="160"
               show-overflow-tooltip
             >
               <template #default="{ row }">
@@ -190,6 +190,16 @@ function formatCell(value: unknown): string {
 .result-empty {
   flex: 1;
   min-height: 0;
+}
+
+/* 表头不换行 */
+.result-table :deep(th .cell) {
+  white-space: nowrap;
+}
+
+/* 紧凑行距:单元格行高收紧 */
+.result-table :deep(.el-table .cell) {
+  line-height: 20px;
 }
 
 .result-empty {

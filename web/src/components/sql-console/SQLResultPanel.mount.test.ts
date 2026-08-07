@@ -120,12 +120,22 @@ describe('SQLResultPanel 折叠', () => {
     expect(wrapper.find('.result-body').isVisible()).toBe(true);
   });
 
+  it('挂载时即带 error 自动展开', () => {
+    const wrapper = mount(SQLResultPanel, {
+      props: { result: null, error: '挂载即错', executing: false },
+    });
+    expect(wrapper.find('.result-body').isVisible()).toBe(true);
+  });
+
   it('点击折叠按钮可手动切换', async () => {
     const wrapper = mountResultPanel(baseResult);
     expect(wrapper.find('.result-body').isVisible()).toBe(true);
     await wrapper.find('.result-collapse-btn').trigger('click');
     await flushFrames();
     expect(wrapper.find('.result-body').isVisible()).toBe(false);
+    // 折叠状态为 v-model 模型:点击后需 emit update:collapsed 供父级布局切换
+    expect(wrapper.emitted('update:collapsed')).toBeTruthy();
+    expect(wrapper.emitted('update:collapsed')![0][0]).toBe(false);
     await wrapper.find('.result-collapse-btn').trigger('click');
     await flushFrames();
     expect(wrapper.find('.result-body').isVisible()).toBe(true);

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ElMessage, ElMessageBox } from 'element-plus';
-import { computed, onMounted } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import { useRoute } from 'vue-router';
 
 import { ApiError } from '@/api/client';
@@ -37,6 +37,9 @@ const {
   cancel,
 } = useSQLConsole({ requestedAccountId });
 const { t } = useI18n();
+
+/** 结果面板折叠状态:折叠时让位编辑器,吸收全部剩余空间 */
+const resultCollapsed = ref(true);
 
 const executionDisabled = computed(
   () => executing.value || connecting.value || !connected.value || !database.value,
@@ -135,6 +138,8 @@ async function confirmAndExecuteWrite(sqlText: string): Promise<void> {
 
     <SQLEditorPanel
       v-model="sql"
+      class="sql-editor-panel"
+      :class="{ 'sql-editor-panel--expanded': resultCollapsed }"
       :executing="executing"
       :disabled="executionDisabled"
       :metadata="metadata"
@@ -144,6 +149,9 @@ async function confirmAndExecuteWrite(sqlText: string): Promise<void> {
     />
 
     <SQLResultPanel
+      v-model:collapsed="resultCollapsed"
+      class="sql-result-panel"
+      :class="{ 'sql-result-panel--collapsed': resultCollapsed }"
       :result="result"
       :error="error"
       :executing="executing"
@@ -158,5 +166,27 @@ async function confirmAndExecuteWrite(sqlText: string): Promise<void> {
   min-height: 0;
   flex-direction: column;
   gap: 12px;
+}
+
+/* 折叠让位布局:默认展开态编辑器占 34%,结果面板吸收剩余;
+   折叠时结果面板收缩为 header 高度,编辑器吸收全部空间。
+   双类写法提高特异性,确保覆盖子组件内部 .editor-panel/.result-panel 的 flex 规则
+   (同特异性下样式加载顺序不可控,避免依赖后加载胜出)。 */
+.sql-editor-panel {
+  flex: 0 0 34%;
+}
+
+.sql-editor-panel.sql-editor-panel--expanded {
+  flex: 1 1 0;
+}
+
+.sql-result-panel {
+  flex: 1;
+  min-height: 190px;
+}
+
+.sql-result-panel.sql-result-panel--collapsed {
+  flex: 0 0 auto;
+  min-height: 0;
 }
 </style>

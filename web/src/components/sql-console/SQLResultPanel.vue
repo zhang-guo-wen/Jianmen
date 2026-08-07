@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ArrowDown, ArrowUp } from '@element-plus/icons-vue';
 import { ElCollapseTransition } from 'element-plus';
-import { computed, ref, watch } from 'vue';
+import { computed, watch } from 'vue';
 
 import type { SQLConsoleResult } from '@/api/client';
 import { useI18n } from '@/i18n';
@@ -21,8 +21,9 @@ const emptyDescription = computed(() => {
 });
 
 /* 折叠状态:默认折叠,查询结果/错误时自动展开
-   immediate:true —— 面板挂载时即携带 result/error(如会话切换后重建)也应展开 */
-const collapsed = ref(true);
+   immediate:true —— 面板挂载时即携带 result/error(如会话切换后重建)也应展开
+   defineModel:折叠状态由父组件(SQLConsoleWorkspace)持有,折叠让位编辑器布局 */
+const collapsed = defineModel<boolean>('collapsed', { default: true });
 
 watch(() => props.result, (result) => {
   if (result) collapsed.value = false;

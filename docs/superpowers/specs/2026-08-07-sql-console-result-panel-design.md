@@ -20,15 +20,17 @@
 
 ## 设计
 
-### 1. 折叠（默认折叠，查询后展示）
+### 1. 折叠（默认折叠，查询后展示，折叠让位编辑器）
 
-`SQLResultPanel.vue` 增加内部状态 `collapsed = ref(true)`：
+`SQLResultPanel.vue` 折叠状态改为 `v-model:collapsed`（默认 `true`，父组件可控）：
 
 - header 右侧加折叠/展开按钮（箭头图标），标题区也可点击切换；
 - 内容区（表格/错误 alert/空态）用 `el-collapse-transition` 包裹，折叠时仅显示 header；
 - 自动展开：`watch(result)` 有值、`watch(error)` 非空时展开（错误也要可见）；初始未执行保持折叠；
 - 折叠时 header 指标区（耗时/行数/审计会话 ID）保留显示；
 - 手动折叠后执行新查询 → 自动重新展开。
+
+**折叠让位布局**（最终审查补充）：折叠时结果面板收缩为 header 高度（`flex: 0 0 auto`），编辑器面板吸收剩余空间（`flex: 1 1 0`）；展开时恢复现状（编辑器 `flex: 0 0 34%`、结果面板 `flex: 1`）。折叠状态由 `SQLConsoleWorkspace.vue` 持有并驱动两个面板的 class 切换，实现"折叠到下面、编辑器变大"的空间收益。
 
 ### 2. 列宽可拖动
 
@@ -46,8 +48,10 @@
 
 ## 影响面
 
-- 改动集中在 `web/src/components/sql-console/SQLResultPanel.vue`（组件内部状态 + 模板 + scoped CSS）；
-- `SQLConsoleWorkspace.vue`、后端均无需改动。
+- `web/src/components/sql-console/SQLResultPanel.vue`（折叠状态模型化 + 模板 + scoped CSS）；
+- `web/src/components/sql-console/SQLConsoleWorkspace.vue`（持有折叠状态、面板 class 切换、布局 CSS）；
+- `web/src/i18n/index.ts`、`web/package.json`（测试挂载）、新建挂载测试；
+- 后端无需改动。
 
 ## 测试
 

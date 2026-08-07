@@ -152,6 +152,7 @@ const zhCN = {
 
   'sqlConsole.account': '数据库账号',
   'sqlConsole.cancel': '取消执行',
+  'sqlConsole.collapse': '折叠结果',
   'sqlConsole.connectedHint': '连接已保持，后续执行将复用当前会话',
   'sqlConsole.connecting': '正在连接并加载数据库...',
   'sqlConsole.database': '数据库',
@@ -168,6 +169,7 @@ const zhCN = {
   'sqlConsole.executionSucceeded': '执行完成',
   'sqlConsole.executeStatement': '执行此语句',
   'sqlConsole.executing': '执行中…',
+  'sqlConsole.expand': '展开结果',
   'sqlConsole.keyboardHint': 'Ctrl / ⌘ + Enter 执行光标所在语句 · 行号 ▶ 执行单条语句',
   'sqlConsole.noResult': '执行 SQL 后，结果将在这里显示',
   'sqlConsole.readOnly': '只读查询',

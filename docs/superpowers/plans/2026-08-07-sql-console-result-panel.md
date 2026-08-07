@@ -1,6 +1,6 @@
 # SQL 控制台结果面板优化实现计划
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** 优化 SQL 控制台结果面板:默认折叠/查询后自动展开、列宽可拖动、表头不换行、行距更密。
 
@@ -11,8 +11,9 @@
 ## Global Constraints
 
 - 注释与 git 提交信息一律使用中文(项目规范);
-- 改动仅限:`web/src/components/sql-console/SQLResultPanel.vue`、`web/src/i18n/index.ts`、`web/package.json`(测试脚本挂载)、新建挂载测试文件;
-- 折叠默认 `collapsed = true`;`result` 有值或 `error` 非空时自动展开;手动折叠后新查询仍自动重新展开;
+- 改动范围:`web/src/components/sql-console/SQLResultPanel.vue`、`web/src/components/sql-console/SQLConsoleWorkspace.vue`、`web/src/i18n/index.ts`、`web/package.json`(测试脚本挂载)、新建挂载测试文件;
+- 折叠状态为 `v-model:collapsed`,默认 `true`(由 SQLConsoleWorkspace 持有);`result` 有值或 `error` 非空时自动展开;手动折叠后新查询仍自动重新展开;
+- 折叠让位布局(最终审查补充):折叠时结果面板 `flex: 0 0 auto`(收缩为 header 高度)、编辑器面板 `flex: 1 1 0`(吸收空间);展开时恢复现状(编辑器 `flex: 0 0 34%`、结果面板 `flex: 1`);
 - 折叠时 header 指标区(耗时/行数/审计会话 ID)保留显示;
 - `el-table-column` 由 `min-width="160"` 改为 `width="160"`(固定宽度启用列宽拖动);保留 `show-overflow-tooltip` 与 stripe;
 - 表头不换行:`th .cell { white-space: nowrap }`;紧凑行距:`size="small"` + `.cell { line-height: 20px }`;
@@ -32,7 +33,7 @@
 - Consumes: 现有 props `result: SQLConsoleResult | null`、`error: string`、`executing: boolean`(类型从 `@/api/client` 导入,结构不变)
 - Produces: 组件内部状态 `collapsed`(默认 true);header 折叠按钮;`el-collapse-transition` 包裹内容区
 
-- [ ] **Step 1: 写失败的挂载测试**
+- [x] **Step 1: 写失败的挂载测试**
 
 `web/src/components/sql-console/SQLResultPanel.mount.test.ts`:
 
@@ -110,12 +111,12 @@ describe('SQLResultPanel 折叠', () => {
 });
 ```
 
-- [ ] **Step 2: 运行测试确认失败**
+- [x] **Step 2: 运行测试确认失败**
 
 Run: `cd web && npx vitest run src/components/sql-console/SQLResultPanel.mount.test.ts`
 Expected: FAIL(`.result-body` 无 v-show 控制,默认可见;无 `.result-collapse-btn` 元素)
 
-- [ ] **Step 3: 实现折叠**
+- [x] **Step 3: 实现折叠**
 
 `web/src/components/sql-console/SQLResultPanel.vue` 修改:
 
@@ -183,24 +184,24 @@ function toggleCollapsed(): void {
 - 折叠按钮 `@click.stop` 防止触发 header 的切换(按钮自身已切换,避免双重触发);
 - 若 `useI18n` 的 `t` 在组件内为 `t('sqlConsole.xxx')` 形式,保持现状调用方式。
 
-- [ ] **Step 4: i18n 新增键**(`web/src/i18n/index.ts` 的 sqlConsole 区块)
+- [x] **Step 4: i18n 新增键**(`web/src/i18n/index.ts` 的 sqlConsole 区块)
 
 ```ts
 'sqlConsole.collapse': '折叠结果',
 'sqlConsole.expand': '展开结果',
 ```
 
-- [ ] **Step 5: 运行测试确认通过**
+- [x] **Step 5: 运行测试确认通过**
 
 Run: `cd web && npx vitest run src/components/sql-console/SQLResultPanel.mount.test.ts`
 Expected: PASS(5 个用例)
 
-- [ ] **Step 6: 挂入测试脚本 + 类型检查**(`web/package.json` 的 `test:connection-dialog` 末尾追加 ` src/components/sql-console/SQLResultPanel.mount.test.ts`)
+- [x] **Step 6: 挂入测试脚本 + 类型检查**(`web/package.json` 的 `test:connection-dialog` 末尾追加 ` src/components/sql-console/SQLResultPanel.mount.test.ts`)
 
 Run: `cd web && npm run test:connection-dialog && npm run typecheck`
 Expected: 全部 PASS
 
-- [ ] **Step 7: 提交**
+- [x] **Step 7: 提交**
 
 ```bash
 git add web/src/components/sql-console/SQLResultPanel.vue web/src/components/sql-console/SQLResultPanel.mount.test.ts web/src/i18n/index.ts web/package.json
@@ -219,7 +220,7 @@ git commit -m "feat(web): SQL 结果面板折叠(默认折叠,查询/错误自�
 - Consumes: Task 1 的折叠结构与样式
 - Produces: `el-table size="small"`、列 `width="160"`、表头/单元格 CSS
 
-- [ ] **Step 1: 追加失败测试**(`SQLResultPanel.mount.test.ts` 追加用例)
+- [x] **Step 1: 追加失败测试**(`SQLResultPanel.mount.test.ts` 追加用例)
 
 ```ts
 describe('SQLResultPanel 表格样式', () => {
@@ -246,12 +247,12 @@ describe('SQLResultPanel 表格样式', () => {
 
 注:若 happy-dom 下 `isVisible`/表格渲染有差异,`el-table` 渲染以实际输出为准;列宽断言可改为检查 DOM 中列样式含 `width` 或 `min-width`——实现后按实测调整断言(保持"列有固定宽度"的验证意图)。
 
-- [ ] **Step 2: 运行测试确认失败**
+- [x] **Step 2: 运行测试确认失败**
 
 Run: `cd web && npx vitest run src/components/sql-console/SQLResultPanel.mount.test.ts`
 Expected: FAIL(`.el-table--small` 不存在;列无固定 width)
 
-- [ ] **Step 3: 表格属性与 CSS**
+- [x] **Step 3: 表格属性与 CSS**
 
 `SQLResultPanel.vue` 模板中的 `el-table` 增加 `size="small"`;`el-table-column` 的 `min-width="160"` 改为 `width="160"`:
 
@@ -280,17 +281,17 @@ scoped CSS 追加(现有 `.result-table` 区块附近):
 }
 ```
 
-- [ ] **Step 4: 运行测试确认通过**
+- [x] **Step 4: 运行测试确认通过**
 
 Run: `cd web && npx vitest run src/components/sql-console/SQLResultPanel.mount.test.ts`
 Expected: PASS
 
-- [ ] **Step 5: 全量验证**
+- [x] **Step 5: 全量验证**
 
 Run: `cd web && npm run test:connection-dialog && npm run typecheck && npm run build`
 Expected: 全部通过
 
-- [ ] **Step 6: 提交**
+- [x] **Step 6: 提交**
 
 ```bash
 git add web/src/components/sql-console/SQLResultPanel.vue web/src/components/sql-console/SQLResultPanel.mount.test.ts

@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import { computed } from 'vue';
+import { ArrowDown, ArrowUp } from '@element-plus/icons-vue';
+import { ElCollapseTransition } from 'element-plus';
+import { computed, watch } from 'vue';
 
 import type { SQLConsoleResult } from '@/api/client';
 import { useI18n } from '@/i18n';
@@ -18,6 +20,27 @@ const emptyDescription = computed(() => {
   return t('sqlConsole.noResult');
 });
 
+/* 折叠状态:默认折叠,查询结果/错误时自动展开
+   immediate:true —— 面板挂载时即携带 result/error(如会话切换后重建)也应展开
+   defineModel:折叠状态由父组件(SQLConsoleWorkspace)持有,折叠让位编辑器布局 */
+const collapsed = defineModel<boolean>('collapsed', { default: true });
+
+watch(() => props.result, (result) => {
+  if (result) collapsed.value = false;
+}, { immediate: true });
+watch(() => props.error, (error) => {
+  if (error) collapsed.value = false;
+}, { immediate: true });
+
+const collapseButtonIcon = computed(() => (collapsed.value ? ArrowUp : ArrowDown));
+const collapseTitle = computed(() =>
+  collapsed.value ? t('sqlConsole.expand') : t('sqlConsole.collapse'),
+);
+
+function toggleCollapsed(): void {
+  collapsed.value = !collapsed.value;
+}
+
 function formatCell(value: unknown): string {
   if (value === null || value === undefined) return 'NULL';
   if (typeof value === 'object') return JSON.stringify(value);
@@ -27,7 +50,7 @@ function formatCell(value: unknown): string {
 
 <template>
   <section class="result-panel" aria-labelledby="sql-console-result-title">
-    <header class="result-header">
+    <header class="result-header" @click="toggleCollapsed">
       <div class="result-heading">
         <strong id="sql-console-result-title">{{ t('sqlConsole.resultTitle') }}</strong>
         <el-tag v-if="result" :type="result.read_only ? 'success' : 'warning'" effect="light" round>
@@ -40,46 +63,60 @@ function formatCell(value: unknown): string {
         <span v-else>{{ t('sqlConsole.result.affected') }} <b>{{ result.rows_affected }}</b></span>
         <span class="audit-id">{{ t('sqlConsole.result.audit') }} <b>{{ result.audit_session_id }}</b></span>
       </div>
+      <el-button
+        class="result-collapse-btn"
+        :icon="collapseButtonIcon"
+        :title="collapseTitle"
+        :aria-label="collapseTitle"
+        circle
+        text
+        size="small"
+        @click.stop="toggleCollapsed"
+      />
     </header>
 
-    <el-alert
-      v-if="error"
-      class="result-alert"
-      type="error"
-      :title="error"
-      :closable="false"
-      show-icon
-    />
-    <el-alert
-      v-else-if="result?.truncated"
-      class="result-alert"
-      type="warning"
-      :title="t('sqlConsole.result.truncated')"
-      :closable="false"
-      show-icon
-    />
+    <el-collapse-transition>
+      <div v-show="!collapsed" class="result-body">
+        <el-alert
+          v-if="error"
+          class="result-alert"
+          type="error"
+          :title="error"
+          :closable="false"
+          show-icon
+        />
+        <el-alert
+          v-else-if="result?.truncated"
+          class="result-alert"
+          type="warning"
+          :title="t('sqlConsole.result.truncated')"
+          :closable="false"
+          show-icon
+        />
 
-    <div v-if="hasRows" class="result-table">
-      <el-table :data="result?.rows ?? []" height="100%" stripe>
-        <el-table-column
-          v-for="(column, index) in result?.columns ?? []"
-          :key="`${index}-${column}`"
-          :label="column"
-          min-width="160"
-          show-overflow-tooltip
-        >
-          <template #default="{ row }">
-            <span :class="{ 'null-value': row[index] == null }">{{ formatCell(row[index]) }}</span>
-          </template>
-        </el-table-column>
-      </el-table>
-    </div>
-    <div v-else class="result-empty">
-      <el-empty
-        :description="emptyDescription"
-        :image-size="72"
-      />
-    </div>
+        <div v-if="hasRows" class="result-table">
+          <el-table :data="result?.rows ?? []" height="100%" stripe size="small">
+            <el-table-column
+              v-for="(column, index) in result?.columns ?? []"
+              :key="`${index}-${column}`"
+              :label="column"
+              width="160"
+              show-overflow-tooltip
+            >
+              <template #default="{ row }">
+                <span :class="{ 'null-value': row[index] == null }">{{ formatCell(row[index]) }}</span>
+              </template>
+            </el-table-column>
+          </el-table>
+        </div>
+        <div v-else class="result-empty">
+          <el-empty
+            :description="emptyDescription"
+            :image-size="72"
+          />
+        </div>
+      </div>
+    </el-collapse-transition>
   </section>
 </template>
 
@@ -137,6 +174,14 @@ function formatCell(value: unknown): string {
   white-space: nowrap;
 }
 
+.result-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+  overflow: hidden;
+}
+
 .result-alert {
   flex: 0 0 auto;
   border-radius: 0;
@@ -146,6 +191,16 @@ function formatCell(value: unknown): string {
 .result-empty {
   flex: 1;
   min-height: 0;
+}
+
+/* 表头不换行 */
+.result-table :deep(th .cell) {
+  white-space: nowrap;
+}
+
+/* 紧凑行距:单元格行高收紧 */
+.result-table :deep(.el-table .cell) {
+  line-height: 20px;
 }
 
 .result-empty {

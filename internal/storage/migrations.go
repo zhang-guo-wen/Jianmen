@@ -245,6 +245,11 @@ var migrations = []Migration{
 		Run:                      migrateAuditFields,
 		SQLiteDisableForeignKeys: true,
 	},
+	{
+		Version: loginCaptchaEnabledMigrationVersion,
+		Name:    "登录验证码开关系统设置",
+		Run:     migrateLoginCaptchaEnabled,
+	},
 }
 
 func rejectDuplicateDatabaseAccounts(tx *gorm.DB) error {

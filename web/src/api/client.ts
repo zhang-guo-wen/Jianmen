@@ -296,6 +296,7 @@ export interface AuditSessionListRecord {
   id: string;
   user_id?: string;
   username: string;
+  display_name?: string;
   protocol: string;
   protocol_subtype?: string;
   resource_type?: string;

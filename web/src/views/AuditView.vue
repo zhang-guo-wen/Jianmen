@@ -29,7 +29,8 @@
             </el-table-column>
             <el-table-column v-bind="TABLE_COLUMNS.identifier" :label="t('audit.column.authSessionId')">
               <template #default="{ row }">
-                <AuditSessionLink :session-id="row.session_id" @open="showUserSessionDetail" />
+                <AuditSessionLink v-if="row.session_id" :session-id="row.session_id" @open="showUserSessionDetail" />
+                <span v-else class="session-id-fallback" :title="row.id">{{ row.id.slice(0, 8) }}</span>
               </template>
             </el-table-column>
             <el-table-column v-bind="TABLE_COLUMNS.address" :label="t('audit.column.targetHost')">
@@ -102,11 +103,12 @@
               <template #default="{ row }">{{ formatTime(row.started_at) }}</template>
             </el-table-column>
             <el-table-column :label="t('audit.column.operator')" min-width="130" show-overflow-tooltip>
-              <template #default="{ row }">{{ row.username || row.user_id || '-' }}</template>
+              <template #default="{ row }">{{ row.display_name || row.username || '-' }}</template>
             </el-table-column>
             <el-table-column v-bind="TABLE_COLUMNS.identifier" :label="t('audit.column.authSessionId')">
               <template #default="{ row }">
-                <AuditSessionLink :session-id="row.session_id" @open="showUserSessionDetail" />
+                <AuditSessionLink v-if="row.session_id" :session-id="row.session_id" @open="showUserSessionDetail" />
+                <span v-else class="session-id-fallback" :title="row.id">{{ row.id.slice(0, 8) }}</span>
               </template>
             </el-table-column>
             <el-table-column v-bind="TABLE_COLUMNS.address" :label="t('audit.column.targetHost')">
@@ -182,7 +184,8 @@
             </el-table-column>
             <el-table-column v-bind="TABLE_COLUMNS.identifier" :label="t('audit.column.authSessionId')">
               <template #default="{ row }">
-                <AuditSessionLink :session-id="row.session_id" @open="showUserSessionDetail" />
+                <AuditSessionLink v-if="row.session_id" :session-id="row.session_id" @open="showUserSessionDetail" />
+                <span v-else class="session-id-fallback" :title="row.id">{{ row.id.slice(0, 8) }}</span>
               </template>
             </el-table-column>
             <el-table-column v-bind="TABLE_COLUMNS.address" :label="t('audit.column.databaseInstance')">
@@ -252,7 +255,8 @@
             </el-table-column>
             <el-table-column v-bind="TABLE_COLUMNS.identifier" :label="t('audit.column.authSessionId')">
               <template #default="{ row }">
-                <AuditSessionLink :session-id="row.session_id" @open="showUserSessionDetail" />
+                <AuditSessionLink v-if="row.session_id" :session-id="row.session_id" @open="showUserSessionDetail" />
+                <span v-else class="session-id-fallback" :title="row.id">{{ row.id.slice(0, 8) }}</span>
               </template>
             </el-table-column>
             <el-table-column v-bind="TABLE_COLUMNS.address" :label="t('audit.column.targetResource')">

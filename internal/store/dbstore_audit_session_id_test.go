@@ -18,7 +18,7 @@ func TestAuditSessionListKeepsDeletedAuthorizationSessionID(t *testing.T) {
 		t.Fatalf("auto migrate: %v", err)
 	}
 
-	user := model.User{ID: "audit-user", Username: "audit-user", Status: "active"}
+	user := model.User{ID: "audit-user", Username: "audit-user", DisplayName: "审计测试用户", Status: "active"}
 	if err := db.Create(&user).Error; err != nil {
 		t.Fatalf("create user: %v", err)
 	}
@@ -57,5 +57,8 @@ func TestAuditSessionListKeepsDeletedAuthorizationSessionID(t *testing.T) {
 	}
 	if items[0].SessionID != "00001" {
 		t.Fatalf("authorization session id = %q, want 00001", items[0].SessionID)
+	}
+	if items[0].DisplayName != "审计测试用户" {
+		t.Fatalf("operator display name = %q, want 审计测试用户", items[0].DisplayName)
 	}
 }

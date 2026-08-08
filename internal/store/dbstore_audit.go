@@ -176,12 +176,14 @@ func (s *DBStore) ListAuditSessions(
 		return nil, 0, err
 	}
 	sessionIDs := s.auditSessionIDs(ctx, sessions)
+	displayNames := s.auditUserDisplayNames(ctx, sessions)
 	views := make([]AuditSessionView, len(sessions))
 	for i, sess := range sessions {
 		views[i] = AuditSessionView{
 			ID:              sess.ID,
 			UserID:          sess.UserID,
 			Username:        sess.Username,
+			DisplayName:     displayNames[sess.UserID],
 			Protocol:        sess.Protocol,
 			ProtocolSubtype: sess.ProtocolSubtype,
 			ResourceType:    sess.ResourceType,
@@ -345,6 +347,36 @@ func (s *DBStore) auditSessionIDs(ctx context.Context, sessions []model.AuditSes
 		if sid, ok := lookup[sess.UserSessionID]; ok {
 			result[sess.ID] = sid
 		}
+	}
+	return result
+}
+
+// auditUserDisplayNames 批量查询 users 表显示名，用于审计会话列表展示操作人。
+// 已软删除(active_marker 为 NULL)或已删除的用户回退为空，由前端回退登录账号。
+func (s *DBStore) auditUserDisplayNames(ctx context.Context, sessions []model.AuditSession) map[string]string {
+	ids := make([]string, 0, len(sessions))
+	for _, sess := range sessions {
+		if sess.UserID != "" {
+			ids = append(ids, sess.UserID)
+		}
+	}
+	if len(ids) == 0 {
+		return map[string]string{}
+	}
+	type row struct {
+		ID          string
+		DisplayName string
+	}
+	var rows []row
+	if err := s.db.WithContext(ctx).
+		Model(&model.User{}).
+		Where("id IN ? AND active_marker = ?", ids, model.ActiveMarkerValue).
+		Select("id, display_name").Find(&rows).Error; err != nil {
+		return map[string]string{}
+	}
+	result := make(map[string]string, len(rows))
+	for _, r := range rows {
+		result[r.ID] = r.DisplayName
 	}
 	return result
 }

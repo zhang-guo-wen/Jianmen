@@ -26,7 +26,7 @@ func (r adminAuditQueryRepository) ListAuditSessions(ctx context.Context, params
 	result := make([]service.AuditSessionListItem, len(items))
 	for i, item := range items {
 		result[i] = service.AuditSessionListItem{
-			ID: item.ID, UserID: item.UserID, Username: item.Username, Protocol: item.Protocol, ProtocolSubtype: item.ProtocolSubtype,
+			ID: item.ID, UserID: item.UserID, Username: item.Username, DisplayName: item.DisplayName, Protocol: item.Protocol, ProtocolSubtype: item.ProtocolSubtype,
 			ResourceType: item.ResourceType, ResourceID: item.ResourceID, HostID: item.HostID, AccountID: item.AccountID,
 			TargetName: item.TargetName, TargetAddress: item.TargetAddress, AccountName: item.AccountName, AccountUsername: item.AccountUsername,
 			ClientIP: item.ClientIP, StartedAt: item.StartedAt, EndedAt: item.EndedAt, State: item.State, Outcome: item.Outcome,

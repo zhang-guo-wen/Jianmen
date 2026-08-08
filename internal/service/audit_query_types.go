@@ -42,6 +42,7 @@ type AuditSessionListItem struct {
 	ID              string `json:"id"`
 	UserID          string `json:"user_id,omitempty"`
 	Username        string `json:"username"`
+	DisplayName     string `json:"display_name,omitempty"`
 	Protocol        string `json:"protocol"`
 	ProtocolSubtype string `json:"protocol_subtype,omitempty"`
 	ResourceType    string `json:"resource_type,omitempty"`

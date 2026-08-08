@@ -13,6 +13,8 @@ import (
 type sqlConsoleRepositoryStub struct {
 	account        model.DatabaseAccount
 	found          bool
+	userSession    model.UserSession
+	userSessionErr error
 	sessions       []*model.AuditSession
 	queries        []*model.AuditDBQuery
 	finished       []string
@@ -23,6 +25,10 @@ type sqlConsoleRepositoryStub struct {
 
 func (s *sqlConsoleRepositoryStub) FindActiveDatabaseAccount(context.Context, string) (model.DatabaseAccount, bool, error) {
 	return s.account, s.found, nil
+}
+
+func (s *sqlConsoleRepositoryStub) GetOrCreateActivePermanentUserSession(_ context.Context, _ string) (model.UserSession, error) {
+	return s.userSession, s.userSessionErr
 }
 
 func (s *sqlConsoleRepositoryStub) CreateAuditSession(_ context.Context, session *model.AuditSession) error {
@@ -105,6 +111,10 @@ func newSQLConsoleServiceFixture(t *testing.T) (*SQLConsoleService, *sqlConsoleR
 	t.Helper()
 	repository := &sqlConsoleRepositoryStub{
 		found: true,
+		userSession: model.UserSession{
+			ID: "user-session-1", UserID: "user-1", SessionID: "00001",
+			Type: "permanent", Status: "active",
+		},
 		account: model.DatabaseAccount{
 			ID: "account-1", UniqueName: "reporting", Username: "reader",
 			Password: model.NewEncryptedField("secret"), Status: "active",
@@ -164,6 +174,9 @@ func TestSQLConsoleExecuteReadQueryAuditsBeforeExecution(t *testing.T) {
 	if len(repository.sessions) != 1 || len(repository.queries) != 1 {
 		t.Fatalf("audit writes = sessions %d, queries %d", len(repository.sessions), len(repository.queries))
 	}
+	if repository.sessions[0].UserSessionID != "user-session-1" {
+		t.Fatalf("audit session user_session_id = %q, want user-session-1", repository.sessions[0].UserSessionID)
+	}
 	if len(repository.finished) != 1 || repository.finished[0] != model.AuditOutcomeSucceeded {
 		t.Fatalf("finished outcomes = %#v", repository.finished)
 	}
@@ -176,6 +189,25 @@ func TestSQLConsoleExecuteReadQueryAuditsBeforeExecution(t *testing.T) {
 	}
 	if result.RowCount != 1 || result.AuditSessionID != "audit-session" || result.QueryKind != "select" {
 		t.Fatalf("result = %#v", result)
+	}
+}
+
+func TestSQLConsoleExecuteAuditsDespiteUserSessionLookupFailure(t *testing.T) {
+	sqlService, repository, _, executor := newSQLConsoleServiceFixture(t)
+	repository.userSessionErr = errors.New("user session lookup failed")
+	sessionID := createSQLConsoleTestSession(t, sqlService)
+	if _, err := sqlService.Execute(
+		context.Background(),
+		SQLConsoleActor{UserID: "user-1", Username: "alice"},
+		SQLConsoleRequest{SessionID: sessionID, Database: "app", SQL: "SELECT 1"},
+	); err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if executor.connection.called != 1 {
+		t.Fatalf("executor called = %d, want 1", executor.connection.called)
+	}
+	if len(repository.sessions) != 1 || repository.sessions[0].UserSessionID != "" {
+		t.Fatalf("audit sessions = %#v, want one session without user_session_id", repository.sessions)
 	}
 }
 

@@ -50,6 +50,15 @@ func (s *Server) startWebTerminalAudit(
 		Outcome:         model.AuditOutcomeActive,
 		ReplayDir:       filepath.Join(s.cfg.ReplayDir, "ssh", session.ID),
 	}
+	// 关联用户授权会话(user_sessions),使审计记录能展示 5 位授权会话编号。
+	// 与 SSH 网关路径一致,获取失败不阻塞连接,仅授权会话 ID 留空。
+	if s.userSessionCreation != nil {
+		if userSession, err := s.userSessionCreation.GetOrCreateActivePermanentUserSession(ctx, session.UserID); err == nil {
+			auditSession.UserSessionID = userSession.ID
+		} else if s.logger != nil {
+			s.logger.Warn("failed to look up web terminal user session", "user", session.UserID, "error", err)
+		}
+	}
 	if err := s.audit.CreateAuditSession(ctx, auditSession); err != nil {
 		s.logger.Warn("failed to create web terminal audit session", "session", session.ID, "error", err)
 		return nil

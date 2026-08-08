@@ -1,6 +1,5 @@
 import {
   computed,
-  onScopeDispose,
   readonly,
   ref,
   shallowReadonly,
@@ -22,23 +21,48 @@ export interface UseSQLConsoleOptions {
   requestedAccountId?: MaybeRefOrGetter<string>;
 }
 
+/**
+ * 模块级单例状态:SQL 控制台连接在组件卸载后保留,重新进入页面时复用,
+ * 不再每次新建数据库连接会话。
+ */
+const accounts = ref<DBAccountRecord[]>([]);
+const databases = ref<string[]>([]);
+const accountId = shallowRef('');
+const database = shallowRef('');
+const sessionId = shallowRef('');
+const sql = shallowRef('SELECT 1 AS ready;');
+const loadingAccounts = shallowRef(false);
+const connecting = shallowRef(false);
+const executing = shallowRef(false);
+const error = shallowRef('');
+const result = shallowRef<SQLConsoleResult | null>(null);
+const metadata = shallowRef<SQLTableMetadata[]>([]);
+const activeController = shallowRef<AbortController | null>(null);
+const connectionController = shallowRef<AbortController | null>(null);
+const metadataController = shallowRef<AbortController | null>(null);
+let connectionGeneration = 0;
+
+/** 重置模块级状态(测试与调试用):清空连接与会话状态,不调用后端 API。 */
+export function resetSQLConsoleState(): void {
+  connectionGeneration++;
+  connectionController.value?.abort();
+  activeController.value?.abort();
+  metadataController.value?.abort();
+  accounts.value = [];
+  databases.value = [];
+  accountId.value = '';
+  database.value = '';
+  sessionId.value = '';
+  sql.value = 'SELECT 1 AS ready;';
+  loadingAccounts.value = false;
+  connecting.value = false;
+  executing.value = false;
+  error.value = '';
+  result.value = null;
+  metadata.value = [];
+}
+
 export function useSQLConsole(options: UseSQLConsoleOptions = {}) {
-  const accounts = ref<DBAccountRecord[]>([]);
-  const databases = ref<string[]>([]);
-  const accountId = shallowRef('');
-  const database = shallowRef('');
-  const sessionId = shallowRef('');
-  const sql = shallowRef('SELECT 1 AS ready;');
-  const loadingAccounts = shallowRef(false);
-  const connecting = shallowRef(false);
-  const executing = shallowRef(false);
-  const error = shallowRef('');
-  const result = shallowRef<SQLConsoleResult | null>(null);
-  const metadata = shallowRef<SQLTableMetadata[]>([]);
-  const activeController = shallowRef<AbortController | null>(null);
-  const connectionController = shallowRef<AbortController | null>(null);
-  const metadataController = shallowRef<AbortController | null>(null);
-  let connectionGeneration = 0;
 
   const selectedAccount = computed(
     () => accounts.value.find(account => account.id === accountId.value) ?? null,
@@ -79,7 +103,10 @@ export function useSQLConsole(options: UseSQLConsoleOptions = {}) {
         return protocol === 'mysql' || protocol === 'postgres' || protocol === 'postgresql';
       });
       applyRequestedAccount();
-      await connect();
+      // 已有活跃连接则复用(重新进入页面不新建会话);账号变化由 watch 触发 connect
+      if (!sessionId.value) {
+        await connect();
+      }
     } catch (cause) {
       error.value = cause instanceof Error ? cause.message : '加载数据库账号失败';
     } finally {
@@ -221,9 +248,8 @@ export function useSQLConsole(options: UseSQLConsoleOptions = {}) {
 
   watch(database, () => void loadMetadata());
 
-  onScopeDispose(() => {
-    void disconnect();
-  });
+  // 注意:组件卸载不断开连接——模块级状态保留会话,重新进入页面时复用。
+  // 后端会话有 idleTTL 自动过期,执行遇 404 时 execute() 会自动重连。
 
   return {
     accounts: readonly(accounts),

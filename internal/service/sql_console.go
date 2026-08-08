@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"strconv"
 	"strings"
 	"sync"
@@ -37,6 +38,13 @@ type SQLConsoleAuthorizer interface {
 	AuthorizeConnection(context.Context, string, []string, string, string) (bool, error)
 }
 
+// SQLConsoleUserSessionProvider 提供用户的认证会话(短 session_id),用于审计记录关联。
+// 与普通连接一致复用 UserSessionCreationService 的共享分配边界,SQL 控制台会话
+// 在审计列表"授权会话 ID"列即可正常显示短认证会话 ID,不再为空。
+type SQLConsoleUserSessionProvider interface {
+	GetOrCreateActivePermanentUserSession(context.Context, string) (model.UserSession, error)
+}
+
 type SQLConsoleActor struct {
 	UserID, Username, ClientIP string
 }
@@ -59,19 +67,21 @@ type SQLConsoleResult struct {
 }
 
 type SQLConsoleService struct {
-	repository SQLConsoleRepository
-	authorizer SQLConsoleAuthorizer
-	executor   SQLConsoleExecutor
-	now        func() time.Time
-	sessionsMu sync.Mutex
-	sessions   map[string]*sqlConsoleSession
-	idleTTL    time.Duration
+	repository   SQLConsoleRepository
+	authorizer   SQLConsoleAuthorizer
+	executor     SQLConsoleExecutor
+	userSessions SQLConsoleUserSessionProvider
+	now          func() time.Time
+	sessionsMu   sync.Mutex
+	sessions     map[string]*sqlConsoleSession
+	idleTTL      time.Duration
 }
 
 func NewSQLConsoleService(
 	repository SQLConsoleRepository,
 	authorizer SQLConsoleAuthorizer,
 	executor SQLConsoleExecutor,
+	userSessions SQLConsoleUserSessionProvider,
 ) (*SQLConsoleService, error) {
 	if repository == nil {
 		return nil, errors.New("SQL console repository is required")
@@ -82,14 +92,31 @@ func NewSQLConsoleService(
 	if executor == nil {
 		return nil, errors.New("SQL console executor is required")
 	}
+	if isNilSQLConsoleUserSessionProvider(userSessions) {
+		return nil, errors.New("SQL console user session provider is required")
+	}
 	return &SQLConsoleService{
-		repository: repository,
-		authorizer: authorizer,
-		executor:   executor,
-		now:        time.Now,
-		sessions:   make(map[string]*sqlConsoleSession),
-		idleTTL:    15 * time.Minute,
+		repository:   repository,
+		authorizer:   authorizer,
+		executor:     executor,
+		userSessions: userSessions,
+		now:          time.Now,
+		sessions:     make(map[string]*sqlConsoleSession),
+		idleTTL:      15 * time.Minute,
 	}, nil
+}
+
+func isNilSQLConsoleUserSessionProvider(provider SQLConsoleUserSessionProvider) bool {
+	if provider == nil {
+		return true
+	}
+	value := reflect.ValueOf(provider)
+	switch value.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
+		return value.IsNil()
+	default:
+		return false
+	}
 }
 
 func (s *SQLConsoleService) Execute(
@@ -138,6 +165,7 @@ func (s *SQLConsoleService) Execute(
 	}
 
 	session := newSQLConsoleAuditSession(actor, account, now)
+	session.UserSessionID = webSession.userSessionID
 	if err := s.repository.CreateAuditSession(ctx, session); err != nil {
 		return SQLConsoleResult{}, fmt.Errorf("%w: create session: %v", ErrSQLConsoleAudit, err)
 	}

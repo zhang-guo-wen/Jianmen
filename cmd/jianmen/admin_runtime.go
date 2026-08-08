@@ -56,10 +56,15 @@ func startAdminRuntime(
 	if err != nil {
 		return err
 	}
+	userSessionCreation, err := service.NewUserSessionCreationService(appStore, authorization)
+	if err != nil {
+		return err
+	}
 	sqlConsoleService, err := service.NewSQLConsoleService(
 		appStore,
 		authorization,
 		service.NewDatabaseSQLConsoleExecutor(),
+		userSessionCreation,
 	)
 	if err != nil {
 		return err

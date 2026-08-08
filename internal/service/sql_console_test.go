@@ -55,6 +55,15 @@ func (s *sqlConsoleRepositoryStub) FinishAuditSession(_ context.Context, _ strin
 	return nil
 }
 
+type sqlConsoleUserSessionProviderStub struct {
+	session model.UserSession
+	err     error
+}
+
+func (s *sqlConsoleUserSessionProviderStub) GetOrCreateActivePermanentUserSession(context.Context, string) (model.UserSession, error) {
+	return s.session, s.err
+}
+
 type sqlConsoleAuthorizerStub struct {
 	allowed bool
 	actions []string
@@ -121,7 +130,10 @@ func newSQLConsoleServiceFixture(t *testing.T) (*SQLConsoleService, *sqlConsoleR
 		},
 	}
 	executor := &sqlConsoleExecutorStub{connection: connection}
-	sqlService, err := NewSQLConsoleService(repository, authorizer, executor)
+	userSessions := &sqlConsoleUserSessionProviderStub{
+		session: model.UserSession{ID: "user-session-1", SessionID: "00001", UserID: "user-1"},
+	}
+	sqlService, err := NewSQLConsoleService(repository, authorizer, executor, userSessions)
 	if err != nil {
 		t.Fatalf("NewSQLConsoleService() error = %v", err)
 	}
@@ -163,6 +175,9 @@ func TestSQLConsoleExecuteReadQueryAuditsBeforeExecution(t *testing.T) {
 	}
 	if len(repository.sessions) != 1 || len(repository.queries) != 1 {
 		t.Fatalf("audit writes = sessions %d, queries %d", len(repository.sessions), len(repository.queries))
+	}
+	if repository.sessions[0].UserSessionID != "user-session-1" {
+		t.Fatalf("audit session user session id = %q, want user-session-1", repository.sessions[0].UserSessionID)
 	}
 	if len(repository.finished) != 1 || repository.finished[0] != model.AuditOutcomeSucceeded {
 		t.Fatalf("finished outcomes = %#v", repository.finished)

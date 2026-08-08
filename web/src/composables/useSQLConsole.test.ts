@@ -4,7 +4,7 @@ import { afterEach, describe, it, vi } from 'vitest';
 
 import { apiClient, type DBAccountRecord } from '@/api/client';
 
-import { useSQLConsole } from './useSQLConsole';
+import { resetSQLConsoleState, useSQLConsole } from './useSQLConsole';
 
 const accounts: DBAccountRecord[] = [
   { id: 'account-1', username: 'reader', instance_protocol: 'postgres' },
@@ -14,6 +14,8 @@ const accounts: DBAccountRecord[] = [
 
 afterEach(() => {
   vi.restoreAllMocks();
+  // useSQLConsole 为模块级单例,清空连接状态避免测试间污染
+  resetSQLConsoleState();
 });
 
 describe('useSQLConsole requested account', () => {
@@ -118,5 +120,34 @@ describe('useSQLConsole requested account', () => {
     const consoleState = useSQLConsole();
     await consoleState.loadAccounts();
     assert.deepEqual(consoleState.metadata.value, []);
+  });
+
+  it('重新挂载(再次 loadAccounts)复用已有连接,不再新建会话', async () => {
+    vi.spyOn(apiClient, 'getAllDBAccounts').mockResolvedValue({
+      items: accounts,
+      total: accounts.length,
+      page: 1,
+      page_size: 200,
+    });
+    const createSession = vi.spyOn(apiClient, 'createSQLConsoleSession').mockResolvedValue({
+      id: 'session-reused',
+      databases: ['app'],
+      default_database: 'app',
+    });
+    const closeSession = vi.spyOn(apiClient, 'closeSQLConsoleSession').mockResolvedValue(undefined);
+    vi.spyOn(apiClient, 'getSQLConsoleMetadata').mockResolvedValue({ tables: [] });
+
+    // 首次进入:建立连接
+    const first = useSQLConsole();
+    await first.loadAccounts();
+    assert.equal(first.connected.value, true);
+
+    // 模拟组件卸载后再挂载:状态仍为模块级单例,复用同一连接
+    const second = useSQLConsole();
+    await second.loadAccounts();
+
+    assert.equal(createSession.mock.calls.length, 1);
+    assert.equal(closeSession.mock.calls.length, 0);
+    assert.equal(second.connected.value, true);
   });
 });

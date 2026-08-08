@@ -100,10 +100,15 @@ func TestNewAcceptsCompleteDBStoreRepository(t *testing.T) {
 	if _, err := New(&config.Config{}, repository, db, identity, browserSessions, nilAuthorization, resourceGrants, resourceGroups, repositoryTestProvisioning{}, slog.New(slog.NewTextHandler(io.Discard, nil)), t.TempDir(), nil, online.NewRegistry(), &webrdp.Handler{}, nil, nil); err == nil {
 		t.Fatal("New accepted typed-nil authorization service")
 	}
+	userSessionCreation, err := service.NewUserSessionCreationService(repository, repositoryTestAuthorization{})
+	if err != nil {
+		t.Fatalf("new user session creation service: %v", err)
+	}
 	sqlConsoleService, err := service.NewSQLConsoleService(
 		repository,
 		repositoryTestAuthorization{},
 		service.NewDatabaseSQLConsoleExecutor(),
+		userSessionCreation,
 	)
 	if err != nil {
 		t.Fatalf("new SQL console service: %v", err)

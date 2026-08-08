@@ -19,13 +19,14 @@ type SQLConsoleSessionInfo struct {
 }
 
 type sqlConsoleSession struct {
-	id         string
-	userID     string
-	accountID  string
-	connection SQLConsoleConnection
-	databases  map[string]struct{}
-	timer      *time.Timer
-	expiresAt  time.Time
+	id            string
+	userID        string
+	accountID     string
+	userSessionID string
+	connection    SQLConsoleConnection
+	databases     map[string]struct{}
+	timer         *time.Timer
+	expiresAt     time.Time
 }
 
 func (s *SQLConsoleService) CreateSession(
@@ -55,13 +56,20 @@ func (s *SQLConsoleService) CreateSession(
 	if err != nil {
 		return SQLConsoleSessionInfo{}, fmt.Errorf("%w: %v", ErrSQLConsoleExecution, err)
 	}
+	// 关联用户认证会话:审计记录据此显示短认证会话 ID。
+	// 获取失败不阻断连接,审计列表回退显示审计会话 ID。
+	userSessionID := ""
+	if userSession, sessionErr := s.userSessions.GetOrCreateActivePermanentUserSession(ctx, userID); sessionErr == nil {
+		userSessionID = userSession.ID
+	}
 	databases := connection.Databases()
 	session := &sqlConsoleSession{
-		id:         uuid.NewString(),
-		userID:     userID,
-		accountID:  accountID,
-		connection: connection,
-		databases:  make(map[string]struct{}, len(databases)),
+		id:            uuid.NewString(),
+		userID:        userID,
+		accountID:     accountID,
+		userSessionID: userSessionID,
+		connection:    connection,
+		databases:     make(map[string]struct{}, len(databases)),
 	}
 	for _, database := range databases {
 		session.databases[database] = struct{}{}

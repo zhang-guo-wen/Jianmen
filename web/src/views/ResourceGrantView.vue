@@ -347,7 +347,8 @@ const customExpiresAt = ref<Date | null>(null)
 // Computed
 const principalOptions = computed(() => {
   if (grantForm.principal_type === 'user') {
-    return allUsers.value.map(u => ({ id: u.id, name: u.username || '' }))
+    // 用户下拉显示显示名，未设置显示名时回退登录账号
+    return allUsers.value.map(u => ({ id: u.id, name: u.display_name?.trim() || u.username || '' }))
   }
   return userGroups.value.map(g => ({ id: g.id, name: g.name }))
 })

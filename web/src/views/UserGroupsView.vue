@@ -80,7 +80,7 @@
             <el-option
               v-for="user in availableUsers"
               :key="user.id"
-              :label="user.username"
+              :label="userLabel(user)"
               :value="user.id"
             />
           </el-select>
@@ -92,7 +92,7 @@
         <el-table :data="currentMembers" v-loading="loadingMembers" stripe style="margin-top: 16px">
           <el-table-column :label="t('resourceGrant.username')" prop="user_id" min-width="200">
             <template #default="{ row }">
-              {{ getUsernameById(row.user_id) }}
+              {{ getUserDisplayName(row.user_id) }}
             </template>
           </el-table-column>
           <el-table-column v-bind="TABLE_COLUMNS.actionsCompact" :label="t('common.actions')">
@@ -154,9 +154,19 @@ const getMemberCount = (groupId: string) => {
   return groupMembers.value[groupId]?.length || 0
 }
 
-const getUsernameById = (userId: string) => {
+// 用户显示标签：优先显示名，带登录账号便于区分同显示名的用户
+const userLabel = (user: UserRecord) => {
+  const username = user.username?.trim()
+  const displayName = user.display_name?.trim()
+  if (displayName && displayName !== username) return `${displayName} (${username})`
+  return username || displayName || String(user.id ?? '')
+}
+
+// 成员表格显示：优先显示名，回退登录账号
+const getUserDisplayName = (userId: string) => {
   const user = allUsers.value.find(u => u.id === userId)
-  return user?.username || userId
+  if (!user) return userId
+  return user.display_name?.trim() || user.username?.trim() || userId
 }
 
 const loadGroups = async () => {
@@ -274,7 +284,8 @@ const searchUsers = (query: string) => {
     return
   }
   availableUsers.value = allUsers.value.filter(u =>
-    (u.username || '').toLowerCase().includes(query.toLowerCase())
+    (u.username || '').toLowerCase().includes(query.toLowerCase()) ||
+    (u.display_name || '').toLowerCase().includes(query.toLowerCase())
   )
 }
 

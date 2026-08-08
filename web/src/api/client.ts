@@ -360,6 +360,7 @@ export interface OperationAuditRecord {
   id: string;
   actor_id: string;
   actor_username: string;
+  actor_display_name?: string;
   action: string;
   resource_type: string;
   resource_id?: string;

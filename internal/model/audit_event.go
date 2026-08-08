@@ -4,9 +4,10 @@ import "time"
 
 // AuditEvent records an auditable management operation.
 type AuditEvent struct {
-	ID            string    `gorm:"primaryKey;size:64" json:"id"`
-	ActorID       string    `gorm:"index;size:64;not null" json:"actor_id"`
-	ActorUsername string    `gorm:"index;size:128" json:"actor_username"`
+	ID               string    `gorm:"primaryKey;size:64" json:"id"`
+	ActorID          string    `gorm:"index;size:64;not null" json:"actor_id"`
+	ActorUsername    string    `gorm:"index;size:128" json:"actor_username"`
+	ActorDisplayName string    `gorm:"-" json:"actor_display_name,omitempty"`
 	Action        string    `gorm:"index;idx_audit_events_resource,priority:1;size:64;not null" json:"action"`
 	ResourceType  string    `gorm:"index;idx_audit_events_resource,priority:2;size:64;not null" json:"resource_type"`
 	ResourceID    string    `gorm:"index;idx_audit_events_resource,priority:3;size:64" json:"resource_id,omitempty"`

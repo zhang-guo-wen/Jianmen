@@ -41,6 +41,9 @@ func TestAuditLogStoresListAndFilter(t *testing.T) {
 	}
 	st := NewDBStore(db)
 	now := time.Now().UTC().Truncate(time.Second)
+	if err := st.db.Create(&model.User{ID: "u1", Username: "alice", DisplayName: "Alice Li", Status: "active"}).Error; err != nil {
+		t.Fatalf("create user: %v", err)
+	}
 	if err := st.CreateAuditEvent(context.Background(), &model.AuditEvent{
 		ActorID: "u1", ActorUsername: "alice", Action: "update", ResourceType: "hosts", ResourceID: "host-1", ResourceName: "/api/hosts/host-1", ClientIP: "127.0.0.1", CreatedAt: now,
 	}); err != nil {
@@ -58,6 +61,9 @@ func TestAuditLogStoresListAndFilter(t *testing.T) {
 	}
 	if total != 1 || len(operations) != 1 || operations[0].Action != "update" {
 		t.Fatalf("operation logs = total:%d items:%+v", total, operations)
+	}
+	if operations[0].ActorDisplayName != "Alice Li" {
+		t.Fatalf("operation actor display name = %q, want Alice Li", operations[0].ActorDisplayName)
 	}
 	logins, total, err := st.ListLoginAuditLogs(context.Background(), LoginAuditListParams{Outcome: "failure", Page: 1, Size: 10})
 	if err != nil {

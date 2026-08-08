@@ -72,3 +72,21 @@ npm run dev        # 开发服务 http://127.0.0.1:47101
 npm run typecheck  # TypeScript 类型检查
 npm run build      # 生产构建
 ```
+
+## 前端依赖变更注意事项
+
+**npm 版本已锁定**:`web/package.json` 的 `packageManager` 字段声明了 npm 版本(当前 `npm@11.16.0`),CI 流水线也已固定同版本。
+
+修改 `web/package.json` 依赖后,必须同步提交 `package-lock.json`,否则 CI 的 `npm ci` 会失败。规范如下:
+
+1. 生成/更新 lock 时使用与 packageManager 一致的 npm 版本(本地 npm 版本不一致时,用 `npx npm@11.16.0 ...` 或 `corepack` 代替):
+   ```bash
+   cd web
+   npx npm@11.16.0 install --package-lock-only
+   ```
+2. 旧版 npm 生成的 lock 可能缺 peer 依赖条目(典型报错 `Missing: @emnapi/core@x.x.x from lock file`,npm ci EUSAGE)。原因是 npm 版本差异导致 peer 校验行为不同,必须用锁定版本重新生成。
+3. 提交前用干净环境验证(现有 node_modules 会干扰 lock 更新,先删除):
+   ```bash
+   cd web && rm -rf node_modules && npx npm@11.16.0 ci
+   ```
+4. 不要手工编辑 `package-lock.json`。

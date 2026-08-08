@@ -130,9 +130,10 @@ type AuditDBQueryPreview struct {
 }
 
 type AuditEvent struct {
-	ID            string    `json:"id"`
-	ActorID       string    `json:"actor_id"`
-	ActorUsername string    `json:"actor_username"`
+	ID               string    `json:"id"`
+	ActorID          string    `json:"actor_id"`
+	ActorUsername    string    `json:"actor_username"`
+	ActorDisplayName string    `json:"actor_display_name,omitempty"`
 	Action        string    `json:"action"`
 	ResourceType  string    `json:"resource_type"`
 	ResourceID    string    `json:"resource_id,omitempty"`

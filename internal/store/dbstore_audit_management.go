@@ -31,6 +31,14 @@ func (s *DBStore) CreateAuditEvent(ctx context.Context, event *model.AuditEvent)
 	return nil
 }
 
+// auditEventWithDisplayName 用于接收 ListAuditEvents 的 join 查询结果：
+// 外层同名字段优先于内嵌模型，从而把 users.display_name 扫描进来
+//（model.AuditEvent.ActorDisplayName 标记 gorm:"-" 不会被 gorm 扫描）。
+type auditEventWithDisplayName struct {
+	model.AuditEvent
+	ActorDisplayName string
+}
+
 func (s *DBStore) ListAuditEvents(
 	ctx context.Context,
 	params AuditEventListParams,
@@ -40,31 +48,39 @@ func (s *DBStore) ListAuditEvents(
 	}
 	q := s.db.WithContext(ctx).
 		Model(&model.AuditEvent{}).
+		// 关联用户表取出操作人显示名；active_marker 为 NULL 表示已软删除的用户
+		Joins("LEFT JOIN users ON users.id = audit_events.actor_id AND users.active_marker IS NOT NULL").
+		Select("audit_events.*, COALESCE(users.display_name, '') AS actor_display_name").
 		Where(logicalAuditEventRowsCondition(s.db.Dialector.Name()))
 	if params.Search != "" {
 		like := "%" + strings.ToLower(strings.TrimSpace(params.Search)) + "%"
 		q = q.Where(
-			"LOWER(actor_username) LIKE ? OR LOWER(action) LIKE ? OR LOWER(resource_type) LIKE ? OR LOWER(resource_name) LIKE ? OR LOWER(result) LIKE ? OR LOWER(request_id) LIKE ? OR LOWER(intent_id) LIKE ? OR LOWER(detail) LIKE ? OR LOWER(client_ip) LIKE ?",
+			"LOWER(audit_events.actor_username) LIKE ? OR LOWER(audit_events.action) LIKE ? OR LOWER(audit_events.resource_type) LIKE ? OR LOWER(audit_events.resource_name) LIKE ? OR LOWER(audit_events.result) LIKE ? OR LOWER(audit_events.request_id) LIKE ? OR LOWER(audit_events.intent_id) LIKE ? OR LOWER(audit_events.detail) LIKE ? OR LOWER(audit_events.client_ip) LIKE ?",
 			like, like, like, like, like, like, like, like, like,
 		)
 	}
 	if params.Action != "" {
-		q = q.Where("action = ?", params.Action)
+		q = q.Where("audit_events.action = ?", params.Action)
 	}
 	if params.ResourceType != "" {
-		q = q.Where("resource_type = ?", params.ResourceType)
+		q = q.Where("audit_events.resource_type = ?", params.ResourceType)
 	}
 	if start, end, ok := auditDateRange(params.Date); ok {
-		q = q.Where("created_at >= ? AND created_at < ?", start, end)
+		q = q.Where("audit_events.created_at >= ? AND audit_events.created_at < ?", start, end)
 	}
 	var total int64
 	if err := q.Count(&total).Error; err != nil {
 		return nil, 0, fmt.Errorf("count audit events: %w", err)
 	}
 	page, size := normalizeAuditPage(params.Page, params.Size)
-	var items []model.AuditEvent
-	if err := q.Order("created_at DESC, id DESC").Offset((page - 1) * size).Limit(size).Find(&items).Error; err != nil {
+	var rows []auditEventWithDisplayName
+	if err := q.Order("audit_events.created_at DESC, audit_events.id DESC").Offset((page - 1) * size).Limit(size).Find(&rows).Error; err != nil {
 		return nil, 0, fmt.Errorf("list audit events: %w", err)
+	}
+	items := make([]model.AuditEvent, len(rows))
+	for i, row := range rows {
+		items[i] = row.AuditEvent
+		items[i].ActorDisplayName = row.ActorDisplayName
 	}
 	return items, total, nil
 }

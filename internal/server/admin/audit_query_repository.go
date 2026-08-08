@@ -147,7 +147,7 @@ func auditQuerySession(item model.AuditSession) service.AuditSession {
 
 func auditQueryEvent(item model.AuditEvent) service.AuditEvent {
 	result := service.AuditEvent{
-		ID: item.ID, ActorID: item.ActorID, ActorUsername: item.ActorUsername, Action: item.Action,
+		ID: item.ID, ActorID: item.ActorID, ActorUsername: item.ActorUsername, ActorDisplayName: item.ActorDisplayName, Action: item.Action,
 		ResourceType: item.ResourceType, ResourceID: item.ResourceID, ResourceName: item.ResourceName,
 		Phase: item.Phase, Result: item.Result, IntentID: item.IntentID, RequestID: item.RequestID,
 		StatusCode: item.StatusCode, Detail: item.Detail, ClientIP: item.ClientIP, CreatedAt: item.CreatedAt,

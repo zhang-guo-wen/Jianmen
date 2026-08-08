@@ -359,7 +359,9 @@
             <el-table-column v-bind="TABLE_COLUMNS.time" :label="t('audit.column.operationTime')" class-name="col-time">
               <template #default="{ row }">{{ formatTime(row.created_at) }}</template>
             </el-table-column>
-            <el-table-column prop="actor_username" :label="t('audit.column.operator')" width="130" show-overflow-tooltip />
+            <el-table-column :label="t('audit.column.operator')" width="130" show-overflow-tooltip>
+              <template #default="{ row }">{{ row.actor_display_name || row.actor_username || '-' }}</template>
+            </el-table-column>
             <el-table-column :label="t('audit.column.operationType')" width="100">
               <template #default="{ row }">{{ operationActionLabel(row.action) }}</template>
             </el-table-column>

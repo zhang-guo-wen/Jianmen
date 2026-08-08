@@ -299,6 +299,15 @@ func TestHandleWebTerminalBearerHeaderDoesNotConsumeValidTicket(t *testing.T) {
 func TestWebTerminalRecorderUsesAuthenticatedIdentity(t *testing.T) {
 	server, db := newAdminDBTestServer(t)
 	server.cfg = &config.Config{ReplayDir: t.TempDir(), Recording: config.RecordingConfig{Enabled: true}}
+	if err := db.Create(&model.User{ID: "real-user-id", Username: "real-user", Status: "active"}).Error; err != nil {
+		t.Fatalf("seed user: %v", err)
+	}
+	if err := db.Create(&model.UserSession{
+		ID: "us-real-user", UserID: "real-user-id", SessionSeq: 1, SessionID: "00001",
+		Type: "permanent", Status: "active",
+	}).Error; err != nil {
+		t.Fatalf("seed user session: %v", err)
+	}
 	user := model.User{ID: "real-user-id", Username: "real-user"}
 	target := store.TargetConfig{ID: "target-1", HostID: "host-1", Name: "operations", HostName: "application-host", Host: "127.0.0.1", Port: 22, Username: "root"}
 	req := httptest.NewRequest(http.MethodGet, webTerminalPath, nil)
@@ -306,6 +315,9 @@ func TestWebTerminalRecorderUsesAuthenticatedIdentity(t *testing.T) {
 	auditSession := server.startWebTerminalAudit(context.Background(), session, target)
 	if auditSession == nil {
 		t.Fatal("web terminal audit session was not created")
+	}
+	if auditSession.UserSessionID != "us-real-user" {
+		t.Fatalf("audit session user_session_id = %q, want us-real-user", auditSession.UserSessionID)
 	}
 	if auditSession.TargetAddress != "127.0.0.1:22" || auditSession.TargetName != "application-host" {
 		t.Fatalf("audit target = address:%q name:%q", auditSession.TargetAddress, auditSession.TargetName)

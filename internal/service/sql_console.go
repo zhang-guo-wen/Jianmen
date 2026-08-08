@@ -27,6 +27,7 @@ var (
 
 type SQLConsoleRepository interface {
 	FindActiveDatabaseAccount(context.Context, string) (model.DatabaseAccount, bool, error)
+	GetOrCreateActivePermanentUserSession(context.Context, string) (model.UserSession, error)
 	CreateAuditSession(context.Context, *model.AuditSession) error
 	CreateAuditDBQuery(context.Context, *model.AuditDBQuery) error
 	CompleteAuditDBQuery(context.Context, string, model.AuditDBQueryResult) error
@@ -138,6 +139,11 @@ func (s *SQLConsoleService) Execute(
 	}
 
 	session := newSQLConsoleAuditSession(actor, account, now)
+	// 关联用户授权会话(user_sessions),使审计记录能展示 5 位授权会话编号。
+	// 与 SSH 网关路径一致,获取失败不阻塞执行,仅授权会话 ID 留空。
+	if userSession, err := s.repository.GetOrCreateActivePermanentUserSession(ctx, strings.TrimSpace(actor.UserID)); err == nil {
+		session.UserSessionID = userSession.ID
+	}
 	if err := s.repository.CreateAuditSession(ctx, session); err != nil {
 		return SQLConsoleResult{}, fmt.Errorf("%w: create session: %v", ErrSQLConsoleAudit, err)
 	}

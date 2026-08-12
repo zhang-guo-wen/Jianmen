@@ -152,6 +152,11 @@ func TestUnifiedListenerPartialPostgresNeverFallsBackToMySQL(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := client.SetReadDeadline(time.Now().Add(200 * time.Millisecond)); err != nil {
+		// 连接可能已被对端立即关闭(畸形 preface 被拒绝),这正是测试期望的行为
+		if errors.Is(err, io.ErrClosedPipe) {
+			waitUnifiedHandler(t, done)
+			return
+		}
 		t.Fatal(err)
 	}
 	var response [1]byte
@@ -189,6 +194,11 @@ func TestUnifiedListenerMalformedPrefacesNeverBecomeMySQL(t *testing.T) {
 				t.Fatal(err)
 			}
 			if err := client.SetReadDeadline(time.Now().Add(200 * time.Millisecond)); err != nil {
+				// 连接可能已被对端立即关闭(畸形 preface 被拒绝),这正是测试期望的行为
+				if errors.Is(err, io.ErrClosedPipe) {
+					waitUnifiedHandler(t, done)
+					return
+				}
 				t.Fatal(err)
 			}
 			var response [1]byte

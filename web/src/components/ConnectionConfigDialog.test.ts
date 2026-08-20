@@ -124,6 +124,8 @@ test('database connection dialog hides TLS metadata and setup controls while kee
     'gateway-tls-panel',
     'gateway-tls-hint',
     'gateway-tls-actions',
+    'databaseConnectionPlan',
+    'databaseCommandUnavailableReason',
   ]) {
     assert.equal(componentSource.includes(removedSymbol), false, `unexpected symbol: ${removedSymbol}`);
   }
@@ -131,15 +133,8 @@ test('database connection dialog hides TLS metadata and setup controls while kee
   assert.match(componentSource, /useDatabaseClientStore/);
   assert.match(componentSource, /buildDatabaseProtocolURL/);
   assert.match(componentSource, /function openClientSettings\(tab: 'ssh' \| 'database'\)/);
-
-  const planStart = componentSource.indexOf('const databaseConnectionPlan');
-  const planEnd = componentSource.indexOf('const databaseCommandUnavailableReason', planStart);
-  const planSource = componentSource.slice(planStart, planEnd);
-  assert.ok(planStart >= 0 && planEnd > planStart);
-  assert.match(planSource, /tls_server_name:\s*tlsServerName/);
-  assert.match(planSource, /tls_ca_pem:\s*tlsCAPEM/);
-  assert.match(planSource, /tls_cert_sha256:\s*tlsCertSHA256/);
-  assert.doesNotMatch(planSource, /databaseName/);
+  assert.match(componentSource, /hasDatabaseGatewayTLSIdentity/);
+  assert.match(componentSource, /databaseGatewayRequiresCustomCA/);
 });
 
 test('SSH client registration is handled by personal settings instead of the connection dialog', () => {

@@ -680,6 +680,17 @@ async function retryConnectionInfo(target: TargetRecord) {
   await ensureConnectionInfo(target, true);
 }
 
+function formatExpiresAt(value: string): string {
+  if (!value) return '';
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString('zh-CN', { hour12: false });
+}
+
+function temporaryPasswordExpiryText(expiresAt: string): string {
+  const formatted = formatExpiresAt(expiresAt);
+  return formatted ? `${formatted}（到期前可重复使用）` : '30 分钟内可重复使用';
+}
+
 function onSSHSearch(query: string) {
   sshSearchInput.value = query;
   sshKeyword.value = query;
@@ -702,6 +713,7 @@ async function copyAllConnectionInfo(target: TargetRecord) {
     `连接地址：${connectionAddress(target)}`,
     `连接账户：${state.compactUser}`,
     `连接临时密码：${state.password}`,
+    `密码有效期：${temporaryPasswordExpiryText(state.expiresAt)}`,
   ].join('\n');
   try {
     await writeClipboardText(content);
@@ -1015,6 +1027,7 @@ async function copyDatabaseConnectionInfo(account: QuickDBTarget) {
       `连接地址：${connectionHost}:${state.port}`,
       `连接账户：${state.compactUser}`,
       `连接临时密码：${state.password}`,
+      `密码有效期：${temporaryPasswordExpiryText(state.expiresAt)}`,
       `客户端 TLS：${
         state.clientTLSMode === 'required'
           ? `强制 TLS（${state.tlsTrustMode === 'system' ? '客户端默认信任库' : '自定义 CA'}）`

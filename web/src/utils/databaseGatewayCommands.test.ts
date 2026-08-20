@@ -520,6 +520,7 @@ test('quick database cards copy temporary connection credentials with an in-flig
   assert.match(source, /`连接地址：\$\{connectionHost\}:\$\{state\.port\}`/);
   assert.match(source, /`连接账户：\$\{state\.compactUser\}`/);
   assert.match(source, /`连接临时密码：\$\{state\.password\}`/);
+  assert.match(source, /`密码有效期：\$\{temporaryPasswordExpiryText\(state\.expiresAt\)\}`/);
   assert.doesNotMatch(source, /Redis 暂不支持复制临时连接凭据/);
   assert.match(
     source,
@@ -529,6 +530,17 @@ test('quick database cards copy temporary connection credentials with an in-flig
   assert.match(
     source,
     /\.database-card__actions\s*\{[\s\S]*grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\)/,
+  );
+});
+
+test('quick SSH cards copy temporary connection credentials with the password expiry', () => {
+  const source = readFileSync(new URL('../views/QuickConnectView.vue', import.meta.url), 'utf8');
+  assert.match(source, /@click="copyAllConnectionInfo\(target\)"/);
+  assert.match(source, /`连接临时密码：\$\{state\.password\}`/);
+  assert.match(source, /`密码有效期：\$\{temporaryPasswordExpiryText\(state\.expiresAt\)\}`/);
+  assert.match(
+    source,
+    /function temporaryPasswordExpiryText\(expiresAt: string\): string \{[\s\S]*30 分钟内可重复使用/,
   );
 });
 
@@ -693,8 +705,19 @@ test('temporary password copy button exposes its in-flight state', () => {
   const dialogSource = readFileSync(new URL('../components/ConnectionConfigDialog.vue', import.meta.url), 'utf8');
   assert.match(
     dialogSource,
-    /InfoValue label="临时密码"[\s\S]*:loading="isCopyInFlight\(temporaryPassword, '临时密码'\)"/,
+    /InfoValue[\s\S]*:label="passwordLabel"[\s\S]*:loading="isCopyInFlight\(temporaryPassword, passwordLabel\)"/,
   );
+});
+
+test('connection dialogs expose a copy-credentials button with the password expiry', () => {
+  const dialogSource = readFileSync(new URL('../components/ConnectionConfigDialog.vue', import.meta.url), 'utf8');
+  assert.match(dialogSource, /data-testid="copy-connection-credentials"/);
+  assert.match(dialogSource, /@click="copyAllConnectionInfo"/);
+  assert.match(dialogSource, /\$\{isDatabase \? '数据库密码' : '登录密码'\}：\$\{temporaryPassword\.value\}/);
+  assert.match(dialogSource, /`密码有效期：\$\{temporaryPasswordExpiryText\.value\}`/);
+  assert.match(dialogSource, /longTermPasswordHint\.value/);
+  assert.doesNotMatch(dialogSource, /客户端 TLS：|CommandRows|buildConnectionCommands|database-tls-switch|permanent-panel|temporary-panel|password-hint/);
+  assert.match(dialogSource, /writeClipboardText\(content\.join\('\\n'\)\)/);
 });
 
 test('connection dialog clears temporary credentials when it closes', () => {

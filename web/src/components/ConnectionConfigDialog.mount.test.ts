@@ -36,6 +36,7 @@ const mocks = vi.hoisted(() => ({
     testDBConnection: vi.fn(),
     getDBGateway: vi.fn(),
   },
+  writeClipboardText: vi.fn(),
 }));
 
 vi.mock('vue-router', () => ({
@@ -63,7 +64,7 @@ vi.mock('@/config/databaseClients', () => ({
 }));
 
 vi.mock('@/utils/clipboard', () => ({
-  writeClipboardText: vi.fn(),
+  writeClipboardText: mocks.writeClipboardText,
 }));
 
 vi.mock('@element-plus/icons-vue', () => ({
@@ -275,8 +276,7 @@ describe('ConnectionConfigDialog permission controls', () => {
 
     assertVisibility(wrapper, 'ssh-local-client', allowSsh);
     assertVisibility(wrapper, 'ssh-browser', allowSsh);
-    assertVisibility(wrapper, 'connection-command-ssh', allowSsh);
-    assertVisibility(wrapper, 'connection-command-sftp', allowSftp);
+    assert.equal(wrapper.find('[data-testid="copy-connection-credentials"]').exists(), true);
 
     wrapper.unmount();
   });
@@ -444,72 +444,6 @@ describe('ConnectionConfigDialog database local client', () => {
     wrapper.unmount();
   });
 
-  it('uses the certificate server name when optional TLS is enabled manually', async () => {
-    mocks.databaseClient.configured = true;
-    mocks.databaseClient.directLaunchReady = true;
-    Object.assign(mocks.databaseClient.value, {
-      client: 'dbeaver',
-      platform: 'windows',
-      executablePath: 'C:\\DBeaver\\dbeaverc.exe',
-      caFilePath: 'C:\\Users\\Alice\\Downloads\\jianmen-database-gateway-ca.pem',
-      protocolRegistered: true,
-    });
-    const wrapper = await mountDatabaseDialog();
-
-    await wrapper.get('[data-testid="database-tls-switch"]').trigger('click');
-    await wrapper.get('[data-testid="database-local-client"]').trigger('click');
-
-    const launchInput = mocks.buildDatabaseProtocolURL.mock.calls.at(-1)?.[0] as {
-      host?: string;
-      tls?: string;
-      tlsTrust?: string;
-    } | undefined;
-    assert.equal(launchInput?.host, 'database.example');
-    assert.equal(launchInput?.tls, 'verify-full');
-    assert.equal(launchInput?.tlsTrust, 'custom');
-    wrapper.unmount();
-  });
-
-  it('allows optional TLS with client default trust and no CA path', async () => {
-    mocks.databaseClient.configured = true;
-    mocks.databaseClient.directLaunchReady = true;
-    Object.assign(mocks.databaseClient.value, {
-      client: 'dbeaver',
-      platform: 'windows',
-      executablePath: 'C:\\DBeaver\\dbeaverc.exe',
-      caFilePath: '',
-      protocolRegistered: true,
-    });
-    mocks.apiClient.getDBGateway.mockResolvedValue({
-      enabled: true,
-      connectable: true,
-      mode: 'unified',
-      protocol: 'postgresql',
-      host: 'gateway.internal',
-      port: 33060,
-      client_tls_mode: 'optional',
-      tls_enabled: true,
-      tls_trust_mode: 'system',
-      tls_server_name: 'database.example',
-      tls_cert_sha256: 'AA:BB',
-    });
-    const wrapper = await mountDatabaseDialog();
-
-    await wrapper.get('[data-testid="database-tls-switch"]').trigger('click');
-    await wrapper.get('[data-testid="database-local-client"]').trigger('click');
-
-    const launchInput = mocks.buildDatabaseProtocolURL.mock.calls.at(-1)?.[0] as {
-      host?: string;
-      tls?: string;
-      tlsTrust?: string;
-    } | undefined;
-    assert.equal(launchInput?.host, 'database.example');
-    assert.equal(launchInput?.tls, 'verify-full');
-    assert.equal(launchInput?.tlsTrust, 'system');
-    assert.equal(mocks.routerPush.mock.calls.length, 0);
-    wrapper.unmount();
-  });
-
   it('forces verified TLS when the gateway policy is required', async () => {
     mocks.databaseClient.configured = true;
     mocks.databaseClient.directLaunchReady = true;
@@ -536,7 +470,6 @@ describe('ConnectionConfigDialog database local client', () => {
     });
     const wrapper = await mountDatabaseDialog();
 
-    assert.equal(wrapper.get('[data-testid="database-tls-switch"]').attributes('disabled'), '');
     await wrapper.get('[data-testid="database-local-client"]').trigger('click');
 
     const launchInput = mocks.buildDatabaseProtocolURL.mock.calls.at(-1)?.[0] as {
@@ -636,6 +569,45 @@ describe('ConnectionConfigDialog database local client', () => {
       databaseName?: string;
     } | undefined;
     assert.equal(launchInput?.databaseName, '');
+    wrapper.unmount();
+  });
+});
+
+describe('ConnectionConfigDialog copy credentials', () => {
+  it('copies the full host credentials including the temporary password expiry', async () => {
+    const wrapper = await mountDialog(true, true);
+
+    await wrapper.get('[data-testid="copy-connection-credentials"]').trigger('click');
+    await flushPromises();
+
+    assert.equal(mocks.writeClipboardText.mock.calls.length, 1);
+    const copied = String(mocks.writeClipboardText.mock.calls[0]?.[0] ?? '');
+    assert.match(copied, /资源名称：test-host/);
+    assert.match(copied, /源地址：10\.0\.0\.1:22/);
+    assert.match(copied, /源账号：admin/);
+    assert.match(copied, /主机地址：/);
+    assert.match(copied, /主机账号：admin@host-1/);
+    assert.match(copied, /登录密码：temporary-password/);
+    assert.match(copied, /密码有效期：30 分钟内可重复使用/);
+    assert.match(copied, /长期连接可输入堡垒机的登录密码作为长期密码/);
+    wrapper.unmount();
+  });
+
+  it('copies the full database credentials', async () => {
+    const wrapper = await mountDatabaseDialog();
+
+    await wrapper.get('[data-testid="copy-connection-credentials"]').trigger('click');
+    await flushPromises();
+
+    assert.equal(mocks.writeClipboardText.mock.calls.length, 1);
+    const copied = String(mocks.writeClipboardText.mock.calls[0]?.[0] ?? '');
+    assert.match(copied, /数据库实例：reporting/);
+    assert.match(copied, /账号名称：reporter/);
+    assert.match(copied, /数据库地址：gateway\.internal:33060/);
+    assert.match(copied, /数据库账号：admin@host-1/);
+    assert.match(copied, /数据库密码：temporary-password/);
+    assert.match(copied, /密码有效期：30 分钟内可重复使用/);
+    assert.match(copied, /长期连接可输入堡垒机的登录密码作为长期密码/);
     wrapper.unmount();
   });
 });

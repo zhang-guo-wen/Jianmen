@@ -34,69 +34,34 @@
       </div>
       <section v-if="connectionInfo && gatewayAddress" class="shared-connection-panel">
         <div class="detail-grid">
-          <InfoValue label="连接地址" :value="gatewayAddress" :loading="isCopyInFlight(gatewayAddress, '连接地址')" @copy="copyValue" />
-          <InfoValue label="连接账户" :value="connectionInfo.compactUser" :loading="isCopyInFlight(connectionInfo.compactUser, '连接账户')" @copy="copyValue" />
+          <InfoValue :label="addressLabel" :value="gatewayAddress" :loading="isCopyInFlight(gatewayAddress, addressLabel)" @copy="copyValue" />
+          <InfoValue :label="accountLabel" :value="connectionInfo.compactUser" :loading="isCopyInFlight(connectionInfo.compactUser, accountLabel)" @copy="copyValue" />
+          <InfoValue :label="passwordLabel" :value="temporaryPassword" :loading="isCopyInFlight(temporaryPassword, passwordLabel)" accent @copy="copyValue" />
         </div>
-        <div v-if="resourceType === 'database'" class="database-tls-row">
-          <div>
-            <strong>客户端 TLS</strong>
-            <span>{{ databaseTLSDescription }}</span>
-          </div>
-          <el-switch
-            v-model="databaseUseTLS"
-            :disabled="databaseTLSRequired"
-            inline-prompt
-            active-text="TLS"
-            inactive-text="无 TLS"
-          />
+        <div class="credential-hints">
+          <div class="credential-hint"><span>密码有效期</span><strong>{{ temporaryPasswordExpiryText }}</strong></div>
+          <div class="credential-hint">{{ longTermPasswordHint }}</div>
         </div>
-        <el-alert
-          v-if="resourceType === 'database' && databaseCommandUnavailableReason"
-          type="warning"
-          :closable="false"
-          :title="databaseCommandUnavailableReason"
-        />
-        <el-alert
-          v-if="resourceType === 'database' && databaseUseTLS && !secureGatewayTLS"
-          type="error"
-          :closable="false"
-          title="TLS 身份材料不完整，无法生成安全连接命令。请联系管理员检查证书链和 server_name。"
-        />
-        <CommandRows :commands="commands" :loading-for="isCopyInFlight" @copy="copyValue" />
       </section>
 
       <div v-if="creatingSession" class="loading-state">
         <el-icon class="is-loading" :size="30"><Loading /></el-icon>
         <p>正在生成连接配置…</p>
       </div>
-
-      <template v-else-if="!connectionError && connectionInfo">
-        <section class="connection-panel permanent-panel">
-          <header>
-            <strong>长期连接</strong>
-            <el-tag type="primary" effect="plain">长期有效</el-tag>
-          </header>
-          <div class="detail-grid">
-            <div class="detail-item password-tip">
-              <span class="password-label">登录密码</span>
-              <div class="password-hint">输入堡垒机的登录密码，不是目标{{ resourceType === 'host' ? '主机' : '数据库' }}的密码</div>
-            </div>
-          </div>
-        </section>
-
-        <section class="connection-panel temporary-panel">
-          <header>
-            <strong>临时连接</strong>
-            <div class="expiry-summary"><span>密码有效期</span><strong>{{ temporaryPasswordExpiryText }}</strong></div>
-          </header>
-          <div class="detail-grid">
-            <InfoValue label="临时密码" :value="temporaryPassword" :loading="isCopyInFlight(temporaryPassword, '临时密码')" accent @copy="copyValue" />
-          </div>
-        </section>
-      </template>
     </div>
 
     <template #footer>
+      <el-button
+        data-testid="copy-connection-credentials"
+        type="primary"
+        aria-label="复制包含临时密码的连接凭据"
+        title="包含临时密码，请妥善保管"
+        :disabled="!connectionInfo || !temporaryPassword"
+        :loading="isCopyInFlight(temporaryPassword, '复制凭据')"
+        @click="copyAllConnectionInfo"
+      >
+        复制凭据
+      </el-button>
       <el-button data-testid="ssh-local-client" v-if="resourceType === 'host' && allowSsh" type="primary" :disabled="!connectionTestResult?.ok" :loading="preferences.loading" @click="openPreferredSSHClient">本地 SSH 客户端打开</el-button>
       <el-button data-testid="ssh-browser" v-if="resourceType === 'host' && allowSsh" type="primary" :disabled="!connectionTestResult?.ok" @click="openInBrowser">在浏览器中打开</el-button>
       <el-button
@@ -123,10 +88,10 @@
 </template>
 
 <script setup lang="ts">
-import { computed, defineComponent, h, onBeforeUnmount, reactive, ref, watch, type PropType } from 'vue';
+import { computed, defineComponent, h, onBeforeUnmount, reactive, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { Loading } from '@element-plus/icons-vue';
-import { ElButton, ElInput, ElMessage, ElSwitch } from 'element-plus';
+import { ElButton, ElMessage } from 'element-plus';
 
 import {
   apiClient,
@@ -146,7 +111,6 @@ import {
 } from '@/utils/databaseConnectionOrchestration';
 import { useSSHHostIdentityRecovery } from '@/composables/useSSHHostIdentityRecovery';
 import {
-  buildDatabaseGatewayConnection,
   databaseGatewayRequiresCustomCA,
   hasDatabaseGatewayTLSIdentity,
   resolveDatabaseGatewayClientHost,
@@ -161,12 +125,6 @@ import {
   type KeyedRequestToken,
 } from '@/utils/connectionRequestState';
 import { buildSSHDeepLink } from '@/utils/connectionLinks';
-import { buildConnectionCommands, type ConnectionCommandInput } from '@/utils/connectionConfigCommands';
-
-interface CommandItem {
-  label: string;
-  value: string;
-}
 
 interface ConnectionTargetSnapshot {
   key: string;
@@ -203,35 +161,6 @@ const InfoValue = defineComponent({
         onClick: () => emit('copy', componentProps.value, componentProps.label),
       }, () => '复制'),
     ]);
-  },
-});
-
-const CommandRows = defineComponent({
-  props: {
-    commands: { type: Array as () => CommandItem[], required: true },
-    loadingFor: { type: Function as PropType<(value: string, operation?: string) => boolean>, required: true },
-  },
-  emits: ['copy'],
-  setup(componentProps, { emit }) {
-    return () => h('div', { class: 'command-list' }, componentProps.commands.map(command => h('div', {
-      class: 'command-row',
-    }, [
-      h('span', { class: 'command-row__heading' }, command.label),
-      h(ElInput, {
-        class: 'command-input',
-        modelValue: command.value,
-        readonly: true,
-        size: 'small',
-        'aria-label': command.label,
-      }, {
-        append: () => h(ElButton, {
-          'data-testid': `connection-command-${command.label.includes('SFTP') ? 'sftp' : 'ssh'}`,
-          'aria-label': `复制${command.label}`,
-          loading: componentProps.loadingFor(command.value, command.label),
-          onClick: () => emit('copy', command.value, command.label),
-        }, () => '复制'),
-      }),
-    ])));
   },
 });
 
@@ -303,19 +232,14 @@ const isRedis = computed(() => (
   props.resourceType === 'database' &&
   props.protocol.trim().toLowerCase() === 'redis'
 ));
-const databaseTLSRequired = computed(() => (
-  connectionInfo.value?.clientTLSMode === 'required'
+const addressLabel = computed(() => props.resourceType === 'host' ? '主机地址' : '数据库地址');
+const accountLabel = computed(() => props.resourceType === 'host' ? '主机账号' : '数据库账号');
+const passwordLabel = computed(() => props.resourceType === 'host' ? '登录密码' : '数据库密码');
+const longTermPasswordHint = computed(() => (
+  props.resourceType === 'host'
+    ? '长期连接可输入堡垒机的登录密码作为长期密码（不是目标主机的密码）'
+    : '长期连接可输入堡垒机的登录密码作为长期密码（不是目标数据库的密码）'
 ));
-const databaseTLSDescription = computed(() => {
-  if (!databaseUseTLS.value) return '默认不使用 TLS，可手动开启';
-  return connectionInfo.value?.tlsTrustMode === 'system'
-    ? databaseTLSRequired.value
-      ? '系统已强制使用 TLS；使用 DBeaver/Java 默认信任库，无需本地 CA 文件'
-      : '已开启 TLS；使用 DBeaver/Java 默认信任库，无需本地 CA 文件'
-    : databaseTLSRequired.value
-      ? '系统已强制使用 TLS，使用自定义 CA'
-      : '已开启 TLS，使用自定义 CA';
-});
 const secureGatewayTLS = computed(() => hasDatabaseGatewayTLSIdentity({
   enabled: true,
   tls_enabled: connectionInfo.value?.tlsEnabled ?? false,
@@ -324,54 +248,6 @@ const secureGatewayTLS = computed(() => hasDatabaseGatewayTLSIdentity({
   tls_ca_pem: connectionInfo.value?.tlsCAPEM,
   tls_cert_sha256: connectionInfo.value?.tlsCertSHA256,
 }));
-const databaseConnectionPlan = computed(() => {
-  if (props.resourceType !== 'database' || !connectionInfo.value) return null;
-  const {
-    port,
-    compactUser,
-    tlsEnabled,
-    tlsTrustMode,
-    tlsServerName,
-    tlsCAPEM,
-    tlsCertSHA256,
-  } = connectionInfo.value;
-  const gateway = {
-    enabled: true,
-    host: databaseConnectionHost.value,
-    client_tls_mode: connectionInfo.value.clientTLSMode,
-    tls_enabled: tlsEnabled,
-    tls_trust_mode: tlsTrustMode,
-    tls_server_name: tlsServerName,
-    tls_ca_pem: tlsCAPEM,
-    tls_cert_sha256: tlsCertSHA256,
-  };
-  return buildDatabaseGatewayConnection({
-    protocol: props.protocol,
-    gateway,
-    port,
-    username: compactUser,
-    useTLS: databaseUseTLS.value,
-  });
-});
-const databaseCommandUnavailableReason = computed(() => {
-  if (databaseConnectionPlan.value?.unavailableReason) return databaseConnectionPlan.value.unavailableReason;
-  if (!databaseConnectionPlan.value) {
-    return databaseUseTLS.value && !secureGatewayTLS.value
-      ? 'TLS 身份材料不完整，无法生成安全连接命令。'
-      : '连接参数包含不安全字符，无法生成连接命令。';
-  }
-  return '';
-});
-const commands = computed<CommandItem[]>(() => {
-  const input: ConnectionCommandInput = {
-    resourceType: props.resourceType,
-    allowSsh: props.allowSsh,
-    allowSftp: props.allowSftp,
-    connectionInfo: connectionInfo.value,
-    databaseConnection: databaseConnectionPlan.value,
-  };
-  return buildConnectionCommands(input);
-});
 const temporaryPasswordExpiryText = computed(() => {
   const formatted = formatExpiresAt(temporaryPasswordExpiresAt.value);
   return formatted ? `${formatted}（到期前可重复使用）` : '30 分钟内可重复使用';
@@ -582,6 +458,38 @@ async function copyValue(value: string, operation = 'value') {
   }
 }
 
+async function copyAllConnectionInfo() {
+  if (!connectionInfo.value || !temporaryPassword.value) {
+    ElMessage.error('连接信息尚未生成');
+    return;
+  }
+  const isDatabase = props.resourceType === 'database';
+  const content = [
+    isDatabase
+      ? `数据库实例：${props.resourceName || '-'}`
+      : `资源名称：${props.resourceName || '-'}`,
+  ];
+  if (isDatabase) {
+    content.push(`账号名称：${props.sourceAccount || '-'}`);
+  } else {
+    content.push(`源地址：${props.sourceAddress || '-'}`);
+    content.push(`源账号：${props.sourceAccount || '-'}`);
+  }
+  content.push(
+    `${isDatabase ? '数据库地址' : '主机地址'}：${gatewayAddress.value}`,
+    `${isDatabase ? '数据库账号' : '主机账号'}：${connectionInfo.value.compactUser}`,
+    `${isDatabase ? '数据库密码' : '登录密码'}：${temporaryPassword.value}`,
+    `密码有效期：${temporaryPasswordExpiryText.value}`,
+    longTermPasswordHint.value,
+  );
+  try {
+    await writeClipboardText(content.join('\n'));
+    ElMessage.success('临时连接信息已全部复制');
+  } catch {
+    ElMessage.error('复制失败，请稍后重试');
+  }
+}
+
 async function openPreferredSSHClient() {
   if (!connectionInfo.value) return;
   if (!preferences.loaded) {
@@ -703,41 +611,24 @@ function formatExpiresAt(value: string): string {
 .connectivity-row { display: flex; align-items: center; gap: 8px; color: var(--el-text-color-secondary); font-size: 13px; }
 .shared-connection-panel { overflow: hidden; border: 1px solid var(--el-border-color-light); border-radius: 10px; }
 .shared-connection-panel .detail-grid { border-top: 0; }
-.database-tls-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 9px 14px; border-top: 1px solid var(--el-border-color-lighter); background: var(--el-fill-color-extra-light); }
-.database-tls-row > div { display: grid; gap: 3px; }
-.database-tls-row strong { font-size: 13px; }
-.database-tls-row span { color: var(--el-text-color-secondary); font-size: 12px; }
 :deep(.copy-action) { justify-self: end; }
 .connect-error { color: var(--el-color-danger); }
 .loading-state { padding: 30px 0; text-align: center; }
 .loading-state p { margin: 10px 0 0; color: var(--el-text-color-secondary); }
-.connection-panel { overflow: hidden; border: 1px solid var(--el-border-color-light); border-radius: 12px; }
-.connection-panel header { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 10px 14px; }
-.connection-panel header > strong { flex: 0 0 auto; font-size: 15px; }
-.permanent-panel header { background: var(--el-color-primary-light-9); }
-.temporary-panel header { background: var(--el-color-warning-light-9); }
-.expiry-summary { display: flex; align-items: center; justify-content: flex-end; gap: 8px; min-width: 0; font-size: 12px; }
-.expiry-summary span { flex: 0 0 auto; color: var(--el-text-color-secondary); }
-.expiry-summary strong { overflow: hidden; color: var(--el-color-warning-dark-2); text-overflow: ellipsis; white-space: nowrap; }
+.credential-hints { display: grid; gap: 6px; padding: 9px 14px; border-top: 1px solid var(--el-border-color-lighter); background: var(--el-fill-color-extra-light); }
+.credential-hint { display: flex; align-items: center; gap: 8px; min-width: 0; color: var(--el-text-color-secondary); font-size: 12px; line-height: 1.5; }
+.credential-hint strong { overflow: hidden; color: var(--el-color-warning-dark-2); text-overflow: ellipsis; white-space: nowrap; }
 .detail-grid { display: grid; grid-template-columns: 1fr; gap: 1px; background: var(--el-border-color-lighter); border-top: 1px solid var(--el-border-color-lighter); }
 .detail-item { display: grid; grid-template-columns: 72px minmax(0, 1fr) auto; align-items: center; gap: 10px; min-width: 0; padding: 9px 14px; background: var(--el-bg-color); }
 .detail-item code, .detail-item strong { overflow-wrap: anywhere; font-size: 13px; }
 .detail-value { min-width: 0; }
 .accent-value code { color: var(--el-color-warning-dark-2); font-size: 14px; font-weight: 800; letter-spacing: .04em; }
-.password-label { color: var(--el-text-color-regular) !important; font-size: 14px !important; }
-.password-hint { grid-column: 2 / 4; color: var(--el-text-color-secondary); font-size: 13px; font-weight: 400; line-height: 1.5; }
-.command-list { display: flex; flex-direction: column; gap: 10px; padding: 10px 14px; border-top: 1px solid var(--el-border-color-lighter); background: var(--el-fill-color-extra-light); }
-.command-row { display: grid; min-width: 0; gap: 5px; }
-.command-row__heading { color: var(--el-text-color-secondary); font-size: 12px; }
-:deep(.command-input .el-input__inner) { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 12px; }
 @media (max-width: 680px) {
   .resource-summary { grid-template-columns: auto minmax(0, 1fr); }
   .source-meta { grid-column: 1 / -1; }
-  .connection-panel header { align-items: flex-start; flex-direction: column; gap: 6px; }
-  .expiry-summary { align-items: flex-start; flex-direction: column; gap: 2px; }
+  .credential-hint { align-items: flex-start; flex-direction: column; gap: 2px; }
   .detail-item { grid-template-columns: minmax(0, 1fr) auto; }
   .detail-item > span { grid-column: 1 / -1; }
-  .password-hint { grid-column: 1 / -1; }
   :deep(.connection-config-dialog .el-dialog__footer) { display: flex; flex-wrap: wrap; gap: 8px; }
   :deep(.connection-config-dialog .el-dialog__footer .el-button) { flex: 1 1 180px; margin: 0; }
 }

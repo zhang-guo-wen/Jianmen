@@ -196,3 +196,24 @@ test('database instance name is optional, advanced, and defaults to its address'
   assert.match(databaseSource, /function syncDefaultInstanceName\(\)/);
   assert.match(databaseSource, /name:\s*instanceForm\.name\.trim\(\) \|\| defaultInstanceName\(\)/);
 });
+
+test('AI authorization result uses one prompt box and one copy action', () => {
+  const componentSource = source('views/TemporaryAccountsView.vue');
+  const dialogStart = componentSource.indexOf('v-model="aiDialogVisible"');
+  const dialogEnd = componentSource.indexOf('</el-dialog>', dialogStart);
+  const dialogSource = componentSource.slice(dialogStart, dialogEnd);
+  const resultStart = dialogSource.indexOf('<template v-else>');
+  const footerStart = dialogSource.indexOf('<template #footer>');
+  const resultSource = dialogSource.slice(resultStart, footerStart);
+
+  assert.match(dialogSource, /&#x6240;&#x6709;&#x8D44;&#x6E90;.*&#x64CD;&#x4F5C;&#x8BB0;&#x5F55;&#x5728;&#x5BA1;&#x8BA1;&#x4E2D;&#x53EF;&#x4EE5;&#x770B;&#x5230;/);
+  assert.doesNotMatch(dialogSource, /48 &#x5C0F;&#x65F6;|30 &#x5929;/);
+  assert.match(resultSource, /&#x8BF7;&#x590D;&#x5236;&#x4E0B;&#x9762;&#x8FD9;&#x6BB5;&#x63D0;&#x793A;&#x8BCD;&#x53D1;&#x7ED9;AI/);
+  assert.doesNotMatch(resultSource, /&#x7136;&#x540E;&#x4E0B;&#x9762;&#x624D;&#x662F;&#x63D0;&#x793A;&#x8BCD;/);
+  assert.ok(resultSource.indexOf('class="ai-prompt-instruction"') < resultSource.indexOf('class="ai-prompt-content"'));
+  assert.equal((resultSource.match(/<el-input\b/g) ?? []).length, 1);
+  assert.match(resultSource, /class="ai-prompt-content"[\s\S]*?:model-value="aiPromptText"[\s\S]*?readonly/);
+  assert.match(dialogSource, /<el-button v-if="aiResult" type="primary" @click="copyAIPrompt">&#x590D;&#x5236;&#x63D0;&#x793A;&#x8BCD;<\/el-button>/);
+  assert.doesNotMatch(resultSource, /credential-card|ai-docs-card|copy-actions|<el-result/);
+  assert.doesNotMatch(componentSource, /copyAISecrets|copyAIText|closeAIDialog/);
+});

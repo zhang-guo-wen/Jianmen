@@ -116,7 +116,7 @@
 
     <el-dialog v-model="aiDialogVisible" title="AI &#x6388;&#x6743;" class="ai-result-dialog crud-form-dialog" destroy-on-close @closed="clearAIResult">
       <template v-if="!aiResult">
-        <el-alert title="&#x6388;&#x6743; AI &#x4F7F;&#x7528;&#x5F53;&#x524D;&#x7528;&#x6237;&#x7684;&#x8D44;&#x6E90;&#x7684;&#x6743;&#x9650;&#xFF0C;&#x8BBF;&#x95EE;&#x4EE4;&#x724C;&#x9ED8;&#x8BA4; 48 &#x5C0F;&#x65F6;&#xFF0C;&#x5237;&#x65B0;&#x4EE4;&#x724C;&#x9ED8;&#x8BA4; 30 &#x5929;&#x3002;" type="warning" show-icon :closable="false" />
+        <el-alert title="&#x6388;&#x6743; AI &#x4F7F;&#x7528;&#x5F53;&#x524D;&#x7528;&#x6237;&#x7684;&#x6240;&#x6709;&#x8D44;&#x6E90;&#x7684;&#x6743;&#x9650;&#xFF0C;&#x64CD;&#x4F5C;&#x8BB0;&#x5F55;&#x5728;&#x5BA1;&#x8BA1;&#x4E2D;&#x53EF;&#x4EE5;&#x770B;&#x5230;&#x3002;" type="warning" show-icon :closable="false" />
         <el-form label-position="top" class="dialog-form">
 
           <el-form-item label="&#x6709;&#x6548;&#x671F;" required>
@@ -132,46 +132,23 @@
         </el-form>
       </template>
       <template v-else>
-        <el-result icon="success" title="AI &#x6388;&#x6743;&#x6210;&#x529F;" sub-title="&#x4EE4;&#x724C;&#x4EC5;&#x5728;&#x672C;&#x6B21;&#x7B7E;&#x53D1;&#x540E;&#x663E;&#x793A;&#xFF0C;&#x5173;&#x95ED;&#x7A97;&#x53E3;&#x540E;&#x65E0;&#x6CD5;&#x518D;&#x6B21;&#x67E5;&#x770B;&#x3002;" />
-        <div class="credential-card">
-          <div class="credential-row">
-            <span>&#x8BBF;&#x95EE;&#x4EE4;&#x724C;</span>
-            <code>{{ aiResult.access_token }}</code>
-            <el-button @click="copyAIText(aiResult.access_token)">&#x590D;&#x5236;</el-button>
-          </div>
-          <div class="credential-row">
-            <span>&#x5237;&#x65B0;&#x4EE4;&#x724C;</span>
-            <code>{{ aiResult.refresh_token }}</code>
-            <el-button @click="copyAIText(aiResult.refresh_token)">&#x590D;&#x5236;</el-button>
-          </div>
-        </div>
-        <div class="ai-docs-card">
-          <div class="ai-docs-header">
-            <div>
-              <div class="prompt-title">AI &#x6587;&#x6863;</div>
-              <el-link
-                v-if="aiResult.docs_url"
-                :href="aiResult.docs_url"
-                target="_blank"
-                rel="noopener noreferrer"
-                type="primary"
-                class="ai-docs-link"
-              >{{ aiResult.docs_url }}</el-link>
-            </div>
-            <el-button v-if="aiResult.docs_content" link type="primary" @click="copyAIText(aiResult.docs_content)">&#x590D;&#x5236;&#x6587;&#x6863;</el-button>
-          </div>
-          <div class="ai-docs-scroll">
-            <pre>{{ aiResult.docs_content || '&#x6682;&#x65E0;&#x6587;&#x6863;&#x5185;&#x5BB9;' }}</pre>
-          </div>
-        </div>
-        <div class="copy-actions">
-          <el-button type="primary" @click="copyAISecrets">&#x590D;&#x5236;&#x4EE4;&#x724C;&#x914D;&#x7F6E;</el-button>
-          <el-button @click="copyAIText(aiResult.copy_prompt || '')">&#x590D;&#x5236;&#x6587;&#x6863;&#x8DEF;&#x5F84;</el-button>
-          <el-button type="success" plain @click="copyAIText(aiResult.full_prompt || '')">&#x590D;&#x5236;&#x5B8C;&#x6574;&#x63D0;&#x793A;&#x8BCD;</el-button>
-        </div>
+        <el-alert
+          class="ai-prompt-instruction"
+          title="&#x8BF7;&#x590D;&#x5236;&#x4E0B;&#x9762;&#x8FD9;&#x6BB5;&#x63D0;&#x793A;&#x8BCD;&#x53D1;&#x7ED9;AI"
+          type="info"
+          show-icon
+          :closable="false"
+        />
+        <el-input
+          class="ai-prompt-content"
+          :model-value="aiPromptText"
+          type="textarea"
+          :autosize="{ minRows: 10, maxRows: 18 }"
+          readonly
+        />
       </template>
       <template #footer>
-        <el-button v-if="aiResult" @click="closeAIDialog">&#x5B8C;&#x6210;</el-button>
+        <el-button v-if="aiResult" type="primary" @click="copyAIPrompt">&#x590D;&#x5236;&#x63D0;&#x793A;&#x8BCD;</el-button>
         <template v-else>
           <el-button @click="aiDialogVisible = false">&#x53D6;&#x6D88;</el-button>
           <el-button type="primary" :loading="submitting" @click="submitAIAuthorization">&#x751F;&#x6210;&#x6388;&#x6743;</el-button>
@@ -198,6 +175,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import DataTableCard from '@/components/DataTableCard.vue'
 import { apiClient, type IssuedAIAccessToken, type TemporaryAccountRecord } from '@/api/client'
 import { TABLE_COLUMNS } from '@/config/tableColumns'
+import { buildAIAuthorizationPrompt } from '@/utils/aiAuthorizationPrompt'
 import { writeClipboardText } from '@/utils/clipboard'
 
 const router = useRouter()
@@ -221,6 +199,7 @@ const temporaryExpiryError = ref('')
 const extendExpiryError = ref('')
 const aiResult = ref<IssuedAIAccessToken | null>(null)
 const temporaryResult = ref<TemporaryAccountRecord | null>(null)
+const aiPromptText = computed(() => aiResult.value ? buildAIAuthorizationPrompt(aiResult.value) : '')
 
 const temporaryForm = reactive({ resource_type: 'host_account', resource_id: '', expires_at: null as Date | null, remark: '' })
 const aiForm = reactive({ expires_at: null as Date | null, remark: '' })
@@ -349,20 +328,12 @@ async function copyTemporaryConnection() {
   }
 }
 
-async function copyAIText(value: string) {
-  if (!value) return
-  await writeClipboardText(value)
-  ElMessage.success('已复制，请妥善保管令牌')
-}
-async function copyAISecrets() {
-  if (!aiResult.value) return
-  await copyAIText(JSON.stringify({
-    access_token: aiResult.value.access_token,
-    refresh_token: aiResult.value.refresh_token,
-  }, null, 2))
+async function copyAIPrompt() {
+  if (!aiPromptText.value) return
+  await writeClipboardText(aiPromptText.value)
+  ElMessage.success('\u63d0\u793a\u8bcd\u5df2\u590d\u5236')
 }
 function clearAIResult() { aiResult.value = null }
-function closeAIDialog() { aiDialogVisible.value = false }
 function openExtendDialog(row: TemporaryAccountRecord) {
   extendTarget.value = row
   extendExpiresAt.value = addDuration('1d')
@@ -416,11 +387,7 @@ onMounted(loadAccounts)
 .credential-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .credential-row > span:first-child { color: var(--el-text-color-secondary); }
 .credential-row code { color: var(--el-text-color-primary); word-break: break-all; }
-.prompt-title { font-weight: 700; }
-.ai-docs-card { margin-top: 16px; padding: 16px 18px; border: 1px solid var(--el-border-color); border-radius: 12px; background: var(--el-fill-color-light); }
-.ai-docs-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
-.ai-docs-link { display: block; max-width: 560px; margin-top: 6px; word-break: break-all; }
-.ai-docs-scroll { max-height: 280px; margin-top: 14px; overflow: auto; border: 1px solid var(--el-border-color-lighter); border-radius: 8px; background: var(--el-bg-color); }
-.ai-docs-scroll pre { margin: 0; padding: 14px 16px; color: var(--el-text-color-regular); font: 12px/1.7 "JetBrains Mono", "Microsoft YaHei", monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
-.copy-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 12px; margin-top: 18px; }
+.ai-prompt-instruction { margin-bottom: 14px; }
+.ai-prompt-content { display: block; }
+.ai-prompt-content :deep(.el-textarea__inner) { resize: none; font: 13px/1.7 "JetBrains Mono", "Microsoft YaHei", monospace; }
 </style>

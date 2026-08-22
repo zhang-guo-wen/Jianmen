@@ -9,28 +9,32 @@ func TestQueryObserversHonorConfiguredClientMessageLimit(t *testing.T) {
 	const configuredLimit = 512 * 1024
 
 	tests := []struct {
-		name        string
-		protocol    string
-		legacyLimit int
-		build       func(*testing.T, int) []byte
+		name          string
+		protocol      string
+		legacyLimit   int
+		build         func(*testing.T, int) []byte
+		oversizedCode string
 	}{
 		{
-			name:        "mysql",
-			protocol:    "mysql",
-			legacyLimit: maxMySQLObserverBufferBytes,
-			build:       buildMySQLQueryWithFrameSize,
+			name:          "mysql",
+			protocol:      "mysql",
+			legacyLimit:   maxMySQLObserverBufferBytes,
+			build:         buildMySQLQueryWithFrameSize,
+			oversizedCode: observerErrorBufferLimit,
 		},
 		{
-			name:        "postgres",
-			protocol:    "postgres",
-			legacyLimit: maxPostgresObserverBufferBytes,
-			build:       buildPostgresQueryWithFrameSize,
+			name:          "postgres",
+			protocol:      "postgres",
+			legacyLimit:   maxPostgresObserverBufferBytes,
+			build:         buildPostgresQueryWithFrameSize,
+			oversizedCode: observerErrorClientMessageLimit,
 		},
 		{
-			name:        "redis",
-			protocol:    "redis",
-			legacyLimit: maxRedisObserverBufferBytes,
-			build:       redisCommandWithExactLength,
+			name:          "redis",
+			protocol:      "redis",
+			legacyLimit:   maxRedisObserverBufferBytes,
+			build:         redisCommandWithExactLength,
+			oversizedCode: observerErrorBufferLimit,
 		},
 	}
 
@@ -55,8 +59,8 @@ func TestQueryObserversHonorConfiguredClientMessageLimit(t *testing.T) {
 			if len(forward) != 0 {
 				t.Fatalf("oversized request forwarded %d bytes", len(forward))
 			}
-			if decision == nil || decision.Allowed || decision.ErrorCode != observerErrorBufferLimit {
-				t.Fatalf("oversized request decision = %#v, want %s", decision, observerErrorBufferLimit)
+			if decision == nil || decision.Allowed || decision.ErrorCode != test.oversizedCode {
+				t.Fatalf("oversized request decision = %#v, want %s", decision, test.oversizedCode)
 			}
 		})
 	}

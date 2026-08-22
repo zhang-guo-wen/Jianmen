@@ -13,51 +13,61 @@ const ( // Stable values persisted in database gateway audit artifacts.
 )
 
 type DBConnectionMeta struct {
-	ID                   string            `json:"id"`
-	Name                 string            `json:"name"`
-	Protocol             string            `json:"protocol"`
-	ClientAddr           string            `json:"client_addr"`
-	UpstreamAddr         string            `json:"upstream_addr"`
-	StartedAt            string            `json:"started_at"`
-	EndedAt              string            `json:"ended_at,omitempty"`
-	DurationMs           int64             `json:"duration_ms,omitempty"`
-	AccountName          string            `json:"account_name,omitempty"`
-	InstanceName         string            `json:"instance_name,omitempty"`
-	AuthUser             string            `json:"auth_user,omitempty"`
-	Database             string            `json:"database,omitempty"`
-	ApplicationName      string            `json:"application_name,omitempty"`
-	MySQLConnectAttrs    map[string]string `json:"mysql_connect_attrs,omitempty"`
-	AuthObservation      string            `json:"auth_observation,omitempty"`
-	AllowedUsersEnforced bool              `json:"allowed_users_enforced"`
+	ID                    string            `json:"id"`
+	Name                  string            `json:"name"`
+	Protocol              string            `json:"protocol"`
+	ClientAddr            string            `json:"client_addr"`
+	UpstreamAddr          string            `json:"upstream_addr"`
+	StartedAt             string            `json:"started_at"`
+	EndedAt               string            `json:"ended_at,omitempty"`
+	DurationMs            int64             `json:"duration_ms,omitempty"`
+	AccountName           string            `json:"account_name,omitempty"`
+	InstanceName          string            `json:"instance_name,omitempty"`
+	AuthUser              string            `json:"auth_user,omitempty"`
+	Database              string            `json:"database,omitempty"`
+	ApplicationName       string            `json:"application_name,omitempty"`
+	MySQLConnectAttrs     map[string]string `json:"mysql_connect_attrs,omitempty"`
+	AuthObservation       string            `json:"auth_observation,omitempty"`
+	AllowedUsersEnforced  bool              `json:"allowed_users_enforced"`
+	QueryDataFile         string            `json:"query_data_file"`
+	AuditRedactionEnabled bool              `json:"audit_redaction_enabled"`
+	AuditPreviewBytes     int               `json:"audit_preview_bytes"`
 }
 
 type DBQueryEvent struct {
-	Type         string         `json:"type"`
-	ConnectionID string         `json:"connection_id"`
-	Seq          int64          `json:"seq"`
-	Protocol     string         `json:"protocol"`
-	SQL          string         `json:"sql,omitempty"`
-	QueryKind    string         `json:"query_kind,omitempty"`
-	Detail       map[string]any `json:"detail,omitempty"`
-	StartedAt    int64          `json:"started_at,omitempty"`
-	CompletedAt  int64          `json:"completed_at,omitempty"`
-	DurationMs   int64          `json:"duration_ms,omitempty"`
-	Status       string         `json:"status,omitempty"`
-	ErrorCode    string         `json:"error_code,omitempty"`
-	ErrorMessage string         `json:"error_message,omitempty"`
-	RowsAffected *int64         `json:"rows_affected,omitempty"`
-	Rows         *int64         `json:"rows,omitempty"`
+	Type               string         `json:"type"`
+	ConnectionID       string         `json:"connection_id"`
+	Seq                int64          `json:"seq"`
+	Protocol           string         `json:"protocol"`
+	SQL                string         `json:"sql,omitempty"`
+	SQLLogOffset       int64          `json:"sql_log_offset"`
+	SQLLogBytes        int64          `json:"sql_log_bytes,omitempty"`
+	ParameterLogOffset int64          `json:"parameter_log_offset"`
+	ParameterLogBytes  int64          `json:"parameter_log_bytes,omitempty"`
+	AuditDataRedacted  bool           `json:"audit_data_redacted"`
+	QueryKind          string         `json:"query_kind,omitempty"`
+	Detail             map[string]any `json:"detail,omitempty"`
+	StartedAt          int64          `json:"started_at,omitempty"`
+	CompletedAt        int64          `json:"completed_at,omitempty"`
+	DurationMs         int64          `json:"duration_ms,omitempty"`
+	Status             string         `json:"status,omitempty"`
+	ErrorCode          string         `json:"error_code,omitempty"`
+	ErrorMessage       string         `json:"error_message,omitempty"`
+	RowsAffected       *int64         `json:"rows_affected,omitempty"`
+	Rows               *int64         `json:"rows,omitempty"`
 }
 
 type queryRecord struct {
-	seq              int64
-	protocol         string
-	sql              string
-	originalSQLBytes int64
-	sqlTruncated     bool
-	queryKind        string
-	detail           map[string]any
-	startedAt        time.Time
+	seq               int64
+	protocol          string
+	sql               string
+	originalSQLBytes  int64
+	sqlTruncated      bool
+	queryKind         string
+	detail            map[string]any
+	sqlArtifact       databaseAuditArtifact
+	parameterArtifact databaseAuditArtifact
+	startedAt         time.Time
 }
 
 type queryFinish struct {

@@ -36,23 +36,24 @@ type SessionRecorder struct {
 	recordCommands bool
 	logger         *slog.Logger
 
-	dir        string
-	terminal   *AsciinemaWriter
-	eventsFile *os.File
-	filesFile  *os.File
-	commands   *CommandRecorder
-	fileSeq    int64
-	files      map[string]*FileSummary
-	auditSink  AuditSink
-	redactor   AuditRedactor
-	output     *auditStreamRedactor
-	input      *auditStreamRedactor
-	onFatal    func(error)
-	fatalOnce  sync.Once
-	promptTail  string
-	redactInput bool
-	inputSeen   bool
-	closed      bool
+	dir              string
+	terminal         *AsciinemaWriter
+	eventsFile       *os.File
+	filesFile        *os.File
+	commands         *CommandRecorder
+	fileSeq          int64
+	files            map[string]*FileSummary
+	auditSink        AuditSink
+	redactor         AuditRedactor
+	redactionEnabled bool
+	output           *auditStreamRedactor
+	input            *auditStreamRedactor
+	onFatal          func(error)
+	fatalOnce        sync.Once
+	promptTail       string
+	redactInput      bool
+	inputSeen        bool
+	closed           bool
 }
 
 type ResizeEvent struct {
@@ -107,7 +108,7 @@ func NewSessionRecorder(
 		return nil, errors.New("audit fatal error handler is required")
 	}
 	dir := filepath.Join(root, "ssh", session.ID)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, err
 	}
 
@@ -116,26 +117,32 @@ func NewSessionRecorder(
 		startedAt = time.Now().UTC()
 	}
 
-	terminalFile, err := os.OpenFile(filepath.Join(dir, "terminal.cast"), os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
+	terminalFile, err := os.OpenFile(filepath.Join(dir, "terminal.cast"), os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
 	if err != nil {
 		return nil, err
 	}
-	eventsFile, err := os.OpenFile(filepath.Join(dir, "terminal-events.jsonl"), os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
+	eventsFile, err := os.OpenFile(filepath.Join(dir, "terminal-events.jsonl"), os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
 	if err != nil {
 		_ = terminalFile.Close()
 		return nil, err
 	}
-	commandsFile, err := os.OpenFile(filepath.Join(dir, "commands.jsonl"), os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
+	commandsFile, err := os.OpenFile(filepath.Join(dir, "commands.jsonl"), os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
 	if err != nil {
 		_ = terminalFile.Close()
 		_ = eventsFile.Close()
 		return nil, err
 	}
-	filesFile, err := os.OpenFile(filepath.Join(dir, "files.jsonl"), os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
+	commandOutputFile, err := os.OpenFile(filepath.Join(dir, "commands-data.bin"), os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
+	if err != nil {
+		closeRecorderFiles(terminalFile, eventsFile, commandsFile)
+		return nil, err
+	}
+	filesFile, err := os.OpenFile(filepath.Join(dir, "files.jsonl"), os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
 	if err != nil {
 		_ = terminalFile.Close()
 		_ = eventsFile.Close()
 		_ = commandsFile.Close()
+		_ = commandOutputFile.Close()
 		return nil, err
 	}
 
@@ -143,45 +150,60 @@ func NewSessionRecorder(
 	if protocol == "" {
 		protocol = "ssh"
 	}
+	redactionEnabled := true
+	if status, ok := redactor.(auditRedactionStatus); ok {
+		redactionEnabled = status.AuditRedactionEnabled()
+	}
 	meta := map[string]any{
-		"session_id":       session.ID,
-		"user_id":          session.UserID,
-		"user":             session.User.Username,
-		"target":           session.Target,
-		"account_username": session.AccountUsername,
-		"client_ip":        session.ClientIP,
-		"started_at":       startedAt.Format(time.RFC3339Nano),
-		"protocol":         protocol,
-		"protocol_subtype": session.ProtocolSubtype,
+		"session_id":               session.ID,
+		"user_id":                  session.UserID,
+		"user":                     session.User.Username,
+		"target":                   session.Target,
+		"account_username":         session.AccountUsername,
+		"client_ip":                session.ClientIP,
+		"started_at":               startedAt.Format(time.RFC3339Nano),
+		"protocol":                 protocol,
+		"protocol_subtype":         session.ProtocolSubtype,
+		"command_output_data_file": "commands-data.bin",
+		"audit_redaction_enabled":  redactionEnabled,
 	}
 	raw, err := json.MarshalIndent(meta, "", "  ")
 	if err != nil {
-		closeRecorderFiles(terminalFile, eventsFile, commandsFile, filesFile)
+		closeRecorderFiles(terminalFile, eventsFile, commandsFile, commandOutputFile, filesFile)
 		return nil, fmt.Errorf("marshal audit session metadata: %w", err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "meta.json"), raw, 0o644); err != nil {
-		closeRecorderFiles(terminalFile, eventsFile, commandsFile, filesFile)
+	if err := os.WriteFile(filepath.Join(dir, "meta.json"), raw, 0o600); err != nil {
+		closeRecorderFiles(terminalFile, eventsFile, commandsFile, commandOutputFile, filesFile)
 		return nil, fmt.Errorf("write audit session metadata: %w", err)
 	}
 
 	rec := &SessionRecorder{
-		session:        session,
-		startedAt:      startedAt,
-		recordInput:    recordInput,
-		recordCommands: recordCommands,
-		logger:         logger,
-		dir:            dir,
-		terminal:       NewAsciinemaWriter(terminalFile, startedAt, 80, 24),
-		eventsFile:     eventsFile,
-		filesFile:      filesFile,
-		files:          make(map[string]*FileSummary),
-		auditSink:      sink,
-		redactor:       redactor,
-		output:         newAuditStreamRedactor("output", redactor),
-		input:          newAuditStreamRedactor("input", redactor),
-		onFatal:        onFatal,
+		session:          session,
+		startedAt:        startedAt,
+		recordInput:      recordInput,
+		recordCommands:   recordCommands,
+		logger:           logger,
+		dir:              dir,
+		terminal:         NewAsciinemaWriter(terminalFile, startedAt, 80, 24),
+		eventsFile:       eventsFile,
+		filesFile:        filesFile,
+		files:            make(map[string]*FileSummary),
+		auditSink:        sink,
+		redactor:         redactor,
+		redactionEnabled: redactionEnabled,
+		output:           newAuditStreamRedactor("output", redactor),
+		input:            newAuditStreamRedactor("input", redactor),
+		onFatal:          onFatal,
 	}
-	rec.commands = NewCommandRecorder(commandsFile, startedAt, redactor, sink, session.ID, rec.reportFatal)
+	rec.commands = NewCommandRecorderWithOutput(
+		commandsFile,
+		commandOutputFile,
+		startedAt,
+		redactor,
+		sink,
+		session.ID,
+		rec.reportFatal,
+	)
 	return rec, nil
 }
 
@@ -228,7 +250,7 @@ func (r *SessionRecorder) writeMetaField(key, value string) error {
 	if err != nil {
 		return fmt.Errorf("encode audit metadata: %w", err)
 	}
-	if err := os.WriteFile(metaPath, updated, 0o644); err != nil {
+	if err := os.WriteFile(metaPath, updated, 0o600); err != nil {
 		return fmt.Errorf("write audit metadata: %w", err)
 	}
 	return nil
@@ -244,17 +266,34 @@ func (r *SessionRecorder) RecordOutput(data []byte) {
 		return
 	}
 	r.observeSensitivePrompt(data)
-	if r.recordCommands {
-		r.commands.ObserveOutput(data)
-	}
 	redacted, err := r.output.Write(data)
 	if err != nil {
 		r.reportFatal(fmt.Errorf("redact terminal output: %w", err))
 		return
 	}
+	if r.recordCommands {
+		r.commands.ObserveOutput(redacted)
+	}
 	if err := r.terminal.WriteOutput(redacted); err != nil {
 		r.reportFatal(fmt.Errorf("write terminal output: %w", err))
 	}
+}
+
+func (r *SessionRecorder) flushPendingOutputLocked() error {
+	if r == nil || r.output == nil {
+		return nil
+	}
+	pending := r.output.Flush()
+	if len(pending) == 0 {
+		return nil
+	}
+	if r.recordCommands {
+		r.commands.ObserveOutput(pending)
+	}
+	if err := r.terminal.WriteOutput(pending); err != nil {
+		return fmt.Errorf("write pending terminal output: %w", err)
+	}
+	return nil
 }
 
 func (r *SessionRecorder) RecordInput(data []byte) {
@@ -264,6 +303,10 @@ func (r *SessionRecorder) RecordInput(data []byte) {
 	r.streamMu.Lock()
 	defer r.streamMu.Unlock()
 	if r.isClosed() {
+		return
+	}
+	if err := r.flushPendingOutputLocked(); err != nil {
+		r.reportFatal(err)
 		return
 	}
 	if r.recordCommands {
@@ -289,6 +332,10 @@ func (r *SessionRecorder) RecordCommand(command string) {
 	r.streamMu.Lock()
 	defer r.streamMu.Unlock()
 	if r.isClosed() {
+		return
+	}
+	if err := r.flushPendingOutputLocked(); err != nil {
+		r.reportFatal(err)
 		return
 	}
 	if err := r.commands.RecordDirect(command); err != nil {
@@ -402,6 +449,9 @@ func (r *SessionRecorder) Close() error {
 		}
 	}
 	if output := r.output.Flush(); len(output) > 0 {
+		if r.recordCommands && r.commands != nil {
+			r.commands.ObserveOutput(output)
+		}
 		recordError("flush terminal output", r.terminal.WriteOutput(output))
 	}
 	if input := r.flushInput(); len(input) > 0 {
@@ -442,7 +492,7 @@ func (r *SessionRecorder) writeEndedAt() error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(metaPath, updated, 0o644)
+	return os.WriteFile(metaPath, updated, 0o600)
 }
 
 func (r *SessionRecorder) isClosed() bool {
@@ -452,12 +502,17 @@ func (r *SessionRecorder) isClosed() bool {
 }
 
 func (r *SessionRecorder) observeSensitivePrompt(data []byte) {
+	if r == nil || !r.redactionEnabled {
+		return
+	}
 	r.mu.Lock()
 	combined := r.promptTail + strings.ToLower(string(data))
 	sensitive := isSensitivePrompt([]byte(combined))
 	if sensitive {
-		r.redactInput = true
-		r.inputSeen = false
+		if r.redactionEnabled {
+			r.redactInput = true
+			r.inputSeen = false
+		}
 		r.promptTail = ""
 	} else {
 		const promptTailBytes = 64
@@ -473,6 +528,12 @@ func (r *SessionRecorder) observeSensitivePrompt(data []byte) {
 }
 
 func (r *SessionRecorder) redactInputFrame(data []byte) ([]byte, error) {
+	if r == nil {
+		return nil, nil
+	}
+	if !r.redactionEnabled {
+		return r.input.Write(data)
+	}
 	r.mu.Lock()
 	if !r.redactInput {
 		r.mu.Unlock()

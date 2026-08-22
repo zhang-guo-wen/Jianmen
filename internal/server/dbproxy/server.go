@@ -16,17 +16,18 @@ import (
 )
 
 type Gateway struct {
-	cfg               config.DatabaseGatewayConfig
-	store             databaseAccountResolver
-	db                *gorm.DB
-	replayDir         string
-	logger            *slog.Logger
-	authorizer        connectionAuthorizer
-	audit             auditWriter
-	auditRequired     bool
-	onlineSessions    *online.Registry
-	postgresCancels   postgresCancelRegistry
-	pendingHandshakes *pendingHandshakeLimiter
+	cfg                  config.DatabaseGatewayConfig
+	store                databaseAccountResolver
+	db                   *gorm.DB
+	replayDir            string
+	logger               *slog.Logger
+	authorizer           connectionAuthorizer
+	audit                auditWriter
+	auditRequired        bool
+	onlineSessions       *online.Registry
+	postgresCancels      postgresCancelRegistry
+	pendingHandshakes    *pendingHandshakeLimiter
+	observerMemoryBudget *observerMemoryBudget
 }
 
 type databaseAccountResolver interface {
@@ -49,16 +50,17 @@ func NewGateway(cfg config.DatabaseGatewayConfig, store databaseAccountResolver,
 		logger = slog.Default()
 	}
 	return &Gateway{
-		cfg:               cfg,
-		store:             store,
-		db:                db,
-		replayDir:         replayDir,
-		logger:            logger,
-		authorizer:        authorizer,
-		audit:             auditStore,
-		auditRequired:     true,
-		onlineSessions:    onlineSessions,
-		pendingHandshakes: newPendingHandshakeLimiter(defaultPendingHandshakeLimit),
+		cfg:                  cfg,
+		store:                store,
+		db:                   db,
+		replayDir:            replayDir,
+		logger:               logger,
+		authorizer:           authorizer,
+		audit:                auditStore,
+		auditRequired:        true,
+		onlineSessions:       onlineSessions,
+		pendingHandshakes:    newPendingHandshakeLimiter(defaultPendingHandshakeLimit),
+		observerMemoryBudget: newObserverMemoryBudget(defaultObserverGlobalMemoryBudgetBytes),
 	}
 }
 
@@ -198,7 +200,12 @@ func (g *Gateway) handleGatewayConn(ctx context.Context, client net.Conn, conn *
 	})
 	defer unregisterOnline()
 
-	observer := newQueryObserverWithLimit(conn.protocol, recorder, g.cfg.MaxClientMessageBytes)
+	observer := newQueryObserverWithLimitAndBudget(
+		conn.protocol,
+		recorder,
+		g.cfg.MaxClientMessageBytes,
+		g.observerMemoryBudget,
+	)
 	relayGatewayConnection(client, conn.upstream, observer)
 }
 

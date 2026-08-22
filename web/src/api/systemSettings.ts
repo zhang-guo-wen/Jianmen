@@ -1,8 +1,11 @@
 export const BYTES_PER_GIB = 1024 ** 3;
 export const BYTES_PER_MIB = 1024 ** 2;
 export const DATABASE_MAX_CLIENT_MESSAGE_BYTES_MIN = 64 * 1024;
-export const DATABASE_MAX_CLIENT_MESSAGE_BYTES_MAX = 16 * BYTES_PER_MIB;
+export const DATABASE_MAX_CLIENT_MESSAGE_BYTES_MAX = 256 * BYTES_PER_MIB;
 export const DATABASE_MAX_CLIENT_MESSAGE_BYTES_DEFAULT = 10 * BYTES_PER_MIB;
+export const DATABASE_AUDIT_PREVIEW_BYTES_MIN = 4096;
+export const DATABASE_AUDIT_PREVIEW_BYTES_MAX = 1048576;
+export const DATABASE_AUDIT_PREVIEW_BYTES_DEFAULT = 65536;
 
 export type DatabaseGatewayMode = 'unified' | 'independent';
 export type DatabaseGatewayClientTLSMode = 'required' | 'optional';
@@ -22,6 +25,9 @@ export interface SystemSettingsValues {
   recording_retention_days: number;
   recording_max_replay_bytes: number;
   recording_cleanup_batch_size: number;
+  recording_ssh_redaction_enabled: boolean;
+  database_audit_redaction_enabled: boolean;
+  database_audit_preview_bytes: number;
 }
 
 export const SYSTEM_SETTINGS_FIELDS = [
@@ -38,6 +44,9 @@ export const SYSTEM_SETTINGS_FIELDS = [
   'recording_retention_days',
   'recording_max_replay_bytes',
   'recording_cleanup_batch_size',
+  'recording_ssh_redaction_enabled',
+  'database_audit_redaction_enabled',
+  'database_audit_preview_bytes',
 ] as const satisfies ReadonlyArray<keyof SystemSettingsValues>;
 
 export interface SystemSettingsGuacdInfrastructure {
@@ -191,6 +200,9 @@ export function weakerProtectionReasons(
   ) {
     reasons.push('降低本地回放容量上限，可能触发更积极的旧录像清理');
   }
+  if (current.recording_ssh_redaction_enabled && !next.recording_ssh_redaction_enabled) reasons.push('关闭 SSH 脱敏，默认原文存储');
+  if (current.database_audit_redaction_enabled && !next.database_audit_redaction_enabled) reasons.push('关闭数据库审计脱敏，默认原文存储');
+  if (next.database_audit_preview_bytes > current.database_audit_preview_bytes) reasons.push('增大数据库审计前缀预览范围');
   if (
     current.database_max_client_message_bytes
     !== next.database_max_client_message_bytes

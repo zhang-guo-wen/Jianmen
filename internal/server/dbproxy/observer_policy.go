@@ -19,12 +19,13 @@ const (
 	maxObserverPendingQueries      = 32
 	maxObserverPreparedObjects     = 128
 
-	observerErrorBufferLimit  = "OBSERVER_BUFFER_LIMIT"
-	observerErrorProtocol     = "OBSERVER_PROTOCOL_ERROR"
-	observerErrorPendingLimit = "OBSERVER_PENDING_LIMIT"
-	observerErrorRelay        = "OBSERVER_RELAY_TERMINATED"
-	observerErrorDrainTimeout = "OBSERVER_DRAIN_TIMEOUT"
-	observerErrorAuditFailure = "OBSERVER_AUDIT_FAILURE"
+	observerErrorBufferLimit        = "OBSERVER_BUFFER_LIMIT"
+	observerErrorClientMessageLimit = "OBSERVER_CLIENT_MESSAGE_LIMIT"
+	observerErrorProtocol           = "OBSERVER_PROTOCOL_ERROR"
+	observerErrorPendingLimit       = "OBSERVER_PENDING_LIMIT"
+	observerErrorRelay              = "OBSERVER_RELAY_TERMINATED"
+	observerErrorDrainTimeout       = "OBSERVER_DRAIN_TIMEOUT"
+	observerErrorAuditFailure       = "OBSERVER_AUDIT_FAILURE"
 )
 
 func observerPendingAuditWithinLimit(

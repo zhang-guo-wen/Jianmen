@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -79,6 +80,8 @@ func (s *Server) handleAuditArtifact(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case artifact == "":
 		s.writeJSON(w, r, http.StatusOK, session)
+	case strings.HasPrefix(artifact, "commands/") && session.ProtocolFamily == service.AuditProtocolFamilySSH:
+		s.handleAuditSSHCommandDetail(w, r, session, artifact)
 	case artifact == "commands" && session.ProtocolFamily == service.AuditProtocolFamilySSH:
 		limit, offset := pageFromQuery(r)
 		if session.ReplayDir != "" {
@@ -124,6 +127,8 @@ func (s *Server) handleAuditArtifact(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		s.writeAuditTextFile(w, r, filepath.Join(replayPath, "terminal.cast"), "application/x-asciicast; charset=utf-8")
+	case strings.HasPrefix(artifact, "queries/") && session.ProtocolFamily == service.AuditProtocolFamilyDB:
+		s.handleAuditDBQueryDetail(w, r, protocol, sessionID, artifact)
 	case artifact == "queries" && session.ProtocolFamily == service.AuditProtocolFamilyDB:
 		page, pageSize, offset := auditDBQueryPageFromQuery(r)
 		items, total, err := s.auditQuery.DBQueryEvents(
@@ -150,6 +155,189 @@ func (s *Server) handleAuditArtifact(w http.ResponseWriter, r *http.Request) {
 		})
 	default:
 		s.writeAuditArtifactUnavailable(w, r)
+	}
+}
+
+func (s *Server) handleAuditSSHCommandDetail(
+	w http.ResponseWriter,
+	r *http.Request,
+	session service.AuditSession,
+	artifactPath string,
+) {
+	parts := strings.Split(artifactPath, "/")
+	if len(parts) != 3 || parts[0] != "commands" || session.ReplayDir == "" {
+		s.writeAuditArtifactUnavailable(w, r)
+		return
+	}
+	seq, err := strconv.ParseInt(parts[1], 10, 64)
+	if err != nil || seq <= 0 {
+		s.writeAuditArtifactUnavailable(w, r)
+		return
+	}
+	command, err := readRecordedSSHCommand(
+		filepath.Join(session.ReplayDir, "commands.jsonl"),
+		seq,
+	)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			s.writeAuditArtifactUnavailable(w, r)
+			return
+		}
+		s.writeAuditFileError(w, r, err)
+		return
+	}
+	switch parts[2] {
+	case "detail":
+		s.writeJSON(w, r, http.StatusOK, map[string]any{
+			"seq":                 command.Seq,
+			"command":             command.Command,
+			"output_preview":      command.Preview,
+			"output_bytes":        command.OutputBytes,
+			"audit_data_redacted": command.AuditDataRedacted,
+			"confidence":          command.Confidence,
+			"started_at":          command.StartedAt,
+			"ended_at":            command.EndedAt,
+		})
+	case "output":
+		if command.OutputBytes <= 0 {
+			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+			w.Header().Set("Content-Length", "0")
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		s.writeAuditFileSection(
+			w,
+			r,
+			filepath.Join(session.ReplayDir, "commands-data.bin"),
+			command.OutputOffset,
+			command.OutputBytes,
+			"text/plain; charset=utf-8",
+			command.AuditDataRedacted,
+		)
+	default:
+		s.writeAuditArtifactUnavailable(w, r)
+	}
+}
+
+func readRecordedSSHCommand(path string, seq int64) (recordedSSHCommand, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return recordedSSHCommand{}, err
+	}
+	defer file.Close()
+	scanner := bufio.NewScanner(file)
+	scanner.Buffer(make([]byte, 0, 64*1024), 8*1024*1024)
+	for scanner.Scan() {
+		var command recordedSSHCommand
+		if json.Unmarshal(scanner.Bytes(), &command) == nil && command.Seq == seq {
+			return command, nil
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return recordedSSHCommand{}, err
+	}
+	return recordedSSHCommand{}, os.ErrNotExist
+}
+
+func (s *Server) handleAuditDBQueryDetail(
+	w http.ResponseWriter,
+	r *http.Request,
+	protocol,
+	sessionID,
+	artifactPath string,
+) {
+	parts := strings.Split(artifactPath, "/")
+	if len(parts) != 3 || parts[0] != "queries" || strings.TrimSpace(parts[1]) == "" {
+		s.writeAuditArtifactUnavailable(w, r)
+		return
+	}
+	session, artifact, err := s.auditQuery.DBQueryArtifact(
+		r.Context(),
+		userIDFromRequest(r),
+		protocol,
+		sessionID,
+		parts[1],
+	)
+	if err != nil {
+		s.writeAuditQueryError(w, r, err)
+		return
+	}
+	if parts[2] == "detail" {
+		s.writeJSON(w, r, http.StatusOK, map[string]any{
+			"query_id":            artifact.ID,
+			"sql_bytes":           artifact.SQLLogBytes,
+			"parameter_bytes":     artifact.ParameterLogBytes,
+			"audit_data_redacted": artifact.AuditDataRedacted,
+			"has_sql":             artifact.SQLLogBytes > 0,
+			"has_parameters":      artifact.ParameterLogBytes > 0,
+		})
+		return
+	}
+	if session.ReplayDir == "" {
+		s.writeAuditArtifactUnavailable(w, r)
+		return
+	}
+	var offset, length int64
+	contentType := "application/octet-stream"
+	switch parts[2] {
+	case "sql":
+		offset, length = artifact.SQLLogOffset, artifact.SQLLogBytes
+		contentType = "text/plain; charset=utf-8"
+	case "parameters":
+		offset, length = artifact.ParameterLogOffset, artifact.ParameterLogBytes
+	default:
+		s.writeAuditArtifactUnavailable(w, r)
+		return
+	}
+	if offset < 0 || length <= 0 {
+		s.writeAuditArtifactUnavailable(w, r)
+		return
+	}
+	s.writeAuditFileSection(
+		w,
+		r,
+		filepath.Join(session.ReplayDir, "query-data.bin"),
+		offset,
+		length,
+		contentType,
+		artifact.AuditDataRedacted,
+	)
+}
+
+func (s *Server) writeAuditFileSection(
+	w http.ResponseWriter,
+	r *http.Request,
+	path string,
+	offset,
+	length int64,
+	contentType string,
+	redacted bool,
+) {
+	file, err := os.Open(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			s.writeAuditArtifactUnavailable(w, r)
+			return
+		}
+		s.writeAuditFileError(w, r, err)
+		return
+	}
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil || offset > info.Size() || length > info.Size()-offset {
+		if err == nil {
+			err = errors.New("database audit artifact section is incomplete")
+		}
+		s.writeAuditFileError(w, r, err)
+		return
+	}
+	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("Content-Length", strconv.FormatInt(length, 10))
+	w.Header().Set("X-Audit-Data-Redacted", strconv.FormatBool(redacted))
+	w.WriteHeader(http.StatusOK)
+	_, err = io.CopyN(w, io.NewSectionReader(file, offset, length), length)
+	if err != nil && s.logger != nil && r.Context().Err() == nil {
+		s.logger.Error("stream audit file section", "error", err)
 	}
 }
 
@@ -242,31 +430,42 @@ func pageFromQuery(r *http.Request) (int, int) {
 	size, _ := strconv.Atoi(r.URL.Query().Get("size"))
 	if size <= 0 {
 		size = 500
+	} else if size > 1000 {
+		size = 1000
 	}
 	if page <= 0 {
 		page = 1
+	}
+	const maxPage = 1_000_000
+	if page > maxPage {
+		page = maxPage
 	}
 	return size, (page - 1) * size
 }
 
 type recordedSSHCommand struct {
-	Seq        int64  `json:"seq"`
-	OffsetMs   int64  `json:"offset_ms"`
-	Command    string `json:"command"`
-	Preview    string `json:"preview"`
-	Confidence string `json:"confidence"`
-	StartedAt  int64  `json:"started_at"`
-	EndedAt    int64  `json:"ended_at"`
+	Seq               int64  `json:"seq"`
+	OffsetMs          int64  `json:"offset_ms"`
+	Command           string `json:"command"`
+	Preview           string `json:"preview"`
+	OutputOffset      int64  `json:"output_offset"`
+	OutputBytes       int64  `json:"output_bytes"`
+	AuditDataRedacted bool   `json:"audit_data_redacted"`
+	Confidence        string `json:"confidence"`
+	StartedAt         int64  `json:"started_at"`
+	EndedAt           int64  `json:"ended_at"`
 }
 
 type auditSSHCommandOutput struct {
-	Seq        int64  `json:"seq"`
-	OffsetMs   int64  `json:"offset_ms"`
-	Command    string `json:"command"`
-	Output     string `json:"output"`
-	Confidence string `json:"confidence"`
-	StartedAt  int64  `json:"started_at"`
-	EndedAt    int64  `json:"ended_at"`
+	Seq               int64  `json:"seq"`
+	OffsetMs          int64  `json:"offset_ms"`
+	Command           string `json:"command"`
+	Output            string `json:"output"`
+	OutputBytes       int64  `json:"output_bytes"`
+	AuditDataRedacted bool   `json:"audit_data_redacted"`
+	Confidence        string `json:"confidence"`
+	StartedAt         int64  `json:"started_at"`
+	EndedAt           int64  `json:"ended_at"`
 }
 
 func readAuditSSHCommandPage(path string, limit, offset int) ([]auditSSHCommandOutput, int, error) {
@@ -287,13 +486,15 @@ func readAuditSSHCommandPage(path string, limit, offset int) ([]auditSSHCommandO
 		}
 		if total >= offset && len(items) < limit {
 			items = append(items, auditSSHCommandOutput{
-				Seq:        recorded.Seq,
-				OffsetMs:   recorded.OffsetMs,
-				Command:    recorded.Command,
-				Output:     recorded.Preview,
-				Confidence: recorded.Confidence,
-				StartedAt:  recorded.StartedAt,
-				EndedAt:    recorded.EndedAt,
+				Seq:               recorded.Seq,
+				OffsetMs:          recorded.OffsetMs,
+				Command:           recorded.Command,
+				Output:            recorded.Preview,
+				OutputBytes:       recorded.OutputBytes,
+				AuditDataRedacted: recorded.AuditDataRedacted,
+				Confidence:        recorded.Confidence,
+				StartedAt:         recorded.StartedAt,
+				EndedAt:           recorded.EndedAt,
 			})
 		}
 		total++

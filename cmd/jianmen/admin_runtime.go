@@ -65,6 +65,11 @@ func startAdminRuntime(
 		authorization,
 		service.NewDatabaseSQLConsoleExecutor(),
 		userSessionCreation,
+		service.SQLConsoleAuditOptions{
+			ReplayDir:        cfg.ReplayDir,
+			PreviewBytes:     cfg.DatabaseGateway.EffectiveAuditPreviewBytes(),
+			RedactionEnabled: cfg.DatabaseGateway.AuditRedactionEnabled,
+		},
 	)
 	if err != nil {
 		return err

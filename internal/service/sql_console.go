@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strconv"
 	"strings"
@@ -13,6 +15,9 @@ import (
 	mysqlDriver "github.com/go-sql-driver/mysql"
 	"github.com/jackc/pgx/v5/pgconn"
 
+	"jianmen/internal/auditartifact"
+	"jianmen/internal/config"
+	"jianmen/internal/databaseaudit"
 	"jianmen/internal/model"
 	"jianmen/internal/rbac"
 )
@@ -38,9 +43,8 @@ type SQLConsoleAuthorizer interface {
 	AuthorizeConnection(context.Context, string, []string, string, string) (bool, error)
 }
 
-// SQLConsoleUserSessionProvider 提供用户的认证会话(短 session_id),用于审计记录关联。
-// 与普通连接一致复用 UserSessionCreationService 的共享分配边界,SQL 控制台会话
-// 在审计列表"授权会话 ID"列即可正常显示短认证会话 ID,不再为空。
+// SQLConsoleUserSessionProvider resolves the short authenticated session ID
+// shared with native database connections for audit correlation.
 type SQLConsoleUserSessionProvider interface {
 	GetOrCreateActivePermanentUserSession(context.Context, string) (model.UserSession, error)
 }
@@ -52,6 +56,12 @@ type SQLConsoleActor struct {
 type SQLConsoleRequest struct {
 	SessionID, Database, SQL string
 	ConfirmWrite             bool
+}
+
+type SQLConsoleAuditOptions struct {
+	ReplayDir        string
+	PreviewBytes     int
+	RedactionEnabled bool
 }
 
 type SQLConsoleResult struct {
@@ -75,6 +85,7 @@ type SQLConsoleService struct {
 	sessionsMu   sync.Mutex
 	sessions     map[string]*sqlConsoleSession
 	idleTTL      time.Duration
+	auditOptions SQLConsoleAuditOptions
 }
 
 func NewSQLConsoleService(
@@ -82,6 +93,7 @@ func NewSQLConsoleService(
 	authorizer SQLConsoleAuthorizer,
 	executor SQLConsoleExecutor,
 	userSessions SQLConsoleUserSessionProvider,
+	auditOptions ...SQLConsoleAuditOptions,
 ) (*SQLConsoleService, error) {
 	if repository == nil {
 		return nil, errors.New("SQL console repository is required")
@@ -95,6 +107,20 @@ func NewSQLConsoleService(
 	if isNilSQLConsoleUserSessionProvider(userSessions) {
 		return nil, errors.New("SQL console user session provider is required")
 	}
+	if len(auditOptions) > 1 {
+		return nil, errors.New("SQL console accepts at most one audit option set")
+	}
+	options := SQLConsoleAuditOptions{}
+	if len(auditOptions) == 1 {
+		options = auditOptions[0]
+		options.ReplayDir = strings.TrimSpace(options.ReplayDir)
+		if options.PreviewBytes == 0 {
+			options.PreviewBytes = config.DefaultDatabaseAuditPreviewBytes
+		}
+		if options.PreviewBytes < config.MinDatabaseAuditPreviewBytes || options.PreviewBytes > config.MaxDatabaseAuditPreviewBytes {
+			return nil, fmt.Errorf("SQL console audit preview bytes must be between %d and %d", config.MinDatabaseAuditPreviewBytes, config.MaxDatabaseAuditPreviewBytes)
+		}
+	}
 	return &SQLConsoleService{
 		repository:   repository,
 		authorizer:   authorizer,
@@ -103,6 +129,7 @@ func NewSQLConsoleService(
 		now:          time.Now,
 		sessions:     make(map[string]*sqlConsoleSession),
 		idleTTL:      15 * time.Minute,
+		auditOptions: options,
 	}, nil
 }
 
@@ -166,18 +193,35 @@ func (s *SQLConsoleService) Execute(
 
 	session := newSQLConsoleAuditSession(actor, account, now)
 	session.UserSessionID = webSession.userSessionID
+	querySQL := policy.SQL
+	var artifact sqlConsoleAuditArtifact
+	if s.auditOptions.ReplayDir != "" {
+		session.ID = model.NewID()
+		artifact, err = writeSQLConsoleAuditArtifact(s.auditOptions, session.ID, policy.SQL)
+		if err != nil {
+			return SQLConsoleResult{}, fmt.Errorf("%w: write complete query file: %v", ErrSQLConsoleAudit, err)
+		}
+		session.ReplayDir = artifact.replayDir
+		querySQL = artifact.preview
+	}
 	if err := s.repository.CreateAuditSession(ctx, session); err != nil {
+		artifact.remove()
 		return SQLConsoleResult{}, fmt.Errorf("%w: create session: %v", ErrSQLConsoleAudit, err)
 	}
 	query := &model.AuditDBQuery{
-		AuditSessionID:   session.ID,
-		Timestamp:        now,
-		SQLText:          policy.SQL,
-		OriginalSQLBytes: int64(len(policy.SQL)),
-		QueryKind:        policy.QueryKind,
-		Status:           model.AuditDBQueryStatusUnknown,
+		AuditSessionID:    session.ID,
+		Timestamp:         now,
+		SQLText:           querySQL,
+		OriginalSQLBytes:  int64(len(policy.SQL)),
+		SQLTruncated:      artifact.truncated,
+		SQLLogOffset:      artifact.offset,
+		SQLLogBytes:       artifact.bytes,
+		AuditDataRedacted: artifact.redacted,
+		QueryKind:         policy.QueryKind,
+		Status:            model.AuditDBQueryStatusUnknown,
 	}
 	if err := s.repository.CreateAuditDBQuery(ctx, query); err != nil {
+		artifact.remove()
 		s.finishSQLConsoleAudit(ctx, session.ID, model.AuditOutcomeFailed, "audit_query_failed", err.Error())
 		return SQLConsoleResult{}, fmt.Errorf("%w: create query: %v", ErrSQLConsoleAudit, err)
 	}
@@ -231,8 +275,8 @@ func (s *SQLConsoleService) Execute(
 	}, nil
 }
 
-// Metadata 返回数据库表结构元数据(供前端补全),不建审计会话。
-// 复用会话缓存的连接,与 Execute 保持一致,不重新 Connect。
+// Metadata returns schema metadata using the cached connection and does not
+// create a separate audit session.
 func (s *SQLConsoleService) Metadata(
 	ctx context.Context,
 	actor SQLConsoleActor,
@@ -267,6 +311,52 @@ func (s *SQLConsoleService) Metadata(
 		return SQLConsoleMetadata{}, ErrSQLConsoleInvalid
 	}
 	return webSession.connection.Metadata(ctx, database)
+}
+
+const sqlConsoleAuditWriterBuffer = 256 * 1024
+
+type sqlConsoleAuditArtifact struct {
+	replayDir string
+	preview   string
+	offset    int64
+	bytes     int64
+	truncated bool
+	redacted  bool
+}
+
+func (a sqlConsoleAuditArtifact) remove() {
+	if a.replayDir != "" {
+		_ = os.RemoveAll(a.replayDir)
+	}
+}
+
+func writeSQLConsoleAuditArtifact(options SQLConsoleAuditOptions, sessionID string, sql string) (sqlConsoleAuditArtifact, error) {
+	dir := filepath.Join(options.ReplayDir, "db", sessionID)
+	artifact := sqlConsoleAuditArtifact{replayDir: dir}
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return sqlConsoleAuditArtifact{}, fmt.Errorf("create SQL console replay directory: %w", err)
+	}
+	file, err := os.OpenFile(filepath.Join(dir, "query-data.bin"), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	if err != nil {
+		artifact.remove()
+		return sqlConsoleAuditArtifact{}, fmt.Errorf("create SQL console query data: %w", err)
+	}
+	writer, err := auditartifact.NewWriter(file, sqlConsoleAuditWriterBuffer)
+	if err != nil {
+		_ = file.Close()
+		artifact.remove()
+		return sqlConsoleAuditArtifact{}, fmt.Errorf("open SQL console query data: %w", err)
+	}
+	result, captureErr := databaseaudit.CaptureSQL(writer, databaseaudit.Policy{
+		PreviewBytes: options.PreviewBytes, RedactionEnabled: options.RedactionEnabled,
+	}, []byte(sql))
+	if artifactErr := errors.Join(captureErr, writer.Close()); artifactErr != nil {
+		artifact.remove()
+		return sqlConsoleAuditArtifact{}, fmt.Errorf("persist SQL console query data: %w", artifactErr)
+	}
+	artifact.preview, artifact.offset, artifact.bytes = result.Preview, result.Section.Offset, result.Section.Bytes
+	artifact.truncated, artifact.redacted = result.Truncated, result.Redacted
+	return artifact, nil
 }
 
 func newSQLConsoleAuditSession(actor SQLConsoleActor, account model.DatabaseAccount, started time.Time) *model.AuditSession {

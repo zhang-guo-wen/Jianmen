@@ -35,7 +35,7 @@ DBeaver 的 MySQL 连接使用 Connector/J 默认信任库和 `VERIFY_IDENTITY`�
 | 协议 | 官方镜像 | 客户端/认证路径 | 每个版本的必测场景 |
 |---|---|---|---|
 | MySQL | `mysql:5.7`、`mysql:8.0`、`mysql:8.4` | `go-sql-driver/mysql`；堡垒机 `mysql_native_password`；上游 5.7 `mysql_native_password`、8.x `caching_sha2_password` | 初始数据库、普通查询、预处理语句、提交/回滚、审计脱敏、超过 `0xFFFFFF` 的多物理包响应及恶意边界字节 |
-| PostgreSQL | `postgres:14-alpine` 至 `postgres:18-alpine` | `pgx/v5`、`database/sql` 和原始协议客户端；网关 TLS；上游 SCRAM-SHA-256（RFC 4013 SASLprep） | Startup 参数、简单/扩展查询、预处理语句、提交/回滚、ErrorResponse 后恢复、COPY、大 DataRow、CancelRequest |
+| PostgreSQL | `postgres:14-alpine` 至 `postgres:18-alpine` | `pgx/v5`、`database/sql` 和原始协议客户端；网关 TLS；上游 SCRAM-SHA-256（RFC 4013 SASLprep） | Startup 参数、简单/扩展查询、预处理语句、提交/回滚、流式大 SQL、`54000` 硬上限错误、COPY、大 DataRow、CancelRequest |
 | Redis | `redis:6.2-alpine`、`redis:7.4-alpine`、`redis:8.8-alpine` | 原始 RESP/TLS 客户端；统一和独立入口均验证 TLS、双参数 `AUTH`、`HELLO 2 AUTH`、`HELLO 3 AUTH` | RESP2/RESP3、流水线、MULTI/EXEC、SELECT、Map/Set/Boolean/Double、Pub/Sub 与 Push、多主题批量退订、临界大主题 ACK、大 Bulk String、审计脱敏 |
 
 默认矩阵由以下测试实现：
@@ -55,8 +55,10 @@ DBeaver 的 MySQL 连接使用 Connector/J 默认信任库和 `VERIFY_IDENTITY`�
 | 客户端加密 | `optional` 接受明文或 MySQL SSLRequest/TLS；`required` 仅接受 TLS | `optional` 接受明文、SSLRequest/TLS 或 Direct TLS；`required` 仅接受 TLS，Direct TLS 要求 ALPN `postgresql` | `optional` 接受明文或 TLS；`required` 仅接受 TLS |
 | 上游加密 | 默认 `disable`；8.0/8.4 实库矩阵另使用 `verify-ca` 验证 TLS，5.7 使用明文基线 | 默认 `disable`，可配置 `verify-ca` / `verify-full`；本矩阵的官方镜像使用明文上游 | 默认 `disable`，可配置 `verify-ca` / `verify-full`；明文模式下 `AUTH` 凭据也不加密 |
 | 查询形态 | COM_QUERY、COM_STMT_PREPARE/EXECUTE、事务 | 简单/扩展查询、COPY、事务、异步 CancelRequest | 普通命令、流水线、事务、Pub/Sub |
-| 大响应 | 验证跨 `0xFFFFFF` 物理包边界、零长终止片及续片首字节 `0xff`/`0xfe` | 验证 300 KB DataRow 和 COPY | 验证 300 KB Bulk String、超大 Pub/Sub 消息及超过审计缓冲区的订阅 ACK |
+| 大请求/响应 | 验证跨 `0xFFFFFF` 物理包边界、零长终止片及续片首字节 `0xff`/`0xfe` | `Query`、`Parse`、`Bind` 增量转发，数据库保留有界前缀，文件完整保存 SQL 与 Bind 参数；验证 300 KB DataRow 和 COPY | 验证 300 KB Bulk String、超大 Pub/Sub 消息及超过审计缓冲区的订阅 ACK |
 | 畸形输入 | 包头、长度、截断帧模糊测试 | StartupMessage/类型消息模糊测试；取消密钥长度边界测试 | RESP2/3 类型、嵌套、长度、命令和认证模糊测试 |
+
+`database_gateway.max_client_message_bytes` 默认保持 10 MiB，可配置范围为 64 KiB–256 MiB。PostgreSQL `Query`、`Parse` 和 `Bind` 超过 256 KiB 后不再整帧缓存，而是增量解析并转发。`database_gateway.audit_preview_bytes` 控制数据库中的可检索 SQL 前缀（默认 64 KiB），`database_gateway.audit_redaction_enabled` 独立控制数据库审计脱敏且默认关闭；无论前缀是否截断，完整 SQL 和 Bind 参数都会以追加写方式保存到连接审计文件。所有活动大 SQL 的前缀捕获共享 64 MiB 网关内存预算；预算繁忙时数据库前缀降级为固定提示，但完整文件仍继续流式写入。超过配置硬上限的完整请求会被排空并返回 SQLSTATE `54000`，随后终止连接，客户端不再只看到模糊的 TCP reset。
 
 PostgreSQL 18 的协议 3.2 使用可变长度取消密钥。网关能够安全解析和路由 4–256 字节密钥，但当前会把 3.2 会话协商到 3.0，因此官方 PostgreSQL 18 实库路径实际使用 3.0 的 4 字节密钥。Direct TLS、3.2 协商和可变密钥分别有原始协议实测或协议测试，不能把“可协商连接”解读为“网关原生运行 3.2”。
 

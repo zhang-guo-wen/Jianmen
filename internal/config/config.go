@@ -13,7 +13,10 @@ import (
 const (
 	DefaultDatabaseGatewayMaxClientMessageBytes = 10 * 1024 * 1024
 	MinDatabaseGatewayMaxClientMessageBytes     = 64 * 1024
-	MaxDatabaseGatewayMaxClientMessageBytes     = 16 * 1024 * 1024
+	MaxDatabaseGatewayMaxClientMessageBytes     = 256 * 1024 * 1024
+	DefaultDatabaseAuditPreviewBytes            = 65536
+	MinDatabaseAuditPreviewBytes                = 4096
+	MaxDatabaseAuditPreviewBytes                = 1048576
 )
 
 type Config struct {
@@ -65,26 +68,28 @@ type ApplicationGatewayConfig struct {
 }
 
 type RecordingConfig struct {
-	Enabled           bool  `json:"enabled"`
-	RecordInput       bool  `json:"record_input"`
-	RecordCommands    bool  `json:"record_commands"`
-	RetentionDays     int   `json:"retention_days"`
-	MaxReplayBytes    int64 `json:"max_replay_bytes"`
-	CleanupBatchSize  int   `json:"cleanup_batch_size"`
-	enabledSet        bool
-	recordInputSet    bool
-	recordCommandsSet bool
-	maxReplayBytesSet bool
+	Enabled             bool  `json:"enabled"`
+	RecordInput         bool  `json:"record_input"`
+	RecordCommands      bool  `json:"record_commands"`
+	RetentionDays       int   `json:"retention_days"`
+	MaxReplayBytes      int64 `json:"max_replay_bytes"`
+	CleanupBatchSize    int   `json:"cleanup_batch_size"`
+	SSHRedactionEnabled bool  `json:"ssh_redaction_enabled"`
+	enabledSet          bool
+	recordInputSet      bool
+	recordCommandsSet   bool
+	maxReplayBytesSet   bool
 }
 
 func (c *RecordingConfig) UnmarshalJSON(data []byte) error {
 	var value struct {
-		Enabled          *bool  `json:"enabled"`
-		RecordInput      *bool  `json:"record_input"`
-		RecordCommands   *bool  `json:"record_commands"`
-		RetentionDays    int    `json:"retention_days"`
-		MaxReplayBytes   *int64 `json:"max_replay_bytes"`
-		CleanupBatchSize int    `json:"cleanup_batch_size"`
+		Enabled             *bool  `json:"enabled"`
+		RecordInput         *bool  `json:"record_input"`
+		RecordCommands      *bool  `json:"record_commands"`
+		RetentionDays       int    `json:"retention_days"`
+		MaxReplayBytes      *int64 `json:"max_replay_bytes"`
+		CleanupBatchSize    int    `json:"cleanup_batch_size"`
+		SSHRedactionEnabled *bool  `json:"ssh_redaction_enabled"`
 	}
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.DisallowUnknownFields()
@@ -94,6 +99,9 @@ func (c *RecordingConfig) UnmarshalJSON(data []byte) error {
 	*c = RecordingConfig{
 		RetentionDays:    value.RetentionDays,
 		CleanupBatchSize: value.CleanupBatchSize,
+	}
+	if value.SSHRedactionEnabled != nil {
+		c.SSHRedactionEnabled = *value.SSHRedactionEnabled
 	}
 	if value.Enabled != nil {
 		c.Enabled = *value.Enabled
@@ -283,8 +291,14 @@ func (c *Config) Validate() error {
 			return fmt.Errorf("database.dsn is required for driver %q", c.Database.Driver)
 		}
 	}
+	if c.DatabaseGateway.AuditPreviewBytes == 0 {
+		c.DatabaseGateway.AuditPreviewBytes = DefaultDatabaseAuditPreviewBytes
+	}
 	if err := validateDatabaseGateway(c.DatabaseGateway); err != nil {
 		return err
+	}
+	if c.DatabaseGateway.AuditPreviewBytes < MinDatabaseAuditPreviewBytes || c.DatabaseGateway.AuditPreviewBytes > MaxDatabaseAuditPreviewBytes {
+		return fmt.Errorf("database_gateway.audit_preview_bytes must be between %d and %d", MinDatabaseAuditPreviewBytes, MaxDatabaseAuditPreviewBytes)
 	}
 	if c.Recording.RetentionDays < 0 || c.Recording.RetentionDays > 3650 {
 		return fmt.Errorf("recording.retention_days must be between 1 and 3650")

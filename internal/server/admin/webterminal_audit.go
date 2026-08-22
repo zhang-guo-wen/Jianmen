@@ -82,7 +82,11 @@ func (s *Server) newWebTerminalRecorder(
 		session,
 		s.cfg.Recording.RecordInput,
 		s.cfg.Recording.RecordCommands,
-		service.NewAuditPolicy(s.cfg.Recording.RetentionDays, s.cfg.Recording.RecordInput),
+		service.NewAuditPolicyWithRedaction(
+			s.cfg.Recording.RetentionDays,
+			s.cfg.Recording.RecordInput,
+			s.cfg.Recording.SSHRedactionEnabled,
+		),
 		onFatal,
 		s.logger,
 		&webTerminalAuditSink{

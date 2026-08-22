@@ -112,6 +112,8 @@ func TestRecorderPersistsOnlyRedactedSQLAndPairsTerminalEvents(t *testing.T) {
 				id:                    "connection-1",
 				protocol:              "mysql",
 				maxClientMessageBytes: defaultMaxClientMessageBytes,
+				auditPreviewBytes:     postgresStreamAuditPreviewBytes,
+				auditRedactionEnabled: true,
 				file:                  file,
 				startedAt:             time.Now(),
 				audit:                 audit,

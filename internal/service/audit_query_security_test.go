@@ -279,6 +279,10 @@ func (r *auditQuerySecurityRepository) ListSFTPEvents(context.Context, string, P
 	return []AuditSFTPEvent{{ID: "file-1"}}, 1, nil
 }
 
+func (r *auditQuerySecurityRepository) GetDBQueryArtifact(context.Context, string, string) (AuditDBQueryArtifact, error) {
+	return AuditDBQueryArtifact{}, ErrAuditArtifactUnavailable
+}
+
 func (r *auditQuerySecurityRepository) ListDBQueryPreviews(context.Context, string, AuditDBQueryPreviewParams) ([]AuditDBQueryPreview, int64, error) {
 	r.queries++
 	r.after("queries")

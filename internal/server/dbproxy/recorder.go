@@ -83,6 +83,7 @@ func relayGatewayConnectionWithDrainTimeout(
 	// callers cannot accidentally expose a stateful protocol observer to both
 	// copy goroutines without synchronization.
 	observer = serializeRelayObserver(observer)
+	defer closeQueryObserver(observer)
 	relay := newRelayCoordinator(client, upstream)
 	results := make(chan relayResult, 2)
 	go func() {
@@ -310,6 +311,17 @@ func abortObserverIfPending(observer queryObserver, code string) {
 	}
 }
 
+func closeQueryObserver(observer queryObserver) {
+	defer func() {
+		if recover() != nil {
+			slog.Error("database proxy observer failed while releasing resources")
+		}
+	}()
+	if closer, ok := observer.(queryObserverResourceCloser); ok {
+		closer.CloseObserver()
+	}
+}
+
 func (r *relayCoordinator) writeObserverError(observer queryObserver, decision queryDecision) {
 	response := observer.ErrorResponse(decision)
 	deadline := time.Now().Add(observerErrorWriteTimeout)
@@ -368,9 +380,13 @@ type connectionRecorder struct {
 	id                    string
 	protocol              string
 	maxClientMessageBytes int
+	auditPreviewBytes     int
+	auditRedactionEnabled bool
 	metaPath              string
 	meta                  DBConnectionMeta
 	file                  *os.File
+	artifact              *databaseAuditArtifactFile
+	artifactRequired      bool
 	seq                   int64
 	startedAt             time.Time
 	audit                 auditWriter
@@ -378,6 +394,49 @@ type connectionRecorder struct {
 	onFatal               func(error)
 	fatalOnce             sync.Once
 	logger                *slog.Logger
+}
+
+func (r *connectionRecorder) DatabaseAuditPreviewBytes() int {
+	if r == nil || r.auditPreviewBytes <= 0 {
+		return postgresStreamAuditPreviewBytes
+	}
+	return r.auditPreviewBytes
+}
+
+func (r *connectionRecorder) DatabaseAuditRedactionEnabled() bool {
+	return r != nil && r.auditRedactionEnabled
+}
+
+func (r *connectionRecorder) BeginDatabaseAuditCapture(kind string) (databaseAuditCapture, error) {
+	if r == nil {
+		return nil, errors.New("database full audit writer is unavailable")
+	}
+	if r.artifact == nil {
+		if r.artifactRequired {
+			return nil, errors.New("database full audit writer is unavailable")
+		}
+		return discardDatabaseAuditCapture{}, nil
+	}
+	return r.artifact.BeginDatabaseAuditCapture(kind)
+}
+
+func databaseParameterArtifactFromDetail(detail map[string]any) (databaseAuditArtifact, map[string]any) {
+	if len(detail) == 0 {
+		return databaseAuditArtifact{offset: -1}, detail
+	}
+	offset, _ := detail["_parameter_log_offset"].(int64)
+	bytes, _ := detail["_parameter_log_bytes"].(int64)
+	redacted, _ := detail["_parameter_log_redacted"].(bool)
+	clean := make(map[string]any, len(detail))
+	for key, value := range detail {
+		switch key {
+		case "_parameter_log_offset", "_parameter_log_bytes", "_parameter_log_redacted":
+			continue
+		default:
+			clean[key] = value
+		}
+	}
+	return databaseAuditArtifact{offset: offset, bytes: bytes, redacted: redacted}, clean
 }
 
 func (r *connectionRecorder) StartQuery(sql string, detail map[string]any) (queryRecord, queryDecision) {
@@ -389,38 +448,47 @@ func (r *connectionRecorder) StartQuery(sql string, detail map[string]any) (quer
 		sqlAudit, detail = normalizeDatabaseSQLAudit(
 			sql,
 			detail,
-			r.maxClientMessageBytes,
+			r.auditPreviewBytes,
 		)
 		sql = sqlAudit.text
 	}
+	parameterArtifact, detail := databaseParameterArtifactFromDetail(detail)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.seq++
 	startedAt := time.Now().UTC()
 	queryKind := classifyQueryKind(sql)
 	record := queryRecord{
-		seq:              r.seq,
-		protocol:         r.protocol,
-		sql:              sql,
-		originalSQLBytes: sqlAudit.originalBytes,
-		sqlTruncated:     sqlAudit.truncated,
-		queryKind:        queryKind,
-		detail:           detail,
-		startedAt:        startedAt,
+		seq:               r.seq,
+		protocol:          r.protocol,
+		sql:               sql,
+		originalSQLBytes:  sqlAudit.originalBytes,
+		sqlTruncated:      sqlAudit.truncated,
+		queryKind:         queryKind,
+		detail:            detail,
+		sqlArtifact:       sqlAudit.artifact,
+		parameterArtifact: parameterArtifact,
+		startedAt:         startedAt,
 	}
 	decision := allowQuery()
 	startDetail := mergeDetails(detail, map[string]any{"query_kind": queryKind})
 	if err := r.writeQueryEventLocked(DBQueryEvent{
-		Type:         queryEventTypeStarted,
-		ConnectionID: r.id,
-		Seq:          record.seq,
-		Protocol:     r.protocol,
-		SQL:          sql,
-		QueryKind:    queryKind,
-		Detail:       startDetail,
-		StartedAt:    startedAt.UnixMilli(),
-		Status:       queryStatusUnknown,
+		Type:               queryEventTypeStarted,
+		ConnectionID:       r.id,
+		Seq:                record.seq,
+		Protocol:           r.protocol,
+		SQL:                sql,
+		SQLLogOffset:       record.sqlArtifact.offset,
+		SQLLogBytes:        record.sqlArtifact.bytes,
+		ParameterLogOffset: record.parameterArtifact.offset,
+		ParameterLogBytes:  record.parameterArtifact.bytes,
+		AuditDataRedacted:  record.sqlArtifact.redacted || record.parameterArtifact.redacted,
+		QueryKind:          queryKind,
+		Detail:             startDetail,
+		StartedAt:          startedAt.UnixMilli(),
+		Status:             queryStatusUnknown,
 	}); err != nil {
+		r.closeArtifactLocked()
 		r.reportFatal(fmt.Errorf("write database query start event: %w", err))
 		return record, *newObserverFatalDecision(observerErrorAuditFailure, "database audit recording failed")
 	}
@@ -450,39 +518,49 @@ func (r *connectionRecorder) writeFinishLocked(record queryRecord, finish queryF
 	}
 	completedAt := time.Now().UTC()
 	if err := r.writeQueryEventLocked(DBQueryEvent{
-		Type:         queryEventTypeFinished,
-		ConnectionID: r.id,
-		Seq:          record.seq,
-		Protocol:     record.protocol,
-		SQL:          record.sql,
-		QueryKind:    record.queryKind,
-		Detail:       mergeDetails(record.detail, finish.Detail),
-		StartedAt:    record.startedAt.UnixMilli(),
-		CompletedAt:  completedAt.UnixMilli(),
-		DurationMs:   completedAt.Sub(record.startedAt).Milliseconds(),
-		Status:       finish.Status,
-		ErrorCode:    finish.ErrorCode,
-		ErrorMessage: finish.ErrorMessage,
-		RowsAffected: finish.RowsAffected,
-		Rows:         finish.Rows,
+		Type:               queryEventTypeFinished,
+		ConnectionID:       r.id,
+		Seq:                record.seq,
+		Protocol:           record.protocol,
+		SQL:                record.sql,
+		SQLLogOffset:       record.sqlArtifact.offset,
+		SQLLogBytes:        record.sqlArtifact.bytes,
+		ParameterLogOffset: record.parameterArtifact.offset,
+		ParameterLogBytes:  record.parameterArtifact.bytes,
+		AuditDataRedacted:  record.sqlArtifact.redacted || record.parameterArtifact.redacted,
+		QueryKind:          record.queryKind,
+		Detail:             mergeDetails(record.detail, finish.Detail),
+		StartedAt:          record.startedAt.UnixMilli(),
+		CompletedAt:        completedAt.UnixMilli(),
+		DurationMs:         completedAt.Sub(record.startedAt).Milliseconds(),
+		Status:             finish.Status,
+		ErrorCode:          finish.ErrorCode,
+		ErrorMessage:       finish.ErrorMessage,
+		RowsAffected:       finish.RowsAffected,
+		Rows:               finish.Rows,
 	}); err != nil {
 		r.reportFatal(fmt.Errorf("write database query finish event: %w", err))
 		return
 	}
 	if r.audit != nil && r.auditSessionID != "" {
 		if err := r.audit.CreateAuditDBQuery(r.ctx, &model.AuditDBQuery{
-			AuditSessionID:   r.auditSessionID,
-			Timestamp:        record.startedAt,
-			SQLText:          record.sql,
-			OriginalSQLBytes: record.originalSQLBytes,
-			SQLTruncated:     record.sqlTruncated,
-			QueryKind:        record.queryKind,
-			DurationMs:       completedAt.Sub(record.startedAt).Milliseconds(),
-			Status:           model.NormalizeAuditDBQueryStatus(finish.Status),
-			ErrorCode:        finish.ErrorCode,
-			ErrorMessage:     finish.ErrorMessage,
-			RowsAffected:     finish.RowsAffected,
-			Rows:             finish.Rows,
+			AuditSessionID:     r.auditSessionID,
+			Timestamp:          record.startedAt,
+			SQLText:            record.sql,
+			OriginalSQLBytes:   record.originalSQLBytes,
+			SQLTruncated:       record.sqlTruncated,
+			SQLLogOffset:       record.sqlArtifact.offset,
+			SQLLogBytes:        record.sqlArtifact.bytes,
+			ParameterLogOffset: record.parameterArtifact.offset,
+			ParameterLogBytes:  record.parameterArtifact.bytes,
+			AuditDataRedacted:  record.sqlArtifact.redacted || record.parameterArtifact.redacted,
+			QueryKind:          record.queryKind,
+			DurationMs:         completedAt.Sub(record.startedAt).Milliseconds(),
+			Status:             model.NormalizeAuditDBQueryStatus(finish.Status),
+			ErrorCode:          finish.ErrorCode,
+			ErrorMessage:       finish.ErrorMessage,
+			RowsAffected:       finish.RowsAffected,
+			Rows:               finish.Rows,
 		}); err != nil {
 			r.reportFatal(fmt.Errorf("write database query audit record: %w", err))
 		}
@@ -511,7 +589,7 @@ func (r *connectionRecorder) writeMetaLocked() error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(r.metaPath, raw, 0o644)
+	return os.WriteFile(r.metaPath, raw, 0o600)
 }
 
 func (r *connectionRecorder) RecordQuery(sql string, detail map[string]any) {
@@ -519,6 +597,15 @@ func (r *connectionRecorder) RecordQuery(sql string, detail map[string]any) {
 	if decision.Allowed {
 		r.FinishQuery(record, queryFinish{Status: queryStatusUnknown})
 	}
+}
+
+func (r *connectionRecorder) closeArtifactLocked() error {
+	if r == nil || r.artifact == nil {
+		return nil
+	}
+	err := r.artifact.close()
+	r.artifact = nil
+	return err
 }
 
 func (r *connectionRecorder) Close() error {
@@ -532,21 +619,22 @@ func (r *connectionRecorder) Close() error {
 	r.meta.EndedAt = endedAt.Format(time.RFC3339Nano)
 	r.meta.DurationMs = endedAt.Sub(r.startedAt).Milliseconds()
 	metaErr := r.writeMetaLocked()
-	if r.file == nil {
-		if metaErr != nil {
-			r.reportFatal(fmt.Errorf("write database replay end metadata: %w", metaErr))
-		}
-		return metaErr
+	var closeErr error
+	if r.file != nil {
+		closeErr = r.file.Close()
+		r.file = nil
 	}
-	closeErr := r.file.Close()
-	r.file = nil
+	artifactErr := r.closeArtifactLocked()
 	if metaErr != nil {
 		r.reportFatal(fmt.Errorf("write database replay end metadata: %w", metaErr))
 	}
 	if closeErr != nil {
 		r.reportFatal(fmt.Errorf("close database query audit file: %w", closeErr))
 	}
-	return errors.Join(metaErr, closeErr)
+	if artifactErr != nil {
+		r.reportFatal(fmt.Errorf("close database full audit file: %w", artifactErr))
+	}
+	return errors.Join(metaErr, closeErr, artifactErr)
 }
 
 func (r *connectionRecorder) reportFatal(err error) {

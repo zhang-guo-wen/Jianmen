@@ -16,6 +16,73 @@ import (
 	"jianmen/internal/store"
 )
 
+func TestHandleAuditFileBackedDatabaseAndSSHDetails(t *testing.T) {
+	server, db := newAdminDBTestServer(t)
+	seedTestSuperAdmin(t, db, "u-admin")
+
+	now := time.Now().UTC()
+	dbReplay := t.TempDir()
+	dbData := []byte("SELECT raw_secretBind raw_parameter")
+	if err := os.WriteFile(filepath.Join(dbReplay, "query-data.bin"), dbData, 0o600); err != nil {
+		t.Fatalf("write database data: %v", err)
+	}
+	dbSession := model.AuditSession{
+		ID: "detail-db-session", UserID: "u1", Protocol: "postgres", StartedAt: now,
+		State: "ended", ReplayDir: dbReplay,
+	}
+	query := model.AuditDBQuery{
+		ID: "detail-query", AuditSessionID: dbSession.ID, Timestamp: now,
+		SQLText: "SELECT raw_secret", SQLLogOffset: 0, SQLLogBytes: int64(len("SELECT raw_secret")),
+		ParameterLogOffset: int64(len("SELECT raw_secret")), ParameterLogBytes: int64(len("Bind raw_parameter")),
+	}
+	if err := db.Create(&dbSession).Error; err != nil {
+		t.Fatalf("create database session: %v", err)
+	}
+	if err := db.Create(&query).Error; err != nil {
+		t.Fatalf("create database query: %v", err)
+	}
+
+	assertRaw := func(path, want string) {
+		t.Helper()
+		req := asTestSuperAdmin(httptest.NewRequest(http.MethodGet, path, nil))
+		rec := httptest.NewRecorder()
+		server.handleAuditArtifact(rec, req)
+		if rec.Code != http.StatusOK || rec.Body.String() != want {
+			t.Fatalf("GET %s = %d %q, want 200 %q", path, rec.Code, rec.Body.String(), want)
+		}
+	}
+	assertRaw("/api/audit/db/detail-db-session/queries/detail-query/sql", "SELECT raw_secret")
+	assertRaw("/api/audit/db/detail-db-session/queries/detail-query/parameters", "Bind raw_parameter")
+	missingReq := asTestSuperAdmin(httptest.NewRequest(
+		http.MethodGet,
+		"/api/audit/db/detail-db-session/queries/other-session-query/sql",
+		nil,
+	))
+	missingRec := httptest.NewRecorder()
+	server.handleAuditArtifact(missingRec, missingReq)
+	if missingRec.Code != http.StatusNotFound {
+		t.Fatalf("cross-session query detail status = %d, want 404", missingRec.Code)
+	}
+
+	sshReplay := t.TempDir()
+	sshOutput := "complete ssh raw_secret output\n"
+	if err := os.WriteFile(filepath.Join(sshReplay, "commands-data.bin"), []byte(sshOutput), 0o600); err != nil {
+		t.Fatalf("write SSH output: %v", err)
+	}
+	commandLine := `{"seq":1,"command":"echo raw_secret","preview":"complete","output_offset":0,"output_bytes":31,"audit_data_redacted":false}` + "\n"
+	if err := os.WriteFile(filepath.Join(sshReplay, "commands.jsonl"), []byte(commandLine), 0o600); err != nil {
+		t.Fatalf("write SSH commands: %v", err)
+	}
+	sshSession := model.AuditSession{
+		ID: "detail-ssh-session", UserID: "u1", Protocol: "ssh", StartedAt: now,
+		State: "ended", ReplayDir: sshReplay,
+	}
+	if err := db.Create(&sshSession).Error; err != nil {
+		t.Fatalf("create SSH session: %v", err)
+	}
+	assertRaw("/api/audit/ssh/detail-ssh-session/commands/1/output", sshOutput)
+}
+
 func TestHandleAuditSSHUsesStandardPaginationAndSearchParams(t *testing.T) {
 	server, db := newAdminDBTestServer(t)
 	seedTestSuperAdmin(t, db, "u-admin")

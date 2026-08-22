@@ -250,6 +250,11 @@ var migrations = []Migration{
 		Name:    "登录验证码开关系统设置",
 		Run:     migrateLoginCaptchaEnabled,
 	},
+	{
+		Version: "202607190010",
+		Name:    "审计脱敏系统设置",
+		Run:     migrateAuditRedactionSettings,
+	},
 }
 
 func rejectDuplicateDatabaseAccounts(tx *gorm.DB) error {

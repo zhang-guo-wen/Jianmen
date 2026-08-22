@@ -1,14 +1,19 @@
 package dbproxy
 
-import "encoding/binary"
+import (
+	"encoding/binary"
+
+	"jianmen/internal/config"
+)
 
 type postgresObserver struct {
 	sink                  querySink
 	maxClientMessageBytes int
 	clientBuf             []byte
 	serverBuf             []byte
-	clientStream          *postgresFrameStream
+	clientStream          *postgresClientFrameStream
 	serverStream          *postgresFrameStream
+	memoryBudget          *observerMemoryBudget
 	startupDone           bool
 	pending               []queryRecord
 	preparedStatements    map[string]*postgresPreparedStatement
@@ -38,9 +43,12 @@ func (o *postgresObserver) observeClientRelayBytes(data []byte) ([]byte, *queryD
 	var forward []byte
 	for {
 		if o.clientStream != nil {
-			chunk, consumed := consumePostgresFrameStream(&o.clientStream, data)
+			chunk, consumed, decision := o.consumePostgresClientFrameStream(data)
 			forward = append(forward, chunk...)
 			data = data[consumed:]
+			if decision != nil {
+				return forward, decision
+			}
 			if len(data) == 0 {
 				return forward, nil
 			}
@@ -78,32 +86,80 @@ func (o *postgresObserver) observeClientRelayBytes(data []byte) ([]byte, *queryD
 		}
 		typ := o.clientBuf[0]
 		msgLen := int(binary.BigEndian.Uint32(o.clientBuf[1:5]))
-		if msgLen < 4 || msgLen > 128*1024*1024 {
+		if msgLen < 4 || msgLen > config.MaxDatabaseGatewayMaxClientMessageBytes {
 			return forward, o.fail(observerErrorProtocol, "malformed PostgreSQL message")
 		}
 		total := 1 + msgLen
-		if total > maxPostgresObserverBufferBytes && canStreamPostgresFrontendFrame(typ) {
-			o.clientStream = &postgresFrameStream{remaining: total - 5}
-			forward = append(forward, o.clientBuf[:5]...)
+		maxClientMessageBytes := normalizeMaxClientMessageBytes(o.maxClientMessageBytes)
+		if typ == 'd' && total > maxPostgresObserverBufferBytes {
+			o.clientStream = newPostgresClientFrameStream(
+				typ,
+				total-5,
+				true,
+				nil,
+				o.memoryBudget,
+				o.sink,
+			)
+			if o.clientStream.forward {
+				forward = append(forward, o.clientBuf[:5]...)
+			}
 			bufferedPayload := o.clientBuf[5:]
 			o.clientBuf = nil
-			chunk, _ := consumePostgresFrameStream(&o.clientStream, bufferedPayload)
+			chunk, _, streamDecision := o.consumePostgresClientFrameStream(bufferedPayload)
 			forward = append(forward, chunk...)
+			if streamDecision != nil {
+				return forward, streamDecision
+			}
 			continue
 		}
-		maxClientMessageBytes := normalizeMaxClientMessageBytes(o.maxClientMessageBytes)
-		if !canStreamPostgresFrontendFrame(typ) && total > maxClientMessageBytes {
-			return forward, o.fail(observerErrorBufferLimit, "PostgreSQL observer frame exceeds the audit limit")
+		if total > maxClientMessageBytes {
+			decision := newObserverFatalDecision(
+				observerErrorClientMessageLimit,
+				"PostgreSQL client message exceeds the configured limit",
+			)
+			o.clientStream = newPostgresClientFrameStream(
+				typ,
+				total-5,
+				false,
+				decision,
+				o.memoryBudget,
+				o.sink,
+			)
+			bufferedPayload := o.clientBuf[5:]
+			o.clientBuf = nil
+			_, _, streamDecision := o.consumePostgresClientFrameStream(bufferedPayload)
+			if streamDecision != nil {
+				return forward, streamDecision
+			}
+			continue
 		}
-		if canStreamPostgresFrontendFrame(typ) {
-			maxClientMessageBytes = maxPostgresObserverBufferBytes
+		if total > maxPostgresObserverBufferBytes && canStreamPostgresFrontendFrame(typ) {
+			o.clientStream = newPostgresClientFrameStream(
+				typ,
+				total-5,
+				true,
+				nil,
+				o.memoryBudget,
+				o.sink,
+			)
+			if o.clientStream.forward {
+				forward = append(forward, o.clientBuf[:5]...)
+			}
+			bufferedPayload := o.clientBuf[5:]
+			o.clientBuf = nil
+			chunk, _, streamDecision := o.consumePostgresClientFrameStream(bufferedPayload)
+			forward = append(forward, chunk...)
+			if streamDecision != nil {
+				return forward, streamDecision
+			}
+			continue
 		}
 		if len(o.clientBuf) < total {
 			if len(data) == 0 {
 				return forward, nil
 			}
-			if !appendObserverBufferChunk(&o.clientBuf, &data, maxClientMessageBytes) {
-				return forward, o.fail(observerErrorBufferLimit, "PostgreSQL observer frame exceeds the audit limit")
+			if !appendObserverBufferChunk(&o.clientBuf, &data, maxPostgresObserverBufferBytes) {
+				return forward, o.fail(observerErrorBufferLimit, "PostgreSQL observer frame exceeds the audit buffer limit")
 			}
 			continue
 		}
@@ -216,6 +272,13 @@ func (o *postgresObserver) HasPending() bool {
 	return len(o.pending) > 0
 }
 
+func (o *postgresObserver) CloseObserver() {
+	if o.clientStream != nil {
+		o.clientStream.close()
+		o.clientStream = nil
+	}
+}
+
 func (o *postgresObserver) failDecision(decision *queryDecision) *queryDecision {
 	if o.fatal == nil {
 		o.fatal = decision
@@ -240,7 +303,10 @@ func (o *postgresObserver) failDecision(decision *queryDecision) *queryDecision 
 	}
 	o.clientBuf = nil
 	o.serverBuf = nil
-	o.clientStream = nil
+	if o.clientStream != nil {
+		o.clientStream.close()
+		o.clientStream = nil
+	}
 	o.serverStream = nil
 	o.pending = nil
 	o.preparedStatements = nil
@@ -251,16 +317,45 @@ func (o *postgresObserver) failDecision(decision *queryDecision) *queryDecision 
 	return o.fatal
 }
 
-func (o *postgresObserver) ErrorResponse(_ queryDecision) []byte {
-	const message = "database proxy rejected query"
+func (o *postgresObserver) ErrorResponse(decision queryDecision) []byte {
+	code, message, hint := postgresProxyErrorFields(decision.ErrorCode)
 	payload := []byte{'S'}
 	payload = append(payload, []byte("ERROR")...)
 	payload = append(payload, 0, 'C')
-	payload = append(payload, []byte("42501")...)
+	payload = append(payload, []byte(code)...)
 	payload = append(payload, 0, 'M')
 	payload = append(payload, []byte(message)...)
+	if hint != "" {
+		payload = append(payload, 0, 'H')
+		payload = append(payload, []byte(hint)...)
+	}
 	payload = append(payload, 0, 0)
 	return append(postgresMessageWithType('E', payload), postgresReadyForQuery()...)
+}
+
+func postgresProxyErrorFields(observerCode string) (code, message, hint string) {
+	switch observerCode {
+	case observerErrorClientMessageLimit:
+		return "54000",
+			"database proxy client message exceeds the configured limit",
+			"increase the gateway limit, split the statement, or use COPY"
+	case observerErrorBufferLimit:
+		return "54000",
+			"database proxy protocol buffer limit exceeded",
+			"retry with a smaller protocol message"
+	case observerErrorPendingLimit:
+		return "54000",
+			"database proxy audit state limit exceeded",
+			"reduce pipelining or close unused prepared statements"
+	case observerErrorProtocol:
+		return "08P01", "database proxy rejected a malformed protocol message", ""
+	case observerErrorAuditFailure:
+		return "58000", "database proxy audit service is unavailable", ""
+	case observerErrorRelay, observerErrorDrainTimeout:
+		return "08006", "database proxy relay terminated", ""
+	default:
+		return "42501", "database proxy rejected query", ""
+	}
 }
 
 func (o *postgresObserver) consumeStartup() bool {

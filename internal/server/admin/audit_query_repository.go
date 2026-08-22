@@ -16,6 +16,10 @@ import (
 
 type adminAuditQueryRepository struct{ repository adminAuditRepository }
 
+type adminDBQueryArtifactRepository interface {
+	GetAuditDBQueryArtifact(context.Context, string, string) (model.AuditDBQuery, error)
+}
+
 func (r adminAuditQueryRepository) ListAuditSessions(ctx context.Context, params service.AuditSessionListParams) ([]service.AuditSessionListItem, int64, error) {
 	items, total, err := r.repository.ListAuditSessions(ctx, store.AuditListParams{
 		Protocol: params.Protocol, Search: params.Search, Date: params.Date, Page: params.Page, Size: params.Size,
@@ -92,23 +96,53 @@ func (r adminAuditQueryRepository) ListDBQueryPreviews(ctx context.Context, sess
 	result := make([]service.AuditDBQueryPreview, len(items))
 	for i, item := range items {
 		result[i] = service.AuditDBQueryPreview{
-			ID:               item.ID,
-			AuditSessionID:   item.AuditSessionID,
-			Timestamp:        item.Timestamp,
-			SQLText:          item.SQLText,
-			SQLStoredBytes:   item.SQLStoredBytes,
-			OriginalSQLBytes: item.OriginalSQLBytes,
-			SQLTruncated:     item.SQLTruncated,
-			QueryKind:        item.QueryKind,
-			DurationMs:       item.DurationMs,
-			Status:           item.Status,
-			ErrorCode:        item.ErrorCode,
-			ErrorMessage:     item.ErrorMessage,
-			RowsAffected:     item.RowsAffected,
-			Rows:             item.Rows,
+			ID:                item.ID,
+			AuditSessionID:    item.AuditSessionID,
+			Timestamp:         item.Timestamp,
+			SQLText:           item.SQLText,
+			SQLStoredBytes:    item.SQLStoredBytes,
+			OriginalSQLBytes:  item.OriginalSQLBytes,
+			SQLTruncated:      item.SQLTruncated,
+			SQLLogBytes:       item.SQLLogBytes,
+			ParameterLogBytes: item.ParameterLogBytes,
+			AuditDataRedacted: item.AuditDataRedacted,
+			QueryKind:         item.QueryKind,
+			DurationMs:        item.DurationMs,
+			Status:            item.Status,
+			ErrorCode:         item.ErrorCode,
+			ErrorMessage:      item.ErrorMessage,
+			RowsAffected:      item.RowsAffected,
+			Rows:              item.Rows,
 		}
 	}
 	return result, total, nil
+}
+
+func (r adminAuditQueryRepository) GetDBQueryArtifact(
+	ctx context.Context,
+	sessionID,
+	queryID string,
+) (service.AuditDBQueryArtifact, error) {
+	repository, ok := r.repository.(adminDBQueryArtifactRepository)
+	if !ok {
+		return service.AuditDBQueryArtifact{}, service.ErrAuditArtifactUnavailable
+	}
+	item, err := repository.GetAuditDBQueryArtifact(ctx, sessionID, queryID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return service.AuditDBQueryArtifact{}, service.ErrAuditArtifactUnavailable
+		}
+		return service.AuditDBQueryArtifact{}, err
+	}
+	return service.AuditDBQueryArtifact{
+		ID:                 item.ID,
+		AuditSessionID:     item.AuditSessionID,
+		SQLLogOffset:       item.SQLLogOffset,
+		SQLLogBytes:        item.SQLLogBytes,
+		ParameterLogOffset: item.ParameterLogOffset,
+		ParameterLogBytes:  item.ParameterLogBytes,
+		AuditDataRedacted:  item.AuditDataRedacted,
+	}, nil
 }
 
 func (r adminAuditQueryRepository) ListAuditEvents(ctx context.Context, params service.AuditEventListParams) ([]service.AuditEvent, int64, error) {

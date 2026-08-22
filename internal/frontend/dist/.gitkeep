@@ -1,1 +1,0 @@
-keeps the go:embed directory available before the frontend is built

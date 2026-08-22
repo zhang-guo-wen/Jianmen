@@ -550,6 +550,7 @@ func validSystemSettings() SystemSettings {
 		RecordingMaxReplayBytes:       10 * 1024 * 1024,
 		RecordingCleanupBatchSize:     100,
 		DatabaseMaxClientMessageBytes: defaultDatabaseMaxClientMessageBytes,
+		DatabaseAuditPreviewBytes:     config.DefaultDatabaseAuditPreviewBytes,
 	}
 }
 

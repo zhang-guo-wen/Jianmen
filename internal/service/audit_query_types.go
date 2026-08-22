@@ -114,20 +114,23 @@ type AuditSFTPEvent struct {
 }
 
 type AuditDBQueryPreview struct {
-	ID               string
-	AuditSessionID   string
-	SQLText          string
-	QueryKind        string
-	Timestamp        time.Time
-	SQLStoredBytes   int64
-	OriginalSQLBytes int64
-	DurationMs       int64
-	SQLTruncated     bool
-	Status           string
-	ErrorCode        string
-	ErrorMessage     string
-	RowsAffected     *int64
-	Rows             *int64
+	ID                string
+	AuditSessionID    string
+	SQLText           string
+	QueryKind         string
+	Timestamp         time.Time
+	SQLStoredBytes    int64
+	OriginalSQLBytes  int64
+	DurationMs        int64
+	SQLTruncated      bool
+	SQLLogBytes       int64
+	ParameterLogBytes int64
+	AuditDataRedacted bool
+	Status            string
+	ErrorCode         string
+	ErrorMessage      string
+	RowsAffected      *int64
+	Rows              *int64
 }
 
 type AuditEvent struct {
@@ -135,18 +138,18 @@ type AuditEvent struct {
 	ActorID          string    `json:"actor_id"`
 	ActorUsername    string    `json:"actor_username"`
 	ActorDisplayName string    `json:"actor_display_name,omitempty"`
-	Action        string    `json:"action"`
-	ResourceType  string    `json:"resource_type"`
-	ResourceID    string    `json:"resource_id,omitempty"`
-	ResourceName  string    `json:"resource_name,omitempty"`
-	Phase         string    `json:"phase,omitempty"`
-	Result        string    `json:"result,omitempty"`
-	IntentID      string    `json:"intent_id,omitempty"`
-	RequestID     string    `json:"request_id,omitempty"`
-	StatusCode    int       `json:"status_code,omitempty"`
-	Detail        string    `json:"detail,omitempty"`
-	ClientIP      string    `json:"client_ip,omitempty"`
-	CreatedAt     time.Time `json:"created_at"`
+	Action           string    `json:"action"`
+	ResourceType     string    `json:"resource_type"`
+	ResourceID       string    `json:"resource_id,omitempty"`
+	ResourceName     string    `json:"resource_name,omitempty"`
+	Phase            string    `json:"phase,omitempty"`
+	Result           string    `json:"result,omitempty"`
+	IntentID         string    `json:"intent_id,omitempty"`
+	RequestID        string    `json:"request_id,omitempty"`
+	StatusCode       int       `json:"status_code,omitempty"`
+	Detail           string    `json:"detail,omitempty"`
+	ClientIP         string    `json:"client_ip,omitempty"`
+	CreatedAt        time.Time `json:"created_at"`
 }
 
 type LoginAuditLog struct {
@@ -165,7 +168,18 @@ type LoginAuditLog struct {
 	CreatedAt  time.Time `json:"created_at"`
 }
 
+type AuditDBQueryArtifact struct {
+	ID                 string
+	AuditSessionID     string
+	SQLLogOffset       int64
+	SQLLogBytes        int64
+	ParameterLogOffset int64
+	ParameterLogBytes  int64
+	AuditDataRedacted  bool
+}
+
 type AuditDBQueryEvent struct {
+	QueryID      string         `json:"query_id,omitempty"`
 	Type         string         `json:"type"`
 	ConnectionID string         `json:"connection_id"`
 	Seq          int64          `json:"seq"`

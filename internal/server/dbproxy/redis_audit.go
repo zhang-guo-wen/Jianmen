@@ -12,6 +12,38 @@ const (
 	maxRedisAuditKeyBytes = 256
 )
 
+func redisOriginalAuditPreview(args []string, limit int) (string, int64, bool) {
+	if limit <= 0 {
+		limit = postgresStreamAuditPreviewBytes
+	}
+	var preview strings.Builder
+	preview.Grow(limit)
+	var originalBytes int64
+	truncated := false
+	for index, arg := range args {
+		if index > 0 {
+			originalBytes++
+			if preview.Len() < limit {
+				preview.WriteByte(' ')
+			}
+		}
+		originalBytes += int64(len(arg))
+		remaining := limit - preview.Len()
+		if remaining <= 0 {
+			truncated = true
+			continue
+		}
+		if len(arg) > remaining {
+			preview.WriteString(arg[:remaining])
+			truncated = true
+		} else {
+			preview.WriteString(arg)
+		}
+	}
+	text, adjusted := normalizeAuditSQLUTF8(preview.String(), limit)
+	return text, originalBytes, truncated || adjusted
+}
+
 func validRedisCommandName(command string) bool {
 	if command == "" || len(command) > 32 || !utf8.ValidString(command) {
 		return false

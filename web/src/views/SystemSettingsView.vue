@@ -160,10 +160,18 @@
 
                 <div class="setting-row">
                   <div class="setting-copy">
-                    <strong>记录原始输入</strong>
-                    <span>可能记录口令等敏感输入，开启时需要二次确认。</span>
+                    <strong>记录终端输入</strong>
+                    <span>决定是否保留 SSH 终端输入；具体以原文或脱敏形式存储由下方 SSH 脱敏开关决定。</span>
                   </div>
                   <el-switch v-model="form.recording_record_input" />
+                </div>
+
+                <div class="setting-row setting-row--danger">
+                  <div class="setting-copy">
+                    <strong>SSH 脱敏</strong>
+                    <span>默认关闭；关闭时，已启用的终端、命令和输出录制均按原文存储。修改需重启生效。</span>
+                  </div>
+                  <el-switch v-model="form.recording_ssh_redaction_enabled" />
                 </div>
 
                 <div class="setting-row">
@@ -239,7 +247,7 @@
                     <strong>最大客户端 SQL / 命令报文</strong>
                     <span>
                       同时作用于 MySQL、PostgreSQL 和 Redis 客户端发送的单个 SQL、参数或命令报文；
-                      超过上限的请求将被拒绝，调整时需二次确认。
+                      PostgreSQL 大报文采用流式转发；数据库仅保存可检索前缀，完整 SQL 与参数始终写入审计文件，超过硬上限的请求将返回明确错误。
                     </span>
                   </div>
                   <div class="number-control">
@@ -255,6 +263,23 @@
                     <span class="number-control__exact">
                       {{ form.database_max_client_message_bytes }} 字节
                     </span>
+                  </div>
+                </div>
+                <div class="setting-row setting-row--danger">
+                  <div class="setting-copy">
+                    <strong>数据库审计脱敏</strong>
+                    <span>默认关闭，完整文件始终开启；关闭时数据库审计默认原文存储。修改需重启生效。</span>
+                  </div>
+                  <el-switch v-model="form.database_audit_redaction_enabled" />
+                </div>
+                <div class="setting-row">
+                  <div class="setting-copy">
+                    <strong>数据库审计前缀预览</strong>
+                    <span>仅控制审计摘要前缀，范围 4-1024 KiB；增大范围需要风险确认。</span>
+                  </div>
+                  <div class="number-control">
+                    <el-input-number v-model="form.database_audit_preview_bytes" :min="4096" :max="1048576" :step="4096" controls-position="right" />
+                    <span>字节</span>
                   </div>
                 </div>
               </section>
@@ -476,6 +501,9 @@ const FIELD_LABELS: Record<keyof SystemSettingsValues, string> = {
   recording_retention_days: '审计保留期',
   recording_max_replay_bytes: '本地回放容量上限',
   recording_cleanup_batch_size: '清理批量',
+  recording_ssh_redaction_enabled: 'SSH 脱敏',
+  database_audit_redaction_enabled: '数据库审计脱敏',
+  database_audit_preview_bytes: '数据库审计前缀预览',
 };
 
 const activeTab = ref('policy');
@@ -539,6 +567,9 @@ function emptySettings(): SystemSettingsValues {
     recording_retention_days: 30,
     recording_max_replay_bytes: 0,
     recording_cleanup_batch_size: 100,
+    recording_ssh_redaction_enabled: false,
+    database_audit_redaction_enabled: false,
+    database_audit_preview_bytes: 65536,
   };
 }
 
@@ -643,7 +674,7 @@ function validateSettings(): SystemSettingsValues | null {
     || next.database_max_client_message_bytes < DATABASE_MAX_CLIENT_MESSAGE_BYTES_MIN
     || next.database_max_client_message_bytes > DATABASE_MAX_CLIENT_MESSAGE_BYTES_MAX
   ) {
-    ElMessage.warning('最大客户端 SQL / 命令报文必须在 0.0625-16 MiB 之间');
+    ElMessage.warning('最大客户端 SQL / 命令报文必须在 0.0625-256 MiB 之间');
     return null;
   }
   if (

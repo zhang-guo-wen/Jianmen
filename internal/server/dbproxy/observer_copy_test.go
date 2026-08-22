@@ -11,9 +11,7 @@ import (
 
 func TestCopyClientToUpstreamStopsOnObserverFatal(t *testing.T) {
 	mysqlHeader := []byte{0xff, 0xff, 0xff, 0}
-	postgresHeader := make([]byte, 5)
-	postgresHeader[0] = 'Q'
-	binary.BigEndian.PutUint32(postgresHeader[1:], 128*1024*1024)
+	postgresOversized := buildPostgresQueryWithFrameSize(t, 65)
 
 	tests := []struct {
 		name     string
@@ -30,11 +28,13 @@ func TestCopyClientToUpstreamStopsOnObserverFatal(t *testing.T) {
 			}),
 		},
 		{
-			name:     "PostgreSQL",
-			observer: &postgresObserver{sink: &captureSink{}, startupDone: true},
-			input:    postgresHeader,
+			name: "PostgreSQL",
+			observer: &postgresObserver{
+				sink: &captureSink{}, startupDone: true, maxClientMessageBytes: 64,
+			},
+			input: postgresOversized,
 			want: (&postgresObserver{}).ErrorResponse(queryDecision{
-				ErrorMessage: "PostgreSQL observer frame exceeds the audit limit",
+				ErrorCode: observerErrorClientMessageLimit,
 			}),
 		},
 		{
@@ -92,7 +92,7 @@ func TestCopyUpstreamToClientStopsOnObserverFatal(t *testing.T) {
 			want: append(
 				append([]byte(nil), postgresHeader...),
 				(&postgresObserver{}).ErrorResponse(queryDecision{
-					ErrorMessage: "PostgreSQL relay ended during a streamed frame",
+					ErrorCode: observerErrorRelay,
 				})...,
 			),
 		},

@@ -21,6 +21,9 @@ type systemSettingsSnapshot struct {
 	RecordingMaxReplayBytes       int64  `json:"recording_max_replay_bytes"`
 	RecordingCleanupBatchSize     int    `json:"recording_cleanup_batch_size"`
 	DatabaseMaxClientMessageBytes int    `json:"database_max_client_message_bytes"`
+	RecordingSSHRedactionEnabled  bool   `json:"recording_ssh_redaction_enabled"`
+	DatabaseAuditRedactionEnabled bool   `json:"database_audit_redaction_enabled"`
+	DatabaseAuditPreviewBytes     int    `json:"database_audit_preview_bytes"`
 }
 
 func marshalSystemSettings(settings SystemSettings) (string, error) {
@@ -60,6 +63,9 @@ func snapshotFromSystemSettings(settings SystemSettings) systemSettingsSnapshot 
 		RecordingMaxReplayBytes:       settings.RecordingMaxReplayBytes,
 		RecordingCleanupBatchSize:     settings.RecordingCleanupBatchSize,
 		DatabaseMaxClientMessageBytes: settings.DatabaseMaxClientMessageBytes,
+		RecordingSSHRedactionEnabled:  settings.RecordingSSHRedactionEnabled,
+		DatabaseAuditRedactionEnabled: settings.DatabaseAuditRedactionEnabled,
+		DatabaseAuditPreviewBytes:     settings.DatabaseAuditPreviewBytes,
 	}
 }
 
@@ -67,6 +73,10 @@ func (snapshot systemSettingsSnapshot) systemSettings() SystemSettings {
 	databaseMaxClientMessageBytes := snapshot.DatabaseMaxClientMessageBytes
 	if databaseMaxClientMessageBytes == 0 {
 		databaseMaxClientMessageBytes = defaultDatabaseMaxClientMessageBytes
+	}
+	databaseAuditPreviewBytes := snapshot.DatabaseAuditPreviewBytes
+	if databaseAuditPreviewBytes == 0 {
+		databaseAuditPreviewBytes = config.DefaultDatabaseAuditPreviewBytes
 	}
 	return SystemSettings{
 		DatabaseGatewayMode:           snapshot.DatabaseGatewayMode,
@@ -82,5 +92,8 @@ func (snapshot systemSettingsSnapshot) systemSettings() SystemSettings {
 		RecordingMaxReplayBytes:       snapshot.RecordingMaxReplayBytes,
 		RecordingCleanupBatchSize:     snapshot.RecordingCleanupBatchSize,
 		DatabaseMaxClientMessageBytes: databaseMaxClientMessageBytes,
+		RecordingSSHRedactionEnabled:  snapshot.RecordingSSHRedactionEnabled,
+		DatabaseAuditRedactionEnabled: snapshot.DatabaseAuditRedactionEnabled,
+		DatabaseAuditPreviewBytes:     databaseAuditPreviewBytes,
 	}
 }

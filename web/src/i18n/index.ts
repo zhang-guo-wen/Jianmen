@@ -1,4 +1,4 @@
-﻿import elementZhCn from 'element-plus/es/locale/lang/zh-cn';
+import elementZhCn from 'element-plus/es/locale/lang/zh-cn';
 import { inject, type App, type InjectionKey } from 'vue';
 
 const zhCN = {
@@ -344,7 +344,8 @@ const zhCN = {
   'audit.action.disconnect': '断开',
   'audit.action.meta': 'Meta',
   'audit.action.play': '播放',
-  'audit.action.queries': 'SQL 记录',
+  'audit.action.queries': '日志',
+  'audit.action.viewDetail': '查看详情',
   'audit.action.replay': '回放',
   'audit.action.restart': '重播',
   'audit.action.stop': '停止',
@@ -444,6 +445,16 @@ const zhCN = {
   'audit.query.copyPreview': '复制预览',
   'audit.query.copySuccess': 'SQL 预览已复制',
   'audit.query.copyFailed': '复制 SQL 预览失败',
+  'audit.detail.storageMode': '存储方式',
+  'audit.detail.original': '原文',
+  'audit.detail.redacted': '已脱敏',
+  'audit.detail.sqlBytes': 'SQL 大小',
+  'audit.detail.outputBytes': '参数 / 输出大小',
+  'audit.detail.parameters': 'Bind 参数',
+  'audit.detail.emptyOutput': '无输出',
+  'audit.detail.copy': '复制',
+  'audit.detail.copySuccess': '完整审计内容已复制',
+  'audit.detail.copyFailed': '复制完整审计内容失败',
   'audit.search.ssh': '搜索会话、主机、账号或命令…',
   'audit.search.logins': '搜索登录账号、IP 或结果说明…',
   'audit.search.operations': '搜索操作者、资源、路径或请求 ID…',

@@ -16,6 +16,8 @@ const (
 type DatabaseGatewayConfig struct {
 	Enabled               bool                     `json:"enabled"`
 	MaxClientMessageBytes int                      `json:"max_client_message_bytes"`
+	AuditRedactionEnabled bool                     `json:"audit_redaction_enabled"`
+	AuditPreviewBytes     int                      `json:"audit_preview_bytes"`
 	Mode                  string                   `json:"mode"`
 	ClientTLSMode         string                   `json:"client_tls_mode"`
 	Unified               DatabaseUnifiedListener  `json:"unified"`
@@ -69,6 +71,13 @@ func (c *DatabaseGatewayConfig) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+func (c DatabaseGatewayConfig) EffectiveAuditPreviewBytes() int {
+	if c.AuditPreviewBytes == 0 {
+		return DefaultDatabaseAuditPreviewBytes
+	}
+	return c.AuditPreviewBytes
+}
+
 // EffectiveMode preserves directly constructed legacy test configurations:
 // an empty mode selects unified only when that listener was explicitly built.
 // Config.Load always applies an explicit production default before validation.
@@ -120,6 +129,9 @@ func (c *DatabaseGatewayConfig) applyDefaults() {
 	}
 	if c.MaxClientMessageBytes == 0 {
 		c.MaxClientMessageBytes = DefaultDatabaseGatewayMaxClientMessageBytes
+	}
+	if c.AuditPreviewBytes == 0 {
+		c.AuditPreviewBytes = DefaultDatabaseAuditPreviewBytes
 	}
 	if c.Enabled && c.EffectiveMode() == DatabaseGatewayModeUnified {
 		c.Unified.Enabled = true

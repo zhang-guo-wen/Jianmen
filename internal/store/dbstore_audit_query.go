@@ -19,20 +19,23 @@ const auditDBQueryPreviewMaxPageSize = 100
 // pages. SQLText is only a prefix of the persisted audit text; SQLStoredBytes
 // records the byte length of the complete persisted value.
 type AuditDBQueryPreview struct {
-	ID               string
-	AuditSessionID   string
-	Timestamp        time.Time
-	SQLText          string
-	SQLStoredBytes   int64
-	OriginalSQLBytes int64 `gorm:"column:original_sql_bytes"`
-	SQLTruncated     bool  `gorm:"column:sql_truncated"`
-	QueryKind        string
-	DurationMs       int64
-	Status           string
-	ErrorCode        string
-	ErrorMessage     string
-	RowsAffected     *int64
-	Rows             *int64
+	ID                string
+	AuditSessionID    string
+	Timestamp         time.Time
+	SQLText           string
+	SQLStoredBytes    int64
+	OriginalSQLBytes  int64 `gorm:"column:original_sql_bytes"`
+	SQLTruncated      bool  `gorm:"column:sql_truncated"`
+	SQLLogBytes       int64 `gorm:"column:sql_log_bytes"`
+	ParameterLogBytes int64 `gorm:"column:parameter_log_bytes"`
+	AuditDataRedacted bool  `gorm:"column:audit_data_redacted"`
+	QueryKind         string
+	DurationMs        int64
+	Status            string
+	ErrorCode         string
+	ErrorMessage      string
+	RowsAffected      *int64
+	Rows              *int64
 }
 
 // AuditDBQueryPreviewParams controls the bounded database query audit list.
@@ -47,6 +50,28 @@ func (s *DBStore) CreateAuditDBQuery(ctx context.Context, query *model.AuditDBQu
 		return fmt.Errorf("create database audit query: nil context")
 	}
 	return s.db.WithContext(ctx).Create(query).Error
+}
+
+func (s *DBStore) GetAuditDBQueryArtifact(
+	ctx context.Context,
+	sessionID,
+	queryID string,
+) (model.AuditDBQuery, error) {
+	if ctx == nil {
+		return model.AuditDBQuery{}, errors.New("get database audit query artifact: nil context")
+	}
+	var query model.AuditDBQuery
+	err := s.db.WithContext(ctx).
+		Select(
+			"id", "audit_session_id", "sql_log_offset", "sql_log_bytes",
+			"parameter_log_offset", "parameter_log_bytes", "audit_data_redacted",
+		).
+		Where("audit_session_id = ? AND id = ?", strings.TrimSpace(sessionID), strings.TrimSpace(queryID)).
+		First(&query).Error
+	if err != nil {
+		return model.AuditDBQuery{}, err
+	}
+	return query, nil
 }
 
 func (s *DBStore) UpdateAuditDBQueryDuration(ctx context.Context, id string, durationMs int64) error {
@@ -142,7 +167,8 @@ func (s *DBStore) ListAuditDBQueryPreviews(
 	}
 	selectColumns := fmt.Sprintf(
 		"id, audit_session_id, timestamp, SUBSTR(sql_text, 1, ?) AS sql_text, %s AS sql_stored_bytes, "+
-			"original_sql_bytes, sql_truncated, query_kind, duration_ms, status, error_code, error_message, "+
+			"original_sql_bytes, sql_truncated, sql_log_bytes, parameter_log_bytes, audit_data_redacted, "+
+			"query_kind, duration_ms, status, error_code, error_message, "+
 			"rows_affected, %s AS %s",
 		sqlStoredBytesExpression,
 		quoteAuditDBQueryColumn(s.db, "rows"),

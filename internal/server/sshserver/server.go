@@ -258,7 +258,11 @@ func (s *Server) handleConn(ctx context.Context, rawConn net.Conn, serverConfig 
 			session,
 			s.cfg.Recording.RecordInput,
 			s.cfg.Recording.RecordCommands,
-			service.NewAuditPolicy(s.cfg.Recording.RetentionDays, s.cfg.Recording.RecordInput),
+			service.NewAuditPolicyWithRedaction(
+				s.cfg.Recording.RetentionDays,
+				s.cfg.Recording.RecordInput,
+				s.cfg.Recording.SSHRedactionEnabled,
+			),
 			func(error) {
 				_ = targetClient.Close()
 				_ = serverConn.Close()

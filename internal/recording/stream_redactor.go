@@ -27,6 +27,10 @@ type auditStreamPrefixPolicy interface {
 	SafeStreamPrefix(kind, value string) int
 }
 
+type auditRedactionStatus interface {
+	AuditRedactionEnabled() bool
+}
+
 func newAuditStreamRedactor(kind string, redactor AuditRedactor) *auditStreamRedactor {
 	return &auditStreamRedactor{kind: kind, redactor: redactor}
 }
@@ -34,6 +38,9 @@ func newAuditStreamRedactor(kind string, redactor AuditRedactor) *auditStreamRed
 func (s *auditStreamRedactor) Write(data []byte) ([]byte, error) {
 	if len(data) == 0 {
 		return nil, nil
+	}
+	if status, ok := s.redactor.(auditRedactionStatus); ok && !status.AuditRedactionEnabled() {
+		return data, nil
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()

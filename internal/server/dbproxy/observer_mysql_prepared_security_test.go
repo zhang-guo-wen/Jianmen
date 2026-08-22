@@ -36,6 +36,29 @@ func TestMySQLPreparedStatementLifecycleIsFailClosedAndAuditable(t *testing.T) {
 		}
 	})
 
+	t.Run("long parameter chunks are independently audited", func(t *testing.T) {
+		sink := &captureSink{}
+		observer := &mysqlObserver{sink: sink}
+		establishMySQLPreparedStatement(t, observer, 42, "INSERT INTO uploads(data) VALUES (?)", false)
+		payload := make([]byte, 7+32*1024)
+		payload[0] = mysqlCommandStmtLongData
+		binary.LittleEndian.PutUint32(payload[1:5], 42)
+		binary.LittleEndian.PutUint16(payload[5:7], 3)
+		copy(payload[7:], bytes.Repeat([]byte{0xa5}, 32*1024))
+		packet := buildMySQLPacket(0, payload)
+
+		forward, decision := observer.ObserveClientRelayBytes(packet)
+		if decision != nil || !bytes.Equal(forward, packet) {
+			t.Fatalf("long data relay = (%x, %#v)", forward, decision)
+		}
+		if len(sink.queries) != 2 || len(sink.finished) != 2 {
+			t.Fatalf("long data audit counts = queries %d, finished %d", len(sink.queries), len(sink.finished))
+		}
+		if sink.details[1]["command"] != "COM_STMT_SEND_LONG_DATA" || fmt.Sprint(sink.details[1]["parameter_id"]) != "3" {
+			t.Fatalf("long data detail = %#v", sink.details[1])
+		}
+	})
+
 	t.Run("unknown statement commands never reach upstream", func(t *testing.T) {
 		for _, command := range []byte{0x17, 0x18, 0x19, 0x1a} {
 			t.Run(fmt.Sprintf("command_%02x", command), func(t *testing.T) {

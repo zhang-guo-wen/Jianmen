@@ -20,6 +20,9 @@ type SystemSetting struct {
 	RecordingMaxReplayBytes       int64  `gorm:"not null"`
 	RecordingCleanupBatchSize     int    `gorm:"not null"`
 	DatabaseMaxClientMessageBytes int    `gorm:"not null;default:10485760"`
+	SSHRedactionEnabled           bool   `gorm:"not null;default:false"`
+	DatabaseAuditRedactionEnabled bool   `gorm:"not null;default:false"`
+	DatabaseAuditPreviewBytes     int    `gorm:"not null;default:65536"`
 	Revision                      int64  `gorm:"not null"`
 	AppliedRevision               int64  `gorm:"not null;default:0"`
 	AppliedAt                     *time.Time

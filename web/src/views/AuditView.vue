@@ -545,6 +545,18 @@
               />
             </template>
           </el-table-column>
+          <el-table-column v-bind="TABLE_COLUMNS.actionsCompact" :label="t('common.actions')">
+            <template #default="{ row }">
+              <el-button
+                link
+                type="primary"
+                :disabled="!row.query_id || !row.has_full_log"
+                @click="openDBQueryDetail(row)"
+              >
+                {{ t('audit.action.viewDetail') }}
+              </el-button>
+            </template>
+          </el-table-column>
         </DataTableCard>
 
         <DataTableCard
@@ -564,6 +576,18 @@
           </el-table-column>
           <el-table-column prop="command" :label="t('audit.column.command')" min-width="280" show-overflow-tooltip />
           <el-table-column prop="output" :label="t('audit.column.output')" min-width="280" show-overflow-tooltip />
+          <el-table-column v-bind="TABLE_COLUMNS.actionsCompact" :label="t('common.actions')">
+            <template #default="{ row }">
+              <el-button
+                link
+                type="primary"
+                :disabled="!row.seq"
+                @click="openSSHCommandDetail(row)"
+              >
+                {{ t('audit.action.viewDetail') }}
+              </el-button>
+            </template>
+          </el-table-column>
         </DataTableCard>
 
         <DataTableCard
@@ -602,6 +626,66 @@
         <el-empty v-else :description="t('audit.empty.detail')" />
       </div>
     </el-drawer>
+
+    <el-dialog
+      v-model="auditLogDetailVisible"
+      :title="auditLogDetailTitle"
+      width="min(1080px, calc(100vw - 32px))"
+      destroy-on-close
+    >
+      <el-alert
+        v-if="auditLogDetailError"
+        :title="auditLogDetailError"
+        type="error"
+        show-icon
+        style="margin-bottom: 12px"
+      />
+      <div v-loading="auditLogDetailLoading" class="audit-log-detail">
+        <el-descriptions v-if="auditLogDetail" :column="3" border>
+          <el-descriptions-item :label="t('audit.detail.storageMode')">
+            {{ auditLogDetail.redacted ? t('audit.detail.redacted') : t('audit.detail.original') }}
+          </el-descriptions-item>
+          <el-descriptions-item :label="t('audit.detail.sqlBytes')">
+            {{ formatBytes(auditLogDetail.sqlBytes) }}
+          </el-descriptions-item>
+          <el-descriptions-item :label="t('audit.detail.outputBytes')">
+            {{ formatBytes(auditLogDetail.outputBytes) }}
+          </el-descriptions-item>
+        </el-descriptions>
+
+        <section v-if="auditLogDetail?.command" class="audit-log-detail__section">
+          <div class="audit-log-detail__heading">{{ t('audit.column.command') }}</div>
+          <pre>{{ auditLogDetail.command }}</pre>
+        </section>
+        <section v-if="auditLogDetail?.sql" class="audit-log-detail__section">
+          <div class="audit-log-detail__heading">
+            <span>{{ t('audit.column.sql') }}</span>
+            <el-button link type="primary" @click="copyAuditLogDetail(auditLogDetail.sql)">
+              {{ t('audit.detail.copy') }}
+            </el-button>
+          </div>
+          <pre>{{ auditLogDetail.sql }}</pre>
+        </section>
+        <section v-if="auditLogDetail?.parameters" class="audit-log-detail__section">
+          <div class="audit-log-detail__heading">
+            <span>{{ t('audit.detail.parameters') }}</span>
+            <el-button link type="primary" @click="copyAuditLogDetail(auditLogDetail.parameters)">
+              {{ t('audit.detail.copy') }}
+            </el-button>
+          </div>
+          <pre>{{ auditLogDetail.parameters }}</pre>
+        </section>
+        <section v-if="auditLogDetail?.output || (!auditLogDetailLoading && auditLogDetail?.kind === 'ssh')" class="audit-log-detail__section">
+          <div class="audit-log-detail__heading">
+            <span>{{ t('audit.column.output') }}</span>
+            <el-button v-if="auditLogDetail?.output" link type="primary" @click="copyAuditLogDetail(auditLogDetail.output)">
+              {{ t('audit.detail.copy') }}
+            </el-button>
+          </div>
+          <pre>{{ auditLogDetail?.output || t('audit.detail.emptyOutput') }}</pre>
+        </section>
+      </div>
+    </el-dialog>
 
     <el-dialog
       v-model="rdpReplayVisible"
@@ -865,6 +949,23 @@ const logKeyword = ref('');
 const logSearchVersion = ref(0);
 const dbQueryConnectionID = ref('');
 const dbQueryTotal = ref(0);
+const artifactSessionID = ref('');
+const auditLogDetailVisible = ref(false);
+const auditLogDetailLoading = ref(false);
+const auditLogDetailError = ref('');
+const auditLogDetailTitle = ref('');
+let auditLogDetailRequestVersion = 0;
+interface AuditLogDetailData {
+  kind: 'db' | 'ssh';
+  command: string;
+  sql: string;
+  parameters: string;
+  output: string;
+  sqlBytes: number;
+  outputBytes: number;
+  redacted: boolean;
+}
+const auditLogDetail = ref<AuditLogDetailData | null>(null);
 let detailRequestVersion = 0;
 
 // ── Replay state ──
@@ -903,8 +1004,11 @@ const queryEvents = computed(() => extractItems<DBQueryEventRecord>(detailData.v
 // 合并 start/finish 事件为一行
 interface MergedQueryEvent {
   seq: number;
+  query_id: string;
+  protocol: string;
   sql: string;
   sql_truncated: boolean;
+  has_full_log: boolean;
   sql_original_bytes: number;
   comment: string;
   query_kind: string;
@@ -925,13 +1029,17 @@ function splitSQLComment(sql: string): { comment: string; sql: string } {
   return { comment: '', sql };
 }
 const mergedQueryEvents = computed<MergedQueryEvent[]>(() => {
-  const map = new Map<number, MergedQueryEvent>();
+  const map = new Map<string, MergedQueryEvent>();
   for (const ev of queryEvents.value) {
     const seq = ev.seq ?? 0;
-    const cur = map.get(seq) ?? {
+    const key = ev.query_id || `seq:${seq}`;
+    const cur = map.get(key) ?? {
       seq,
+      query_id: ev.query_id ?? '',
+      protocol: ev.protocol ?? '',
       sql: '',
       sql_truncated: false,
+      has_full_log: false,
       sql_original_bytes: 0,
       comment: '',
       query_kind: ev.query_kind ?? '',
@@ -939,6 +1047,8 @@ const mergedQueryEvents = computed<MergedQueryEvent[]>(() => {
       duration_ms: 0,
       started_at: ev.started_at ?? 0,
     };
+    cur.query_id = ev.query_id || cur.query_id;
+    cur.protocol = ev.protocol || cur.protocol;
     if (ev.type === 'query_started') {
       const parsed = splitSQLComment(ev.sql || cur.sql);
       cur.sql = parsed.sql || cur.sql;
@@ -946,6 +1056,7 @@ const mergedQueryEvents = computed<MergedQueryEvent[]>(() => {
       cur.query_kind = ev.query_kind || cur.query_kind;
       cur.started_at = ev.started_at ?? cur.started_at;
       cur.sql_truncated = Boolean(ev.detail?.sql_truncated);
+      cur.has_full_log = Boolean(ev.detail?.has_full_log);
       cur.sql_original_bytes = Number(ev.detail?.sql_original_bytes ?? 0);
     } else {
       cur.status = ev.status ?? cur.status;
@@ -959,7 +1070,7 @@ const mergedQueryEvents = computed<MergedQueryEvent[]>(() => {
         cur.duration_ms = ev.completed_at - cur.started_at;
       }
     }
-    map.set(seq, cur);
+    map.set(key, cur);
   }
   return Array.from(map.values()).sort((a, b) => a.seq - b.seq);
 });
@@ -1396,6 +1507,182 @@ async function copyQuerySQL(sql: string): Promise<void> {
   }
 }
 
+async function copyAuditLogDetail(value: string): Promise<void> {
+  try {
+    await navigator.clipboard.writeText(value);
+    ElMessage.success(t('audit.detail.copySuccess'));
+  } catch {
+    ElMessage.error(t('audit.detail.copyFailed'));
+  }
+}
+
+function bytesToBase64(bytes: Uint8Array): string {
+  const chunkBytes = 24_576;
+  const encoded: string[] = [];
+  for (let offset = 0; offset < bytes.length; offset += chunkBytes) {
+    const chunk = bytes.subarray(offset, Math.min(offset + chunkBytes, bytes.length));
+    let binary = '';
+    for (let index = 0; index < chunk.length; index++) {
+      binary += String.fromCharCode(chunk[index]);
+    }
+    encoded.push(btoa(binary));
+  }
+  return encoded.join('');
+}
+
+function formatPostgresBindParameters(buffer: ArrayBuffer): string {
+  const bytes = new Uint8Array(buffer);
+  const view = new DataView(buffer);
+  let offset = 0;
+  const readCString = (): string => {
+    const start = offset;
+    while (offset < bytes.length && bytes[offset] !== 0) offset++;
+    if (offset >= bytes.length) throw new Error('Bind C string is incomplete');
+    const value = new TextDecoder().decode(bytes.subarray(start, offset));
+    offset++;
+    return value;
+  };
+  const readUint16 = (): number => {
+    if (offset + 2 > bytes.length) throw new Error('Bind int16 is incomplete');
+    const value = view.getUint16(offset);
+    offset += 2;
+    return value;
+  };
+  const portal = readCString();
+  const statement = readCString();
+  const formatCount = readUint16();
+  const formats: number[] = [];
+  for (let index = 0; index < formatCount; index++) formats.push(readUint16());
+  const parameterCount = readUint16();
+  const lines = [
+    `Portal: ${portal || '(unnamed)'}`,
+    `Statement: ${statement || '(unnamed)'}`,
+    `Parameter count: ${parameterCount}`,
+    '',
+  ];
+  for (let index = 0; index < parameterCount; index++) {
+    if (offset + 4 > bytes.length) throw new Error('Bind parameter length is incomplete');
+    const length = view.getInt32(offset);
+    offset += 4;
+    const format = formats.length === 0 ? 0 : formats.length === 1 ? formats[0] : formats[index] ?? 0;
+    if (length === -1) {
+      lines.push(`#${index + 1} [${format === 1 ? 'binary' : 'text'}] = NULL`, '');
+      continue;
+    }
+    if (length < 0 || offset + length > bytes.length) throw new Error('Bind parameter value is incomplete');
+    const value = bytes.subarray(offset, offset + length);
+    offset += length;
+    if (format === 0) {
+      try {
+        const text = new TextDecoder('utf-8', { fatal: true }).decode(value);
+        lines.push(`#${index + 1} [text, ${length} bytes]`, text, '');
+        continue;
+      } catch {
+        // Invalid text-format bytes are still preserved as Base64.
+      }
+    }
+    lines.push(`#${index + 1} [binary/Base64, ${length} bytes]`, bytesToBase64(value), '');
+  }
+  return lines.join('\n');
+}
+
+function formatDatabaseSQL(buffer: ArrayBuffer, protocol: string): string {
+  if (!buffer.byteLength) return '';
+  try {
+    return new TextDecoder('utf-8', { fatal: true }).decode(buffer);
+  } catch {
+    return `${protocol || 'database'} payload (Base64)\n${bytesToBase64(new Uint8Array(buffer))}`;
+  }
+}
+
+function formatDatabaseParameters(buffer: ArrayBuffer, protocol: string, redacted: boolean): string {
+  if (!buffer.byteLength) return '';
+  if (redacted) return new TextDecoder().decode(buffer);
+  if (protocol.toLowerCase().includes('postgres')) {
+    try {
+      return formatPostgresBindParameters(buffer);
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : 'unknown parser error';
+      return `PostgreSQL Bind payload (Base64; ${reason})\n${bytesToBase64(new Uint8Array(buffer))}`;
+    }
+  }
+  return `MySQL execute payload (Base64)\n${bytesToBase64(new Uint8Array(buffer))}`;
+}
+
+async function openDBQueryDetail(row: MergedQueryEvent): Promise<void> {
+  const connectionID = dbQueryConnectionID.value;
+  if (!connectionID || !row.query_id) return;
+  const requestVersion = ++auditLogDetailRequestVersion;
+  auditLogDetailVisible.value = true;
+  auditLogDetailLoading.value = true;
+  auditLogDetailError.value = '';
+  auditLogDetailTitle.value = `${t('audit.action.viewDetail')} · ${row.query_id}`;
+  auditLogDetail.value = null;
+  try {
+    const metadata = await apiClient.getDBQueryDetail(connectionID, row.query_id);
+    const [sql, parameters] = await Promise.all([
+      metadata.has_sql
+        ? apiClient.getDBQuerySQL(connectionID, row.query_id)
+        : Promise.resolve(new ArrayBuffer(0)),
+      metadata.has_parameters
+        ? apiClient.getDBQueryParameters(connectionID, row.query_id)
+        : Promise.resolve(new ArrayBuffer(0)),
+    ]);
+    if (requestVersion !== auditLogDetailRequestVersion) return;
+    auditLogDetail.value = {
+      kind: 'db',
+      command: '',
+      sql: formatDatabaseSQL(sql, row.protocol),
+      parameters: formatDatabaseParameters(parameters, row.protocol, metadata.audit_data_redacted),
+      output: '',
+      sqlBytes: metadata.sql_bytes,
+      outputBytes: metadata.parameter_bytes,
+      redacted: metadata.audit_data_redacted,
+    };
+  } catch (err) {
+    if (requestVersion === auditLogDetailRequestVersion) {
+      auditLogDetailError.value = err instanceof Error ? err.message : t('audit.error.loadArtifact');
+    }
+  } finally {
+    if (requestVersion === auditLogDetailRequestVersion) auditLogDetailLoading.value = false;
+  }
+}
+
+async function openSSHCommandDetail(row: SessionCommandRecord): Promise<void> {
+  const sessionID = artifactSessionID.value;
+  const seq = Number(row.seq ?? 0);
+  if (!sessionID || !seq) return;
+  const requestVersion = ++auditLogDetailRequestVersion;
+  auditLogDetailVisible.value = true;
+  auditLogDetailLoading.value = true;
+  auditLogDetailError.value = '';
+  auditLogDetailTitle.value = `${t('audit.action.viewDetail')} · #${seq}`;
+  auditLogDetail.value = null;
+  try {
+    const [metadata, output] = await Promise.all([
+      apiClient.getSessionCommandDetail(sessionID, seq),
+      apiClient.getSessionCommandOutput(sessionID, seq),
+    ]);
+    if (requestVersion !== auditLogDetailRequestVersion) return;
+    auditLogDetail.value = {
+      kind: 'ssh',
+      command: metadata.command,
+      sql: '',
+      parameters: '',
+      output: output || metadata.output_preview,
+      sqlBytes: 0,
+      outputBytes: metadata.output_bytes,
+      redacted: metadata.audit_data_redacted,
+    };
+  } catch (err) {
+    if (requestVersion === auditLogDetailRequestVersion) {
+      auditLogDetailError.value = err instanceof Error ? err.message : t('audit.error.loadArtifact');
+    }
+  } finally {
+    if (requestVersion === auditLogDetailRequestVersion) auditLogDetailLoading.value = false;
+  }
+}
+
 // ── Data fetching ──
 
 async function loadOnlineSessions() {
@@ -1605,6 +1892,9 @@ async function loadSessionArtifact(session: { id: string | number }, kind: Exclu
   }
 
   const requestVersion = ++detailRequestVersion;
+  auditLogDetailRequestVersion++;
+  auditLogDetailVisible.value = false;
+  artifactSessionID.value = id;
   dbQueryConnectionID.value = '';
   dbQueryTotal.value = 0;
   detailLoading.value = true;
@@ -2008,6 +2298,8 @@ async function loadDBArtifact(connection: { id: string | number }, kind: 'meta' 
     return;
   }
 
+  auditLogDetailRequestVersion++;
+  auditLogDetailVisible.value = false;
   if (kind === 'queries') {
     detailRequestVersion++;
     dbQueryConnectionID.value = '';
@@ -2370,6 +2662,39 @@ onBeforeUnmount(() => {
   font-size: 13px;
   text-align: center;
   pointer-events: none;
+}
+
+.audit-log-detail {
+  min-height: 180px;
+}
+
+.audit-log-detail__section {
+  margin-top: 16px;
+}
+
+.audit-log-detail__heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+  font-weight: 700;
+}
+
+.audit-log-detail pre {
+  max-height: 52vh;
+  margin: 0;
+  padding: 16px;
+  overflow: auto;
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 8px;
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--el-color-primary) 5%, transparent), transparent 28%),
+    var(--el-fill-color-light);
+  font-family: "JetBrains Mono", "Cascadia Code", monospace;
+  font-size: 12px;
+  line-height: 1.65;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .query-sql-cell {

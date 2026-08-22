@@ -1,6 +1,7 @@
 package recording
 
 import (
+	"bufio"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,27 +12,35 @@ import (
 )
 
 type CommandRecorder struct {
-	mu              sync.Mutex
-	file            *os.File
-	startedAt       time.Time
-	seq             int64
-	line            []rune
-	current         *commandEvent
-	sensitivePrompt bool
-	redactor        AuditRedactor
-	auditSink       AuditSink
-	sessionID       string
-	onFatal         func(error)
+	mu               sync.Mutex
+	file             *os.File
+	outputFile       *os.File
+	outputWriter     *bufio.Writer
+	outputOffset     int64
+	startedAt        time.Time
+	seq              int64
+	line             []rune
+	current          *commandEvent
+	sensitivePrompt  bool
+	redactionEnabled bool
+	redactor         AuditRedactor
+	auditSink        AuditSink
+	sessionID        string
+	onFatal          func(error)
 }
 
 type commandEvent struct {
-	Seq        int64  `json:"seq"`
-	OffsetMs   int64  `json:"offset_ms"`
-	Command    string `json:"command"`
-	Preview    string `json:"preview"`
-	Confidence string `json:"confidence"`
-	StartedAt  int64  `json:"started_at"`
-	EndedAt    int64  `json:"ended_at"`
+	Seq               int64  `json:"seq"`
+	OffsetMs          int64  `json:"offset_ms"`
+	Command           string `json:"command"`
+	Preview           string `json:"preview"`
+	OutputOffset      int64  `json:"output_offset"`
+	OutputBytes       int64  `json:"output_bytes"`
+	AuditDataRedacted bool   `json:"audit_data_redacted"`
+	Confidence        string `json:"confidence"`
+	StartedAt         int64  `json:"started_at"`
+	EndedAt           int64  `json:"ended_at"`
+	auditSinkWritten  bool   `json:"-"`
 }
 
 func NewCommandRecorder(
@@ -42,15 +51,45 @@ func NewCommandRecorder(
 	sessionID string,
 	onFatal func(error),
 ) *CommandRecorder {
-	return &CommandRecorder{
-		file:      file,
-		startedAt: startedAt,
-		line:      make([]rune, 0, 128),
-		redactor:  redactor,
-		auditSink: sink,
-		sessionID: sessionID,
-		onFatal:   onFatal,
+	return NewCommandRecorderWithOutput(
+		file,
+		nil,
+		startedAt,
+		redactor,
+		sink,
+		sessionID,
+		onFatal,
+	)
+}
+
+func NewCommandRecorderWithOutput(
+	file,
+	outputFile *os.File,
+	startedAt time.Time,
+	redactor AuditRedactor,
+	sink AuditSink,
+	sessionID string,
+	onFatal func(error),
+) *CommandRecorder {
+	redactionEnabled := true
+	if status, ok := redactor.(auditRedactionStatus); ok {
+		redactionEnabled = status.AuditRedactionEnabled()
 	}
+	recorder := &CommandRecorder{
+		file:             file,
+		outputFile:       outputFile,
+		startedAt:        startedAt,
+		line:             make([]rune, 0, 128),
+		redactionEnabled: redactionEnabled,
+		redactor:         redactor,
+		auditSink:        sink,
+		sessionID:        sessionID,
+		onFatal:          onFatal,
+	}
+	if outputFile != nil {
+		recorder.outputWriter = bufio.NewWriterSize(outputFile, 256*1024)
+	}
+	return recorder
 }
 
 func (r *CommandRecorder) MarkSensitivePrompt() {
@@ -100,6 +139,20 @@ func (r *CommandRecorder) ObserveOutput(data []byte) {
 	if r.current == nil {
 		return
 	}
+	if r.outputWriter != nil {
+		written, err := r.outputWriter.Write(data)
+		r.current.OutputBytes += int64(written)
+		r.outputOffset += int64(written)
+		if err != nil || written != len(data) {
+			if err == nil {
+				err = errors.New("short command output audit write")
+			}
+			if r.onFatal != nil {
+				r.onFatal(fmt.Errorf("write complete command output: %w", err))
+			}
+			return
+		}
+	}
 	const maxPreview = 4096
 	if len(r.current.Preview) >= maxPreview {
 		return
@@ -137,13 +190,24 @@ func (r *CommandRecorder) RecordDirect(command string) error {
 	r.seq++
 	now := time.Now().UTC()
 	r.current = &commandEvent{
-		Seq:        r.seq,
-		OffsetMs:   int64(now.Sub(r.startedAt) / time.Millisecond),
-		Command:    command,
-		Confidence: "exact",
-		StartedAt:  now.UnixMilli(),
+		Seq:               r.seq,
+		OffsetMs:          int64(now.Sub(r.startedAt) / time.Millisecond),
+		Command:           command,
+		OutputOffset:      r.outputOffset,
+		AuditDataRedacted: r.redactionEnabled,
+		Confidence:        "exact",
+		StartedAt:         now.UnixMilli(),
 	}
-	return r.flushCurrentLocked()
+	if r.auditSink != nil {
+		if err := r.auditSink.WriteCommand(r.sessionID, now, command); err != nil {
+			if r.onFatal != nil {
+				r.onFatal(fmt.Errorf("write direct database command audit event: %w", err))
+			}
+			return err
+		}
+		r.current.auditSinkWritten = true
+	}
+	return nil
 }
 
 func (r *CommandRecorder) Close() error {
@@ -153,12 +217,22 @@ func (r *CommandRecorder) Close() error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	flushErr := r.flushCurrentLocked()
-	if r.file == nil {
-		return flushErr
+	var outputFlushErr error
+	if r.outputWriter != nil {
+		outputFlushErr = r.outputWriter.Flush()
+		r.outputWriter = nil
 	}
-	closeErr := r.file.Close()
-	r.file = nil
-	return errors.Join(flushErr, closeErr)
+	var outputCloseErr error
+	if r.outputFile != nil {
+		outputCloseErr = r.outputFile.Close()
+		r.outputFile = nil
+	}
+	var closeErr error
+	if r.file != nil {
+		closeErr = r.file.Close()
+		r.file = nil
+	}
+	return errors.Join(flushErr, outputFlushErr, outputCloseErr, closeErr)
 }
 
 func (r *CommandRecorder) submitLineLocked() {
@@ -182,11 +256,13 @@ func (r *CommandRecorder) submitLineLocked() {
 	r.seq++
 	now := time.Now().UTC()
 	r.current = &commandEvent{
-		Seq:        r.seq,
-		OffsetMs:   int64(now.Sub(r.startedAt) / time.Millisecond),
-		Command:    command,
-		Confidence: "partial",
-		StartedAt:  now.UnixMilli(),
+		Seq:               r.seq,
+		OffsetMs:          int64(now.Sub(r.startedAt) / time.Millisecond),
+		Command:           command,
+		OutputOffset:      r.outputOffset,
+		AuditDataRedacted: r.redactionEnabled,
+		Confidence:        "partial",
+		StartedAt:         now.UnixMilli(),
 	}
 }
 
@@ -201,6 +277,11 @@ func (r *CommandRecorder) flushCurrentLocked() error {
 	r.current.EndedAt = now.UnixMilli()
 	r.current.Preview = strings.TrimSpace(stripControlPreview(r.current.Preview))
 	r.current.Preview = r.redactor.Redact("output", r.current.Preview)
+	if r.outputWriter != nil {
+		if err := r.outputWriter.Flush(); err != nil {
+			return fmt.Errorf("flush complete command output: %w", err)
+		}
+	}
 	raw, err := json.Marshal(r.current)
 	if err != nil {
 		return err
@@ -210,7 +291,7 @@ func (r *CommandRecorder) flushCurrentLocked() error {
 	}
 	event := r.current
 	r.current = nil
-	if r.auditSink != nil {
+	if r.auditSink != nil && !event.auditSinkWritten {
 		if err := r.auditSink.WriteCommand(r.sessionID, time.UnixMilli(event.StartedAt), event.Command); err != nil {
 			return fmt.Errorf("write database command audit event: %w", err)
 		}

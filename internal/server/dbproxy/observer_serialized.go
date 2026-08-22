@@ -21,6 +21,10 @@ type queryObserverLifecycle interface {
 	HasPending() bool
 }
 
+type queryObserverResourceCloser interface {
+	CloseObserver()
+}
+
 type querySink interface {
 	StartQuery(sql string, detail map[string]any) (queryRecord, queryDecision)
 	FinishQuery(record queryRecord, finish queryFinish)
@@ -31,13 +35,28 @@ func newQueryObserver(protocol string, sink querySink) queryObserver {
 }
 
 func newQueryObserverWithLimit(protocol string, sink querySink, maxClientMessageBytes int) queryObserver {
+	return newQueryObserverWithLimitAndBudget(protocol, sink, maxClientMessageBytes, nil)
+}
+
+func newQueryObserverWithLimitAndBudget(
+	protocol string,
+	sink querySink,
+	maxClientMessageBytes int,
+	memoryBudget *observerMemoryBudget,
+) queryObserver {
 	maxClientMessageBytes = normalizeMaxClientMessageBytes(maxClientMessageBytes)
 	var observer queryObserver
 	switch protocol {
 	case "mysql":
 		observer = &mysqlObserver{sink: sink, maxClientMessageBytes: maxClientMessageBytes}
 	case "postgres":
-		observer = &postgresObserver{sink: sink, startupDone: true, maxClientMessageBytes: maxClientMessageBytes}
+		postgres := &postgresObserver{
+			sink:                  sink,
+			startupDone:           true,
+			maxClientMessageBytes: maxClientMessageBytes,
+			memoryBudget:          memoryBudget,
+		}
+		observer = postgres
 	case "redis":
 		observer = &redisObserver{sink: sink, maxClientMessageBytes: maxClientMessageBytes}
 	default:
@@ -125,4 +144,12 @@ func (o *serializedQueryObserver) HasPending() bool {
 		return lifecycle.HasPending()
 	}
 	return false
+}
+
+func (o *serializedQueryObserver) CloseObserver() {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if closer, ok := o.observer.(queryObserverResourceCloser); ok {
+		closer.CloseObserver()
+	}
 }

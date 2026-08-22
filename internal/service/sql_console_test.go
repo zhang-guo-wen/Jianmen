@@ -1,8 +1,12 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -191,6 +195,74 @@ func TestSQLConsoleExecuteReadQueryAuditsBeforeExecution(t *testing.T) {
 	}
 	if result.RowCount != 1 || result.AuditSessionID != "audit-session" || result.QueryKind != "select" {
 		t.Fatalf("result = %#v", result)
+	}
+}
+
+func TestSQLConsoleExecuteStoresBoundedPreviewAndCompleteFile(t *testing.T) {
+	sqlService, repository, _, _ := newSQLConsoleServiceFixture(t)
+	root := t.TempDir()
+	sqlService.auditOptions = SQLConsoleAuditOptions{
+		ReplayDir:    root,
+		PreviewBytes: 4 * 1024,
+	}
+	sessionID := createSQLConsoleTestSession(t, sqlService)
+	sql := "SELECT 'raw-secret-" + strings.Repeat("x", 8*1024) + "'"
+
+	_, err := sqlService.Execute(
+		context.Background(),
+		SQLConsoleActor{UserID: "user-1"},
+		SQLConsoleRequest{SessionID: sessionID, Database: "app", SQL: sql},
+	)
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if len(repository.sessions) != 1 || len(repository.queries) != 1 {
+		t.Fatalf("audit writes = sessions %d, queries %d", len(repository.sessions), len(repository.queries))
+	}
+	auditSession := repository.sessions[0]
+	query := repository.queries[0]
+	if auditSession.ReplayDir == "" || query.SQLLogBytes != int64(len(sql)) || !query.SQLTruncated {
+		t.Fatalf("artifact metadata = session %#v, query %#v", auditSession, query)
+	}
+	if len(query.SQLText) > 4*1024 || !strings.Contains(query.SQLText, "raw-secret") {
+		t.Fatalf("bounded raw preview = %d bytes, %q", len(query.SQLText), query.SQLText)
+	}
+	stored, err := os.ReadFile(filepath.Join(auditSession.ReplayDir, "query-data.bin"))
+	if err != nil {
+		t.Fatalf("read query artifact: %v", err)
+	}
+	if !bytes.Equal(stored, []byte(sql)) {
+		t.Fatalf("complete SQL bytes = %d, want %d", len(stored), len(sql))
+	}
+}
+
+func TestSQLConsoleExecuteRedactsPreviewAndCompleteFileWhenEnabled(t *testing.T) {
+	sqlService, repository, _, _ := newSQLConsoleServiceFixture(t)
+	sqlService.auditOptions = SQLConsoleAuditOptions{
+		ReplayDir:        t.TempDir(),
+		PreviewBytes:     4 * 1024,
+		RedactionEnabled: true,
+	}
+	sessionID := createSQLConsoleTestSession(t, sqlService)
+
+	_, err := sqlService.Execute(
+		context.Background(),
+		SQLConsoleActor{UserID: "user-1"},
+		SQLConsoleRequest{SessionID: sessionID, Database: "app", SQL: "SELECT 'web-secret'"},
+	)
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	query := repository.queries[0]
+	stored, err := os.ReadFile(filepath.Join(repository.sessions[0].ReplayDir, "query-data.bin"))
+	if err != nil {
+		t.Fatalf("read query artifact: %v", err)
+	}
+	if bytes.Contains(stored, []byte("web-secret")) || strings.Contains(query.SQLText, "web-secret") {
+		t.Fatalf("redacted SQL leaked: preview %q, file %q", query.SQLText, stored)
+	}
+	if !query.AuditDataRedacted {
+		t.Fatal("redacted web SQL artifact was not marked redacted")
 	}
 }
 

@@ -92,7 +92,12 @@ func consumePostgresFrameStream(stream **postgresFrameStream, data []byte) ([]by
 }
 
 func canStreamPostgresFrontendFrame(messageType byte) bool {
-	return messageType == 'd'
+	switch messageType {
+	case 'Q', 'P', 'B', 'd':
+		return true
+	default:
+		return false
+	}
 }
 
 func canStreamPostgresBackendFrame(messageType byte) bool {

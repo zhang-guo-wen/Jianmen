@@ -105,11 +105,18 @@ func startDatabaseGateway(
 	mode string,
 	protocol string,
 	logger *slog.Logger,
+	maxClientMessageBytes ...int,
 ) databaseGatewayEndpoint {
 	t.Helper()
 	addr := freeTCPAddress(t)
 	authorizer := newIntegrationAuthorizer(t, fixture)
 	gatewayConfig := config.DatabaseGatewayConfig{Enabled: true}
+	if len(maxClientMessageBytes) > 1 {
+		t.Fatalf("at most one client message limit may be configured")
+	}
+	if len(maxClientMessageBytes) == 1 {
+		gatewayConfig.MaxClientMessageBytes = maxClientMessageBytes[0]
+	}
 	listener := config.DatabaseProtocolListener{Enabled: true, Address: addr}
 	switch protocol {
 	case "mysql":

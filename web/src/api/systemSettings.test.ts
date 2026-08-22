@@ -6,6 +6,7 @@ import {
   BYTES_PER_GIB,
   BYTES_PER_MIB,
   DATABASE_MAX_CLIENT_MESSAGE_BYTES_DEFAULT,
+  DATABASE_MAX_CLIENT_MESSAGE_BYTES_MAX,
   SYSTEM_SETTINGS_FIELDS,
   changedSystemSettingsFields,
   clientMessageBytesToMiB,
@@ -32,6 +33,9 @@ function settings(overrides: Partial<SystemSettingsValues> = {}): SystemSettings
     recording_retention_days: 30,
     recording_max_replay_bytes: 10 * BYTES_PER_GIB,
     recording_cleanup_batch_size: 100,
+    recording_ssh_redaction_enabled: false,
+    database_audit_redaction_enabled: false,
+    database_audit_preview_bytes: 64 * 1024,
     ...overrides,
   };
 }
@@ -82,6 +86,7 @@ test('GiB conversion preserves normal configuration values', () => {
 
 test('MiB conversion preserves database and Redis client message limits', () => {
   assert.equal(DATABASE_MAX_CLIENT_MESSAGE_BYTES_DEFAULT, 10 * BYTES_PER_MIB);
+  assert.equal(DATABASE_MAX_CLIENT_MESSAGE_BYTES_MAX, 256 * BYTES_PER_MIB);
   assert.equal(clientMessageBytesToMiB(10 * BYTES_PER_MIB), 10);
   assert.equal(clientMessageBytesToMiB(64 * 1024), 0.0625);
   assert.equal(clientMessageMiBToBytes(10), 10 * BYTES_PER_MIB);

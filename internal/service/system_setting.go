@@ -42,6 +42,9 @@ var systemSettingFieldNames = []string{
 	"recording_max_replay_bytes",
 	"recording_cleanup_batch_size",
 	"database_max_client_message_bytes",
+	"recording_ssh_redaction_enabled",
+	"database_audit_redaction_enabled",
+	"database_audit_preview_bytes",
 }
 
 // hotReloadableSystemSettingFields 保存后立即生效的字段集合；
@@ -79,6 +82,9 @@ type SystemSettings struct {
 	RecordingMaxReplayBytes       int64
 	RecordingCleanupBatchSize     int
 	DatabaseMaxClientMessageBytes int
+	RecordingSSHRedactionEnabled  bool
+	DatabaseAuditRedactionEnabled bool
+	DatabaseAuditPreviewBytes     int
 }
 
 type SystemSettingsActor struct {
@@ -213,6 +219,9 @@ func (s *SystemSettingsService) Update(ctx context.Context, update SystemSetting
 	if err := s.requireBootstrapped(); err != nil {
 		return SystemSettingsState{}, err
 	}
+	if update.Settings.DatabaseAuditPreviewBytes == 0 {
+		update.Settings.DatabaseAuditPreviewBytes = config.DefaultDatabaseAuditPreviewBytes
+	}
 	if err := s.validateSystemSettings(update.Settings); err != nil {
 		return SystemSettingsState{}, err
 	}
@@ -261,7 +270,7 @@ func (s *SystemSettingsService) Update(ctx context.Context, update SystemSetting
 		model.SystemSettingRevision{
 			SnapshotJSON:      snapshotJSON,
 			ChangedFieldsJSON: string(changedFieldsJSON),
-			FullAudit: model.FullAudit{UpdatedBy: strings.TrimSpace(update.Actor.ID)},
+			FullAudit:         model.FullAudit{UpdatedBy: strings.TrimSpace(update.Actor.ID)},
 		},
 	)
 	if err != nil {
@@ -318,12 +327,12 @@ func (s *SystemSettingsService) ListRevisions(ctx context.Context, limit int) ([
 				row.Revision, err)
 		}
 		revisions = append(revisions, SystemSettingsRevision{
-			ID:                row.ID,
-			Revision:          row.Revision,
-			Snapshot:          snapshot,
-			ChangedFields:     changedFields,
-			UpdatedBy:         row.UpdatedBy,
-			CreatedAt:         row.CreatedAt,
+			ID:            row.ID,
+			Revision:      row.Revision,
+			Snapshot:      snapshot,
+			ChangedFields: changedFields,
+			UpdatedBy:     row.UpdatedBy,
+			CreatedAt:     row.CreatedAt,
 		})
 	}
 	return revisions, nil
@@ -357,6 +366,9 @@ func (s *SystemSettingsService) stateFromModel(persisted model.SystemSetting) (S
 }
 
 func validateSystemSettings(settings SystemSettings) error {
+	if settings.DatabaseAuditPreviewBytes == 0 {
+		settings.DatabaseAuditPreviewBytes = config.DefaultDatabaseAuditPreviewBytes
+	}
 	switch {
 	case settings.DatabaseGatewayMode != config.DatabaseGatewayModeUnified &&
 		settings.DatabaseGatewayMode != config.DatabaseGatewayModeIndependent:
@@ -396,6 +408,8 @@ func validateSystemSettings(settings SystemSettings) error {
 			minDatabaseMaxClientMessageBytes,
 			maxDatabaseMaxClientMessageBytes,
 		)
+	case settings.DatabaseAuditPreviewBytes < config.MinDatabaseAuditPreviewBytes || settings.DatabaseAuditPreviewBytes > config.MaxDatabaseAuditPreviewBytes:
+		return fmt.Errorf("%w: database audit preview bytes must be between %d and %d", ErrInvalidSystemSettings, config.MinDatabaseAuditPreviewBytes, config.MaxDatabaseAuditPreviewBytes)
 	default:
 		return nil
 	}
@@ -456,6 +470,15 @@ func changedSystemSettingFields(before, after SystemSettings) []string {
 	if before.DatabaseMaxClientMessageBytes != after.DatabaseMaxClientMessageBytes {
 		changed = append(changed, "database_max_client_message_bytes")
 	}
+	if before.RecordingSSHRedactionEnabled != after.RecordingSSHRedactionEnabled {
+		changed = append(changed, "recording_ssh_redaction_enabled")
+	}
+	if before.DatabaseAuditRedactionEnabled != after.DatabaseAuditRedactionEnabled {
+		changed = append(changed, "database_audit_redaction_enabled")
+	}
+	if before.DatabaseAuditPreviewBytes != after.DatabaseAuditPreviewBytes {
+		changed = append(changed, "database_audit_preview_bytes")
+	}
 	return changed
 }
 
@@ -490,6 +513,15 @@ func riskySystemSettingFields(before, after SystemSettings) []string {
 	if before.DatabaseMaxClientMessageBytes != after.DatabaseMaxClientMessageBytes {
 		risky = append(risky, "database_max_client_message_bytes")
 	}
+	if before.RecordingSSHRedactionEnabled && !after.RecordingSSHRedactionEnabled {
+		risky = append(risky, "recording_ssh_redaction_enabled")
+	}
+	if before.DatabaseAuditRedactionEnabled && !after.DatabaseAuditRedactionEnabled {
+		risky = append(risky, "database_audit_redaction_enabled")
+	}
+	if after.DatabaseAuditPreviewBytes > before.DatabaseAuditPreviewBytes {
+		risky = append(risky, "database_audit_preview_bytes")
+	}
 	return risky
 }
 
@@ -513,7 +545,10 @@ func systemSettingModel(settings SystemSettings, actor SystemSettingsActor) mode
 		RecordingMaxReplayBytes:       settings.RecordingMaxReplayBytes,
 		RecordingCleanupBatchSize:     settings.RecordingCleanupBatchSize,
 		DatabaseMaxClientMessageBytes: settings.DatabaseMaxClientMessageBytes,
-		FullAudit: model.FullAudit{UpdatedBy: strings.TrimSpace(actor.ID)},
+		SSHRedactionEnabled:           settings.RecordingSSHRedactionEnabled,
+		DatabaseAuditRedactionEnabled: settings.DatabaseAuditRedactionEnabled,
+		DatabaseAuditPreviewBytes:     settings.DatabaseAuditPreviewBytes,
+		FullAudit:                     model.FullAudit{UpdatedBy: strings.TrimSpace(actor.ID)},
 	}
 }
 
@@ -525,6 +560,10 @@ func systemSettingsFromModel(setting model.SystemSetting) SystemSettings {
 	clientTLSMode := strings.TrimSpace(setting.DatabaseGatewayClientTLSMode)
 	if clientTLSMode == "" {
 		clientTLSMode = config.DatabaseGatewayClientTLSModeOptional
+	}
+	previewBytes := setting.DatabaseAuditPreviewBytes
+	if previewBytes == 0 {
+		previewBytes = config.DefaultDatabaseAuditPreviewBytes
 	}
 	return SystemSettings{
 		DatabaseGatewayMode:           mode,
@@ -540,5 +579,8 @@ func systemSettingsFromModel(setting model.SystemSetting) SystemSettings {
 		RecordingMaxReplayBytes:       setting.RecordingMaxReplayBytes,
 		RecordingCleanupBatchSize:     setting.RecordingCleanupBatchSize,
 		DatabaseMaxClientMessageBytes: setting.DatabaseMaxClientMessageBytes,
+		RecordingSSHRedactionEnabled:  setting.SSHRedactionEnabled,
+		DatabaseAuditRedactionEnabled: setting.DatabaseAuditRedactionEnabled,
+		DatabaseAuditPreviewBytes:     previewBytes,
 	}
 }

@@ -16,17 +16,34 @@ const (
 type AuditPolicy struct {
 	retentionDays       int
 	recordOriginalInput bool
+	redactionEnabled    bool
 }
 
 // NewAuditPolicy creates an audit policy. Invalid retention periods fall back to the
 // conservative default, and raw input recording is disabled unless explicitly enabled.
 func NewAuditPolicy(retentionDays int, recordOriginalInput bool) AuditPolicy {
+	return NewAuditPolicyWithRedaction(retentionDays, recordOriginalInput, true)
+}
+
+func NewAuditPolicyWithRedaction(
+	retentionDays int,
+	recordOriginalInput,
+	redactionEnabled bool,
+) AuditPolicy {
 	if retentionDays <= 0 {
 		retentionDays = defaultAuditRetentionDays
 	} else if retentionDays > maxAuditRetentionDays {
 		retentionDays = maxAuditRetentionDays
 	}
-	return AuditPolicy{retentionDays: retentionDays, recordOriginalInput: recordOriginalInput}
+	return AuditPolicy{
+		retentionDays:       retentionDays,
+		recordOriginalInput: recordOriginalInput,
+		redactionEnabled:    redactionEnabled,
+	}
+}
+
+func (p AuditPolicy) AuditRedactionEnabled() bool {
+	return p.redactionEnabled
 }
 
 // RetentionCutoff returns the oldest timestamp that may be retained at now.
@@ -38,6 +55,9 @@ func (p AuditPolicy) RetentionCutoff(now time.Time) time.Time {
 func (p AuditPolicy) Redact(kind, value string) string {
 	if !p.recordOriginalInput && isInputKind(kind) {
 		return redactedValue
+	}
+	if !p.redactionEnabled {
+		return value
 	}
 	if isSQLKind(kind) {
 		value = redactSQLStrings(value)

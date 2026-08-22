@@ -38,6 +38,7 @@ type AuditQueryRepository interface {
 	ListSSHCommands(context.Context, string, Page) ([]AuditSSHCommand, int64, error)
 	ListSFTPEvents(context.Context, string, Page) ([]AuditSFTPEvent, int64, error)
 	ListDBQueryPreviews(context.Context, string, AuditDBQueryPreviewParams) ([]AuditDBQueryPreview, int64, error)
+	GetDBQueryArtifact(context.Context, string, string) (AuditDBQueryArtifact, error)
 	ListAuditEvents(context.Context, AuditEventListParams) ([]AuditEvent, int64, error)
 	ListLoginAuditLogs(context.Context, LoginAuditListParams) ([]LoginAuditLog, int64, error)
 }
@@ -249,8 +250,9 @@ func (s *AuditQueryService) DBQueryEvents(ctx context.Context, userID, protocol,
 		completedAt := ts + query.DurationMs
 		sqlPreview, detail := AuditDBQuerySQLPreview(query)
 		events = append(events,
-			AuditDBQueryEvent{Type: "query_started", ConnectionID: sessionID, Seq: seq, Protocol: queryProtocol, SQL: sqlPreview, QueryKind: query.QueryKind, Detail: detail, StartedAt: ts, Status: model.AuditDBQueryStatusUnknown},
+			AuditDBQueryEvent{QueryID: query.ID, Type: "query_started", ConnectionID: sessionID, Seq: seq, Protocol: queryProtocol, SQL: sqlPreview, QueryKind: query.QueryKind, Detail: detail, StartedAt: ts, Status: model.AuditDBQueryStatusUnknown},
 			AuditDBQueryEvent{
+				QueryID:      query.ID,
 				Type:         "query_finished",
 				ConnectionID: sessionID,
 				Seq:          seq,
@@ -268,6 +270,30 @@ func (s *AuditQueryService) DBQueryEvents(ctx context.Context, userID, protocol,
 		)
 	}
 	return events, total, nil
+}
+
+func (s *AuditQueryService) DBQueryArtifact(
+	ctx context.Context,
+	userID,
+	protocol,
+	sessionID,
+	queryID string,
+) (AuditSession, AuditDBQueryArtifact, error) {
+	session, err := s.AuthorizedSession(ctx, userID, protocol, sessionID)
+	if err != nil {
+		return AuditSession{}, AuditDBQueryArtifact{}, err
+	}
+	if session.ProtocolFamily != AuditProtocolFamilyDB || strings.TrimSpace(queryID) == "" {
+		return AuditSession{}, AuditDBQueryArtifact{}, ErrAuditArtifactUnavailable
+	}
+	artifact, err := s.repository.GetDBQueryArtifact(ctx, sessionID, queryID)
+	if err != nil {
+		return AuditSession{}, AuditDBQueryArtifact{}, err
+	}
+	if strings.TrimSpace(artifact.AuditSessionID) != strings.TrimSpace(sessionID) {
+		return AuditSession{}, AuditDBQueryArtifact{}, ErrAuditArtifactUnavailable
+	}
+	return session, artifact, nil
 }
 
 func (s *AuditQueryService) authorize(ctx context.Context, userID string, actions ...string) error {
@@ -390,6 +416,8 @@ func AuditDBQuerySQLPreview(query AuditDBQueryPreview) (string, map[string]any) 
 		"sql_truncated": query.SQLTruncated || previewTruncated, "sql_audit_truncated": query.SQLTruncated,
 		"sql_preview_truncated": previewTruncated, "sql_original_bytes": originalBytes,
 		"sql_stored_bytes": storedBytes, "sql_preview_bytes": len(preview),
+		"sql_log_bytes": query.SQLLogBytes, "parameter_log_bytes": query.ParameterLogBytes,
+		"has_full_log": query.SQLLogBytes > 0, "audit_data_redacted": query.AuditDataRedacted,
 	}
 }
 

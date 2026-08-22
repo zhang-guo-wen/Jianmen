@@ -97,7 +97,7 @@ func (o *postgresObserver) canQueuePostgresStateOperation(
 	return postgresPreparedStateWithinLimit(
 		prepared,
 		portals,
-		o.maxClientMessageBytes,
+		o.auditStateLimit(),
 	)
 }
 

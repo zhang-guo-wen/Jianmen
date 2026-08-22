@@ -4,6 +4,8 @@ import (
 	"regexp"
 	"strings"
 	"unicode/utf8"
+
+	"jianmen/internal/databaseaudit"
 )
 
 const (
@@ -15,6 +17,64 @@ type databaseSQLAudit struct {
 	text          string
 	originalBytes int64
 	truncated     bool
+	artifact      databaseAuditArtifact
+}
+
+type databaseAuditPolicySink interface {
+	DatabaseAuditPreviewBytes() int
+	DatabaseAuditRedactionEnabled() bool
+}
+
+func databaseAuditPolicy(sink querySink, fallbackLimit int) (int, bool) {
+	limit := fallbackLimit
+	redact := true
+	if policy, ok := sink.(databaseAuditPolicySink); ok {
+		limit = policy.DatabaseAuditPreviewBytes()
+		redact = policy.DatabaseAuditRedactionEnabled()
+	}
+	if limit <= 0 {
+		limit = postgresStreamAuditPreviewBytes
+	}
+	return limit, redact
+}
+
+func prepareAndCaptureDatabaseSQLAudit(
+	sink querySink,
+	sql string,
+	fallbackLimit int,
+) (databaseSQLAudit, error) {
+	return prepareAndCaptureDatabaseSQLBytes(sink, []byte(sql), fallbackLimit)
+}
+
+func prepareAndCaptureDatabaseSQLBytes(
+	sink querySink,
+	sql []byte,
+	fallbackLimit int,
+) (databaseSQLAudit, error) {
+	limit, redact := databaseAuditPolicy(sink, fallbackLimit)
+	artifact, err := captureDatabaseAuditBytes(sink, databaseAuditArtifactSQL, sql)
+	if err != nil {
+		return databaseSQLAudit{}, err
+	}
+	var audit databaseSQLAudit
+	if redact {
+		audit = prepareDatabaseSQLAudit(string(sql), limit)
+	} else {
+		preview := sql
+		truncated := false
+		if len(preview) > limit {
+			preview = preview[:limit]
+			truncated = true
+		}
+		previewText, utf8Adjusted := normalizeAuditSQLUTF8(string(preview), limit)
+		audit = databaseSQLAudit{
+			text:          previewText,
+			originalBytes: int64(len(sql)),
+			truncated:     truncated || utf8Adjusted,
+		}
+	}
+	audit.artifact = artifact
+	return audit, nil
 }
 
 var sensitiveSQLAssignment = regexp.MustCompile(
@@ -28,20 +88,14 @@ var sensitiveSQLAuthorization = regexp.MustCompile(
 // redactDatabaseSQL is deliberately stricter than a SQL formatter. The relay
 // still forwards the original bytes; only this audit copy is transformed.
 func redactDatabaseSQL(sql string) string {
-	redacted, _ := redactDatabaseSQLWithLimit(sql, 0)
-	return redacted
+	return databaseaudit.RedactSQL([]byte(sql))
 }
 
 func prepareDatabaseSQLAudit(sql string, limit int) databaseSQLAudit {
-	redacted, truncated := redactDatabaseSQLWithLimit(
-		sql,
-		normalizeMaxClientMessageBytes(limit),
-	)
-	return databaseSQLAudit{
-		text:          redacted,
-		originalBytes: int64(len(sql)),
-		truncated:     truncated,
-	}
+	result := databaseaudit.PreviewSQL([]byte(sql), databaseaudit.Policy{
+		PreviewBytes: normalizeMaxClientMessageBytes(limit), RedactionEnabled: true,
+	})
+	return databaseSQLAudit{text: result.Preview, originalBytes: result.OriginalBytes, truncated: result.Truncated}
 }
 
 func (a databaseSQLAudit) withDetail(detail map[string]any) map[string]any {
@@ -50,6 +104,9 @@ func (a databaseSQLAudit) withDetail(detail map[string]any) map[string]any {
 		"sql_original_bytes":      a.originalBytes,
 		"sql_truncated":           a.truncated,
 		"sql_audit_bytes":         len(a.text),
+		"_sql_log_offset":         a.artifact.offset,
+		"_sql_log_bytes":          a.artifact.bytes,
+		"_sql_log_redacted":       a.artifact.redacted,
 	})
 }
 
@@ -64,7 +121,10 @@ func normalizeDatabaseSQLAudit(
 	}
 	cleanDetail := make(map[string]any, len(detail)+4)
 	for key, value := range detail {
-		if key != sqlAuditPreparedDetailKey {
+		switch key {
+		case sqlAuditPreparedDetailKey, "_sql_log_offset", "_sql_log_bytes", "_sql_log_redacted":
+			continue
+		default:
 			cleanDetail[key] = value
 		}
 	}
@@ -91,10 +151,18 @@ func preparedDatabaseSQLAudit(sql string, detail map[string]any) (databaseSQLAud
 	if !ok || auditBytes != len(sql) {
 		return databaseSQLAudit{}, false
 	}
+	logOffset, _ := detail["_sql_log_offset"].(int64)
+	logBytes, _ := detail["_sql_log_bytes"].(int64)
+	logRedacted, _ := detail["_sql_log_redacted"].(bool)
 	return databaseSQLAudit{
 		text:          sql,
 		originalBytes: originalBytes,
 		truncated:     truncated,
+		artifact: databaseAuditArtifact{
+			offset:   logOffset,
+			bytes:    logBytes,
+			redacted: logRedacted,
+		},
 	}, true
 }
 

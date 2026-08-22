@@ -1,4 +1,4 @@
-﻿const API_BASE_URL = ((typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_BASE_URL) || '').replace(/\/$/, '');
+const API_BASE_URL = ((typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_BASE_URL) || '').replace(/\/$/, '');
 
 import { withIdempotencyKey, type ProvisionRequest } from '@/utils/provisioningRequest';
 import type {
@@ -426,12 +426,25 @@ export interface SessionCommandRecord {
   seq?: number;
   command?: string;
   output?: string;
+  output_bytes?: number;
+  audit_data_redacted?: boolean;
   confidence?: string;
   timestamp?: string;
   started_at?: string;
   ended_at?: string;
   offset_ms?: number;
   [key: string]: unknown;
+}
+
+export interface SessionCommandDetailRecord {
+  seq: number;
+  command: string;
+  output_preview: string;
+  output_bytes: number;
+  audit_data_redacted: boolean;
+  confidence: string;
+  started_at: number;
+  ended_at: number;
 }
 
 export interface SessionFileEventRecord {
@@ -623,6 +636,7 @@ export interface DBConnectionMetaRecord {
 }
 
 export interface DBQueryEventRecord {
+  query_id?: string;
   type?: string;
   connection_id?: string;
   seq?: number;
@@ -639,6 +653,15 @@ export interface DBQueryEventRecord {
   rows_affected?: number | null;
   rows?: number | null;
   [key: string]: unknown;
+}
+
+export interface DBQueryDetailRecord {
+  query_id: string;
+  sql_bytes: number;
+  parameter_bytes: number;
+  audit_data_redacted: boolean;
+  has_sql: boolean;
+  has_parameters: boolean;
 }
 
 // ── Application (Web App Proxy) ─────────────────────────────────────────
@@ -1063,6 +1086,37 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   return payload as T;
 }
 
+async function requestArrayBuffer(path: string): Promise<ArrayBuffer> {
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    credentials: 'include',
+  });
+  if (response.status === 401) {
+    clearCSRFToken();
+    if (window.location.pathname !== '/login') {
+      window.location.href = '/login';
+    }
+  }
+  if (!response.ok) {
+    let payload: { error?: ApiErrorBody; request_id?: string } | null = null;
+    try {
+      payload = (await response.json()) as { error?: ApiErrorBody; request_id?: string };
+    } catch {
+      // Non-JSON proxy errors fall back to HTTP status text.
+    }
+    if (payload?.error) {
+      throw new ApiError(
+        response.status,
+        payload.error.code || 'UNKNOWN',
+        payload.error.message || response.statusText,
+        payload.request_id || '',
+        payload.error.details
+      );
+    }
+    throw new ApiError(response.status, 'UNKNOWN', response.statusText, '');
+  }
+  return response.arrayBuffer();
+}
+
 // ── API client ─────────────────────────────────────────────────────────
 
 export const apiClient = {
@@ -1234,6 +1288,14 @@ export const apiClient = {
     request<SessionCommandRecord[]>(
       `/api/audit/ssh/${encodeURIComponent(String(id))}/commands`
     ),
+  getSessionCommandDetail: (id: string | number, seq: number) =>
+    request<SessionCommandDetailRecord>(
+      `/api/audit/ssh/${encodeURIComponent(String(id))}/commands/${encodeURIComponent(String(seq))}/detail`
+    ),
+  getSessionCommandOutput: (id: string | number, seq: number) =>
+    request<string>(
+      `/api/audit/ssh/${encodeURIComponent(String(id))}/commands/${encodeURIComponent(String(seq))}/output`
+    ),
   getSessionFiles: (id: string | number) =>
     request<SessionFileEventRecord[]>(
       `/api/audit/ssh/${encodeURIComponent(String(id))}/files`
@@ -1373,6 +1435,18 @@ export const apiClient = {
   getDBConnectionQueries: (id: string | number, params?: { page?: number; page_size?: number; q?: string }) =>
     request<PageResponse<DBQueryEventRecord>>(
       `/api/audit/db/${encodeURIComponent(String(id))}/queries${buildQS(params as Record<string, string | number | undefined>)}`
+    ),
+  getDBQueryDetail: (id: string | number, queryId: string) =>
+    request<DBQueryDetailRecord>(
+      `/api/audit/db/${encodeURIComponent(String(id))}/queries/${encodeURIComponent(queryId)}/detail`
+    ),
+  getDBQuerySQL: (id: string | number, queryId: string) =>
+    requestArrayBuffer(
+      `/api/audit/db/${encodeURIComponent(String(id))}/queries/${encodeURIComponent(queryId)}/sql`
+    ),
+  getDBQueryParameters: (id: string | number, queryId: string) =>
+    requestArrayBuffer(
+      `/api/audit/db/${encodeURIComponent(String(id))}/queries/${encodeURIComponent(queryId)}/parameters`
     ),
 
   // applications (web app proxy)

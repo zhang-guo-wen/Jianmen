@@ -70,6 +70,9 @@ func systemSettingsFromConfig(cfg *config.Config) service.SystemSettings {
 		RecordingMaxReplayBytes:       cfg.Recording.MaxReplayBytes,
 		RecordingCleanupBatchSize:     cfg.Recording.CleanupBatchSize,
 		DatabaseMaxClientMessageBytes: cfg.DatabaseGateway.MaxClientMessageBytes,
+		RecordingSSHRedactionEnabled:  cfg.Recording.SSHRedactionEnabled,
+		DatabaseAuditRedactionEnabled: cfg.DatabaseGateway.AuditRedactionEnabled,
+		DatabaseAuditPreviewBytes:     cfg.DatabaseGateway.AuditPreviewBytes,
 	}
 }
 
@@ -86,8 +89,10 @@ func applySystemSettings(cfg *config.Config, settings service.SystemSettings) {
 	cfg.Recording.RetentionDays = settings.RecordingRetentionDays
 	cfg.Recording.MaxReplayBytes = settings.RecordingMaxReplayBytes
 	cfg.Recording.CleanupBatchSize = settings.RecordingCleanupBatchSize
-	cfg.DatabaseGateway.MaxClientMessageBytes =
-		settings.DatabaseMaxClientMessageBytes
+	cfg.DatabaseGateway.MaxClientMessageBytes = settings.DatabaseMaxClientMessageBytes
+	cfg.Recording.SSHRedactionEnabled = settings.RecordingSSHRedactionEnabled
+	cfg.DatabaseGateway.AuditRedactionEnabled = settings.DatabaseAuditRedactionEnabled
+	cfg.DatabaseGateway.AuditPreviewBytes = settings.DatabaseAuditPreviewBytes
 }
 
 func newSystemSettingsDiagnostics(

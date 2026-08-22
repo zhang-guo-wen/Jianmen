@@ -1,17 +1,12 @@
 package dbproxy
 
-import (
-	"encoding/binary"
-	"testing"
-)
+import "testing"
 
 const testObserverPendingLimit = 32
 
 func TestObserversRejectOversizedClientFramesPermanently(t *testing.T) {
 	mysqlHeader := []byte{0xff, 0xff, 0xff, 0}
-	postgresHeader := make([]byte, 5)
-	postgresHeader[0] = 'Q'
-	binary.BigEndian.PutUint32(postgresHeader[1:], 128*1024*1024)
+	postgresOversized := buildPostgresQueryWithFrameSize(t, 65)
 
 	tests := []struct {
 		name       string
@@ -26,9 +21,11 @@ func TestObserversRejectOversizedClientFramesPermanently(t *testing.T) {
 			validFrame: buildMySQLPacket(0, append([]byte{0x03}, []byte("select 1")...)),
 		},
 		{
-			name:       "PostgreSQL",
-			observer:   &postgresObserver{sink: &captureSink{}, startupDone: true},
-			oversized:  postgresHeader,
+			name: "PostgreSQL",
+			observer: &postgresObserver{
+				sink: &captureSink{}, startupDone: true, maxClientMessageBytes: 64,
+			},
+			oversized:  postgresOversized,
 			validFrame: postgresMessage('Q', append([]byte("select 1"), 0)),
 		},
 		{

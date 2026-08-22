@@ -292,12 +292,6 @@ func (o *mysqlObserver) handleClientPacket(seq byte, payload []byte) (decision *
 		return statementDecision
 	}
 	prepared := mysqlPreparedStatement{}
-	if cmd == mysqlCommandStmtPrepare {
-		prepared = newMySQLPreparedStatement(
-			string(payload[1:]),
-			o.maxClientMessageBytes,
-		)
-	}
 	if o.sink == nil {
 		if mysqlCommandExpectsResponse(cmd) {
 			o.enqueueMySQLResponse(queryRecord{}, false, cmd)
@@ -305,9 +299,28 @@ func (o *mysqlObserver) handleClientPacket(seq byte, payload []byte) (decision *
 		}
 		return nil
 	}
+	if cmd == mysqlCommandStmtPrepare {
+		audit, err := prepareAndCaptureDatabaseSQLBytes(
+			o.sink,
+			payload[1:],
+			postgresStreamAuditPreviewBytes,
+		)
+		if err != nil {
+			return o.fail(observerErrorAuditFailure, "database full SQL audit recording failed")
+		}
+		prepared.audit = audit
+		prepared.queryKind = classifyQueryKind(audit.text)
+	}
 	switch cmd {
 	case 0x03: // COM_QUERY
-		audit := prepareDatabaseSQLAudit(string(payload[1:]), o.maxClientMessageBytes)
+		audit, err := prepareAndCaptureDatabaseSQLBytes(
+			o.sink,
+			payload[1:],
+			postgresStreamAuditPreviewBytes,
+		)
+		if err != nil {
+			return o.fail(observerErrorAuditFailure, "database full SQL audit recording failed")
+		}
 		if !observerPendingAuditWithinLimit(o.pending, audit, o.maxClientMessageBytes) {
 			return o.fail(observerErrorPendingLimit, "pending MySQL audit text exceeds the configured limit")
 		}
@@ -341,17 +354,58 @@ func (o *mysqlObserver) handleClientPacket(seq byte, payload []byte) (decision *
 		}
 		o.enqueueMySQLResponse(record, true, cmd)
 		o.setLastMySQLPendingPrepared(prepared)
+	case mysqlCommandStmtLongData:
+		if !observerPendingAuditWithinLimit(o.pending, statement.audit, o.maxClientMessageBytes) {
+			return o.fail(observerErrorPendingLimit, "pending MySQL audit text exceeds the configured limit")
+		}
+		stmtID := binary.LittleEndian.Uint32(payload[1:5])
+		parameterArtifact, err := captureDatabaseAuditBytes(
+			o.sink,
+			databaseAuditArtifactParams,
+			payload,
+		)
+		if err != nil {
+			return o.fail(observerErrorAuditFailure, "database long parameter audit recording failed")
+		}
+		record, decision, ok := startPreparedObservedSQLQuery(o.sink, statement.audit, map[string]any{
+			"protocol":                "mysql",
+			"command":                 "COM_STMT_SEND_LONG_DATA",
+			"stmt_id":                 stmtID,
+			"parameter_id":            binary.LittleEndian.Uint16(payload[5:7]),
+			"seq":                     seq,
+			"_parameter_log_offset":   parameterArtifact.offset,
+			"_parameter_log_bytes":    parameterArtifact.bytes,
+			"_parameter_log_redacted": parameterArtifact.redacted,
+		})
+		if !ok {
+			return auditSinkFailureDecision()
+		}
+		if !decision.Allowed {
+			return &decision
+		}
+		o.sink.FinishQuery(record, queryFinish{Status: queryStatusSuccess})
 	case mysqlCommandStmtExecute:
 		if !observerPendingAuditWithinLimit(o.pending, statement.audit, o.maxClientMessageBytes) {
 			return o.fail(observerErrorPendingLimit, "pending MySQL audit text exceeds the configured limit")
 		}
 		stmtID := binary.LittleEndian.Uint32(payload[1:5])
+		parameterArtifact, err := captureDatabaseAuditBytes(
+			o.sink,
+			databaseAuditArtifactParams,
+			payload,
+		)
+		if err != nil {
+			return o.fail(observerErrorAuditFailure, "database parameter audit recording failed")
+		}
 		record, decision, ok := startPreparedObservedSQLQuery(o.sink, statement.audit, map[string]any{
-			"protocol":            "mysql",
-			"command":             "COM_STMT_EXECUTE",
-			"stmt_id":             stmtID,
-			"prepared_query_kind": statement.queryKind,
-			"seq":                 seq,
+			"protocol":                "mysql",
+			"command":                 "COM_STMT_EXECUTE",
+			"stmt_id":                 stmtID,
+			"prepared_query_kind":     statement.queryKind,
+			"seq":                     seq,
+			"_parameter_log_offset":   parameterArtifact.offset,
+			"_parameter_log_bytes":    parameterArtifact.bytes,
+			"_parameter_log_redacted": parameterArtifact.redacted,
 		})
 		if !ok {
 			return auditSinkFailureDecision()

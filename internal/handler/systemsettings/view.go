@@ -21,6 +21,9 @@ type settingsValues struct {
 	RecordingMaxReplayBytes       int64  `json:"recording_max_replay_bytes"`
 	RecordingCleanupBatchSize     int    `json:"recording_cleanup_batch_size"`
 	DatabaseMaxClientMessageBytes int    `json:"database_max_client_message_bytes"`
+	RecordingSSHRedactionEnabled  bool   `json:"recording_ssh_redaction_enabled"`
+	DatabaseAuditRedactionEnabled bool   `json:"database_audit_redaction_enabled"`
+	DatabaseAuditPreviewBytes     int    `json:"database_audit_preview_bytes"`
 }
 
 type updateRequest struct {
@@ -43,6 +46,9 @@ type settingsValuesRequest struct {
 	RecordingMaxReplayBytes       *int64  `json:"recording_max_replay_bytes"`
 	RecordingCleanupBatchSize     *int    `json:"recording_cleanup_batch_size"`
 	DatabaseMaxClientMessageBytes *int    `json:"database_max_client_message_bytes"`
+	RecordingSSHRedactionEnabled  *bool   `json:"recording_ssh_redaction_enabled"`
+	DatabaseAuditRedactionEnabled *bool   `json:"database_audit_redaction_enabled"`
+	DatabaseAuditPreviewBytes     *int    `json:"database_audit_preview_bytes"`
 }
 
 type stateResponse struct {
@@ -136,7 +142,23 @@ func (v settingsValuesRequest) toService() (service.SystemSettings, error) {
 		RecordingMaxReplayBytes:       *v.RecordingMaxReplayBytes,
 		RecordingCleanupBatchSize:     *v.RecordingCleanupBatchSize,
 		DatabaseMaxClientMessageBytes: *v.DatabaseMaxClientMessageBytes,
+		RecordingSSHRedactionEnabled:  valueOrFalse(v.RecordingSSHRedactionEnabled),
+		DatabaseAuditRedactionEnabled: valueOrFalse(v.DatabaseAuditRedactionEnabled),
+		DatabaseAuditPreviewBytes:     valueOrDefault(v.DatabaseAuditPreviewBytes, 65536),
 	}, nil
+}
+
+func valueOrFalse(value *bool) bool {
+	if value == nil {
+		return false
+	}
+	return *value
+}
+func valueOrDefault(value *int, fallback int) int {
+	if value == nil || *value == 0 {
+		return fallback
+	}
+	return *value
 }
 
 func mapValues(value service.SystemSettings) settingsValues {
@@ -154,6 +176,9 @@ func mapValues(value service.SystemSettings) settingsValues {
 		RecordingMaxReplayBytes:       value.RecordingMaxReplayBytes,
 		RecordingCleanupBatchSize:     value.RecordingCleanupBatchSize,
 		DatabaseMaxClientMessageBytes: value.DatabaseMaxClientMessageBytes,
+		RecordingSSHRedactionEnabled:  value.RecordingSSHRedactionEnabled,
+		DatabaseAuditRedactionEnabled: value.DatabaseAuditRedactionEnabled,
+		DatabaseAuditPreviewBytes:     value.DatabaseAuditPreviewBytes,
 	}
 }
 

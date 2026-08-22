@@ -161,7 +161,22 @@ parseCommands:
 			slot.pubSubArgs = append([]string(nil), args...)
 		}
 		if shouldRecordRedisCommand(cmd) && o.sink != nil {
-			record, decision, ok := startObservedQuery(o.sink, auditCommand, map[string]any{
+			previewLimit, redact := databaseAuditPolicy(o.sink, postgresStreamAuditPreviewBytes)
+			audit := prepareDatabaseSQLAudit(auditCommand, previewLimit)
+			artifactData := []byte(auditCommand)
+			if !redact {
+				audit.text, audit.originalBytes, audit.truncated = redisOriginalAuditPreview(args, previewLimit)
+				artifactData = o.buf[:pos]
+			}
+			artifact, err := captureDatabaseAuditBytes(o.sink, databaseAuditArtifactSQL, artifactData)
+			if err != nil {
+				return o.rejectClientBytes(
+					forward,
+					o.fail(observerErrorAuditFailure, "database full Redis audit recording failed"),
+				)
+			}
+			audit.artifact = artifact
+			record, decision, ok := startPreparedObservedSQLQuery(o.sink, audit, map[string]any{
 				"protocol": "redis",
 				"command":  cmd,
 			})

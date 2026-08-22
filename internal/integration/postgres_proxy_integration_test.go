@@ -29,9 +29,12 @@ import (
 )
 
 const (
-	postgresCompatUpstreamUser     = "app"
-	postgresCompatUpstreamPassword = "before\u00a0after"
-	postgresCompatDatabase         = "app"
+	postgresCompatUpstreamUser         = "app"
+	postgresCompatUpstreamPassword     = "before\u00a0after"
+	postgresCompatDatabase             = "app"
+	postgresCompatGatewayMessageBytes  = 13 * 1024 * 1024
+	postgresCompatLargeSQLPayloadBytes = 12 * 1024 * 1024
+	postgresCompatRejectedSQLBytes     = 14 * 1024 * 1024
 )
 
 func TestDatabaseGatewayPostgresCompatibilityMatrix(t *testing.T) {
@@ -90,7 +93,14 @@ func TestDatabaseGatewayPostgresCompatibilityMatrix(t *testing.T) {
 			for _, mode := range databaseGatewayModes() {
 				mode := mode
 				t.Run(mode, func(t *testing.T) {
-					gateway := startDatabaseGateway(t, fixture, mode, "postgresql", testLogger())
+					gateway := startDatabaseGateway(
+						t,
+						fixture,
+						mode,
+						"postgresql",
+						testLogger(),
+						postgresCompatGatewayMessageBytes,
+					)
 					applicationName := "jianmen-compat-pg" + major + "-" + mode
 					dsn := postgresCompatGatewayDSN(
 						gateway,
@@ -100,6 +110,10 @@ func TestDatabaseGatewayPostgresCompatibilityMatrix(t *testing.T) {
 					)
 
 					postgresCompatVerifyDatabaseSQL(t, dsn, major, applicationName)
+					postgresCompatVerifyLargeSQLInsert(t, dsn, major)
+					if major == "16" {
+						postgresCompatVerifyClientLimitError(t, dsn)
+					}
 					postgresCompatVerifySimpleProtocol(t, gateway, compactUsername)
 					postgresCompatVerifyCopy(t, dsn)
 					postgresCompatVerifyContextCancel(t, dsn)
@@ -126,7 +140,7 @@ func TestDatabaseGatewayPostgresCompatibilityMatrix(t *testing.T) {
 					assertDBAuditSQLContains(
 						t,
 						fixture.replayDir,
-						"SELECT [REDACTED] AS audit_probe",
+						"SELECT 42 AS audit_probe",
 					)
 				})
 			}
@@ -254,6 +268,89 @@ func postgresCompatVerifyDatabaseSQL(
 		"SELECT 42 AS audit_probe",
 	).Scan(&auditProbe); err != nil || auditProbe != 42 {
 		t.Fatalf("PostgreSQL %s audit probe = %d, %v", major, auditProbe, err)
+	}
+}
+
+func postgresCompatVerifyLargeSQLInsert(t *testing.T, dsn, major string) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+	database, err := sql.Open("pgx", dsn)
+	if err != nil {
+		t.Fatalf("open PostgreSQL %s large-SQL client: %v", major, err)
+	}
+	database.SetMaxOpenConns(1)
+	database.SetMaxIdleConns(1)
+	defer database.Close()
+
+	if _, err := database.ExecContext(
+		ctx,
+		"CREATE TEMP TABLE postgres_compat_large_sql (payload text NOT NULL)",
+	); err != nil {
+		t.Fatalf("create PostgreSQL %s large-SQL table: %v", major, err)
+	}
+
+	payload := strings.Repeat("x", postgresCompatLargeSQLPayloadBytes)
+	insertSQL := "INSERT INTO postgres_compat_large_sql (payload) VALUES ('" +
+		payload + "' || $1::text)"
+	if len(insertSQL) >= postgresCompatGatewayMessageBytes {
+		t.Fatalf(
+			"PostgreSQL %s large INSERT statement = %d bytes, want below %d-byte gateway limit",
+			major,
+			len(insertSQL),
+			postgresCompatGatewayMessageBytes,
+		)
+	}
+	result, err := database.ExecContext(ctx, insertSQL, "")
+	if err != nil {
+		t.Fatalf("execute PostgreSQL %s %d-byte INSERT through gateway: %v", major, len(insertSQL), err)
+	}
+	rows, err := result.RowsAffected()
+	if err != nil || rows != 1 {
+		t.Fatalf("PostgreSQL %s large INSERT rows = %d, %v", major, rows, err)
+	}
+
+	var storedBytes int
+	if err := database.QueryRowContext(
+		ctx,
+		"SELECT octet_length(payload) FROM postgres_compat_large_sql",
+	).Scan(&storedBytes); err != nil {
+		t.Fatalf("read PostgreSQL %s large INSERT payload size: %v", major, err)
+	}
+	if storedBytes != postgresCompatLargeSQLPayloadBytes {
+		t.Fatalf(
+			"PostgreSQL %s large INSERT payload = %d bytes, want %d",
+			major,
+			storedBytes,
+			postgresCompatLargeSQLPayloadBytes,
+		)
+	}
+}
+
+func postgresCompatVerifyClientLimitError(t *testing.T, dsn string) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+	database, err := sql.Open("pgx", dsn)
+	if err != nil {
+		t.Fatalf("open PostgreSQL client-limit connection: %v", err)
+	}
+	database.SetMaxOpenConns(1)
+	database.SetMaxIdleConns(1)
+	defer database.Close()
+
+	payload := strings.Repeat("x", postgresCompatRejectedSQLBytes)
+	query := "SELECT '" + payload + "' || $1::text"
+	_, err = database.ExecContext(ctx, query, "")
+	var postgresError *pgconn.PgError
+	if !errors.As(err, &postgresError) {
+		t.Fatalf("oversized PostgreSQL query error = %T %v, want protocol error", err, err)
+	}
+	if postgresError.Code != "54000" {
+		t.Fatalf("oversized PostgreSQL SQLSTATE = %q, want 54000: %v", postgresError.Code, err)
+	}
+	if !strings.Contains(postgresError.Message, "configured limit") {
+		t.Fatalf("oversized PostgreSQL error message = %q", postgresError.Message)
 	}
 }
 

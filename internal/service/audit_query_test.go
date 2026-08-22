@@ -232,6 +232,9 @@ func (r *auditQueryTestRepository) ListSSHCommands(context.Context, string, Page
 func (r *auditQueryTestRepository) ListSFTPEvents(context.Context, string, Page) ([]AuditSFTPEvent, int64, error) {
 	return nil, 0, r.err
 }
+func (r *auditQueryTestRepository) GetDBQueryArtifact(context.Context, string, string) (AuditDBQueryArtifact, error) {
+	return AuditDBQueryArtifact{}, ErrAuditArtifactUnavailable
+}
 func (r *auditQueryTestRepository) ListDBQueryPreviews(context.Context, string, AuditDBQueryPreviewParams) ([]AuditDBQueryPreview, int64, error) {
 	return r.queries, int64(len(r.queries)), r.err
 }

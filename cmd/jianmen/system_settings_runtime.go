@@ -1,0 +1,130 @@
+package main
+
+import (
+	"context"
+	"fmt"
+	"strings"
+	"time"
+
+	"jianmen/internal/config"
+	"jianmen/internal/objectstore"
+	"jianmen/internal/service"
+	"jianmen/internal/store"
+)
+
+func bootstrapSystemSettings(
+	ctx context.Context,
+	cfg *config.Config,
+	repository *store.DBStore,
+	prepareEffective ...func(*config.Config) error,
+) (*service.SystemSettingsService, error) {
+	if cfg == nil || repository == nil {
+		return nil, fmt.Errorf("system settings runtime dependencies are required")
+	}
+	if len(prepareEffective) > 1 {
+		return nil, fmt.Errorf("at most one effective configuration preparer is allowed")
+	}
+	settings, err := service.NewSystemSettingsService(
+		repository,
+		cfg.DatabaseGateway.AvailableModes(),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("initialize system settings service: %w", err)
+	}
+	prepared, err := settings.PrepareBootstrap(ctx, systemSettingsFromConfig(cfg))
+	if err != nil {
+		return nil, fmt.Errorf("prepare system settings: %w", err)
+	}
+	projected := *cfg
+	applySystemSettings(&projected, prepared.Settings)
+	if err := projected.Validate(); err != nil {
+		return nil, fmt.Errorf("validate projected system settings: %w", err)
+	}
+	if len(prepareEffective) == 1 && prepareEffective[0] != nil {
+		if err := prepareEffective[0](&projected); err != nil {
+			return nil, fmt.Errorf("prepare effective system settings: %w", err)
+		}
+	}
+	if err := projected.Validate(); err != nil {
+		return nil, fmt.Errorf("validate effective system settings: %w", err)
+	}
+	if _, err := settings.ActivateBootstrap(ctx, prepared); err != nil {
+		return nil, fmt.Errorf("activate system settings: %w", err)
+	}
+	*cfg = projected
+	return settings, nil
+}
+
+func systemSettingsFromConfig(cfg *config.Config) service.SystemSettings {
+	return service.SystemSettings{
+		DatabaseGatewayMode:           cfg.DatabaseGateway.EffectiveMode(),
+		DatabaseGatewayClientTLSMode:  cfg.DatabaseGateway.EffectiveClientTLSMode(),
+		LoginCaptchaEnabled:           cfg.Admin.LoginCaptchaEnabled,
+		WebRDPEnabled:                 cfg.WebRDP.Enabled,
+		WebRDPConnectTimeoutSeconds:   cfg.WebRDP.ConnectTimeoutSecs,
+		WebRDPAllowUnrecorded:         cfg.WebRDP.AllowUnrecorded,
+		RecordingEnabled:              cfg.Recording.Enabled,
+		RecordingRecordInput:          cfg.Recording.RecordInput,
+		RecordingRecordCommands:       cfg.Recording.RecordCommands,
+		RecordingRetentionDays:        cfg.Recording.RetentionDays,
+		RecordingMaxReplayBytes:       cfg.Recording.MaxReplayBytes,
+		RecordingCleanupBatchSize:     cfg.Recording.CleanupBatchSize,
+		DatabaseMaxClientMessageBytes: cfg.DatabaseGateway.MaxClientMessageBytes,
+		RecordingSSHRedactionEnabled:  cfg.Recording.SSHRedactionEnabled,
+		DatabaseAuditRedactionEnabled: cfg.DatabaseGateway.AuditRedactionEnabled,
+		DatabaseAuditPreviewBytes:     cfg.DatabaseGateway.AuditPreviewBytes,
+	}
+}
+
+func applySystemSettings(cfg *config.Config, settings service.SystemSettings) {
+	cfg.DatabaseGateway.Mode = settings.DatabaseGatewayMode
+	cfg.DatabaseGateway.ClientTLSMode = settings.DatabaseGatewayClientTLSMode
+	cfg.Admin.LoginCaptchaEnabled = settings.LoginCaptchaEnabled
+	cfg.WebRDP.Enabled = settings.WebRDPEnabled
+	cfg.WebRDP.ConnectTimeoutSecs = settings.WebRDPConnectTimeoutSeconds
+	cfg.WebRDP.AllowUnrecorded = settings.WebRDPAllowUnrecorded
+	cfg.Recording.Enabled = settings.RecordingEnabled
+	cfg.Recording.RecordInput = settings.RecordingRecordInput
+	cfg.Recording.RecordCommands = settings.RecordingRecordCommands
+	cfg.Recording.RetentionDays = settings.RecordingRetentionDays
+	cfg.Recording.MaxReplayBytes = settings.RecordingMaxReplayBytes
+	cfg.Recording.CleanupBatchSize = settings.RecordingCleanupBatchSize
+	cfg.DatabaseGateway.MaxClientMessageBytes = settings.DatabaseMaxClientMessageBytes
+	cfg.Recording.SSHRedactionEnabled = settings.RecordingSSHRedactionEnabled
+	cfg.DatabaseGateway.AuditRedactionEnabled = settings.DatabaseAuditRedactionEnabled
+	cfg.DatabaseGateway.AuditPreviewBytes = settings.DatabaseAuditPreviewBytes
+}
+
+func newSystemSettingsDiagnostics(
+	cfg *config.Config,
+	objects objectstore.Store,
+) (*service.SystemSettingsDiagnosticService, error) {
+	infrastructure := service.SystemSettingsRuntimeInfrastructure{
+		GuacdAddress:       cfg.WebRDP.GuacdAddress,
+		SpoolDir:           cfg.WebRDP.SpoolDir,
+		GuacdRecordingRoot: cfg.WebRDP.GuacdRecordingRoot,
+		LocalDriveRoot:     cfg.WebRDP.LocalDriveRoot,
+		GuacdDriveRoot:     cfg.WebRDP.GuacdDriveRoot,
+		ReplayDir:          cfg.ReplayDir,
+		ObjectStorage: service.SystemSettingsObjectStorageInfrastructure{
+			Provider: cfg.ObjectStorage.Provider, LocalDir: cfg.ObjectStorage.LocalDir,
+			Endpoint: cfg.ObjectStorage.Endpoint, Bucket: cfg.ObjectStorage.Bucket,
+			Region: cfg.ObjectStorage.Region, Prefix: cfg.ObjectStorage.Prefix,
+			Secure: cfg.ObjectStorage.Secure, PathStyle: cfg.ObjectStorage.PathStyle,
+			AutoCreateBucket:          cfg.ObjectStorage.AutoCreateBucket,
+			AccessKeyIDConfigured:     strings.TrimSpace(cfg.ObjectStorage.AccessKeyID) != "",
+			SecretAccessKeyConfigured: strings.TrimSpace(cfg.ObjectStorage.SecretAccessKey) != "",
+			SessionTokenConfigured:    strings.TrimSpace(cfg.ObjectStorage.SessionToken) != "",
+		},
+	}
+	timeout := time.Duration(cfg.WebRDP.ConnectTimeoutSecs) * time.Second
+	diagnostics, err := service.NewSystemSettingsDiagnosticService(
+		infrastructure,
+		objects,
+		timeout,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("initialize system settings diagnostics: %w", err)
+	}
+	return diagnostics, nil
+}

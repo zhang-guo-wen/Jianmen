@@ -1,0 +1,2737 @@
+<template>
+  <div class="view-stack audit-view">
+    <el-tabs v-model="auditScope" class="page-tabs" @tab-change="loadAuditScope">
+      <el-tab-pane v-if="permission.canDo('audit:view')" :label="t('audit.scope.ssh')" name="ssh">
+        <el-alert v-if="sessionError" :title="sessionError" type="error" show-icon style="margin-bottom: 12px" />
+        <div class="page-container">
+          <DataTableCard
+            :data="sessions"
+            :loading="sessionsLoading"
+            :total="sessionTotal"
+            v-model:page="sessionPage"
+            v-model:page-size="sessionPageSize"
+            v-model:search="sessionKeyword"
+            search-placeholder="搜索会话…"
+            @search="onSessionSearch"
+          >
+            <template #toolbar-extra>
+              <el-button :loading="sessionsLoading" :icon="Refresh" @click="loadSessions">{{ t('common.refresh') }}</el-button>
+            </template>
+            <el-table-column v-bind="TABLE_COLUMNS.time" :label="t('audit.column.startedAt')" class-name="col-time">
+              <template #default="{ row }">
+                {{ formatTime(row.started_at) }}
+              </template>
+            </el-table-column>
+            <el-table-column :label="t('audit.column.operator')" min-width="130" show-overflow-tooltip>
+              <template #default="{ row }">
+                {{ sessionUser(row) }}
+              </template>
+            </el-table-column>
+            <el-table-column v-bind="TABLE_COLUMNS.identifier" :label="t('audit.column.authSessionId')">
+              <template #default="{ row }">
+                <AuditSessionLink v-if="row.session_id" :session-id="row.session_id" @open="showUserSessionDetail" />
+                <span v-else class="session-id-fallback" :title="row.id">{{ row.id.slice(0, 8) }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column v-bind="TABLE_COLUMNS.address" :label="t('audit.column.targetHost')">
+              <template #default="{ row }">
+                {{ sessionInstance(row) }}
+              </template>
+            </el-table-column>
+            <el-table-column :label="t('audit.column.hostAccount')" min-width="130" show-overflow-tooltip>
+              <template #default="{ row }">
+                {{ sessionAccount(row) }}
+              </template>
+            </el-table-column>
+            <el-table-column v-bind="TABLE_COLUMNS.address" :label="t('audit.column.sourceIp')">
+              <template #default="{ row }">{{ row.client_ip || '-' }}</template>
+            </el-table-column>
+            <el-table-column :label="t('audit.column.protocol')" width="90">
+              <template #default="{ row }">
+                <el-tag :type="sessionProtocolTag(row)" size="small" effect="plain">{{ sessionProtocol(row) }}</el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column v-bind="TABLE_COLUMNS.status" :label="t('audit.column.result')">
+              <template #default="{ row }">
+                <AuditResultTag
+                  :label="connectionOutcomeLabel(row.outcome, row.state)"
+                  :type="connectionOutcomeTag(row.outcome, row.state)"
+                  :detail="auditFailureDetail(row.failure_code, row.failure_message)"
+                />
+              </template>
+            </el-table-column>
+            <el-table-column v-bind="TABLE_COLUMNS.number" :label="t('audit.column.duration')">
+              <template #default="{ row }">
+                {{ formatDurationSeconds(computeDuration(row.started_at, row.ended_at)) }}
+              </template>
+            </el-table-column>
+            <el-table-column v-bind="TABLE_COLUMNS.number" :label="t('audit.column.eventCount')">
+              <template #default="{ row }">{{ row.log_count ?? 0 }}</template>
+            </el-table-column>
+            <el-table-column v-bind="TABLE_COLUMNS.actions" :label="t('common.actions')">
+              <template #default="{ row }">
+                <el-button :disabled="!hasReplay(row)" link type="success" @click="loadSessionArtifact(row, 'replay')">
+                  {{ t('audit.action.replay') }}
+                </el-button>
+                <el-button link type="primary" @click="loadSessionLog(row)">
+                  {{ t('audit.action.log') }}
+                </el-button>
+              </template>
+            </el-table-column>
+          </DataTableCard>
+        </div>
+      </el-tab-pane>
+      <el-tab-pane v-if="canAccessRDPTab" :label="t('audit.scope.rdp')" name="rdp">
+        <el-alert v-if="rdpError" :title="rdpError" type="error" show-icon style="margin-bottom: 12px" />
+        <div class="page-container">
+          <DataTableCard
+            :data="rdpSessions"
+            :loading="rdpLoading"
+            :total="rdpTotal"
+            v-model:page="rdpPage"
+            v-model:page-size="rdpPageSize"
+            v-model:search="rdpKeyword"
+            search-placeholder="搜索 RDP 会话…"
+            @search="onRDPSearch"
+          >
+            <template #toolbar-extra>
+              <el-button :loading="rdpLoading" :icon="Refresh" @click="loadRDPSessions">
+                {{ t('common.refresh') }}
+              </el-button>
+            </template>
+            <el-table-column v-bind="TABLE_COLUMNS.time" :label="t('audit.column.startedAt')" class-name="col-time">
+              <template #default="{ row }">{{ formatTime(row.started_at) }}</template>
+            </el-table-column>
+            <el-table-column :label="t('audit.column.operator')" min-width="130" show-overflow-tooltip>
+              <template #default="{ row }">{{ row.display_name || row.username || '-' }}</template>
+            </el-table-column>
+            <el-table-column v-bind="TABLE_COLUMNS.identifier" :label="t('audit.column.authSessionId')">
+              <template #default="{ row }">
+                <AuditSessionLink v-if="row.session_id" :session-id="row.session_id" @open="showUserSessionDetail" />
+                <span v-else class="session-id-fallback" :title="row.id">{{ row.id.slice(0, 8) }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column v-bind="TABLE_COLUMNS.address" :label="t('audit.column.targetHost')">
+              <template #default="{ row }">{{ rdpSessionTarget(row) }}</template>
+            </el-table-column>
+            <el-table-column :label="t('audit.column.hostAccount')" min-width="150" show-overflow-tooltip>
+              <template #default="{ row }">{{ rdpSessionAccount(row) }}</template>
+            </el-table-column>
+            <el-table-column v-bind="TABLE_COLUMNS.address" :label="t('audit.column.sourceIp')">
+              <template #default="{ row }">{{ row.client_ip || '-' }}</template>
+            </el-table-column>
+            <el-table-column v-bind="TABLE_COLUMNS.status" :label="t('audit.column.result')">
+              <template #default="{ row }">
+                <AuditResultTag
+                  :label="connectionOutcomeLabel(row.outcome, row.state)"
+                  :type="connectionOutcomeTag(row.outcome, row.state)"
+                  :detail="auditFailureDetail(row.failure_code, row.failure_message)"
+                />
+              </template>
+            </el-table-column>
+            <el-table-column v-bind="TABLE_COLUMNS.number" :label="t('audit.column.duration')">
+              <template #default="{ row }">
+                {{ formatDurationSeconds(computeDuration(row.started_at, row.ended_at)) }}
+              </template>
+            </el-table-column>
+            <el-table-column v-bind="TABLE_COLUMNS.status" :label="t('audit.column.recordingStatus')">
+              <template #default="{ row }">
+                <el-tag :type="rdpRecordingTag(row.recording_status)" size="small" effect="plain">
+                  {{ rdpRecordingLabel(row.recording_status) }}
+                </el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column v-bind="TABLE_COLUMNS.actionsCompact" :label="t('common.actions')">
+              <template #default="{ row }">
+                <el-button
+                  :disabled="!row.has_replay"
+                  link
+                  type="success"
+                  @click="openRDPReplay(row)"
+                >
+                  回放
+                </el-button>
+              </template>
+            </el-table-column>
+          </DataTableCard>
+        </div>
+      </el-tab-pane>
+      <el-tab-pane v-if="permission.canDo('db:audit:view')" :label="t('audit.scope.db')" name="db">
+        <el-alert v-if="dbError" :title="dbError" type="warning" show-icon style="margin-bottom: 12px" />
+        <div class="page-container">
+          <DataTableCard
+            :data="dbConnections"
+            :loading="dbLoading"
+            :total="dbTotal"
+            v-model:page="dbPage"
+            v-model:page-size="dbPageSize"
+            v-model:search="dbKeyword"
+            search-placeholder="搜索数据库连接…"
+            @search="onDBSearch"
+          >
+            <template #toolbar-extra>
+              <el-button :loading="dbLoading" :icon="Refresh" @click="loadDBConnections">{{ t('common.refresh') }}</el-button>
+            </template>
+            <el-table-column v-bind="TABLE_COLUMNS.time" :label="t('audit.column.startedAt')" class-name="col-time">
+              <template #default="{ row }">
+                {{ formatTime(row.started_at) }}
+              </template>
+            </el-table-column>
+            <el-table-column :label="t('audit.column.operator')" min-width="130" show-overflow-tooltip>
+              <template #default="{ row }">
+                {{ row.username || row.user_id || '-' }}
+              </template>
+            </el-table-column>
+            <el-table-column v-bind="TABLE_COLUMNS.identifier" :label="t('audit.column.authSessionId')">
+              <template #default="{ row }">
+                <AuditSessionLink v-if="row.session_id" :session-id="row.session_id" @open="showUserSessionDetail" />
+                <span v-else class="session-id-fallback" :title="row.id">{{ row.id.slice(0, 8) }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column v-bind="TABLE_COLUMNS.address" :label="t('audit.column.databaseInstance')">
+              <template #default="{ row }">{{ displayAuditIdentity(row.target_address, row.target_name) }}</template>
+            </el-table-column>
+            <el-table-column :label="t('audit.column.databaseAccount')" min-width="130" show-overflow-tooltip>
+              <template #default="{ row }">{{ displayAuditIdentity(row.account_username, row.account_name) }}</template>
+            </el-table-column>
+            <el-table-column v-bind="TABLE_COLUMNS.address" :label="t('audit.column.sourceIp')">
+              <template #default="{ row }">{{ row.client_ip || '-' }}</template>
+            </el-table-column>
+            <el-table-column :label="t('audit.column.protocol')" width="110">
+              <template #default="{ row }">
+                <el-tag :type="databaseProtocolTag(row.protocol)" size="small" effect="plain">
+                  {{ formatDatabaseProtocol(row.protocol) }}
+                </el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column v-bind="TABLE_COLUMNS.status" :label="t('audit.column.result')">
+              <template #default="{ row }">
+                <AuditResultTag
+                  :label="connectionOutcomeLabel(row.outcome, row.state)"
+                  :type="connectionOutcomeTag(row.outcome, row.state)"
+                  :detail="auditFailureDetail(row.failure_code, row.failure_message)"
+                />
+              </template>
+            </el-table-column>
+            <el-table-column v-bind="TABLE_COLUMNS.number" :label="t('audit.column.duration')">
+              <template #default="{ row }">
+                {{ formatDuration(computeDurationMs(row.started_at, row.ended_at)) }}
+              </template>
+            </el-table-column>
+            <el-table-column v-bind="TABLE_COLUMNS.number" :label="t('audit.column.sqlCount')">
+              <template #default="{ row }">{{ row.log_count ?? 0 }}</template>
+            </el-table-column>
+            <el-table-column v-bind="TABLE_COLUMNS.actionsCompact" :label="t('common.actions')">
+              <template #default="{ row }">
+                <el-button link type="primary" @click="loadDBArtifact(row, 'queries')">
+                  {{ t('audit.action.queries') }}
+                </el-button>
+              </template>
+            </el-table-column>
+          </DataTableCard>
+        </div>
+      </el-tab-pane>
+      <el-tab-pane v-if="permission.canDo('session:view')" :label="t('audit.scope.online')" name="online">
+        <el-alert v-if="onlineError" :title="onlineError" type="warning" show-icon style="margin-bottom: 12px" />
+        <div class="page-container">
+          <DataTableCard
+            :data="onlineSessions"
+            :loading="onlineLoading"
+            :total="onlineTotal"
+            v-model:page="onlinePage"
+            v-model:page-size="onlinePageSize"
+            v-model:search="onlineKeyword"
+            :search-placeholder="t('audit.search.online')"
+            @search="onOnlineSearch"
+          >
+            <template #toolbar-extra>
+              <el-button :loading="onlineLoading" :icon="Refresh" @click="loadOnlineSessions">{{ t('common.refresh') }}</el-button>
+            </template>
+            <el-table-column v-bind="TABLE_COLUMNS.time" :label="t('audit.column.startedAt')" class-name="col-time">
+              <template #default="{ row }">{{ formatTime(row.started_at) }}</template>
+            </el-table-column>
+            <el-table-column :label="t('audit.column.operator')" min-width="120" show-overflow-tooltip>
+              <template #default="{ row }">{{ row.operator || '-' }}</template>
+            </el-table-column>
+            <el-table-column v-bind="TABLE_COLUMNS.identifier" :label="t('audit.column.authSessionId')">
+              <template #default="{ row }">
+                <AuditSessionLink v-if="row.session_id" :session-id="row.session_id" @open="showUserSessionDetail" />
+                <span v-else class="session-id-fallback" :title="row.id">{{ row.id.slice(0, 8) }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column v-bind="TABLE_COLUMNS.address" :label="t('audit.column.targetResource')">
+              <template #default="{ row }">{{ row.instance || '-' }}</template>
+            </el-table-column>
+            <el-table-column :label="t('audit.column.protocol')" width="110">
+              <template #default="{ row }">
+                <el-tag :type="onlineProtocolTag(row)" size="small" effect="plain">
+                  {{ onlineProtocol(row) }}
+                </el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column :label="t('audit.column.loginAccount')" min-width="140" show-overflow-tooltip>
+              <template #default="{ row }">{{ row.account || '-' }}</template>
+            </el-table-column>
+            <el-table-column v-bind="TABLE_COLUMNS.actionsWide" :label="t('common.actions')">
+              <template #default="{ row }">
+                <el-button :disabled="!row.has_replay" link type="success" @click="loadOnlineReplay(row)">
+                  {{ t('audit.action.replay') }}
+                </el-button>
+                <el-button link type="primary" @click="loadOnlineLog(row)">
+                  {{ t('audit.action.log') }}
+                </el-button>
+                <el-button
+                  v-if="permission.canDo('session:disconnect')"
+                  :loading="disconnectingSessionID === row.id"
+                  link
+                  type="danger"
+                  @click="disconnectOnlineSession(row)"
+                >
+                  {{ t('audit.action.disconnect') }}
+                </el-button>
+              </template>
+            </el-table-column>
+          </DataTableCard>
+        </div>
+      </el-tab-pane>
+      <el-tab-pane v-if="permission.canDo('audit:view')" :label="t('audit.scope.logins')" name="logins">
+        <el-alert v-if="loginAuditError" :title="loginAuditError" type="error" show-icon style="margin-bottom: 12px" />
+        <div class="page-container">
+          <DataTableCard
+            :data="loginAuditLogs"
+            :loading="loginAuditLoading"
+            :total="loginAuditTotal"
+            v-model:page="loginAuditPage"
+            v-model:page-size="loginAuditPageSize"
+            v-model:search="loginAuditKeyword"
+            :search-placeholder="t('audit.search.logins')"
+            @search="onLoginAuditSearch"
+          >
+            <template #toolbar-extra>
+              <el-select v-model="loginAuditOutcome" size="small" style="width: 110px" @change="onLoginAuditOutcomeChange">
+                <el-option :label="t('audit.filter.all')" value="" />
+                <el-option :label="t('audit.result.success')" value="success" />
+                <el-option :label="t('audit.result.failure')" value="failure" />
+                <el-option :label="t('audit.result.blocked')" value="blocked" />
+              </el-select>
+              <el-button :loading="loginAuditLoading" :icon="Refresh" @click="loadLoginAuditLogs">{{ t('common.refresh') }}</el-button>
+            </template>
+            <el-table-column v-bind="TABLE_COLUMNS.time" :label="t('audit.column.loginTime')" class-name="col-time">
+              <template #default="{ row }">{{ formatTime(row.created_at) }}</template>
+            </el-table-column>
+            <el-table-column prop="username" :label="t('audit.column.loginAccount')" min-width="140" show-overflow-tooltip />
+            <el-table-column v-bind="TABLE_COLUMNS.address" prop="client_ip" :label="t('audit.column.sourceIp')" />
+            <el-table-column v-bind="TABLE_COLUMNS.status" :label="t('audit.column.loginResult')">
+              <template #default="{ row }">
+                <el-tag :type="loginOutcomeTag(row.result || row.outcome)" size="small" effect="plain">
+                  {{ loginOutcomeLabel(row.result || row.outcome) }}
+                </el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column v-bind="TABLE_COLUMNS.note" prop="reason" :label="t('audit.column.resultDetail')">
+              <template #default="{ row }">{{ loginReasonForDisplay(row.reason) || '-' }}</template>
+            </el-table-column>
+            <el-table-column prop="user_agent" :label="t('audit.column.clientEnvironment')" min-width="240" show-overflow-tooltip />
+          </DataTableCard>
+        </div>
+      </el-tab-pane>
+      <el-tab-pane v-if="permission.canDo('audit:view')" :label="t('audit.scope.operations')" name="operations">
+        <el-alert v-if="operationAuditError" :title="operationAuditError" type="error" show-icon style="margin-bottom: 12px" />
+        <div class="page-container">
+          <DataTableCard
+            :data="operationAuditLogs"
+            :loading="operationAuditLoading"
+            :total="operationAuditTotal"
+            v-model:page="operationAuditPage"
+            v-model:page-size="operationAuditPageSize"
+            v-model:search="operationAuditKeyword"
+            :search-placeholder="t('audit.search.operations')"
+            @search="onOperationAuditSearch"
+          >
+            <template #toolbar-extra>
+              <el-select v-model="operationAuditAction" size="small" style="width: 110px" @change="onOperationAuditActionChange">
+                <el-option :label="t('audit.filter.all')" value="" />
+                <el-option :label="t('audit.action.create')" value="create" />
+                <el-option :label="t('audit.action.update')" value="update" />
+                <el-option :label="t('audit.action.delete')" value="delete" />
+                <el-option :label="t('audit.action.revoke')" value="revoke" />
+                <el-option :label="t('audit.action.test')" value="test" />
+                <el-option :label="t('audit.action.refresh')" value="refresh" />
+              </el-select>
+              <el-button :loading="operationAuditLoading" :icon="Refresh" @click="loadOperationAuditLogs">{{ t('common.refresh') }}</el-button>
+            </template>
+            <el-table-column v-bind="TABLE_COLUMNS.time" :label="t('audit.column.operationTime')" class-name="col-time">
+              <template #default="{ row }">{{ formatTime(row.created_at) }}</template>
+            </el-table-column>
+            <el-table-column :label="t('audit.column.operator')" width="130" show-overflow-tooltip>
+              <template #default="{ row }">{{ row.actor_display_name || row.actor_username || '-' }}</template>
+            </el-table-column>
+            <el-table-column :label="t('audit.column.operationType')" width="100">
+              <template #default="{ row }">{{ operationActionLabel(row.action) }}</template>
+            </el-table-column>
+            <el-table-column prop="resource_type" :label="t('audit.column.resourceType')" min-width="150" show-overflow-tooltip />
+            <el-table-column :label="t('audit.column.operationTarget')" min-width="170" show-overflow-tooltip>
+              <template #default="{ row }">
+                {{ displayAuditIdentity(row.resource_id, row.resource_name) }}
+              </template>
+            </el-table-column>
+            <el-table-column v-bind="TABLE_COLUMNS.address" prop="client_ip" :label="t('audit.column.sourceIp')" />
+            <el-table-column v-bind="TABLE_COLUMNS.note" :label="t('audit.column.requestId')">
+              <template #default="{ row }">{{ operationRequestID(row) }}</template>
+            </el-table-column>
+            <el-table-column v-bind="TABLE_COLUMNS.number" :label="t('audit.column.httpStatus')">
+              <template #default="{ row }">{{ operationStatusCode(row) }}</template>
+            </el-table-column>
+            <el-table-column v-bind="TABLE_COLUMNS.status" :label="t('audit.column.result')">
+              <template #default="{ row }">
+                <el-tag :type="operationResultTag(row)" size="small" effect="plain">{{ operationResultLabel(row) }}</el-tag>
+              </template>
+            </el-table-column>
+          </DataTableCard>
+        </div>
+      </el-tab-pane>
+    </el-tabs>
+
+    <el-drawer
+      v-model="drawerVisible"
+      direction="rtl"
+      size="65%"
+      @close="closeDetail"
+    >
+      <template #title>
+        <div class="toolbar">
+          <span>{{ detailTitle || t('audit.title.detail') }}</span>
+          <el-tag v-if="detailKind">{{ detailKind === 'queries' ? t('audit.action.queries') : detailKind }}</el-tag>
+        </div>
+      </template>
+      <el-alert v-if="detailError" :title="detailError" type="error" show-icon />
+      <div v-else v-loading="detailLoading" class="drawer-content">
+        <el-descriptions v-if="isDBMeta" :column="2" border>
+          <el-descriptions-item :label="t('common.id')">{{ dbMeta.id || t('common.none') }}</el-descriptions-item>
+          <el-descriptions-item :label="t('audit.column.databaseInstance')">
+            {{ displayAuditIdentity(dbMeta.target_address, dbMeta.target_name) }}
+          </el-descriptions-item>
+          <el-descriptions-item :label="t('audit.column.protocol')">
+            {{ dbMeta.protocol || t('common.none') }}
+          </el-descriptions-item>
+          <el-descriptions-item :label="t('audit.column.operator')">
+            {{ dbMeta.username || t('common.none') }}
+          </el-descriptions-item>
+          <el-descriptions-item :label="t('audit.column.databaseAccount')">
+            {{ displayAuditIdentity(dbMeta.account_username, dbMeta.account_name) }}
+          </el-descriptions-item>
+          <el-descriptions-item :label="t('audit.column.sourceIp')">
+            {{ dbMeta.client_ip || t('common.none') }}
+          </el-descriptions-item>
+          <el-descriptions-item :label="t('audit.column.startedAt')">
+            {{ formatTime(dbMeta.started_at) }}
+          </el-descriptions-item>
+          <el-descriptions-item :label="t('audit.column.result')">
+            <AuditResultTag
+              :label="connectionOutcomeLabel(dbMeta.outcome, dbMeta.state)"
+              :type="connectionOutcomeTag(dbMeta.outcome, dbMeta.state)"
+              :detail="auditFailureDetail(dbMeta.failure_code, dbMeta.failure_message)"
+            />
+          </el-descriptions-item>
+          <el-descriptions-item :label="t('audit.status')">
+            {{ dbMeta.state || t('common.none') }}
+          </el-descriptions-item>
+          <el-descriptions-item :label="t('audit.column.resultDetail')" :span="2">
+            {{ dbMeta.failure_message || dbMeta.failure_code || t('common.none') }}
+          </el-descriptions-item>
+        </el-descriptions>
+
+        <div v-else-if="isReplay" class="replay-panel">
+          <div class="replay-controls">
+            <div class="replay-meta">
+              <span>{{ formatReplayDuration(replayCurrentTime) }}</span>
+              <el-slider
+                v-model="replaySeekPercent"
+                :max="100"
+                :show-tooltip="false"
+                :disabled="!replayFrames.length"
+                size="small"
+                @change="seekReplay"
+              />
+              <span>{{ formatReplayDuration(replayDuration) }}</span>
+            </div>
+            <div class="replay-actions">
+              <el-button :disabled="!replayOutputFrames.length" type="primary" size="small" @click="playReplay">
+                {{ replayPlaying ? t('audit.action.restart') : t('audit.action.play') }}
+              </el-button>
+              <el-button :disabled="!replayPlaying" size="small" @click="stopReplay">
+                {{ t('audit.action.stop') }}
+              </el-button>
+              <el-select
+                v-model="playbackSpeed"
+                size="small"
+                :disabled="replayPlaying"
+                style="width: 64px"
+              >
+                <el-option
+                  v-for="s in speedOptions"
+                  :key="s"
+                  :label="`${s}x`"
+                  :value="s"
+                />
+              </el-select>
+            </div>
+          </div>
+          <div class="replay-meta-secondary">
+            <span>{{ t('audit.replay.frames') }} {{ replayFrames.length }}</span>
+            <span>{{ t('audit.replay.outputFrames') }} {{ replayOutputFrames.length }}</span>
+            <span>{{ t('audit.replay.size') }} {{ formatBytes(replayRawBytes) }}</span>
+          </div>
+          <div class="replay-terminal-shell">
+            <div ref="replayTerminalHostRef" class="replay-terminal" />
+            <div v-if="replayTerminalMessage" class="replay-terminal-empty">
+              {{ replayTerminalMessage }}
+            </div>
+          </div>
+        </div>
+
+        <DataTableCard
+          v-else-if="isDBQueries"
+          :key="`queries-${logSearchVersion}`"
+          :data="mergedQueryEvents"
+          :total="dbQueryTotal"
+          :loading="detailLoading"
+          row-key="seq"
+          :search-placeholder="t('audit.search.sqlLog')"
+          v-model:page="logPage"
+          v-model:page-size="logPageSize"
+          @search="onLogSearch"
+        >
+          <el-table-column v-bind="TABLE_COLUMNS.time" :label="t('audit.column.time')" class-name="col-time">
+            <template #default="{ row }">
+              {{ formatTime(row.started_at) }}
+            </template>
+          </el-table-column>
+          <el-table-column :label="t('audit.column.sql')" min-width="420">
+            <template #default="{ row }">
+              <div class="query-sql-cell">
+                <span class="query-sql-cell__text" :title="row.sql">{{ row.sql }}</span>
+                <el-tag v-if="row.sql_truncated" type="warning" size="small" effect="plain">
+                  {{ t('audit.query.truncated') }} {{ formatBytes(row.sql_original_bytes) }}
+                </el-tag>
+                <el-button
+                  v-if="row.sql"
+                  class="query-sql-cell__copy"
+                  link
+                  size="small"
+                  @click.stop="copyQuerySQL(row.sql)"
+                >
+                  {{ t('audit.query.copyPreview') }}
+                </el-button>
+              </div>
+            </template>
+          </el-table-column>
+          <el-table-column v-bind="TABLE_COLUMNS.number" :label="t('audit.column.rowCount')">
+            <template #default="{ row }">
+              {{ formatQueryRowCount(row) }}
+            </template>
+          </el-table-column>
+          <el-table-column v-bind="TABLE_COLUMNS.number" :label="t('audit.column.duration')">
+            <template #default="{ row }">
+              {{ formatDuration(row.duration_ms) }}
+            </template>
+          </el-table-column>
+          <el-table-column v-bind="TABLE_COLUMNS.status" :label="t('audit.column.result')">
+            <template #default="{ row }">
+              <AuditResultTag
+                :label="queryStatusLabel(row.status)"
+                :type="queryStatusType(row.status)"
+                :detail="auditFailureDetail(row.error_code, row.error_message)"
+              />
+            </template>
+          </el-table-column>
+          <el-table-column v-bind="TABLE_COLUMNS.actionsCompact" :label="t('common.actions')">
+            <template #default="{ row }">
+              <el-button
+                link
+                type="primary"
+                :disabled="!row.query_id || !row.has_full_log"
+                @click="openDBQueryDetail(row)"
+              >
+                {{ t('audit.action.viewDetail') }}
+              </el-button>
+            </template>
+          </el-table-column>
+        </DataTableCard>
+
+        <DataTableCard
+          v-else-if="isCommands"
+          :key="`commands-${logSearchVersion}`"
+          :data="pagedCommandEvents"
+          :total="filteredCommandEvents.length"
+          :search-placeholder="t('audit.search.commandLog')"
+          v-model:page="logPage"
+          v-model:page-size="logPageSize"
+          @search="onLogSearch"
+        >
+          <el-table-column v-bind="TABLE_COLUMNS.time" :label="t('audit.column.time')" class-name="col-time">
+            <template #default="{ row }">
+              {{ formatTime(row.timestamp ?? row.started_at) }}
+            </template>
+          </el-table-column>
+          <el-table-column prop="command" :label="t('audit.column.command')" min-width="280" show-overflow-tooltip />
+          <el-table-column prop="output" :label="t('audit.column.output')" min-width="280" show-overflow-tooltip />
+          <el-table-column v-bind="TABLE_COLUMNS.actionsCompact" :label="t('common.actions')">
+            <template #default="{ row }">
+              <el-button
+                link
+                type="primary"
+                :disabled="!row.seq"
+                @click="openSSHCommandDetail(row)"
+              >
+                {{ t('audit.action.viewDetail') }}
+              </el-button>
+            </template>
+          </el-table-column>
+        </DataTableCard>
+
+        <DataTableCard
+          v-else-if="isFiles"
+          :data="pagedFileEvents"
+          :total="fileEvents.length"
+          :show-search="false"
+          v-model:page="logPage"
+          v-model:page-size="logPageSize"
+        >
+          <el-table-column v-bind="TABLE_COLUMNS.time" :label="t('audit.column.time')" class-name="col-time">
+            <template #default="{ row }">
+              {{ formatTime(row.timestamp ?? row.started_at) }}
+            </template>
+          </el-table-column>
+          <el-table-column :label="t('audit.column.action')" width="80">
+            <template #default="{ row }">
+              {{ formatFileAction(row.action) }}
+            </template>
+          </el-table-column>
+          <el-table-column prop="path" :label="t('audit.column.path')" min-width="420" show-overflow-tooltip />
+          <el-table-column v-bind="TABLE_COLUMNS.status" :label="t('audit.column.result')">
+            <template #default="{ row }">
+              <el-tag :type="row.result === 'success' ? 'success' : 'danger'" size="small">
+                {{ row.result === 'success' ? t('audit.result.success') : t('audit.result.failure') }}
+              </el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column v-bind="TABLE_COLUMNS.number" :label="t('audit.column.size')">
+            <template #default="{ row }">
+              <template v-if="row.size > 0">{{ formatBytes(row.size) }}</template>
+            </template>
+          </el-table-column>
+        </DataTableCard>
+
+        <el-empty v-else :description="t('audit.empty.detail')" />
+      </div>
+    </el-drawer>
+
+    <el-dialog
+      v-model="auditLogDetailVisible"
+      :title="auditLogDetailTitle"
+      width="min(1080px, calc(100vw - 32px))"
+      destroy-on-close
+    >
+      <el-alert
+        v-if="auditLogDetailError"
+        :title="auditLogDetailError"
+        type="error"
+        show-icon
+        style="margin-bottom: 12px"
+      />
+      <div v-loading="auditLogDetailLoading" class="audit-log-detail">
+        <el-descriptions v-if="auditLogDetail" :column="3" border>
+          <el-descriptions-item :label="t('audit.detail.storageMode')">
+            {{ auditLogDetail.redacted ? t('audit.detail.redacted') : t('audit.detail.original') }}
+          </el-descriptions-item>
+          <el-descriptions-item :label="t('audit.detail.sqlBytes')">
+            {{ formatBytes(auditLogDetail.sqlBytes) }}
+          </el-descriptions-item>
+          <el-descriptions-item :label="t('audit.detail.outputBytes')">
+            {{ formatBytes(auditLogDetail.outputBytes) }}
+          </el-descriptions-item>
+        </el-descriptions>
+
+        <section v-if="auditLogDetail?.command" class="audit-log-detail__section">
+          <div class="audit-log-detail__heading">{{ t('audit.column.command') }}</div>
+          <pre>{{ auditLogDetail.command }}</pre>
+        </section>
+        <section v-if="auditLogDetail?.sql" class="audit-log-detail__section">
+          <div class="audit-log-detail__heading">
+            <span>{{ t('audit.column.sql') }}</span>
+            <el-button link type="primary" @click="copyAuditLogDetail(auditLogDetail.sql)">
+              {{ t('audit.detail.copy') }}
+            </el-button>
+          </div>
+          <pre>{{ auditLogDetail.sql }}</pre>
+        </section>
+        <section v-if="auditLogDetail?.parameters" class="audit-log-detail__section">
+          <div class="audit-log-detail__heading">
+            <span>{{ t('audit.detail.parameters') }}</span>
+            <el-button link type="primary" @click="copyAuditLogDetail(auditLogDetail.parameters)">
+              {{ t('audit.detail.copy') }}
+            </el-button>
+          </div>
+          <pre>{{ auditLogDetail.parameters }}</pre>
+        </section>
+        <section v-if="auditLogDetail?.output || (!auditLogDetailLoading && auditLogDetail?.kind === 'ssh')" class="audit-log-detail__section">
+          <div class="audit-log-detail__heading">
+            <span>{{ t('audit.column.output') }}</span>
+            <el-button v-if="auditLogDetail?.output" link type="primary" @click="copyAuditLogDetail(auditLogDetail.output)">
+              {{ t('audit.detail.copy') }}
+            </el-button>
+          </div>
+          <pre>{{ auditLogDetail?.output || t('audit.detail.emptyOutput') }}</pre>
+        </section>
+      </div>
+    </el-dialog>
+
+    <el-dialog
+      v-model="rdpReplayVisible"
+      title="RDP 会话回放"
+      width="min(1180px, calc(100vw - 32px))"
+      destroy-on-close
+      @closed="destroyRDPReplay"
+    >
+      <el-alert
+        v-if="rdpReplayError"
+        :title="rdpReplayError"
+        type="error"
+        show-icon
+        style="margin-bottom: 12px"
+      />
+      <div v-loading="rdpReplayLoading" class="rdp-replay-panel">
+        <div class="rdp-replay-controls">
+          <div class="rdp-replay-actions">
+            <el-button
+              type="primary"
+              :disabled="rdpReplayDuration <= 0"
+              @click="toggleRDPReplay"
+            >
+              {{ rdpReplayPlaying ? '暂停' : '播放' }}
+            </el-button>
+            <el-button :disabled="rdpReplayDuration <= 0" @click="restartRDPReplay">
+              重播
+            </el-button>
+          </div>
+          <div class="rdp-replay-timeline">
+            <span>{{ formatRDPReplayTime(rdpReplayPosition) }}</span>
+            <el-slider
+              v-model="rdpReplayPosition"
+              :max="Math.max(rdpReplayDuration, 1)"
+              :show-tooltip="false"
+              :disabled="rdpReplayDuration <= 0"
+              aria-label="RDP 回放进度"
+              @change="seekRDPReplay"
+            />
+            <span>{{ formatRDPReplayTime(rdpReplayDuration) }}</span>
+          </div>
+        </div>
+        <div ref="rdpReplayHostRef" class="rdp-replay-display">
+          <el-empty v-if="!rdpReplayLoading && !rdpReplayDuration && !rdpReplayError" description="录屏中暂无可播放画面" />
+        </div>
+      </div>
+    </el-dialog>
+
+    <UserSessionDetailDialog v-model="sessionDetailVisible" :session-id="sessionDetailId" />
+  </div>
+</template>
+
+<script setup lang="ts">
+import { Terminal } from '@xterm/xterm';
+import { FitAddon } from '@xterm/addon-fit';
+import '@xterm/xterm/css/xterm.css';
+import Guacamole from 'guacamole-common-js';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { Refresh } from '@element-plus/icons-vue';
+import { ElMessage, ElMessageBox, type TabPaneName } from 'element-plus';
+import { useRoute } from 'vue-router';
+
+import AuditResultTag from '@/components/audit/AuditResultTag.vue';
+import AuditSessionLink from '@/components/audit/AuditSessionLink.vue';
+import DataTableCard from '@/components/DataTableCard.vue';
+import UserSessionDetailDialog from '@/components/UserSessionDetailDialog.vue';
+import { TABLE_COLUMNS } from '@/config/tableColumns';
+import {
+  apiClient,
+  type DBConnectionMetaRecord,
+  type DBConnectionRecord,
+  type DBQueryEventRecord,
+  type OnlineSessionRecord,
+  type SessionCommandRecord,
+  type SessionFileEventRecord,
+  type SessionRecord,
+  type LoginAuditRecord,
+  type OperationAuditRecord,
+  type RDPAuditSessionRecord,
+} from '@/api/client';
+import { useI18n } from '@/i18n';
+import { usePermissionStore } from '@/stores/permission';
+import {
+  auditFailureDetail,
+  connectionOutcomePresentation,
+  formatAuditTimestamp,
+  loginOutcomePresentation,
+  loginReasonForDisplay,
+  operationResultPresentation,
+  parseOperationAuditMetadata,
+  queryResultPresentation,
+  type AuditResultCode,
+  type AuditTagType,
+} from '@/utils/auditDisplay';
+import { installUnicodeGuacamoleParser } from '@/utils/guacamoleProtocol';
+import {
+  bindRDPReplayDisplay,
+  type RDPReplayDisplayBinding,
+  type RDPReplayScaleDisplay,
+} from '@/utils/rdpReplayDisplay';
+
+type AuditScope = 'logins' | 'operations' | 'ssh' | 'rdp' | 'db' | 'online';
+type DetailKind = '' | 'meta' | 'commands' | 'files' | 'file-summary' | 'queries' | 'replay';
+type ReplayFrame = {
+  time: number;
+  stream: string;
+  data: string;
+};
+type ReplayData = {
+  header: Record<string, unknown>;
+  frames: ReplayFrame[];
+  raw: string;
+};
+
+interface RDPReplayDisplay extends RDPReplayScaleDisplay {
+  getElement(): HTMLDivElement;
+}
+
+interface RDPRecording {
+  connect(data?: string): void;
+  disconnect(): void;
+  abort(): void;
+  play(): void;
+  pause(): void;
+  seek(position: number, callback?: () => void): void;
+  isPlaying(): boolean;
+  getPosition(): number;
+  getDuration(): number;
+  getDisplay(): RDPReplayDisplay;
+  onload: (() => void) | null;
+  onerror: ((message: string) => void) | null;
+  onprogress: ((duration: number, parsedSize: number) => void) | null;
+  onplay: (() => void) | null;
+  onpause: (() => void) | null;
+  onseek: ((position: number) => void) | null;
+}
+
+interface GuacamoleReplayRuntime {
+  StaticHTTPTunnel: new (
+    url: string,
+    crossDomain?: boolean,
+    headers?: Record<string, string>,
+  ) => unknown;
+  SessionRecording: new (source: unknown) => RDPRecording;
+}
+
+const GuacamoleReplay = Guacamole as unknown as GuacamoleReplayRuntime;
+installUnicodeGuacamoleParser(Guacamole);
+
+const { t } = useI18n();
+const permission = usePermissionStore();
+const route = useRoute();
+
+function routeQueryValue(value: unknown): string {
+  if (Array.isArray(value)) return routeQueryValue(value[0]);
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function permittedAuditScope(value: unknown): AuditScope {
+  const requested = routeQueryValue(value);
+  if (requested === 'logins' && permission.canDo('audit:view')) return 'logins';
+  if (requested === 'operations' && permission.canDo('audit:view')) return 'operations';
+  if (requested === 'online' && permission.canDo('session:view')) return 'online';
+  if (requested === 'db' && permission.canDo('db:audit:view')) return 'db';
+  if (requested === 'rdp' && permission.canDo('rdp:recording:view')) return 'rdp';
+  if (requested === 'ssh' && permission.canDo('audit:view')) return 'ssh';
+  if (permission.canDo('audit:view')) return 'ssh';
+  if (permission.canDo('rdp:recording:view')) return 'rdp';
+  if (permission.canDo('db:audit:view')) return 'db';
+  return 'online';
+}
+
+const initialAuditScope = permittedAuditScope(route.query.scope);
+const initialAuditKeyword = routeQueryValue(route.query.q);
+const auditScope = ref<AuditScope>(initialAuditScope);
+const initialOnlineResourceType = initialAuditScope === 'online' ? routeQueryValue(route.query.resource_type) : '';
+const initialOnlineResourceID = initialAuditScope === 'online' ? routeQueryValue(route.query.resource_id) : '';
+
+// ── SSH session list state ──
+const sessions = ref<SessionRecord[]>([]);
+const sessionTotal = ref(0);
+const sessionPage = ref(1);
+const sessionPageSize = ref(50);
+const sessionKeyword = ref(initialAuditScope === 'ssh' ? initialAuditKeyword : '');
+const sessionsLoading = ref(false);
+const sessionError = ref('');
+
+// ── RDP audit and replay state ──
+const canViewRDPRecordings = computed(() => permission.canDo('rdp:recording:view'));
+const canAccessRDPTab = canViewRDPRecordings;
+const rdpSessions = ref<RDPAuditSessionRecord[]>([]);
+const rdpTotal = ref(0);
+const rdpPage = ref(1);
+const rdpPageSize = ref(50);
+const rdpKeyword = ref(initialAuditScope === 'rdp' ? initialAuditKeyword : '');
+const rdpLoading = ref(false);
+const rdpError = ref('');
+
+const rdpReplayVisible = ref(false);
+const rdpReplayLoading = ref(false);
+const rdpReplayError = ref('');
+const rdpReplayHostRef = ref<HTMLElement>();
+const rdpReplayPlaying = ref(false);
+const rdpReplayPosition = ref(0);
+const rdpReplayDuration = ref(0);
+let rdpRecording: RDPRecording | undefined;
+let rdpReplayResizeObserver: ResizeObserver | undefined;
+let rdpReplayDisplayBinding: RDPReplayDisplayBinding | undefined;
+
+// Login and management operation audit state
+const loginAuditLogs = ref<LoginAuditRecord[]>([]);
+const loginAuditTotal = ref(0);
+const loginAuditPage = ref(1);
+const loginAuditPageSize = ref(50);
+const loginAuditKeyword = ref(initialAuditScope === 'logins' ? initialAuditKeyword : '');
+const loginAuditOutcome = ref('');
+const loginAuditLoading = ref(false);
+const loginAuditError = ref('');
+const operationAuditLogs = ref<OperationAuditRecord[]>([]);
+const operationAuditTotal = ref(0);
+const operationAuditPage = ref(1);
+const operationAuditPageSize = ref(50);
+const operationAuditKeyword = ref(initialAuditScope === 'operations' ? initialAuditKeyword : '');
+const operationAuditAction = ref('');
+const operationAuditLoading = ref(false);
+const operationAuditError = ref('');
+
+// ── DB connection list state ──
+const dbConnections = ref<DBConnectionRecord[]>([]);
+const dbTotal = ref(0);
+const dbPage = ref(1);
+const dbPageSize = ref(50);
+const dbKeyword = ref(initialAuditScope === 'db' ? initialAuditKeyword : '');
+const dbLoading = ref(false);
+const dbError = ref('');
+
+// Online session list state
+const onlineSessions = ref<OnlineSessionRecord[]>([]);
+const onlineTotal = ref(0);
+const onlinePage = ref(1);
+const onlinePageSize = ref(50);
+const onlineKeyword = ref(initialAuditScope === 'online' ? initialAuditKeyword : '');
+const onlineResourceType = ref(initialOnlineResourceType);
+const onlineResourceID = ref(initialOnlineResourceID);
+const onlineLoading = ref(false);
+const onlineError = ref('');
+const disconnectingSessionID = ref('');
+const sessionDetailVisible = ref(false);
+const sessionDetailId = ref('');
+
+// ── Drawer state ──
+const detailLoading = ref(false);
+const detailError = ref('');
+const detailTitle = ref('');
+const detailKind = ref<DetailKind>('');
+const detailData = ref<unknown>(null);
+const drawerVisible = ref(false);
+const logPage = ref(1);
+const logPageSize = ref(50);
+const logKeyword = ref('');
+const logSearchVersion = ref(0);
+const dbQueryConnectionID = ref('');
+const dbQueryTotal = ref(0);
+const artifactSessionID = ref('');
+const auditLogDetailVisible = ref(false);
+const auditLogDetailLoading = ref(false);
+const auditLogDetailError = ref('');
+const auditLogDetailTitle = ref('');
+let auditLogDetailRequestVersion = 0;
+interface AuditLogDetailData {
+  kind: 'db' | 'ssh';
+  command: string;
+  sql: string;
+  parameters: string;
+  output: string;
+  sqlBytes: number;
+  outputBytes: number;
+  redacted: boolean;
+}
+const auditLogDetail = ref<AuditLogDetailData | null>(null);
+let detailRequestVersion = 0;
+
+// ── Replay state ──
+const playbackSpeed = ref(1);
+const speedOptions = [1, 2, 4, 8];
+const replayPlaying = ref(false);
+const replayProgress = ref(0);
+const replaySeekPercent = ref(0);
+const replayCurrentTime = ref(0);
+const replayRenderedOutput = ref(false);
+const replayTerminalHostRef = ref<HTMLElement>();
+let replayTerminal: Terminal | undefined;
+let replayFitAddon: FitAddon | undefined;
+let replayResizeObserver: ResizeObserver | undefined;
+let replayTimer: number | undefined;
+let replayStartedAt = 0;
+let replayStartOffset = 0;
+let replayFrameIndex = 0;
+
+// ── Computed ──
+const isDBMeta = computed(() => detailKind.value === 'meta' && isRecord(detailData.value) && 'protocol' in detailData.value);
+function hasItems(data: unknown): boolean {
+  if (Array.isArray(data)) return true;
+  if (data && typeof data === 'object' && 'items' in data && Array.isArray((data as Record<string, unknown>).items)) return true;
+  return false;
+}
+const isDBQueries = computed(() => detailKind.value === 'queries' && hasItems(detailData.value));
+const isCommands = computed(() => detailKind.value === 'commands' && hasItems(detailData.value));
+const isFiles = computed(() => detailKind.value === 'files' && hasItems(detailData.value));
+const isReplay = computed(() => detailKind.value === 'replay' && isReplayData(detailData.value));
+const dbMeta = computed<Partial<DBConnectionMetaRecord>>(() => (
+  isRecord(detailData.value) ? (detailData.value as unknown as DBConnectionMetaRecord) : {}
+));
+const queryEvents = computed(() => extractItems<DBQueryEventRecord>(detailData.value));
+
+// 合并 start/finish 事件为一行
+interface MergedQueryEvent {
+  seq: number;
+  query_id: string;
+  protocol: string;
+  sql: string;
+  sql_truncated: boolean;
+  has_full_log: boolean;
+  sql_original_bytes: number;
+  comment: string;
+  query_kind: string;
+  status: string;
+  duration_ms: number;
+  started_at: number;
+  rows_affected?: number | null;
+  rows?: number | null;
+  error_code?: string;
+  error_message?: string;
+}
+function splitSQLComment(sql: string): { comment: string; sql: string } {
+  // 提取 MySQL /++ ... +/ 风格注释，作为来源信息
+  const m = /^\/\*\s*(.+?)\s*\*\/\s*/.exec(sql);
+  if (m) {
+    return { comment: m[1], sql: sql.slice(m[0].length) };
+  }
+  return { comment: '', sql };
+}
+const mergedQueryEvents = computed<MergedQueryEvent[]>(() => {
+  const map = new Map<string, MergedQueryEvent>();
+  for (const ev of queryEvents.value) {
+    const seq = ev.seq ?? 0;
+    const key = ev.query_id || `seq:${seq}`;
+    const cur = map.get(key) ?? {
+      seq,
+      query_id: ev.query_id ?? '',
+      protocol: ev.protocol ?? '',
+      sql: '',
+      sql_truncated: false,
+      has_full_log: false,
+      sql_original_bytes: 0,
+      comment: '',
+      query_kind: ev.query_kind ?? '',
+      status: 'unknown',
+      duration_ms: 0,
+      started_at: ev.started_at ?? 0,
+    };
+    cur.query_id = ev.query_id || cur.query_id;
+    cur.protocol = ev.protocol || cur.protocol;
+    if (ev.type === 'query_started') {
+      const parsed = splitSQLComment(ev.sql || cur.sql);
+      cur.sql = parsed.sql || cur.sql;
+      cur.comment = parsed.comment || cur.comment;
+      cur.query_kind = ev.query_kind || cur.query_kind;
+      cur.started_at = ev.started_at ?? cur.started_at;
+      cur.sql_truncated = Boolean(ev.detail?.sql_truncated);
+      cur.has_full_log = Boolean(ev.detail?.has_full_log);
+      cur.sql_original_bytes = Number(ev.detail?.sql_original_bytes ?? 0);
+    } else {
+      cur.status = ev.status ?? cur.status;
+      cur.duration_ms = ev.duration_ms ?? cur.duration_ms;
+      cur.rows_affected = ev.rows_affected;
+      cur.rows = ev.rows;
+      cur.error_code = ev.error_code;
+      cur.error_message = ev.error_message;
+      // 如果没有 duration_ms，用 started_at 和 completed_at 计算
+      if (!cur.duration_ms && cur.started_at && ev.completed_at) {
+        cur.duration_ms = ev.completed_at - cur.started_at;
+      }
+    }
+    map.set(key, cur);
+  }
+  return Array.from(map.values()).sort((a, b) => a.seq - b.seq);
+});
+
+function formatQueryRowCount(row: MergedQueryEvent): string {
+  const count = row.rows ?? row.rows_affected;
+  return count == null ? '-' : String(count);
+}
+function extractItems<T>(data: unknown): T[] {
+  if (Array.isArray(data)) return data as T[];
+  if (data && typeof data === 'object' && 'items' in data && Array.isArray((data as Record<string, unknown>).items)) {
+    return (data as Record<string, unknown>).items as T[];
+  }
+  return [];
+}
+const commandEvents = computed(() => extractItems<SessionCommandRecord>(detailData.value));
+const fileEvents = computed(() => extractItems<SessionFileEventRecord>(detailData.value));
+const normalizedLogKeyword = computed(() => logKeyword.value.trim().toLowerCase());
+const filteredCommandEvents = computed(() => {
+  if (!normalizedLogKeyword.value) return commandEvents.value;
+  return commandEvents.value.filter((event) => String(event.command ?? '').toLowerCase().includes(normalizedLogKeyword.value));
+});
+
+// Client-side pagination for drawer sub-tables
+const pagedCommandEvents = computed(() => {
+  const start = (logPage.value - 1) * logPageSize.value;
+  return filteredCommandEvents.value.slice(start, start + logPageSize.value);
+});
+const pagedFileEvents = computed(() => {
+  const start = (logPage.value - 1) * logPageSize.value;
+  return fileEvents.value.slice(start, start + logPageSize.value);
+});
+
+const replayData = computed(() => (isReplayData(detailData.value) ? detailData.value : { header: {}, frames: [], raw: '' }));
+const replayFrames = computed(() => replayData.value.frames);
+const replayOutputFrames = computed(() => replayFrames.value.filter((frame) => frame.stream === 'o'));
+const replayDuration = computed(() => replayFrames.value.at(-1)?.time ?? 0);
+const replayRawBytes = computed(() => utf8ByteLength(replayData.value.raw));
+const replayFirstOutputTime = computed(() => replayOutputFrames.value[0]?.time ?? 0);
+const replayTerminalMessage = computed(() => {
+  if (!isReplay.value) {
+    return '';
+  }
+  if (!replayFrames.value.length) {
+    return t('audit.empty.replay');
+  }
+  if (!replayOutputFrames.value.length) {
+    return t('audit.empty.replayNoOutput');
+  }
+  if (replayPlaying.value && !replayRenderedOutput.value) {
+    return t('audit.empty.replayWaiting');
+  }
+  return '';
+});
+
+function rdpSessionTarget(session: RDPAuditSessionRecord): string {
+  return displayAuditIdentity(session.target_address || session.host_id, session.target_name);
+}
+
+function rdpSessionAccount(session: RDPAuditSessionRecord): string {
+  return displayAuditIdentity(session.account_username || session.account_id, session.account_name);
+}
+
+function auditResultLabel(code: AuditResultCode): string {
+  return t(`audit.result.${code}`);
+}
+
+function connectionOutcomeLabel(outcome: unknown, state?: unknown): string {
+  return auditResultLabel(connectionOutcomePresentation(outcome, state).code);
+}
+
+function connectionOutcomeTag(outcome: unknown, state?: unknown): AuditTagType {
+  return connectionOutcomePresentation(outcome, state).tag;
+}
+
+function rdpRecordingLabel(status: unknown): string {
+  switch (String(status || '').toLowerCase()) {
+    case 'ready': return '可回放';
+    case 'pending': return '录制中';
+    case 'uploading': return '上传中';
+    case 'failed': return '失败';
+    case 'none': return '未录制';
+    default: return '未知';
+  }
+}
+
+function rdpRecordingTag(status: unknown): 'success' | 'warning' | 'danger' | 'info' {
+  switch (String(status || '').toLowerCase()) {
+    case 'ready': return 'success';
+    case 'pending':
+    case 'uploading': return 'warning';
+    case 'failed': return 'danger';
+    default: return 'info';
+  }
+}
+
+async function loadRDPSessions() {
+  if (!canViewRDPRecordings.value) return;
+  rdpLoading.value = true;
+  rdpError.value = '';
+  try {
+    const response = await apiClient.getRDPSessions({
+      q: rdpKeyword.value.trim() || undefined,
+      page: rdpPage.value,
+      page_size: rdpPageSize.value,
+    });
+    rdpSessions.value = response.items ?? [];
+    rdpTotal.value = response.total ?? 0;
+  } catch (error) {
+    rdpSessions.value = [];
+    rdpError.value = error instanceof Error ? error.message : '加载 RDP 审计失败';
+  } finally {
+    rdpLoading.value = false;
+  }
+}
+
+async function openRDPReplay(session: Pick<RDPAuditSessionRecord, 'id' | 'has_replay'>) {
+  if (!session.id || !session.has_replay) return;
+  destroyRDPReplay();
+  rdpReplayVisible.value = true;
+  rdpReplayLoading.value = true;
+  rdpReplayError.value = '';
+  await nextTick();
+
+  const host = rdpReplayHostRef.value;
+  if (!host) {
+    rdpReplayLoading.value = false;
+    rdpReplayError.value = '无法初始化回放画布';
+    return;
+  }
+
+  const recordingURL = new URL(
+    apiClient.getRDPRecordingURL(session.id),
+    window.location.href,
+  );
+  const tunnel = new GuacamoleReplay.StaticHTTPTunnel(
+    recordingURL.toString(),
+    recordingURL.origin !== window.location.origin,
+  );
+  const recording = new GuacamoleReplay.SessionRecording(tunnel);
+  rdpRecording = recording;
+
+  const display = recording.getDisplay();
+  const displayElement = display.getElement();
+  displayElement.classList.add('rdp-recording-canvas');
+  host.replaceChildren(displayElement);
+  const displayBinding = bindRDPReplayDisplay(display, host);
+  rdpReplayDisplayBinding = displayBinding;
+  rdpReplayResizeObserver = new ResizeObserver(() => displayBinding.fit());
+  rdpReplayResizeObserver.observe(host);
+
+  recording.onprogress = duration => {
+    rdpReplayDuration.value = duration;
+    rdpReplayLoading.value = false;
+    displayBinding.fit();
+  };
+  recording.onload = () => {
+    rdpReplayDuration.value = recording.getDuration();
+    rdpReplayLoading.value = false;
+    displayBinding.fit();
+  };
+  recording.onerror = message => {
+    rdpReplayLoading.value = false;
+    rdpReplayError.value = message || '加载 RDP 录屏失败';
+  };
+  recording.onplay = () => {
+    rdpReplayPlaying.value = true;
+  };
+  recording.onpause = () => {
+    rdpReplayPlaying.value = false;
+    rdpReplayPosition.value = recording.getPosition();
+  };
+  recording.onseek = position => {
+    rdpReplayPosition.value = position;
+    rdpReplayDuration.value = recording.getDuration();
+  };
+  recording.connect();
+}
+
+function toggleRDPReplay() {
+  if (!rdpRecording) return;
+  if (rdpRecording.isPlaying()) rdpRecording.pause();
+  else rdpRecording.play();
+}
+
+function seekRDPReplay(position: number) {
+  rdpRecording?.seek(position);
+}
+
+function restartRDPReplay() {
+  if (!rdpRecording) return;
+  rdpRecording.pause();
+  rdpRecording.seek(0, () => rdpRecording?.play());
+}
+
+function formatRDPReplayTime(milliseconds: number): string {
+  const seconds = Math.max(0, Math.round(milliseconds / 1000));
+  const minutes = Math.floor(seconds / 60);
+  const remainder = String(seconds % 60).padStart(2, '0');
+  return `${minutes}:${remainder}`;
+}
+
+function destroyRDPReplay() {
+  rdpReplayResizeObserver?.disconnect();
+  rdpReplayResizeObserver = undefined;
+  rdpReplayDisplayBinding?.detach();
+  rdpReplayDisplayBinding = undefined;
+  if (rdpRecording) {
+    rdpRecording.onload = null;
+    rdpRecording.onerror = null;
+    rdpRecording.onprogress = null;
+    rdpRecording.onplay = null;
+    rdpRecording.onpause = null;
+    rdpRecording.onseek = null;
+    rdpRecording.pause();
+    try {
+      rdpRecording.abort();
+    } catch {
+      rdpRecording.disconnect();
+    }
+  }
+  rdpRecording = undefined;
+  rdpReplayPlaying.value = false;
+  rdpReplayPosition.value = 0;
+  rdpReplayDuration.value = 0;
+  rdpReplayLoading.value = false;
+  rdpReplayHostRef.value?.replaceChildren();
+}
+
+// ── Helpers ──
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isReplayData(value: unknown): value is ReplayData {
+  return isRecord(value) && Array.isArray(value.frames) && typeof value.raw === 'string';
+}
+
+function sessionId(session: { id: string | number }): string {
+  return String(session.id ?? '');
+}
+
+function displayAuditIdentity(actualValue: unknown, displayNameValue: unknown): string {
+  const actual = String(actualValue ?? '').trim();
+  const displayName = String(displayNameValue ?? '').trim();
+  if (!actual) return displayName || t('common.none');
+  if (!displayName || displayName === actual) return actual;
+  return `${actual}（${displayName}）`;
+}
+
+function sessionInstance(session: SessionRecord): string {
+  return displayAuditIdentity(session.target_address, session.target_name);
+}
+
+function sessionAccount(session: SessionRecord): string {
+  return displayAuditIdentity(session.account_username, session.account_name);
+}
+
+function sessionUser(session: SessionRecord): string {
+  return String(session.username || session.user_id || t('common.none'));
+}
+
+function hasReplay(session: SessionRecord): boolean {
+  return session.has_replay;
+}
+
+function formatTime(value: unknown): string {
+  return formatAuditTimestamp(value, t('common.none'));
+}
+
+function formatDuration(value: unknown): string {
+  if (value === undefined || value === null) return t('common.none');
+  const n = Number(value);
+  if (!Number.isFinite(n)) return t('common.none');
+  // n is milliseconds
+  if (n < 1000) return `${Math.round(n)}ms`;
+  const totalSeconds = n / 1000;
+  if (totalSeconds < 60) return `${Math.round(totalSeconds * 10) / 10}s`;
+  const mins = Math.floor(totalSeconds / 60);
+  const secs = Math.round(totalSeconds % 60);
+  return `${mins}m ${secs}s`;
+}
+
+function formatDurationSeconds(value: unknown): string {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) {
+    return t('common.none');
+  }
+  if (value < 60) {
+    return `${Math.round(value)}s`;
+  }
+  const mins = Math.floor(value / 60);
+  const secs = Math.round(value % 60);
+  return `${mins}m ${secs}s`;
+}
+
+function computeDuration(started_at: unknown, ended_at: unknown): number {
+  const s = toTimestamp(started_at);
+  const e = toTimestamp(ended_at);
+  if (s && e && e > s) return (e - s) / 1000;
+  return 0;
+}
+
+function computeDurationMs(started_at: unknown, ended_at: unknown): number {
+  const s = toTimestamp(started_at);
+  const e = toTimestamp(ended_at);
+  if (s && e && e > s) return e - s;
+  return 0;
+}
+
+function toTimestamp(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Date.parse(value);
+    if (!Number.isNaN(parsed)) return parsed;
+  }
+  return null;
+}
+
+function sessionProtocol(row: SessionRecord): string {
+  const subtype = row.protocol_subtype?.toLowerCase() || '';
+  if (subtype === 'web-terminal') return 'Web';
+  if (subtype === 'sftp') return 'SFTP';
+  if (subtype === 'scp') return 'SCP';
+  if (row.protocol.toLowerCase() === 'sftp') return 'SFTP';
+  return 'SSH';
+}
+
+function sessionProtocolTag(row: SessionRecord): 'success' | 'warning' | 'info' | 'danger' | '' {
+  const subtype = row.protocol_subtype?.toLowerCase() || '';
+  if (subtype === 'web-terminal') return 'info';
+  if (subtype === 'sftp') return 'warning';
+  if (subtype === 'scp') return 'warning';
+  if (row.protocol.toLowerCase() === 'sftp') return 'warning';
+  return 'success';
+}
+
+function formatDatabaseProtocol(protocol: unknown): string {
+  switch (String(protocol ?? '').toLowerCase()) {
+    case 'mysql':
+      return 'MySQL';
+    case 'postgres':
+    case 'postgresql':
+      return 'PostgreSQL';
+    case 'redis':
+      return 'Redis';
+    default:
+      return String(protocol || '-');
+  }
+}
+
+function databaseProtocolTag(protocol: unknown): 'primary' | 'success' | 'warning' | 'info' | 'danger' | '' {
+  switch (String(protocol ?? '').toLowerCase()) {
+    case 'mysql':
+      return 'warning';
+    case 'postgres':
+    case 'postgresql':
+      return 'primary';
+    case 'redis':
+      return 'danger';
+    default:
+      return 'info';
+  }
+}
+
+function formatReplayDuration(value: number): string {
+  if (!Number.isFinite(value) || value <= 0) {
+    return '0s';
+  }
+  if (value < 60) {
+    return `${value.toFixed(1)}s`;
+  }
+  const minutes = Math.floor(value / 60);
+  const seconds = Math.round(value % 60);
+  return `${minutes}m ${seconds}s`;
+}
+
+function formatBytes(value: number): string {
+  if (!Number.isFinite(value) || value <= 0) {
+    return '0 B';
+  }
+  if (value < 1024) {
+    return `${value} B`;
+  }
+  if (value < 1024 * 1024) {
+    return `${(value / 1024).toFixed(1)} KB`;
+  }
+  return `${(value / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function queryStatusLabel(status: unknown): string {
+  return auditResultLabel(queryResultPresentation(status).code);
+}
+
+function queryStatusType(status: unknown): AuditTagType {
+  return queryResultPresentation(status).tag;
+}
+
+function setDetail(title: string, kind: DetailKind, data: unknown) {
+  stopReplay();
+  detailTitle.value = title;
+  detailKind.value = kind;
+  detailData.value = data;
+  drawerVisible.value = true;
+  playbackSpeed.value = 1;
+  logPage.value = 1;
+  logKeyword.value = '';
+  logSearchVersion.value++;
+  replayProgress.value = 0;
+  replaySeekPercent.value = 0;
+  replayCurrentTime.value = 0;
+  replayRenderedOutput.value = false;
+  resetReplayTerminal();
+}
+
+function closeDetail() {
+  stopReplay();
+  detailRequestVersion++;
+  dbQueryConnectionID.value = '';
+  dbQueryTotal.value = 0;
+  drawerVisible.value = false;
+  playbackSpeed.value = 1;
+}
+
+async function copyQuerySQL(sql: string): Promise<void> {
+  try {
+    if (!navigator.clipboard?.writeText) {
+      throw new Error('clipboard is unavailable');
+    }
+    await navigator.clipboard.writeText(sql);
+    ElMessage.success(t('audit.query.copySuccess'));
+  } catch {
+    ElMessage.error(t('audit.query.copyFailed'));
+  }
+}
+
+async function copyAuditLogDetail(value: string): Promise<void> {
+  try {
+    await navigator.clipboard.writeText(value);
+    ElMessage.success(t('audit.detail.copySuccess'));
+  } catch {
+    ElMessage.error(t('audit.detail.copyFailed'));
+  }
+}
+
+function bytesToBase64(bytes: Uint8Array): string {
+  const chunkBytes = 24_576;
+  const encoded: string[] = [];
+  for (let offset = 0; offset < bytes.length; offset += chunkBytes) {
+    const chunk = bytes.subarray(offset, Math.min(offset + chunkBytes, bytes.length));
+    let binary = '';
+    for (let index = 0; index < chunk.length; index++) {
+      binary += String.fromCharCode(chunk[index]);
+    }
+    encoded.push(btoa(binary));
+  }
+  return encoded.join('');
+}
+
+function formatPostgresBindParameters(buffer: ArrayBuffer): string {
+  const bytes = new Uint8Array(buffer);
+  const view = new DataView(buffer);
+  let offset = 0;
+  const readCString = (): string => {
+    const start = offset;
+    while (offset < bytes.length && bytes[offset] !== 0) offset++;
+    if (offset >= bytes.length) throw new Error('Bind C string is incomplete');
+    const value = new TextDecoder().decode(bytes.subarray(start, offset));
+    offset++;
+    return value;
+  };
+  const readUint16 = (): number => {
+    if (offset + 2 > bytes.length) throw new Error('Bind int16 is incomplete');
+    const value = view.getUint16(offset);
+    offset += 2;
+    return value;
+  };
+  const portal = readCString();
+  const statement = readCString();
+  const formatCount = readUint16();
+  const formats: number[] = [];
+  for (let index = 0; index < formatCount; index++) formats.push(readUint16());
+  const parameterCount = readUint16();
+  const lines = [
+    `Portal: ${portal || '(unnamed)'}`,
+    `Statement: ${statement || '(unnamed)'}`,
+    `Parameter count: ${parameterCount}`,
+    '',
+  ];
+  for (let index = 0; index < parameterCount; index++) {
+    if (offset + 4 > bytes.length) throw new Error('Bind parameter length is incomplete');
+    const length = view.getInt32(offset);
+    offset += 4;
+    const format = formats.length === 0 ? 0 : formats.length === 1 ? formats[0] : formats[index] ?? 0;
+    if (length === -1) {
+      lines.push(`#${index + 1} [${format === 1 ? 'binary' : 'text'}] = NULL`, '');
+      continue;
+    }
+    if (length < 0 || offset + length > bytes.length) throw new Error('Bind parameter value is incomplete');
+    const value = bytes.subarray(offset, offset + length);
+    offset += length;
+    if (format === 0) {
+      try {
+        const text = new TextDecoder('utf-8', { fatal: true }).decode(value);
+        lines.push(`#${index + 1} [text, ${length} bytes]`, text, '');
+        continue;
+      } catch {
+        // Invalid text-format bytes are still preserved as Base64.
+      }
+    }
+    lines.push(`#${index + 1} [binary/Base64, ${length} bytes]`, bytesToBase64(value), '');
+  }
+  return lines.join('\n');
+}
+
+function formatDatabaseSQL(buffer: ArrayBuffer, protocol: string): string {
+  if (!buffer.byteLength) return '';
+  try {
+    return new TextDecoder('utf-8', { fatal: true }).decode(buffer);
+  } catch {
+    return `${protocol || 'database'} payload (Base64)\n${bytesToBase64(new Uint8Array(buffer))}`;
+  }
+}
+
+function formatDatabaseParameters(buffer: ArrayBuffer, protocol: string, redacted: boolean): string {
+  if (!buffer.byteLength) return '';
+  if (redacted) return new TextDecoder().decode(buffer);
+  if (protocol.toLowerCase().includes('postgres')) {
+    try {
+      return formatPostgresBindParameters(buffer);
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : 'unknown parser error';
+      return `PostgreSQL Bind payload (Base64; ${reason})\n${bytesToBase64(new Uint8Array(buffer))}`;
+    }
+  }
+  return `MySQL execute payload (Base64)\n${bytesToBase64(new Uint8Array(buffer))}`;
+}
+
+async function openDBQueryDetail(row: MergedQueryEvent): Promise<void> {
+  const connectionID = dbQueryConnectionID.value;
+  if (!connectionID || !row.query_id) return;
+  const requestVersion = ++auditLogDetailRequestVersion;
+  auditLogDetailVisible.value = true;
+  auditLogDetailLoading.value = true;
+  auditLogDetailError.value = '';
+  auditLogDetailTitle.value = `${t('audit.action.viewDetail')} · ${row.query_id}`;
+  auditLogDetail.value = null;
+  try {
+    const metadata = await apiClient.getDBQueryDetail(connectionID, row.query_id);
+    const [sql, parameters] = await Promise.all([
+      metadata.has_sql
+        ? apiClient.getDBQuerySQL(connectionID, row.query_id)
+        : Promise.resolve(new ArrayBuffer(0)),
+      metadata.has_parameters
+        ? apiClient.getDBQueryParameters(connectionID, row.query_id)
+        : Promise.resolve(new ArrayBuffer(0)),
+    ]);
+    if (requestVersion !== auditLogDetailRequestVersion) return;
+    auditLogDetail.value = {
+      kind: 'db',
+      command: '',
+      sql: formatDatabaseSQL(sql, row.protocol),
+      parameters: formatDatabaseParameters(parameters, row.protocol, metadata.audit_data_redacted),
+      output: '',
+      sqlBytes: metadata.sql_bytes,
+      outputBytes: metadata.parameter_bytes,
+      redacted: metadata.audit_data_redacted,
+    };
+  } catch (err) {
+    if (requestVersion === auditLogDetailRequestVersion) {
+      auditLogDetailError.value = err instanceof Error ? err.message : t('audit.error.loadArtifact');
+    }
+  } finally {
+    if (requestVersion === auditLogDetailRequestVersion) auditLogDetailLoading.value = false;
+  }
+}
+
+async function openSSHCommandDetail(row: SessionCommandRecord): Promise<void> {
+  const sessionID = artifactSessionID.value;
+  const seq = Number(row.seq ?? 0);
+  if (!sessionID || !seq) return;
+  const requestVersion = ++auditLogDetailRequestVersion;
+  auditLogDetailVisible.value = true;
+  auditLogDetailLoading.value = true;
+  auditLogDetailError.value = '';
+  auditLogDetailTitle.value = `${t('audit.action.viewDetail')} · #${seq}`;
+  auditLogDetail.value = null;
+  try {
+    const [metadata, output] = await Promise.all([
+      apiClient.getSessionCommandDetail(sessionID, seq),
+      apiClient.getSessionCommandOutput(sessionID, seq),
+    ]);
+    if (requestVersion !== auditLogDetailRequestVersion) return;
+    auditLogDetail.value = {
+      kind: 'ssh',
+      command: metadata.command,
+      sql: '',
+      parameters: '',
+      output: output || metadata.output_preview,
+      sqlBytes: 0,
+      outputBytes: metadata.output_bytes,
+      redacted: metadata.audit_data_redacted,
+    };
+  } catch (err) {
+    if (requestVersion === auditLogDetailRequestVersion) {
+      auditLogDetailError.value = err instanceof Error ? err.message : t('audit.error.loadArtifact');
+    }
+  } finally {
+    if (requestVersion === auditLogDetailRequestVersion) auditLogDetailLoading.value = false;
+  }
+}
+
+// ── Data fetching ──
+
+async function loadOnlineSessions() {
+  onlineLoading.value = true;
+  onlineError.value = '';
+  try {
+    const res = await apiClient.getOnlineSessions({
+      page: onlinePage.value,
+      page_size: onlinePageSize.value,
+      q: onlineKeyword.value || undefined,
+      resource_type: onlineResourceType.value || undefined,
+      resource_id: onlineResourceID.value || undefined,
+    });
+    onlineSessions.value = res.items ?? [];
+    onlineTotal.value = res.total ?? 0;
+  } catch (err) {
+    onlineSessions.value = [];
+    onlineError.value = err instanceof Error ? err.message : t('audit.error.loadOnline');
+  } finally {
+    onlineLoading.value = false;
+  }
+}
+
+function loginOutcomeTag(outcome: unknown): AuditTagType {
+  return loginOutcomePresentation(outcome).tag;
+}
+
+function loginOutcomeLabel(outcome: unknown): string {
+  return auditResultLabel(loginOutcomePresentation(outcome).code);
+}
+
+function operationActionLabel(action: unknown): string {
+  const key = String(action ?? '').toLowerCase();
+  const labels: Record<string, string> = {
+    create: t('audit.action.create'),
+    update: t('audit.action.update'),
+    delete: t('audit.action.delete'),
+    revoke: t('audit.action.revoke'),
+    test: t('audit.action.test'),
+    refresh: t('audit.action.refresh'),
+  };
+  return labels[key] || String(action || '-');
+}
+
+function operationResultLabel(row: OperationAuditRecord): string {
+  return auditResultLabel(operationResultPresentation(row).code);
+}
+
+function operationResultTag(row: OperationAuditRecord): AuditTagType {
+  return operationResultPresentation(row).tag;
+}
+
+function operationRequestID(row: OperationAuditRecord): string {
+  return parseOperationAuditMetadata(row).requestId || '-';
+}
+
+function operationStatusCode(row: OperationAuditRecord): string {
+  return String(parseOperationAuditMetadata(row).statusCode ?? '-');
+}
+
+async function loadLoginAuditLogs() {
+  loginAuditLoading.value = true;
+  loginAuditError.value = '';
+  try {
+    const res = await apiClient.getLoginAuditLogs({
+      page: loginAuditPage.value,
+      page_size: loginAuditPageSize.value,
+      q: loginAuditKeyword.value || undefined,
+      outcome: loginAuditOutcome.value || undefined,
+    });
+    loginAuditLogs.value = res.items ?? [];
+    loginAuditTotal.value = res.total ?? 0;
+  } catch (err) {
+    loginAuditLogs.value = [];
+    loginAuditError.value = err instanceof Error ? err.message : t('audit.error.loadLogins');
+  } finally {
+    loginAuditLoading.value = false;
+  }
+}
+
+async function loadOperationAuditLogs() {
+  operationAuditLoading.value = true;
+  operationAuditError.value = '';
+  try {
+    const res = await apiClient.getOperationAuditLogs({
+      page: operationAuditPage.value,
+      page_size: operationAuditPageSize.value,
+      q: operationAuditKeyword.value || undefined,
+      action: operationAuditAction.value || undefined,
+    });
+    operationAuditLogs.value = res.items ?? [];
+    operationAuditTotal.value = res.total ?? 0;
+  } catch (err) {
+    operationAuditLogs.value = [];
+    operationAuditError.value = err instanceof Error ? err.message : t('audit.error.loadOperations');
+  } finally {
+    operationAuditLoading.value = false;
+  }
+}
+
+async function loadSessions() {
+  sessionsLoading.value = true;
+  sessionError.value = '';
+
+  try {
+    const res = await apiClient.getSessions({
+      page: sessionPage.value,
+      page_size: sessionPageSize.value,
+      q: sessionKeyword.value || undefined,
+    });
+    sessions.value = res.items ?? [];
+    sessionTotal.value = res.total ?? 0;
+  } catch (err) {
+    sessionError.value = err instanceof Error ? err.message : t('sessions.loadError');
+  } finally {
+    sessionsLoading.value = false;
+  }
+}
+
+async function loadDBConnections() {
+  dbLoading.value = true;
+  dbError.value = '';
+
+  try {
+    const res = await apiClient.getDBConnections({
+      page: dbPage.value,
+      page_size: dbPageSize.value,
+      q: dbKeyword.value || undefined,
+    });
+    dbConnections.value = res.items ?? [];
+    dbTotal.value = res.total ?? 0;
+  } catch (err) {
+    dbConnections.value = [];
+    dbError.value = err instanceof Error ? err.message : t('audit.error.loadDBConnections');
+  } finally {
+    dbLoading.value = false;
+  }
+}
+
+function onLogSearch(q: string) {
+  logKeyword.value = q;
+  if (detailKind.value !== 'queries' || !dbQueryConnectionID.value) {
+    logPage.value = 1;
+    return;
+  }
+  if (logPage.value !== 1) {
+    logPage.value = 1;
+  } else {
+    void loadDBQueryPage(dbQueryConnectionID.value, false);
+  }
+}
+
+function onOnlineSearch(q: string) {
+  onlineKeyword.value = q;
+  onlinePage.value = 1;
+  void loadOnlineSessions();
+}
+
+function onSessionSearch(q: string) {
+  sessionKeyword.value = q;
+  sessionPage.value = 1;
+  loadSessions();
+}
+
+function onRDPSearch(q: string) {
+  rdpKeyword.value = q;
+  rdpPage.value = 1;
+  void loadRDPSessions();
+}
+
+function onLoginAuditSearch(q: string) {
+  loginAuditKeyword.value = q;
+  loginAuditPage.value = 1;
+  void loadLoginAuditLogs();
+}
+
+function onLoginAuditOutcomeChange() {
+  loginAuditPage.value = 1;
+  void loadLoginAuditLogs();
+}
+
+function onOperationAuditSearch(q: string) {
+  operationAuditKeyword.value = q;
+  operationAuditPage.value = 1;
+  void loadOperationAuditLogs();
+}
+
+function onOperationAuditActionChange() {
+  operationAuditPage.value = 1;
+  void loadOperationAuditLogs();
+}
+
+function onDBSearch(q: string) {
+  dbKeyword.value = q;
+  dbPage.value = 1;
+  loadDBConnections();
+}
+
+// ── Session artifacts ──
+
+async function loadSessionArtifact(session: { id: string | number }, kind: Exclude<DetailKind, '' | 'queries'>) {
+  const id = sessionId(session);
+
+  if (!id) {
+    ElMessage.error(t('audit.error.missingSession'));
+    return;
+  }
+
+  const requestVersion = ++detailRequestVersion;
+  auditLogDetailRequestVersion++;
+  auditLogDetailVisible.value = false;
+  artifactSessionID.value = id;
+  dbQueryConnectionID.value = '';
+  dbQueryTotal.value = 0;
+  detailLoading.value = true;
+  detailError.value = '';
+
+  try {
+    let title = '';
+    let data: unknown;
+    let startReplay = false;
+    if (kind === 'meta') {
+      title = `${t('audit.scope.ssh')} ${id}`;
+      data = await apiClient.getSessionMeta(id);
+    } else if (kind === 'replay') {
+      title = `${t('audit.action.replay')} ${id}`;
+      data = parseReplayCast(await apiClient.getSessionReplay(id));
+      startReplay = true;
+    } else if (kind === 'commands') {
+      title = `${t('audit.action.commands')} ${id}`;
+      data = await apiClient.getSessionCommands(id);
+    } else if (kind === 'files') {
+      title = `${t('audit.action.files')} ${id}`;
+      data = await apiClient.getSessionFiles(id);
+    } else {
+      title = `${t('audit.action.summary')} ${id}`;
+      data = await apiClient.getSessionFileSummary(id);
+    }
+    if (requestVersion !== detailRequestVersion) return;
+
+    setDetail(title, kind, data);
+    if (startReplay) {
+      await nextTick();
+      if (requestVersion !== detailRequestVersion) return;
+      playReplay();
+    }
+  } catch (err) {
+    if (requestVersion === detailRequestVersion) {
+      detailError.value = err instanceof Error ? err.message : t('audit.error.loadArtifact');
+    }
+  } finally {
+    if (requestVersion === detailRequestVersion) {
+      detailLoading.value = false;
+    }
+  }
+}
+
+function formatFileAction(action: string): string {
+  const map: Record<string, string> = {
+    realpath: '解析路径',
+    list: '列目录',
+    open_read: '打开读取',
+    open_write: '打开写入',
+    read: '读取',
+    write: '写入',
+    close: '关闭',
+    remove: '删除',
+    rename: '重命名',
+    mkdir: '创建目录',
+    rmdir: '删除目录',
+    stat: '查看属性',
+    setstat: '设属性',
+    fstat: '文件属性',
+    fsetstat: '设文件属性',
+    opendir: '打开目录',
+    readdir: '读目录',
+    readlink: '读链接',
+    symlink: '创建链接',
+  };
+  return map[action] || action;
+}
+
+function isSFTP(row: SessionRecord): boolean {
+  if (row.protocol_subtype === 'sftp') return true;
+  return row.protocol.toLowerCase() === 'sftp';
+}
+
+function loadSessionLog(session: SessionRecord) {
+  if (isSFTP(session)) {
+    void loadSessionArtifact(session, 'files');
+  } else {
+    void loadSessionArtifact(session, 'commands');
+  }
+}
+
+// ── Replay ──
+
+function parseReplayCast(raw: string): ReplayData {
+  const lines = raw.split(/\r?\n/).filter((line) => line.trim().length > 0);
+  const header = parseReplayHeader(lines[0]);
+  const frames: ReplayFrame[] = [];
+
+  for (const line of lines.slice(1)) {
+    try {
+      const row = JSON.parse(line) as unknown[];
+      const time = typeof row[0] === 'number' ? row[0] : Number(row[0]);
+      const stream = typeof row[1] === 'string' ? row[1] : '';
+      const data = typeof row[2] === 'string' ? row[2] : '';
+      if (Number.isFinite(time) && data) {
+        frames.push({ time: Math.max(0, time), stream, data });
+      }
+    } catch {
+      // Skip malformed rows so one bad line does not break playback.
+    }
+  }
+
+  frames.sort((a, b) => a.time - b.time);
+  return { header, frames, raw };
+}
+
+function parseReplayHeader(line: string | undefined): Record<string, unknown> {
+  if (!line) {
+    return {};
+  }
+  try {
+    const value = JSON.parse(line);
+    return isRecord(value) ? value : {};
+  } catch {
+    return {};
+  }
+}
+
+function playReplay() {
+  const frames = replayFrames.value;
+  stopReplay();
+  const terminal = ensureReplayTerminal();
+  terminal?.reset();
+  replayProgress.value = 0;
+  replaySeekPercent.value = 0;
+  replayCurrentTime.value = 0;
+  replayRenderedOutput.value = false;
+  replayStartOffset = replayFirstOutputTime.value > 0 ? Math.max(0, replayFirstOutputTime.value - 0.2) : 0;
+  replayFrameIndex = Math.max(
+    0,
+    frames.findIndex((frame) => frame.time >= replayStartOffset)
+  );
+
+  if (!frames.length || !replayOutputFrames.value.length) {
+    return;
+  }
+
+  replayPlaying.value = true;
+  replayStartedAt = performance.now();
+  tickReplay();
+}
+
+function stopReplay() {
+  if (replayTimer !== undefined) {
+    window.clearTimeout(replayTimer);
+    replayTimer = undefined;
+  }
+  cancelAutoScroll();
+  replayPlaying.value = false;
+}
+
+let scrollRafId: number | undefined;
+
+function autoScrollTerminal() {
+  // Cancel any pending scroll — only the latest position matters
+  if (scrollRafId !== undefined) {
+    cancelAnimationFrame(scrollRafId);
+  }
+  scrollRafId = requestAnimationFrame(() => {
+    const host = replayTerminalHostRef.value;
+    if (!host) return;
+    const viewport = host.querySelector('.xterm-viewport') as HTMLElement | null;
+    if (!viewport) return;
+    viewport.scrollTop = viewport.scrollHeight;
+    // xterm may batch DOM updates — confirm on the next frame
+    scrollRafId = requestAnimationFrame(() => {
+      scrollRafId = undefined;
+      viewport.scrollTop = viewport.scrollHeight;
+    });
+  });
+}
+
+function cancelAutoScroll() {
+  if (scrollRafId !== undefined) {
+    cancelAnimationFrame(scrollRafId);
+    scrollRafId = undefined;
+  }
+}
+
+function seekReplay(percent: number) {
+  const frames = replayFrames.value;
+  const duration = Math.max(replayDuration.value, 0.1);
+  const targetTime = (percent / 100) * duration;
+
+  // Find target frame index
+  const targetIndex = frames.findIndex((f) => f.time >= targetTime);
+  const idx = targetIndex >= 0 ? targetIndex : frames.length;
+
+  const wasPlaying = replayPlaying.value;
+  stopReplay();
+
+  // Reset terminal and fast-forward
+  const terminal = ensureReplayTerminal();
+  terminal?.reset();
+  replayRenderedOutput.value = false;
+
+  for (let i = 0; i < idx; i++) {
+    if (frames[i].stream === 'o') {
+      terminal?.write(frames[i].data);
+      replayRenderedOutput.value = true;
+    }
+  }
+
+  autoScrollTerminal();
+
+  // Update state
+  replayFrameIndex = idx;
+  replayProgress.value = percent;
+  replaySeekPercent.value = percent;
+  replayCurrentTime.value = targetTime;
+  replayStartOffset = targetTime;
+
+  if (wasPlaying) {
+    replayPlaying.value = true;
+    replayStartedAt = performance.now();
+    tickReplay();
+  }
+}
+
+function tickReplay() {
+  if (!replayPlaying.value) {
+    return;
+  }
+
+  const frames = replayFrames.value;
+  const speed = playbackSpeed.value;
+  const elapsed = ((performance.now() - replayStartedAt) / 1000) * speed + replayStartOffset;
+  while (replayFrameIndex < frames.length && frames[replayFrameIndex].time <= elapsed) {
+    appendReplayOutput(frames[replayFrameIndex]);
+    replayFrameIndex++;
+  }
+
+  // Keep viewport at bottom so new output is always visible
+  autoScrollTerminal();
+
+  const duration = Math.max(replayDuration.value, 0.1);
+  const pct =
+    replayFrameIndex >= frames.length ? 100 : Math.min(99, Math.round((elapsed / duration) * 100));
+  replayProgress.value = pct;
+  replaySeekPercent.value = pct;
+  replayCurrentTime.value = Math.min(elapsed, duration);
+
+  if (replayFrameIndex >= frames.length) {
+    replayPlaying.value = false;
+    replayTimer = undefined;
+    return;
+  }
+
+  replayTimer = window.setTimeout(tickReplay, 33);
+}
+
+function appendReplayOutput(frame: ReplayFrame) {
+  if (frame.stream !== 'o') {
+    return;
+  }
+  const terminal = ensureReplayTerminal();
+  if (!terminal) {
+    return;
+  }
+  replayRenderedOutput.value = true;
+  terminal.write(frame.data);
+}
+
+function ensureReplayTerminal(): Terminal | undefined {
+  const host = replayTerminalHostRef.value;
+  if (!host) {
+    return undefined;
+  }
+
+  if (!replayTerminal) {
+    replayTerminal = new Terminal({
+      convertEol: false,
+      cursorBlink: false,
+      disableStdin: true,
+      fontFamily: '"SFMono-Regular", Consolas, "Liberation Mono", monospace',
+      fontSize: 13,
+      lineHeight: 1.2,
+      scrollback: 5000,
+      theme: {
+        background: '#0b1220',
+        foreground: '#d0d5dd',
+        cursor: '#98a2b3',
+        selectionBackground: '#344054'
+      }
+    });
+    replayFitAddon = new FitAddon();
+    replayTerminal.loadAddon(replayFitAddon);
+    replayTerminal.open(host);
+
+    // 自适应容器宽度，让终端内容不截断
+    replayFitAddon.fit();
+
+    // 容器大小变化时重新适配
+    replayResizeObserver = new ResizeObserver(() => {
+      if (replayFitAddon && replayTerminal) {
+        replayFitAddon.fit();
+      }
+    });
+    replayResizeObserver.observe(host);
+  }
+
+  return replayTerminal;
+}
+
+function resetReplayTerminal() {
+  replayTerminal?.reset();
+}
+
+function destroyReplayTerminal() {
+  replayResizeObserver?.disconnect();
+  replayResizeObserver = undefined;
+  replayFitAddon?.dispose();
+  replayFitAddon = undefined;
+  replayTerminal?.dispose();
+  replayTerminal = undefined;
+}
+
+function utf8ByteLength(value: string): number {
+  return new TextEncoder().encode(value).length;
+}
+
+// ── DB artifacts ──
+
+function onlineProtocol(row: OnlineSessionRecord): string {
+  if (row.resource_type === 'database_instance') return formatDatabaseProtocol(row.protocol);
+  if (String(row.protocol).toLowerCase() === 'rdp') return 'RDP';
+  if (row.protocol_subtype === 'sftp') return 'SFTP';
+  if (row.protocol_subtype === 'web-terminal') return 'Web';
+  return 'SSH';
+}
+
+function onlineProtocolTag(row: OnlineSessionRecord): 'primary' | 'success' | 'warning' | 'info' | 'danger' | '' {
+  if (row.resource_type === 'database_instance') return databaseProtocolTag(row.protocol);
+  if (String(row.protocol).toLowerCase() === 'rdp') return 'primary';
+  if (row.protocol_subtype === 'sftp') return 'warning';
+  if (row.protocol_subtype === 'web-terminal') return 'success';
+  return 'info';
+}
+
+function loadOnlineReplay(row: OnlineSessionRecord) {
+  if (String(row.protocol).toLowerCase() === 'rdp') {
+    void openRDPReplay({
+      id: row.audit_session_id,
+      has_replay: row.has_replay,
+    });
+    return;
+  }
+  void loadSessionArtifact({ id: row.audit_session_id }, 'replay');
+}
+
+function loadOnlineLog(row: OnlineSessionRecord) {
+  if (row.resource_type === 'database_instance') {
+    void loadDBArtifact({ id: row.audit_session_id }, 'queries');
+    return;
+  }
+  if (String(row.protocol).toLowerCase() === 'rdp') {
+    ElMessage.info('RDP 通道审计已记录元数据，不展示剪贴板或文件内容');
+    return;
+  }
+  const kind = row.protocol_subtype === 'sftp' ? 'files' : 'commands';
+  void loadSessionArtifact({
+    id: row.audit_session_id,
+  }, kind);
+}
+
+async function disconnectOnlineSession(row: OnlineSessionRecord) {
+  try {
+    await ElMessageBox.confirm(
+      t('audit.confirm.disconnectMessage'),
+      t('audit.confirm.disconnectTitle'),
+      { type: 'warning' },
+    );
+  } catch {
+    return;
+  }
+
+  disconnectingSessionID.value = row.id;
+  try {
+    await apiClient.disconnectOnlineSession(row.id);
+    ElMessage.success(t('audit.success.disconnected'));
+    await loadOnlineSessions();
+  } catch (err) {
+    ElMessage.error(err instanceof Error ? err.message : t('audit.error.disconnect'));
+  } finally {
+    disconnectingSessionID.value = '';
+  }
+}
+
+function showUserSessionDetail(sessionID: string) {
+  sessionDetailId.value = sessionID;
+  sessionDetailVisible.value = true;
+}
+
+async function loadDBArtifact(connection: { id: string | number }, kind: 'meta' | 'queries') {
+  const id = String(connection.id ?? '');
+
+  if (!id) {
+    ElMessage.error(t('audit.error.missingConnection'));
+    return;
+  }
+
+  auditLogDetailRequestVersion++;
+  auditLogDetailVisible.value = false;
+  if (kind === 'queries') {
+    detailRequestVersion++;
+    dbQueryConnectionID.value = '';
+    logPage.value = 1;
+    logKeyword.value = '';
+    await loadDBQueryPage(id, true);
+    return;
+  }
+
+  const requestVersion = ++detailRequestVersion;
+  dbQueryConnectionID.value = '';
+  dbQueryTotal.value = 0;
+  detailLoading.value = true;
+  detailError.value = '';
+
+  try {
+    const response = await apiClient.getDBConnectionMeta(id);
+    if (requestVersion !== detailRequestVersion) return;
+    setDetail(`${t('audit.scope.db')} ${id}`, kind, response);
+  } catch (err) {
+    if (requestVersion === detailRequestVersion) {
+      detailError.value = err instanceof Error ? err.message : t('audit.error.loadArtifact');
+    }
+  } finally {
+    if (requestVersion === detailRequestVersion) {
+      detailLoading.value = false;
+    }
+  }
+}
+
+// ── Lifecycle & watchers ──
+
+async function loadDBQueryPage(id: string, openDrawer: boolean) {
+  const requestVersion = ++detailRequestVersion;
+  detailLoading.value = true;
+  detailError.value = '';
+
+  try {
+    const response = await apiClient.getDBConnectionQueries(id, {
+      page: logPage.value,
+      page_size: logPageSize.value,
+      q: logKeyword.value.trim() || undefined,
+    });
+    if (requestVersion !== detailRequestVersion) return;
+
+    dbQueryConnectionID.value = id;
+    dbQueryTotal.value = response.total ?? 0;
+    if (openDrawer) {
+      setDetail(`${t('audit.action.queries')} ${id}`, 'queries', response);
+    } else {
+      detailData.value = response;
+    }
+  } catch (err) {
+    if (requestVersion === detailRequestVersion) {
+      detailError.value = err instanceof Error ? err.message : t('audit.error.loadArtifact');
+    }
+  } finally {
+    if (requestVersion === detailRequestVersion) {
+      detailLoading.value = false;
+    }
+  }
+}
+
+function applyRouteAuditFilter() {
+  const scope = permittedAuditScope(route.query.scope);
+  const keyword = routeQueryValue(route.query.q);
+  auditScope.value = scope;
+  if (scope === 'logins') {
+    loginAuditKeyword.value = keyword;
+    if (loginAuditPage.value === 1) void loadLoginAuditLogs();
+    else loginAuditPage.value = 1;
+    return;
+  }
+  if (scope === 'operations') {
+    operationAuditKeyword.value = keyword;
+    if (operationAuditPage.value === 1) void loadOperationAuditLogs();
+    else operationAuditPage.value = 1;
+    return;
+  }
+  if (scope === 'online') {
+    onlineKeyword.value = keyword;
+    onlineResourceType.value = routeQueryValue(route.query.resource_type);
+    onlineResourceID.value = routeQueryValue(route.query.resource_id);
+    if (onlinePage.value === 1) void loadOnlineSessions();
+    else onlinePage.value = 1;
+    return;
+  }
+  if (scope === 'rdp') {
+    rdpKeyword.value = keyword;
+    if (rdpPage.value === 1) void loadRDPSessions();
+    else rdpPage.value = 1;
+    return;
+  }
+  onlineKeyword.value = '';
+  onlineResourceType.value = '';
+  onlineResourceID.value = '';
+  if (scope === 'ssh') {
+    sessionKeyword.value = keyword;
+    if (sessionPage.value === 1) void loadSessions();
+    else sessionPage.value = 1;
+  } else {
+    dbKeyword.value = keyword;
+    if (dbPage.value === 1) void loadDBConnections();
+    else dbPage.value = 1;
+  }
+}
+
+function loadAuditScope(scope: TabPaneName): void {
+  switch (scope) {
+    case 'ssh':
+      void loadSessions();
+      return;
+    case 'rdp':
+      void loadRDPSessions();
+      return;
+    case 'db':
+      void loadDBConnections();
+      return;
+    case 'online':
+      void loadOnlineSessions();
+      return;
+    case 'logins':
+      void loadLoginAuditLogs();
+      return;
+    case 'operations':
+      void loadOperationAuditLogs();
+  }
+}
+
+onMounted(() => {
+  loadAuditScope(auditScope.value);
+});
+
+watch(
+  () => route.fullPath,
+  () => {
+    if (route.name === 'audit') applyRouteAuditFilter();
+  },
+);
+
+watch(isReplay, async (value) => {
+  if (value) {
+    await nextTick();
+    ensureReplayTerminal();
+    resetReplayTerminal();
+  }
+});
+
+// Watch pagination changes for main lists
+watch([sessionPage, sessionPageSize], () => {
+  if (auditScope.value === 'ssh') loadSessions();
+});
+watch([rdpPage, rdpPageSize], () => {
+  if (auditScope.value === 'rdp') void loadRDPSessions();
+});
+watch([loginAuditPage, loginAuditPageSize], () => {
+  if (auditScope.value === 'logins') loadLoginAuditLogs();
+});
+watch([operationAuditPage, operationAuditPageSize], () => {
+  if (auditScope.value === 'operations') loadOperationAuditLogs();
+});
+watch([dbPage, dbPageSize], () => {
+  if (auditScope.value === 'db') loadDBConnections();
+});
+watch([onlinePage, onlinePageSize], () => {
+  if (auditScope.value === 'online') loadOnlineSessions();
+});
+watch([logPage, logPageSize], ([page, pageSize], [previousPage, previousPageSize]) => {
+  if (detailKind.value !== 'queries' || !dbQueryConnectionID.value) return;
+  if (pageSize !== previousPageSize && page !== 1) {
+    logPage.value = 1;
+    return;
+  }
+  if (page !== previousPage || pageSize !== previousPageSize) {
+    void loadDBQueryPage(dbQueryConnectionID.value, false);
+  }
+});
+
+onBeforeUnmount(() => {
+  stopReplay();
+  destroyReplayTerminal();
+  destroyRDPReplay();
+});
+</script>
+
+<style scoped>
+/* 保留 tab header 默认间距 (page-tabs 会清零) */
+.page-tabs :deep(.el-tabs__header) {
+  margin-bottom: 15px;
+  padding: 0;
+}
+
+.audit-view {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.placeholder-panel :deep(.el-segmented) {
+  max-width: 100%;
+}
+
+:deep(.col-time) {
+  white-space: nowrap;
+}
+
+/* Make drawer body a flex column so terminal can fill remaining space */
+:deep(.el-drawer__body) {
+  display: flex;
+  flex-direction: column;
+  padding: 12px 16px;
+}
+
+.drawer-content {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.rdp-replay-actions,
+.rdp-replay-timeline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.rdp-replay-panel {
+  display: flex;
+  height: min(72dvh, 720px);
+  min-height: 0;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.rdp-replay-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+}
+
+.rdp-replay-timeline {
+  flex: 1 1 320px;
+  min-width: 0;
+}
+
+.rdp-replay-timeline :deep(.el-slider) {
+  flex: 1;
+  min-width: 120px;
+}
+
+.rdp-replay-display {
+  display: grid;
+  flex: 1;
+  min-height: clamp(220px, 52dvh, 620px);
+  place-items: center;
+  overflow: hidden;
+  border-radius: 10px;
+  background: #090f1d;
+}
+
+.rdp-replay-display :deep(.rdp-recording-canvas) {
+  position: relative;
+  transform-origin: center center;
+}
+
+.replay-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 1;
+  min-height: 0;
+}
+
+.replay-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.replay-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+  color: #667085;
+  font-size: 12px;
+}
+
+.replay-meta :deep(.el-slider) {
+  flex: 1;
+  min-width: 80px;
+}
+
+.replay-meta-secondary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  color: #667085;
+  font-size: 11px;
+}
+
+.replay-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.replay-terminal-shell {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 200px;
+  overflow: auto;
+  background: #0b1220;
+  border-radius: 8px;
+}
+
+.replay-terminal {
+  flex: 1;
+  min-width: fit-content;
+  /* 使用 flex 布局让终端自然填充高度，min-width:fit-content 允许 xterm 超宽时触发父级横向滚动 */
+}
+
+/* let xterm control its own dimensions based on cols/rows */
+
+.replay-terminal :deep(.xterm-viewport) {
+  overflow-y: auto !important;
+  scrollbar-width: thin;
+  scrollbar-color: #475467 transparent;
+}
+
+.replay-terminal :deep(.xterm-viewport::-webkit-scrollbar) {
+  width: 6px;
+}
+
+.replay-terminal :deep(.xterm-viewport::-webkit-scrollbar-track) {
+  background: transparent;
+}
+
+.replay-terminal :deep(.xterm-viewport::-webkit-scrollbar-thumb) {
+  background: #475467;
+  border-radius: 3px;
+}
+
+/* 不限制 xterm-screen 宽度，让它按 cols 自然渲染，终端壳层处理横向滚动 */
+
+.replay-terminal-empty {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  color: #98a2b3;
+  font-size: 13px;
+  text-align: center;
+  pointer-events: none;
+}
+
+.audit-log-detail {
+  min-height: 180px;
+}
+
+.audit-log-detail__section {
+  margin-top: 16px;
+}
+
+.audit-log-detail__heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+  font-weight: 700;
+}
+
+.audit-log-detail pre {
+  max-height: 52vh;
+  margin: 0;
+  padding: 16px;
+  overflow: auto;
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 8px;
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--el-color-primary) 5%, transparent), transparent 28%),
+    var(--el-fill-color-light);
+  font-family: "JetBrains Mono", "Cascadia Code", monospace;
+  font-size: 12px;
+  line-height: 1.65;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.query-sql-cell {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.query-sql-cell__text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.query-sql-cell :deep(.el-tag) {
+  flex-shrink: 0;
+}
+
+.query-sql-cell__copy {
+  flex-shrink: 0;
+}
+
+@media (max-width: 620px) {
+  .rdp-replay-actions,
+  .rdp-replay-timeline {
+    width: 100%;
+  }
+
+  .rdp-replay-actions :deep(.el-button) {
+    flex: 1;
+    margin: 0;
+  }
+
+  .replay-controls {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}
+</style>

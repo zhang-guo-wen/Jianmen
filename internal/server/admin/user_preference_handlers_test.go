@@ -1,0 +1,102 @@
+package admin
+
+import (
+	"bytes"
+	"net/http"
+	"net/http/httptest"
+	"reflect"
+	"testing"
+
+	"jianmen/internal/model"
+)
+
+func TestMePreferencesDefaultsAndPersists(t *testing.T) {
+	server, db := newAdminDBTestServer(t)
+	if err := db.Create(&model.User{ID: "u1", Username: "alice", Status: "active"}).Error; err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+
+	getRequest := asTestUser(httptest.NewRequest(http.MethodGet, "/api/me/preferences", nil), "u1", "alice")
+	getRecorder := httptest.NewRecorder()
+	server.handleMePreferences(getRecorder, getRequest)
+	if getRecorder.Code != http.StatusOK {
+		t.Fatalf("get preferences status = %d, body=%s", getRecorder.Code, getRecorder.Body.String())
+	}
+	var defaults userPreferenceResponse
+	if err := decodeTestData(t, getRecorder.Body.Bytes(), &defaults); err != nil {
+		t.Fatalf("decode defaults: %v", err)
+	}
+	if defaults.Theme != "light" || defaults.TerminalFontSize != 14 {
+		t.Fatalf("unexpected defaults: %#v", defaults)
+	}
+
+	body := bytes.NewBufferString(`{"theme":"dark","ssh_client":"xshell","ssh_client_path":"C:\\Xshell.exe","terminal_font_family":"Cascadia Mono","terminal_font_size":16}`)
+	putRequest := asTestUser(httptest.NewRequest(http.MethodPut, "/api/me/preferences", body), "u1", "alice")
+	putRecorder := httptest.NewRecorder()
+	server.handleMePreferences(putRecorder, putRequest)
+	if putRecorder.Code != http.StatusOK {
+		t.Fatalf("put preferences status = %d, body=%s", putRecorder.Code, putRecorder.Body.String())
+	}
+
+	var stored model.UserPreference
+	if err := db.First(&stored, "user_id = ?", "u1").Error; err != nil {
+		t.Fatalf("read stored preference: %v", err)
+	}
+	if stored.Theme != "dark" || stored.SSHClient != "xshell" || stored.TerminalFontSize != 16 {
+		t.Fatalf("unexpected stored preference: %#v", stored)
+	}
+}
+
+func TestUserPreferenceModelHasNoRemovedDatabaseClientFields(t *testing.T) {
+	typeOfPreference := reflect.TypeOf(model.UserPreference{})
+	for _, field := range []string{"DatabaseClient", "DatabaseClientPath"} {
+		if _, ok := typeOfPreference.FieldByName(field); ok {
+			t.Fatalf("removed field %q is still present in the production model", field)
+		}
+	}
+}
+
+func TestMePreferencesRejectsInvalidValues(t *testing.T) {
+	server, _ := newAdminDBTestServer(t)
+	cases := []string{
+		`{"theme":"neon","terminal_font_size":99}`,
+		`{"language":"zh-CN"}`,
+		`{"layout":"split"}`,
+	}
+	for _, body := range cases {
+		recorder := httptest.NewRecorder()
+		request := asTestUser(httptest.NewRequest(http.MethodPut, "/api/me/preferences", bytes.NewBufferString(body)), "u1", "alice")
+		server.handleMePreferences(recorder, request)
+		if recorder.Code != http.StatusBadRequest {
+			t.Fatalf("body = %s, status = %d, want 400; body=%s", body, recorder.Code, recorder.Body.String())
+		}
+	}
+}
+
+func TestMePreferencesRejectsRemovedDatabaseClientFields(t *testing.T) {
+	server, _ := newAdminDBTestServer(t)
+	body := bytes.NewBufferString(`{"database_client":"dbeaver","database_client_path":"C:\\DBeaver\\dbeaver.exe"}`)
+	request := asTestUser(httptest.NewRequest(http.MethodPut, "/api/me/preferences", body), "u1", "alice")
+	recorder := httptest.NewRecorder()
+	server.handleMePreferences(recorder, request)
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body=%s", recorder.Code, recorder.Body.String())
+	}
+}
+
+func TestMePreferencesRejectsMissingUserID(t *testing.T) {
+	server, _ := newAdminDBTestServer(t)
+
+	getRecorder := httptest.NewRecorder()
+	server.handleMePreferences(getRecorder, httptest.NewRequest(http.MethodGet, "/api/me/preferences", nil))
+	if getRecorder.Code != http.StatusNotFound {
+		t.Fatalf("get status = %d, want %d; body=%s", getRecorder.Code, http.StatusNotFound, getRecorder.Body.String())
+	}
+
+	putRecorder := httptest.NewRecorder()
+	putRecorderBody := bytes.NewBufferString(`{"theme":"dark"}`)
+	server.handleMePreferences(putRecorder, httptest.NewRequest(http.MethodPut, "/api/me/preferences", putRecorderBody))
+	if putRecorder.Code != http.StatusNotFound {
+		t.Fatalf("put status = %d, want %d; body=%s", putRecorder.Code, http.StatusNotFound, putRecorder.Body.String())
+	}
+}

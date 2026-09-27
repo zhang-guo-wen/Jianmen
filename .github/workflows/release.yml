@@ -1,0 +1,130 @@
+name: Publish release
+
+"on":
+  push:
+    tags:
+      - "v*.*.*"
+
+jobs:
+  quality-gates:
+    name: Verify build and test gates
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Validate release tag
+        shell: bash
+        run: |
+          if [[ ! "${GITHUB_REF_NAME}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
+            echo "release tag must look like v1.2.3 or v1.2.3-rc.1" >&2
+            exit 1
+          fi
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      # 固定 npm 版本,避免 npm 版本漂移导致 lock 校验行为不一致(与 web/package.json 的 packageManager 保持一致)
+      - name: 固定 npm 版本
+        run: npm install -g npm@11.16.0
+
+      - name: Install frontend dependencies
+        run: npm ci
+        working-directory: web
+
+      - name: Typecheck frontend
+        run: npm run typecheck
+        working-directory: web
+
+      - name: Build frontend
+        run: npm run build
+        working-directory: web
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Download backend dependencies
+        run: go mod download
+
+      - name: Build backend
+        run: go build ./...
+
+      - name: Test backend
+        run: go test ./... -count=1
+
+      - name: Vet backend
+        run: go vet ./...
+
+  package:
+    needs: quality-gates
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.x"
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build release packages
+        run: ./scripts/build/package-release.sh "${GITHUB_REF_NAME}"
+
+      - name: Upload release packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-packages
+          path: dist/release/
+          if-no-files-found: error
+          retention-days: 1
+
+  release:
+    needs: package
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download release packages
+        uses: actions/download-artifact@v4
+        with:
+          name: release-packages
+          path: dist/release
+
+      - name: Create or update GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
+            gh release upload "${GITHUB_REF_NAME}" dist/release/* --clobber
+          else
+            gh release create "${GITHUB_REF_NAME}" dist/release/* \
+              --verify-tag \
+              --generate-notes \
+              --title "Jianmen ${GITHUB_REF_NAME}"
+          fi

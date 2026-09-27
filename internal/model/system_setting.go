@@ -1,0 +1,30 @@
+package model
+
+import "time"
+
+const SystemSettingSingletonID = "system"
+
+// SystemSetting stores the desired restart-applied system policy.
+type SystemSetting struct {
+	ID                            string `gorm:"primaryKey;size:32"`
+	DatabaseGatewayMode           string `gorm:"size:16;not null;default:unified;check:chk_system_settings_database_gateway_mode,database_gateway_mode IN ('unified','independent')"`
+	DatabaseGatewayClientTLSMode  string `gorm:"size:16;not null;default:optional;check:chk_system_settings_database_gateway_client_tls_mode,database_gateway_client_tls_mode IN ('required','optional')"`
+	LoginCaptchaEnabled           bool   `gorm:"not null;default:false"`
+	WebRDPEnabled                 bool   `gorm:"not null"`
+	WebRDPConnectTimeoutSeconds   int    `gorm:"not null"`
+	WebRDPAllowUnrecorded         bool   `gorm:"not null"`
+	RecordingEnabled              bool   `gorm:"not null"`
+	RecordingRecordInput          bool   `gorm:"not null"`
+	RecordingRecordCommands       bool   `gorm:"not null"`
+	RecordingRetentionDays        int    `gorm:"not null"`
+	RecordingMaxReplayBytes       int64  `gorm:"not null"`
+	RecordingCleanupBatchSize     int    `gorm:"not null"`
+	DatabaseMaxClientMessageBytes int    `gorm:"not null;default:10485760"`
+	SSHRedactionEnabled           bool   `gorm:"not null;default:false"`
+	DatabaseAuditRedactionEnabled bool   `gorm:"not null;default:false"`
+	DatabaseAuditPreviewBytes     int    `gorm:"not null;default:65536"`
+	Revision                      int64  `gorm:"not null"`
+	AppliedRevision               int64  `gorm:"not null;default:0"`
+	AppliedAt                     *time.Time
+	FullAudit
+}

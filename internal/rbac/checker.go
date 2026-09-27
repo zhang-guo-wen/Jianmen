@@ -1,0 +1,340 @@
+package rbac
+
+import (
+	"context"
+	"errors"
+	"strings"
+	"time"
+
+	"gorm.io/gorm"
+
+	"jianmen/internal/model"
+)
+
+type Checker struct {
+	db *gorm.DB
+}
+
+func NewChecker(db *gorm.DB) *Checker {
+	return &Checker{db: db}
+}
+
+func (c *Checker) HasPermission(userID, action, resourceType, resourceID string) (bool, error) {
+	return c.HasPermissionContext(context.Background(), userID, action, resourceType, resourceID)
+}
+
+func (c *Checker) HasPermissionContext(
+	ctx context.Context,
+	userID string,
+	action string,
+	resourceType string,
+	resourceID string,
+) (bool, error) {
+	if c == nil || c.db == nil {
+		return false, errors.New("rbac: nil database")
+	}
+	scoped := &Checker{db: c.db.WithContext(ctx)}
+
+	userID = strings.TrimSpace(userID)
+	action = strings.TrimSpace(action)
+	resourceType = strings.TrimSpace(resourceType)
+	resourceID = strings.TrimSpace(resourceID)
+	if userID == "" || action == "" {
+		return false, nil
+	}
+	if resourceType != "" && resourceID != "" {
+		active, err := activeResourceExists(scoped.db, resourceType, resourceID)
+		if err != nil {
+			return false, err
+		}
+		if !active {
+			return false, nil
+		}
+	}
+
+	permissions, err := scoped.permissionsForUser(userID)
+	if err != nil {
+		return false, err
+	}
+
+	hasAction := false
+	hasResourceGrant := resourceType == "" && resourceID == ""
+	for _, permission := range permissions {
+		if isDeny(permission) && scoped.matches(permission, action, resourceType, resourceID) {
+			return false, nil
+		}
+	}
+
+	for _, permission := range permissions {
+		if !isAllow(permission) {
+			continue
+		}
+		if actionMatches(permission.Action, action) && isActionOnly(permission) {
+			hasAction = true
+			continue
+		}
+		if resourceType != "" && resourceID != "" && scoped.resourceMatches(permission, resourceType, resourceID) {
+			if actionMatches(permission.Action, action) {
+				return true, nil
+			}
+			if permission.Action == "" || permission.Action == "*" {
+				hasResourceGrant = true
+			}
+		}
+	}
+
+	return hasAction && hasResourceGrant, nil
+}
+
+func (c *Checker) HasDenyContext(
+	ctx context.Context,
+	userID string,
+	action string,
+	resourceType string,
+	resourceID string,
+) (bool, error) {
+	if c == nil || c.db == nil {
+		return false, errors.New("rbac: nil database")
+	}
+	scoped := &Checker{db: c.db.WithContext(ctx)}
+	userID = strings.TrimSpace(userID)
+	action = strings.TrimSpace(action)
+	resourceType = strings.TrimSpace(resourceType)
+	resourceID = strings.TrimSpace(resourceID)
+	if userID == "" || action == "" {
+		return false, nil
+	}
+	if resourceType != "" && resourceID != "" {
+		active, err := activeResourceExists(scoped.db, resourceType, resourceID)
+		if err != nil {
+			return false, err
+		}
+		if !active {
+			return false, nil
+		}
+	}
+	permissions, err := scoped.permissionsForUser(userID)
+	if err != nil {
+		return false, err
+	}
+	for _, permission := range permissions {
+		if isDeny(permission) && scoped.matches(permission, action, resourceType, resourceID) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func (c *Checker) permissionsForUser(userID string) ([]model.Permission, error) {
+	now := time.Now().UTC()
+	var permissions []model.Permission
+	err := c.db.
+		Table("permissions").
+		Select("permissions.*").
+		Joins("JOIN role_permissions ON role_permissions.permission_id = permissions.id").
+		Joins("JOIN user_roles ON user_roles.role_id = role_permissions.role_id").
+		Joins("JOIN roles ON roles.id = user_roles.role_id").
+		Joins("JOIN users ON users.id = user_roles.user_id").
+		Where("user_roles.user_id = ?", userID).
+		Where("user_roles.expires_at IS NULL OR user_roles.expires_at > ?", now).
+		Where("permissions.active_marker = ?", model.ActiveMarkerValue).
+		Where("roles.active_marker = ?", model.ActiveMarkerValue).
+		Where("users.active_marker = ?", model.ActiveMarkerValue).
+		Where("roles.status = '' OR roles.status = ?", "active").
+		Find(&permissions).Error
+	return permissions, err
+}
+
+func (c *Checker) matches(permission model.Permission, action, resourceType, resourceID string) bool {
+	if !actionMatches(permission.Action, action) {
+		return false
+	}
+	if resourceType == "" && resourceID == "" {
+		return isActionOnly(permission)
+	}
+	return isActionOnly(permission) || c.resourceMatches(permission, resourceType, resourceID)
+}
+
+func (c *Checker) resourceMatches(permission model.Permission, resourceType, resourceID string) bool {
+	switch {
+	case resourceTypeMatches(permission.ResourceType, resourceType) && resourceIDMatches(permission.ResourceID, resourceID):
+		return true
+	case permission.ResourceType == model.ResourceTypeGroup && permission.ResourceID != "":
+		return c.groupContainsResource(permission.ResourceID, resourceType, resourceID)
+	default:
+		return false
+	}
+}
+
+func (c *Checker) groupContainsResource(groupID, resourceType, resourceID string) bool {
+	// 查找资源组名称
+	var group model.ResourceGroup
+	if err := c.db.
+		Where("id = ? AND active_marker = ?", groupID, model.ActiveMarkerValue).
+		First(&group).Error; err != nil {
+		return false
+	}
+	groupName := group.Name
+
+	switch {
+	case resourceType == model.ResourceTypeHostAccount:
+		var count int64
+		c.db.Model(&model.HostAccount{}).
+			Joins("JOIN hosts ON hosts.id = host_accounts.host_id").
+			Where("hosts.group_name = ? AND host_accounts.id = ?", groupName, resourceID).
+			Where("host_accounts.active_marker = ? AND hosts.active_marker = ?", model.ActiveMarkerValue, model.ActiveMarkerValue).
+			Count(&count)
+		return count > 0
+	case resourceType == model.ResourceTypeDatabaseAccount:
+		var count int64
+		c.db.Model(&model.DatabaseAccount{}).
+			Joins("JOIN database_instances ON database_instances.id = database_accounts.instance_id").
+			Where("database_instances.group_name = ? AND database_accounts.id = ?", groupName, resourceID).
+			Where("database_accounts.active_marker = ? AND database_instances.active_marker = ?", model.ActiveMarkerValue, model.ActiveMarkerValue).
+			Count(&count)
+		return count > 0
+	case resourceType == model.ResourceTypeHost:
+		var count int64
+		c.db.Model(&model.Host{}).
+			Where("group_name = ? AND id = ? AND active_marker = ?", groupName, resourceID, model.ActiveMarkerValue).
+			Count(&count)
+		return count > 0
+	case resourceType == model.ResourceTypeDatabaseInstance:
+		var count int64
+		c.db.Model(&model.DatabaseInstance{}).
+			Where("group_name = ? AND id = ? AND active_marker = ?", groupName, resourceID, model.ActiveMarkerValue).
+			Count(&count)
+		return count > 0
+	case resourceType == model.ResourceTypeApplication:
+		var count int64
+		c.db.Model(&model.Application{}).
+			Where("app_group = ? AND id = ? AND active_marker = ?", groupName, resourceID, model.ActiveMarkerValue).
+			Count(&count)
+		return count > 0
+	case resourceType == model.ResourceTypePlatformAccount:
+		var count int64
+		c.db.Model(&model.PlatformAccount{}).
+			Where("group_name = ? AND id = ? AND active_marker = ?", groupName, resourceID, model.ActiveMarkerValue).
+			Count(&count)
+		return count > 0
+	default:
+		return false
+	}
+}
+
+func actionMatches(granted, requested string) bool {
+	return granted == requested || granted == "*"
+}
+
+func resourceTypeMatches(granted, requested string) bool {
+	return granted == requested || granted == "*"
+}
+
+func resourceIDMatches(granted, requested string) bool {
+	return granted == requested || granted == "*"
+}
+
+func isActionOnly(permission model.Permission) bool {
+	return permission.ResourceType == "" && permission.ResourceID == ""
+}
+
+func isAllow(permission model.Permission) bool {
+	return permission.Effect == "" || strings.EqualFold(permission.Effect, model.PermissionEffectAllow)
+}
+
+func isDeny(permission model.Permission) bool {
+	return strings.EqualFold(permission.Effect, model.PermissionEffectDeny)
+}
+
+// BatchActionDecisionsContext loads all role permissions and resource-group
+// memberships once, then evaluates every requested resource in memory.
+func (c *Checker) BatchActionDecisionsContext(ctx context.Context, userID string, requests []BatchAuthorizationRequest) ([]BatchActionDecision, error) {
+	result := make([]BatchActionDecision, len(requests))
+	if c == nil || c.db == nil {
+		return nil, errors.New("rbac: nil database")
+	}
+	if len(requests) == 0 {
+		return result, nil
+	}
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return result, nil
+	}
+	permissions, err := (&Checker{db: c.db.WithContext(ctx)}).permissionsForUser(userID)
+	if err != nil {
+		return nil, err
+	}
+	facts, err := c.loadBatchFacts(ctx, requests, groupIDsFromPermissions(permissions))
+	if err != nil {
+		return nil, err
+	}
+	for index, request := range requests {
+		decision := result[index]
+		resourceActive := facts.resourceIsActive(request.ResourceType, request.ResourceID)
+		for _, action := range normalizedBatchActions(request.Actions) {
+			globalAllowed := false
+			globalDenied := false
+			resourceDenied := false
+			for _, permission := range permissions {
+				if !actionMatches(permission.Action, action) {
+					continue
+				}
+				if isActionOnly(permission) {
+					if isDeny(permission) {
+						globalDenied = true
+					}
+					if isAllow(permission) {
+						globalAllowed = true
+					}
+					continue
+				}
+				if isDeny(permission) && batchPermissionResourceMatches(permission, request, facts) {
+					resourceDenied = true
+				}
+			}
+			// HasPermissionContext(user, action, "", "") first applies
+			// action-only deny precedence, then requires an action-only allow.
+			// Keep that decision separate from a concrete resource deny so the
+			// service can preserve action_denied versus resource_denied.
+			if globalDenied || !globalAllowed {
+				continue
+			}
+			decision.ActionAllowed = true
+			// Single authorization resolves the global action before checking
+			// the concrete resource. Preserve that classification here: an
+			// inactive or missing resource is resource_denied, not
+			// action_denied.
+			if !resourceActive {
+				continue
+			}
+			if !resourceDenied {
+				decision.Allowed = true
+			}
+			if resourceDenied {
+				decision.Denied = true
+			}
+		}
+		if decision.Allowed {
+			decision.Denied = false
+		}
+		result[index] = decision
+	}
+	return result, nil
+}
+
+func normalizedBatchActions(actions []string) []string {
+	seen := map[string]struct{}{}
+	result := make([]string, 0, len(actions))
+	for _, action := range actions {
+		action = strings.TrimSpace(action)
+		if action == "" {
+			continue
+		}
+		if _, ok := seen[action]; ok {
+			continue
+		}
+		seen[action] = struct{}{}
+		result = append(result, action)
+	}
+	return result
+}

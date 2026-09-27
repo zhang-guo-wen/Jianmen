@@ -1,0 +1,34 @@
+.idea/
+node_modules/
+dist/
+!internal/frontend/dist/
+internal/frontend/dist/*
+!internal/frontend/dist/.gitkeep
+data/
+logs/
+bin/
+config.local.json
+*.exe
+*.test
+coverage.out
+*.db
+*.sqlite
+*.sqlite3
+*.log
+*.key
+*.key.pub
+*.pem
+*.p12
+*.pfx
+
+# Generated from the pinned official guacd image by the build scripts.
+internal/guacdruntime/assets/*.tar.gz
+
+.vite/
+.claude/worktrees/
+/.superpowers/
+/.worktrees/
+/docs/superpowers/
+
+# 本地 Agent worktree（不提交）
+.agents/worktree/

@@ -1,0 +1,38 @@
+<template>
+  <div class="view-stack">
+    <el-tabs v-model="activeTab" class="page-tabs" @tab-change="handleTabChange">
+      <!-- 主机管理 Tab -->
+      <el-tab-pane :label="t('nav.hosts')" name="hosts">
+        <HostsView v-if="activeTab === 'hosts'" />
+      </el-tab-pane>
+
+      <!-- 数据库管理 Tab -->
+      <el-tab-pane :label="t('nav.databases')" name="databases">
+        <DatabaseView v-if="activeTab === 'databases'" />
+      </el-tab-pane>
+    </el-tabs>
+  </div>
+</template>
+
+<script setup lang="ts">
+import { ref } from 'vue'
+import { useI18n } from '@/i18n'
+import HostsView from '@/views/HostsView.vue'
+import DatabaseView from '@/views/DatabaseView.vue'
+
+const { t } = useI18n()
+
+const activeTab = ref('hosts')
+
+const handleTabChange = (_tab: string) => {
+  // Tab 切换时的逻辑（如果需要）
+}
+</script>
+
+<style scoped>
+/* 保留 tab header 默认间距 (page-tabs 会清零) */
+.page-tabs :deep(.el-tabs__header) {
+  margin-bottom: 15px;
+  padding: 0;
+}
+</style>

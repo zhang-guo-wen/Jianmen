@@ -1,0 +1,226 @@
+package rbac
+
+import (
+	"reflect"
+	"testing"
+)
+
+func TestPermissionCatalogContainsEveryAction(t *testing.T) {
+	expected := []string{
+		ActionDBConnect, ActionDBQuery, ActionDBExecute, ActionSessionConnect, ActionSFTPConnect,
+		ActionRDPConnect, ActionRDPClipboardRead, ActionRDPClipboardWrite,
+		ActionRDPFileUpload, ActionRDPFileDownload, ActionRDPDriveMap,
+		ActionRDPRecordingView,
+		ActionAuditView, ActionDBAuditView,
+		ActionHostCreate, ActionHostUpdate, ActionHostDelete, ActionHostView,
+		ActionTargetCreate, ActionTargetUpdate, ActionTargetDelete, ActionTargetView,
+		ActionDBProxyCreate, ActionDBProxyUpdate, ActionDBProxyDelete, ActionDBProxyView,
+		ActionRBACManage, ActionSessionView, ActionSessionDisconnect,
+		ActionAppCreate, ActionAppUpdate, ActionAppDelete, ActionAppView, ActionAppConnect,
+		ActionContainerCreate, ActionContainerUpdate, ActionContainerDelete, ActionContainerView, ActionContainerConnect,
+		ActionPlatformAccountCreate, ActionPlatformAccountUpdate, ActionPlatformAccountDelete,
+		ActionPlatformAccountView, ActionPlatformAccountUse,
+		ActionAIManage,
+	}
+
+	if err := ValidatePermissionCatalog(); err != nil {
+		t.Fatalf("ValidatePermissionCatalog() error = %v", err)
+	}
+	if got := len(PermissionCatalog()); got != len(expected) {
+		t.Fatalf("catalog length = %d, want %d", got, len(expected))
+	}
+	for _, action := range expected {
+		item, ok := FindPermissionDefinition(action)
+		if !ok || item.Action != action || !item.Assignable {
+			t.Fatalf("catalog entry for %q = %#v, %v", action, item, ok)
+		}
+	}
+}
+
+func TestAIPermissionCatalogUsesReadableChineseMetadata(t *testing.T) {
+	item, ok := FindPermissionDefinition(ActionAIManage)
+	if !ok {
+		t.Fatal("AI permission catalog entry is missing")
+	}
+	if item.Label != "AI 授权" {
+		t.Fatalf("AI permission label = %q, want %q", item.Label, "AI 授权")
+	}
+	if item.Description != "签发和撤销 AI 访问令牌" {
+		t.Fatalf("AI permission description = %q, want %q", item.Description, "签发和撤销 AI 访问令牌")
+	}
+}
+
+func TestPermissionCatalogReturnsDefensiveCopies(t *testing.T) {
+	items := PermissionCatalog()
+	items[0].Action = "changed"
+	if len(items[0].ResourceTypes) > 0 {
+		items[0].ResourceTypes[0] = "changed"
+	}
+	pages := PermissionPages()
+	pages[0].Key = "changed"
+	pages[0].Actions[0].Action = "changed"
+	if _, ok := FindPermissionDefinition("changed"); ok {
+		t.Fatal("caller mutated catalog index")
+	}
+	if PermissionPages()[0].Key == "changed" {
+		t.Fatal("caller mutated page catalog")
+	}
+}
+
+func TestValidateAssignableActionsAddsDependencies(t *testing.T) {
+	got, err := ValidateAssignableActions([]string{ActionTargetDelete, ActionAppCreate, ActionTargetDelete})
+	if err != nil {
+		t.Fatalf("ValidateAssignableActions() error = %v", err)
+	}
+	want := []string{ActionAppCreate, ActionAppView, ActionHostView, ActionTargetDelete, ActionTargetView}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("actions = %#v, want %#v", got, want)
+	}
+	if _, err := ValidateAssignableActions([]string{"missing:action"}); err == nil {
+		t.Fatal("unknown action was accepted")
+	}
+}
+
+func TestSFTPConnectDoesNotGrantSSHConnect(t *testing.T) {
+	got, err := ValidateAssignableActions([]string{ActionSFTPConnect})
+	if err != nil {
+		t.Fatalf("ValidateAssignableActions() error = %v", err)
+	}
+	want := []string{ActionSFTPConnect}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("actions = %#v, want %#v", got, want)
+	}
+}
+
+func TestRDPConnectDoesNotGrantHighRiskChannels(t *testing.T) {
+	got, err := ValidateAssignableActions([]string{ActionRDPConnect})
+	if err != nil {
+		t.Fatalf("ValidateAssignableActions() error = %v", err)
+	}
+	want := []string{ActionRDPConnect}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("actions = %#v, want %#v", got, want)
+	}
+}
+
+func TestRDPChannelActionsRequireConnect(t *testing.T) {
+	got, err := ValidateAssignableActions([]string{
+		ActionRDPClipboardRead,
+		ActionRDPClipboardWrite,
+		ActionRDPFileUpload,
+		ActionRDPFileDownload,
+		ActionRDPDriveMap,
+	})
+	if err != nil {
+		t.Fatalf("ValidateAssignableActions() error = %v", err)
+	}
+	want := []string{
+		ActionRDPClipboardRead,
+		ActionRDPClipboardWrite,
+		ActionRDPConnect,
+		ActionRDPDriveMap,
+		ActionRDPFileDownload,
+		ActionRDPFileUpload,
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("actions = %#v, want %#v", got, want)
+	}
+}
+
+func TestRDPActionsAreScopedAndDiscoverable(t *testing.T) {
+	actions := []string{
+		ActionRDPConnect,
+		ActionRDPClipboardRead,
+		ActionRDPClipboardWrite,
+		ActionRDPFileUpload,
+		ActionRDPFileDownload,
+		ActionRDPDriveMap,
+		ActionRDPRecordingView,
+	}
+	for _, actionKey := range actions {
+		item, ok := FindPermissionDefinition(actionKey)
+		if !ok {
+			t.Fatalf("catalog entry for %q is missing", actionKey)
+		}
+		wantResourceTypes := []string{"host_account"}
+		if !reflect.DeepEqual(item.ResourceTypes, wantResourceTypes) {
+			t.Fatalf("resource types for %q = %#v, want %#v", actionKey, item.ResourceTypes, wantResourceTypes)
+		}
+	}
+
+	wantConnectPages := []PageAccess{
+		{Key: "quickConnect", Path: "/quick-connect", Order: 10},
+		{Key: "audit", Path: "/audit", Order: 60},
+	}
+	if pages := AccessiblePages([]string{ActionRDPConnect}); !reflect.DeepEqual(pages, wantConnectPages) {
+		t.Fatalf("RDP connect pages = %#v, want %#v", pages, wantConnectPages)
+	}
+	wantAudit := []PageAccess{{Key: "audit", Path: "/audit", Order: 60}}
+	for _, actionKey := range []string{ActionRDPRecordingView} {
+		if pages := AccessiblePages([]string{actionKey}); !reflect.DeepEqual(pages, wantAudit) {
+			t.Fatalf("%s pages = %#v, want %#v", actionKey, pages, wantAudit)
+		}
+	}
+}
+
+func TestSessionDisconnectIncludesViewAndAuditPage(t *testing.T) {
+	actions, err := ValidateAssignableActions([]string{ActionSessionDisconnect})
+	if err != nil {
+		t.Fatalf("ValidateAssignableActions() error = %v", err)
+	}
+	wantActions := []string{ActionSessionDisconnect, ActionSessionView}
+	if !reflect.DeepEqual(actions, wantActions) {
+		t.Fatalf("actions = %#v, want %#v", actions, wantActions)
+	}
+	wantPages := []PageAccess{{Key: "audit", Path: "/audit", Order: 60}}
+	if pages := AccessiblePages([]string{ActionSessionView}); !reflect.DeepEqual(pages, wantPages) {
+		t.Fatalf("pages = %#v, want %#v", pages, wantPages)
+	}
+}
+
+func TestAccessiblePagesUsesAnyChildAction(t *testing.T) {
+	got := AccessiblePages([]string{ActionDBConnect, ActionDBAuditView})
+	want := []PageAccess{
+		{Key: "quickConnect", Path: "/quick-connect", Order: 10},
+		{Key: "audit", Path: "/audit", Order: 60},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("pages = %#v, want %#v", got, want)
+	}
+	if all := AccessiblePages([]string{"*"}); len(all) != len(PermissionPages()) {
+		t.Fatalf("wildcard pages = %d, want %d", len(all), len(PermissionPages()))
+	}
+}
+
+func TestDatabaseExecuteIncludesQueryAndConnectionAccess(t *testing.T) {
+	actions, err := ValidateAssignableActions([]string{ActionDBExecute})
+	if err != nil {
+		t.Fatalf("ValidateAssignableActions() error = %v", err)
+	}
+	wantActions := []string{ActionDBConnect, ActionDBExecute, ActionDBQuery}
+	if !reflect.DeepEqual(actions, wantActions) {
+		t.Fatalf("actions = %#v, want %#v", actions, wantActions)
+	}
+	wantPages := []PageAccess{
+		{Key: "quickConnect", Path: "/quick-connect", Order: 10},
+		{Key: "sqlConsole", Path: "/sql-console", Order: 15},
+	}
+	if pages := AccessiblePages(actions); !reflect.DeepEqual(pages, wantPages) {
+		t.Fatalf("pages = %#v, want %#v", pages, wantPages)
+	}
+}
+
+func TestContainerConnectOnlyOpensQuickConnectPage(t *testing.T) {
+	actions, err := ValidateAssignableActions([]string{ActionContainerConnect})
+	if err != nil {
+		t.Fatalf("ValidateAssignableActions() error = %v", err)
+	}
+	wantActions := []string{ActionContainerConnect}
+	if !reflect.DeepEqual(actions, wantActions) {
+		t.Fatalf("actions = %#v, want %#v", actions, wantActions)
+	}
+	wantPages := []PageAccess{{Key: "quickConnect", Path: "/quick-connect", Order: 10}}
+	if pages := AccessiblePages(actions); !reflect.DeepEqual(pages, wantPages) {
+		t.Fatalf("pages = %#v, want %#v", pages, wantPages)
+	}
+}

@@ -339,6 +339,7 @@ import StatusSwitch from '@/components/StatusSwitch.vue'
 import { TABLE_COLUMNS } from '@/config/tableColumns'
 import * as api from '@/api/client'
 import { usePermissionStore } from '@/stores/permission'
+import { countUsage, fetchRecentSample } from '@/utils/auditUsageSample'
 import { createLatestKeyedRequest } from '@/utils/connectionRequestState'
 import {
   databaseTLSPreflightFingerprint,
@@ -509,13 +510,11 @@ async function loadInstanceUsage() {
   instanceUsageCounts.value = {}
   if (!permission.canDo('db:audit:view')) return
   try {
-    const connections = await fetchAllPages(page => api.apiClient.getDBConnections({ page, page_size: 200 }))
-    const counts: Record<string, number> = {}
-    connections.forEach(connection => {
-      const name = String(connection.target_name || connection.target_address || '').trim().toLowerCase()
-      if (name) counts[name] = (counts[name] || 0) + 1
-    })
-    instanceUsageCounts.value = counts
+    // 只取最近一页审计记录作为“常用”排序样本，不逐页拉取全量历史
+    const connections = await fetchRecentSample((page, pageSize) =>
+      api.apiClient.getDBConnections({ page, page_size: pageSize }))
+    instanceUsageCounts.value = countUsage(connections, connection =>
+      String(connection.target_name || connection.target_address || '').trim().toLowerCase())
   } catch {
     // Audit permission or storage may be unavailable; group filters still work.
   }

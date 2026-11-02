@@ -306,6 +306,7 @@ import { useI18n } from '@/i18n';
 import { useDatabaseClientStore } from '@/stores/databaseClient';
 import { usePermissionStore } from '@/stores/permission';
 import { usePreferencesStore } from '@/stores/preferences';
+import { countUsage, fetchRecentSample } from '@/utils/auditUsageSample';
 import { writeClipboardText } from '@/utils/clipboard';
 import {
   databaseGatewayConnectionError,
@@ -561,13 +562,12 @@ const displayedTargets = computed(() => {
 async function loadSSHUsage(): Promise<Record<string, number>> {
   if (!permission.canDo('audit:view')) return {};
   try {
-    const sessions = await fetchAllPages(page => apiClient.getSessions({ page, page_size: 200 }));
-    const counts: Record<string, number> = {};
-    sessions.forEach(session => {
-      const key = usageKey(String(session.target_name || session.target_address || ''), String(session.account_name || session.account_username || ''));
-      counts[key] = (counts[key] || 0) + 1;
-    });
-    return counts;
+    // 只取最近一页审计记录作为“常用”排序样本，不逐页拉取全量历史
+    const sessions = await fetchRecentSample((page, pageSize) => apiClient.getSessions({ page, page_size: pageSize }));
+    return countUsage(sessions, session => usageKey(
+      String(session.target_name || session.target_address || ''),
+      String(session.account_name || session.account_username || ''),
+    ));
   } catch {
     // Audit permission or storage may be unavailable; group filters still work.
     return {};
@@ -801,7 +801,8 @@ async function performLoadDBAccounts() {
       }
     }
     dbAccounts.value = all;
-    await loadDBUsage();
+    // 账号列表返回后即结束加载状态；“常用”统计在后台补齐，不阻塞界面
+    void loadDBUsage();
   } catch (error) {
     dbError.value = error instanceof Error ? error.message : '无法加载数据库账号';
     ElMessage.error(dbError.value);
@@ -852,16 +853,12 @@ async function loadDBUsage() {
   dbUsageCounts.value = {};
   if (!permission.canDo('db:audit:view')) return;
   try {
-    const connections = await fetchAllPages(page => apiClient.getDBConnections({ page, page_size: 200 }));
-    const counts: Record<string, number> = {};
-    connections.forEach(connection => {
-      const key = usageKey(
-        String(connection.target_name || connection.target_address || ''),
-        String(connection.account_name || connection.account_username || ''),
-      );
-      counts[key] = (counts[key] || 0) + 1;
-    });
-    dbUsageCounts.value = counts;
+    // 只取最近一页审计记录作为“常用”排序样本，不逐页拉取全量历史
+    const connections = await fetchRecentSample((page, pageSize) => apiClient.getDBConnections({ page, page_size: pageSize }));
+    dbUsageCounts.value = countUsage(connections, connection => usageKey(
+      String(connection.target_name || connection.target_address || ''),
+      String(connection.account_name || connection.account_username || ''),
+    ));
   } catch {
     // Audit permission or storage may be unavailable; group filters still work.
   }

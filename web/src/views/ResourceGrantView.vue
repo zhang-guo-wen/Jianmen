@@ -108,6 +108,7 @@
                 <el-tab-pane :label="t('resourceGrant.hostAccounts')" name="host_account" />
                 <el-tab-pane :label="t('resourceGrant.databaseAccounts')" name="database_account" />
                 <el-tab-pane label="应用" name="application" />
+                <el-tab-pane :label="t('resourceGrant.platformAccounts')" name="platform_account" />
                 <el-tab-pane :label="t('resourceGrant.resourceGroups')" name="resource_group" />
                 <el-tab-pane :label="t('resourceGrant.accountGroups')" name="account_group" />
               </el-tabs>
@@ -199,6 +200,20 @@
                   <template #default="{ row }">
                     {{ row.instance_address || '' }}
                   </template>
+                </el-table-column>
+              </template>
+              <template v-else-if="resourceTabType === 'platform_account'">
+                <el-table-column :label="t('platformAccounts.column.name')" min-width="140" show-overflow-tooltip>
+                  <template #default="{ row }">{{ row.name || '-' }}</template>
+                </el-table-column>
+                <el-table-column :label="t('platformAccounts.column.platform')" min-width="120" show-overflow-tooltip>
+                  <template #default="{ row }">{{ row.platform_name || '-' }}</template>
+                </el-table-column>
+                <el-table-column :label="t('platformAccounts.column.username')" min-width="120" show-overflow-tooltip>
+                  <template #default="{ row }">{{ row.username }}</template>
+                </el-table-column>
+                <el-table-column v-bind="TABLE_COLUMNS.url" :label="t('platformAccounts.column.url')">
+                  <template #default="{ row }">{{ row.url || '-' }}</template>
                 </el-table-column>
               </template>
               <template v-else-if="resourceTabType === 'application'">
@@ -731,6 +746,10 @@ const handleResourceScroll = (event: Event) => {
 }
 
 const resourceSelectionName = (row: any) => {
+  if (resourceTabType.value === 'platform_account') {
+    const label = row.name || row.username || row.id
+    return row.platform_name ? `${label} (${row.platform_name})` : label
+  }
   if (row.username) return `${row.username}@${row.host_name || row.instance_name || row.host_address || ''}`
   if (row.name) return `${row.name}${row.address ? ` (${row.address}:${row.port || ''})` : ''}`
   return row.unique_name || row.id
@@ -915,6 +934,31 @@ onMounted(async () => {
 
 .resource-tabs {
   margin-bottom: 8px;
+}
+
+/* 资源类型较多，页签改为换行展示，避免被折叠进左右滚动箭头 */
+.resource-tabs :deep(.el-tabs__nav-wrap) {
+  padding: 0;
+}
+
+.resource-tabs :deep(.el-tabs__nav-prev),
+.resource-tabs :deep(.el-tabs__nav-next) {
+  display: none;
+}
+
+.resource-tabs :deep(.el-tabs__nav) {
+  flex-wrap: wrap;
+  transform: none !important;
+}
+
+.resource-tabs :deep(.el-tabs__item) {
+  height: 32px;
+  line-height: 32px;
+  padding: 0 12px;
+}
+
+.resource-tabs :deep(.el-tabs__active-bar) {
+  display: none;
 }
 
 .resource-search {

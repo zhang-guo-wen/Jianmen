@@ -30,6 +30,7 @@
           </el-menu>
         </nav>
         <div class="sidebar-footer">
+          <span v-if="softwareVersion" class="sidebar-version">v{{ softwareVersion }}</span>
           <el-button
             class="sidebar-logout"
             type="primary"
@@ -74,7 +75,7 @@
 
 <script setup lang="ts">
 import { SwitchButton } from "@element-plus/icons-vue";
-import { computed, onMounted, watchEffect } from "vue";
+import { computed, onMounted, ref, watchEffect } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
 import { apiClient, clearCSRFToken, getCSRFToken } from "@/api/client";
@@ -100,8 +101,12 @@ const preferences = usePreferencesStore();
 const navItems = computed(() =>
   APP_NAV_ITEMS.filter((item) => !item.hidden && permission.canAccessMenu(item.key)),
 );
+const softwareVersion = ref("");
 
 onMounted(async () => {
+	apiClient.getInitStatus()
+		.then((status) => { softwareVersion.value = status.software_version || ""; })
+		.catch(() => undefined);
 	if (!isStandaloneRoute.value && getCSRFToken()) {
     await Promise.all([permission.fetch(), preferences.fetch().catch(() => undefined)]);
   }

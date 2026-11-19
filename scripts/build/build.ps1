@@ -42,6 +42,12 @@ $root = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $frontendDist = Join-Path $root "web\dist"
 $embedDir = Join-Path $root "internal\frontend\dist"
 $outputDir = Join-Path $root "dist"
+# 版本号取自最近的 git tag；取不到时回退到默认值，保证界面始终有版本可显示
+$softwareVersion = (& git -C $root describe --tags --abbrev=0 2>$null)
+if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($softwareVersion)) {
+    $softwareVersion = "1.0.0"
+}
+$ldflags = "-X jianmen/internal/version.Version=$($softwareVersion.Trim())"
 $stepCount = if ($WindowsOnly) { 3 } else { 6 }
 $buildTitle = if ($WindowsOnly) { "Windows local" } else { "Linux Lite + RDP" }
 
@@ -82,7 +88,7 @@ Push-Location $root
 try {
     Write-Host "[3/$stepCount] Building Windows amd64..." -ForegroundColor Cyan
     $windowsOutput = Join-Path $outputDir "jianmen-windows-amd64.exe"
-    go build -o $windowsOutput ./cmd/jianmen/
+    go build -ldflags $ldflags -o $windowsOutput ./cmd/jianmen/
     if ($LASTEXITCODE -ne 0) { throw "Windows build failed" }
     Write-Host "  OK jianmen-windows-amd64.exe ($(Get-FileSizeMB $windowsOutput)MB)" -ForegroundColor Green
 
@@ -97,7 +103,7 @@ try {
 
             Write-Host "[4/$stepCount] Building Linux amd64 Lite..." -ForegroundColor Cyan
             $liteOutput = Join-Path $outputDir "jianmen-linux-amd64-lite"
-            go build -o $liteOutput ./cmd/jianmen/
+            go build -ldflags $ldflags -o $liteOutput ./cmd/jianmen/
             if ($LASTEXITCODE -ne 0) { throw "Linux Lite build failed" }
             Write-Host "  OK jianmen-linux-amd64-lite ($(Get-FileSizeMB $liteOutput)MB)" -ForegroundColor Green
 
@@ -110,7 +116,7 @@ try {
 
             Write-Host "[6/$stepCount] Building Linux amd64 RDP..." -ForegroundColor Cyan
             $rdpOutput = Join-Path $outputDir "jianmen-linux-amd64-rdp"
-            go build -tags embedded_guacd -o $rdpOutput ./cmd/jianmen/
+            go build -tags embedded_guacd -ldflags $ldflags -o $rdpOutput ./cmd/jianmen/
             if ($LASTEXITCODE -ne 0) { throw "Linux RDP build failed" }
             Write-Host "  OK jianmen-linux-amd64-rdp ($(Get-FileSizeMB $rdpOutput)MB)" -ForegroundColor Green
         } finally {

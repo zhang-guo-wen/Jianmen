@@ -90,6 +90,7 @@ export interface LoginCaptchaChallenge {
 export interface InitStatusResponse {
   initialized: boolean;
   login_captcha_enabled: boolean;
+  software_version: string;
 }
 
 export interface UserRecord {

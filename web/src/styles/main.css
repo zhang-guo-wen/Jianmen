@@ -176,6 +176,14 @@ body {
   --el-button-hover-text-color: #fff;
 }
 
+/* 软件版本号放在退出登录上方，避免与系统配置版本混淆 */
+.sidebar-version {
+  color: #94a3b8;
+  font-size: 12px;
+  text-align: center;
+  user-select: text;
+}
+
 .app-content {
   min-width: 0;
   min-height: 0;

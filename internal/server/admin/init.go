@@ -11,11 +11,13 @@ import (
 	"time"
 
 	"jianmen/internal/service"
+	"jianmen/internal/version"
 )
 
 type InitStatusResponse struct {
-	Initialized         bool `json:"initialized"`
-	LoginCaptchaEnabled bool `json:"login_captcha_enabled"`
+	Initialized         bool   `json:"initialized"`
+	LoginCaptchaEnabled bool   `json:"login_captcha_enabled"`
+	SoftwareVersion     string `json:"software_version"`
 }
 
 type SetupRequest struct {
@@ -56,6 +58,7 @@ func (s *Server) handleInitStatus(w http.ResponseWriter, r *http.Request) {
 	s.writeJSON(w, r, http.StatusOK, InitStatusResponse{
 		Initialized:         initialized,
 		LoginCaptchaEnabled: s.loginCaptchaEnabled.Load(),
+		SoftwareVersion:     version.Display(),
 	})
 }
 

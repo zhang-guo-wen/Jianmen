@@ -32,7 +32,8 @@ build_archive() {
   mkdir -p "$package_dir"
 
   CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" \
-    go build "${build_tags[@]}" -trimpath -ldflags="-s -w" \
+    go build "${build_tags[@]}" -trimpath \
+    -ldflags="-s -w -X jianmen/internal/version.Version=${VERSION}" \
     -o "$package_dir/$executable" ./cmd/jianmen
 
   cp "$ROOT/configs/config.example.json" "$package_dir/config.example.json"

@@ -765,7 +765,7 @@ const zhCN = {
   'resourceGrant.select': '选择',
   'resourceGrant.hostAccounts': '主机账户',
   'resourceGrant.databaseAccounts': '数据库账户',
-  'resourceGrant.platformAccounts': '平台账户',
+  'resourceGrant.platformAccounts': '平台账号',
   'resourceGrant.resourceGroups': '资源分组',
   'resourceGrant.accountGroups': '账号分组',
   'resourceGrant.accountName': '账户名',

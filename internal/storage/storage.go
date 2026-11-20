@@ -109,6 +109,11 @@ func dialectorFor(driver Driver, dsn string) (gorm.Dialector, error) {
 	}
 }
 
+// sqliteDSNPragmas 是每条 SQLite 连接都必须设置的 pragma。
+// temp_store=memory 让临时表与临时库留在内存：迁移重建整表时需要临时存储，
+// 若进程的系统临时目录不可写，SQLite 会报 "unable to open database file"。
+var sqliteDSNPragmas = []string{"foreign_keys(1)", "temp_store(memory)"}
+
 func sqliteDSNWithForeignKeys(dsn string) string {
 	if strings.TrimSpace(dsn) == ":memory:" {
 		dsn = fmt.Sprintf("file:jianmen-memory-%d?mode=memory&cache=shared", sqliteMemoryDSNSequence.Add(1))
@@ -121,16 +126,19 @@ func sqliteDSNWithForeignKeys(dsn string) string {
 	}
 	filtered := parts[:0]
 	for _, part := range parts {
-		if isSQLiteForeignKeysPragma(part) {
+		if isSQLitePragmaOf(part, "foreign_keys") || isSQLitePragmaOf(part, "temp_store") {
 			continue
 		}
 		filtered = append(filtered, part)
 	}
-	parts = append(filtered, "_pragma=foreign_keys(1)")
-	return base + "?" + strings.Join(parts, "&")
+	for _, pragma := range sqliteDSNPragmas {
+		filtered = append(filtered, "_pragma="+pragma)
+	}
+	return base + "?" + strings.Join(filtered, "&")
 }
 
-func isSQLiteForeignKeysPragma(part string) bool {
+// isSQLitePragmaOf 判断查询参数是否为指定名称的 SQLite pragma（形如 _pragma=name(value)）。
+func isSQLitePragmaOf(part, name string) bool {
 	key, value, hasValue := strings.Cut(part, "=")
 	if !hasValue {
 		return false
@@ -143,9 +151,23 @@ func isSQLiteForeignKeysPragma(part string) bool {
 	if err != nil {
 		return false
 	}
-	return len(decodedValue) >= len("foreign_keys()") &&
-		strings.EqualFold(decodedValue[:len("foreign_keys(")], "foreign_keys(") &&
+	prefix := name + "("
+	return len(decodedValue) > len(prefix) &&
+		strings.EqualFold(decodedValue[:len(prefix)], prefix) &&
 		decodedValue[len(decodedValue)-1] == ')'
+}
+
+// sqliteFilePath 返回 SQLite DSN 指向的数据库文件路径。
+// DSN 允许携带 ?_pragma=... 之类的驱动参数，备份与恢复只能使用文件路径部分。
+func sqliteFilePath(dsn string) string {
+	dsn = strings.TrimSpace(dsn)
+	if dsn == "" {
+		dsn = "data/bastion.db"
+	}
+	if base, _, hasQuery := strings.Cut(dsn, "?"); hasQuery {
+		dsn = base
+	}
+	return filepath.Clean(dsn)
 }
 
 func ensureSQLiteDir(dsn string) error {
@@ -216,7 +238,7 @@ func BackupSQLite(dsn string) error {
 		return nil // 内存/URI 模式数据库无需文件级备份
 	}
 
-	srcPath := filepath.Clean(dsn)
+	srcPath := sqliteFilePath(dsn)
 	if _, err := os.Stat(srcPath); os.IsNotExist(err) {
 		return nil // 首次启动，数据库文件尚不存在，无需备份
 	}
@@ -270,9 +292,5 @@ func backupSQLiteFile(srcPath, bakPath string, ops sqliteBackupFileOps) error {
 
 // BackupPath 返回 SQLite 数据库的 .bak 备份文件路径。
 func BackupPath(dsn string) string {
-	dsn = strings.TrimSpace(dsn)
-	if dsn == "" {
-		dsn = "data/bastion.db"
-	}
-	return filepath.Clean(dsn) + ".bak"
+	return sqliteFilePath(dsn) + ".bak"
 }

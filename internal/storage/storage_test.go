@@ -42,10 +42,10 @@ func TestSQLiteDSNWithForeignKeysNormalizesMemoryDSNs(t *testing.T) {
 		dsn  string
 		want string
 	}{
-		{name: "one to zero", dsn: "file:existing?mode=memory&_pragma=foreign_keys(0)", want: "file:existing?mode=memory&_pragma=foreign_keys(1)"},
-		{name: "zero to one", dsn: "file:existing?mode=memory&_pragma=foreign_keys(1)", want: "file:existing?mode=memory&_pragma=foreign_keys(1)"},
-		{name: "duplicate and mixed case", dsn: "file:existing?_pragma=FOREIGN_KEYS(OFF)&x=1&_PRAGMA=foreign_keys(ON)&_pragma=foreign_keys(0)", want: "file:existing?x=1&_pragma=foreign_keys(1)"},
-		{name: "encoded", dsn: "file:existing?keep=a%2Bb&_pragma=foreign_keys%28OFF%29&other=2", want: "file:existing?keep=a%2Bb&other=2&_pragma=foreign_keys(1)"},
+		{name: "one to zero", dsn: "file:existing?mode=memory&_pragma=foreign_keys(0)", want: "file:existing?mode=memory&_pragma=foreign_keys(1)&_pragma=temp_store(memory)"},
+		{name: "zero to one", dsn: "file:existing?mode=memory&_pragma=foreign_keys(1)", want: "file:existing?mode=memory&_pragma=foreign_keys(1)&_pragma=temp_store(memory)"},
+		{name: "duplicate and mixed case", dsn: "file:existing?_pragma=FOREIGN_KEYS(OFF)&x=1&_PRAGMA=foreign_keys(ON)&_pragma=foreign_keys(0)", want: "file:existing?x=1&_pragma=foreign_keys(1)&_pragma=temp_store(memory)"},
+		{name: "encoded", dsn: "file:existing?keep=a%2Bb&_pragma=foreign_keys%28OFF%29&other=2", want: "file:existing?keep=a%2Bb&other=2&_pragma=foreign_keys(1)&_pragma=temp_store(memory)"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := sqliteDSNWithForeignKeys(tc.dsn); got != tc.want {

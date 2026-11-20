@@ -1,4 +1,4 @@
-﻿:root {
+:root {
   --gap-xs: 4px;
   --gap-sm: 8px;
   --gap-base: 12px;
@@ -16,10 +16,21 @@
   --color-border-strong: #cbd5e1;
   --color-text: #0f172a;
   --color-text-secondary: #64748b;
-  --color-primary: #2563eb;
-  --color-primary-strong: #1d4ed8;
-  --color-primary-bg: #eff6ff;
-  --color-primary-border: #bfdbfe;
+  --color-brand: #0c213e;
+  --color-sidebar: #001529;
+  --color-sidebar-logo: #0f2438;
+  --color-primary: var(--color-brand);
+  --color-primary-fill: var(--color-brand);
+  --color-primary-strong: color-mix(in srgb, var(--color-primary) 80%, #000);
+  --color-primary-hover: color-mix(in srgb, var(--color-primary-fill) 86%, #fff);
+  --color-primary-pressed: color-mix(in srgb, var(--color-primary-fill) 80%, #000);
+  --color-primary-bg: var(--el-color-primary-light-9);
+  --color-primary-border: var(--el-color-primary-light-5);
+  /* 视图切换等“选中态”统一使用同一组颜色。 */
+  --color-selected-bg: var(--color-primary-fill);
+  --color-selected-text: #fff;
+  --color-selected-border: var(--color-primary-fill);
+  --color-selected-hover-bg: var(--color-primary-bg);
   --color-warning: #d97706;
   --color-warning-bg: #fff7ed;
   --color-warning-border: #fed7aa;
@@ -36,6 +47,18 @@
   color: var(--color-text);
   font-family: var(--font-sans);
   background: var(--color-bg);
+}
+
+/* 项目与 Element Plus 主色统一；保留组件库的成功、警告、失败及信息色。 */
+:root,
+:root[data-theme="dark"] {
+  --el-color-primary: var(--color-primary);
+  --el-color-primary-light-3: color-mix(in srgb, var(--color-primary) 70%, var(--color-surface));
+  --el-color-primary-light-5: color-mix(in srgb, var(--color-primary) 50%, var(--color-surface));
+  --el-color-primary-light-7: color-mix(in srgb, var(--color-primary) 30%, var(--color-surface));
+  --el-color-primary-light-8: color-mix(in srgb, var(--color-primary) 20%, var(--color-surface));
+  --el-color-primary-light-9: color-mix(in srgb, var(--color-primary) 10%, var(--color-surface));
+  --el-color-primary-dark-2: var(--color-primary-strong);
 }
 
 * {
@@ -68,7 +91,7 @@ body {
   flex-direction: column;
   position: relative;
   color: #fff;
-  background: linear-gradient(180deg, #0f172a 0%, #111827 54%, #020617 100%);
+  background: var(--color-sidebar);
   box-shadow: 12px 0 30px rgb(15 23 42 / 10%);
   overflow: hidden;
 }
@@ -112,10 +135,10 @@ body {
   font-weight: 900;
   letter-spacing: -0.06em;
   place-items: center;
-  background: linear-gradient(135deg, #60a5fa, #2563eb 55%, #7c3aed);
+  background: var(--color-sidebar-logo);
   border: 1px solid rgb(255 255 255 / 22%);
   border-radius: 15px;
-  box-shadow: 0 10px 22px rgb(37 99 235 / 24%);
+  box-shadow: 0 10px 22px rgb(0 0 0 / 20%);
 }
 
 .brand-copy strong,
@@ -152,8 +175,8 @@ body {
 }
 
 .nav-menu .el-menu-item.is-active {
-  background: linear-gradient(135deg, #2563eb, #4f46e5);
-  box-shadow: 0 8px 18px rgb(37 99 235 / 22%);
+  background: var(--color-brand);
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 12%);
 }
 
 /* 侧边栏底部操作区 */
@@ -318,10 +341,102 @@ body {
   border-radius: 10px;
   font-weight: 700;
 }
-.el-button--primary {
-  --el-button-bg-color: var(--color-primary);
-  --el-button-border-color: var(--color-primary);
-  --el-button-hover-bg-color: var(--color-primary-strong);
+/* 实心状态单独使用可承载白字的底色，不覆盖朴素、文字或链接按钮。 */
+.el-button--primary:not(.is-plain, .is-text, .is-link, .is-dashed) {
+  --el-button-bg-color: var(--color-primary-fill);
+  --el-button-border-color: var(--color-primary-fill);
+  --el-button-hover-bg-color: var(--color-primary-hover);
+  --el-button-hover-border-color: var(--color-primary-hover);
+  --el-button-active-bg-color: var(--color-primary-pressed);
+  --el-button-active-border-color: var(--color-primary-pressed);
+}
+
+.el-pagination.is-background .el-pager li.is-active:not(.is-disabled),
+.el-button--primary.is-plain:not(.sidebar-logout):hover,
+.el-button--primary.is-plain:not(.sidebar-logout):focus-visible {
+  background-color: var(--color-primary-fill);
+  border-color: var(--color-primary-fill);
+}
+
+/* 分段与切换控件的选中态统一：按钮组、单选按钮组、分段控件共用同一组令牌。 */
+.audit-view-switch {
+  display: inline-flex;
+  align-items: center;
+  height: 32px;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--color-border);
+  border-radius: 9px;
+  background: var(--color-surface);
+}
+
+.audit-view-switch > .el-button[aria-pressed] {
+  height: 26px;
+  margin: 0;
+  padding: 0 10px;
+  float: none;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-weight: 500;
+}
+
+.audit-view-switch > .el-button[aria-pressed='false']:hover {
+  background: var(--color-surface-muted);
+  color: var(--color-text);
+}
+
+.audit-view-switch > .el-button[aria-pressed='true'] {
+  background: var(--color-selected-bg);
+  color: var(--color-selected-text);
+  border-color: var(--color-selected-border);
+  font-weight: 650;
+}
+
+.audit-view-switch > .el-button[aria-pressed]:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 1px;
+}
+
+.el-radio-button.is-active > .el-radio-button__inner {
+  background: var(--color-selected-bg);
+  border-color: var(--color-selected-border);
+  color: var(--color-selected-text);
+  box-shadow: -1px 0 0 0 var(--color-selected-border);
+}
+
+.el-radio-button.is-active > .el-radio-button__inner:hover {
+  color: var(--color-selected-text);
+}
+
+.el-segmented__item-selected {
+  background: var(--color-selected-bg);
+}
+
+.el-segmented__item.is-selected {
+  color: var(--color-selected-text);
+}
+
+.el-radio-button,
+.el-segmented,
+.el-checkbox,
+.el-radio,
+.el-switch {
+  --el-radio-button-checked-bg-color: var(--color-selected-bg);
+  --el-radio-button-checked-border-color: var(--color-selected-border);
+  --el-radio-button-checked-text-color: var(--color-selected-text);
+  --el-segmented-item-selected-bg-color: var(--color-selected-bg);
+  --el-segmented-item-selected-color: var(--color-selected-text);
+  --el-checkbox-checked-bg-color: var(--color-primary-fill);
+  --el-checkbox-checked-input-border-color: var(--color-primary-fill);
+  --el-radio-input-bg-color: var(--color-surface);
+  --el-switch-on-color: var(--color-primary-fill);
+}
+
+.el-input__wrapper.is-focus,
+.el-select__wrapper.is-focused {
+  box-shadow: 0 0 0 1px var(--color-primary) inset;
 }
 .el-input__wrapper,
 .el-select__wrapper {
@@ -332,7 +447,7 @@ body {
   --el-table-header-bg-color: var(--color-surface-muted);
   --el-table-header-text-color: var(--color-text);
   --el-table-row-hover-bg-color: var(--color-primary-bg);
-  color: #334155;
+  color: var(--color-text);
 }
 .el-table th.el-table__cell {
   font-weight: 800;
@@ -464,7 +579,7 @@ body {
   padding: 24px;
   place-items: center;
   background:
-    radial-gradient(circle at 18% 12%, rgb(96 165 250 / 18%), transparent 30%),
+    radial-gradient(circle at 18% 12%, color-mix(in srgb, var(--color-primary) 12%, transparent), transparent 30%),
     linear-gradient(135deg, var(--color-bg), var(--color-surface-muted));
 }
 
@@ -615,8 +730,17 @@ body {
   --color-border-strong: #38506e;
   --color-text: #e5edf8;
   --color-text-secondary: #91a4bd;
-  --color-primary-bg: #102b4f;
-  --color-primary-border: #1d4f85;
+  /* 暗色背景上的文字与焦点用浅蓝，实心控件仍用能承载白字的深蓝。 */
+  --color-primary: #aac6e9;
+  --color-primary-fill: #335b87;
+  --color-primary-strong: color-mix(in srgb, var(--color-primary) 75%, #fff);
+  --color-primary-bg: var(--el-color-primary-light-9);
+  --color-primary-border: var(--el-color-primary-light-5);
+  /* 深色下选中态改用低饱和蓝灰，避免整块亮色抢视线。 */
+  --color-selected-bg: #23354b;
+  --color-selected-text: #c8def9;
+  --color-selected-border: #405772;
+  --color-selected-hover-bg: #1c2b3f;
   --shadow-card: 0 16px 34px rgb(0 0 0 / 24%);
   --shadow-elevated: 0 22px 52px rgb(0 0 0 / 34%);
   color-scheme: dark;
@@ -629,7 +753,7 @@ body {
 
 :root[data-theme="dark"] .app-shell,
 :root[data-theme="dark"] body {
-  background: radial-gradient(circle at 82% 12%, rgb(14 116 144 / 15%), transparent 30%), var(--color-bg);
+  background: radial-gradient(circle at 82% 12%, color-mix(in srgb, var(--color-primary-fill) 18%, transparent), transparent 30%), var(--color-bg);
 }
 
 /* ---- SQL 编辑器(CodeMirror 6)---- */

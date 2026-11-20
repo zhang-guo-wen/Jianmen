@@ -134,6 +134,7 @@ func (g *Gateway) handleGatewayConn(ctx context.Context, client net.Conn, conn *
 		Protocol:        conn.protocol,
 		ResourceType:    model.ResourceTypeDatabaseAccount,
 		ResourceID:      conn.accountID,
+		BatchTargetID:   conn.instanceID,
 		AccountID:       conn.accountID,
 		TargetName:      conn.instanceName,
 		TargetAddress:   conn.upstreamAddr,

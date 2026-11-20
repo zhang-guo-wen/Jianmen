@@ -16,6 +16,26 @@ import (
 
 type adminAuditQueryRepository struct{ repository adminAuditRepository }
 
+func (r adminAuditQueryRepository) ListAuditBatches(ctx context.Context, filter service.AuditBatchFilter, params service.AuditSessionListParams) ([]service.AuditBatchListItem, int64, error) {
+	repo, ok := r.repository.(service.AuditBatchQueryRepository)
+	if !ok {
+		return nil, 0, errors.New("audit batch repository unavailable")
+	}
+	return repo.ListAuditBatches(ctx, filter, params)
+}
+
+func (r adminAuditQueryRepository) ListAuditBatchLogs(ctx context.Context, filter service.AuditBatchFilter, params service.AuditDBQueryPreviewParams) ([]service.AuditBatchLogItem, int64, error) {
+	repo, ok := r.repository.(service.AuditBatchQueryRepository)
+	if !ok {
+		return nil, 0, errors.New("audit batch repository unavailable")
+	}
+	items, total, err := repo.ListAuditBatchLogs(ctx, filter, params)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, 0, service.ErrAuditArtifactUnavailable
+	}
+	return items, total, err
+}
+
 type adminDBQueryArtifactRepository interface {
 	GetAuditDBQueryArtifact(context.Context, string, string) (model.AuditDBQuery, error)
 }
@@ -23,6 +43,7 @@ type adminDBQueryArtifactRepository interface {
 func (r adminAuditQueryRepository) ListAuditSessions(ctx context.Context, params service.AuditSessionListParams) ([]service.AuditSessionListItem, int64, error) {
 	items, total, err := r.repository.ListAuditSessions(ctx, store.AuditListParams{
 		Protocol: params.Protocol, Search: params.Search, Date: params.Date, Page: params.Page, Size: params.Size,
+		BatchID: params.BatchID, BatchIncludeStarted: params.BatchIncludeStarted,
 	})
 	if err != nil {
 		return nil, 0, err

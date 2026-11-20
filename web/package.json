@@ -6,7 +6,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "npm run test:connection-dialog && npm run test:connection-commands && npm run test:dialog-layout && vue-tsc --noEmit && vite build",
+    "build": "npm run test:connection-dialog && npm run test:connection-commands && npm run test:dialog-layout && npm run test:audit-batches && vue-tsc --noEmit && vite build",
+    "test:audit-batches": "vitest run src/components/audit/AuditBatchLogDrawer.mount.test.ts src/composables/useAuditBatches.test.ts",
     "preview": "vite preview",
     "typecheck": "vue-tsc --noEmit",
     "test:connection-commands": "tsx --test src/utils/databaseGatewayCommands.test.ts src/utils/databaseUpstreamTLS.test.ts src/utils/provisioningRequest.test.ts src/utils/connectionLinks.test.ts src/utils/connectionRequestState.test.ts src/utils/guacamoleProtocol.test.ts src/utils/rdpReplayDisplay.test.ts src/utils/webRDPViewport.test.ts src/utils/sshHostIdentity.test.ts src/utils/aiAuthorizationPrompt.test.ts src/utils/auditDisplay.test.ts src/utils/auditUsageSample.test.ts src/utils/hostsConnectionTest.test.ts src/config/databaseClients.test.ts src/config/sshClients.test.ts src/config/tableColumns.test.ts src/views/AuditView.columns.test.ts src/views/RBACView.columns.test.ts src/stores/preferences.test.ts src/components/ConnectionConfigDialog.test.ts src/api/systemSettings.test.ts src/utils/sqlStatements.test.ts src/utils/sqlSchema.test.ts",

@@ -260,6 +260,11 @@ var migrations = []Migration{
 		Name:    "回填审计事件 phase/intent_id 复合索引折叠字段",
 		Run:     migrateAuditEventPhaseBackfill,
 	},
+	{
+		Version: auditBatchesMigrationVersion,
+		Name:    "审计会话批次字段",
+		Run:     migrateAuditBatches,
+	},
 }
 
 func rejectDuplicateDatabaseAccounts(tx *gorm.DB) error {

@@ -1209,7 +1209,7 @@ onBeforeUnmount(() => {
 .quick-card-body {
   padding: 18px;
   background:
-    radial-gradient(circle at 10% 0%, rgb(14 165 233 / 8%), transparent 30%),
+    radial-gradient(circle at 10% 0%, color-mix(in srgb, var(--color-primary) 8%, transparent), transparent 30%),
     linear-gradient(180deg, var(--color-surface-muted), var(--color-card));
 }
 
@@ -1236,7 +1236,7 @@ onBeforeUnmount(() => {
 }
 
 .connection-card:hover {
-  border-color: rgb(14 165 233 / 36%);
+  border-color: var(--color-primary-border);
   box-shadow: 0 9px 22px rgb(15 23 42 / 9%);
   transform: translateY(-1px);
 }
@@ -1265,17 +1265,17 @@ onBeforeUnmount(() => {
 }
 
 .protocol-mark--mysql {
-  background: linear-gradient(145deg, #2563eb, #0ea5e9);
+  background: linear-gradient(145deg, var(--color-primary-fill), var(--color-primary-hover));
 }
 
 .protocol-mark--rdp {
-  background: linear-gradient(145deg, #2563eb, #0ea5e9);
-  box-shadow: 0 6px 14px rgb(37 99 235 / 18%);
+  background: linear-gradient(145deg, var(--color-primary-fill), var(--color-primary-hover));
+  box-shadow: 0 6px 14px color-mix(in srgb, var(--color-brand) 18%, transparent);
 }
 
 .protocol-mark--postgres,
 .protocol-mark--postgresql {
-  background: linear-gradient(145deg, #475569, #2563eb);
+  background: linear-gradient(145deg, #475569, var(--color-primary-fill));
 }
 
 .protocol-mark--redis {

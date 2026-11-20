@@ -12,6 +12,8 @@ const (
 type AuditSessionListParams struct {
 	Protocol, Search, Date string
 	Page, Size             int
+	BatchID                string
+	BatchIncludeStarted    bool
 }
 
 type Page struct{ Limit, Offset int }

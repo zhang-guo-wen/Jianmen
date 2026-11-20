@@ -368,6 +368,7 @@ func newSQLConsoleAuditSession(actor SQLConsoleActor, account model.DatabaseAcco
 		ProtocolSubtype: "web_sql",
 		ResourceType:    model.ResourceTypeDatabaseAccount,
 		ResourceID:      account.ID,
+		BatchTargetID:   account.InstanceID,
 		AccountID:       account.ID,
 		TargetName:      instance.Name,
 		TargetAddress:   fmt.Sprintf("%s:%d", instance.Address, effectiveDatabasePort(instance)),

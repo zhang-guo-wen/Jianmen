@@ -22,6 +22,9 @@ func (s *Server) handleAuditSSH(w http.ResponseWriter, r *http.Request) {
 	}
 	params.Page, _ = strconv.Atoi(r.URL.Query().Get("page"))
 	params.Size, _ = strconv.Atoi(firstNonEmpty(r.URL.Query().Get("page_size"), r.URL.Query().Get("size")))
+	if params.BatchID = r.URL.Query().Get("batch_id"); params.BatchID != "" {
+		params.Page, params.Size, _ = auditDBQueryPageFromQuery(r)
+	}
 
 	items, total, err := s.auditQuery.ListSSH(r.Context(), userIDFromRequest(r), params)
 	if err != nil {
@@ -45,6 +48,9 @@ func (s *Server) handleAuditDB(w http.ResponseWriter, r *http.Request) {
 	}
 	params.Page, _ = strconv.Atoi(r.URL.Query().Get("page"))
 	params.Size, _ = strconv.Atoi(firstNonEmpty(r.URL.Query().Get("page_size"), r.URL.Query().Get("size")))
+	if params.BatchID = r.URL.Query().Get("batch_id"); params.BatchID != "" {
+		params.Page, params.Size, _ = auditDBQueryPageFromQuery(r)
+	}
 
 	items, total, err := s.auditQuery.ListDB(r.Context(), userIDFromRequest(r), params)
 	if err != nil {
@@ -372,6 +378,8 @@ func auditDBQueryPageFromQuery(r *http.Request) (int, int, int) {
 
 func (s *Server) writeAuditQueryError(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
+	case errors.Is(err, service.ErrAuditBatchSearchTooLong):
+		s.writeErrorText(w, r, http.StatusBadRequest, "invalid audit search keyword")
 	case errors.Is(err, service.ErrAuditQueryInvalidProtocol):
 		s.writeErrorText(w, r, http.StatusBadRequest, "invalid audit protocol")
 	case errors.Is(err, service.ErrAuditArtifactUnavailable):

@@ -10,7 +10,7 @@
       <!-- Already initialized -->
       <template v-else-if="alreadyInitialized">
         <div class="setup-success">
-          <el-icon :size="48" color="#409eff"><CircleCheckFilled /></el-icon>
+          <el-icon :size="48" color="var(--color-primary)"><CircleCheckFilled /></el-icon>
           <h3>{{ t('setup.alreadyInitialized') }}</h3>
           <p class="setup-desc">{{ t('setup.alreadyInitializedHint') }}</p>
         </div>

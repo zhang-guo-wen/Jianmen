@@ -8,13 +8,21 @@
             :data="sessions"
             :loading="sessionsLoading"
             :total="sessionTotal"
-            v-model:page="sessionPage"
-            v-model:page-size="sessionPageSize"
-            v-model:search="sessionKeyword"
-            search-placeholder="搜索会话…"
+            v-model:page="sshDisplayPage"
+            v-model:page-size="sshDisplaySize"
+            v-model:search="sshDisplayKeyword"
+            :search-placeholder="sshBatchView.mode === 'batch' ? t('audit.batch.search') : '搜索会话…'"
             @search="onSessionSearch"
           >
             <template #toolbar-extra>
+              <template v-if="sshBatchView.batchId">
+                <span class="audit-batch-context" :title="sshBatchView.batchId">{{ t('audit.batch.column') }} {{ sshBatchView.batchId.slice(0, 12) }}</span>
+                <el-button @click="selectBatchMode('ssh', 'batch')">{{ t('audit.batch.back') }}</el-button>
+              </template>
+              <el-button-group class="audit-view-switch" :aria-label="t('audit.batch.viewMode')" role="group">
+                <el-button :type="sshBatchView.mode === 'session' ? 'primary' : ''" :aria-pressed="sshBatchView.mode === 'session'" @click="selectBatchMode('ssh', 'session')">{{ t('audit.batch.bySession') }}</el-button>
+                <el-button :type="sshBatchView.mode === 'batch' ? 'primary' : ''" :aria-pressed="sshBatchView.mode === 'batch'" @click="selectBatchMode('ssh', 'batch')">{{ t('audit.batch.byBatch') }}</el-button>
+              </el-button-group>
               <el-button :loading="sessionsLoading" :icon="Refresh" @click="loadSessions">{{ t('common.refresh') }}</el-button>
             </template>
             <el-table-column v-bind="TABLE_COLUMNS.time" :label="t('audit.column.startedAt')" class-name="col-time">
@@ -27,10 +35,13 @@
                 {{ sessionUser(row) }}
               </template>
             </el-table-column>
-            <el-table-column v-bind="TABLE_COLUMNS.identifier" :label="t('audit.column.authSessionId')">
+            <el-table-column v-bind="TABLE_COLUMNS.identifier" :label="sshBatchView.mode === 'batch' ? t('audit.batch.column') : t('audit.column.authSessionId')">
               <template #default="{ row }">
-                <AuditSessionLink v-if="row.session_id" :session-id="row.session_id" @open="showUserSessionDetail" />
-                <span v-else class="session-id-fallback" :title="row.id">{{ row.id.slice(0, 8) }}</span>
+                <el-button v-if="sshBatchView.mode === 'batch'" link type="primary" :title="row.batch_id" @click="openBatchSessions('ssh', row.batch_id)">{{ row.batch_id?.slice(0, 12) }}</el-button>
+                <template v-else>
+                  <AuditSessionLink v-if="row.session_id" :session-id="row.session_id" @open="showUserSessionDetail" />
+                  <span v-else class="session-id-fallback" :title="row.id">{{ row.id.slice(0, 8) }}</span>
+                </template>
               </template>
             </el-table-column>
             <el-table-column v-bind="TABLE_COLUMNS.address" :label="t('audit.column.targetHost')">
@@ -54,7 +65,7 @@
             <el-table-column v-bind="TABLE_COLUMNS.status" :label="t('audit.column.result')">
               <template #default="{ row }">
                 <AuditResultTag
-                  :label="connectionOutcomeLabel(row.outcome, row.state)"
+                  :label="row.failure_count > 0 ? `${t('audit.result.failure')} ${row.failure_count}` : connectionOutcomeLabel(row.outcome, row.state)"
                   :type="connectionOutcomeTag(row.outcome, row.state)"
                   :detail="auditFailureDetail(row.failure_code, row.failure_message)"
                 />
@@ -70,12 +81,18 @@
             </el-table-column>
             <el-table-column v-bind="TABLE_COLUMNS.actions" :label="t('common.actions')">
               <template #default="{ row }">
-                <el-button :disabled="!hasReplay(row)" link type="success" @click="loadSessionArtifact(row, 'replay')">
-                  {{ t('audit.action.replay') }}
-                </el-button>
-                <el-button link type="primary" @click="loadSessionLog(row)">
-                  {{ t('audit.action.log') }}
-                </el-button>
+                <template v-if="sshBatchView.mode === 'batch'">
+                  <el-button link type="primary" @click="openBatchSessions('ssh', row.batch_id)">{{ t('audit.batch.sessions') }} ({{ row.session_count }})</el-button>
+                  <el-button link type="primary" @click="openBatchLog('ssh', row.batch_id)">{{ t('audit.action.log') }}</el-button>
+                </template>
+                <template v-else>
+                  <el-button :disabled="!hasReplay(row)" link type="success" @click="loadSessionArtifact(row, 'replay')">
+                    {{ t('audit.action.replay') }}
+                  </el-button>
+                  <el-button link type="primary" @click="loadSessionLog(row)">
+                    {{ t('audit.action.log') }}
+                  </el-button>
+                </template>
               </template>
             </el-table-column>
           </DataTableCard>
@@ -163,13 +180,21 @@
             :data="dbConnections"
             :loading="dbLoading"
             :total="dbTotal"
-            v-model:page="dbPage"
-            v-model:page-size="dbPageSize"
-            v-model:search="dbKeyword"
-            search-placeholder="搜索数据库连接…"
+            v-model:page="dbDisplayPage"
+            v-model:page-size="dbDisplaySize"
+            v-model:search="dbDisplayKeyword"
+            :search-placeholder="dbBatchView.mode === 'batch' ? t('audit.batch.search') : '搜索数据库连接…'"
             @search="onDBSearch"
           >
             <template #toolbar-extra>
+              <template v-if="dbBatchView.batchId">
+                <span class="audit-batch-context" :title="dbBatchView.batchId">{{ t('audit.batch.column') }} {{ dbBatchView.batchId.slice(0, 12) }}</span>
+                <el-button @click="selectBatchMode('db', 'batch')">{{ t('audit.batch.back') }}</el-button>
+              </template>
+              <el-button-group class="audit-view-switch" :aria-label="t('audit.batch.viewMode')" role="group">
+                <el-button :type="dbBatchView.mode === 'session' ? 'primary' : ''" :aria-pressed="dbBatchView.mode === 'session'" @click="selectBatchMode('db', 'session')">{{ t('audit.batch.bySession') }}</el-button>
+                <el-button :type="dbBatchView.mode === 'batch' ? 'primary' : ''" :aria-pressed="dbBatchView.mode === 'batch'" @click="selectBatchMode('db', 'batch')">{{ t('audit.batch.byBatch') }}</el-button>
+              </el-button-group>
               <el-button :loading="dbLoading" :icon="Refresh" @click="loadDBConnections">{{ t('common.refresh') }}</el-button>
             </template>
             <el-table-column v-bind="TABLE_COLUMNS.time" :label="t('audit.column.startedAt')" class-name="col-time">
@@ -182,10 +207,13 @@
                 {{ row.username || row.user_id || '-' }}
               </template>
             </el-table-column>
-            <el-table-column v-bind="TABLE_COLUMNS.identifier" :label="t('audit.column.authSessionId')">
+            <el-table-column v-bind="TABLE_COLUMNS.identifier" :label="dbBatchView.mode === 'batch' ? t('audit.batch.column') : t('audit.column.authSessionId')">
               <template #default="{ row }">
-                <AuditSessionLink v-if="row.session_id" :session-id="row.session_id" @open="showUserSessionDetail" />
-                <span v-else class="session-id-fallback" :title="row.id">{{ row.id.slice(0, 8) }}</span>
+                <el-button v-if="dbBatchView.mode === 'batch'" link type="primary" :title="row.batch_id" @click="openBatchSessions('db', row.batch_id)">{{ row.batch_id?.slice(0, 12) }}</el-button>
+                <template v-else>
+                  <AuditSessionLink v-if="row.session_id" :session-id="row.session_id" @open="showUserSessionDetail" />
+                  <span v-else class="session-id-fallback" :title="row.id">{{ row.id.slice(0, 8) }}</span>
+                </template>
               </template>
             </el-table-column>
             <el-table-column v-bind="TABLE_COLUMNS.address" :label="t('audit.column.databaseInstance')">
@@ -207,7 +235,7 @@
             <el-table-column v-bind="TABLE_COLUMNS.status" :label="t('audit.column.result')">
               <template #default="{ row }">
                 <AuditResultTag
-                  :label="connectionOutcomeLabel(row.outcome, row.state)"
+                  :label="row.failure_count > 0 ? `${t('audit.result.failure')} ${row.failure_count}` : connectionOutcomeLabel(row.outcome, row.state)"
                   :type="connectionOutcomeTag(row.outcome, row.state)"
                   :detail="auditFailureDetail(row.failure_code, row.failure_message)"
                 />
@@ -215,15 +243,19 @@
             </el-table-column>
             <el-table-column v-bind="TABLE_COLUMNS.number" :label="t('audit.column.duration')">
               <template #default="{ row }">
-                {{ formatDuration(computeDurationMs(row.started_at, row.ended_at)) }}
+                {{ dbBatchView.mode === 'batch' && !row.ended_at ? '-' : formatDuration(computeDurationMs(row.started_at, row.ended_at)) }}
               </template>
             </el-table-column>
             <el-table-column v-bind="TABLE_COLUMNS.number" :label="t('audit.column.sqlCount')">
               <template #default="{ row }">{{ row.log_count ?? 0 }}</template>
             </el-table-column>
-            <el-table-column v-bind="TABLE_COLUMNS.actionsCompact" :label="t('common.actions')">
+            <el-table-column v-bind="TABLE_COLUMNS.actionsCompact" :width="dbBatchView.mode === 'batch' ? 128 : TABLE_COLUMNS.actionsCompact.width" :label="t('common.actions')">
               <template #default="{ row }">
-                <el-button link type="primary" @click="loadDBArtifact(row, 'queries')">
+                <template v-if="dbBatchView.mode === 'batch'">
+                  <el-button link type="primary" @click="openBatchSessions('db', row.batch_id)">{{ t('audit.batch.sessions') }} ({{ row.session_count }})</el-button>
+                  <el-button link type="primary" @click="openBatchLog('db', row.batch_id)">{{ t('audit.action.log') }}</el-button>
+                </template>
+                <el-button v-else link type="primary" @click="loadDBArtifact(row, 'queries')">
                   {{ t('audit.action.queries') }}
                 </el-button>
               </template>
@@ -734,6 +766,9 @@
       </div>
     </el-dialog>
 
+    <AuditBatchLogDrawer
+      v-model="batchLogVisible" :scope="batchLogScope" :batch-id="batchLogId" @query-detail="openBatchQueryDetail"
+    />
     <UserSessionDetailDialog v-model="sessionDetailVisible" :session-id="sessionDetailId" />
   </div>
 </template>
@@ -743,20 +778,24 @@ import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import '@xterm/xterm/css/xterm.css';
 import Guacamole from 'guacamole-common-js';
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch, type Ref } from 'vue';
 import { Refresh } from '@element-plus/icons-vue';
 import { ElMessage, ElMessageBox, type TabPaneName } from 'element-plus';
 import { useRoute } from 'vue-router';
 
+import AuditBatchLogDrawer from '@/components/audit/AuditBatchLogDrawer.vue';
 import AuditResultTag from '@/components/audit/AuditResultTag.vue';
 import AuditSessionLink from '@/components/audit/AuditSessionLink.vue';
 import DataTableCard from '@/components/DataTableCard.vue';
 import UserSessionDetailDialog from '@/components/UserSessionDetailDialog.vue';
 import { TABLE_COLUMNS } from '@/config/tableColumns';
+import { useAuditBatches, useAuditPageRequest } from '@/composables/useAuditBatches';
 import {
   apiClient,
+  type AuditBatchLogRecord,
+  type AuditBatchScope,
+  type AuditSessionListRecord,
   type DBConnectionMetaRecord,
-  type DBConnectionRecord,
   type DBQueryEventRecord,
   type OnlineSessionRecord,
   type SessionCommandRecord,
@@ -865,13 +904,13 @@ const initialOnlineResourceType = initialAuditScope === 'online' ? routeQueryVal
 const initialOnlineResourceID = initialAuditScope === 'online' ? routeQueryValue(route.query.resource_id) : '';
 
 // ── SSH session list state ──
-const sessions = ref<SessionRecord[]>([]);
-const sessionTotal = ref(0);
+const sshRequest = useAuditPageRequest<AuditSessionListRecord>();
+const { rows: sessions, total: sessionTotal, loading: sessionsLoading, error: sessionError } = sshRequest;
 const sessionPage = ref(1);
 const sessionPageSize = ref(50);
 const sessionKeyword = ref(initialAuditScope === 'ssh' ? initialAuditKeyword : '');
-const sessionsLoading = ref(false);
-const sessionError = ref('');
+const sshBatches = useAuditBatches();
+const sshBatchView = sshBatches.view;
 
 // ── RDP audit and replay state ──
 const canViewRDPRecordings = computed(() => permission.canDo('rdp:recording:view'));
@@ -914,13 +953,27 @@ const operationAuditLoading = ref(false);
 const operationAuditError = ref('');
 
 // ── DB connection list state ──
-const dbConnections = ref<DBConnectionRecord[]>([]);
-const dbTotal = ref(0);
+const dbRequest = useAuditPageRequest<AuditSessionListRecord>();
+const { rows: dbConnections, total: dbTotal, loading: dbLoading, error: dbError } = dbRequest;
 const dbPage = ref(1);
 const dbPageSize = ref(50);
 const dbKeyword = ref(initialAuditScope === 'db' ? initialAuditKeyword : '');
-const dbLoading = ref(false);
-const dbError = ref('');
+const dbBatches = useAuditBatches();
+const dbBatchView = dbBatches.view;
+
+function auditDisplayField<T>(batches: ReturnType<typeof useAuditBatches>, normal: Ref<T>, groups: Ref<T>, members: Ref<T>) {
+  const field = () => batches.view.value.mode === 'batch' ? groups : batches.view.value.batchId ? members : normal;
+  return computed({ get: () => field().value, set: value => { field().value = value; } });
+}
+const sshDisplayPage = auditDisplayField(sshBatches, sessionPage, sshBatches.batchPage, sshBatches.memberPage);
+const sshDisplaySize = auditDisplayField(sshBatches, sessionPageSize, sshBatches.batchPageSize, sshBatches.memberPageSize);
+const sshDisplayKeyword = auditDisplayField(sshBatches, sessionKeyword, sshBatches.batchKeyword, sshBatches.memberKeyword);
+const dbDisplayPage = auditDisplayField(dbBatches, dbPage, dbBatches.batchPage, dbBatches.memberPage);
+const dbDisplaySize = auditDisplayField(dbBatches, dbPageSize, dbBatches.batchPageSize, dbBatches.memberPageSize);
+const dbDisplayKeyword = auditDisplayField(dbBatches, dbKeyword, dbBatches.batchKeyword, dbBatches.memberKeyword);
+const batchLogVisible = ref(false);
+const batchLogId = ref('');
+const batchLogScope = ref<AuditBatchScope>('db');
 
 // Online session list state
 const onlineSessions = ref<OnlineSessionRecord[]>([]);
@@ -1609,8 +1662,12 @@ function formatDatabaseParameters(buffer: ArrayBuffer, protocol: string, redacte
   return `MySQL execute payload (Base64)\n${bytesToBase64(new Uint8Array(buffer))}`;
 }
 
-async function openDBQueryDetail(row: MergedQueryEvent): Promise<void> {
-  const connectionID = dbQueryConnectionID.value;
+function openBatchQueryDetail(row: AuditBatchLogRecord): void {
+  if (row.kind !== 'query' || !row.has_full_log) return;
+  void openDBQueryDetail({ query_id: row.id, protocol: row.protocol ?? '' }, row.audit_session_id);
+}
+
+async function openDBQueryDetail(row: Pick<MergedQueryEvent, 'query_id' | 'protocol'>, connectionID = dbQueryConnectionID.value): Promise<void> {
   if (!connectionID || !row.query_id) return;
   const requestVersion = ++auditLogDetailRequestVersion;
   auditLogDetailVisible.value = true;
@@ -1783,43 +1840,36 @@ async function loadOperationAuditLogs() {
   }
 }
 
-async function loadSessions() {
-  sessionsLoading.value = true;
-  sessionError.value = '';
-
-  try {
-    const res = await apiClient.getSessions({
-      page: sessionPage.value,
-      page_size: sessionPageSize.value,
-      q: sessionKeyword.value || undefined,
-    });
-    sessions.value = res.items ?? [];
-    sessionTotal.value = res.total ?? 0;
-  } catch (err) {
-    sessionError.value = err instanceof Error ? err.message : t('sessions.loadError');
-  } finally {
-    sessionsLoading.value = false;
-  }
+function loadSessions() {
+  const { mode, batchId } = sshBatchView.value;
+  const params = { page: sshDisplayPage.value, page_size: sshDisplaySize.value, q: sshDisplayKeyword.value || undefined };
+  return sshRequest.load(signal => mode === 'batch'
+    ? apiClient.getAuditBatches('ssh', params, signal)
+    : apiClient.getSessions({ ...params, batch_id: batchId || undefined }, signal), t('sessions.loadError'));
 }
 
-async function loadDBConnections() {
-  dbLoading.value = true;
-  dbError.value = '';
+function loadDBConnections() {
+  const { mode, batchId } = dbBatchView.value;
+  const params = { page: dbDisplayPage.value, page_size: dbDisplaySize.value, q: dbDisplayKeyword.value || undefined };
+  return dbRequest.load(signal => mode === 'batch'
+    ? apiClient.getAuditBatches('db', params, signal)
+    : apiClient.getDBConnections({ ...params, batch_id: batchId || undefined }, signal), t('audit.error.loadDBConnections'));
+}
 
-  try {
-    const res = await apiClient.getDBConnections({
-      page: dbPage.value,
-      page_size: dbPageSize.value,
-      q: dbKeyword.value || undefined,
-    });
-    dbConnections.value = res.items ?? [];
-    dbTotal.value = res.total ?? 0;
-  } catch (err) {
-    dbConnections.value = [];
-    dbError.value = err instanceof Error ? err.message : t('audit.error.loadDBConnections');
-  } finally {
-    dbLoading.value = false;
-  }
+function selectBatchMode(scope: AuditBatchScope, mode: 'batch' | 'session') {
+  (scope === 'ssh' ? sshBatches : dbBatches).selectMode(mode);
+}
+
+function openBatchSessions(scope: AuditBatchScope, id?: string) {
+  if (!id) return;
+  (scope === 'ssh' ? sshBatches : dbBatches).showSessions(id);
+}
+
+function openBatchLog(scope: AuditBatchScope, id?: string) {
+  if (!id) return;
+  batchLogScope.value = scope;
+  batchLogId.value = id;
+  batchLogVisible.value = true;
 }
 
 function onLogSearch(q: string) {
@@ -1842,9 +1892,9 @@ function onOnlineSearch(q: string) {
 }
 
 function onSessionSearch(q: string) {
-  sessionKeyword.value = q;
-  sessionPage.value = 1;
-  loadSessions();
+  sshDisplayKeyword.value = q;
+  if (sshDisplayPage.value === 1) void loadSessions();
+  else sshDisplayPage.value = 1;
 }
 
 function onRDPSearch(q: string) {
@@ -1876,9 +1926,9 @@ function onOperationAuditActionChange() {
 }
 
 function onDBSearch(q: string) {
-  dbKeyword.value = q;
-  dbPage.value = 1;
-  loadDBConnections();
+  dbDisplayKeyword.value = q;
+  if (dbDisplayPage.value === 1) void loadDBConnections();
+  else dbDisplayPage.value = 1;
 }
 
 // ── Session artifacts ──
@@ -2397,17 +2447,22 @@ function applyRouteAuditFilter() {
   onlineResourceType.value = '';
   onlineResourceID.value = '';
   if (scope === 'ssh') {
-    sessionKeyword.value = keyword;
-    if (sessionPage.value === 1) void loadSessions();
-    else sessionPage.value = 1;
+    const wasDefault = sshBatchView.value.mode === 'session' && !sshBatchView.value.batchId;
+    sshBatches.selectMode('session');
+    if (wasDefault) onSessionSearch(keyword);
+    else { sessionKeyword.value = keyword; sessionPage.value = 1; }
   } else {
-    dbKeyword.value = keyword;
-    if (dbPage.value === 1) void loadDBConnections();
-    else dbPage.value = 1;
+    const wasDefault = dbBatchView.value.mode === 'session' && !dbBatchView.value.batchId;
+    dbBatches.selectMode('session');
+    if (wasDefault) onDBSearch(keyword);
+    else { dbKeyword.value = keyword; dbPage.value = 1; }
   }
 }
 
 function loadAuditScope(scope: TabPaneName): void {
+  if (scope !== 'ssh') sshRequest.cancel();
+  if (scope !== 'db') dbRequest.cancel();
+  if (scope !== batchLogScope.value) batchLogVisible.value = false;
   switch (scope) {
     case 'ssh':
       void loadSessions();
@@ -2449,8 +2504,9 @@ watch(isReplay, async (value) => {
 });
 
 // Watch pagination changes for main lists
-watch([sessionPage, sessionPageSize], () => {
-  if (auditScope.value === 'ssh') loadSessions();
+watch([sshBatchView, sshDisplayPage, sshDisplaySize], ([view], [previous]) => {
+  if (view !== previous) sshRequest.cancel(true);
+  if (auditScope.value === 'ssh') void loadSessions();
 });
 watch([rdpPage, rdpPageSize], () => {
   if (auditScope.value === 'rdp') void loadRDPSessions();
@@ -2461,8 +2517,9 @@ watch([loginAuditPage, loginAuditPageSize], () => {
 watch([operationAuditPage, operationAuditPageSize], () => {
   if (auditScope.value === 'operations') loadOperationAuditLogs();
 });
-watch([dbPage, dbPageSize], () => {
-  if (auditScope.value === 'db') loadDBConnections();
+watch([dbBatchView, dbDisplayPage, dbDisplaySize], ([view], [previous]) => {
+  if (view !== previous) dbRequest.cancel(true);
+  if (auditScope.value === 'db') void loadDBConnections();
 });
 watch([onlinePage, onlinePageSize], () => {
   if (auditScope.value === 'online') loadOnlineSessions();
@@ -2479,6 +2536,8 @@ watch([logPage, logPageSize], ([page, pageSize], [previousPage, previousPageSize
 });
 
 onBeforeUnmount(() => {
+  sshRequest.cancel();
+  dbRequest.cancel();
   stopReplay();
   destroyReplayTerminal();
   destroyRDPReplay();
@@ -2486,6 +2545,12 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
+.audit-batch-context {
+  align-self: center;
+  color: var(--color-primary-strong);
+  white-space: nowrap;
+}
+
 /* 保留 tab header 默认间距 (page-tabs 会清零) */
 .page-tabs :deep(.el-tabs__header) {
   margin-bottom: 15px;

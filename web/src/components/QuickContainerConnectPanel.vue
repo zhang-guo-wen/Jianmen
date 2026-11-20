@@ -510,7 +510,7 @@ onBeforeUnmount(() => {
 .quick-filter-options .el-button { padding-inline: 9px; }
 .quick-filter-more { padding-inline: 4px; }
 .container-workspace { display: flex; height: calc(100vh - 225px); min-height: 620px; background: var(--color-card); }
-.container-card-panel { display: flex; flex: 1; min-height: 0; flex-direction: column; border-bottom: 0; background: radial-gradient(circle at 10% 0%, rgb(14 165 233 / 8%), transparent 30%), linear-gradient(180deg, var(--color-surface-muted), var(--color-card)); }
+.container-card-panel { display: flex; flex: 1; min-height: 0; flex-direction: column; border-bottom: 0; background: radial-gradient(circle at 10% 0%, color-mix(in srgb, var(--color-primary) 8%, transparent), transparent 30%), linear-gradient(180deg, var(--color-surface-muted), var(--color-card)); }
 .load-alert { margin: 12px 16px 0; }
 .inventory-status { display: flex; min-height: 36px; align-items: center; gap: 12px; padding: 8px 16px 4px; color: var(--color-text-secondary); font-size: 12px; }
 .inventory-status strong { color: var(--color-text); }
@@ -519,7 +519,7 @@ onBeforeUnmount(() => {
 .container-card-scroll { min-height: 0; flex: 1; overflow: auto; padding: 8px 16px 12px; }
 .container-card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(245px, 1fr)); gap: 10px; }
 .container-card { min-width: 0; border: 1px solid var(--color-border); border-radius: 12px; padding: 11px 12px; background: color-mix(in srgb, var(--color-card) 96%, var(--el-color-primary) 4%); color: inherit; cursor: pointer; text-align: left; box-shadow: 0 5px 15px rgb(15 23 42 / 4%); transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease; }
-.container-card:hover { border-color: rgb(14 165 233 / 42%); box-shadow: 0 9px 22px rgb(15 23 42 / 9%); transform: translateY(-1px); }
+.container-card:hover { border-color: var(--color-primary-border); box-shadow: 0 9px 22px rgb(15 23 42 / 9%); transform: translateY(-1px); }
 .container-card.is-selected { border-color: var(--el-color-primary); box-shadow: 0 0 0 2px color-mix(in srgb, var(--el-color-primary) 18%, transparent), 0 9px 22px rgb(15 23 42 / 9%); }
 .container-card__topline { display: grid; min-width: 0; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 8px; }
 .container-card__topline strong { overflow: hidden; color: var(--color-text); font-size: 14px; text-overflow: ellipsis; white-space: nowrap; }

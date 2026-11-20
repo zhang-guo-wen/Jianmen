@@ -19,6 +19,7 @@ type DBStore struct {
 	auditLeaseDuration time.Duration
 	now                func() time.Time
 
+	auditBatches      auditBatchTracker
 	auditLeaseMu      sync.RWMutex
 	activeAuditLeases map[string]struct{}
 	ensureGrantMu     sync.Mutex

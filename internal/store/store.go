@@ -347,17 +347,19 @@ func errSentinel(msg string) error { return &sentinelError{msg: msg} }
 
 // AuditListParams 审计列表查询参数。
 type AuditListParams struct {
-	Protocol        string // 空表示不过滤，可逗号分隔多个协议
-	Search          string // 模糊搜索用户名/目标名
-	Date            string // 兼容旧接口的 YYYY-MM-DD 过滤
-	UserID          string
-	AccountID       string
-	Outcome         string
-	RecordingStatus string
-	StartedFrom     *time.Time
-	StartedTo       *time.Time
-	Page            int
-	Size            int
+	Protocol            string // 空表示不过滤，可逗号分隔多个协议
+	Search              string // 模糊搜索用户名/目标名
+	Date                string // 兼容旧接口的 YYYY-MM-DD 过滤
+	UserID              string
+	AccountID           string
+	Outcome             string
+	RecordingStatus     string
+	StartedFrom         *time.Time
+	StartedTo           *time.Time
+	BatchID             string
+	BatchIncludeStarted bool
+	Page                int
+	Size                int
 }
 
 // AuditSessionAccessMetadata contains only the fields needed to authorize an

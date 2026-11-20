@@ -683,7 +683,7 @@ onUnmounted(() => {
 }
 
 :deep(.rdp-display > div:focus-visible) {
-  outline: 2px solid #60a5fa;
+  outline: 2px solid var(--color-primary);
   outline-offset: -2px;
 }
 

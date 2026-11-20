@@ -325,6 +325,27 @@ export type SessionRecord = AuditSessionListRecord;
 export type RDPAuditSessionRecord = AuditSessionListRecord;
 export type DBConnectionRecord = AuditSessionListRecord;
 
+export type AuditBatchScope = 'db' | 'ssh';
+export type AuditPageParams = { page?: number; page_size?: number; q?: string; batch_id?: string };
+export type AuditBatchRecord = AuditSessionListRecord & { batch_id: string; session_count: number; failure_count: number };
+export interface AuditBatchLogRecord {
+  id: string;
+  audit_session_id: string;
+  kind: 'query' | 'command' | 'file';
+  timestamp: string;
+  protocol?: string;
+  text: string;
+  action?: string;
+  status?: string;
+  duration_ms?: number;
+  rows?: number;
+  rows_affected?: number;
+  error_code?: string;
+  error_message?: string;
+  sql_truncated?: boolean;
+  has_full_log?: boolean;
+}
+
 export interface OnlineSessionRecord {
   id: string;
   audit_session_id: string;
@@ -1294,8 +1315,12 @@ export const apiClient = {
     request<PageResponse<OnlineSessionRecord>>(`/api/online-sessions${buildQS(params as Record<string, string | number | undefined>)}`),
   disconnectOnlineSession: (id: string) =>
     request<void>(`/api/online-sessions/${encodeURIComponent(id)}`, { method: 'DELETE' }),
-  getSessions: (params?: { page?: number; page_size?: number; q?: string }) =>
-    request<PageResponse<SessionRecord>>(`/api/audit/ssh${buildQS(params as Record<string, string | number | undefined>)}`),
+  getSessions: (params?: AuditPageParams, signal?: AbortSignal) =>
+    request<PageResponse<SessionRecord>>(`/api/audit/ssh${buildQS(params)}`, { signal }),
+  getAuditBatches: (scope: AuditBatchScope, params?: AuditPageParams, signal?: AbortSignal) =>
+    request<PageResponse<AuditBatchRecord>>(`/api/audit/batches/${scope}${buildQS(params)}`, { signal }),
+  getAuditBatchLogs: (scope: AuditBatchScope, batchId: string, params?: AuditPageParams, signal?: AbortSignal) =>
+    request<PageResponse<AuditBatchLogRecord>>(`/api/audit/batches/${scope}/${encodeURIComponent(batchId)}/logs${buildQS(params)}`, { signal }),
   getLoginAuditLogs: (params?: { page?: number; page_size?: number; q?: string; outcome?: string; date?: string }) =>
     request<PageResponse<LoginAuditRecord>>(`/api/audit/logins${buildQS(params as Record<string, string | number | undefined>)}`),
   getOperationAuditLogs: (params?: { page?: number; page_size?: number; q?: string; action?: string; resource_type?: string; date?: string }) =>
@@ -1448,8 +1473,8 @@ export const apiClient = {
     ),
 
   // database connections (audit)
-  getDBConnections: (params?: { page?: number; page_size?: number; q?: string }) =>
-    request<PageResponse<DBConnectionRecord>>(`/api/audit/db${buildQS(params as Record<string, string | number | undefined>)}`),
+  getDBConnections: (params?: AuditPageParams, signal?: AbortSignal) =>
+    request<PageResponse<DBConnectionRecord>>(`/api/audit/db${buildQS(params)}`, { signal }),
   getDBConnectionMeta: (id: string | number) =>
     request<DBConnectionMetaRecord>(
       `/api/audit/db/${encodeURIComponent(String(id))}`

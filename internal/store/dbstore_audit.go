@@ -19,7 +19,9 @@ func (s *DBStore) CreateAuditSession(ctx context.Context, session *model.AuditSe
 		return errors.New("create audit session: nil context")
 	}
 	s.prepareAuditSessionLease(session)
-	if err := s.db.WithContext(ctx).Create(session).Error; err != nil {
+	if err := s.auditBatches.persist(session, s.now(), func() error {
+		return s.db.WithContext(ctx).Create(session).Error
+	}); err != nil {
 		return fmt.Errorf("create audit session: %w", err)
 	}
 	s.trackAuditSessionLease(session)
@@ -111,7 +113,12 @@ func (s *DBStore) ListAuditSessions(
 		protos := splitCSV(params.Protocol)
 		q = q.Where("protocol IN ?", protos)
 	}
-	if params.Search != "" {
+	if params.BatchID != "" {
+		q = q.Where("batch_id = ?", params.BatchID).Where("state IN ?", auditBatchStates(params.BatchIncludeStarted))
+		if params.Search != "" {
+			q = applyAuditBatchSearch(q, params.Search, auditBatchIsSSH(params.Protocol), "audit_sessions")
+		}
+	} else if params.Search != "" {
 		like := "%" + strings.ToLower(params.Search) + "%"
 		q = q.Where(
 			`LOWER(username) LIKE ?
@@ -168,7 +175,11 @@ func (s *DBStore) ListAuditSessions(
 		params.Page = 1
 	}
 	var sessions []model.AuditSession
-	if err := q.Order("started_at DESC").Offset((params.Page - 1) * params.Size).Limit(params.Size).Find(&sessions).Error; err != nil {
+	order := "started_at DESC"
+	if params.BatchID != "" {
+		order += ", id DESC"
+	}
+	if err := q.Order(order).Offset((params.Page - 1) * params.Size).Limit(params.Size).Find(&sessions).Error; err != nil {
 		return nil, 0, fmt.Errorf("list audit sessions: %w", err)
 	}
 	logCounts, err := s.auditLogCounts(ctx, sessions)

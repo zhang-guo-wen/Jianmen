@@ -112,6 +112,16 @@ test('the short user session identifier is named unambiguously', () => {
   assert.doesNotMatch(pane('online'), />SessionID</);
 });
 
+test('batch log action is separate from the existing audit session actions', () => {
+  for (const scope of ['db', 'ssh']) {
+    const block = pane(scope);
+    assert.match(block, new RegExp(`openBatchLog\\('${scope}', row\\.batch_id\\)`));
+    assert.match(block, new RegExp(`openBatchSessions\\('${scope}', row\\.batch_id\\)`));
+    assert.match(block, /AuditSessionLink v-if="row.session_id"/);
+  }
+  assert.match(source, /<AuditBatchLogDrawer[\s\S]*@query-detail="openBatchQueryDetail"/);
+});
+
 test('switching audit tabs refreshes only the selected scope without polling online sessions', () => {
   assert.match(source, /<el-tabs v-model="auditScope" class="page-tabs" @tab-change="loadAuditScope">/);
 

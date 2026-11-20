@@ -33,6 +33,7 @@
       <el-table
         :data="data"
         :row-key="rowKey"
+        :empty-text="emptyText"
         v-loading="loading"
         size="small"
         :highlight-current-row="rowClickable"
@@ -73,7 +74,8 @@ const props = withDefaults(
     showSearch?: boolean
     searchPlaceholder?: string
     search?: string
-    rowKey?: string
+    emptyText?: string
+    rowKey?: string | ((row: any) => string)
     rowClickable?: boolean
   }>(),
   {

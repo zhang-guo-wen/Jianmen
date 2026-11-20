@@ -22,6 +22,8 @@ const (
 type AuditSession struct {
 	ID              string     `gorm:"primaryKey;size:64" json:"id"`
 	UserSessionID   string     `gorm:"index;size:64" json:"user_session_id,omitempty"`
+	BatchID         string     `gorm:"size:64;index:idx_audit_sessions_batch_started,priority:1" json:"batch_id,omitempty"`
+	BatchTargetID   string     `gorm:"-" json:"-"` // 数据库实例 ID，只参与批次分配。
 	UserID          string     `gorm:"index:idx_audit_sessions_user_started,priority:1;size:64" json:"user_id"`
 	Username        string     `gorm:"index;size:128" json:"username"`
 	Protocol        string     `gorm:"index:idx_audit_sessions_protocol_started,priority:1;size:32" json:"protocol"`
@@ -35,7 +37,7 @@ type AuditSession struct {
 	AccountName     string     `gorm:"size:128" json:"account_name"`
 	AccountUsername string     `gorm:"size:128" json:"account_username"`
 	ClientIP        string     `gorm:"size:128" json:"client_ip"`
-	StartedAt       time.Time  `gorm:"index:idx_audit_sessions_protocol_started,priority:2;index:idx_audit_sessions_user_started,priority:2;index:idx_audit_sessions_session_started,priority:2;index:idx_audit_sessions_resource_started,priority:3" json:"started_at"`
+	StartedAt       time.Time  `gorm:"index:idx_audit_sessions_protocol_started,priority:2;index:idx_audit_sessions_user_started,priority:2;index:idx_audit_sessions_session_started,priority:2;index:idx_audit_sessions_resource_started,priority:3;index:idx_audit_sessions_batch_started,priority:2" json:"started_at"`
 	EndedAt         *time.Time `gorm:"index:idx_audit_sessions_cleanup,priority:2" json:"ended_at,omitempty"`
 	State           string     `gorm:"index;index:idx_audit_sessions_lease_owner_state,priority:2;index:idx_audit_sessions_lease_expiry,priority:1;size:32" json:"state"`
 	Outcome         string     `gorm:"index;size:32" json:"outcome"`

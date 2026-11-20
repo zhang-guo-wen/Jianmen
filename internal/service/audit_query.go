@@ -79,6 +79,9 @@ func isNilAuditQueryDependency(dependency any) bool {
 }
 
 func (s *AuditQueryService) ListSSH(ctx context.Context, userID string, params AuditSessionListParams) ([]AuditSessionListItem, int64, error) {
+	if params.BatchID != "" {
+		return s.batchSessions(ctx, userID, "ssh", params)
+	}
 	if err := s.authorize(ctx, userID, AuditQueryActionView); err != nil {
 		return nil, 0, err
 	}
@@ -94,6 +97,9 @@ func (s *AuditQueryService) ListSSH(ctx context.Context, userID string, params A
 }
 
 func (s *AuditQueryService) ListDB(ctx context.Context, userID string, params AuditSessionListParams) ([]AuditSessionListItem, int64, error) {
+	if params.BatchID != "" {
+		return s.batchSessions(ctx, userID, "db", params)
+	}
 	if err := auditQueryContextError(ctx, "list database audit sessions"); err != nil {
 		return nil, 0, err
 	}

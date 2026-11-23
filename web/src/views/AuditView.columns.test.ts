@@ -83,13 +83,12 @@ test('audit tables use contextual names in a stable order', () => {
   assertOrder('operations', [
     'audit.column.operationTime',
     'audit.column.operator',
+    'audit.column.actorChannel',
     'audit.column.operationType',
-    'audit.column.resourceType',
     'audit.column.operationTarget',
     'audit.column.sourceIp',
-    'audit.column.requestId',
-    'audit.column.httpStatus',
     'audit.column.result',
+    'common.actions',
   ]);
 });
 

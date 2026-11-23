@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -14,6 +15,31 @@ import (
 )
 
 var errOperationAuditUnavailable = errors.New("operation audit unavailable")
+
+// 业务动作键。前端按这些键展示中文动作名，新增键时必须同步更新
+// web/src/i18n 的 audit.operation.* 文案；未收录的键会退回通用「动词:资源」展示。
+const (
+	operationIssueCredential     = "issue_credential"
+	operationIssueSession        = "issue_session"
+	operationRefreshAIToken      = "refresh_ai_token"
+	operationTestConnection      = "test_connection"
+	operationGrantAccess         = "grant_access"
+	operationRevokeAccess        = "revoke_access"
+	operationUpdateSettings      = "update_settings"
+	operationUpdatePreferences   = "update_preferences"
+	operationIssueTerminalTicket = "issue_terminal_ticket"
+	operationOpenSQLConsole      = "open_sql_console"
+	operationExecuteSQL          = "execute_sql"
+	operationCloseSQLConsole     = "close_sql_console"
+	operationDisconnectSession   = "disconnect_session"
+	operationRevealPlatformPassword = "reveal_platform_password"
+)
+
+// 调用来源：区分 AI 令牌调用和浏览器后台操作，便于筛掉高频 AI 调用。
+const (
+	actorChannelAdminConsole = "admin_console"
+	actorChannelAIAPI        = "ai_api"
+)
 
 type operationAuditMetadataKey struct{}
 
@@ -55,10 +81,15 @@ func operationAuditMetadataValues(r *http.Request) map[string]string {
 }
 
 // auditResponseWriter captures the final status without changing the response API.
+// 失败响应额外保留有限长度的错误正文，用于在操作日志里显示失败原因。
 type auditResponseWriter struct {
 	http.ResponseWriter
-	status int
+	status    int
+	errorBody []byte
 }
+
+// maxAuditErrorBodyBytes 限制错误正文抓取量，避免大响应进入审计写入路径。
+const maxAuditErrorBodyBytes = 2048
 
 func (w *auditResponseWriter) WriteHeader(status int) {
 	if w.status != 0 {
@@ -72,7 +103,19 @@ func (w *auditResponseWriter) Write(body []byte) (int, error) {
 	if w.status == 0 {
 		w.WriteHeader(http.StatusOK)
 	}
+	w.captureErrorBody(body)
 	return w.ResponseWriter.Write(body)
+}
+
+func (w *auditResponseWriter) captureErrorBody(body []byte) {
+	if w.status < http.StatusBadRequest || len(w.errorBody) >= maxAuditErrorBodyBytes {
+		return
+	}
+	remaining := maxAuditErrorBodyBytes - len(w.errorBody)
+	if len(body) > remaining {
+		body = body[:remaining]
+	}
+	w.errorBody = append(w.errorBody, body...)
 }
 
 func (w *auditResponseWriter) statusCode() int {
@@ -115,7 +158,7 @@ func (s *Server) withOperationAudit(next http.HandlerFunc) http.HandlerFunc {
 
 		aw := &auditResponseWriter{ResponseWriter: w}
 		next(aw, r)
-		s.recordOperationResult(r, aw.statusCode(), intentID)
+		s.recordOperationResult(r, aw.statusCode(), intentID, operationErrorMessage(aw.errorBody))
 	}
 }
 
@@ -149,10 +192,10 @@ func (s *Server) recordOperationIntent(r *http.Request) (string, error) {
 }
 
 func (s *Server) recordOperation(r *http.Request, status int) {
-	s.recordOperationResult(r, status, "")
+	s.recordOperationResult(r, status, "", "")
 }
 
-func (s *Server) recordOperationResult(r *http.Request, status int, intentID string) {
+func (s *Server) recordOperationResult(r *http.Request, status int, intentID, errorMessage string) {
 	event := s.newOperationAuditEvent(r)
 	event.Phase = "result"
 	event.Result = operationResult(status)
@@ -173,8 +216,14 @@ func (s *Server) recordOperationResult(r *http.Request, status int, intentID str
 	if aiTokenID != "" {
 		detailMap["ai_token_id"] = aiTokenID
 	}
+	if message := clampAuditErrorMessage(errorMessage); message != "" {
+		detailMap["error_message"] = message
+	}
 	for key, value := range operationAuditMetadataValues(r) {
 		detailMap[key] = value
+		if key == operationAuditTargetLabelKey {
+			event.TargetLabel = trimOperationAuditLabel(value)
+		}
 	}
 	detail, err := json.Marshal(detailMap)
 	if err == nil {
@@ -189,11 +238,45 @@ func (s *Server) recordOperationResult(r *http.Request, status int, intentID str
 	}
 }
 
+// recordReadOperation 为敏感只读动作（例如查看平台账号密码）补一条审计结果行。
+// 只读动作没有 intent 行；调用方必须在返回敏感数据之前调用本方法，
+// 写入失败时禁止把密码返回给客户端。
+func (s *Server) recordReadOperation(r *http.Request, status int, operation, targetLabel string) error {
+	event := s.newOperationAuditEvent(r)
+	event.Action = "read"
+	event.Operation = operation
+	event.Phase = "result"
+	event.Result = operationResult(status)
+	event.StatusCode = status
+	event.RequestID = apiresp.RequestID(r.Context())
+	event.TargetLabel = trimOperationAuditLabel(targetLabel)
+	detailMap := map[string]any{
+		"method":     r.Method,
+		"path":       r.URL.Path,
+		"phase":      "result",
+		"status":     status,
+		"result":     operationResult(status),
+		"request_id": apiresp.RequestID(r.Context()),
+		"user_agent": r.UserAgent(),
+	}
+	if aiTokenID := aiTokenIDFromRequest(r); aiTokenID != "" {
+		detailMap["ai_token_id"] = aiTokenID
+	}
+	detail, err := json.Marshal(detailMap)
+	if err != nil {
+		return err
+	}
+	event.Detail = string(detail)
+	return s.createOperationAuditEvent(r, event)
+}
+
 func (s *Server) newOperationAuditEvent(r *http.Request) *model.AuditEvent {
 	return &model.AuditEvent{
 		ActorID:       userIDFromRequest(r),
 		ActorUsername: usernameFromRequest(r),
 		Action:        operationAction(r),
+		Operation:     operationKey(r),
+		ActorChannel:  operationActorChannel(r),
 		ResourceType:  operationResourceType(r.URL.Path),
 		ResourceID:    operationResourceID(r.URL.Path),
 		ResourceName:  r.URL.Path,
@@ -289,9 +372,211 @@ func splitAPIPath(path string) []string {
 
 func isOperationPathPart(value string) bool {
 	switch strings.ToLower(value) {
-	case "test", "check", "accounts", "databases", "queries", "permissions", "members", "provision-account":
+	case "test", "check", "accounts", "databases", "queries", "permissions", "members",
+		"provision-account", "preferences", "tokens", "catalog", "effective":
 		return true
 	default:
 		return false
 	}
+}
+
+// operationAuditTargetLabelKey 是处理器写入可读操作对象名的元数据键。
+const operationAuditTargetLabelKey = "target_label"
+
+// maxAuditErrorMessageRunes 限制失败原因长度，避免把整段错误页写进审计。
+const maxAuditErrorMessageRunes = 200
+
+// operationErrorMessage 从失败响应正文里取出可读原因。
+// 后台错误统一是 {error:{message}}；纯文本错误按原文截断；其余不落库。
+func operationErrorMessage(body []byte) string {
+	body = bytes.TrimSpace(body)
+	if len(body) == 0 {
+		return ""
+	}
+	var envelope struct {
+		Error struct {
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(body, &envelope); err == nil {
+		if message := clampAuditErrorMessage(envelope.Error.Message); message != "" {
+			return message
+		}
+	}
+	if bytes.HasPrefix(body, []byte("{")) || bytes.HasPrefix(body, []byte("[")) {
+		return ""
+	}
+	return clampAuditErrorMessage(string(body))
+}
+
+func clampAuditErrorMessage(message string) string {
+	message = strings.TrimSpace(message)
+	if message == "" {
+		return ""
+	}
+	runes := []rune(message)
+	if len(runes) <= maxAuditErrorMessageRunes {
+		return message
+	}
+	return string(runes[:maxAuditErrorMessageRunes])
+}
+
+// operationKey 把 HTTP 方法和路径归成业务动作键，供列表直接展示「做了什么」。
+func operationKey(r *http.Request) string {
+	path := strings.ToLower(strings.TrimSuffix(r.URL.Path, "/"))
+	switch {
+	case strings.HasPrefix(path, "/api/ai/resources/"):
+		switch {
+		case strings.HasSuffix(path, "/credentials"):
+			return operationIssueCredential
+		case strings.HasSuffix(path, "/session"):
+			return operationIssueSession
+		}
+	case path == "/api/ai/auth/refresh":
+		return operationRefreshAIToken
+	case strings.HasPrefix(path, "/api/sql-console/sessions"):
+		switch {
+		case strings.HasSuffix(path, "/execute"):
+			return operationExecuteSQL
+		case r.Method == http.MethodDelete:
+			return operationCloseSQLConsole
+		case r.Method == http.MethodPost && path == "/api/sql-console/sessions":
+			return operationOpenSQLConsole
+		}
+	case strings.HasPrefix(path, "/api/db/accounts/test"),
+		strings.HasPrefix(path, "/api/targets/test-connection"),
+		strings.HasPrefix(path, "/api/containers/test"):
+		return operationTestConnection
+	case strings.HasPrefix(path, "/api/web-terminal/tickets"):
+		return operationIssueTerminalTicket
+	case strings.HasPrefix(path, "/api/system-settings"):
+		return operationUpdateSettings
+	case strings.HasPrefix(path, "/api/me/preferences"):
+		return operationUpdatePreferences
+	case strings.HasPrefix(path, "/api/online-sessions/") && strings.HasSuffix(path, "/disconnect"):
+		return operationDisconnectSession
+	case strings.HasPrefix(path, "/api/connection-passwords"):
+		return operationIssueCredential
+	case strings.HasPrefix(path, "/api/resource-grants"):
+		if r.Method == http.MethodDelete {
+			return operationRevokeAccess
+		}
+		if r.Method == http.MethodPost || r.Method == http.MethodPut || r.Method == http.MethodPatch {
+			return operationGrantAccess
+		}
+	}
+	return operationVerb(r.Method) + ":" + operationFamily(r.URL.Path)
+}
+
+func operationVerb(method string) string {
+	switch method {
+	case http.MethodPost:
+		return "create"
+	case http.MethodPut, http.MethodPatch:
+		return "update"
+	case http.MethodDelete:
+		return "delete"
+	default:
+		return strings.ToLower(method)
+	}
+}
+
+// operationFamily 返回资源族名（单数），前端据此把「动词:资源」翻成中文。
+func operationFamily(path string) string {
+	parts := splitAPIPath(path)
+	if len(parts) == 0 {
+		return "api"
+	}
+	switch parts[0] {
+	case "ai":
+		if len(parts) > 1 {
+			switch parts[1] {
+			case "resources":
+				if len(parts) > 2 {
+					return parts[2]
+				}
+			case "tokens":
+				return "ai_token"
+			}
+		}
+	case "db":
+		if len(parts) > 1 {
+			switch parts[1] {
+			case "instances":
+				return "database_instance"
+			case "accounts":
+				return "database_account"
+			case "connections":
+				return "database_connection"
+			}
+		}
+	case "rbac":
+		if len(parts) > 1 {
+			switch parts[1] {
+			case "roles":
+				return "role"
+			case "permissions":
+				return "permission"
+			case "user-roles":
+				return "user_role"
+			case "role-permissions":
+				return "role_permission"
+			}
+		}
+	case "me":
+		return "preference"
+	case "users":
+		return "user"
+	case "hosts":
+		return "host"
+	case "targets":
+		return "target"
+	case "resource-grants":
+		return "resource_grant"
+	case "resource-groups":
+		return "resource_group"
+	case "user-groups":
+		return "user_group"
+	case "applications":
+		return "application"
+	case "containers":
+		return "container_endpoint"
+	case "platform-accounts":
+		return "platform_account"
+	case "temporary-accounts":
+		return "temporary_account"
+	case "connection-passwords":
+		return "connection_password"
+	case "online-sessions":
+		return "online_session"
+	case "system-settings":
+		return "system_setting"
+	case "web-terminal":
+		return "web_terminal"
+	}
+	return parts[0]
+}
+
+// operationActorChannel 区分 AI 令牌调用与浏览器后台操作。
+func operationActorChannel(r *http.Request) string {
+	if aiTokenIDFromRequest(r) != "" {
+		return actorChannelAIAPI
+	}
+	if userIDFromRequest(r) != "" {
+		return actorChannelAdminConsole
+	}
+	return ""
+}
+
+// trimOperationAuditLabel 把可读对象名裁到列宽，避免超长标签写库失败。
+func trimOperationAuditLabel(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	runes := []rune(value)
+	if len(runes) <= 255 {
+		return value
+	}
+	return string(runes[:255])
 }

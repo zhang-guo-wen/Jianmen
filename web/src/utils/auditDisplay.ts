@@ -30,6 +30,10 @@ export interface OperationAuditMetadata {
   result: string;
   requestId: string;
   statusCode?: number;
+  /** 失败时后台记录的可读原因；历史记录通常没有。 */
+  errorMessage: string;
+  method: string;
+  path: string;
 }
 
 function normalized(value: unknown): string {
@@ -113,6 +117,9 @@ export function parseOperationAuditMetadata(row: OperationResultSource): Operati
     result: String(row.result ?? detail.result ?? '').trim().toLowerCase(),
     requestId: String(row.request_id ?? detail.request_id ?? '').trim(),
     statusCode: Number.isFinite(statusCode) ? statusCode : undefined,
+    errorMessage: String(detail.error_message ?? '').trim(),
+    method: String(detail.method ?? '').trim().toUpperCase(),
+    path: String(detail.path ?? '').trim(),
   };
 }
 

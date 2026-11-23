@@ -402,12 +402,15 @@ type AuditSessionView struct {
 
 // AuditEventListParams controls operation audit log filtering and pagination.
 type AuditEventListParams struct {
-	Search       string
-	Action       string
-	ResourceType string
-	Date         string
-	Page         int
-	Size         int
+	Search          string
+	Action          string
+	Operation       string
+	OperationVerb   string
+	ActorChannel    string
+	ResourceType    string
+	Date            string
+	Page            int
+	Size            int
 }
 
 // LoginAuditListParams controls login audit log filtering and pagination.

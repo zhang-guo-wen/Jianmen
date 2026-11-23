@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -116,9 +117,13 @@ func (s *Server) issueAIResourceCredential(w http.ResponseWriter, r *http.Reques
 		s.writeAIResourceUnavailable(w, r, "credentials", errors.New("ai resource service unavailable"))
 		return
 	}
-	if _, err := s.aiResources.Get(r.Context(), userIDFromRequest(r), resourceType, resourceID); err != nil {
+	if resource, err := s.aiResources.Get(r.Context(), userIDFromRequest(r), resourceType, resourceID); err != nil {
 		s.writeAIResourceError(w, r, "credentials", err)
 		return
+	} else {
+		setOperationAuditMetadata(r, map[string]string{
+			operationAuditTargetLabelKey: aiAuditTargetLabel(resource),
+		})
 	}
 	if s.connectionPassword == nil {
 		s.writeAIResourceUnavailable(w, r, "credentials", errors.New("connection password service unavailable"))
@@ -152,6 +157,9 @@ func (s *Server) issueAIResourceSession(w http.ResponseWriter, r *http.Request, 
 		s.writeAIResourceError(w, r, "session", err)
 		return
 	}
+	setOperationAuditMetadata(r, map[string]string{
+		operationAuditTargetLabelKey: aiAuditTargetLabel(result.Resource),
+	})
 	s.writeJSON(w, r, http.StatusCreated, map[string]any{
 		"resource_id": resourceID, "compact_username": result.CompactUsername,
 		"session_id": result.SessionID, "session_seq": result.SessionSeq,
@@ -275,4 +283,22 @@ func contextWithString(ctx context.Context, key contextKey, value string) contex
 		ctx = model.WithAuditUserID(ctx, value)
 	}
 	return context.WithValue(ctx, key, value)
+}
+
+// aiAuditTargetLabel 生成「地址:端口 · 账号」的可读对象名，只用于审计展示，
+// 不包含密码或任何凭据。
+func aiAuditTargetLabel(resource service.AIResource) string {
+	address := strings.TrimSpace(resource.Address)
+	username := strings.TrimSpace(resource.Username)
+	if address == "" {
+		return username
+	}
+	target := address
+	if resource.Port > 0 {
+		target = net.JoinHostPort(address, strconv.Itoa(resource.Port))
+	}
+	if username == "" {
+		return target
+	}
+	return target + " · " + username
 }

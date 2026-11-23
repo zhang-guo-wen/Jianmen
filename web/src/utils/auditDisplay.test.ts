@@ -35,6 +35,9 @@ test('operation metadata prefers structured fields and supports legacy detail JS
     result: 'success',
     requestId: 'structured',
     statusCode: 204,
+    errorMessage: '',
+    method: '',
+    path: '',
   });
   assert.deepEqual(parseOperationAuditMetadata({
     detail: '{"phase":"result","result":"failure","request_id":"req-1","status":503}',
@@ -43,6 +46,23 @@ test('operation metadata prefers structured fields and supports legacy detail JS
     result: 'failure',
     requestId: 'req-1',
     statusCode: 503,
+    errorMessage: '',
+    method: '',
+    path: '',
+  });
+});
+
+test('failed operations expose the recorded reason and request path', () => {
+  assert.deepEqual(parseOperationAuditMetadata({
+    detail: '{"phase":"result","result":"failure","status":502,"error_message":"上游连接超时","method":"post","path":"/api/targets/test-connection"}',
+  }), {
+    phase: 'result',
+    result: 'failure',
+    requestId: '',
+    statusCode: 502,
+    errorMessage: '上游连接超时',
+    method: 'POST',
+    path: '/api/targets/test-connection',
   });
 });
 

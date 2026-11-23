@@ -167,7 +167,7 @@ func (r adminAuditQueryRepository) GetDBQueryArtifact(
 }
 
 func (r adminAuditQueryRepository) ListAuditEvents(ctx context.Context, params service.AuditEventListParams) ([]service.AuditEvent, int64, error) {
-	items, total, err := r.repository.ListAuditEvents(ctx, store.AuditEventListParams{Search: params.Search, Action: params.Action, ResourceType: params.ResourceType, Date: params.Date, Page: params.Page, Size: params.Size})
+	items, total, err := r.repository.ListAuditEvents(ctx, store.AuditEventListParams{Search: params.Search, Action: params.Action, Operation: params.Operation, OperationVerb: params.OperationVerb, ActorChannel: params.ActorChannel, ResourceType: params.ResourceType, Date: params.Date, Page: params.Page, Size: params.Size})
 	if err != nil {
 		return nil, 0, err
 	}
@@ -203,6 +203,7 @@ func auditQuerySession(item model.AuditSession) service.AuditSession {
 func auditQueryEvent(item model.AuditEvent) service.AuditEvent {
 	result := service.AuditEvent{
 		ID: item.ID, ActorID: item.ActorID, ActorUsername: item.ActorUsername, ActorDisplayName: item.ActorDisplayName, Action: item.Action,
+		Operation: item.Operation, ActorChannel: item.ActorChannel, TargetLabel: item.TargetLabel,
 		ResourceType: item.ResourceType, ResourceID: item.ResourceID, ResourceName: item.ResourceName,
 		Phase: item.Phase, Result: item.Result, IntentID: item.IntentID, RequestID: item.RequestID,
 		StatusCode: item.StatusCode, Detail: item.Detail, ClientIP: item.ClientIP, CreatedAt: item.CreatedAt,

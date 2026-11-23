@@ -24,8 +24,8 @@ type AuditDBQueryPreviewParams struct {
 }
 
 type AuditEventListParams struct {
-	Search, Action, ResourceType, Date string
-	Page, Size                         int
+	Search, Action, Operation, OperationVerb, ActorChannel, ResourceType, Date string
+	Page, Size                                                                 int
 }
 
 type LoginAuditListParams struct {
@@ -141,6 +141,9 @@ type AuditEvent struct {
 	ActorUsername    string    `json:"actor_username"`
 	ActorDisplayName string    `json:"actor_display_name,omitempty"`
 	Action           string    `json:"action"`
+	Operation        string    `json:"operation,omitempty"`
+	ActorChannel     string    `json:"actor_channel,omitempty"`
+	TargetLabel      string    `json:"target_label,omitempty"`
 	ResourceType     string    `json:"resource_type"`
 	ResourceID       string    `json:"resource_id,omitempty"`
 	ResourceName     string    `json:"resource_name,omitempty"`

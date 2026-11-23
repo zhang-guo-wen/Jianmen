@@ -55,12 +55,22 @@ func (s *DBStore) ListAuditEvents(
 	if params.Search != "" {
 		like := "%" + strings.ToLower(strings.TrimSpace(params.Search)) + "%"
 		q = q.Where(
-			"LOWER(audit_events.actor_username) LIKE ? OR LOWER(audit_events.action) LIKE ? OR LOWER(audit_events.resource_type) LIKE ? OR LOWER(audit_events.resource_name) LIKE ? OR LOWER(audit_events.result) LIKE ? OR LOWER(audit_events.request_id) LIKE ? OR LOWER(audit_events.intent_id) LIKE ? OR LOWER(audit_events.detail) LIKE ? OR LOWER(audit_events.client_ip) LIKE ?",
-			like, like, like, like, like, like, like, like, like,
+			"LOWER(audit_events.actor_username) LIKE ? OR LOWER(audit_events.action) LIKE ? OR LOWER(audit_events.operation) LIKE ? OR LOWER(audit_events.target_label) LIKE ? OR LOWER(audit_events.resource_type) LIKE ? OR LOWER(audit_events.resource_name) LIKE ? OR LOWER(audit_events.result) LIKE ? OR LOWER(audit_events.request_id) LIKE ? OR LOWER(audit_events.intent_id) LIKE ? OR LOWER(audit_events.detail) LIKE ? OR LOWER(audit_events.client_ip) LIKE ?",
+			like, like, like, like, like, like, like, like, like, like, like,
 		)
 	}
 	if params.Action != "" {
 		q = q.Where("audit_events.action = ?", params.Action)
+	}
+	if params.Operation != "" {
+		q = q.Where("audit_events.operation = ?", params.Operation)
+	}
+	// 通用动作按「动词:资源族」存储，这里用前缀匹配一次筛出全部新增/修改/删除。
+	if params.OperationVerb != "" {
+		q = q.Where("audit_events.operation LIKE ?", params.OperationVerb+":%")
+	}
+	if params.ActorChannel != "" {
+		q = q.Where("audit_events.actor_channel = ?", params.ActorChannel)
 	}
 	if params.ResourceType != "" {
 		q = q.Where("audit_events.resource_type = ?", params.ResourceType)

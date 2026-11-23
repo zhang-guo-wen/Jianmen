@@ -74,6 +74,83 @@ func TestAuditLogStoresListAndFilter(t *testing.T) {
 	}
 }
 
+func TestListAuditEventsFiltersByBusinessOperation(t *testing.T) {
+	db, err := storage.Open(storage.Config{Driver: storage.DriverSQLite, DSN: ":memory:"})
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	if err := storage.AutoMigrate(db); err != nil {
+		t.Fatalf("auto migrate: %v", err)
+	}
+	st := NewDBStore(db)
+	now := time.Now().UTC().Truncate(time.Second)
+	events := []model.AuditEvent{
+		{Action: "create", Operation: "issue_credential", ActorChannel: "ai_api", ResourceType: "host_account", ResourceID: "acc-1", TargetLabel: "10.0.0.1:22 · root", CreatedAt: now},
+		{Action: "create", Operation: "issue_credential", ActorChannel: "ai_api", ResourceType: "host_account", ResourceID: "acc-2", TargetLabel: "10.0.0.2:22 · root", CreatedAt: now},
+		{Action: "update", Operation: "update:host", ActorChannel: "admin_console", ResourceType: "hosts", ResourceID: "host-1", CreatedAt: now},
+		// 历史行没有业务动作，只能靠通用动作兜底，不应被业务动作筛选命中。
+		{Action: "delete", ResourceType: "hosts", ResourceID: "host-2", CreatedAt: now},
+	}
+	for i := range events {
+		if err := st.CreateAuditEvent(context.Background(), &events[i]); err != nil {
+			t.Fatalf("create operation log: %v", err)
+		}
+	}
+
+	credentials, total, err := st.ListAuditEvents(context.Background(), AuditEventListParams{Operation: "issue_credential", Page: 1, Size: 10})
+	if err != nil {
+		t.Fatalf("filter by operation: %v", err)
+	}
+	if total != 2 || len(credentials) != 2 {
+		t.Fatalf("issue_credential rows = total:%d items:%+v", total, credentials)
+	}
+	for _, item := range credentials {
+		if item.Operation != "issue_credential" || item.ActorChannel != "ai_api" || item.TargetLabel == "" {
+			t.Fatalf("unexpected credential row: %+v", item)
+		}
+	}
+
+	settings, total, err := st.ListAuditEvents(context.Background(), AuditEventListParams{Operation: "update:host", Page: 1, Size: 10})
+	if err != nil {
+		t.Fatalf("filter by generic operation: %v", err)
+	}
+	if total != 1 || len(settings) != 1 || settings[0].ResourceID != "host-1" {
+		t.Fatalf("update:host rows = total:%d items:%+v", total, settings)
+	}
+
+	consoleRows, total, err := st.ListAuditEvents(context.Background(), AuditEventListParams{ActorChannel: "admin_console", Page: 1, Size: 10})
+	if err != nil {
+		t.Fatalf("filter by actor channel: %v", err)
+	}
+	if total != 1 || len(consoleRows) != 1 || consoleRows[0].Operation != "update:host" {
+		t.Fatalf("admin_console rows = total:%d items:%+v", total, consoleRows)
+	}
+
+	searchRows, total, err := st.ListAuditEvents(context.Background(), AuditEventListParams{Search: "10.0.0.2:22", Page: 1, Size: 10})
+	if err != nil {
+		t.Fatalf("search by target label: %v", err)
+	}
+	if total != 1 || len(searchRows) != 1 || searchRows[0].ResourceID != "acc-2" {
+		t.Fatalf("target label search rows = total:%d items:%+v", total, searchRows)
+	}
+
+	// 通用动作用前缀筛选：能一次筛出所有「新增」，但不会误命中固定动作。
+	created, total, err := st.ListAuditEvents(context.Background(), AuditEventListParams{OperationVerb: "create", Page: 1, Size: 10})
+	if err != nil {
+		t.Fatalf("filter by operation verb: %v", err)
+	}
+	if total != 0 || len(created) != 0 {
+		t.Fatalf("create verb rows = total:%d items:%+v", total, created)
+	}
+	updated, total, err := st.ListAuditEvents(context.Background(), AuditEventListParams{OperationVerb: "update", Page: 1, Size: 10})
+	if err != nil {
+		t.Fatalf("filter by update verb: %v", err)
+	}
+	if total != 1 || len(updated) != 1 || updated[0].Operation != "update:host" {
+		t.Fatalf("update verb rows = total:%d items:%+v", total, updated)
+	}
+}
+
 func TestListAuditEventsCollapsesCompletedPairsBeforePagination(t *testing.T) {
 	db, err := storage.Open(storage.Config{Driver: storage.DriverSQLite, DSN: ":memory:"})
 	if err != nil {

@@ -164,21 +164,42 @@ func (s *PlatformAccountService) Delete(ctx context.Context, actor PlatformAccou
 }
 
 func (s *PlatformAccountService) Password(ctx context.Context, actor PlatformAccountActor, id string) (string, error) {
-	if err := s.authorize(ctx, actor, rbac.ActionPlatformAccountUse, id); err != nil {
+	secret, err := s.RevealPassword(ctx, actor, id)
+	if err != nil {
 		return "", err
+	}
+	return secret.Password, nil
+}
+
+// PlatformAccountSecret 是「查看密码」返回的最小集合：密码本身加上写审计用的可读信息。
+type PlatformAccountSecret struct {
+	Password string
+	Name     string
+	Username string
+	URL      string
+}
+
+func (s *PlatformAccountService) RevealPassword(ctx context.Context, actor PlatformAccountActor, id string) (PlatformAccountSecret, error) {
+	if err := s.authorize(ctx, actor, rbac.ActionPlatformAccountUse, id); err != nil {
+		return PlatformAccountSecret{}, err
 	}
 	record, err := s.repository.GetPlatformAccountMetadata(ctx, strings.TrimSpace(id))
 	if err != nil {
-		return "", fmt.Errorf("get platform account for password: %w", err)
+		return PlatformAccountSecret{}, fmt.Errorf("get platform account for password: %w", err)
 	}
 	if strings.ToLower(strings.TrimSpace(record.Status)) != "active" || (record.ExpiresAt != nil && !record.ExpiresAt.After(s.now().UTC())) {
-		return "", ErrPlatformAccountUnavailable
+		return PlatformAccountSecret{}, ErrPlatformAccountUnavailable
 	}
 	password, err := s.repository.GetPlatformAccountPassword(ctx, record.ID)
 	if err != nil {
-		return "", fmt.Errorf("get platform account password: %w", err)
+		return PlatformAccountSecret{}, fmt.Errorf("get platform account password: %w", err)
 	}
-	return password, nil
+	return PlatformAccountSecret{
+		Password: password,
+		Name:     record.Name,
+		Username: record.Username,
+		URL:      record.URL,
+	}, nil
 }
 
 func (s *PlatformAccountService) authorize(ctx context.Context, actor PlatformAccountActor, action, id string) error {

@@ -81,6 +81,8 @@ func newAIRefreshAuditEvent(r *http.Request, fingerprint string, token *model.AI
 		ActorID:       fingerprint,
 		ActorUsername: aiRefreshAuditActor,
 		Action:        "refresh",
+		Operation:     operationRefreshAIToken,
+		ActorChannel:  actorChannelAIAPI,
 		ResourceType:  "ai_access_token",
 		ResourceID:    fingerprint,
 		ResourceName:  r.URL.Path,

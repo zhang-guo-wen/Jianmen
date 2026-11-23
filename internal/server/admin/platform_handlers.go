@@ -3,6 +3,7 @@ package admin
 import (
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -133,12 +134,56 @@ func (s *Server) handlePlatformAccountPassword(w http.ResponseWriter, r *http.Re
 		s.writeErrorText(w, r, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
-	password, err := s.platformAccountService.Password(r.Context(), platformAccountActor(r), id)
+	secret, err := s.platformAccountService.RevealPassword(r.Context(), platformAccountActor(r), id)
 	if err != nil {
+		// 失败的查看同样留痕：谁在什么时候试图取过哪个账号的密码。
+		if auditErr := s.recordReadOperation(r, platformAccountErrorStatus(err), operationRevealPlatformPassword, id); auditErr != nil {
+			s.logOperationAuditFailure(r, auditErr)
+		}
 		s.writePlatformAccountServiceError(w, r, err)
 		return
 	}
-	s.writeJSON(w, r, http.StatusOK, map[string]string{"password": password})
+	// 先写审计再给密码：审计不可用时宁可不返回密码。
+	if auditErr := s.recordReadOperation(r, http.StatusOK, operationRevealPlatformPassword, platformSecretLabel(secret)); auditErr != nil {
+		s.logOperationAuditFailure(r, auditErr)
+		s.writeErrorText(w, r, http.StatusServiceUnavailable, "operation audit unavailable")
+		return
+	}
+	s.writeJSON(w, r, http.StatusOK, map[string]string{"password": secret.Password})
+}
+
+// platformSecretLabel 生成「账号名 · 用户名」的可读对象名，不包含密码本身。
+func platformSecretLabel(secret service.PlatformAccountSecret) string {
+	parts := make([]string, 0, 2)
+	if name := strings.TrimSpace(secret.Name); name != "" {
+		parts = append(parts, name)
+	}
+	if username := strings.TrimSpace(secret.Username); username != "" {
+		parts = append(parts, username)
+	}
+	return strings.Join(parts, " · ")
+}
+
+// platformAccountErrorStatus 与 writePlatformAccountServiceError 保持同一套状态码。
+func platformAccountErrorStatus(err error) int {
+	switch {
+	case errors.Is(err, service.ErrPlatformAccountForbidden), errors.Is(err, service.ErrPlatformAccountUnavailable):
+		return http.StatusForbidden
+	case errors.Is(err, store.ErrPlatformAccountNotFound):
+		return http.StatusNotFound
+	case errors.Is(err, service.ErrInvalidPlatformAccount):
+		return http.StatusBadRequest
+	default:
+		return http.StatusInternalServerError
+	}
+}
+
+func (s *Server) logOperationAuditFailure(r *http.Request, err error) {
+	logger := s.logger
+	if logger == nil {
+		logger = slog.Default()
+	}
+	logger.Warn("failed to write operation audit event", "path", r.URL.Path, "error", err)
 }
 
 type platformAccountPayload struct {

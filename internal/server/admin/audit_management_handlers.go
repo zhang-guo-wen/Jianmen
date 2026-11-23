@@ -11,6 +11,9 @@ func (s *Server) handleAuditOperations(w http.ResponseWriter, r *http.Request) {
 	params := service.AuditEventListParams{
 		Search:       strings.TrimSpace(firstNonEmpty(r.URL.Query().Get("q"), r.URL.Query().Get("search"))),
 		Action:       strings.TrimSpace(r.URL.Query().Get("action")),
+		Operation:    strings.TrimSpace(r.URL.Query().Get("operation")),
+		OperationVerb: strings.TrimSpace(r.URL.Query().Get("verb")),
+		ActorChannel: strings.TrimSpace(r.URL.Query().Get("channel")),
 		ResourceType: strings.TrimSpace(r.URL.Query().Get("resource_type")),
 		Date:         strings.TrimSpace(r.URL.Query().Get("date")),
 		Page:         positiveIntRequestQuery(r, "page", 1),

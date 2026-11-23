@@ -265,6 +265,11 @@ var migrations = []Migration{
 		Name:    "审计会话批次字段",
 		Run:     migrateAuditBatches,
 	},
+	{
+		Version: auditOperationMigrationVersion,
+		Name:    "操作审计业务动作、调用来源与可读对象",
+		Run:     migrateAuditOperationFields,
+	},
 }
 
 func rejectDuplicateDatabaseAccounts(tx *gorm.DB) error {

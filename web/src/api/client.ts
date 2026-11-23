@@ -385,6 +385,12 @@ export interface OperationAuditRecord {
   actor_username: string;
   actor_display_name?: string;
   action: string;
+  /** 业务动作键，例如 issue_credential；历史记录可能为空。 */
+  operation?: string;
+  /** 调用来源：admin_console / ai_api；历史记录可能为空。 */
+  actor_channel?: string;
+  /** 写入时生成的可读操作对象名，例如 47.107.41.233:22 · root。 */
+  target_label?: string;
   resource_type: string;
   resource_id?: string;
   resource_name?: string;
@@ -1323,7 +1329,7 @@ export const apiClient = {
     request<PageResponse<AuditBatchLogRecord>>(`/api/audit/batches/${scope}/${encodeURIComponent(batchId)}/logs${buildQS(params)}`, { signal }),
   getLoginAuditLogs: (params?: { page?: number; page_size?: number; q?: string; outcome?: string; date?: string }) =>
     request<PageResponse<LoginAuditRecord>>(`/api/audit/logins${buildQS(params as Record<string, string | number | undefined>)}`),
-  getOperationAuditLogs: (params?: { page?: number; page_size?: number; q?: string; action?: string; resource_type?: string; date?: string }) =>
+  getOperationAuditLogs: (params?: { page?: number; page_size?: number; q?: string; action?: string; operation?: string; verb?: string; channel?: string; resource_type?: string; date?: string }) =>
     request<PageResponse<OperationAuditRecord>>(`/api/audit/operations${buildQS(params as Record<string, string | number | undefined>)}`),
   getSessionMeta: (id: string | number) =>
     request<SessionMetaRecord>(

@@ -381,42 +381,67 @@
             @search="onOperationAuditSearch"
           >
             <template #toolbar-extra>
-              <el-select v-model="operationAuditAction" size="small" style="width: 110px" @change="onOperationAuditActionChange">
+              <el-select v-model="operationAuditChannel" size="small" style="width: 120px" :placeholder="t('audit.filter.all')" @change="onOperationAuditFilterChange">
                 <el-option :label="t('audit.filter.all')" value="" />
-                <el-option :label="t('audit.action.create')" value="create" />
-                <el-option :label="t('audit.action.update')" value="update" />
-                <el-option :label="t('audit.action.delete')" value="delete" />
-                <el-option :label="t('audit.action.revoke')" value="revoke" />
-                <el-option :label="t('audit.action.test')" value="test" />
-                <el-option :label="t('audit.action.refresh')" value="refresh" />
+                <el-option v-for="item in operationChannelOptions" :key="item.value" :label="item.label" :value="item.value" />
+              </el-select>
+              <el-select v-model="operationAuditFilter" size="small" style="width: 200px" :placeholder="t('audit.filter.all')" @change="onOperationAuditFilterChange">
+                <el-option :label="t('audit.filter.all')" value="" />
+                <el-option-group :label="t('audit.filter.byAction')">
+                  <el-option
+                    v-for="item in operationVerbOptions"
+                    :key="'verb:' + item.value"
+                    :label="item.label"
+                    :value="'verb:' + item.value"
+                  />
+                </el-option-group>
+                <el-option-group :label="t('audit.filter.specificAction')">
+                  <el-option
+                    v-for="item in operationActionOptions"
+                    :key="'op:' + item.value"
+                    :label="item.label"
+                    :value="'op:' + item.value"
+                  />
+                </el-option-group>
               </el-select>
               <el-button :loading="operationAuditLoading" :icon="Refresh" @click="loadOperationAuditLogs">{{ t('common.refresh') }}</el-button>
             </template>
             <el-table-column v-bind="TABLE_COLUMNS.time" :label="t('audit.column.operationTime')" class-name="col-time">
               <template #default="{ row }">{{ formatTime(row.created_at) }}</template>
             </el-table-column>
-            <el-table-column :label="t('audit.column.operator')" width="130" show-overflow-tooltip>
+            <el-table-column :label="t('audit.column.operator')" min-width="120" show-overflow-tooltip>
               <template #default="{ row }">{{ row.actor_display_name || row.actor_username || '-' }}</template>
             </el-table-column>
-            <el-table-column :label="t('audit.column.operationType')" width="100">
-              <template #default="{ row }">{{ operationActionLabel(row.action) }}</template>
-            </el-table-column>
-            <el-table-column prop="resource_type" :label="t('audit.column.resourceType')" min-width="150" show-overflow-tooltip />
-            <el-table-column :label="t('audit.column.operationTarget')" min-width="170" show-overflow-tooltip>
+            <el-table-column :label="t('audit.column.actorChannel')" width="104">
               <template #default="{ row }">
-                {{ displayAuditIdentity(row.resource_id, row.resource_name) }}
+                <el-tag v-if="row.actor_channel" :type="operationChannelTag(row.actor_channel)" size="small" effect="plain">
+                  {{ channelLabel(row.actor_channel, t) }}
+                </el-tag>
+                <span v-else>-</span>
               </template>
             </el-table-column>
-            <el-table-column v-bind="TABLE_COLUMNS.address" prop="client_ip" :label="t('audit.column.sourceIp')" />
-            <el-table-column v-bind="TABLE_COLUMNS.note" :label="t('audit.column.requestId')">
-              <template #default="{ row }">{{ operationRequestID(row) }}</template>
+            <el-table-column :label="t('audit.column.operationType')" min-width="150" show-overflow-tooltip>
+              <template #default="{ row }">{{ operationLabel(row, t) }}</template>
             </el-table-column>
-            <el-table-column v-bind="TABLE_COLUMNS.number" :label="t('audit.column.httpStatus')">
-              <template #default="{ row }">{{ operationStatusCode(row) }}</template>
+            <el-table-column :label="t('audit.column.operationTarget')" min-width="170" show-overflow-tooltip>
+              <template #default="{ row }">{{ operationTargetLabel(row, t) }}</template>
             </el-table-column>
-            <el-table-column v-bind="TABLE_COLUMNS.status" :label="t('audit.column.result')">
+            <el-table-column prop="client_ip" :label="t('audit.column.sourceIp')" width="140" show-overflow-tooltip />
+            <el-table-column :label="t('audit.column.result')" width="240">
               <template #default="{ row }">
-                <el-tag :type="operationResultTag(row)" size="small" effect="plain">{{ operationResultLabel(row) }}</el-tag>
+                <div class="operation-result">
+                  <el-tag :type="operationResultTag(row)" size="small" effect="plain">{{ operationResultLabel(row) }}</el-tag>
+                  <span
+                    v-if="operationFailureReason(row)"
+                    class="operation-result__reason"
+                    :title="operationFailureReason(row)"
+                  >{{ operationFailureReason(row) }}</span>
+                </div>
+              </template>
+            </el-table-column>
+            <el-table-column v-bind="TABLE_COLUMNS.actionsCompact" :label="t('common.actions')">
+              <template #default="{ row }">
+                <el-button link type="primary" @click="openOperationDetail(row)">{{ t('audit.action.viewDetail') }}</el-button>
               </template>
             </el-table-column>
           </DataTableCard>
@@ -769,6 +794,7 @@
     <AuditBatchLogDrawer
       v-model="batchLogVisible" :scope="batchLogScope" :batch-id="batchLogId" @query-detail="openBatchQueryDetail"
     />
+    <OperationDetailDrawer v-model="operationDetailVisible" :record="operationDetailRecord" />
     <UserSessionDetailDialog v-model="sessionDetailVisible" :session-id="sessionDetailId" />
   </div>
 </template>
@@ -787,6 +813,7 @@ import AuditBatchLogDrawer from '@/components/audit/AuditBatchLogDrawer.vue';
 import AuditResultTag from '@/components/audit/AuditResultTag.vue';
 import AuditSessionLink from '@/components/audit/AuditSessionLink.vue';
 import DataTableCard from '@/components/DataTableCard.vue';
+import OperationDetailDrawer from '@/components/audit/OperationDetailDrawer.vue';
 import UserSessionDetailDialog from '@/components/UserSessionDetailDialog.vue';
 import { TABLE_COLUMNS } from '@/config/tableColumns';
 import { useAuditBatches, useAuditPageRequest } from '@/composables/useAuditBatches';
@@ -819,6 +846,15 @@ import {
   type AuditResultCode,
   type AuditTagType,
 } from '@/utils/auditDisplay';
+import {
+  channelFilterOptions,
+  channelLabel,
+  operationFilterOptions,
+  operationLabel,
+  operationTargetLabel,
+  operationVerbFilterOptions,
+  parseOperationFilter,
+} from '@/utils/operationAudit';
 import { installUnicodeGuacamoleParser } from '@/utils/guacamoleProtocol';
 import {
   bindRDPReplayDisplay,
@@ -948,9 +984,15 @@ const operationAuditTotal = ref(0);
 const operationAuditPage = ref(1);
 const operationAuditPageSize = ref(50);
 const operationAuditKeyword = ref(initialAuditScope === 'operations' ? initialAuditKeyword : '');
-const operationAuditAction = ref('');
+const operationAuditFilter = ref('');
+const operationAuditChannel = ref('');
 const operationAuditLoading = ref(false);
 const operationAuditError = ref('');
+const operationActionOptions = computed(() => operationFilterOptions(t));
+const operationVerbOptions = computed(() => operationVerbFilterOptions(t));
+const operationChannelOptions = computed(() => channelFilterOptions(t));
+const operationDetailVisible = ref(false);
+const operationDetailRecord = ref<OperationAuditRecord | null>(null);
 
 // ── DB connection list state ──
 const dbRequest = useAuditPageRequest<AuditSessionListRecord>();
@@ -1771,19 +1813,6 @@ function loginOutcomeLabel(outcome: unknown): string {
   return auditResultLabel(loginOutcomePresentation(outcome).code);
 }
 
-function operationActionLabel(action: unknown): string {
-  const key = String(action ?? '').toLowerCase();
-  const labels: Record<string, string> = {
-    create: t('audit.action.create'),
-    update: t('audit.action.update'),
-    delete: t('audit.action.delete'),
-    revoke: t('audit.action.revoke'),
-    test: t('audit.action.test'),
-    refresh: t('audit.action.refresh'),
-  };
-  return labels[key] || String(action || '-');
-}
-
 function operationResultLabel(row: OperationAuditRecord): string {
   return auditResultLabel(operationResultPresentation(row).code);
 }
@@ -1792,12 +1821,18 @@ function operationResultTag(row: OperationAuditRecord): AuditTagType {
   return operationResultPresentation(row).tag;
 }
 
-function operationRequestID(row: OperationAuditRecord): string {
-  return parseOperationAuditMetadata(row).requestId || '-';
+/** 失败原因来自后台抓取的错误正文；成功记录没有。 */
+function operationFailureReason(row: OperationAuditRecord): string {
+  return parseOperationAuditMetadata(row).errorMessage;
 }
 
-function operationStatusCode(row: OperationAuditRecord): string {
-  return String(parseOperationAuditMetadata(row).statusCode ?? '-');
+function operationChannelTag(channel: string): AuditTagType {
+  return channel === 'ai_api' ? 'warning' : 'info';
+}
+
+function openOperationDetail(row: OperationAuditRecord) {
+  operationDetailRecord.value = row;
+  operationDetailVisible.value = true;
 }
 
 async function loadLoginAuditLogs() {
@@ -1824,11 +1859,14 @@ async function loadOperationAuditLogs() {
   operationAuditLoading.value = true;
   operationAuditError.value = '';
   try {
+    const filter = parseOperationFilter(operationAuditFilter.value);
     const res = await apiClient.getOperationAuditLogs({
       page: operationAuditPage.value,
       page_size: operationAuditPageSize.value,
       q: operationAuditKeyword.value || undefined,
-      action: operationAuditAction.value || undefined,
+      operation: filter.operation,
+      verb: filter.verb,
+      channel: operationAuditChannel.value || undefined,
     });
     operationAuditLogs.value = res.items ?? [];
     operationAuditTotal.value = res.total ?? 0;
@@ -1920,7 +1958,7 @@ function onOperationAuditSearch(q: string) {
   void loadOperationAuditLogs();
 }
 
-function onOperationAuditActionChange() {
+function onOperationAuditFilterChange() {
   operationAuditPage.value = 1;
   void loadOperationAuditLogs();
 }
@@ -2545,6 +2583,22 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
+/* 结果列把失败原因放在状态标签后面，完整内容仍在详情抽屉。 */
+.operation-result {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.operation-result__reason {
+  overflow: hidden;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .audit-batch-context {
   align-self: center;
   color: var(--color-primary-strong);
